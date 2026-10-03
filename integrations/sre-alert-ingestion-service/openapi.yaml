@@ -19,8 +19,8 @@ info:
   title: SRE Alert API
   version: 1.0.0
   description: >-
-    Receives alert webhooks from monitoring vendors, normalizes them into the
-    canonical alert and stores them for sre-alert-core-service. One POST route per vendor.
+    Receives alert webhooks from monitoring sources, normalizes them into the
+    canonical alert and stores them for sre-alert-core-service. One POST route per source.
 servers:
   - url: /api/wso2/v1/sre_alert_api
 tags:
@@ -42,7 +42,7 @@ paths:
           schema:
             type: string
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '200':
           description: SNS subscription confirmation handled; nothing stored.
@@ -63,7 +63,7 @@ paths:
       operationId: postAzureAlert
       summary: Receive an Azure Monitor alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -82,7 +82,7 @@ paths:
       operationId: postDatadogAlert
       summary: Receive a Datadog alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -101,7 +101,7 @@ paths:
       operationId: postElasticsearchAlert
       summary: Receive an Elasticsearch alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -120,7 +120,7 @@ paths:
       operationId: postGcpAlert
       summary: Receive a GCP alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -139,7 +139,7 @@ paths:
       operationId: postIcingaAlert
       summary: Receive an Icinga alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -158,7 +158,7 @@ paths:
       operationId: postOpenobserveAlert
       summary: Receive an OpenObserve alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -177,7 +177,7 @@ paths:
       operationId: postOpensearchAlert
       summary: Receive an OpenSearch alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -196,7 +196,7 @@ paths:
       operationId: postPrometheusAlert
       summary: Receive a Prometheus Alertmanager alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -237,7 +237,7 @@ paths:
       operationId: postSite24x7Alert
       summary: Receive a Site24x7 alert webhook
       requestBody:
-        $ref: '#/components/requestBodies/VendorPayload'
+        $ref: '#/components/requestBodies/SourcePayload'
       responses:
         '201':
           $ref: '#/components/responses/Stored'
@@ -252,9 +252,9 @@ paths:
 
 components:
   requestBodies:
-    VendorPayload:
+    SourcePayload:
       required: true
-      description: The vendor's native webhook payload, sent as-is (up to 1 MiB).
+      description: The source's native webhook payload, sent as-is (up to 1 MiB).
       content:
         application/json:
           schema:
@@ -331,6 +331,11 @@ components:
         count:
           type: integer
           example: 1
+        alerts:
+          type: array
+          description: The transformed, canonical alert(s) that were stored.
+          items:
+            $ref: '#/components/schemas/CanonicalAlert'
     Error:
       type: object
       properties:

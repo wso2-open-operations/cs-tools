@@ -14,17 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package model is the canonical alert written to the alerts.alert column, field for field with sre-alert-core-service's model.Alert.
-package model
+package utils
 
-// Alert's field names and JSON keys are fixed by the contract with alerts-core; do not add fields.
-type Alert struct {
-	Service          string `json:"service"`
-	MetricName       string `json:"metric_name"`
-	Severity         string `json:"severity"`
-	Category         string `json:"category"`
-	Environment      string `json:"environment"`
-	Source           string `json:"source"`
-	UniqueIdentifier string `json:"unique_identifier"`
-	Description      string `json:"description"`
+import "os"
+
+// AlertConfigRaw returns a source's config JSON override from its env var, empty meaning "use defaults".
+func AlertConfigRaw(envVar string) string {
+	return os.Getenv(envVar)
 }

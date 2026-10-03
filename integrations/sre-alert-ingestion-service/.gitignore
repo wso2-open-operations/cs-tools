@@ -1,5 +1,6 @@
 # Deployment config and secrets; config.toml is supplied via Choreo file mount.
 config.toml
+vendor_alert_config.json
 .env
 /sre-alert-ingestion-service
 

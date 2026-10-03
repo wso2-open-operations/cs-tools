@@ -40,11 +40,7 @@ type budget struct {
 	AllocatorDrain time.Duration
 }
 
-// shutdown runs the SIGTERM sequence within ctx (server.shutdown_grace):
-//  1. /healthz answers 503, then drain_delay passes so the platform stops routing here;
-//  2. in-flight requests get until drain_delay + request_wait from the start;
-//  3. the allocator gets its own allocator_drain, even if step 2 overran, so claimed ids get rows;
-//  4. whatever remains goes to the last wake-up and any pending Chat cards.
+// shutdown drains /healthz, in-flight requests, then the allocator, in that order, within server.shutdown_grace.
 func shutdown(ctx context.Context, logger *slog.Logger, srv drainer, httpSrv *http.Server, alloc closer, b budget, after ...func(context.Context)) {
 	start := time.Now()
 	srv.StartDraining()

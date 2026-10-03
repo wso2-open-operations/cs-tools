@@ -14,20 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package allocator assigns alert ids and writes the rows alerts-core reads.
-//
-// Claiming one id per alert makes every request compete for the single alert_seq row, which
-// turns a burst into mostly failed compare-and-sets. Instead, handlers queue their alerts and
-// one claimer goroutine per replica takes everything waiting (up to MaxBatch), claims the
-// whole range N+1..N+n with a single compare-and-set, and hands the range to parallel writers
-// without waiting for them. Replicas only contend on the claim itself, which takes
-// milliseconds; they never wait on each other's inserts.
-//
-// alerts-core reads ids in order and waits gap_timeout on a missing id. So once an id is
-// claimed it must get a row: writes use a context detached from the HTTP request, throttled
-// writes are retried until store.write_deadline, and an alert that still can't be written gets
-// a filler row alerts-core can't parse and skips immediately. The claimer only claims as many
-// ids as there are free writer slots, and accepted-but-unfinished work is capped in bytes.
+// Package allocator batches alerts into id-range claims against alert_seq, then writes every row in parallel, retrying failures until a filler row stands in.
 package allocator
 
 import (
@@ -36,19 +23,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"sre-alert-ingestion-service/internal/cassandra"
 	"sre-alert-ingestion-service/internal/model"
+	"sre-alert-ingestion-service/internal/postgres"
 )
 
-// Errors returned by Submit. All of them map to 503: none of them leaves a claimed id empty
-// through a fault of the request itself.
+// Errors returned by Submit; all of them map to 503.
 var (
 	ErrQueueFull      = errors.New("alert queue full")
 	ErrQueueBytesFull = errors.New("alert queue memory limit reached")
@@ -58,35 +43,26 @@ var (
 	ErrTimeout        = errors.New("timed out waiting for storage")
 )
 
-// fillerPrefix marks a row alerts-core can't parse as an alert: it logs
-// "alert unprocessable, skipping" and moves to the next id without waiting.
+// fillerPrefix marks a row alerts-core can't parse as an alert, so it skips the id without waiting.
 const fillerPrefix = "VOID: "
-
-// throttleJitter bounds the random extra wait added to Cosmos DB's RetryAfter. A var so tests
-// can shorten it.
-var throttleJitter = 100 * time.Millisecond
-
-// fillerGrace is how long past the write deadline a throttled filler keeps retrying.
-const fillerGrace = time.Minute
 
 // memLogEvery rate-limits the "queue memory limit reached" warning.
 const memLogEvery = time.Minute
 
-// Store is the storage the allocator needs; *cassandra.Store implements it.
+// Store is the storage the allocator needs; *postgres.Store implements it.
 type Store interface {
-	ReadSeq(ctx context.Context) (int64, error)
-	// CompareAndSet moves alert_seq from `from` to `to`; when rejected, current is the value
-	// the row actually holds.
-	CompareAndSet(ctx context.Context, from, to int64) (applied bool, current int64, err error)
-	Insert(ctx context.Context, id, vendor, alert string) error
-	Exists(ctx context.Context, id string) (bool, error)
+	// ClaimRange reserves n consecutive alert ids in one round trip and returns the first.
+	ClaimRange(ctx context.Context, n int) (start int64, err error)
+	// InsertBatch writes every row in one pipelined round trip, one error per row in input order.
+	InsertBatch(ctx context.Context, rows []postgres.InsertRow) []error
+	Insert(ctx context.Context, id, source string, alert []byte) error
 	// InsertFiller writes the filler only if id has no row; otherwise existing is that row's alert.
-	InsertFiller(ctx context.Context, id, vendor, filler string) (applied bool, existing string, err error)
+	InsertFiller(ctx context.Context, id, source, filler string) (applied bool, existing string, err error)
 }
 
 // StoreFailure describes an alert that couldn't be written after every attempt.
 type StoreFailure struct {
-	Vendor        string
+	Source        string
 	RequestID     string
 	AltID         string
 	Alert         model.Alert
@@ -94,7 +70,7 @@ type StoreFailure struct {
 	FillerWritten bool
 }
 
-// FailureNotifier is told about every alert that couldn't be stored (the DB-failure Chat card).
+// FailureNotifier is told about every alert that couldn't be stored.
 type FailureNotifier interface {
 	StoreFailed(StoreFailure)
 }
@@ -111,16 +87,12 @@ type Config struct {
 	QueueMaxBytes    int64
 	MaxBatch         int
 	WriteConcurrency int
-	ClaimMaxAttempts int
 	InsertAttempts   int
 	InsertBaseDelay  time.Duration
-	// QueryTimeout is store.query_timeout; no insert starts with less than twice this left.
+	// QueryTimeout is store.query_timeout; no insert starts with less than this left.
 	QueryTimeout time.Duration
-	// WriteDeadline, from claim time, bounds retries of throttled writes.
+	// WriteDeadline, from claim time, bounds retries of failed writes and the claim call itself.
 	WriteDeadline time.Duration
-	// ClaimJitter bounds the random pause before retrying a rejected compare-and-set, so two
-	// replicas that collided don't collide again in lockstep.
-	ClaimJitter time.Duration
 }
 
 // Result is what a submitter receives: its ids, in submission order, or an error.
@@ -130,7 +102,7 @@ type Result struct {
 }
 
 type submission struct {
-	vendor    string
+	source    string
 	requestID string
 	alerts    []model.Alert
 	size      int64
@@ -160,8 +132,7 @@ type Allocator struct {
 	pendingMu sync.Mutex
 	pending   map[int64]struct{} // claimed ids whose row or filler isn't written yet
 
-	// Shutdown drain: once Close starts with a deadline, retries stop at stopAt and each
-	// unwritten id gets one filler attempt before the process exits.
+	// Shutdown drain: once Close starts, retries stop at stopAt and each unwritten id gets one filler attempt.
 	drainCh   chan struct{}
 	drainOnce sync.Once
 	stopAt    atomic.Int64 // unix nanos; 0 until a drain deadline is set
@@ -185,10 +156,8 @@ func New(logger *slog.Logger, store Store, notifier FailureNotifier, waker Waker
 	return a
 }
 
-// Submit queues alerts and waits for their ids. A full queue fails immediately. If ctx ends
-// first Submit returns ErrTimeout, but the alerts are still written: their ids may already be
-// claimed, and a claimed id must never be left empty.
-func (a *Allocator) Submit(ctx context.Context, vendor, requestID string, alerts []model.Alert) ([]string, error) {
+// Submit queues alerts and waits for their ids; a full queue fails immediately, and a ctx timeout still lets the write finish since a claimed id must never be left empty.
+func (a *Allocator) Submit(ctx context.Context, source, requestID string, alerts []model.Alert) ([]string, error) {
 	if len(alerts) == 0 {
 		return []string{}, nil
 	}
@@ -197,7 +166,7 @@ func (a *Allocator) Submit(ctx context.Context, vendor, requestID string, alerts
 		a.noteMemReject()
 		return nil, ErrQueueBytesFull
 	}
-	sub := &submission{vendor: vendor, requestID: requestID, alerts: alerts, size: size, done: make(chan Result, 1)}
+	sub := &submission{source: source, requestID: requestID, alerts: alerts, size: size, done: make(chan Result, 1)}
 
 	a.mu.RLock()
 	if a.closed {
@@ -219,7 +188,7 @@ func (a *Allocator) Submit(ctx context.Context, vendor, requestID string, alerts
 		return res.IDs, res.Err
 	case <-ctx.Done():
 		a.logger.Warn("request gave up waiting; its alerts are still being written",
-			"request_id", requestID, "vendor", vendor, "alerts", len(alerts))
+			"request_id", requestID, "source", source, "alerts", len(alerts))
 		return nil, ErrTimeout
 	}
 }
@@ -227,8 +196,7 @@ func (a *Allocator) Submit(ctx context.Context, vendor, requestID string, alerts
 // QueueBytes is the size of accepted submissions not yet finished.
 func (a *Allocator) QueueBytes() int64 { return a.bytes.Load() }
 
-// sizeOf estimates a submission's memory: its alerts' fields, with each distinct description
-// counted once (a Prometheus batch shares one description).
+// sizeOf estimates a submission's memory, counting each distinct description once (a Prometheus batch shares one).
 func sizeOf(alerts []model.Alert) int64 {
 	var n int64
 	seen := make(map[string]struct{}, 1)
@@ -279,8 +247,7 @@ func (a *Allocator) noteMemReject() {
 		"queue_bytes", a.bytes.Load(), "queue_max_bytes", a.cfg.QueueMaxBytes)
 }
 
-// Close stops accepting submissions, lets the claimer claim everything already queued, and
-// waits for every write to finish or ctx to end. Safe to call more than once.
+// Close stops accepting submissions, drains the queue, and waits for every write to finish or ctx to end; safe to call more than once.
 func (a *Allocator) Close(ctx context.Context) error {
 	a.mu.Lock()
 	if !a.closed {
@@ -319,8 +286,7 @@ func (a *Allocator) Close(ctx context.Context) error {
 // maxLoggedIDs bounds the id list in the unwritten-ids log line.
 const maxLoggedIDs = 100
 
-// logUnwritten names the claimed ids left without a row, which alerts-core will wait
-// gap_timeout on.
+// logUnwritten names the claimed ids left without a row, which alerts-core will wait gap_timeout on.
 func (a *Allocator) logUnwritten() {
 	a.pendingMu.Lock()
 	seqs := make([]int64, 0, len(a.pending))
@@ -334,11 +300,11 @@ func (a *Allocator) logUnwritten() {
 	slices.Sort(seqs)
 	ids := make([]string, 0, min(len(seqs), maxLoggedIDs))
 	for _, s := range seqs[:min(len(seqs), maxLoggedIDs)] {
-		ids = append(ids, cassandra.FormatID(s))
+		ids = append(ids, postgres.FormatID(s))
 	}
 	a.logger.Error("shutdown cut off writes; these ids have no row and alerts-core will wait gap_timeout on them",
-		"count", len(seqs), "first_id", cassandra.FormatID(seqs[0]),
-		"last_id", cassandra.FormatID(seqs[len(seqs)-1]), "ids", ids)
+		"count", len(seqs), "first_id", postgres.FormatID(seqs[0]),
+		"last_id", postgres.FormatID(seqs[len(seqs)-1]), "ids", ids)
 }
 
 // reserveSlots blocks until k writer slots are held.
@@ -348,29 +314,13 @@ func (a *Allocator) reserveSlots(k int) {
 	}
 }
 
-// tryReserveSlots takes k writer slots only if all are free now.
-func (a *Allocator) tryReserveSlots(k int) bool {
-	for i := range k {
-		select {
-		case a.writeSem <- struct{}{}:
-		default:
-			a.releaseSlots(i)
-			return false
-		}
-	}
-	return true
-}
-
 func (a *Allocator) releaseSlots(k int) {
 	for range k {
 		<-a.writeSem
 	}
 }
 
-// claimLoop takes the first waiting submission, waits for writer slots for it, then adds
-// whatever else is waiting while free slots and MaxBatch allow. Ids are claimed only for
-// alerts that have a slot. A submission is never split: one larger than WriteConcurrency is
-// claimed alone once every slot is free, and its extra alerts wait for slots after the claim.
+// claimLoop batches whatever is waiting, up to MaxBatch, never splitting a submission across claims; write_concurrency gates concurrent claimed-group writes.
 func (a *Allocator) claimLoop() {
 	defer close(a.claimerDone)
 	var carry *submission
@@ -383,8 +333,7 @@ func (a *Allocator) claimLoop() {
 				return
 			}
 		}
-		held := min(len(first.alerts), a.cfg.WriteConcurrency)
-		a.reserveSlots(held)
+		a.reserveSlots(1)
 		batch := []*submission{first}
 		n := len(first.alerts)
 	gather:
@@ -394,32 +343,31 @@ func (a *Allocator) claimLoop() {
 				if !ok {
 					break gather
 				}
-				if n+len(sub.alerts) > a.cfg.MaxBatch || !a.tryReserveSlots(len(sub.alerts)) {
+				if n+len(sub.alerts) > a.cfg.MaxBatch {
 					carry = sub
 					break gather
 				}
 				batch = append(batch, sub)
 				n += len(sub.alerts)
-				held += len(sub.alerts)
 			default:
 				break gather
 			}
 		}
 
 		claimStart := time.Now()
-		start, attempts, err := a.claim(n)
+		start, err := a.claim(n)
 		if err != nil {
-			a.releaseSlots(held)
+			a.releaseSlots(1)
 			a.logger.Error("claim failed; batch rejected, no ids claimed", "alerts", n,
-				"submissions", len(batch), "claim_attempts", attempts, "error", err)
+				"submissions", len(batch), "error", err)
 			for _, sub := range batch {
 				a.finish(sub, Result{Err: ErrClaimFailed})
 			}
 			continue
 		}
 		a.logger.Info("batch claimed", "alerts", n, "submissions", len(batch),
-			"first_id", cassandra.FormatID(start), "last_id", cassandra.FormatID(start+int64(n)-1),
-			"claim_attempts", attempts, "claim_ms", time.Since(claimStart).Milliseconds(),
+			"first_id", postgres.FormatID(start), "last_id", postgres.FormatID(start+int64(n)-1),
+			"claim_ms", time.Since(claimStart).Milliseconds(),
 			"queue_len", len(a.queue), "queue_bytes", a.bytes.Load())
 		a.pendingMu.Lock()
 		for s := start; s < start+int64(n); s++ {
@@ -427,71 +375,19 @@ func (a *Allocator) claimLoop() {
 		}
 		a.pendingMu.Unlock()
 		a.writes.Add(1)
-		go a.writeBatch(batch, start, held, claimStart)
+		go a.writeBatch(batch, start, claimStart)
 	}
 }
 
-// claim reserves n consecutive ids with one compare-and-set and returns the first. A rejected
-// compare-and-set returns the row's current value, which the retry uses directly.
-//
-// A throttled read or compare-and-set was rejected by Cosmos DB and did not apply, so it is
-// retried without counting an attempt. Any other compare-and-set error may still have applied
-// on the server, leaving ids without rows; the retry can't tell, so that is logged.
-func (a *Allocator) claim(n int) (start int64, attempts int, err error) {
-	ctx := context.Background()
-	giveUp := time.Now().Add(a.cfg.WriteDeadline)
-	current, err := a.readSeq(ctx, giveUp)
+// claim reserves n consecutive ids with a single call; a Postgres sequence can never collide under concurrent claimers, so there is no retry loop here.
+func (a *Allocator) claim(n int) (start int64, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), a.cfg.WriteDeadline)
+	defer cancel()
+	start, err = a.store.ClaimRange(ctx, n)
 	if err != nil {
-		return 0, 0, err
+		return 0, fmt.Errorf("claim %d ids: %w", n, err)
 	}
-	var lastErr error
-	for attempt := 1; attempt <= a.cfg.ClaimMaxAttempts; {
-		applied, seen, err := a.store.CompareAndSet(ctx, current, current+int64(n))
-		switch {
-		case cassandra.IsThrottled(err):
-			if time.Now().After(giveUp) || a.shuttingDown() {
-				return 0, attempt, err
-			}
-			a.sleep(retryWait(err))
-			continue
-		case err != nil:
-			lastErr = err
-			a.logger.Warn("compare-and-set errored; it may have applied, leaving a gap",
-				"from", current, "to", current+int64(n), "attempt", attempt, "error", err)
-			if current, err = a.readSeq(ctx, giveUp); err != nil {
-				lastErr = err
-			}
-		case applied:
-			return current + 1, attempt, nil
-		default:
-			current = seen
-		}
-		attempt++
-		a.pause()
-	}
-	return 0, a.cfg.ClaimMaxAttempts, fmt.Errorf("gave up after %d attempts: %v", a.cfg.ClaimMaxAttempts, lastErr)
-}
-
-// readSeq reads alert_seq, waiting out throttling until giveUp.
-func (a *Allocator) readSeq(ctx context.Context, giveUp time.Time) (int64, error) {
-	for {
-		seq, err := a.store.ReadSeq(ctx)
-		if !cassandra.IsThrottled(err) || time.Now().After(giveUp) || a.shuttingDown() {
-			return seq, err
-		}
-		a.sleep(retryWait(err))
-	}
-}
-
-func (a *Allocator) pause() {
-	if a.cfg.ClaimJitter > 0 {
-		time.Sleep(rand.N(a.cfg.ClaimJitter))
-	}
-}
-
-// retryWait is the RetryAfter Cosmos DB asked for, plus jitter.
-func retryWait(err error) time.Duration {
-	return cassandra.RetryAfter(err) + rand.N(throttleJitter)
+	return start, nil
 }
 
 // sleep waits d, cut short to the shutdown stop time once a drain starts.
@@ -516,190 +412,177 @@ func (a *Allocator) shuttingDown() bool {
 	return at != 0 && time.Now().UnixNano() >= at
 }
 
-// batchStats is shared by one batch's writers for the "batch written" line.
-type batchStats struct {
-	ru        cassandra.RUMeter
-	throttled atomic.Int64
-}
-
 type alertJob struct {
 	sub      *submission
+	subIndex int // this submission's position in the claimed batch, for outcomes[subIndex]
 	index    int
 	seq      int64
 	deadline time.Time
-	stats    *batchStats
+	id       string
+	alert    model.Alert
+	body     []byte
 }
 
-// writeBatch writes every alert in parallel. The claimer already holds `held` writer slots for
-// this batch; alerts beyond that (a submission larger than WriteConcurrency) wait for a slot.
-// It replies to each submitter with its ids and wakes alerts-core once if anything was stored.
-func (a *Allocator) writeBatch(batch []*submission, start int64, held int, claimedAt time.Time) {
+// writeBatch writes the claimed group in one pipelined round trip, retries any row that failed individually, replies to each submitter, and wakes alerts-core once if anything was stored.
+func (a *Allocator) writeBatch(batch []*submission, start int64, claimedAt time.Time) {
+	defer a.releaseSlots(1)
 	defer a.writes.Done()
 	writeStart := time.Now()
-	stats := &batchStats{}
 	deadline := claimedAt.Add(a.cfg.WriteDeadline)
 
 	type outcome struct {
 		ids    []string
-		failed bool
+		failed atomic.Bool
 	}
 	outcomes := make([]outcome, len(batch))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	stored := false
-
-	seq := start
-	k := 0
 	for si, sub := range batch {
 		outcomes[si].ids = make([]string, len(sub.alerts))
+	}
+
+	jobs := make([]alertJob, 0, len(batch))
+	seq := start
+	for si, sub := range batch {
 		for i := range sub.alerts {
-			job := alertJob{sub: sub, index: i, seq: seq, deadline: deadline, stats: stats}
-			seq++
-			if k >= held {
-				a.writeSem <- struct{}{}
+			alert := sub.alerts[i]
+			id := postgres.FormatID(seq)
+			if alert.UniqueIdentifier == "" {
+				a.logger.Warn("source sent no id; using the alert id as unique_identifier, so this alert "+
+					"won't merge with repeats or resolve on recovery",
+					"request_id", sub.requestID, "source", sub.source, "alt_id", id)
+				alert.UniqueIdentifier = id
 			}
-			k++
-			wg.Add(1)
-			go func(si int) {
-				defer wg.Done()
-				defer func() { <-a.writeSem }()
-				id, ok := a.writeOne(job)
-				mu.Lock()
-				outcomes[si].ids[job.index] = id
-				if ok {
-					stored = true
-				} else {
-					outcomes[si].failed = true
-				}
-				mu.Unlock()
-			}(si)
+			job := alertJob{sub: sub, subIndex: si, index: i, seq: seq, deadline: deadline, id: id, alert: alert}
+			outcomes[si].ids[i] = id
+			body, err := json.Marshal(alert)
+			if err != nil {
+				// Unreachable for a struct of strings; handled so the id still gets a row.
+				outcomes[si].failed.Store(true)
+				a.fail(job, id, alert, err)
+				a.pendingMu.Lock()
+				delete(a.pending, seq)
+				a.pendingMu.Unlock()
+			} else {
+				job.body = body
+				jobs = append(jobs, job)
+			}
+			seq++
 		}
 	}
-	wg.Wait()
+
+	rows := make([]postgres.InsertRow, len(jobs))
+	for i, job := range jobs {
+		rows[i] = postgres.InsertRow{ID: job.id, Source: job.sub.source, Alert: job.body}
+	}
+	var errs []error
+	if len(rows) > 0 {
+		if time.Until(deadline) >= a.cfg.QueryTimeout && !a.shuttingDown() {
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			errs = a.store.InsertBatch(ctx, rows)
+			cancel()
+		} else {
+			errs = make([]error, len(rows))
+			for i := range errs {
+				errs[i] = a.stopErr()
+			}
+		}
+	}
+
+	var stored atomic.Bool
+	var retryWG sync.WaitGroup
+	for i, job := range jobs {
+		if errs[i] == nil {
+			stored.Store(true)
+			a.pendingMu.Lock()
+			delete(a.pending, job.seq)
+			a.pendingMu.Unlock()
+			continue
+		}
+		job, firstErr := job, errs[i]
+		a.writes.Add(1)
+		retryWG.Add(1)
+		go func() {
+			defer a.writes.Done()
+			defer retryWG.Done()
+			if ok := a.retryAfterBatchFailure(job, firstErr); ok {
+				stored.Store(true)
+			} else {
+				outcomes[job.subIndex].failed.Store(true)
+			}
+		}()
+	}
+	retryWG.Wait()
 
 	failed := 0
-	for _, o := range outcomes {
-		if o.failed {
+	for i := range outcomes {
+		if outcomes[i].failed.Load() {
 			failed++
 		}
 	}
-	attrs := []any{"alerts", seq - start, "first_id", cassandra.FormatID(start),
-		"failed_submissions", failed, "write_ms", time.Since(writeStart).Milliseconds(),
-		"throttled", stats.throttled.Load()}
-	if ru, ok := stats.ru.Total(); ok {
-		attrs = append(attrs, "total_ru", ru)
-	}
-	a.logger.Info("batch written", attrs...)
+	a.logger.Info("batch written", "alerts", seq-start, "first_id", postgres.FormatID(start),
+		"failed_submissions", failed, "write_ms", time.Since(writeStart).Milliseconds())
 
 	for si, sub := range batch {
-		if outcomes[si].failed {
+		if outcomes[si].failed.Load() {
 			a.finish(sub, Result{IDs: outcomes[si].ids, Err: ErrStoreFailed})
 		} else {
 			a.finish(sub, Result{IDs: outcomes[si].ids})
 		}
 	}
-	if stored && a.waker != nil {
+	if stored.Load() && a.waker != nil {
 		a.waker.Wake()
 	}
 }
 
-// writeOne writes one alert under its claimed id and confirms it by reading it back. Throttled
-// inserts and read-backs are retried on the same id until the write deadline without counting
-// an attempt; other errors get InsertAttempts attempts. Then it falls back to a filler row.
-// ok reports whether the real alert was stored.
-func (a *Allocator) writeOne(job alertJob) (id string, ok bool) {
+// retryAfterBatchFailure continues retrying one alert after its batch attempt failed with firstErr, then writes a filler row; ok reports whether the real alert was stored.
+func (a *Allocator) retryAfterBatchFailure(job alertJob, firstErr error) (ok bool) {
 	defer func() {
 		a.pendingMu.Lock()
 		delete(a.pending, job.seq)
 		a.pendingMu.Unlock()
 	}()
-	ctx := cassandra.WithRUMeter(context.Background(), &job.stats.ru) // detached from the request
-	id = cassandra.FormatID(job.seq)
-	alert := job.sub.alerts[job.index]
-	if alert.UniqueIdentifier == "" {
-		a.logger.Warn("vendor sent no id; using the alert id as unique_identifier, so this alert "+
-			"won't merge with repeats or resolve on recovery",
-			"request_id", job.sub.requestID, "vendor", job.sub.vendor, "alt_id", id)
-		alert.UniqueIdentifier = id
-	}
-	body, err := json.Marshal(alert)
-	if err != nil {
-		// Unreachable for a struct of strings; handled so the id still gets a row.
-		return id, a.fail(job, id, alert, err)
-	}
-
-	w := writeState{a: a, job: job, id: id}
+	ctx := context.Background() // detached from the request
+	w := writeState{a: a, job: job, id: job.id, attempts: 1}
 	failures := 0
 	delay := a.cfg.InsertBaseDelay
-	inserted := false
+	if w.failed(firstErr, &failures, &delay) {
+		return a.fail(job, job.id, job.alert, firstErr)
+	}
 	for {
-		if !inserted {
-			if time.Until(job.deadline) < 2*a.cfg.QueryTimeout || a.shuttingDown() {
-				return id, a.fail(job, id, alert, w.stopErr())
-			}
-			err := a.store.Insert(ctx, id, job.sub.vendor, string(body))
-			w.attempts++
-			if cassandra.IsThrottled(err) {
-				w.throttled(err)
-				continue
-			}
-			if err == nil {
-				inserted = true
-			} else if w.failed(err, &failures, &delay) {
-				return id, a.fail(job, id, alert, err)
-			} else {
-				continue
-			}
+		if time.Until(job.deadline) < a.cfg.QueryTimeout || a.shuttingDown() {
+			return a.fail(job, job.id, job.alert, w.stopErr())
 		}
-		visible, err := a.store.Exists(ctx, id)
-		switch {
-		case err == nil && visible:
-			w.stored()
-			return id, true
-		case cassandra.IsThrottled(err):
-			if time.Now().After(job.deadline) || a.shuttingDown() {
-				return id, a.fail(job, id, alert, w.stopErr())
-			}
-			w.throttled(err)
-			continue // read back again; the insert already went through
-		case err == nil:
-			err = fmt.Errorf("row %s not visible after insert", id)
+		err := a.store.Insert(ctx, job.id, job.sub.source, job.body)
+		w.attempts++
+		if err == nil {
+			return true
 		}
-		inserted = false // insert again, as for any failed attempt
 		if w.failed(err, &failures, &delay) {
-			return id, a.fail(job, id, alert, err)
+			return a.fail(job, job.id, job.alert, err)
 		}
 	}
+}
+
+// stopErr reports why a write phase stopped before it could attempt an insert.
+func (a *Allocator) stopErr() error {
+	if a.shuttingDown() {
+		return errors.New("shutdown stopped retries before the alert was stored")
+	}
+	return errors.New("write deadline passed before the alert could be written")
 }
 
 // writeState tracks one alert's retries for logging.
 type writeState struct {
-	a             *Allocator
-	job           alertJob
-	id            string
-	attempts      int
-	throttles     int
-	firstThrottle time.Time
+	a        *Allocator
+	job      alertJob
+	id       string
+	attempts int
 }
 
-func (w *writeState) throttled(err error) {
-	w.job.stats.throttled.Add(1)
-	if w.throttles == 0 {
-		w.firstThrottle = time.Now()
-		w.a.logger.Warn("Cosmos DB throttled the write; retrying on the same id",
-			"request_id", w.job.sub.requestID, "vendor", w.job.sub.vendor, "alt_id", w.id,
-			"retry_after", cassandra.RetryAfter(err))
-	}
-	w.throttles++
-	w.a.sleep(retryWait(err))
-}
-
-// failed counts a non-throttle error, waits before the next attempt, and reports whether the
-// attempts are used up.
+// failed counts an insert error, waits before the next attempt, and reports whether the attempts are used up.
 func (w *writeState) failed(err error, failures *int, delay *time.Duration) bool {
 	*failures++
 	w.a.logger.Warn("insert failed, retrying on the same id", "request_id", w.job.sub.requestID,
-		"vendor", w.job.sub.vendor, "alt_id", w.id, "attempt", *failures, "error", err)
+		"source", w.job.sub.source, "alt_id", w.id, "attempt", *failures, "error", err)
 	if *failures >= w.a.cfg.InsertAttempts {
 		return true
 	}
@@ -708,38 +591,22 @@ func (w *writeState) failed(err error, failures *int, delay *time.Duration) bool
 	return false
 }
 
-func (w *writeState) stored() {
-	if w.throttles > 0 {
-		w.a.logger.Info("alert stored after throttling", "request_id", w.job.sub.requestID,
-			"vendor", w.job.sub.vendor, "alt_id", w.id, "attempts", w.attempts,
-			"waited_ms", time.Since(w.firstThrottle).Milliseconds())
-	}
-}
-
 func (w *writeState) stopErr() error {
 	if w.a.shuttingDown() {
 		return errors.New("shutdown stopped retries before the alert was stored")
 	}
-	if w.throttles > 0 {
-		return errors.New("write deadline passed while Cosmos DB was throttling")
-	}
 	return errors.New("write deadline passed before the alert could be written")
 }
 
-// fail writes the filler row, reports the failure, and returns writeOne's ok. The filler never
-// overwrites a row: if the alert did land (a timed-out insert, or a read-back Cosmos missed),
-// it is kept and counted as stored. A throttled filler is retried until the write deadline
-// plus fillerGrace; other errors get InsertAttempts attempts. During a shutdown drain it gets
-// one attempt.
+// fail writes the filler row without overwriting a row that already landed, and returns writeOne's ok.
 func (a *Allocator) fail(job alertJob, id string, alert model.Alert, cause error) bool {
 	filler := fillerPrefix + cause.Error()
-	fillerDeadline := job.deadline.Add(fillerGrace)
 	var existing string
 	var fillerErr error
 	failures := 0
 	delay := a.cfg.InsertBaseDelay
 	for {
-		applied, prev, err := a.store.InsertFiller(context.Background(), id, job.sub.vendor, filler)
+		applied, prev, err := a.store.InsertFiller(context.Background(), id, job.sub.source, filler)
 		fillerErr = err
 		if err == nil {
 			if !applied {
@@ -750,17 +617,9 @@ func (a *Allocator) fail(job alertJob, id string, alert model.Alert, cause error
 		if a.shuttingDown() {
 			break
 		}
-		if cassandra.IsThrottled(err) {
-			if time.Now().Add(cassandra.RetryAfter(err)).After(fillerDeadline) {
-				break
-			}
-			job.stats.throttled.Add(1)
-			a.sleep(retryWait(err))
-			continue
-		}
 		failures++
 		a.logger.Warn("filler row failed, retrying", "request_id", job.sub.requestID,
-			"vendor", job.sub.vendor, "alt_id", id, "attempt", failures, "error", err)
+			"source", job.sub.source, "alt_id", id, "attempt", failures, "error", err)
 		if failures >= a.cfg.InsertAttempts {
 			break
 		}
@@ -769,22 +628,22 @@ func (a *Allocator) fail(job alertJob, id string, alert model.Alert, cause error
 	}
 	if existing != "" && !strings.HasPrefix(existing, fillerPrefix) {
 		a.logger.Warn("alert stored although its write reported a failure; filler not written",
-			"request_id", job.sub.requestID, "vendor", job.sub.vendor, "alt_id", id, "error", cause)
+			"request_id", job.sub.requestID, "source", job.sub.source, "alt_id", id, "error", cause)
 		return true
 	}
 	if fillerErr != nil {
-		// Cassandra is likely down: alerts-core will wait gap_timeout on this id.
+		// Postgres is likely down: alerts-core will wait gap_timeout on this id.
 		a.logger.Error("alert NOT stored and filler row failed; alerts-core will stall on this id until gap_timeout",
-			"request_id", job.sub.requestID, "vendor", job.sub.vendor, "alt_id", id,
+			"request_id", job.sub.requestID, "source", job.sub.source, "alt_id", id,
 			"alert", alert, "error", cause, "filler_error", fillerErr)
 	} else {
 		a.logger.Error("alert NOT stored; filler row written so alerts-core skips the id",
-			"request_id", job.sub.requestID, "vendor", job.sub.vendor, "alt_id", id,
+			"request_id", job.sub.requestID, "source", job.sub.source, "alt_id", id,
 			"alert", alert, "error", cause)
 	}
 	if a.notifier != nil {
 		a.notifier.StoreFailed(StoreFailure{
-			Vendor: job.sub.vendor, RequestID: job.sub.requestID, AltID: id,
+			Source: job.sub.source, RequestID: job.sub.requestID, AltID: id,
 			Alert: alert, Err: cause, FillerWritten: fillerErr == nil,
 		})
 	}

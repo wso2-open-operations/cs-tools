@@ -41,10 +41,9 @@ type Config struct {
 	Server    ServerConfig    `toml:"server"`
 	Allocator AllocatorConfig `toml:"allocator"`
 	Store     StoreConfig     `toml:"store"`
-	Cassandra CassandraConfig `toml:"cassandra"`
+	Postgres  PostgresConfig  `toml:"postgres"`
 	Wake      WakeConfig      `toml:"wake"`
 	Reject    RejectConfig    `toml:"reject"`
-	Fallback  FallbackConfig  `toml:"fallback"`
 	// LegacyAuthSection flags a leftover [auth] table, no longer read now auth is AUTH_ENABLED.
 	LegacyAuthSection bool `toml:"-"`
 }
@@ -61,13 +60,12 @@ type ServerConfig struct {
 	MaxBodyBytes   int64    `toml:"max_body_bytes"`
 }
 
-// AllocatorConfig tunes the id allocator: queue depth, batch size, writers and CAS attempts.
+// AllocatorConfig tunes the id allocator: queue depth, batch size, and writer concurrency.
 type AllocatorConfig struct {
 	QueueSize        int   `toml:"queue_size"`
 	QueueMaxBytes    int64 `toml:"queue_max_bytes"`
 	MaxBatch         int   `toml:"max_batch"`
 	WriteConcurrency int   `toml:"write_concurrency"`
-	ClaimMaxAttempts int   `toml:"claim_max_attempts"`
 }
 
 // StoreConfig tunes row writes: attempts per id, the doubling backoff base and the query timeout.
@@ -79,8 +77,8 @@ type StoreConfig struct {
 	WriteDeadline   Duration `toml:"write_deadline"`
 }
 
-// CassandraConfig tunes startup connection retry, matching sre-alert-core-service.
-type CassandraConfig struct {
+// PostgresConfig tunes startup connection retry, matching sre-alert-core-service.
+type PostgresConfig struct {
 	ConnectMaxAttempts int      `toml:"connect_max_attempts"`
 	ConnectBaseDelay   Duration `toml:"connect_base_delay"`
 	ConnectTimeout     Duration `toml:"connect_timeout"`
@@ -91,15 +89,9 @@ type WakeConfig struct {
 	Timeout Duration `toml:"timeout"`
 }
 
-// RejectConfig tunes the reject Chat card: the per vendor+error window and the body preview length.
+// RejectConfig tunes how much of a rejected webhook's body is kept for logging.
 type RejectConfig struct {
-	Window           Duration `toml:"window"`
-	BodyPreviewChars int      `toml:"body_preview_chars"`
-}
-
-// FallbackConfig rate-limits the DB-failure Chat card.
-type FallbackConfig struct {
-	CardsPerMinute int `toml:"cards_per_minute"`
+	BodyPreviewChars int `toml:"body_preview_chars"`
 }
 
 // Duration wraps time.Duration so TOML values like "30s" decode via time.ParseDuration.
@@ -137,8 +129,7 @@ func Defaults() Config {
 			QueueSize:        5000,
 			QueueMaxBytes:    256 << 20,
 			MaxBatch:         200,
-			WriteConcurrency: 16,
-			ClaimMaxAttempts: 20,
+			WriteConcurrency: 8,
 		},
 		Store: StoreConfig{
 			InsertAttempts:  5,
@@ -147,14 +138,13 @@ func Defaults() Config {
 			ClaimTimeout:    Duration(5 * time.Second),
 			WriteDeadline:   Duration(5 * time.Minute),
 		},
-		Cassandra: CassandraConfig{
+		Postgres: PostgresConfig{
 			ConnectMaxAttempts: 5,
 			ConnectBaseDelay:   Duration(2 * time.Second),
 			ConnectTimeout:     Duration(10 * time.Second),
 		},
-		Wake:     WakeConfig{Timeout: Duration(2 * time.Second)},
-		Reject:   RejectConfig{Window: Duration(15 * time.Minute), BodyPreviewChars: 500},
-		Fallback: FallbackConfig{CardsPerMinute: 5},
+		Wake:   WakeConfig{Timeout: Duration(2 * time.Second)},
+		Reject: RejectConfig{BodyPreviewChars: 500},
 	}
 }
 
@@ -213,8 +203,6 @@ func (c Config) Validate() error {
 		return fmt.Errorf("allocator.max_batch must be positive")
 	case c.Allocator.WriteConcurrency <= 0:
 		return fmt.Errorf("allocator.write_concurrency must be positive")
-	case c.Allocator.ClaimMaxAttempts <= 0:
-		return fmt.Errorf("allocator.claim_max_attempts must be positive")
 	case c.Store.InsertAttempts <= 0:
 		return fmt.Errorf("store.insert_attempts must be positive")
 	case c.Store.InsertBaseDelay <= 0:
@@ -225,31 +213,25 @@ func (c Config) Validate() error {
 		return fmt.Errorf("store.claim_timeout must be positive")
 	case c.Store.WriteDeadline <= 0 || c.Store.WriteDeadline >= MaxWriteDeadline:
 		return fmt.Errorf("store.write_deadline must be positive and under %v (alerts-core's gap_timeout)", MaxWriteDeadline.Duration())
-	case c.Cassandra.ConnectMaxAttempts <= 0:
-		return fmt.Errorf("cassandra.connect_max_attempts must be positive")
-	case c.Cassandra.ConnectBaseDelay <= 0:
-		return fmt.Errorf("cassandra.connect_base_delay must be positive")
-	case c.Cassandra.ConnectTimeout <= 0:
-		return fmt.Errorf("cassandra.connect_timeout must be positive")
+	case c.Postgres.ConnectMaxAttempts <= 0:
+		return fmt.Errorf("postgres.connect_max_attempts must be positive")
+	case c.Postgres.ConnectBaseDelay <= 0:
+		return fmt.Errorf("postgres.connect_base_delay must be positive")
+	case c.Postgres.ConnectTimeout <= 0:
+		return fmt.Errorf("postgres.connect_timeout must be positive")
 	case c.Wake.Timeout <= 0:
 		return fmt.Errorf("wake.timeout must be positive")
-	case c.Reject.Window <= 0:
-		return fmt.Errorf("reject.window must be positive")
 	case c.Reject.BodyPreviewChars <= 0:
 		return fmt.Errorf("reject.body_preview_chars must be positive")
-	case c.Fallback.CardsPerMinute <= 0:
-		return fmt.Errorf("fallback.cards_per_minute must be positive")
 	}
 	return nil
 }
 
-// Env is read from the environment; CASSANDRA_* and <VENDOR>_ALERT_CONFIG are read by their packages.
+// Env is read from the environment; PG* and <SOURCE>_ALERT_CONFIG are read by their packages.
 type Env struct {
 	Port string `env:"PORT" envDefault:"8080"`
 	// WakeURL is alerts-core's POST /alertz; empty skips the wake-up and the 10s poll still runs.
 	WakeURL string `env:"ALERT_CORE_WAKE_URL"`
-	// ChatWebhookURLs are Google Chat webhooks for reject/DB-failure cards; empty only logs them.
-	ChatWebhookURLs []string `env:"FALLBACK_CHAT_WEBHOOK_URLS" envSeparator:","`
 	// AuthEnabledRaw is AUTH_ENABLED, unparsed; read AuthEnabled.
 	AuthEnabledRaw string `env:"AUTH_ENABLED"`
 	// AuthAuditOnlyRaw is AUTH_AUDIT_ONLY, unparsed; read AuthAuditOnly.
@@ -261,7 +243,7 @@ type Env struct {
 	WakeSecret   string `env:"ALERT_CORE_WAKE_SECRET"`
 }
 
-// LoadEnv parses Env, trimming blanks out of the comma-separated Chat webhook list.
+// LoadEnv parses Env.
 func LoadEnv() (Env, error) {
 	var e Env
 	if err := env.Parse(&e); err != nil {
@@ -270,13 +252,6 @@ func LoadEnv() (Env, error) {
 	e.WakeURL = strings.TrimSpace(e.WakeURL)
 	e.WakeUsername = strings.TrimSpace(e.WakeUsername)
 	e.WakeSecret = strings.TrimSpace(e.WakeSecret)
-	urls := e.ChatWebhookURLs[:0]
-	for _, u := range e.ChatWebhookURLs {
-		if u = strings.TrimSpace(u); u != "" {
-			urls = append(urls, u)
-		}
-	}
-	e.ChatWebhookURLs = urls
 	var err error
 	if e.AuthEnabled, err = parseBool("AUTH_ENABLED", e.AuthEnabledRaw); err != nil {
 		return Env{}, err

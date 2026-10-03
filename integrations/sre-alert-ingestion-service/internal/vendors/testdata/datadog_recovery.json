@@ -1,1 +1,0 @@
-{"event_name":"prod-web high memory usage","trigger_name":"avg(last_5m):avg:system.mem.pct_usable{env:production} < 0.1","transition":"Recovered","alert_id":"148502937","service":"client-medlineprod-alert-integration","category":"service_interruption","tags":"env:production,severity:1,team:sre"}

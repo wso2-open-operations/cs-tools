@@ -1,1 +1,0 @@
-{"notification_type":"PROBLEM","host_name":"prod-db-primary-01","host_display_name":"prod-db-primary-01.medlineprod.internal","host_state":"UP","service_name":"postgres-replication-lag","service_state":"CRITICAL","vars":{"service":"client-medlineprod-alert-integration","environment":"production"}}

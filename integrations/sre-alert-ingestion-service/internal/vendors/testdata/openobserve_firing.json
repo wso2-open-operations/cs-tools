@@ -1,1 +1,0 @@
-{"short_description":"prod-api-gateway: p99 latency above 2000ms","description":"p99 latency has been above 2000ms for 5 minutes","urgency":"1","impact":"1","correlation_id":"9f3a7c2e-4b1d-4e8a-9c3f-2b8d5e6f1a9c","caller_id":"openobserve","service":"client-medlineprod-alert-integration","category":"service_interruption","environment":"production"}
