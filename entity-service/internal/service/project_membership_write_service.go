@@ -240,13 +240,6 @@ func (s *projectMembershipWriteService) Invite(ctx context.Context, projectID st
 	if err != nil {
 		return domain.ProjectMembership{}, err
 	}
-	if len(roles) == 0 {
-		// An invitation granting nothing is a mistake, not a valid state:
-		// the person would be provisioned an identity and see an empty
-		// portal. A role change may legitimately clear the list (see
-		// UpdateRoles); a first invitation may not.
-		return domain.ProjectMembership{}, &apierror.ValidationError{Msg: "roles must contain at least one role"}
-	}
 
 	var written salesforceWriteRecord
 	res, err := s.deps.Memberships.UpsertWithin(ctx, projectID, email, func(ctx context.Context, wc repository.MembershipWriteContext) (domain.SalesforceMembershipUpsert, domain.UpsertOnboardingStepRequest, error) {
@@ -279,6 +272,23 @@ func (s *projectMembershipWriteService) Invite(ctx context.Context, projectID st
 			State:               state,
 			SetRoles:            true,
 			SetState:            true,
+			ValidateContactType: func(isIntegrationUser bool) error {
+				if len(roles) == 0 && !isIntegrationUser {
+					// An invitation granting nothing is a mistake, not a
+					// valid state: the person would be provisioned an
+					// identity and see an empty portal. A role change may
+					// legitimately clear the list (see UpdateRoles); a first
+					// invitation may not -- except for a genuine CS
+					// integration user (Salesforce's own classification,
+					// resolved above -- not merely the caller's claim, which
+					// could otherwise be used to invite an existing, real
+					// human contact with no roles), which by definition gets
+					// no Asgardeo identity and no invitation e-mail, so
+					// "sees an empty portal" never applies to it.
+					return &apierror.ValidationError{Msg: "roles must contain at least one role"}
+				}
+				return nil
+			},
 		})
 		if err != nil {
 			return domain.SalesforceMembershipUpsert{}, domain.UpsertOnboardingStepRequest{}, err
@@ -656,6 +666,17 @@ type salesforceWriteIntent struct {
 	// restate the state and a deactivation does not restate the roles.
 	SetRoles bool
 	SetState bool
+	// ValidateContactType, when set, is called with the RESOLVED contact's
+	// true integration-user status -- Salesforce's own existing value for a
+	// contact that already existed, IsCsIntegrationUser only for one this
+	// call just created -- after the contact is searched/created but before
+	// any membership write (CreateProjectContact/UpdateProjectContact). Only
+	// Invite sets this, to refuse an invitation with zero roles unless the
+	// contact is genuinely an integration user: validating against the raw
+	// request flag instead would let a caller claim IsCsIntegrationUser for
+	// an existing, real human contact and invite them with no roles. nil for
+	// UpdateRoles/Deactivate, which have no such constraint.
+	ValidateContactType func(isIntegrationUser bool) error
 }
 
 // salesforceWriteRecord is what the Salesforce half actually did, kept so the
@@ -761,6 +782,25 @@ func (s *projectMembershipWriteService) writeSalesforce(ctx context.Context, wc 
 		return domain.SalesforceMembershipUpsert{}, rec, &apierror.ServiceUnavailableError{Msg: "sales/sales-entity-service returned a contact with no id"}
 	}
 
+	// The Salesforce value wins for a contact that already existed. For one
+	// this call just CREATED, POST /contacts is only contracted to return an
+	// id, so a response that omits isCsIntegrationUser must not be read as
+	// "false" -- that would hand a machine account an Asgardeo identity,
+	// global roles and an invitation e-mail. Fall back to what we asked for.
+	//
+	// Resolved here, before any membership write, so ValidateContactType (see
+	// its own doc comment) checks the real classification rather than
+	// whatever the caller merely claimed in intent.IsCsIntegrationUser.
+	isIntegrationUser := contact.IsCsIntegrationUser != nil && *contact.IsCsIntegrationUser
+	if rec.CreatedContact && contact.IsCsIntegrationUser == nil {
+		isIntegrationUser = intent.IsCsIntegrationUser
+	}
+	if intent.ValidateContactType != nil {
+		if err := intent.ValidateContactType(isIntegrationUser); err != nil {
+			return domain.SalesforceMembershipUpsert{}, rec, err
+		}
+	}
+
 	membership, mFound, err := s.deps.SalesEntity.SearchProjectContact(ctx, wc.Target.ProjectSfID, rec.ContactSfID)
 	if err != nil {
 		return domain.SalesforceMembershipUpsert{}, rec, err
@@ -853,15 +893,8 @@ func (s *projectMembershipWriteService) writeSalesforce(ctx context.Context, wc 
 		// the version stamp below suppresses.
 		groups, _ = mapProjectGroups(writtenRoles)
 	}
-	// The Salesforce value wins for a contact that already existed. For one
-	// this call just CREATED, POST /contacts is only contracted to return an
-	// id, so a response that omits isCsIntegrationUser must not be read as
-	// "false" -- that would hand a machine account an Asgardeo identity,
-	// global roles and an invitation e-mail. Fall back to what we asked for.
-	isIntegrationUser := contact.IsCsIntegrationUser != nil && *contact.IsCsIntegrationUser
-	if rec.CreatedContact && contact.IsCsIntegrationUser == nil {
-		isIntegrationUser = intent.IsCsIntegrationUser
-	}
+	// isIntegrationUser was already resolved above, before the membership
+	// write -- see the comment there.
 	// customer/partner follow the contact's account classification, as in
 	// the ingest. A contact this call just created carries no account in
 	// the create response; mapGlobalRoles then treats it as a customer
