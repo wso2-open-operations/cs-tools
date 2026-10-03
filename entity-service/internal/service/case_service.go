@@ -1384,10 +1384,11 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// closing an engagement/service_request/security_report_analysis/
 	// announcement (the other four case-like work_item types, see
 	// "Case-like work_item types" elsewhere in this codebase) hit this same
-	// requirement even though resolution_code/cause/close_notes are
-	// "case"-only columns (see updateCaseQuery) -- there is no way for any
-	// other type to ever satisfy it, and the webapp's own close flow for
-	// those types never collects these fields in the first place. A fetch
+	// requirement even though the webapp's own close flow for those types
+	// never collects these fields. They may still send them -- every type
+	// but announcement has resolution_code since migration 0184 -- they are
+	// just not required, as ServiceNow leaves them empty on most closed
+	// records of those types. A fetch
 	// failure above (before == nil) can't confirm the type, so this still
 	// conservatively requires the fields rather than silently exempting a
 	// case whose type just couldn't be read.

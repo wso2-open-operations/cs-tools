@@ -188,3 +188,102 @@ func TestCaseLikeExtension_UpdateCase_SucceedsForNonCaseTypes(t *testing.T) {
 	}
 }
 
+// TestCaseLikeExtension_UpdateCase_WorkStateAndResolutionCode covers migration
+// 0184: service requests, engagements and security report analyses take a work
+// state and a resolution code like a case does, and GetCaseByID reads them back.
+func TestCaseLikeExtension_UpdateCase_WorkStateAndResolutionCode(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedCaseLikeExtensionFixture(t, pool)
+	repo := repository.NewCaseRepository(repository.NewScoped(pool))
+	ctx := repository.WithCallerIdentity(context.Background(), repository.SearchScope{Unrestricted: false, ViewerEmail: cleMember})
+
+	inProgress := domain.CaseStateWorkInProgress
+	paused := domain.CaseWorkStatePaused
+	closed := domain.CaseStateClosed
+	cause := domain.CaseCauseUnknown
+	closeNotes := "closing"
+	resCode := domain.CaseResolutionCodeSolvedFixedBySupportGuidanceProvided
+
+	for _, c := range []struct{ name, id string }{
+		{"engagement", cleEngagement},
+		{"service_request", cleServiceReq},
+		{"security_report_analysis", cleSecReport},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, State: &inProgress}); err != nil {
+				t.Fatalf("set work_in_progress: %v", err)
+			}
+			updated, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, WorkState: &paused})
+			if err != nil {
+				t.Fatalf("set workState: %v", err)
+			}
+			if updated.WorkState == nil || *updated.WorkState != paused {
+				t.Errorf("UpdateCase WorkState = %v, want paused", updated.WorkState)
+			}
+
+			cv, err := repo.GetCaseByID(ctx, c.id, repository.SearchScope{Unrestricted: true})
+			if err != nil {
+				t.Fatalf("GetCaseByID: %v", err)
+			}
+			if cv.WorkState == nil || *cv.WorkState != paused {
+				t.Errorf("GetCaseByID WorkState = %v, want paused", cv.WorkState)
+			}
+
+			if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{
+				ID: c.id, State: &closed, Cause: &cause, CloseNotes: &closeNotes, ResolutionCode: &resCode,
+			}); err != nil {
+				t.Fatalf("close with resolutionCode: %v", err)
+			}
+			cv, err = repo.GetCaseByID(ctx, c.id, repository.SearchScope{Unrestricted: true})
+			if err != nil {
+				t.Fatalf("GetCaseByID after close: %v", err)
+			}
+			if cv.ResolutionCode == nil || *cv.ResolutionCode != resCode {
+				t.Errorf("GetCaseByID ResolutionCode = %v, want %v", cv.ResolutionCode, resCode)
+			}
+		})
+	}
+}
+
+// TestCaseLikeExtension_UpdateCase_OneOngoingAcrossTypes: an engineer with an
+// Ongoing service request cannot also set an engagement Ongoing.
+func TestCaseLikeExtension_UpdateCase_OneOngoingAcrossTypes(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedCaseLikeExtensionFixture(t, pool)
+	repo := repository.NewCaseRepository(repository.NewScoped(pool))
+
+	const engineerID = "74444444-0000-0000-0000-000000000001"
+	sys := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	cleanup := func() {
+		_, _ = scoped.Exec(sys, `UPDATE work_item SET assigned_to_id = NULL WHERE assigned_to_id = $1`, engineerID)
+		_, _ = pool.Exec(sys, `DELETE FROM "user" WHERE id = $1`, engineerID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := pool.Exec(sys, `INSERT INTO "user" (id, created_on, updated_on, user_name, email, is_active)
+		VALUES ($1, now(), now(), 'cle-engineer@test.local', 'cle-engineer@test.local', true)`, engineerID); err != nil {
+		t.Fatalf("seed engineer: %v", err)
+	}
+	if _, err := scoped.Exec(sys, `UPDATE work_item SET assigned_to_id = $1 WHERE id = ANY($2::uuid[])`,
+		engineerID, []string{cleServiceReq, cleEngagement}); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+
+	ctx := repository.WithCallerIdentity(context.Background(), repository.SearchScope{Unrestricted: false, ViewerEmail: cleMember})
+	inProgress := domain.CaseStateWorkInProgress
+	ongoing := domain.CaseWorkStateOngoing
+	for _, id := range []string{cleServiceReq, cleEngagement} {
+		if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: id, State: &inProgress}); err != nil {
+			t.Fatalf("set work_in_progress on %s: %v", id, err)
+		}
+	}
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleServiceReq, WorkState: &ongoing}); err != nil {
+		t.Fatalf("first Ongoing: %v", err)
+	}
+	_, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleEngagement, WorkState: &ongoing})
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second Ongoing: err = %v, want *apierror.ConflictError", err)
+	}
+}

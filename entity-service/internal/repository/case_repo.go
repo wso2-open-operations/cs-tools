@@ -233,6 +233,17 @@ const caseLikeCloseNotesColumn = `COALESCE(c.close_notes, eng.close_notes, sr.cl
 const caseLikeResolvedOnColumn = `COALESCE(c.resolved_on, eng.resolved_on, sr.resolved_on, sra.resolved_on, ann.resolved_on)`
 const caseLikeClosedOnColumn = `COALESCE(c.closed_on, eng.closed_on, sr.closed_on, sra.closed_on, ann.closed_on)`
 
+// caseLikeWorkStateColumn/caseLikeResolutionCodeColumn cover the four
+// case-like tables that carry these columns (migration 0184 added them to
+// engagement/service_request/security_report_analysis, using the same enum
+// types as "case"). announcement has neither.
+const caseLikeWorkStateColumn = `COALESCE(c.work_state::TEXT, eng.work_state::TEXT, sr.work_state::TEXT, sra.work_state::TEXT)`
+const caseLikeResolutionCodeColumn = `COALESCE(c.resolution_code::TEXT, eng.resolution_code::TEXT, sr.resolution_code::TEXT, sra.resolution_code::TEXT)`
+
+// workStateWorkItemTypes are the case-like work_item types that carry a work
+// state and resolution code: all of caseLikeWorkItemTypes except ANNOUNCEMENT.
+const workStateWorkItemTypes = `'{CASE,ENGAGEMENT,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS}'::work_item_type_enum[]`
+
 // caseLikeJoins LEFT-joins every case-like work_item extension table other
 // than "case" itself (each caller already joins "case" under its own alias,
 // since some callers need it INNER/LEFT differently and some don't select
@@ -1263,9 +1274,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 
 	err := r.db.QueryRow(ctx,
 		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT, ann.announcement_type::TEXT,
-		        wi.description, c.severity::TEXT, c.issue_type::TEXT, c.work_state::TEXT,
+		        wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
 		        `+caseLikeStateColumn+`, `+caseLikeCauseColumn+`, `+caseLikeCloseNotesColumn+`,
-		        c.resolution_code::TEXT, c.current_escalation_level::TEXT, c.is_escalated,
+		        `+caseLikeResolutionCodeColumn+`, c.current_escalation_level::TEXT, c.is_escalated,
 		        wi.created_on, wi.updated_on, `+caseLikeClosedOnColumn+`, `+caseLikeResolvedOnColumn+`,
 		        wi.subject,
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta, wi.eta_shared_on,
@@ -1765,12 +1776,14 @@ const updateCaseQuery = `
 const updateSecurityReportAnalysisQuery = `
 	WITH updated_sra AS (
 		UPDATE security_report_analysis
-		SET state       = CASE WHEN $2 <> '' THEN $2::security_report_analysis_state_enum ELSE state END,
-		    closed_on   = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause       = CASE WHEN $3 <> '' THEN $3::security_report_analysis_cause_enum ELSE cause END,
-		    close_notes = COALESCE($4, close_notes)
+		SET state           = CASE WHEN $2 <> '' THEN $2::security_report_analysis_state_enum ELSE state END,
+		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    cause           = CASE WHEN $3 <> '' THEN $3::security_report_analysis_cause_enum ELSE cause END,
+		    close_notes     = COALESCE($4, close_notes),
+		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
-		RETURNING id, state, closed_on
+		RETURNING id, state, work_state, closed_on
 	),
 	updated_work_item AS (
 		UPDATE work_item
@@ -1781,7 +1794,7 @@ const updateSecurityReportAnalysisQuery = `
 	)
 	SELECT uwi.id, uwi.number, uwi.wso2_id, uwi.created_by, uwi.project_id, uwi.deployment_id, uwi.deployed_product_id,
 	       uwi.subject, uwi.description,
-	       NULL::TEXT, NULL::TEXT, usra.state::TEXT, NULL::TEXT,
+	       NULL::TEXT, NULL::TEXT, usra.state::TEXT, usra.work_state::TEXT,
 	       uwi.created_on, uwi.updated_on, usra.closed_on
 	FROM updated_work_item uwi
 	JOIN updated_sra usra ON usra.id = uwi.id`
@@ -1789,12 +1802,14 @@ const updateSecurityReportAnalysisQuery = `
 const updateServiceRequestQuery = `
 	WITH updated_sr AS (
 		UPDATE service_request
-		SET state       = CASE WHEN $2 <> '' THEN $2::service_request_state_enum ELSE state END,
-		    closed_on   = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause       = CASE WHEN $3 <> '' THEN $3::service_request_cause_enum ELSE cause END,
-		    close_notes = COALESCE($4, close_notes)
+		SET state           = CASE WHEN $2 <> '' THEN $2::service_request_state_enum ELSE state END,
+		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    cause           = CASE WHEN $3 <> '' THEN $3::service_request_cause_enum ELSE cause END,
+		    close_notes     = COALESCE($4, close_notes),
+		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
-		RETURNING id, state, closed_on
+		RETURNING id, state, work_state, closed_on
 	),
 	updated_work_item AS (
 		UPDATE work_item
@@ -1805,7 +1820,7 @@ const updateServiceRequestQuery = `
 	)
 	SELECT uwi.id, uwi.number, uwi.wso2_id, uwi.created_by, uwi.project_id, uwi.deployment_id, uwi.deployed_product_id,
 	       uwi.subject, uwi.description,
-	       NULL::TEXT, NULL::TEXT, usr.state::TEXT, NULL::TEXT,
+	       NULL::TEXT, NULL::TEXT, usr.state::TEXT, usr.work_state::TEXT,
 	       uwi.created_on, uwi.updated_on, usr.closed_on
 	FROM updated_work_item uwi
 	JOIN updated_sr usr ON usr.id = uwi.id`
@@ -1813,12 +1828,14 @@ const updateServiceRequestQuery = `
 const updateEngagementQuery = `
 	WITH updated_eng AS (
 		UPDATE engagement
-		SET state       = CASE WHEN $2 <> '' THEN $2::engagement_state_enum ELSE state END,
-		    closed_on   = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause       = CASE WHEN $3 <> '' THEN $3::engagement_cause_enum ELSE cause END,
-		    close_notes = COALESCE($4, close_notes)
+		SET state           = CASE WHEN $2 <> '' THEN $2::engagement_state_enum ELSE state END,
+		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    cause           = CASE WHEN $3 <> '' THEN $3::engagement_cause_enum ELSE cause END,
+		    close_notes     = COALESCE($4, close_notes),
+		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
-		RETURNING id, state, closed_on
+		RETURNING id, state, work_state, closed_on
 	),
 	updated_work_item AS (
 		UPDATE work_item
@@ -1829,7 +1846,7 @@ const updateEngagementQuery = `
 	)
 	SELECT uwi.id, uwi.number, uwi.wso2_id, uwi.created_by, uwi.project_id, uwi.deployment_id, uwi.deployed_product_id,
 	       uwi.subject, uwi.description,
-	       NULL::TEXT, NULL::TEXT, ueng.state::TEXT, NULL::TEXT,
+	       NULL::TEXT, NULL::TEXT, ueng.state::TEXT, ueng.work_state::TEXT,
 	       uwi.created_on, uwi.updated_on, ueng.closed_on
 	FROM updated_work_item uwi
 	JOIN updated_eng ueng ON ueng.id = uwi.id`
@@ -1860,27 +1877,50 @@ const updateAnnouncementQuery = `
 	FROM updated_work_item uwi
 	JOIN updated_ann uann ON uann.id = uwi.id`
 
-// validateUpdateCaseFieldsForType validates that fields only applicable to "case"
-// (severity, workState, resolutionCode) are not provided when updating non-case
-// work items, and validates that announcement state only uses "open" or "closed".
+// validateUpdateCaseFieldsForType rejects fields the work item's type has no
+// column for, and restricts announcement state to "open" or "closed".
+//
+// severity is "case"-only. workState and resolutionCode are on every
+// case-like type except announcement (migration 0184), matching ServiceNow,
+// where u_work_state and resolution_code live on the one case table that
+// holds all of these types.
 func validateUpdateCaseFieldsForType(workItemType string, req domain.UpdateCaseRequest, state string) error {
-	if workItemType != "CASE" {
-		if req.Severity != nil {
-			return &apierror.ValidationError{Msg: "severity is only supported for cases"}
-		}
-		if req.WorkState != nil {
-			return &apierror.ValidationError{Msg: "workState is only supported for cases"}
-		}
-		if req.ResolutionCode != nil {
-			return &apierror.ValidationError{Msg: "resolutionCode is only supported for cases"}
-		}
+	if workItemType != "CASE" && req.Severity != nil {
+		return &apierror.ValidationError{Msg: "severity is only supported for cases"}
 	}
 	if workItemType == "ANNOUNCEMENT" {
+		if req.WorkState != nil {
+			return &apierror.ValidationError{Msg: "workState is not supported for announcements"}
+		}
+		if req.ResolutionCode != nil {
+			return &apierror.ValidationError{Msg: "resolutionCode is not supported for announcements"}
+		}
 		if state != "" && state != "OPEN" && state != "CLOSED" {
 			return &apierror.ValidationError{Msg: "announcements only support state open or closed"}
 		}
 	}
 	return nil
+}
+
+// caseLikeExtensionUpdate returns the update statement and its arguments for
+// a non-"case" case-like work item, plus a label for error messages. "case"
+// itself goes through updateCaseQuery, which also handles severity.
+func caseLikeExtensionUpdate(workItemType string, req domain.UpdateCaseRequest, state, workState, resolutionCode, cause string) (query string, args []any, label string, ok bool) {
+	switch workItemType {
+	case "SECURITY_REPORT_ANALYSIS":
+		return updateSecurityReportAnalysisQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "security report analysis", true
+	case "SERVICE_REQUEST":
+		return updateServiceRequestQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "service request", true
+	case "ENGAGEMENT":
+		return updateEngagementQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "engagement", true
+	case "ANNOUNCEMENT":
+		annState := state
+		if annState == "CLOSED" {
+			annState = "CLOSE"
+		}
+		return updateAnnouncementQuery, []any{req.ID, annState, cause, req.CloseNotes}, "announcement", true
+	}
+	return "", nil, "", false
 }
 
 // scanUpdatedCase is shared by both branches of UpdateCase below.
@@ -1896,16 +1936,24 @@ func scanUpdatedCase(row pgx.Row) (domain.Case, error) {
 	// against for internalID/severity/etc, confirmed live the first time
 	// this path could actually return NULL here.
 	var deploymentID, deployedProductID *string
+	// projectID/description: work_item.project_id and .description are both
+	// nullable, and synced data has NULLs in each (8,414 and 510 case-like
+	// rows on the staging copy checked) -- scanned straight into
+	// domain.Case's plain strings, every update to such a row failed with
+	// "cannot scan NULL into *string" after the write had already happened.
+	var projectID, description *string
 	var severity, issueType, state, workStateRaw *string
 	if err := row.Scan(
 		&c.ID, &c.Number, &internalID, &c.CreatedBy,
-		&c.ProjectID, &deploymentID, &deployedProductID,
-		&c.Subject, &c.Description, &severity, &issueType, &state, &workStateRaw,
+		&projectID, &deploymentID, &deployedProductID,
+		&c.Subject, &description, &severity, &issueType, &state, &workStateRaw,
 		&c.CreatedOn, &c.UpdatedOn, &c.ClosedOn,
 	); err != nil {
 		return domain.Case{}, err
 	}
 	c.InternalID = stringOrEmpty(internalID)
+	c.ProjectID = stringOrEmpty(projectID)
+	c.Description = stringOrEmpty(description)
 	c.DeploymentID = stringOrEmpty(deploymentID)
 	c.DeployedProductID = stringOrEmpty(deployedProductID)
 	if severity != nil {
@@ -1997,7 +2045,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 		// here would only ever surface later as a failed mirror write. Checked in
 		// a transaction serialized per assignee.
 		if req.WorkState != nil && workState == "ONGOING" {
-			return r.updateCaseEnforcingOneOngoing(ctx, req, state, severity, workState, resolutionCode, cause)
+			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause)
 		}
 
 		// req.Severity == nil: severity can't change, so there's nothing to
@@ -2057,52 +2105,24 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 		}
 		return c, previousSeverity, nil
 
-	case "SECURITY_REPORT_ANALYSIS":
-		c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateSecurityReportAnalysisQuery, req.ID, state, cause, req.CloseNotes))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
-		}
-		if err != nil {
-			return domain.Case{}, nil, fmt.Errorf("update case: security report analysis: %w", err)
-		}
-		return c, nil, nil
-
-	case "SERVICE_REQUEST":
-		c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateServiceRequestQuery, req.ID, state, cause, req.CloseNotes))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
-		}
-		if err != nil {
-			return domain.Case{}, nil, fmt.Errorf("update case: service request: %w", err)
-		}
-		return c, nil, nil
-
-	case "ENGAGEMENT":
-		c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateEngagementQuery, req.ID, state, cause, req.CloseNotes))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
-		}
-		if err != nil {
-			return domain.Case{}, nil, fmt.Errorf("update case: engagement: %w", err)
-		}
-		return c, nil, nil
-
-	case "ANNOUNCEMENT":
-		annState := state
-		if annState == "CLOSED" {
-			annState = "CLOSE"
-		}
-		c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateAnnouncementQuery, req.ID, annState, cause, req.CloseNotes))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
-		}
-		if err != nil {
-			return domain.Case{}, nil, fmt.Errorf("update case: announcement: %w", err)
-		}
-		return c, nil, nil
-
 	default:
-		return domain.Case{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
+		query, args, label, ok := caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause)
+		if !ok {
+			return domain.Case{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
+		}
+		// Same one-Ongoing-per-engineer rule as "case": ServiceNow keeps the
+		// work state of every case-like type in one field on one table.
+		if req.WorkState != nil && workState == "ONGOING" {
+			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause)
+		}
+		c, err := scanUpdatedCase(r.db.QueryRow(ctx, query, args...))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
+		}
+		if err != nil {
+			return domain.Case{}, nil, fmt.Errorf("update case: %s: %w", label, err)
+		}
+		return c, nil, nil
 	}
 }
 
@@ -2722,7 +2742,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	dataQuery := fmt.Sprintf(
 		`SELECT wi.id, wi.number, wi.wso2_id,
 		        wi.type::TEXT, wi.subject, wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
-		        eng.type::TEXT, c.work_state::TEXT, c.current_escalation_level::TEXT, wi.created_on, wi.updated_on,
+		        eng.type::TEXT, `+caseLikeWorkStateColumn+`, c.current_escalation_level::TEXT, wi.created_on, wi.updated_on,
 		        wi.created_by,
 		        p.id, p.name,
 		        d.id, d.name,
@@ -3801,20 +3821,31 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	return activity, total, nil
 }
 
-// updateCaseEnforcingOneOngoing is UpdateCase's workState=ONGOING path. It
-// takes a transaction-scoped advisory lock keyed on the case's assignee (two
-// concurrent requests for two different cases of the same engineer share no
-// row to lock), rejects the update with a ConflictError naming the engineer's
-// other ONGOING case, then runs the normal update in the same transaction.
-// An unassigned case has no engineer to conflict with and proceeds.
-func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, state, severity, workState, resolutionCode, cause string) (domain.Case, *domain.CaseSeverity, error) {
+// updateCaseEnforcingOneOngoing is UpdateCase's workState=ONGOING path, for
+// every type in workStateWorkItemTypes. It takes a transaction-scoped
+// advisory lock keyed on the work item's assignee (two concurrent requests
+// for two different work items of the same engineer share no row to lock),
+// rejects the update with a ConflictError naming the engineer's other ONGOING
+// work item of any of those types, then runs the type's normal update in the
+// same transaction. An unassigned work item has no engineer to conflict with
+// and proceeds.
+func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string) (domain.Case, *domain.CaseSeverity, error) {
+	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes}, "case"
+	if workItemType != "CASE" {
+		var ok bool
+		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause)
+		if !ok {
+			return domain.Case{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
+		}
+	}
+
 	// r.db.InTx (Scoped) sets the caller identity, commits on a nil return
 	// and rolls back on any error, exactly the lifecycle the hand-written
 	// Begin/Commit it replaces had.
 	var c domain.Case
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		var assignee *string
-		err := tx.QueryRow(ctx, `SELECT assigned_to_id::TEXT FROM work_item WHERE id = $1 AND type = 'CASE'`, req.ID).Scan(&assignee)
+		err := tx.QueryRow(ctx, `SELECT assigned_to_id::TEXT FROM work_item WHERE id = $1 AND type = ANY(`+workStateWorkItemTypes+`)`, req.ID).Scan(&assignee)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &apierror.NotFoundError{Msg: "case not found"}
 		}
@@ -3828,9 +3859,15 @@ func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain
 			var otherNumber string
 			err := tx.QueryRow(ctx, `
 				SELECT wi.number
-				FROM work_item wi JOIN "case" c ON c.id = wi.id
+				FROM work_item wi
+				LEFT JOIN "case" c ON c.id = wi.id
+				LEFT JOIN engagement eng ON eng.id = wi.id
+				LEFT JOIN service_request sr ON sr.id = wi.id
+				LEFT JOIN security_report_analysis sra ON sra.id = wi.id
 				WHERE wi.assigned_to_id = $1::uuid AND wi.id <> $2::uuid
-				  AND c.work_state = 'ONGOING' AND c.state <> 'CLOSED'
+				  AND wi.type = ANY(`+workStateWorkItemTypes+`)
+				  AND `+caseLikeWorkStateColumn+` = 'ONGOING'
+				  AND COALESCE(c.state::TEXT, eng.state::TEXT, sr.state::TEXT, sra.state::TEXT) <> 'CLOSED'
 				ORDER BY wi.updated_on DESC LIMIT 1`, *assignee, req.ID).Scan(&otherNumber)
 			if err == nil {
 				return &apierror.ConflictError{Msg: "Cannot set work state to Ongoing: the assigned engineer already has an Ongoing case: " + otherNumber}
@@ -3841,9 +3878,9 @@ func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain
 		}
 
 		var scanErr error
-		c, scanErr = scanUpdatedCase(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes))
+		c, scanErr = scanUpdatedCase(tx.QueryRow(ctx, query, args...))
 		if scanErr != nil {
-			return fmt.Errorf("update case: %w", scanErr)
+			return fmt.Errorf("update case: %s: %w", label, scanErr)
 		}
 		return nil
 	})
@@ -3862,7 +3899,7 @@ var caseAggregateColumns = map[string]struct{ key, label string }{
 	"type":           {"wi.type::TEXT", "wi.type::TEXT"},
 	"engagementType": {"eng.type::TEXT", "eng.type::TEXT"},
 	"issueType":      {"c.issue_type::TEXT", "c.issue_type::TEXT"},
-	"workState":      {"c.work_state::TEXT", "c.work_state::TEXT"},
+	"workState":      {caseLikeWorkStateColumn, caseLikeWorkStateColumn},
 	"account":        {"wi.account_id::TEXT", "a.name"},
 }
 

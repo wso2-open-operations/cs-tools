@@ -3250,8 +3250,9 @@ across whichever of the five extension tables actually matches (exactly one
 ever does, since each is a shared-PK extension keyed to a specific
 `wi.type`) — `announcement_state_enum`'s `CLOSE` (not `CLOSED`) is
 normalized to match the other four's vocabulary. `severity`/`issue_type`/
-`work_state`/`resolution_code`/`current_escalation_level`/`is_escalated`
-remain `"case"`-only, since no other extension table has those columns.
+`current_escalation_level`/`is_escalated` remain `"case"`-only, since no
+other extension table has those columns. `work_state`/`resolution_code` are
+not: see "Work state and resolution code on non-case types" below.
 `GetCaseByID` also now populates `Cause`/`ResolutionCode`/`ResolutionNotes`/
 `ResolvedOn`/`EscalationLevel`/`IsEscalated` for the first time — real
 columns that were simply never selected before, not previously believed
@@ -4782,6 +4783,39 @@ Missing a `sysidToUUID()` call on a response ID means callers receive a bare sys
 
 - **Security fixes in PRs** — when a change is made to fix a security issue (gosec findings, input sanitization, etc.), do not mention it in the PR title or description; describe the change in neutral functional terms only
 - **Run govulncheck on every change** — `govulncheck ./...` (install once: `go install golang.org/x/vuln/cmd/govulncheck@latest`) must report no vulnerabilities before opening a PR. Most findings here are Go standard-library CVEs tied to the toolchain patch version pinned in `go.mod`'s `go` directive — bump it to the latest `1.26.x` patch (and run `go mod tidy` so the toolchain download matches) rather than working around the symptom. A finding in a third-party module (e.g. `golang.org/x/text`, pulled in transitively via `pgx`) is fixed with `go get <module>@<fixed-version>`
+
+## Work state and resolution code on non-case types (migration 0184)
+
+PR #2289 made `UpdateCase` write the right extension table for each case-like
+type, and rejected `severity`/`workState`/`resolutionCode` for every type but
+`case`. ServiceNow disagrees for two of the three: every case-like record lives
+in `sn_customerservice_case`, and on wso2sndev in-progress service requests,
+engagements and security report analyses carry `u_work_state` (1 = Ongoing,
+2 = Paused), and closed ones carry `resolution_code`. Announcements carry
+neither. Severity (`priority` 9–14) is effectively case-only; service requests
+use `priority` 1–4, a different scale, which this does not model.
+
+With `workState` rejected, the portal's Start progress left a service request
+in Work in Progress with an empty work state, shown as "Paused", and public
+replies stayed locked, since both the BFF and the webapp require `ongoing`.
+
+- **Migration 0184** adds `work_state case_work_state_enum` and
+  `resolution_code case_resolution_code_enum` (the "case" enum types) to
+  `service_request`, `engagement` and `security_report_analysis`. Applied by
+  hand like 0179-0181; the sync service does not create or fill them yet.
+- **`validateUpdateCaseFieldsForType`**: `severity` stays case-only;
+  `workState`/`resolutionCode` are rejected only for announcements.
+- **Update queries** for the three types write both columns (`$5`/`$6`) and
+  return `work_state`. `caseLikeExtensionUpdate` builds the statement and
+  arguments for every non-case type, shared by `UpdateCase` and the
+  one-Ongoing path.
+- **One Ongoing per engineer** now spans case, service request, engagement and
+  security report analysis (`workStateWorkItemTypes`), matching the webapp's
+  own conflict lookup, which searches every case-like type.
+- **Reads** (`GetCaseByID`, `SearchCases`, the `workState` filter and
+  aggregate) use `caseLikeWorkStateColumn`/`caseLikeResolutionCodeColumn`.
+- **Dual write** needed no change: the ServiceNow mirror for state, work state
+  and resolution fields already PATCHes the shared case record, whatever its type.
 
 ## Incident report flows (migration 0181)
 

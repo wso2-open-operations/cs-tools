@@ -197,20 +197,19 @@ func TestValidateUpdateCaseFieldsForType(t *testing.T) {
 			wantErrSubstr: "severity is only supported for cases",
 		},
 		{
-			name:         "SECURITY_REPORT_ANALYSIS rejects workState",
+			name:         "SECURITY_REPORT_ANALYSIS allows workState",
 			workItemType: "SECURITY_REPORT_ANALYSIS",
 			req: domain.UpdateCaseRequest{
 				WorkState: &ws,
 			},
-			wantErrSubstr: "workState is only supported for cases",
 		},
 		{
-			name:         "SECURITY_REPORT_ANALYSIS rejects resolutionCode",
+			name:         "SECURITY_REPORT_ANALYSIS allows resolutionCode",
 			workItemType: "SECURITY_REPORT_ANALYSIS",
 			req: domain.UpdateCaseRequest{
 				ResolutionCode: &resCode,
 			},
-			wantErrSubstr: "resolutionCode is only supported for cases",
+			state: "CLOSED",
 		},
 		{
 			name:          "SERVICE_REQUEST rejects severity",
@@ -219,16 +218,44 @@ func TestValidateUpdateCaseFieldsForType(t *testing.T) {
 			wantErrSubstr: "severity is only supported for cases",
 		},
 		{
-			name:          "ENGAGEMENT rejects workState",
+			name:         "SERVICE_REQUEST allows workState",
+			workItemType: "SERVICE_REQUEST",
+			req:          domain.UpdateCaseRequest{WorkState: &ws},
+		},
+		{
+			name:         "SERVICE_REQUEST allows resolutionCode",
+			workItemType: "SERVICE_REQUEST",
+			req:          domain.UpdateCaseRequest{ResolutionCode: &resCode},
+			state:        "CLOSED",
+		},
+		{
+			name:         "ENGAGEMENT allows workState",
+			workItemType: "ENGAGEMENT",
+			req:          domain.UpdateCaseRequest{WorkState: &ws},
+		},
+		{
+			name:          "ENGAGEMENT rejects severity",
 			workItemType:  "ENGAGEMENT",
+			req:           domain.UpdateCaseRequest{Severity: &sev},
+			wantErrSubstr: "severity is only supported for cases",
+		},
+		{
+			name:          "ANNOUNCEMENT rejects workState",
+			workItemType:  "ANNOUNCEMENT",
 			req:           domain.UpdateCaseRequest{WorkState: &ws},
-			wantErrSubstr: "workState is only supported for cases",
+			wantErrSubstr: "workState is not supported for announcements",
 		},
 		{
 			name:          "ANNOUNCEMENT rejects resolutionCode",
 			workItemType:  "ANNOUNCEMENT",
 			req:           domain.UpdateCaseRequest{ResolutionCode: &resCode},
-			wantErrSubstr: "resolutionCode is only supported for cases",
+			wantErrSubstr: "resolutionCode is not supported for announcements",
+		},
+		{
+			name:          "ANNOUNCEMENT rejects severity",
+			workItemType:  "ANNOUNCEMENT",
+			req:           domain.UpdateCaseRequest{Severity: &sev},
+			wantErrSubstr: "severity is only supported for cases",
 		},
 		{
 			name:         "ANNOUNCEMENT allows CLOSED state",
@@ -345,6 +372,43 @@ func TestExtensionUpdateQueriesMatchMigrations(t *testing.T) {
 				t.Errorf("query does not cast to %s", q.causeEnum)
 			}
 		})
+	}
+}
+
+// TestExtensionUpdateQueriesWriteWorkStateAndResolutionCode pins the columns
+// migration 0184 adds to the three non-announcement extension tables to the
+// update queries that write them, so neither side changes alone.
+func TestExtensionUpdateQueriesWriteWorkStateAndResolutionCode(t *testing.T) {
+	raw, err := os.ReadFile("../../migrations/0184_case_like_work_state_resolution_code.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m0184 := string(raw)
+
+	queries := map[string]string{
+		"security_report_analysis": updateSecurityReportAnalysisQuery,
+		"service_request":          updateServiceRequestQuery,
+		"engagement":               updateEngagementQuery,
+	}
+	for table, query := range queries {
+		t.Run(table, func(t *testing.T) {
+			for _, col := range []string{"work_state case_work_state_enum", "resolution_code case_resolution_code_enum"} {
+				if !strings.Contains(m0184, "ALTER TABLE "+table+" ADD COLUMN IF NOT EXISTS "+col) {
+					t.Errorf("migration 0184 does not add %s to %s", col, table)
+				}
+			}
+			for _, want := range []string{"$5::case_work_state_enum", "$6::case_resolution_code_enum", "RETURNING id, state, work_state, closed_on"} {
+				if !strings.Contains(query, want) {
+					t.Errorf("query does not contain %q", want)
+				}
+			}
+		})
+	}
+	if strings.Contains(m0184, "ALTER TABLE announcement") {
+		t.Error("migration 0184 must not add these columns to announcement")
+	}
+	if strings.Contains(updateAnnouncementQuery, "work_state") || strings.Contains(updateAnnouncementQuery, "resolution_code") {
+		t.Error("updateAnnouncementQuery must not write work_state or resolution_code")
 	}
 }
 

@@ -124,7 +124,8 @@ func caseFieldPredicates(f caseFieldSet, argIdx int) ([]string, []any, int, erro
 		add("eng.type = ANY($%d::engagement_type_enum[])", upper(len(f.EngagementTypes), func(i int) string { return string(f.EngagementTypes[i]) }))
 	}
 	if len(f.WorkStates) > 0 {
-		add("c.work_state = ANY($%d::case_work_state_enum[])", upper(len(f.WorkStates), func(i int) string { return string(f.WorkStates[i]) }))
+		// Every case-like type but announcement carries a work state (migration 0184).
+		add(caseLikeWorkStateColumn+" = ANY($%d::text[])", upper(len(f.WorkStates), func(i int) string { return string(f.WorkStates[i]) }))
 	}
 	if len(f.AssignedUserIDs) > 0 {
 		add("wi.assigned_to_id = ANY($%d::uuid[])", f.AssignedUserIDs)
