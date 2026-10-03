@@ -27,10 +27,11 @@ import (
 type catalogService struct {
 	repo repository.CatalogRepository
 	// snMirror is set only under DATA_SOURCE=postgres-servicenow-dual-write
-	// (see NewCatalogServiceWithSNFallback) -- every method reads from it
-	// instead of repo when non-nil. sr_category/catalog_item exist and are
-	// populated in Postgres (99/312 rows respectively, checked live), but
-	// SearchCatalogs' own availability check requires a matching
+	// (see NewCatalogServiceWithSNFallback). Only SearchCatalogs reads from it
+	// when non-nil -- GetCatalogItemVariables always reads repo (see its own
+	// doc comment below for why that split exists). sr_category/catalog_item
+	// exist and are populated in Postgres (99/312 rows respectively, checked
+	// live), but SearchCatalogs' own availability check requires a matching
 	// sr_category_routing_rule row (0 rows) and, more fundamentally, the
 	// deployed_product row itself: a deployed product that predates
 	// dual-write (or was never touched through this service's own SN-first
@@ -86,11 +87,15 @@ func (s *catalogService) SearchCatalogs(ctx context.Context, req domain.SearchCa
 }
 
 // GetCatalogItemVariables implements CatalogService.
+//
+// Unlike SearchCatalogs, this always reads repo (Postgres) even under
+// DATA_SOURCE=postgres-servicenow-dual-write: catalog_variable's extra fields
+// (read_only/hidden/reference_table/max_length/validation) and the sibling
+// catalog_variable_choice table (migration 0125) are now kept current by a
+// separate sync service, so Postgres is trusted for this read. This does not
+// change the plain `servicenow` data source, which still calls ServiceNow
+// live.
 func (s *catalogService) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) (domain.GetCatalogItemVariablesResponse, error) {
-	if s.snMirror != nil {
-		return s.snMirror.GetCatalogItemVariables(ctx, catalogID, catalogItemID)
-	}
-
 	if catalogID == "" {
 		return domain.GetCatalogItemVariablesResponse{}, &apierror.ValidationError{Msg: "catalogId is required"}
 	}

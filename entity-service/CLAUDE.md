@@ -4122,10 +4122,17 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   don't specify one. Only active categories with at least one available item are returned;
   an unknown deployed product is a 404.
 - `GetCatalogItemVariables` 404s unless the item is linked to that catalog.
-  `catalog_variable` has no columns for `readOnly`/`hidden`/`maxLength`/
-  `referenceTable`/`validation`/`choices`, so those stay at their zero value
-  (TODO: choice-based variables render as free text until a choices table
-  exists). A NULL `is_active` counts as active.
+  `catalog_variable`'s `read_only`/`hidden`/`reference_table`/`max_length`/
+  `validation_name`/`validation_regex`/`validation_message` columns and the
+  sibling `catalog_variable_choice` table (migration 0125) back
+  `readOnly`/`hidden`/`maxLength`/`referenceTable`/`validation`/`choices` on
+  this data source now -- a NULL `read_only`/`hidden` reads as `false`, and
+  `Choices` is only set when the variable has at least one `is_inactive IS NOT
+  TRUE` choice row (an inactive choice is excluded entirely, not flagged). This
+  data is kept current by a separate sync service, not written here. A NULL
+  `is_active` counts as active. Under `postgres-servicenow-dual-write`, this
+  one endpoint reads Postgres directly (unlike `SearchCatalogs`, which still
+  falls back to ServiceNow -- see `catalogService.snMirror`'s own doc comment).
 
 ## Case search filters on the Postgres data source
 

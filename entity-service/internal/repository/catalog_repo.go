@@ -191,12 +191,14 @@ func (r *catalogRepo) SearchCatalogs(ctx context.Context, deployedProductID stri
 
 // GetCatalogItemVariables implements CatalogRepository.
 //
-// catalog_variable (migration 0071) carries only id/name/question_text/
-// type/order/is_mandatory/is_active/default_value. ReadOnly, Hidden,
-// MaxLength, ReferenceTable, Validation and Choices have no backing column
-// yet, so they stay at their zero value (false/nil/omitted). TODO: populate
-// them once the schema gains them (choice-based variables in particular
-// render as free text until a choices table exists).
+// catalog_variable (migration 0071) carries id/name/question_text/type/order/
+// is_mandatory/is_active/default_value, plus read_only/hidden/reference_table/
+// max_length/validation_name/validation_regex/validation_message (migration
+// 0125). Choices come from the sibling catalog_variable_choice table (also
+// migration 0125), fetched in a second batched query keyed by variable id to
+// avoid N+1 (same ANY($...::uuid[]) pattern SearchCatalogs already uses above
+// for catalog items). This data is kept in sync from the backing data source
+// by a separate service, not written here.
 func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) ([]domain.CatalogItemVariable, error) {
 	var belongs bool
 	if err := r.db.QueryRow(ctx,
@@ -210,7 +212,9 @@ func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, ca
 
 	rows, err := r.db.Query(ctx,
 		`SELECT id, question_text, "order", type, name, is_mandatory,
-		        (is_active IS DISTINCT FROM FALSE), default_value
+		        (is_active IS DISTINCT FROM FALSE), default_value,
+		        read_only, hidden, reference_table, max_length,
+		        validation_name, validation_regex, validation_message
 		 FROM catalog_variable
 		 WHERE catalog_item_id = $1
 		 ORDER BY "order" NULLS LAST, id`, catalogItemID)
@@ -220,32 +224,85 @@ func (r *catalogRepo) GetCatalogItemVariables(ctx context.Context, catalogID, ca
 	defer rows.Close()
 
 	out := []domain.CatalogItemVariable{}
+	ids := make([]string, 0)
 	for rows.Next() {
 		var (
-			v                  domain.CatalogItemVariable
-			questionText, typ  *string
-			order              *int
-			mandatory          *bool
-			name, defaultValue *string
+			v                                                  domain.CatalogItemVariable
+			questionText, typ                                  *string
+			order                                              *int
+			mandatory, readOnly, hidden                        *bool
+			name, defaultValue, referenceTable                 *string
+			maxLength                                          *int
+			validationName, validationRegex, validationMessage *string
 		)
-		if err := rows.Scan(&v.ID, &questionText, &order, &typ, &name, &mandatory, &v.Active, &defaultValue); err != nil {
+		if err := rows.Scan(&v.ID, &questionText, &order, &typ, &name, &mandatory,
+			&v.Active, &defaultValue, &readOnly, &hidden, &referenceTable, &maxLength,
+			&validationName, &validationRegex, &validationMessage); err != nil {
 			return nil, fmt.Errorf("scan catalog variable: %w", err)
 		}
-		// question_text/type/order/is_mandatory are nullable columns, but the
-		// response fields are plain (non-pointer) values -- NULL becomes the
-		// zero value rather than an error.
+		// question_text/type/order/is_mandatory/read_only/hidden are nullable
+		// columns, but the response fields are plain (non-pointer) values --
+		// NULL becomes the zero value rather than an error.
 		v.QuestionText = stringOrEmpty(questionText)
 		v.Type = stringOrEmpty(typ)
 		if order != nil {
 			v.Order = *order
 		}
 		v.Mandatory = mandatory != nil && *mandatory
+		v.ReadOnly = readOnly != nil && *readOnly
+		v.Hidden = hidden != nil && *hidden
 		v.Name = name
 		v.DefaultValue = defaultValue
+		v.MaxLength = maxLength
+		v.ReferenceTable = referenceTable
+		if validationName != nil {
+			v.Validation = &domain.CatalogVariableValidation{
+				Name:    *validationName,
+				Regex:   stringOrEmpty(validationRegex),
+				Message: stringOrEmpty(validationMessage),
+			}
+		}
 		out = append(out, v)
+		ids = append(ids, v.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate catalog variables: %w", err)
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	choiceRows, err := r.db.Query(ctx,
+		`SELECT catalog_variable_id, value, text, "order"
+		 FROM catalog_variable_choice
+		 WHERE catalog_variable_id = ANY($1::text[]::uuid[])
+		   AND is_inactive IS DISTINCT FROM TRUE
+		 ORDER BY catalog_variable_id, "order" NULLS LAST`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query catalog variable choices: %w", err)
+	}
+	defer choiceRows.Close()
+
+	choicesByVariable := make(map[string][]domain.CatalogVariableChoice)
+	for choiceRows.Next() {
+		var variableID string
+		var c domain.CatalogVariableChoice
+		if err := choiceRows.Scan(&variableID, &c.Value, &c.Text, &c.Order); err != nil {
+			return nil, fmt.Errorf("scan catalog variable choice: %w", err)
+		}
+		choicesByVariable[variableID] = append(choicesByVariable[variableID], c)
+	}
+	if err := choiceRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate catalog variable choices: %w", err)
+	}
+
+	for i := range out {
+		// Omitted entirely rather than emitted as an empty list (see
+		// domain.CatalogItemVariable.Choices' own doc comment) -- only set
+		// when the variable actually has active choice rows.
+		if cs := choicesByVariable[out[i].ID]; len(cs) > 0 {
+			out[i].Choices = cs
+		}
 	}
 	return out, nil
 }

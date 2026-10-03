@@ -876,11 +876,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// sr_category/catalog_item/catalog_item_category/catalog_variable/
 	// sr_category_routing_rule (migrations 000067-000071) back the service
 	// request catalog on the Postgres data source, so these routes are
-	// registered for both data sources. Under dual-write, Postgres is not
-	// trusted for reads here either -- see catalogService.snMirror's own
-	// doc comment for why (deployed_product/routing-rule data was never
+	// registered for both data sources. Under dual-write, SearchCatalogs
+	// still reads from ServiceNow -- see catalogService.snMirror's own doc
+	// comment for why (deployed_product/routing-rule data was never
 	// backfilled from ServiceNow, same gap as deployments/deployed-products/
-	// instances).
+	// instances). GetCatalogItemVariables is the exception: catalog_variable's
+	// extra fields and its catalog_variable_choice table (migration 0125) are
+	// kept current by a separate sync service, so that one read goes to
+	// Postgres under dual-write too -- see catalogService.GetCatalogItemVariables'
+	// own doc comment.
 	catalogRepo := repository.NewCatalogRepository(repository.NewScoped(db))
 	var activeCatalogSvc service.CatalogService
 	switch cfg.DataSource {
