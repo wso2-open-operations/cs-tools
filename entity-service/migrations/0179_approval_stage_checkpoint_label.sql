@@ -1,0 +1,39 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- changeRequestApprovalStagePosition (change_request_repo.go) infers a
+-- stage's lifecycle label (Assess/Authorize/Customer Approval) purely from
+-- its zero-based ordinal position among approval_stage rows for the same
+-- work_item -- a reasonable approximation of ServiceNow's own real
+-- stage-identification logic (which keys off group sys_ids never synced
+-- into this schema) for as long as every checkpoint between New and
+-- whichever ordinal is being read has already been implemented, in order.
+-- That assumption broke the moment a Review checkpoint was added at
+-- ordinal 2 without first building the (still-unimplemented) Customer
+-- Approval checkpoint that real ServiceNow's own workflow places there --
+-- a stage this codebase now provisions for Review collides, by pure
+-- ordinal position, with the label this same function already used for an
+-- entirely different, not-yet-built checkpoint.
+--
+-- checkpoint_label breaks that coupling: provisionApprovalStage now writes
+-- its own checkpoint's exact label directly, so a stage created by this
+-- codebase is identified by what it explicitly says it is, not by counting
+-- its siblings. NULL (every pre-existing row, and anything csm-sync-service
+-- ever mirrors from ServiceNow's own sysapproval_group, which has no
+-- equivalent concept) falls back to the historical ordinal-position
+-- heuristic unchanged -- no backfill needed, and nothing synced from
+-- ServiceNow is reinterpreted.
+ALTER TABLE approval_stage ADD COLUMN IF NOT EXISTS checkpoint_label VARCHAR(50);

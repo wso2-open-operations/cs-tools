@@ -248,7 +248,8 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		req.IsPlanningVisibleToCustomers == nil &&
 		req.ImplementationPlan == nil && req.Priority == nil && req.Category == nil &&
 		req.RequestedByID == nil && req.AffectedServicesText == nil && req.AffectedComponentsText == nil &&
-		req.RollbackDurationText == nil && req.CustomerGroupID == nil {
+		req.RollbackDurationText == nil && req.CustomerGroupID == nil &&
+		req.OnHold == nil && req.OnHoldReason == nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
 	// Accepted by the contract (and mirrored) but with no Postgres column

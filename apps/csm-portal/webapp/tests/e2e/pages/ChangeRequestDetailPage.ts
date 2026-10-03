@@ -36,18 +36,24 @@ export class ChangeRequestDetailPage {
    * A freshly-created CR isn't always retrievable the instant we navigate to
    * it — the real DEV-SN backend can lag between the create write and the
    * record becoming readable. Retry the navigation (full reload) until the
-   * stable "Back to change requests" button actually renders, rather than
-   * failing on the first attempt.
+   * page has genuinely loaded the record, rather than failing on the first
+   * attempt. The lifecycle stepper (always rendered once a CR resolves,
+   * regardless of its number/state) is the readiness signal — there is no
+   * "Back to change requests" control on this page (it opens as a tab
+   * alongside the dashboard, like a case does; confirmed absent anywhere in
+   * CsmChangeRequestDetailPage.tsx — an earlier version of this page object
+   * waited on one that never existed in the current tab-strip UI, which
+   * silently turned every `goto()` call into a 45s timeout).
    */
   async goto(id: string): Promise<void> {
     await expect(async () => {
       await this.page.goto(`/operations/change-requests/${id}`);
-      await expect(this.backButton()).toBeVisible({ timeout: 3_000 });
+      await expect(this.lifecycleStepper()).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 45_000, intervals: [1_000, 2_000, 3_000, 5_000] });
   }
 
-  backButton(): Locator {
-    return this.page.getByRole("button", { name: "Back to change requests" });
+  lifecycleStepper(): Locator {
+    return this.page.getByRole("list", { name: "Change request lifecycle" });
   }
 
   moveToAssessButton(): Locator {
@@ -96,31 +102,36 @@ export class ChangeRequestDetailPage {
   }
 
   // ── Approvals ────────────────────────────────────────────────────────────
+  //
+  // ChangeRequestApprovals.tsx renders one flat table (State/Approver/
+  // Assignment group/Comments/Created/Approved on/Actions) with every
+  // approver from every stage shown together — not the collapsible
+  // per-stage accordion cards an earlier UI revision used (see that
+  // component's own history in entity-service's CLAUDE.md, "Change
+  // requests" section: "a full UI redesign ... now renders as one flat
+  // table"). Scope by table row, not an accordion class.
 
-  /** Expands an approval-stage accordion by its displayed stage label (e.g.
-   * "Assess", "Authorize", "Customer Approval" — see
-   * `ChangeRequestApprovals.tsx`; a repeated stage gets a "(N of M)" suffix
-   * appended). */
-  async expandApprovalStage(stageLabel: string): Promise<void> {
-    await this.page
-      .locator(".MuiAccordionSummary-root", { hasText: stageLabel })
-      .click();
+  /** The approvals table row for a named approver (e.g. "Jane Doe"). */
+  approverRow(approverName: string): Locator {
+    return this.page.getByRole("row", { name: approverName });
+  }
+
+  /** That approver's status chip text ("Requested" | "Approved" |
+   * "Rejected" | "Cancelled" | ...). */
+  approverStatus(approverName: string): Locator {
+    return this.approverRow(approverName).locator(".MuiChip-label");
   }
 
   /** Approve/Reject buttons only render for the signed-in user's own
    * pending ("REQUESTED") approval row — scope by the approver's own display
-   * name if more than one row is expanded at once. */
+   * name when more than one row is on the page at once. */
   approveButton(approverName?: string): Locator {
-    const scope = approverName
-      ? this.page.locator(".MuiAccordionDetails-root", { hasText: approverName })
-      : this.page;
+    const scope = approverName ? this.approverRow(approverName) : this.page;
     return scope.getByRole("button", { name: "Approve" });
   }
 
   rejectButton(approverName?: string): Locator {
-    const scope = approverName
-      ? this.page.locator(".MuiAccordionDetails-root", { hasText: approverName })
-      : this.page;
+    const scope = approverName ? this.approverRow(approverName) : this.page;
     return scope.getByRole("button", { name: "Reject" });
   }
 

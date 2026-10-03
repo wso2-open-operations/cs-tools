@@ -105,6 +105,9 @@ type fakeChangeRequestDetailRow struct {
 	impact, state, changeModel                                         *string
 	createdOn, updatedOn                                               time.Time
 	agID, agName                                                       *string
+	isOnHold                                                           *bool
+	onHoldReason                                                       *string
+	onHoldStartedOn                                                    *time.Time
 	createdBy                                                          string
 	justification, impactDescription, serviceOutage                    *string
 	communicationPlan, rollbackPlan, testPlan                          *string
@@ -134,6 +137,7 @@ func (f fakeChangeRequestDetailRow) Scan(dest ...any) error {
 		f.startOn, f.endOn, f.impact, f.state, f.changeModel,
 		f.createdOn, f.updatedOn,
 		f.agID, f.agName,
+		f.isOnHold, f.onHoldReason, f.onHoldStartedOn,
 		f.createdBy, f.justification, f.impactDescription, f.serviceOutage, f.communicationPlan, f.rollbackPlan, f.testPlan,
 		f.isCustomerApproved, f.isCustomerReviewed,
 		f.implementationPlan, f.priority, f.category,

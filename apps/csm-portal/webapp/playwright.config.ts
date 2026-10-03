@@ -23,6 +23,11 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3001";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // tests/e2e/auth/generate-session.spec.ts is a session-minting utility, not
+  // a regression test — it's run only via playwright.auth.config.ts (see that
+  // file's own doc comment for why a plain `playwright test` here must never
+  // pick it up).
+  testIgnore: ["**/auth/**"],
   timeout: 30_000,
   // Specs run against a real staging backend (no mocking), all under the same
   // captured account -- concurrent workers cause real network contention and

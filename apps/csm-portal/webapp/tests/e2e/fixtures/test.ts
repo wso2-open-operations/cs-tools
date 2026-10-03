@@ -27,7 +27,13 @@ import { test as base, expect, type Browser, type BrowserContext, type Page } fr
 import fs from "node:fs";
 import path from "node:path";
 
-export type TimecardRole = "approver" | "engineer";
+// "crApprover" is generated locally (see tests/e2e/auth/generate-session.spec.ts)
+// against the local docker-compose mock-oidc provider, as jane.doe@example.com
+// — the approver seeded on the Change Request lifecycle fixtures in
+// scripts/csm-compose/seed-entity-service.sql (CR-FIXED-003/004). Unlike
+// "approver"/"engineer" above (captured by hand against a real staging
+// backend), it is only ever valid against the local stack.
+export type TimecardRole = "approver" | "engineer" | "crApprover";
 
 /** A captured session: the origin's localStorage + sessionStorage snapshots.
  * `cookies` (optional) carries the IdP-domain cookies so the SDK's silent

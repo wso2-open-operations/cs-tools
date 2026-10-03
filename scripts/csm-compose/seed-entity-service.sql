@@ -105,4 +105,128 @@ ON CONFLICT (id) DO NOTHING;
 UPDATE account SET cre_team_id = '00000000-0000-0000-0000-000000000901'
 WHERE id = '00000000-0000-0000-0000-000000000301';
 
+-- team_member.group_id (distinct from team_id -- see entity-service's own CLAUDE.md,
+-- "Change requests" section, "team_member.group_id is the real column for
+-- this") is what change_request's Assess-entry approver auto-provisioning
+-- actually reads, not team_id. It's left NULL by the plain INSERT above (and
+-- an ON CONFLICT DO NOTHING re-run would never backfill it either), so it's
+-- set explicitly here, unconditionally, once the "group" row above exists
+-- (group_id's FK requires it) -- same always-apply-regardless-of-conflict
+-- shape as the account.cre_team_id UPDATE just above. This makes both seeded
+-- users resolve as members of "group" 901, which CR-FIXED-002's own
+-- {state: "assess"} exercise (see the change-request fixtures below) relies
+-- on to auto-provision them as approvers.
+UPDATE team_member SET group_id = '00000000-0000-0000-0000-000000000901'
+WHERE id IN ('00000000-0000-0000-0000-000000000902', '00000000-0000-0000-0000-000000000903');
+
+-- Change requests: four fixed-UUID fixtures (block 1001+) giving Playwright
+-- E2E specs a real, deterministic change request to navigate straight to by
+-- id/number at every stage of its lifecycle, since the webapp's own "Create
+-- Change Request" flow always 503s on this data source (work_item.number has
+-- no DB sequence -- see entity-service's own CLAUDE.md, "CreateCase and case
+-- numbers"/"Change requests"). Each is a work_item (type CHANGE_REQUEST) +
+-- change_request row, the same shared-primary-key extension shape as the
+-- "case"/work_item pair above. wso2_id is left unset: it's nullable for
+-- change requests specifically (migration 0021's own comment -- "change_request
+-- work items have no wso2_id data"), unlike the case fixture above, whose
+-- type requires it.
+--
+-- CR-FIXED-001: NEW, no assignment_group_id at all -- covers "Move to Assess
+-- is disabled/blocked with no team assigned" (PatchChangeRequest's compulsory-
+-- team gate, entity-service's own CLAUDE.md).
+INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id, opened_by_user_id, assigned_to_id, description) VALUES
+  ('00000000-0000-0000-0000-000000001001', now(), now(), 'seed', 'seed', 'CHG-FIXED-001', 'E2E fixture: New change request with no assigned team', 'CHANGE_REQUEST', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000401', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Seed fixture for Playwright E2E coverage: New state, no assignment_group_id -- Move to Assess must be blocked until a team is assigned.')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO change_request (id, state, priority, impact, category, risk, change_request_type, requested_by_user_id, justification) VALUES
+  ('00000000-0000-0000-0000-000000001001', 'NEW'::change_request_state_enum, 'MODERATE'::change_request_priority_enum, 'LOW'::change_request_impact_enum, 'SOFTWARE'::change_request_category_enum, 'LOW'::change_request_risk_enum, 'GENERAL'::change_request_type_enum, '00000000-0000-0000-0000-000000000002', 'Seed fixture: no team assigned, used to cover the compulsory-team gate before Assess.')
+ON CONFLICT (id) DO NOTHING;
+
+-- CR-FIXED-002: NEW, assignment_group_id = the existing "Example Corp ABT"
+-- group (901) -- covers "Move to Assess succeeds once a team is assigned, and
+-- auto-provisions that team's members (jane.doe/john.smith, via the
+-- team_member.group_id UPDATE above) as Assess-stage approvers." No
+-- approval_stage exists yet here on purpose: PatchChangeRequest's own
+-- auto-provisioning only creates one the first time {state: "assess"}
+-- succeeds (see entity-service's own CLAUDE.md), and this fixture is meant to
+-- be driven through that exact transition by the Playwright spec itself.
+--
+-- requested_by_user_id is deliberately NULL on this and the two fixtures
+-- below (not jane.doe/john.smith, both team members) -- confirmed live
+-- against real ServiceNow (CHG0039122) and now mirrored by PatchChangeRequest
+-- itself (see entity-service's own CLAUDE.md): the change's own requester is
+-- auto-provisioned as a Cancelled approver, not Requested, same as real SN.
+-- Either seeded user as requester here would silently turn one of these two
+-- fixtures' "both members become pending approvers" / "approving one cancels
+-- the other pending sibling" demonstrations into a demonstration of self-
+-- exclusion instead -- a real, already-covered-elsewhere behavior (see the
+-- entity-service integration tests), but not what these three fixtures exist
+-- to show.
+INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id, assignment_group_id, opened_by_user_id, assigned_to_id, description) VALUES
+  ('00000000-0000-0000-0000-000000001002', now(), now(), 'seed', 'seed', 'CHG-FIXED-002', 'E2E fixture: New change request with an assigned team', 'CHANGE_REQUEST', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000401', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Seed fixture for Playwright E2E coverage: New state, assignment_group_id set to the seeded Example Corp ABT group -- Move to Assess must succeed and auto-provision that team''s members as approvers.')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO change_request (id, state, priority, impact, category, risk, change_request_type, requested_by_user_id, justification) VALUES
+  ('00000000-0000-0000-0000-000000001002', 'NEW'::change_request_state_enum, 'MODERATE'::change_request_priority_enum, 'LOW'::change_request_impact_enum, 'SOFTWARE'::change_request_category_enum, 'LOW'::change_request_risk_enum, 'GENERAL'::change_request_type_enum, NULL, 'Seed fixture: team assigned, used to cover Assess-entry approver auto-provisioning.')
+ON CONFLICT (id) DO NOTHING;
+
+-- CR-FIXED-003: ASSESS, assignment_group_id = 901, with its approval_stage +
+-- approval_stage_approver rows already created (simulating a CR that already
+-- went through auto-provisioning) -- both jane.doe and john.smith sit as
+-- "requested" approvers on one stage, covering "both of two approvers see a
+-- pending Approve/Reject action; after one approves, the CR cascades to
+-- Authorize and the sibling approver's row is cancelled"
+-- (DecideChangeRequestApproval's first-responder-wins quorum rule).
+INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id, assignment_group_id, opened_by_user_id, assigned_to_id, description) VALUES
+  ('00000000-0000-0000-0000-000000001003', now(), now(), 'seed', 'seed', 'CHG-FIXED-003', 'E2E fixture: change request in Assess with two pending approvers', 'CHANGE_REQUEST', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000401', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Seed fixture for Playwright E2E coverage: Assess state with two requested approvers (jane.doe, john.smith) on one stage -- approving one must cascade to Authorize and cancel the other.')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO change_request (id, state, priority, impact, category, risk, change_request_type, requested_by_user_id, justification) VALUES
+  ('00000000-0000-0000-0000-000000001003', 'ASSESS'::change_request_state_enum, 'MODERATE'::change_request_priority_enum, 'LOW'::change_request_impact_enum, 'SOFTWARE'::change_request_category_enum, 'LOW'::change_request_risk_enum, 'GENERAL'::change_request_type_enum, NULL, 'Seed fixture: Assess state, approval already provisioned, used to cover the approve/cancel-sibling cascade.')
+ON CONFLICT (id) DO NOTHING;
+
+-- approval_stage/approval_stage_approver mirror what PatchChangeRequest's own
+-- auto-provisioning would have written for CR-FIXED-003 on a real
+-- {state: "assess"} transition (see entity-service's own CLAUDE.md) --
+-- raw_status/status use that same code's lowercase ServiceNow-passthrough
+-- vocabulary ("requested", not "REQUESTED"; migration 0089's own doc comment).
+INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status) VALUES
+  ('00000000-0000-0000-0000-000000001005', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000901', 'requested')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, status) VALUES
+  ('00000000-0000-0000-0000-000000001006', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000001', 'requested'),
+  ('00000000-0000-0000-0000-000000001007', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000002', 'requested')
+ON CONFLICT (id) DO NOTHING;
+
+-- CR-FIXED-004: AUTHORIZE, assignment_group_id = 901, with its
+-- approval_stage_approver rows already resolved the way #3 should look after
+-- a decision -- jane.doe approved, john.smith's sibling row cancelled -- for
+-- "an already-decided CR shows the right terminal approval state and offers
+-- whatever its legal next states are."
+INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, account_id, project_id, assignment_group_id, opened_by_user_id, assigned_to_id, description) VALUES
+  ('00000000-0000-0000-0000-000000001004', now(), now(), 'seed', 'seed', 'CHG-FIXED-004', 'E2E fixture: change request in Authorize with a resolved approval', 'CHANGE_REQUEST', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000401', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Seed fixture for Playwright E2E coverage: Authorize state with a resolved approval (jane.doe approved, john.smith cancelled) -- a terminal approval decision already applied.')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO change_request (id, state, priority, impact, category, risk, change_request_type, requested_by_user_id, justification) VALUES
+  ('00000000-0000-0000-0000-000000001004', 'AUTHORIZE'::change_request_state_enum, 'MODERATE'::change_request_priority_enum, 'LOW'::change_request_impact_enum, 'SOFTWARE'::change_request_category_enum, 'LOW'::change_request_risk_enum, 'GENERAL'::change_request_type_enum, NULL, 'Seed fixture: Authorize state, approval already decided, used to cover a terminal-approval-state display.')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status) VALUES
+  ('00000000-0000-0000-0000-000000001008', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001004', '00000000-0000-0000-0000-000000000901', 'approved')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, status) VALUES
+  ('00000000-0000-0000-0000-000000001009', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001008', '00000000-0000-0000-0000-000000001004', '00000000-0000-0000-0000-000000000001', 'approved'),
+  ('00000000-0000-0000-0000-000000001010', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001008', '00000000-0000-0000-0000-000000001004', '00000000-0000-0000-0000-000000000002', 'cancelled')
+ON CONFLICT (id) DO NOTHING;
+
+-- Retrofit for an environment that already seeded CR-FIXED-002/003/004 before
+-- requested_by_user_id was nulled out above (ON CONFLICT DO NOTHING on the
+-- INSERTs above would never pick up that change on a re-run) -- same
+-- always-apply-regardless-of-conflict shape as the account.cre_team_id/
+-- team_member.group_id UPDATEs earlier in this file.
+UPDATE change_request SET requested_by_user_id = NULL
+WHERE id IN ('00000000-0000-0000-0000-000000001002', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000001004');
+
 COMMIT;

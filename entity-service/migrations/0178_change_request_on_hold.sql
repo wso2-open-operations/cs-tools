@@ -1,0 +1,48 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- "On hold" has no representation anywhere in this schema today, even
+-- though a live investigation of the real ServiceNow "Change Request -
+-- Normal" workflow (wso2sndev.service-now.com, all 56 activities mapped)
+-- found it threaded through nearly every stage transition: activities named
+-- "Assess and On hold" / "Authorize and On hold" / "Internal Review and On
+-- hold", each followed by an `If -- "Check if Change is \"On hold\""`
+-- branch that, when true, runs a `Wait for condition -- "Wait for On hold
+-- to be false"` before that stage's own approval/transition logic is
+-- allowed to proceed at all. Entity-service's change_request table has
+-- never had an equivalent column, so nothing here has ever blocked a change
+-- request from advancing through its lifecycle while it is "on hold" in
+-- ServiceNow's sense -- a confirmed, real gap between this mirror and the
+-- system it models.
+--
+-- Shape follows this table's own existing boolean+text precedent
+-- (is_customer_approved/is_customer_reviewed/is_planning_visible_to_customers,
+-- 0043_change_request_details_table.sql) for the flag, and work_item's own
+-- workaround_provided_on/workaround_provided_by_user_id pairing
+-- (0021_work_item_table.sql) for "when did this state begin" -- a nullable
+-- TIMESTAMPTZ whose presence records the moment, not a boolean. A nullable
+-- TEXT reason column sits alongside both, matching every other free-text
+-- change_request column here (justification/impact_description/...) --
+-- there is no fixed, closed vocabulary of hold reasons to draw an ENUM from.
+--
+-- is_on_hold is the gate PatchChangeRequest checks before accepting any
+-- state-changing PATCH (see change_request_repo.go/entity-service's own
+-- CLAUDE.md, "Change requests" -> "On hold"); on_hold_reason/
+-- on_hold_started_on are display-only, for a UI answering "why is this on
+-- hold, and since when" -- they carry no gating behavior of their own.
+ALTER TABLE change_request ADD COLUMN IF NOT EXISTS is_on_hold BOOLEAN;
+ALTER TABLE change_request ADD COLUMN IF NOT EXISTS on_hold_reason TEXT;
+ALTER TABLE change_request ADD COLUMN IF NOT EXISTS on_hold_started_on TIMESTAMPTZ;

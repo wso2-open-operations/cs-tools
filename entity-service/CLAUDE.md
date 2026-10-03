@@ -2520,6 +2520,32 @@ team, all inside the same transaction as the state write. `GetChangeRequestAppro
 needed no changes at all — it already renders whatever `approval_stage`/
 `approval_stage_approver` rows exist, regardless of who wrote them.
 
+**The change request's own requester is provisioned `cancelled`, not
+`requested`, when they are also a member of the assigned team** — mirroring
+ServiceNow's own real self-approval-prevention behavior, confirmed live
+against a real ServiceNow record (wso2sndev.service-now.com, CHG0039122,
+inspected directly) rather than guessed: that record's own requester was
+also a member of the group an approval stage was generated for, and their
+`sysapproval_approver` row came back already in `Cancelled` state — the
+record's own activity log shows this as the very first "Field changes"
+entry at creation, not a later transition away from `Requested`. Every
+other team member's row is `Requested` exactly as before. The row still
+gets created, same as real ServiceNow — it's just born cancelled rather
+than omitted. `requested_by_user_id` is read fresh from `change_request`
+inside the same transaction (not from the request's own
+`RequestedByID`, which is only set when this particular PATCH is the one
+changing it) so this reflects the change request's post-PATCH value, since
+the `crSets` UPDATE earlier in this same transaction may have just set it.
+**Reintroduces the identical dead-end risk the empty-group check above
+already guards against, in a new shape**: if excluding the requester would
+leave zero `requested` approvers — the requester is the assigned team's
+only member, or every member happens to be the requester via some data
+anomaly — the whole `{state: "assess"}` PATCH is rejected with a
+`ValidationError` ("the assigned team has no members other than the
+requester to provision as Assess approvers"), checked before the
+`approval_stage` row is created, same ordering discipline as the
+empty-group check.
+
 Scoped to "no `approval_stage` exists yet" so a resent `{state: "assess"}`
 (a retry, or an unrelated field edit while already in Assess) can never
 duplicate the stage or re-seed approvers over whatever
@@ -2565,6 +2591,209 @@ actually points at the same `"group"` row the rest of this feature uses
 everywhere else, and is presumably populated in real synced environments by
 `csm-sync-service` mirroring ServiceNow's own `sys_user_grmember`, the same
 way `assignment_group_id` itself is populated from `sys_user_group`.
+
+**The second approval checkpoint, Authorize ("Risk approvals" in real
+ServiceNow), now gets the identical auto-provisioning treatment as Assess**
+— the same gap, one lifecycle step later: a change request that reaches
+Authorize with nothing in `approval_stage`/`approval_stage_approver` for it
+is just as stuck as the original Assess-empty-Approvals-tab bug this whole
+feature exists to fix. By explicit product decision this reuses the SAME
+assigned team (`work_item.assignment_group_id`) Assess already uses — there
+is no confirmed evidence ServiceNow uses a separate CAB-specific group for
+this gate, so none is invented here — with the identical self-approval-
+exclusion and dead-end-guard rules, just parameterized by which checkpoint
+is being gated ("Assess"/"Authorize" in the `ValidationError` messages).
+
+**Refactored first, rather than duplicating the ~140-line Assess block.**
+`provisionApprovalStage(ctx, tx, workItemID, assignedTeamID, actorEmail,
+checkpoint)` (`change_request_repo.go`) is the single implementation both
+checkpoints now call: query-and-validate `team_member` before creating
+anything (the CodeRabbit-fixed empty-group ordering), the self-approval
+exclusion and its own dead-end guard, `DISTINCT` deduplication, one
+`approval_stage` row plus one `approval_stage_approver` row per member. The
+two Assess-only `ValidationError` messages ("the assigned team has no
+members ... as Assess approvers", "... no members other than the requester
+... as Assess approvers") are unchanged in wording for Assess itself —
+`checkpoint.Label` is simply `"Assess"` there, `"Authorize"` for the new
+caller.
+
+**The design question this needed answering: how does a second checkpoint's
+provisioning tell "no stage exists yet for ME" apart from "a stage already
+exists for an EARLIER checkpoint"?** Migration 0089's `approval_stage` has
+no column recording which lifecycle transition a given row belongs to, and
+adding one was considered and rejected: every stage this repository has
+ever created (Assess's, going back to the original addition) and every
+stage `csm-sync-service` has ever mirrored in from ServiceNow's own
+`sysapproval_group` would need a backfill to populate it, and this schema
+already has an established, working answer to "which checkpoint is this"
+that needs no new column and no backfill at all — a stage's zero-based
+**ordinal position** among `approval_stage` rows for the same
+`work_item_id`, ordered by `created_on`. `changeRequestApprovalStagePosition`
+(the read path, `GetChangeRequestApprovals`) already derives a stage's
+label — "Assess"/"Authorize"/"Customer Approval" — purely from this
+ordinal, and `DecideChangeRequestApproval`'s own `isAssessStage` check (see
+below) already gates its state cascade on the identical ordinal rather than
+on `change_request.state` alone. Reusing that same convention for
+provisioning, instead of inventing a second, parallel way to answer the
+same question, keeps every consumer of "which checkpoint is this stage" —
+old and new — in agreement with no migration required.
+
+Concretely: `changeRequestApprovalCheckpoint{Position, Label}` carries the
+expected ordinal (`changeRequestAssessCheckpoint` = 0,
+`changeRequestAuthorizeCheckpoint` = 1), and `provisionApprovalStage` only
+creates a stage when `COUNT(*) FROM approval_stage WHERE work_item_id = $1`
+**exactly equals** `checkpoint.Position` — not merely "less than or equal",
+and not "not yet exists at this checkpoint's label". Fewer existing stages
+than `Position` means an earlier checkpoint's own stage hasn't been created
+yet, and provisioning this one anyway would land it at the wrong ordinal
+and be silently mislabeled the next time `GetChangeRequestApprovals` reads
+it back (e.g. an Authorize stage created with zero prior stages would read
+back as "Assess"); more existing stages means this checkpoint (or a later
+one) already has its stage — the exact generalization of the original
+Assess-only "no `approval_stage` exists yet" guard
+(`TestChangeRequestIntegration_PatchAssessDoesNotReprovisionWhenStageExists`'s
+own invariant), which this change keeps enforcing unchanged for Assess
+(`Position: 0`, i.e. still exactly "no stage exists at all yet") while
+extending the identical mechanism to Authorize. An Assess stage already
+existing does not block Authorize's own provisioning (it's precisely the
+precondition Authorize's `Position: 1` expects), and vice versa — confirmed
+by `TestChangeRequestIntegration_AssessAndAuthorizeStagesCoexist`, which
+runs the real Assess→decide→Authorize flow end to end and checks both
+stages' approvers are independently correct and neither clobbers the other.
+
+**Wired into both of Authorize's real entry points, with deliberately
+different failure handling at each.** A change request reaches Authorize
+two ways on this data source, mirroring the two ways Assess provisioning
+already triggers (a direct `{state: "assess"}` PATCH, generically, and
+nothing else — Assess has no cascade of its own):
+
+1. **A direct `{state: "authorize"}` PATCH** (`patchChangeRequestTx`) — the
+   generic `if req.State != nil { ... }` trigger, exactly mirroring Assess's
+   own. Resolves the effective assigned team the identical way Assess does
+   (`req.AssignedTeamID` from this same request, else whatever is already on
+   `work_item.assignment_group_id`), then calls `provisionApprovalStage`.
+   Unlike Assess, there is **no** new compulsory "assignedTeamId is
+   required" gate added for this transition — by the time a change request
+   reaches Authorize through its one real, normal path (Assess's own
+   compulsory gate, then approval), a team is already guaranteed to be on
+   the record, so inventing a second hard gate here would be redundant
+   product surface for a case that shouldn't occur. A direct PATCH that
+   skips Assess entirely (this data source enforces no legal-transition
+   order — see this file's own "LegalNextStates" history above) with no team
+   ever assigned is still caught: `provisionApprovalStage`'s own "no
+   members" check treats a nil/empty team the same as an assigned-but-empty
+   group, so the whole PATCH is rejected with the same `ValidationError`
+   shape rather than silently leaving Authorize stageless. **This path fails
+   loudly** — a `ValidationError` from `provisionApprovalStage` rolls back
+   the whole PATCH, same as Assess, since a direct PATCH caller can see and
+   immediately correct it.
+2. **`DecideChangeRequestApproval`'s own Assess→Authorize cascade** — the
+   `isAssessStage`-gated branch that already flips `change_request.state` to
+   `AUTHORIZE` on a resolving approval (see that method's own doc comment
+   above). This is the path a change request actually reaches Authorize
+   through in production, not the direct PATCH above (there is no "Change
+   state → Authorize" button; the Approvers section is the only route).
+   Immediately after the state write, this reads the assigned team fresh off
+   `work_item` (this method carries no `PatchChangeRequestRequest` of its
+   own) and calls the identical `provisionApprovalStage`. **This path is
+   deliberately best-effort** — a provisioning failure (no team, an empty
+   group, a requester-only group) is logged (`slog.WarnContext`) and
+   swallowed, never returned from `DecideChangeRequestApproval` itself. This
+   is a considered asymmetry, not an oversight: by the time provisioning
+   runs here, the approver's own decision has already been recorded and
+   `change_request.state` has already genuinely advanced — rolling that
+   whole transaction back because some OTHER, future checkpoint's team
+   configuration has a problem would turn a real, valid approval into a
+   confusing failure for the person who just approved it, over something
+   entirely outside their action. This matches the same "a downstream side
+   effect must never fail the primary mutation" convention this file's own
+   `publishXxx` helpers already follow elsewhere in this service. The
+   practical effect of this is the known, accepted gap it creates: a change
+   request whose assigned team has no members (or only the requester) by
+   the time the Assess→Authorize cascade fires lands in Authorize with no
+   approval stage of its own — exactly the dead-end this whole feature
+   exists to prevent, just for this one specific, narrow precondition
+   failure on this one specific entry point, logged rather than silent.
+
+   **Caught on review, fixed before merge**: "logged and swallowed" only
+   actually held for `provisionApprovalStage`'s own `ValidationError`
+   returns (empty group, requester-only group), which happen before any SQL
+   write runs. A failure at the *database* level inside it instead — a
+   constraint violation, a bad cast — poisons the whole surrounding
+   Postgres transaction: every later statement, including this method's own
+   eventual `COMMIT`, would then fail with "current transaction is
+   aborted," silently rolling back the very approval decision this
+   best-effort block exists to protect — defeating its entire stated
+   purpose for exactly the class of failure it was least prepared for. The
+   call is now wrapped in its own `SAVEPOINT` (`tx.Begin(ctx)` on an
+   already-open pgx `Tx` issues one): a failure rolls back only that
+   savepoint — undoing just provisioning's own half-written statements —
+   and the outer transaction, decision and all, commits normally; only a
+   genuine failure to open or release the savepoint itself (vanishingly
+   rare — e.g. the connection dying) propagates as a real error.
+
+**The third approval checkpoint, Review ("Internal Review" in real
+ServiceNow's own workflow), gets the identical auto-provisioning treatment as
+Assess and Authorize** — the same gap, two lifecycle steps later, at the
+Review state of `changeRequestForwardNextStates`
+(...→Implement→Review→{Closed, CustomerReview}→Closed). Same product decision
+as Authorize: this reuses the SAME assigned team
+(`work_item.assignment_group_id`), the identical self-approval-exclusion and
+dead-end-guard rules, via `changeRequestReviewCheckpoint =
+changeRequestApprovalCheckpoint{Position: 2, Label: "Review"}` — the next
+ordinal after Authorize, created via the exact same `provisionApprovalStage`
+every earlier checkpoint already calls; nothing about those rules is
+checkpoint-specific, only the ordinal/label differs.
+
+**Review has only ONE real entry point, not two — confirmed before writing
+any code, not assumed.** Authorize's own write-up above documents two real
+entry points precisely because `DecideChangeRequestApproval`'s state cascade
+exists at all for Assess→Authorize. Reading that method in full (including
+its own doc comment's explicit scoping) confirms it stops there: "The state
+cascade is deliberately scoped to Assess→Authorize only — Authorize's own
+outgoing approval gate (into Scheduled or Customer Approval) is a separate,
+deferred piece of work." No cascading approval-decision mechanism exists
+anywhere in this repository past Authorize, so a change request reaches
+Review exclusively through a direct `{state: "review"}` PATCH, via
+Authorize→Scheduled→Implement→Review (or the Customer Approval detour) —
+the same generic `if req.State != nil { ... }` trigger in
+`patchChangeRequestTx` every earlier checkpoint already uses, with no second
+call site to wire into `DecideChangeRequestApproval` the way Authorize's own
+cascade path required. Unlike Authorize, there is therefore no best-effort/
+fails-loudly asymmetry to document for Review: its one entry point fails
+loudly, exactly like Authorize's own direct-PATCH entry point does, for the
+same reason — a direct PATCH caller can see and immediately correct a
+`ValidationError`. Same "no compulsory assignedTeamId gate" reasoning as
+Authorize applies too: by the time a change request reaches Review through
+its only normal path, a team is already guaranteed to be on the record, so a
+third hard gate would be redundant product surface for a case that shouldn't
+occur; a direct PATCH that skips straight to Review with no team ever
+assigned is still caught by `provisionApprovalStage`'s own "no members"
+check.
+
+**The labeling collision above is now fixed, via migration `0179`.** Adding
+the Review checkpoint at position 2 collided with `changeRequestApprovalStagePosition`'s
+pre-existing hardcoded "position ≥ 2 → Customer Approval" default (written
+when position 2 was still purely theoretical) — a real change request that
+actually took the Authorize→Customer Approval branch would land ITS stage at
+the same ordinal, and `approval_stage` had no column recording which
+lifecycle transition a given row was actually for, so position alone could
+never tell the two apart once both were possible at the same ordinal.
+
+Resolved with `approval_stage.checkpoint_label` (migration `0179`, nullable
+`VARCHAR(50)`): `provisionApprovalStage` now writes its own `checkpoint.Label`
+("Assess"/"Authorize"/"Review") directly onto every stage it creates, rather
+than leaving it to be inferred later from sibling count.
+`changeRequestApprovalStageLabel` (the new wrapper `buildChangeRequestApprovals`
+actually calls) prefers this explicit label when present, and only falls
+back to the original `changeRequestApprovalStagePosition` ordinal heuristic
+when it's NULL — true for every ServiceNow-synced stage (that system has no
+equivalent concept to sync) and any stage provisioned before this column
+existed, so neither needs a backfill and nothing synced is reinterpreted.
+Every checkpoint this codebase provisions going forward (Customer Approval,
+Review again, Customer Review) must keep writing its own explicit label the
+same way — the ordinal heuristic is now purely legacy-fallback plumbing, not
+something new checkpoints should ever rely on again.
 
 **Fields still with no real column anywhere, left unset rather than
 guessed at** (see `ChangeRequestRepository`'s own doc comment for the full
@@ -2704,10 +2933,87 @@ cancels every other still-`requested` approver on that same stage, matching
 real ServiceNow's own observed behavior on a genuine multi-approver group
 (confirmed live: only the 1-2 who actually responded were left
 Approved/Rejected, every other pending approver on the same group was moved
-to Cancelled, not left sitting at Requested indefinitely). A rejection never
-does either. Still deliberately scoped to Assess→Authorize only — a decision
-on an Authorize-stage approver still cancels its own siblings, but has no
-state-cascade effect yet.
+to Cancelled, not left sitting at Requested indefinitely). **A rejection
+used to do neither** — see the dedicated writeup just below, which closes
+that gap. The state cascade itself is still deliberately scoped to
+Assess→Authorize only — a decision on an Authorize-stage approver still
+cancels its own siblings, but has no state-cascade effect yet.
+
+**A rejection now cancels its stage's other pending siblings too — exactly
+like an approval does, at every checkpoint — but still never touches
+`change_request.state`, in either direction.** This was a real, confirmed
+gap, not a deliberate asymmetry: `decideChangeRequestApprovalQuery` only
+ever flipped the acting approver's own row and returned, so a rejected
+stage's other `requested` approvers were left sitting there forever, with
+no way to tell "this stage was rejected" apart from "nobody has looked at
+it yet" short of reading every row — exactly the same dead-end the original
+cancellation fix (above) already closed for approvals, just left open on
+the rejection side. `DecideChangeRequestApproval` now runs the identical
+`UPDATE approval_stage_approver SET status = 'cancelled' ... WHERE stage_id
+= $1 AND status = 'requested'` on a rejection too (factored into a shared
+`cancelSiblingApprovalStageApprovers` helper both branches now call), at
+Assess, Authorize, and Review alike — sibling-cancellation was never
+Assess-specific to begin with, only the state cascade is.
+
+`change_request.state` is deliberately left completely untouched by a
+rejection, both before and after this fix — no forward advance (obviously:
+nothing was approved) and, just as deliberately, **no backward rollback
+either**. A live investigation of the real ServiceNow "Change Request -
+Normal" workflow (wso2sndev.service-now.com) found a genuinely complex
+reject/rollback pattern threaded through it — "Set Values — `cancelled when
+reject`", "Set Values — `Rollback when reviews rejected`", and a dedicated
+"Rollback To — `Rollback to Customer Approval Process`" activity that moves
+`change_request.state` BACKWARD to an earlier stage — but that investigation
+was ACL-blocked on the actual condition scripts before it could confirm
+either which earlier state a given rejection rolls back to, or under what
+precise conditions it does so. Implementing a guess at that targeted
+rollback would be inventing product semantics with no confirmed basis
+(the same discipline this file's own "On hold" section above and its
+`CustomerApproval`/`CustomerReview` outgoing-edges writeup already apply to
+similarly unconfirmed SN behavior), so this is left as a known, explicitly
+flagged, accepted gap rather than a guess: a rejected change request simply
+stays exactly where it already was.
+
+**The "already-resolved stage" edge case this needed a decision on**: can a
+rejection ever land on a stage some OTHER decision already resolved, and if
+so, what should happen? Two sub-cases, handled differently and on purpose:
+
+- A sibling of the SAME stage-resolving decision (the normal case this fix
+  itself creates) can never reach this branch at all — every decision in
+  this method runs inside a transaction that first locks the owning
+  `change_request` row (`SELECT ... FOR UPDATE`), serializing every
+  decision against every other one for the same change request, so the
+  moment any decision (approval or rejection) cancels a stage's other
+  `requested` siblings, a later decision attempt on one of those siblings
+  fails at `decideChangeRequestApprovalQuery`'s own
+  `status = 'requested'` WHERE clause first (`NotFoundError`, "no pending
+  approval found") — it never even gets a `stageID` to act on, let alone
+  reaches the cancellation code.
+- Data this method did NOT itself create or resolve — a ServiceNow-synced
+  stage, or one seeded before this fix shipped — has no such guarantee: an
+  `approved` row can legitimately coexist with other still-`requested` rows
+  that were never cancelled, because whatever created them predates (or is
+  outside) this method's own cancellation discipline. For exactly this
+  case, the rejection branch checks `hasApproval` (mirroring the existing
+  approval branch's own `hasRejection` check) before cancelling anything,
+  and skips cancellation entirely when the stage already has an `approved`
+  row — a late/duplicate rejection on an already-resolved stage is a no-op
+  on its siblings, not a destructive retroactive cancellation of approvers
+  an earlier approval had every right to leave alone. Covered by
+  `TestChangeRequestIntegration_DecideRejectionDoesNotDisturbAlreadyApprovedStage`,
+  which seeds exactly this shape directly (bypassing
+  `DecideChangeRequestApproval` for the approval, the way a sync would) and
+  confirms the untouched sibling survives.
+
+`TestChangeRequestIntegration_DecideRejectionCancelsSiblingApprovers` and
+`...CancelsSiblingApproversAtEveryCheckpoint` (table-driven over Authorize
+and Review, using a synthetic earlier-`approval_stage` history to push the
+real stage to each ordinal — the same mechanism
+`changeRequestApprovalStagePosition`/`isAssessStage` already read) are the
+regression guards for the cancellation itself; the existing
+`TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade` already
+covered (and still covers) the single-approver no-state-change case this
+fix does not alter.
 
 `domain.ChangeRequestApprover` also gained `CreatedOn`/`Comments` (both
 `*string`, both read from `approval_stage_approver.created_on`/`.comments`
@@ -2734,6 +3040,229 @@ own doc comment already describes this as "the reverse of
 Because of this, `SearchChangeRequestView.Project`/`Case` can be empty
 (`EntityRef{}`)/`nil` for a change request that exists but hasn't been
 linked yet — a real, valid state for this schema, not a bug.
+
+**"On hold" is now a real, enforced concept — it had no representation
+anywhere in this schema at all before.** A live investigation of the real
+ServiceNow "Change Request - Normal" workflow (wso2sndev.service-now.com, all
+56 activities mapped end to end) found "on hold" threaded through nearly
+every stage transition: activities named "Assess and On hold" / "Authorize
+and On hold" / "Internal Review and On hold", each immediately followed by
+an `If — "Check if Change is \"On hold\""` branch that, when true, runs a
+`Wait for condition — "Wait for On hold to be false"` before that stage's
+own approval/transition logic is allowed to proceed at all. Nothing in
+entity-service modeled any of this — no column, no gate, nothing — so a
+change request here never stopped advancing through its lifecycle
+regardless of any ServiceNow-side hold, a confirmed, real gap between this
+mirror and the system it models.
+
+- **Schema** (migration 0178): `change_request.is_on_hold BOOLEAN`,
+  `on_hold_reason TEXT`, `on_hold_started_on TIMESTAMPTZ`. Shape follows two
+  existing precedents in this same table rather than inventing a third: the
+  boolean naming matches `is_customer_approved`/`is_customer_reviewed`/
+  `is_planning_visible_to_customers` (migration 0043), and the
+  flag-plus-"since" pairing mirrors `work_item.workaround_provided_on`/
+  `workaround_provided_by_user_id` (migration 0021) — a nullable TIMESTAMPTZ
+  recording *when* a state began, not a second boolean. `on_hold_reason` is
+  free TEXT, matching every other free-text change_request column here
+  (`justification`/`impact_description`/...): there is no fixed, closed
+  vocabulary of hold reasons anywhere to draw an ENUM from. All three are
+  nullable with no DEFAULT, so a record that predates this migration simply
+  reads as "never on hold" (`OnHold` nil on the wire) rather than `false` —
+  the same "a record predating a column has no opinion on it" posture this
+  file already documents for e.g. `account.deleted_on`.
+- **Domain** (`internal/domain/entity.go`): `SearchChangeRequestView` (and
+  therefore `ChangeRequest`, which embeds it) gained `OnHold *bool`/
+  `OnHoldReason *string`/`OnHoldSince *string` (RFC3339, same convention as
+  `PlannedStartOn`/`PlannedEndOn`) on the read side.
+  `PatchChangeRequestRequest` gained `OnHold *bool`/`OnHoldReason *string` on
+  the write side — plain optional pointers, not the tri-state
+  pointer-to-pointer convention the Group C1/C2 "field-parity additions"
+  use: `OnHoldReason` has no standalone "explicit clear" wire shape of its
+  own (clearing it always goes through `OnHold: false` instead — see below),
+  so a second level of nil-ness would have nothing to express.
+- **Combinable, not exclusive — a deliberate, documented choice.** The task
+  that added this asked for a reasoned choice between the two, matching
+  whichever existing pattern this endpoint already follows most
+  consistently. `UpdateCaseRequest` (case's own PATCH) has a real exclusive/
+  combinable split (`state`/`watchList`/`assigneeEmail`/`parentId`/
+  `acknowledge` mutually exclusive; `subject`/`description`/... freely
+  combinable — see "PATCH /cases/{id}" above) — but `PatchChangeRequestRequest`
+  has **no such grouping at all**: every existing field on this PATCH (state,
+  impact, assignedTeamId, justification, requestApproval, ...) is already
+  independently settable and freely combinable with every other field, with
+  only one blanket "at least one field must be provided" check. Introducing
+  a new exclusive group just for `onHold` would be inventing a new pattern
+  for this one endpoint rather than following its own established one, so
+  `OnHold`/`OnHoldReason` are fully combinable — including with `State`
+  itself, which is exactly what the simultaneous-clear-and-advance behavior
+  below depends on.
+- **The gate** (`patchChangeRequestTx`, immediately after `work_item`'s own
+  `UPDATE ... RETURNING id` succeeds — **not** before any write runs, see
+  below for why): a PATCH that sets `state` is rejected with a
+  `ValidationError` when `change_request.is_on_hold` is **currently**
+  `true` — read fresh inside the same transaction, locked `FOR UPDATE`,
+  never from whatever this same PATCH's own `crSets` might also be setting.
+
+  **Caught on review, fixed before merge**: an earlier revision ran this
+  check first, as a plain unlocked `SELECT`, before `work_item` was ever
+  touched. That left a real race — a concurrent `{onHold: true}`-only PATCH
+  could commit in the window between this read and this transaction's own
+  later writes, letting a state-changing PATCH land against a record that
+  was actually on hold by the time it committed. The fix isn't simply
+  adding `FOR UPDATE` at that same early spot, though: every PATCH,
+  state-changing or not, always writes `work_item` first (`wiSets` above
+  always includes at least `updated_on`/`updated_by`) and `change_request`
+  second (`crSets`, whenever it's non-empty) — so locking `change_request`
+  at the old, earlier position would make this one code path take the
+  *opposite* lock order from every other PATCH, and two transactions taking
+  the same pair of locks in opposite orders is exactly how Postgres
+  deadlocks. Moving the gate to run after `work_item` is already locked
+  keeps the order consistently `work_item` → `change_request` everywhere.
+  **The one deliberate
+  exception**: `{state: X, onHold: false}` in the same request is allowed
+  straight through — "take it off hold and advance in one call" (an
+  approver clearing a hold and immediately promoting the record) is a
+  legitimate, common single action, not two separate PATCHes, so a request
+  that is *also* turning `OnHold` off is excluded from the gate rather than
+  rejected by it. Taking a record off hold with no state change at all
+  (`{onHold: false}` alone) is **never** blocked by anything, regardless of
+  the record's current lifecycle state, terminal states included. A PATCH
+  that never touches `state` at all (editing `description`, say) is
+  completely unaffected by this gate either way, on-hold or not —
+  deliberately: being on hold only ever blocks *advancing the lifecycle*,
+  never any other field.
+- **The write semantics** (same function, in the `change_request` `UPDATE`'s
+  own field-by-field block): `OnHold: true` sets `is_on_hold = true` and
+  always refreshes `on_hold_started_on = NOW()` — even on a change request
+  already on hold, a resent `{onHold: true}` is treated as a fresh hold
+  event — and sets `on_hold_reason` to `OnHoldReason` if provided in the same
+  request, else clears it to `NULL` (a fresh hold event does not inherit a
+  stale reason text from whatever hold period preceded it). `OnHold: false`
+  always clears both `on_hold_reason` and `on_hold_started_on` to `NULL`
+  regardless of whether `OnHoldReason` also accompanies the same request —
+  taking a record off hold wins over setting a reason in the same call.
+  `OnHoldReason` sent alone (`OnHold` omitted) only updates the reason text,
+  letting a caller correct or add a reason on an existing hold without
+  resending `OnHold` itself; it has no effect on `is_on_hold`/
+  `on_hold_started_on` and is not validated against the record's current
+  on-hold status (a reason sent while not on hold is written but harmless —
+  not cross-validated, matching this PATCH's existing "don't over-engineer a
+  rarely-meaningful combination" posture elsewhere in this same field set).
+- **Not done here, deliberately**: no search filter on `isOnHold` and no
+  `AggregateChangeRequests` grouping by it — out of scope for this pass,
+  following the same "accepted, not wired" posture `changeRequestWhereClause`
+  already documents for `assignmentGroupId`. The webapp's own on-hold toggle
+  and a blocked-reason display on the action bar are a deliberate follow-up
+  cycle once this API contract exists, not part of this change.
+
+**`is_customer_approved`/`is_customer_reviewed` are now authorized and
+one-way-locked — the last gap in this schema's four internal approval
+checkpoints plus these two customer-facing fields had no authorization of
+its own at all before this.** `PatchChangeRequestRequest.IsCustomerApproved`/
+`IsCustomerReviewed` (`domain.ChangeRequest.HasCustomerApproved`/
+`HasCustomerReviewed` on the read side) used to be written straight through
+in `patchChangeRequestTx`, unconditionally, from any caller — exactly the
+state `EditChangeRequestDialog.tsx`'s own doc comment describes as the
+reason its edit controls for these two fields were deliberately removed
+("nothing could set them meaningfully" at the time, on the ServiceNow-backed
+data source specifically — see that comment's own, different finding
+below). This closes it on the Postgres write path, by explicit product
+decision:
+
+- **No schema change, no `approval_stage` involvement at all.** These stay
+  the plain booleans they already were (migration 0043); this adds
+  authorization on top of the existing columns, not a new mechanism.
+- **Who may flip a flag `false` → `true`**: either (a) an internal/staff
+  caller — `repository.CallerIdentityFromContext`'s own `Unrestricted`, the
+  exact `INTERNAL` resolution `AccessService.ResolveScope`/
+  `recompute_user_type` already use everywhere else in this service (see
+  "Token validation and caller-scoped access" above) — reused here rather
+  than re-derived, or (b) a caller who resolves, by the `x-user-id-token`
+  email claim (`actorEmail`, already threaded into `patchChangeRequestTx` as
+  a parameter — no new identity-plumbing mechanism needed), to a
+  `project_contact` row on THIS change request's OWN project
+  (`work_item.project_id`, via `change_request`'s shared-PK join), in state
+  `REGISTERED`, holding the `PORTAL_USER` project role via
+  `project_contact` → `project_contact_group` → `project_group_role` →
+  `project_role` — the identical join chain
+  `CaseRepository.ProjectContactEmailsByRole`/`ProjectContactRepository`'s
+  own `projectContactColumns` already use for "is this person a registered
+  contact with role X on project Y", reused verbatim
+  (`callerMayGrantChangeRequestCustomerFlag`, `change_request_repo.go`)
+  rather than inventing a second way to ask the same question.
+- **Once a flag is `true`, it is permanently locked — confirmed via live
+  ServiceNow inspection, not guessed.** The real change-request form renders
+  both checkboxes read-only — un-clickable — the instant either is checked
+  (confirmed by direct DOM inspection AND a physical click-test showing
+  neither toggles back off), and no sampled record's own history ever shows
+  a reversal either. A `true` → `false` attempt is therefore always
+  rejected (`ValidationError`, naming the field), for either flag,
+  regardless of who is asking — there is no override path in this cycle,
+  internal caller or not.
+- **`false` → `false` and `true` → `true` are no-ops** and always succeed
+  trivially, with no authorization check at all — a write that changes
+  nothing needs no permission to not-change it. Each field is evaluated
+  independently against its OWN current value: a single PATCH setting both
+  flags, with one already locked `true` (a no-op) and the other genuinely
+  flipping `false` → `true` (authorization-gated), succeeds as a whole —
+  one field's lock state has no bearing on the other's.
+- **A caller who is neither internal nor a qualifying contact gets a
+  `ForbiddenError`, not a `ValidationError`** — an authorization-shaped
+  rejection, matching how `apierror.ForbiddenError` is already used
+  elsewhere in this codebase for exactly that distinction
+  (`AccessService.ResolveScope`'s own "no access for this user";
+  `TimeCardRepository.TransitionTimeCardState`'s "only an eligible approver
+  ... may approve or reject this time card") — `ValidationError` stays
+  reserved for a problem with the request's own data, not with who sent it.
+- **A project with no qualifying contact simply means no external caller
+  can ever flip a flag on a change request linked to it** — accepted, by
+  design: this has **no relationship whatsoever** to
+  `legalChangeRequestNextStates`/`changeRequestForwardNextStates`, and must
+  never gate or block that change request's own lifecycle in any way;
+  nothing in this feature touches `change_request.state`, and nothing that
+  does consults it.
+- **This is a deliberate simplification of real ServiceNow's OWN behavior
+  for these two fields, not an oversight** — `EditChangeRequestDialog.tsx`'s
+  own doc comment (traced end to end: webapp → BFF → this service →
+  Ballerina → the SN scripted API's dedicated `patchCustomerApproved`/
+  `patchCustomerReviewed` handlers) found that on the ServiceNow-backed data
+  source, flipping either field is gated on the change request already
+  sitting in the matching "Customer Approval"/"Customer Review" state, AND
+  the "off" direction there is actively destructive — it drives a real
+  state transition (`isCustomerApproved: false` → Cancelled;
+  `isCustomerReviewed: false` → Rollback, a terminal dead end), not a plain
+  boolean edit. That is real, confirmed behavior for the ServiceNow data
+  source specifically (`sn_change_request_service.go`'s own PATCH path,
+  untouched by this change) — this feature is scoped to the Postgres write
+  path (`change_request_repo.go`) only, where product has explicitly
+  decided these stay plain, locked booleans with no state-machine
+  involvement, by the design above. The two data sources are intentionally
+  not symmetric here.
+- **Tests** (`change_request_repo_integration_test.go`,
+  `TestChangeRequestIntegration_PatchCustomerFlag*`): an internal caller
+  setting both flags `true` together; a REGISTERED `PORTAL_USER` contact on
+  the matching project approving; the identical contact registered on a
+  DIFFERENT project being refused; a REGISTERED contact holding no
+  `PORTAL_USER` role anywhere on the project (a literal "no qualifying
+  contact" project) being refused AND a separate `{state: "canceled"}` PATCH
+  on the very same record still succeeding right afterward; an `INVITED`
+  (not yet `REGISTERED`) `PORTAL_USER` contact being refused; both internal
+  and a qualifying contact being refused when attempting to revert an
+  already-`true` flag; an already-`false` flag staying a no-op success even
+  for a non-qualifying caller; and one field already locked `true` not
+  blocking the other's legitimate `false` → `true` flip in the same PATCH.
+  **One environment quirk surfaced while writing these, confirmed live, not
+  guessed**: the local docker-compose stack's own `CHANGE_REQUEST_TEST_DSN`
+  connects as the `postgres` role, a real Postgres superuser — superusers
+  unconditionally bypass every RLS policy regardless of
+  `FORCE ROW LEVEL SECURITY` (a Postgres behavior, not a bug in migration
+  0147's own `work_item` policies) — so the "different project"/"invited
+  contact" tests are rejected by THIS feature's own `ForbiddenError` check
+  in this environment rather than by `work_item`'s RLS returning a
+  `NotFoundError` one layer earlier, as a non-superuser deployment role
+  would instead produce for the identical scenario. Either way the caller
+  cannot flip the flag; the tests' own doc comments spell this out rather
+  than silently asserting the wrong error type.
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s
 
