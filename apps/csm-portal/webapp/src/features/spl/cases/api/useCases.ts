@@ -68,11 +68,27 @@ interface EntitySearchCaseView {
   subject: string | null;
   description: string | null;
   state: string | null;
+  // Free-form display string from the backend, e.g. "Critical (P1)", "Low
+  // (P4)" -- already in the exact label shape the UI's own PRIORITY_COLOR
+  // lookup expects (CaseDetailPage.tsx), on both the search and GET views
+  // (BeCaseSearchView/BeCaseView in src/api/backend/types.ts), so this needs
+  // no reformatting.
+  severity: string | null;
   product: EntityRef | null;
   project: EntityRef | null;
   projectKey: string | null;
   assignedEngineer: EntityUserRef | null;
+  // The case creator. `id` is always null here by design (the data source
+  // doesn't resolve the reporter to a user record on either view) -- `name`/
+  // `email` are always populated.
+  createdBy: EntityUserRef | null;
   account: EntityRef | null;
+  // Nullable: ServiceNow-sourced cases may have no deployment. Only
+  // {id, name} are ever populated on this join -- the deployment's own
+  // `type` lives on a separate entity, reachable only via POST
+  // /deployments/search (no ids filter) rather than this response, so it
+  // isn't mapped below.
+  deployment: EntityRef | null;
 }
 interface EntitySearchCasesResponse {
   cases: EntitySearchCaseView[];
@@ -86,12 +102,12 @@ function toCaseDetails(v: EntitySearchCaseView): CaseDetails {
     caseId: v.internalId,
     number: v.number,
     caseType: "case",
-    priority: "",
+    priority: v.severity ?? "",
     shortDescription: v.subject ?? "",
     description: v.description ?? "",
     state: caseStateToDisplay[state] ?? state,
     openedAt: v.createdOn,
-    openedBy: "",
+    openedBy: v.createdBy?.name ?? v.createdBy?.email ?? "",
     assignedTo: v.assignedEngineer?.name ?? "",
     accountNumber: "",
     accountName: v.account?.name ?? "",
@@ -100,9 +116,22 @@ function toCaseDetails(v: EntitySearchCaseView): CaseDetails {
     projectKey: v.projectKey ?? "",
     projectId: v.project?.id,
     productName: v.product?.name ?? "",
+    // Neither field is available: there is no case-level "last WSO2/customer
+    // comment" timestamp, and it can't be derived from the comments list
+    // either -- a case comment's author carries no customer-vs-engineer
+    // signal today (CS-Portal's own native mapper has the identical gap and
+    // hardcodes every comment author to 'wso2_engineer' rather than guess --
+    // see mappers.ts's uiCommentFromBe, whose own doc comment says so
+    // explicitly). Needs new backend work (attaching user type to a
+    // comment's createdBy, or an equivalent lookup), not a frontend
+    // wire-through.
     lastWSO2CommentTime: "",
     lastCustomerCommentTime: "",
-    projectDeploymentName: "",
+    projectDeploymentName: v.deployment?.name ?? "",
+    // Not available on this response -- the deployment's own `type` lives on
+    // a separate entity, reachable only via POST /deployments/search (no ids
+    // filter) rather than this one, so showing it here would mean an extra
+    // network round trip per case. Deliberately left out of this fix.
     projectDeploymentType: "",
   };
 }
