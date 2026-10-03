@@ -78,7 +78,10 @@ func phaseWord(kind string) string {
 // discarding. That matters more here than elsewhere: sweeping marks decisions
 // as sent, so running it with nowhere to deliver would consume notices nobody
 // ever receives.
-func SendNotices(sweeper Sweeper, email EmailSender, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+//
+// portalBaseURL is CSM_PORTAL_WEB_BASE_URL; each email links to the outage's
+// portal page under it, or carries no link when it is empty.
+func SendNotices(sweeper Sweeper, email EmailSender, to, cc []string, emailsEnabled bool, portalBaseURL string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
@@ -95,6 +98,7 @@ func SendNotices(sweeper Sweeper, email EmailSender, to, cc []string, emailsEnab
 				PhaseWord: phaseWord(d.Kind),
 				Number:    d.Number,
 				Message:   d.Body,
+				Link:      notify.OutageLink(portalBaseURL, d.OutageID),
 			})
 			if err := email.SendEmail(ctx, to, cc, d.Subject, body); err != nil {
 				failures = append(failures, fmt.Errorf("outage %s (%s): %w", d.Number, d.Kind, err))

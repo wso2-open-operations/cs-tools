@@ -40,11 +40,11 @@ const (
 	// port is a port; swapping it is a one-line change.
 	outageCommSubjectPrefix = "Choreo Outage"
 
-	// ServiceNow signs both emails "[Team Name]" — a template placeholder
-	// that was never filled in and ships with the square brackets.
-	//
-	// QUESTION FOR STAKEHOLDERS: what should the sign-off say?
-	outageCommSignOff = "[Team Name]"
+	// ServiceNow signs both emails "[Team Name]", a template placeholder that
+	// was never filled in and ships with the square brackets. The audience is
+	// the SRE team and the sign-off is theirs, so the port says so; decided
+	// 2026-10-03 rather than carried over.
+	outageCommSignOff = "SRE"
 )
 
 // decideOutageCommunication reproduces the two arms of ServiceNow's

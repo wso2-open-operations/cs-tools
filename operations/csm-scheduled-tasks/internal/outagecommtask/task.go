@@ -26,6 +26,7 @@ import (
 	"html"
 	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/outagecomm"
 )
 
@@ -62,7 +63,9 @@ type EmailSender interface {
 // That matters more here than for a report: sweeping writes log rows, so
 // running it with nowhere to deliver would consume announcements nobody ever
 // receives and leave those outages permanently marked as declared.
-func SendCommunications(sweeper Sweeper, email EmailSender, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+//
+// portalBaseURL is CSM_PORTAL_WEB_BASE_URL; see renderBody.
+func SendCommunications(sweeper Sweeper, email EmailSender, to, cc []string, emailsEnabled bool, portalBaseURL string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
@@ -75,7 +78,7 @@ func SendCommunications(sweeper Sweeper, email EmailSender, to, cc []string, ema
 
 		var failures []error
 		for _, d := range res.Decisions {
-			if err := email.SendEmail(ctx, to, cc, d.Subject, renderBody(d)); err != nil {
+			if err := email.SendEmail(ctx, to, cc, d.Subject, renderBody(d, notify.OutageLink(portalBaseURL, d.OutageID))); err != nil {
 				failures = append(failures, fmt.Errorf("outage %s (%s): %w", d.Number, d.Kind, err))
 			}
 		}
@@ -95,10 +98,15 @@ func SendCommunications(sweeper Sweeper, email EmailSender, to, cc []string, ema
 // Deliberately not a shared template: unlike the internal notifier, whose
 // three bodies are one fixed sentence apiece, these two are full messages
 // rendered upstream. The presentation decision belongs where the content is.
-func renderBody(d outagecomm.Decision) string {
+//
+// link, when set, adds a "View outage" line after the body. ServiceNow's email
+// has none; the link is a deliberate addition so a reader can get from the
+// announcement to the outage in one click.
+func renderBody(d outagecomm.Decision, link string) string {
 	escaped := html.EscapeString(d.Body)
 	withBreaks := strings.ReplaceAll(escaped, "\n", "<br>\n")
 	return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.6;color:#17191e">` +
 		withBreaks +
+		notify.OutageLinkHTML(link) +
 		`</div>`
 }

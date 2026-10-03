@@ -41,8 +41,10 @@ import (
 // instead, and they are the only places this can silently diverge:
 //
 //   - status: derived from end_on, never stored (domain.OutageStatus says so)
-//   - duration: derived from begin/end rather than read, since the mirrored
-//     duration column is only populated for rows csm-sync brought over
+//   - duration: derived from begin/end rather than read, since rows written
+//     before Create/Update kept the column in step may still hold NULL. The
+//     column itself is now written on create and on every begin/end change,
+//     as ServiceNow's "Outage Calculations" rule does, for readers that use it
 //   - publishesToStatusPage / statusPageCloud: resolved from whether the
 //     outage's service offering has a cloud_monitor row, which is the same
 //     join the cloud status sweep uses to decide which dashboard to tell
@@ -294,12 +296,17 @@ func insertOutage(ctx context.Context, tx pgx.Tx, in OutageWrite) (string, error
 INSERT INTO outage (id, number, type, start_on, end_on, name,
                     service_offering_id, work_item_id,
                     external_outage_communications, internal_outage_communications,
-                    notify_internal_stakeholders,
+                    notify_internal_stakeholders, duration,
                     created_on, created_by, updated_on, updated_by)
 VALUES (gen_random_uuid(),
         'OUT' || LPAD(nextval('outage_number_seq')::text, 7, '0'),
         $1::outage_type_enum, $2, $3, $4,
         $5::uuid, $6::uuid, $7, $8, FALSE,
+        -- ServiceNow's "Outage Calculations" business rule: duration is
+        -- end - begin, and NULL while either is missing. Readers such as the
+        -- outage-communication email take it from this column, so an outage
+        -- created here must carry it like a synced one does.
+        $3::timestamptz - $2::timestamptz,
         NOW(), $9, NOW(), $9)
 RETURNING id::text`
 
@@ -483,8 +490,13 @@ func (r *outageRepo) Update(ctx context.Context, patch OutagePatch) (domain.Outa
 	if patch.Type != nil {
 		set("type = $%d::outage_type_enum", strings.ToUpper(*patch.Type))
 	}
+	// beginExpr/endExpr are the values start_on/end_on will hold AFTER this
+	// update. In an UPDATE's SET list a column name reads the OLD value, so
+	// recomputing duration from the columns would use the pre-patch times.
+	beginExpr, endExpr := "start_on", "end_on"
 	if patch.Begin != nil {
 		set("start_on = $%d", *patch.Begin)
+		beginExpr = fmt.Sprintf("$%d::timestamptz", len(args))
 	}
 	// End is pointer-to-pointer on purpose: omitted leaves it alone, explicit
 	// null REOPENS the outage, a value closes it. Collapsing those two is how
@@ -492,9 +504,18 @@ func (r *outageRepo) Update(ctx context.Context, patch OutagePatch) (domain.Outa
 	if patch.End != nil {
 		if *patch.End == nil {
 			sets = append(sets, "end_on = NULL")
+			endExpr = "NULL::timestamptz"
 		} else {
 			set("end_on = $%d", **patch.End)
+			endExpr = fmt.Sprintf("$%d::timestamptz", len(args))
 		}
+	}
+	// ServiceNow's "Outage Calculations" rule (before insert/update): duration
+	// = end - begin, NULL if either is missing. Without it an outage closed
+	// here keeps a NULL duration and the resolution email prints a blank
+	// "Outage Duration:".
+	if patch.Begin != nil || patch.End != nil {
+		sets = append(sets, fmt.Sprintf("duration = %s - %s", endExpr, beginExpr))
 	}
 	if patch.ShortDescription != nil {
 		set("name = $%d", *patch.ShortDescription)

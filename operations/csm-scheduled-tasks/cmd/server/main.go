@@ -261,6 +261,21 @@ func main() {
 	alertRecipients := splitComma(os.Getenv("ALERT_RECIPIENTS"))
 	emailBaseURL := os.Getenv("EMAIL_BASE_URL")
 
+	// The CSM portal's web origin, e.g. https://csm-stg.apps.wso2.com -- the
+	// same variable csm-notification-service builds its case links from. Both
+	// outage emails link to /operations/outages/{id} under it. Optional: unset
+	// sends them without the link, which is worth a warning but not an exit,
+	// since the email is still correct without it. A set but non-https value,
+	// or one carrying a query or fragment, is a misconfiguration and stops
+	// startup like EMAIL_BASE_URL does.
+	csmPortalWebBaseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("CSM_PORTAL_WEB_BASE_URL")), "/")
+	if csmPortalWebBaseURL == "" {
+		slog.Warn("CSM_PORTAL_WEB_BASE_URL is not set; outage emails will carry no link to the outage")
+	} else if err := notify.CheckPortalBaseURL(csmPortalWebBaseURL); err != nil {
+		slog.Error("CSM_PORTAL_WEB_BASE_URL is invalid", "err", err)
+		os.Exit(1)
+	}
+
 	// Email itself is not required for every deployment — EMAIL_BASE_URL is
 	// read with os.Getenv, not mustEnv, matching
 	// integrations/csm-notification-service's own
@@ -394,7 +409,7 @@ func main() {
 			Name:     outageNotifyTaskName,
 			Schedule: scheduleFor(scheduleOverrides, outageNotifyTaskName, "*/5 * * * *"),
 			Handler: outagenotifytask.SendNotices(
-				outageNotifyClient, emailClient, outageNotifyTo, outageNotifyCc, alertsEnabled,
+				outageNotifyClient, emailClient, outageNotifyTo, outageNotifyCc, alertsEnabled, csmPortalWebBaseURL,
 			),
 			To: outageNotifyTo,
 			Cc: outageNotifyCc,
@@ -417,7 +432,7 @@ func main() {
 			Name:     outageCommTaskName,
 			Schedule: scheduleFor(scheduleOverrides, outageCommTaskName, "*/5 * * * *"),
 			Handler: outagecommtask.SendCommunications(
-				outageCommClient, emailClient, outageCommTo, outageCommCc, alertsEnabled,
+				outageCommClient, emailClient, outageCommTo, outageCommCc, alertsEnabled, csmPortalWebBaseURL,
 			),
 			To: outageCommTo,
 			Cc: outageCommCc,

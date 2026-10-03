@@ -210,7 +210,7 @@ func TestRenderOutageCommunication_MatchesTheOriginalWording(t *testing.T) {
 		"Start Time: 2026-09-30T08:00:00Z",
 		"Current Status: In Progress",
 		"Next Steps:",
-		"[Team Name]", // the unfilled placeholder, shipping today
+		"Best regards,\nSRE\n", // replaces ServiceNow's unfilled "[Team Name]"
 	} {
 		if !strings.Contains(decl.Body, frag) {
 			t.Errorf("declaration body missing %q\n---\n%s", frag, decl.Body)
@@ -227,7 +227,7 @@ func TestRenderOutageCommunication_MatchesTheOriginalWording(t *testing.T) {
 		"Outage Duration: 2h",
 		"End Time: 2026-09-30T10:00:00Z",
 		"Root Cause Analysis (RCA)", // a promise no active flow keeps
-		"[Team Name]",
+		"Best regards,\nSRE\n",
 	} {
 		if !strings.Contains(res.Body, frag) {
 			t.Errorf("resolution body missing %q\n---\n%s", frag, res.Body)

@@ -54,18 +54,11 @@ type OutageForCommunication struct {
 
 	ShortDescription string `json:"shortDescription,omitempty"`
 
-	// *** Impact AND State ARE NEVER POPULATED. *** ServiceNow's email body
-	// prints "Impact:" and "Current Status:" from cmdb_ci_outage's impact
-	// and state, and NEITHER is mirrored onto the Postgres `outage` table --
-	// verified against the live schema, not assumed. They stay on the struct
-	// because the rendered email has those lines and dropping them would
-	// change the message shape; they render blank until digiops-cs maps
-	// them.
-	//
-	// Do not "fix" this by sourcing them from a nearby column. An earlier
-	// revision filled Impact from `message`, which is the outage's own
-	// message -- a plausible-looking wrong value in every email, and harder
-	// to notice than a blank.
+	// Impact and State are outage.impact and outage.state, mirrored from
+	// cmdb_ci_outage's impact and state -- the "Impact:" and "Current
+	// Status:" lines of ServiceNow's email. Blank when ServiceNow left them
+	// blank. Do not source them from a nearby column: an earlier revision
+	// filled Impact from `message`, a plausible-looking wrong value.
 	Impact  string     `json:"impact,omitempty"`
 	State   string     `json:"state,omitempty"`
 	StartOn *time.Time `json:"startOn,omitempty"`

@@ -78,6 +78,7 @@ func TestLiveSend(t *testing.T) {
 		[]string{liveTestRecipient}, // to  -- one address, nobody else
 		nil,                         // cc  -- deliberately empty
 		true,                        // ALERTS_ENABLED
+		os.Getenv("CSM_PORTAL_WEB_BASE_URL"),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
