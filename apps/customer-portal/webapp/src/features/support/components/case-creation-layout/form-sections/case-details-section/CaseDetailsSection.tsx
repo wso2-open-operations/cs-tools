@@ -130,6 +130,20 @@ export function CaseDetailsSection({
     color: getSeverityLegendColor(level.label),
     label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
   }));
+  // Unrestricted, for looking up the currently-selected severity's own label
+  // and color. severityLevels above is deliberately narrowed by
+  // excludeS0/isSeverityDisabled for the *editable* dropdown's own options,
+  // but `severity` can hold an id that restriction excludes (e.g. an
+  // AI-classified severity set before this restriction resolves, or before
+  // it's known at all) -- looking it up in the narrowed list would fail and
+  // silently misreport what's actually selected.
+  const allSeverityLevels = [...baseSeverityLevels, ...(extraSeverityLevels ?? [])].map(
+    (level) => ({
+      ...level,
+      color: getSeverityLegendColor(level.label),
+      label: SEVERITY_LABEL_MAP[level.label] ?? level.label,
+    }),
+  );
 
   const issueTypeLabels = issueTypes
     .map((type: unknown) =>
@@ -484,7 +498,7 @@ export function CaseDetailsSection({
               </Box>
               {isSeverityDisabled ? (
                 (() => {
-                  const selectedLevel = severityLevels.find(
+                  const selectedLevel = allSeverityLevels.find(
                     (level) => level.id === severity,
                   );
                   return (
@@ -507,12 +521,12 @@ export function CaseDetailsSection({
                           width: 10,
                           height: 10,
                           borderRadius: "50%",
-                          bgcolor: selectedLevel?.color ?? getSeverityLegendColor(CaseSeverityLevel.S4),
+                          bgcolor: selectedLevel?.color ?? getSeverityLegendColor(),
                           flexShrink: 0,
                         }}
                       />
                       <Typography variant="body2" color="text.primary">
-                        {selectedLevel?.label ?? CaseSeverityLevel.S4}
+                        {selectedLevel?.label ?? "—"}
                       </Typography>
                     </Box>
                   );

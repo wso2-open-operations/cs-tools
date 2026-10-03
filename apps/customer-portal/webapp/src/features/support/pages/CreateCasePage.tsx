@@ -161,7 +161,7 @@ export default function CreateCasePage(): JSX.Element {
       ? getProjectSeverityPolicy(projectDetails.type?.label, {
           projectFeatures,
         })
-      : { excludeS0: true, restrictSeverityToLow: true };
+      : { excludeS0: false, restrictSeverityToLow: false };
   const { excludeS0, restrictSeverityToLow: forceSeverityS4 } = severityPolicy;
   const { data: filters, isLoading: isFiltersLoading } = useGetProjectFilters(
     projectId || "",
