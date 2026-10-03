@@ -555,6 +555,11 @@ const outageCommentsSQL = `
            COALESCE(to_char(oc.created_on AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')
       FROM outage_communication oc
      WHERE oc.outage_id = $1::uuid
+       -- *** EXTERNAL ONLY. *** The table also holds the outage API's
+       -- internal and additional communications (migration 0184). This
+       -- endpoint feeds the public status page, so anything else here would
+       -- publish internal notes to customers.
+       AND oc.channel = 'external'
      ORDER BY oc.created_on DESC, oc.id
 `
 

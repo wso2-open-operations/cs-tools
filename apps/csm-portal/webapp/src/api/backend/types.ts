@@ -4546,6 +4546,9 @@ export interface BeSearchOutagesResponse {
 export interface BeAddOutageCommunicationPayload {
   channel: BeOutageCommunicationChannel;
   body: string;
+  /** Required by the backend (409 otherwise) only for an external entry on an
+   *  outage that publishes to the status page; omit it everywhere else. */
+  acknowledgePublicPublication?: boolean;
 }
 
 /** A single communication journal entry. `isPublic` is true only for the
