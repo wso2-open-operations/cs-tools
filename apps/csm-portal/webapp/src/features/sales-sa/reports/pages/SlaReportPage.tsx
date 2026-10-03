@@ -41,7 +41,7 @@ import {
   Typography,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
-import { reportPaperTheme } from "@features/spl/reports/reportPaperTheme";
+import { reportPaperTheme } from "@features/sales-sa/reports/reportPaperTheme";
 import DownloadIcon from "@mui/icons-material/Download";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
@@ -51,11 +51,11 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useParams } from "react-router";
 import { BackendApiError } from "@api/backend/client";
-import { useGetSlaReport } from "@features/spl/reports/api/useGetSlaReport";
-import DividedCell from "@features/spl/reports/components/DividedCell";
-import type { CaseDataList, SLAReportResponse } from "@features/spl/reports/api/reportTypes";
+import { useGetSlaReport } from "@features/sales-sa/reports/api/useGetSlaReport";
+import DividedCell from "@features/sales-sa/reports/components/DividedCell";
+import type { CaseDataList, SLAReportResponse } from "@features/sales-sa/reports/api/reportTypes";
 import { sysidToUuid } from "@features/csm-cases/utils/inlineImages";
-import "@features/spl/reports/styles/SLAReport.css";
+import "@features/sales-sa/reports/styles/SLAReport.css";
 
 // Hoisted out of the page component — this codebase's lint config
 // (react-hooks/static-components, for React Compiler compatibility) forbids
@@ -349,7 +349,7 @@ export default function SlaReportPage(): JSX.Element {
 
   const handleRowClick = (rowData: CaseDataList) => {
     // This report's case rows are still ServiceNow-sourced (see
-    // postgresSplReportsClient's own doc comment on the backend -- report
+    // postgresReportsClient's own doc comment on the backend -- report
     // case data isn't part of the accounts/projects/cases entity-service
     // merge), so caseSysId is a bare ServiceNow sysid, not entity-service's
     // own dashed UUID -- sysidToUuid converts it to what SPL's own

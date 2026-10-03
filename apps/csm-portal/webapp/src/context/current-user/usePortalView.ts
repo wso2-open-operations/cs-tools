@@ -56,7 +56,7 @@ export type PortalView = "cs-abt" | "sales-sa";
  *
  * This governs the *default landing nav only* — it is not a hard audience
  * block. See `useAccess.ts` and `internal/handler/access.go`'s
- * `PermSPLAccess` for the actual SPL audience gate: it grants access on
+ * `PermViewerAccess` for the actual SPL audience gate: it grants access on
  * "viewer" alone, unconditionally, with no cs_engineer exclusion, so a CS
  * engineer who also holds viewer still lands on "cs-abt" here but isn't
  * blocked from an SPL screen reached directly. There's no in-app nav

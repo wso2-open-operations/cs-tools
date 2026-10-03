@@ -35,7 +35,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { CheckCircleIcon, XCircleIcon, CopyIcon } from "@wso2/oxygen-ui-icons-react";
-import { useScanUser, type ScanResponseItem } from "@features/spl/user-scan/api/useScanUser";
+import { useScanUser, type ScanResponseItem } from "@features/sales-sa/user-scan/api/useScanUser";
 
 function copyToClipboard(value: string) {
   void navigator.clipboard.writeText(value);

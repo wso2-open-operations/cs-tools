@@ -32,7 +32,7 @@ import type {
   ABTTeamMembersDetails,
   EscalationDetails,
 } from "./accountTypes";
-import type { ProjectDetails } from "../../projects/projectTypes";
+import type { ProjectDetails } from "@features/sales-sa/projects/projectTypes";
 
 // --- entity-service response shapes (this app's own copy of the JSON
 // contract entity-service returns raw through CS Portal's /accounts and

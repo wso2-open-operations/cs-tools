@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
-import type { ABTTeamScheduleData } from "@features/spl/schedule/scheduleTypes";
+import type { ABTTeamScheduleData } from "@features/sales-sa/schedule/scheduleTypes";
 
 export interface TeamScheduleParams {
   teamId: string;

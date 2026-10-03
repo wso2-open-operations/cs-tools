@@ -14,16 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Routed at both /spl/projects/:projectId and
-// /spl/accounts/:accountId/projects/:projectId (same two entry points the
-// source app has) — only `projectId` is ever read; ProjectDetailView
-// resolves the account context itself from the project record.
-import DOMPurify from "dompurify";
-import { useParams } from "react-router";
-import ProjectDetailView from "@features/spl/projects/components/ProjectDetailView";
+import { Typography } from "@wso2/oxygen-ui";
+import ProjectsTable from "@features/sales-sa/projects/components/ProjectsTable";
 
-export default function ProjectDetailPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const id = projectId ? DOMPurify.sanitize(projectId) : "";
-  return <ProjectDetailView id={id} />;
+export default function ProjectsPage() {
+  return (
+    <>
+      <Typography variant="h5" sx={{ mb: 2 }}>
+        Projects
+      </Typography>
+      <ProjectsTable />
+    </>
+  );
 }
