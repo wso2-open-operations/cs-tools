@@ -210,6 +210,73 @@ func TestSNIncidentService_UpdateIncident_ResolutionCodePassedThrough(t *testing
 	}
 }
 
+// TestSNIncidentService_UpdateIncident_WrapsWorkNotesInCodeBlock pins the fix
+// for incident work notes/comments showing up as literal, unrendered HTML
+// tags in CSM: ServiceNow HTML-escapes a work_notes/additionalComments
+// journal field unless the value is wrapped in "[code]"/"[/code]" -- see
+// sn_code_block.go.
+func TestSNIncidentService_UpdateIncident_WrapsWorkNotesInCodeBlock(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Incident updated successfully.",
+			"incident": {"id": "` + testIncidentSysid + `", "number": "INC0001", "createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com"}
+		}`))
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	workNotes := "Duplicate alert received.<br>Source: Grafana"
+	_, err := svc.UpdateIncident(contextWithUserIDToken("token"), domain.UpdateIncidentRequest{
+		ID:        testIncidentUUID,
+		WorkNotes: &workNotes,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "[code]Duplicate alert received.<br>Source: Grafana[/code]"
+	if got, _ := gotBody["workNotes"].(string); got != want {
+		t.Fatalf("workNotes: got %q, want %q", got, want)
+	}
+}
+
+// TestSNIncidentService_GetIncidentByID_TrimsCodeBlockFromWorkNotes is
+// UpdateIncident's counterpart: ServiceNow echoes the "[code]"/"[/code]"
+// wrapper back verbatim, so it must be stripped before the content reaches
+// the portal, or it would show up literally in the UI.
+func TestSNIncidentService_GetIncidentByID_TrimsCodeBlockFromWorkNotes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "` + testIncidentSysid + `", "number": "INC0001",
+			"workNotes": "[code]Duplicate alert received.<br>Source: Grafana[/code]",
+			"additionalComments": "[code]<p>hello</p>[/code]"}`))
+	})
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowIncidentService(client, nil)
+
+	view, err := svc.GetIncidentByID(contextWithUserIDToken("token"), testIncidentUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantWorkNotes := "Duplicate alert received.<br>Source: Grafana"
+	if view.WorkNotes == nil || *view.WorkNotes != wantWorkNotes {
+		t.Errorf("WorkNotes = %v, want %q", view.WorkNotes, wantWorkNotes)
+	}
+	wantComments := "<p>hello</p>"
+	if view.AdditionalComments == nil || *view.AdditionalComments != wantComments {
+		t.Errorf("AdditionalComments = %v, want %q", view.AdditionalComments, wantComments)
+	}
+}
+
 // TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid verifies a resolution code
 // outside the closed enum is rejected with a clean validation error before any SN call.
 func TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid(t *testing.T) {

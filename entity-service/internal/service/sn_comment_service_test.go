@@ -18,7 +18,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 
@@ -95,6 +97,73 @@ func TestCreateCommentReferenceTypes(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestCreateComment_WrapsContentInCodeBlock pins the fix for incident/comment
+// work notes showing up as literal, unrendered HTML tags in CSM: ServiceNow
+// HTML-escapes anything written to a work_notes/comments journal field unless
+// it is wrapped in "[code]"/"[/code]" -- see sn_code_block.go.
+func TestCreateComment_WrapsContentInCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	var gotBody []byte
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"created","comment":{"id":"abc","createdOn":"2026-08-01 10:00:00","createdBy":"jane.doe@example.com"}}`))
+	}))
+	svc := NewServiceNowCommentService(client)
+
+	_, err := svc.CreateComment(context.Background(), domain.CreateCommentRequest{
+		ReferenceID:   "00000000-0000-0000-0000-000000000000",
+		ReferenceType: domain.ReferenceTypeIncident,
+		Type:          domain.CommentTypeComment,
+		Content:       "Duplicate alert received.<br>Source: Grafana",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sent struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(gotBody, &sent); err != nil {
+		t.Fatalf("unmarshal posted body: %v", err)
+	}
+	want := "[code]Duplicate alert received.<br>Source: Grafana[/code]"
+	if sent.Content != want {
+		t.Errorf("got content %q, want %q", sent.Content, want)
+	}
+}
+
+// TestSearchComments_TrimsCodeBlockFromContent is SearchComments' counterpart
+// to TestCreateComment_WrapsContentInCodeBlock: ServiceNow echoes the
+// "[code]"/"[/code]" wrapper back verbatim, so it must be stripped before the
+// content reaches the portal, or it would show up literally in the UI.
+func TestSearchComments_TrimsCodeBlockFromContent(t *testing.T) {
+	t.Parallel()
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"comments":[{"id":"abc","referenceId":"def","content":"[code]Duplicate alert received.<br>Source: Grafana[/code]","type":"work_notes","createdOn":"2026-08-01 10:00:00","createdBy":"jane.doe@example.com"}],"offset":0,"limit":50,"totalRecords":1}`))
+	}))
+	svc := NewServiceNowCommentService(client)
+
+	resp, err := svc.SearchComments(context.Background(), domain.SearchCommentsRequest{
+		ReferenceID:   testUUID,
+		ReferenceType: domain.ReferenceTypeIncident,
+		Pagination:    domain.Pagination{Limit: 50},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Comments) != 1 {
+		t.Fatalf("got %d comments, want 1", len(resp.Comments))
+	}
+	want := "Duplicate alert received.<br>Source: Grafana"
+	if got := resp.Comments[0].Content; got != want {
+		t.Errorf("got content %q, want %q", got, want)
+	}
 }
 
 // TestSNCommentSearchService_EditDeleteUnsupported covers the ServiceNow data

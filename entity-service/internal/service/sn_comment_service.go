@@ -90,8 +90,10 @@ func (s *snCommentSearchService) SearchComments(ctx context.Context, req domain.
 		comments = append(comments, domain.Comment{
 			ID:          sysidToUUID(c.ID),
 			ReferenceID: sysidToUUID(c.ReferenceID),
-			Content:     c.Content,
-			Type:        commentType,
+			// Strips the [code]/[/code] wrapper CreateComment adds on write --
+			// see sn_code_block.go.
+			Content: *trimCodeBlock(&c.Content),
+			Type:    commentType,
 			CreatedOn:   createdAt,
 			CreatedBy:   snUserReference(c.CreatedByUser, c.CreatedBy, c.CreatedByFullName),
 		})
@@ -145,8 +147,10 @@ func (s *snCommentSearchService) CreateComment(ctx context.Context, req domain.C
 		ReferenceID:   uuidToSysid(req.ReferenceID),
 		ReferenceType: string(req.ReferenceType),
 		Type:          snType,
-		Content:       req.Content,
-		CreatedBy:     req.CreatedBy,
+		// Wrapped in [code]/[/code] so ServiceNow renders this HTML-sourced
+		// content instead of showing the tags literally -- see sn_code_block.go.
+		Content:   *wrapCodeBlock(&req.Content),
+		CreatedBy: req.CreatedBy,
 	}
 
 	raw, err := s.client.Post(ctx, "/comments", token, payload)
