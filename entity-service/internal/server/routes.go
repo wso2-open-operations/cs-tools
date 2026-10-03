@@ -213,6 +213,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// only in Postgres, so its routes are registered only when a pool is
 	// configured.
 	var scheduleHandler *handler.ScheduleHandler
+	var teamMemberHandler *handler.TeamMemberHandler
 
 	accountRepo := repository.NewAccountRepository(repository.NewScoped(db))
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
@@ -764,6 +765,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		scheduleHandler = handler.NewScheduleHandler(
 			service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc),
 		)
+		// Postgres-only, and internal-staff-only like every other read in this
+		// module: it returns staff names, addresses and rank.
+		teamMemberHandler = handler.NewTeamMemberHandler(
+			service.NewTeamMemberService(repository.NewTeamMemberRepository(db), accessSvc),
+		)
 	}
 	// activeAttachmentSvc backs the case-attachment routes registered below
 	// (POST/GET/PATCH/DELETE /attachments...) — see caseAttachmentOverrideSvc's
@@ -1153,13 +1159,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var activeCommentSvc service.CommentService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
-		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient)
+		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		// CreateComment mirrors to ServiceNow, asynchronously, after
 		// Postgres -- see commentService's own doc comment. This is separate
 		// from case's own comment mirror (CreateCaseComment/CreateBareCaseComment),
 		// which backs the case-scoped comment routes, not these generic ones.
-		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient)
+		//
+		// The mirror carries eventPublisher rather than nil: it is the only
+		// thing on this path that publishes at all (the Postgres comment
+		// service publishes nothing), so without it an incident comment in
+		// dual-write mode would emit no incident.comment_added, and an
+		// elevation-triggered escalation ladder would lose its only stop
+		// signal. There is no double-publish risk for the same reason.
+		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
 		activeCommentSvc = service.NewCommentServiceWithSNWriteback(commentRepo, userRepo, snWritebackDispatcher, snCommentMirrorSvc)
 	default:
 		activeCommentSvc = service.NewCommentService(commentRepo, userRepo)
@@ -1243,6 +1256,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /team-schedule/assignments/search", scheduleHandler.SearchScheduleAssignments)
 		mux.HandleFunc("POST /team-schedule/absences/search", scheduleHandler.SearchScheduleAbsences)
 		mux.HandleFunc("GET /team-schedule/on-duty", scheduleHandler.GetScheduleOnDuty)
+	}
+	if teamMemberHandler != nil {
+		// Who holds which rank. The call-escalation ladder resolves four of its
+		// five rungs from this, and the fifth by intersecting it with on-duty
+		// above.
+		mux.HandleFunc("GET /team-schedule/members", teamMemberHandler.GetTeamMembers)
+	}
+	if scheduleHandler != nil {
 
 		// Lead edit. Own team only -- the service reads the team from the row
 		// being changed rather than from the request, so naming your own team

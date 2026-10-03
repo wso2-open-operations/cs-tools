@@ -1,8 +1,12 @@
 # Environment
 .env
 
-# Build output
+# Build output -- one entry per cmd/ directory, since `go build ./cmd/<name>`
+# writes a binary of that name here. Only /server used to be listed, so a built
+# escalation-local was committed by accident once (14 MB, in 4ec698081).
 /server
+/escalation-local
+/ladder-harness
 /bin/
 *.exe
 *.exe~

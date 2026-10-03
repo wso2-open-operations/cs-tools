@@ -1,0 +1,223 @@
+# Incident call escalation — the local compose stack's configuration.
+#
+# Every knob here changes how many telephone calls a ladder places, which is
+# why it is a file rather than a set of environment variables: narrowing which
+# incidents escalate, capping a ladder's reach, or switching a deployment to
+# the log channel are all things somebody does between incidents, without
+# waiting for a build.
+#
+# Both ladders are configured here. They share an engine, a Twilio account,
+# and a bill.
+#
+# Point the service at this file with INCIDENT_ESCALATION_CONFIG. With no such
+# variable the service behaves as it did before this file existed: enabled, on
+# INCIDENT_ESCALATION_CHANNEL, with no conditions and no caps.
+
+enabled: true
+
+cre:
+  enabled: true
+
+  # log | chat | call | both
+  #
+  # `log` is the local default on purpose. It runs the whole ladder for real —
+  # the consumer, the resolver, the Redis state, the wake loop, the work note —
+  # and writes a line per rung saying who it would have reached, without a
+  # Twilio account and without posting into a room real colleagues are sitting
+  # in. Switch to `call` or `both` only against numbers you control.
+  channel: log
+
+  trigger:
+    # Which priorities get a ladder at all. Empty means every priority that
+    # has a policy row. The bluntest cost control there is.
+    priorities: []
+
+    # Assignment-group allowlist, and a stronger exclude list that wins over
+    # it. Empty means any team.
+    teams: []
+    excludeTeams: []
+
+    # Restrict to certain shifts, e.g. [LK_MORNING, LK] to leave the Americas
+    # night alone while a policy is being trialled.
+    shifts: []
+
+    # Refuse to start a ladder for an incident whose team cannot be resolved,
+    # rather than guessing. Left on here because guessing means falling
+    # through to the CRE ladder, which is how an SRE incident ends up waking
+    # CRE engineers.
+    requireKnownTeam: true
+
+  # The teams the rules refer to by role rather than by name. These are
+  # deployment facts -- there are seven ABTs today and there will not always
+  # be -- and they are what answers the rule table's "is this incident
+  # assigned to an ABT team" column. Get one wrong and that rule silently
+  # routes the other way, so they are configuration, not a constant.
+  teams:
+    # The ABT this ladder escalates within, as team.type spells it in the
+    # database. There are two: cre-abt holds seven teams (atlas, castor,
+    # draco, phoenix, rigel, sirius, vega) and sre-abt holds two (apollo,
+    # artemis). Each of those teams has exactly one lead, its Team lead.
+    #
+    # Naming the type rather than the teams is deliberate: which teams an ABT
+    # holds is already recorded per team, so adding one needs no change here
+    # and a team moved between ABTs cannot leave a stale key behind.
+    abtType: cre-abt
+
+    # The seven teams cre-abt holds, named outright. This WINS over abtType
+    # above, so the ladder reaches exactly these and nothing else -- empty it
+    # to have entity-service answer from team.type instead, which is the
+    # version that survives a team being added.
+    abts: [atlas, castor, draco, phoenix, rigel, sirius, vega]
+
+    # Americas is NOT an ABT -- its team.type is cre. It covers 9pm-6am IST,
+    # has its own alert-duty nominees, and three Team leads of its own with a
+    # single Americas lead above them, which is why R5 and R6 read
+    # americas_team_leads at LEVEL_1 and americas_team_lead at LEVEL_2.
+    americas: americas
+
+    # Only used when heads.cre / heads.cs below are left empty.
+    leadership: cre-leadership
+
+    # How many leads the "Team leads" rung calls, out of the pool below.
+    # Zero calls all of them.
+    #
+    # The rung is "at least three team leads from the pool", and the pool is
+    # every ABT team's lead -- seven for cre-abt. So the sheet's three and the
+    # pool's seven were never in conflict: one is how many get called, the
+    # other how many there are to choose from.
+    #
+    # Which three rotates, by who has gone longest without a call, so the duty
+    # spreads across the pool instead of landing on the same names every time.
+    teamLeadsToCall: 3
+
+    # The pool itself. Empty means every team in the ABT above.
+    teamLeads: []
+
+    # Caps the rota-sourced Level 0 rungs, per shift.
+    #
+    # "Rota Members" means everyone on duty, and that is what the ladder calls.
+    # The rules sheet's counts for those rungs -- 2 on LK_MORNING, 3 on
+    # LK_WEEKEND, 7 on LK_EVENING without an ABT -- describe how many people
+    # are rostered in each shift, not a limit the code imposes.
+    #
+    # Empty is the default and the recommended setting: a cap means somebody
+    # who IS on duty does not get called, which is a strange thing to want
+    # from a pager. It exists because these counts decide the Twilio bill and
+    # a deployment may need a ceiling it can set without a release. Name only
+    # the shifts you want capped, e.g.
+    #
+    #   rotaMembersToCall:
+    #     LK_EVENING: 7
+    #
+    # Shift names are LK, LK_MORNING, LK_EVENING, LK_WEEKEND, USA,
+    # USA_WEEKEND; anything else is refused at startup rather than ignored.
+    # Which members a cap drops rotates by longest-since-called, so it does
+    # not always spare the same names.
+    rotaMembersToCall: {}
+
+    # Level 1 ("Team lead") when the incident is on no ABT -- R3, R4b, and R1
+    # when the incident carries no team at all.
+    #
+    # That rung takes the incident's OWN ABT lead, and an unassigned incident
+    # has no ABT to take one from, so it used to reach nobody: the rung was
+    # recorded NO_RECIPIENTS and skipped. Skipping is right when a lead is
+    # merely unconfigured -- the ladder climbs and somebody above answers --
+    # but for an unassigned incident the rung can never fire at all, and the
+    # rungs above keep their own offsets. A P0 went from +0m straight to
+    # +4m with nobody called, where the rules sheet says one call.
+    #
+    #   pool  one lead from teamLeads above, longest-since-called
+    #   none  reach nobody and climb, the behaviour before this existed
+    unassignedTeamLead: pool
+
+    # How many of that pool it calls. One is what the sheet counts at Level 1,
+    # against three at Level 2 -- which is what keeps the two rungs distinct.
+    unassignedTeamLeadCount: 1
+
+  # rules: the R1-R6 table. Omitted here, which uses the shipped
+  # transcription of the spreadsheet (see internal/escalation/rules.go).
+  # Override a row only to correct it ahead of a release; the shape is
+  #   - id: R2
+  #     shift: LK
+  #     assignedToABT: yes
+  #     levels: [alert_duty_own_abt, team_lead, all_team_leads, cre_head, cs_head]
+  #     expectedCalls: [3, 1, 3, 1, 1]
+  #
+  # The night shift's LEVEL_1 has a second reading worth knowing about: the
+  # shipped table uses all_team_leads (every ABT's lead), but if "Team leads"
+  # there means the AMERICAS team's own three leads -- the ones below its
+  # single lead at LEVEL_2 -- override R5 and R6 with americas_team_leads:
+  #   - id: R5
+  #     shift: USA
+  #     assignedToABT: any
+  #     levels: [alert_duty_americas, americas_team_leads, americas_team_lead,
+  #              cre_head, cs_head]
+  #     expectedCalls: [3, 3, 1, 1, 1]
+  #
+  # Every source a level may name:
+  #   rota_members · rota_pair · alert_duty_own_abt · alert_duty_each_abt
+  #   alert_duty_americas · rota_member_and_alert_duty_americas
+  #   team_lead · all_team_leads · americas_team_lead · americas_team_leads
+  #   cre_head · cs_head
+
+  # The last two rungs, named outright. They are two people, not a team, so
+  # the ladder asks for them here rather than looking them up by role inside a
+  # leadership team. Leave a head empty to fall back to that lookup.
+  heads:
+    cre: {name: "", email: "", phone: ""}
+    cs:  {name: "", email: "", phone: ""}
+
+  # How the nominated rungs are read.
+  alertDuty:
+    # The nominations that exist. Each ABT has three, and so does Americas.
+    tiers: [T1, T2, T3]
+
+    # How many nominees a rung takes from each team it spans. 0 takes all of
+    # them.
+    #
+    # This is the other half of the 3-vs-7 question: "the team's nominees" is
+    # all three of one team, while "one nominee from each team in the ABT" is
+    # one each across seven. Set it to 1 and every nominated rung calls one person per
+    # team; leave it 0 and it calls all of them.
+    perTeam: 3
+
+  # What stops a ladder.
+  acknowledgement:
+    # Acknowledgement is BOTH gestures: the incident moved out of NEW AND a
+    # public comment written. Either alone leaves it climbing, which is the
+    # point -- a dispatcher moving a status while triaging has not picked the
+    # incident up. Set false to accept either gesture on its own.
+    requireBoth: true
+
+  safety:
+    # The most calls one ladder may place across every rung. A plan larger
+    # than this is truncated and says so, so a rota that suddenly resolves to
+    # forty people fails loudly at planning time instead of arriving as a bill.
+    #
+    # R3 is the rule to watch: an incident assigned to no ABT reaches one
+    # nominee in EVERY ABT, which is seven calls at LEVEL_0 alone.
+    maxCallsPerLadder: 12
+
+    # The highest rung the ladder may climb, 0..4. Omit for no cap. Setting it
+    # to 2 keeps an escalation away from the heads while a policy is trialled.
+    # maxLevel: 2
+
+    # When set, the ONLY numbers that may be dialled; every other recipient is
+    # dropped before the call is placed. This is what makes a real ladder safe
+    # to exercise against a real Twilio account — the resolver still runs and
+    # the plan is still built from the real rota, but only these ring.
+    allowedNumbers: []
+
+sre:
+  enabled: true
+  channel: log
+  teams:
+    # The other ABT: two teams.
+    abtType: sre-abt
+    abts: [apollo, artemis]
+  trigger:
+    priorities: []
+    requireKnownTeam: true
+  safety:
+    maxCallsPerLadder: 8
+    allowedNumbers: []

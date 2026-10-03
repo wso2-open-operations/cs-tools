@@ -31,7 +31,7 @@ import (
 
 func TestParseIssueURL(t *testing.T) {
 	ok := map[string]Issue{
-		"https://github.com/wso2/choreo/issues/42":   {"wso2", "choreo", 42},
+		"https://github.com/wso2/choreo/issues/42":         {"wso2", "choreo", 42},
 		"https://github.com/SParaparan/cr-test/issues/635": {"SParaparan", "cr-test", 635},
 		// Enterprise host, same shape.
 		"https://github.acme.internal/org/repo/issues/1": {"org", "repo", 1},
@@ -52,12 +52,12 @@ func TestParseIssueURL(t *testing.T) {
 		"",
 		"not a url",
 		"ftp://github.com/o/r/issues/1",
-		"https://github.com/wso2/choreo/pull/42",      // a PR, not an issue
-		"https://github.com/wso2/choreo/issues/",      // no number
-		"https://github.com/wso2/choreo/issues/abc",   // not a number
-		"https://github.com/wso2/choreo/issues/0",     // issues are 1-based
-		"https://github.com/wso2/choreo/issues/42/x",  // trailing segment
-		"https://github.com/choreo/issues/42",         // no owner
+		"https://github.com/wso2/choreo/pull/42", // a PR, not an issue
+		"https://github.com/wso2/choreo/issues/", // no number
+		"https://github.com/wso2/choreo/issues/abc",  // not a number
+		"https://github.com/wso2/choreo/issues/0",    // issues are 1-based
+		"https://github.com/wso2/choreo/issues/42/x", // trailing segment
+		"https://github.com/choreo/issues/42",        // no owner
 	}
 	for _, raw := range bad {
 		if got, err := ParseIssueURL(raw); err == nil {
@@ -81,12 +81,12 @@ func TestVerifySignature(t *testing.T) {
 	}
 
 	bad := map[string]string{
-		"empty":            "",
-		"no prefix":        hex.EncodeToString([]byte("whatever")),
-		"not hex":          "sha256=zzzz",
-		"wrong secret":     sign("other", body),
-		"wrong body":       sign(secret, []byte(`{"action":"closed"}`)),
-		"sha1 downgrade":   "sha1=" + hex.EncodeToString([]byte("x")),
+		"empty":          "",
+		"no prefix":      hex.EncodeToString([]byte("whatever")),
+		"not hex":        "sha256=zzzz",
+		"wrong secret":   sign("other", body),
+		"wrong body":     sign(secret, []byte(`{"action":"closed"}`)),
+		"sha1 downgrade": "sha1=" + hex.EncodeToString([]byte("x")),
 	}
 	for name, header := range bad {
 		t.Run(name, func(t *testing.T) {

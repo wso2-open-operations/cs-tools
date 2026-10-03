@@ -72,6 +72,24 @@ services:
       timeout: 5s
       retries: 20
 
+  # The call-escalation ladder's wake index and per-incident state. Nothing
+  # else in this stack needs Redis, which is why it was absent: the ladder is
+  # the first thing here that has to remember something between ticks.
+  #
+  # Unpersisted on purpose. A ladder is a few minutes of state about an
+  # incident happening right now; there is nothing worth surviving a
+  # `docker compose down`, and plenty of confusion in a half-finished ladder
+  # resuming days later against a database reseeded underneath it.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # One-shot: applies entity-service's raw SQL migrations (it doesn't wire
   # up a migration tool) and loads dummy seed data. Every service that reads
   # from Postgres waits on this completing.
@@ -90,6 +108,7 @@ services:
       - ./entity-service/migrations:/migrations/entity-service:ro
       - ./scripts/csm-compose/seed-entity-service.sql:/migrations/seed-entity-service.sql:ro
       - ./scripts/csm-compose/seed-team-schedule.sql:/migrations/seed-team-schedule.sql:ro
+      - ./scripts/csm-compose/seed-escalation-roles.sql:/migrations/seed-escalation-roles.sql:ro
       - ./scripts/csm-compose/fixtures:/migrations/fixtures:ro
       - ./scripts/csm-compose/migrate-and-seed.sh:/migrate.sh:ro
     entrypoint: ["sh", "/migrate.sh"]
@@ -258,7 +277,12 @@ services:
       AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_JWKS_URL: http://mock-oidc:9100/oauth2/jwks
       AUTH_USER_TOKEN_AUDIENCES: csm-portal-webapp,customer-portal-webapp
-      AUTH_INTERNAL_CLIENT_IDS: csm-portal-backend-dev-client,csm-integration-service-dev-client
+      # csm-notification-service is here for the call-escalation ladder: it
+      # reads the rota and the ranks behind it to decide who each rung
+      # reaches, machine to machine, with no user to carry a token. Both
+      # of those reads are internal-staff-only, so without this every
+      # rung resolves to nobody and the ladder silently reaches no one.
+      AUTH_INTERNAL_CLIENT_IDS: csm-portal-backend-dev-client,csm-integration-service-dev-client,csm-notification-service-dev-client
     volumes:
       - csm-dev-certs:/certs:ro
     ports:
@@ -457,6 +481,8 @@ services:
       context: ./integrations/csm-notification-service
       dockerfile: ../../docker/local/csm-notification-service.Dockerfile
     depends_on:
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
       kafka-topics-init:
@@ -479,9 +505,31 @@ services:
       # for.
       EMAIL_SENDING_ENABLED: "false"
       CALL_SENDING_ENABLED: "false"
+      # The escalation ladder. REDIS_ADDR is what makes the engine exist at
+      # all: without it cmd/server never builds one, and an incident.created
+      # is consumed and ignored.
+      REDIS_ADDR: redis:6379
+      # chat, not call: CALL_SENDING_ENABLED above is false and there is no
+      # telephony account here, so a voice rung would reach nobody and prove
+      # nothing.
+      # The configuration file decides what actually gets dialled: which
+      # incidents escalate, how far, and over which channel. It ships set to
+      # `log`, so `docker compose up` runs the whole ladder for real and
+      # reaches nobody. INCIDENT_ESCALATION_CHANNEL below is the pre-file
+      # fallback and is ignored whenever this path is set.
+      INCIDENT_ESCALATION_CONFIG: /config/escalation.yaml
+      INCIDENT_ESCALATION_CHANNEL: chat
+      # Both of these are yours, not the repository's. GOOGLE_CHAT_SPACES
+      # carries a webhook URL, which is a credential: anyone holding it can
+      # post into the space as the app. Export them in your own shell and
+      # compose passes them through. Unset, the ladder is built but reaches
+      # nobody, and says so at startup.
+      GOOGLE_CHAT_SPACES: ${GOOGLE_CHAT_SPACES:-}
+      INCIDENT_ESCALATION_ROSTER: ${INCIDENT_ESCALATION_ROSTER:-}
       PORT: "8080"
     volumes:
       - csm-dev-certs:/certs:ro
+      - ./scripts/csm-compose/escalation.yaml:/config/escalation.yaml:ro
     ports:
       - "127.0.0.1:8083:8080"
 

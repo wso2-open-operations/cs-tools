@@ -40,7 +40,7 @@ func TestCreateCommentReferenceTypes(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"message":"created","comment":{"id":"abc","createdOn":"2026-08-01 10:00:00","createdBy":"jane.doe@example.com"}}`))
 		}))
-		return NewServiceNowCommentService(client)
+		return NewServiceNowCommentService(client, nil)
 	}
 
 	req := func(refType domain.ReferenceType) domain.CreateCommentRequest {
@@ -102,9 +102,10 @@ func TestCreateCommentReferenceTypes(t *testing.T) {
 // a net-new Postgres-only capability (ServiceNow's own sys_journal_field is
 // append-only), so every method must reject explicitly with a
 // ServiceUnavailableError rather than silently succeeding or panicking. None
-// of these methods touch the injected client, so a nil one is fine here.
+// of these methods touch the injected client or the event publisher, so nil
+// is fine for both here.
 func TestSNCommentSearchService_EditDeleteUnsupported(t *testing.T) {
-	svc := NewServiceNowCommentService(nil)
+	svc := NewServiceNowCommentService(nil, nil)
 	ctx := context.Background()
 
 	t.Run("UpdateComment", func(t *testing.T) {

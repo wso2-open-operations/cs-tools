@@ -380,7 +380,7 @@ DELETE FROM team_member m USING team t
 DELETE FROM team_member WHERE created_by = {t};
 INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, role)
 SELECT md5('{IMPORT_TAG}-tm-' || p.email)::uuid, NOW(), NOW(), {t}, {t}, tm.id, u.user_id,
-       CASE WHEN p.is_lead THEN 'lead' ELSE 'member' END
+       CASE WHEN p.is_lead THEN 'lead' ELSE 'engineer' END
   FROM _imp_person p
   JOIN _imp_uid u ON u.email = p.email
   JOIN team tm ON lower(tm.name) = p.team_key

@@ -151,11 +151,11 @@ type mockCallSender struct {
 	calls []sentCall
 }
 
-func (m *mockCallSender) MakeCall(ctx context.Context, to, message string) error {
+func (m *mockCallSender) MakeCall(ctx context.Context, to, message string) (notifications.Call, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, sentCall{to, message})
-	return m.err
+	return notifications.Call{}, m.err
 }
 
 // mockLinkResolver defaults to resolving every recipient to the same fixed
@@ -1291,20 +1291,27 @@ func TestDispatcher_Handle_CaseCreated_EmailSendingDisabled(t *testing.T) {
 	}
 }
 
-// TestDispatcher_Handle_IgnoresSLATierReached verifies that a
-// sla.tier_reached record — published by internal/slaengine's own poller,
-// which this dispatcher's consumers still get a full copy of via the shared
-// topic — is a silent no-op here, not an error. Erroring would burn this
-// consumer's retries and dead-letter an event that was never broken.
-func TestDispatcher_Handle_IgnoresSLATierReached(t *testing.T) {
+// TestDispatcher_Handle_IgnoresEventTypesOwnedByOtherConsumers verifies that
+// records belonging to another consumer group on this shared topic -- the
+// slaengine poller's sla.tier_reached, and internal/escalation's three
+// incident signals -- are a silent no-op here, not an error. Erroring would
+// burn this consumer's retries and dead-letter an event that was never broken.
+func TestDispatcher_Handle_IgnoresEventTypesOwnedByOtherConsumers(t *testing.T) {
 	mock := &mockEmailSender{}
 	chat := &mockGoogleChatSender{}
 	call := &mockCallSender{}
 	d := newTestDispatcher(mock, chat, call)
 
-	record := `{"type":"sla.tier_reached","entityId":"CASE-1","payload":{"caseId":"CASE-1","clockType":"response","tier":"50"}}`
-	if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(record)}); err != nil {
-		t.Errorf("Handle(%s) error = %v, want nil", record, err)
+	records := []string{
+		`{"type":"sla.tier_reached","entityId":"CASE-1","payload":{"caseId":"CASE-1","clockType":"response","tier":"50"}}`,
+		`{"type":"incident.acknowledged","entityId":"INC-1","payload":{"previousState":"NEW","newState":"IN_PROGRESS"}}`,
+		`{"type":"incident.priority_elevated","entityId":"INC-1","payload":{"oldPriority":"MODERATE","newPriority":"HIGH","title":"t"}}`,
+		`{"type":"incident.comment_added","entityId":"INC-1","payload":{"commentId":"c-1","isPublic":true}}`,
+	}
+	for _, r := range records {
+		if err := d.Handle(context.Background(), eventbus.Record{Value: []byte(r)}); err != nil {
+			t.Errorf("Handle(%s) error = %v, want nil", r, err)
+		}
 	}
 	chatCalls := len(chat.caseCreatedCalls) + len(chat.caseAcknowledgedCalls) + len(chat.severityChangedCalls) + len(chat.securityReportAnalysisCalls)
 	if len(mock.calls) != 0 || chatCalls != 0 || len(call.calls) != 0 {
@@ -1349,7 +1356,7 @@ type concurrencyProbeCallSender struct {
 	sends     int
 }
 
-func (s *concurrencyProbeCallSender) MakeCall(ctx context.Context, to, message string) error {
+func (s *concurrencyProbeCallSender) MakeCall(ctx context.Context, to, message string) (notifications.Call, error) {
 	s.mu.Lock()
 	s.active++
 	s.sends++
@@ -1363,7 +1370,7 @@ func (s *concurrencyProbeCallSender) MakeCall(ctx context.Context, to, message s
 	s.mu.Lock()
 	s.active--
 	s.mu.Unlock()
-	return nil
+	return notifications.Call{}, nil
 }
 
 // TestDispatcher_Handle_ConcurrentClaimNeverOverlaps is a regression test

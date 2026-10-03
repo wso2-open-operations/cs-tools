@@ -322,8 +322,14 @@
   /* Above the day cells it has to cover, and above the header row's own
      cells where the two sticky axes cross. */
   z-index: 3;
-  width: 210px;
-  min-width: 210px;
+  /* Wide enough for the longest real name plus its avatar, the watcher badge
+     and the padding -- 210px cut "Yasiru Nimantha Welagedara" short, and
+     because the name sits in a flex row beside the avatar it wrapped rather
+     than clipped, making that one row taller than every other and breaking
+     the grid's alignment. A name longer than this still degrades to an
+     ellipsis (.nm .who), so the row height stays fixed either way. */
+  width: 252px;
+  min-width: 252px;
   text-align: left;
   /* Opaque: with the portal's semi-transparent paper colour, thirty days of
      cells scrolled visibly through this column. */

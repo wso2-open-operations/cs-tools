@@ -6782,6 +6782,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/members:
+    get:
+      summary: Who holds which rank on these teams.
+      description: >
+        The org chart behind the rota, as the call-escalation ladder reads it.
+        Its rungs resolve from here: an incident's own team supplies the team
+        lead, the ABT supplies every team lead, and the first rung is the
+        alert-duty nominees, on their own or intersected with
+        `/team-schedule/on-duty`.
+
+
+        Either `teamKeys` or `teamTypes` must be supplied. Both being absent is
+        rejected: an unfiltered read would return every membership in the
+        organisation.
+      operationId: getTeamMembers
+      parameters:
+        - name: teamKeys
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated team keys, as the rota names them (`vega`,
+            `americas`). Required unless `teamTypes` is supplied.
+          example: vega,americas
+        - name: teamTypes
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated team types, which is how teams are grouped into an
+            ABT: `cre-abt` holds seven teams and `sre-abt` two, while a team
+            like Americas is `cre` and belongs to no ABT. Selecting by type
+            means a team added to an ABT is included without the caller
+            carrying a list of keys. Required unless `teamKeys` is supplied.
+          example: cre-abt
+        - name: roles
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated roles to keep. Omit for every role. One of
+            `engineer`, `sub_lead`, `lead`, `cre_head`, `cs_head`.
+          example: lead
+        - name: alertTiers
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated alert-duty nominations to keep (`T1`, `T2`, `T3`).
+            Omit for members holding any nomination or none. A nomination is a
+            standing duty to take the first call for a team, independent of
+            rank and never held by a lead.
+          example: T1,T2,T3
+      responses:
+        "200":
+          description: >
+            Every membership matching. A team with nobody at the asked-for rank
+            returns an empty list, not an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMembersResponse'
+        "400":
+          description: Bad request — no teamKeys or teamTypes, or a role that is not one of the five.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff — the rota is not available to customers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups/search:
     post:
       summary: Search groups (ServiceNow data source only).
@@ -17582,6 +17672,51 @@ components:
           items: { type: string }
         userId: { type: string, format: uuid }
         userEmail: { type: string }
+    TeamMembersResponse:
+      type: object
+      required: [members, count]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamMemberEntry'
+        count:
+          type: integer
+    TeamMemberEntry:
+      type: object
+      required: [teamKey, role, userId, name, email]
+      properties:
+        teamKey:
+          type: string
+          example: vega
+        teamType:
+          type: string
+          description: >
+            The team's own type, which is what groups teams into an ABT:
+            `cre-abt`, `sre-abt`, `cre`, `cre-leadership`.
+          example: cre-abt
+        alertTier:
+          type: string
+          description: >
+            The standing alert-duty nomination this member holds (`T1`, `T2`,
+            `T3`), absent when they hold none.
+          example: T1
+        role:
+          type: string
+          description: >
+            The raw membership rank. Passed through unvalidated on read, so a
+            role a later migration adds reaches a caller without this contract
+            changing first.
+          example: sub_lead
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Empty when the user row carries no name.
+        email:
+          type: string
+          description: Empty when the user row carries no address.
     ScheduleAssignmentsResponse:
       type: object
       properties:

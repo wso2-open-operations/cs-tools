@@ -8,7 +8,7 @@ This service used to also expose `POST /events` (an HTTP ingest endpoint the bac
 
 The consume→dispatch path (event bus → `dispatch.Dispatcher`) **is real** — it sends actual emails, Google Chat alerts, and voice calls — but has one known, explicitly-flagged gap:
 
-- **SMS and direct call channels are unused.** `TwilioClient.SendSMS` has no caller anywhere in this service; `MakeCall` is only invoked by `handleIncidentCreated`. Both clients/methods exist and are tested, just not wired to any event type yet.
+- **SMS is unused.** `TwilioClient.SendSMS` has no caller anywhere in this service. Voice has two: `dispatch.handleIncidentCreated`'s single immediate call (`MakeCall`), and the incident call-escalation engine (`MakeCall` or `MakeSSMLCall`, see "Incident call escalation" below), which places the many calls of a ladder.
 
 A dead-letter topic **does** exist now (see "Event-driven notifications" below) — a record that exhausts the main consumer's retries is published there rather than dropped, and a separate DLQ consumer gets its own retry pass at it. There's still no third tier past that: a record that also exhausts the DLQ consumer's retries is logged and dropped for good.
 
@@ -159,6 +159,193 @@ The "Add Comment" CTA in all four templates changed from a solid-background butt
 - **`dispatch.go`'s `Handle` switch has an explicit no-op case for `events.TypeSLATierReached`** — still in `KnownTypes` (so `IsKnown()` passes) and still has a `Validate` case (so a genuinely malformed one is still rejected), but `dispatch.Dispatcher` itself has no reaction to it; returning `nil` rather than falling through to the switch's `default` is required, since erroring would burn the main consumer's retries and dead-letter an event that was never broken, just not this consumer's concern. `events.TypeSLAClockRegister` no longer exists at all — nothing publishes it anymore, so there's nothing left for any consumer to ignore.
 - **`internal/timecardengine`** — `Engine.Handle` is `events.TypeCaseBillableStatusChanged`'s own consumer entry point, on its **own dedicated consumer group** (`TIME_CARD_CONSUMER_GROUP`/`TIME_CARD_CONSUMER_COUNT` in `cmd/server/main.go`, started unconditionally, unlike the SLA engine above — it has no Redis/state dependency at all, and unlike `slaEngine` it genuinely is a Kafka consumer): `eventbus.Consumer.Run` processes one record at a time, fully sequentially (fetch → handle → commit → repeat), so a future bulk update over "several time cards" (each its own HTTP round trip to entity-service) must not delay unrelated email/Chat delivery on `dispatch.Dispatcher`'s own consumer instance. Decodes the envelope, silently ignores anything that isn't its own type, validates, then — **currently just logs**. The actual reaction (bulk-flipping every time card's `isBillable` for the case) needs a Postgres `time_cards` table/repo/service on entity-service first (it has none today; time cards are ServiceNow-only there) — see the package's own doc comment and `events.TypeCaseBillableStatusChanged`'s. entity-service's own `Publish` call for this event is itself still commented out for the same reason, so this consumer group exists ahead of ever actually receiving a record — deliberate ahead-of-need plumbing (topic wiring, retry/DLQ behavior, schema validation), not a live reaction.
 - **`dispatch.go`'s `Handle` switch also has a no-op case for `events.TypeCaseBillableStatusChanged`**, mirroring the `TypeSLATierReached` case above exactly (a *different* consumer group — `internal/timecardengine` — reacts to it instead): required for the same reason, since `dispatch.Dispatcher`'s own consumer group also gets a full copy of the topic and would otherwise treat this as an unknown type and dead-letter it once it starts being published.
+
+## Cases and incidents are different entities
+
+A **case** is entity-service's `POST /cases` and `domain.CaseView`, carried by
+the `case.*` events. An **incident** is `POST /incidents` and
+`domain.IncidentView`, carried by the `incident.*` events. Both families exist
+here and they are not interchangeable: `case.comment_added` and
+`incident.comment_added` are different payloads about different entities, and
+`dispatch` reacts to the first while `internal/escalation` reacts to the
+second.
+
+**"SRE incident" is not a third thing.** `integrations/sre-alert-ingestion-service`
+turns a vendor alert (Azure, Grafana, Site24x7, OpenSearch) into a platform
+incident through that same `POST /incidents`, so an alert-born incident is
+exactly what the `incident.*` events describe, and the call-escalation ladder
+below escalates it like any other. There is no separate SRE entity.
+
+## Incident call escalation
+
+`internal/escalation` runs the incident call-escalation ladder from the
+"Synchronizing Twilio Alerts for New Incoming Incidents Based on ABT Model"
+specification: an unattended incident climbs five rungs (LEVEL_0 rotation
+lead/members — rotations only — then ABT leads, ABT team leads, Head of BU,
+Head of CRE), each rung placing several calls spaced apart before escalating,
+on a clock set entirely by the incident's priority (section 7.0's table, in
+`policy.go`'s `DefaultPolicy`, verbatim — with two documented divergences
+where the document's own rows don't sum to its stated totals; the formula
+wins and tests pin both). Like `internal/slaengine`, it is its own consumer
+group on the shared topic (`INCIDENT_ESCALATION_CONSUMER_GROUP`) plus a
+ticker, with Redis as its only durable state — the same `REDIS_URL`/
+`REDIS_ADDR` client, its own keys. Structure:
+
+- **`policy.go` / `plan.go` — pure.** `Lookup` resolves a priority (P-notation
+  or a label: both the case-severity vocabulary and ServiceNow's incident
+  priority enum, whose `MODERATE` is the spelling `MEDIUM` — `PLANNING` is
+  deliberately absent, section 7.0 has no row below P4). `BuildPlan` expands a
+  `Trigger` into every `PlannedCall`, resolving recipients **once per rung**
+  (a live roster could otherwise answer two attempts of one rung
+  differently). `ExecutionSummary`/`WorkNote` render section 11.0's work note
+  from the engine's *placed flags*, not from scheduled times — a cancellation
+  and a call due at the same instant race, the cancellation wins, and
+  reporting by time alone claimed calls that never happened.
+- **`resolver.go` — the seam.** `RoutingContext.HasNotificationLevel` decides
+  whether LEVEL_0 exists: rotation shifts only, **and on USA_WEEKEND only when
+  not ABT-eligible** (rule R10 has no notification level, R12/R14 do — the one
+  input that changes the ladder's shape rather than who answers).
+  `ABTEligible` is a `*bool` in both the payload and the routing context,
+  because there are three states: eligibility splits the rule table in half,
+  so "nobody told us" is genuinely different from "told no" — and it is the
+  common case, since no publisher sets it. Unknown reports the rule as
+  `UNKNOWN_ABT` rather than a confident wrong row, and keeps LEVEL_0 on a
+  USA_WEEKEND rotation (waking one extra person is the recoverable error;
+  dropping the fastest rung on a weekend night is not).
+  `RoutingContext.Rule` names which of section 5.0's fourteen rows an incident
+  routes by; nothing branches on it, it exists so the path is *reportable* —
+  it's in the schedule log line, every placed call, both endings, and the work
+  note. `Resolver` is the interface the rule table's data plugs into.
+  **`RosterResolver` is a stopgap**: the specification resolves recipients
+  from ServiceNow (`sys_user_group_type`, `u_team_member_role`, the On-Call
+  Scheduling module), none of which is reachable here, so an operator roster
+  (`INCIDENT_ESCALATION_ROSTER`, JSON) implements the table's specificity
+  order — team, then shift pool, then default — against hand-maintained data.
+  Section 8.0's LEVEL_0 availability filtering is not implemented (no
+  schedule to read). `StaticResolver` is for tests.
+- **`shift.go`.** `ShiftAt` derives the effective shift from the trigger
+  time in IST (section 6.0's boundaries); the night shift straddles midnight,
+  so pre-06:00 hours belong to the shift-day that opened the night before.
+  This assumes ServiceNow's `openedOn`/`createdOn` are UTC — the whole repo's
+  existing `parseSNDateTime` assumption, but a 5.5-hour error here puts an
+  incident in the wrong shift entirely, so confirm it against a real record.
+- **`engine.go` / `store.go` — the two halves.** `Handle` reacts to four
+  events: `incident.created` claims the incident **create-if-absent** (a
+  redelivered trigger must not restart a ladder from LEVEL_0);
+  `incident.priority_elevated` deliberately **replaces** a running ladder,
+  retiring its outstanding calls; `incident.acknowledged` (leaving NEW) and a
+  public `incident.comment_added` are the two halves of an acknowledgement and
+  **both are required**: each is recorded on the ladder's own state as it
+  arrives, in either order, and the ladder keeps climbing until the second one
+  does. A status move on its own is what a dispatcher does while triaging a
+  queue, and treating it as an answer silenced the pager for incidents nobody
+  had picked up. `acknowledgement.requireBoth: false` restores the old
+  either-gesture rule. A work note
+  (`isPublic: false`) is ignored. `Tick` (every `INCIDENT_ESCALATION_TICK_INTERVAL`,
+  default 5s — finer than the SLA engine's, since P0's calls are a minute
+  apart) scans the wake ZSET, and for each due call: **place, then record,
+  then drop the wake entry** — a crash between the first two repeats the call
+  next tick, which is the direction to fail in for a paging system.
+  **A trigger whose last call is already in the past is dropped**: this
+  group reads the topic from its first offset the first time it exists, so
+  the first deployment replays retention, and without that guard the next
+  tick burst-dials every rung of every stale incident. A short backlog still
+  catches up correctly (offsets are from the report time on purpose).
+- **`client.go`.** A narrow entity-service client whose one job is PATCHing
+  the execution summary onto the incident as a work note. **Optional**
+  (`CUSTOMER_ENTITY_BASE_URL` unset → summary logged instead), unlike the SLA
+  engine's — this engine's job is placing calls; the summary is a record.
+  Loop-safe: a work-notes-only PATCH publishes no escalation signal, and
+  `incident.comment_added` comes from a different endpoint this never calls.
+- **`config.go` — what a deployment may spend.** `INCIDENT_ESCALATION_CONFIG`
+  points at a YAML file governing **both** ladders (`cre:`/`sre:` sections):
+  an `enabled` master switch, a per-ladder `channel`, `trigger` conditions
+  (`priorities`/`teams`/`excludeTeams`/`shifts`/`requireKnownTeam`) deciding
+  which incidents get a ladder at all, and `safety` caps
+  (`maxCallsPerLadder`/`maxLevel`/`allowedNumbers`) capping what one ladder may
+  spend. It is a file rather than more environment variables because every
+  knob in it changes how many calls get placed, and therefore the bill — and
+  because the answer to "what will this deployment dial" should be one
+  readable thing, not eight variables assembled by hand from a container spec.
+  Rules worth keeping: an **unreadable or invalid file disables both ladders**
+  and logs it, never a silent fall back to defaults nobody chose; an
+  **unknown key is an error** (`KnownFields(true)`), because a misspelled
+  `maxCallsPerLadder` that is quietly dropped leaves an operator certain they
+  have capped the spend when they have not; `safety.maxLevel` is a **`*int`**
+  so absent and `0` are different — LEVEL_0 is a legitimate cap and the zero
+  value of the struct (what a deployment with no file, and every hand-built
+  `EngineConfig` in tests, gets) must mean *no* cap, not "truncate every ladder
+  to one rung". With **no `INCIDENT_ESCALATION_CONFIG` set at all** the service
+  behaves exactly as it did before the file existed, so adopting it is opt-in;
+  `INCIDENT_ESCALATION_ENABLED` overrides the file's master switch in both
+  directions, so a ladder can be stopped without editing and shipping a file
+  mid-incident. `Engine.applySafety` trims a freshly built plan to the caps
+  **before it is stored**, recording a `PlanIssue` (`LEVEL_CAPPED`,
+  `NUMBER_NOT_ALLOWED`, `CALL_CAP_REACHED`) for each, so a ladder reaching
+  fewer people than the rules say lands on the work note rather than being a
+  quiet saving.
+- **`notifier.go` - which channel a rung reaches people on.** The ladder's
+  timing, routing and cancellation are channel-agnostic; only the last hop
+  differs. `INCIDENT_ESCALATION_CHANNEL` picks `call` (the specification's
+  own, and the default), `chat` (a card in the incident's Google Chat space
+  via `SendEscalationAlert`), `both`, or **`log`** — which runs the entire
+  ladder and writes a line per rung naming who it *would* have reached,
+  reaching nobody. `log` exists because the two channels that reach people
+  both need an account: calls cost money per rung, chat needs a webhook for a
+  room real colleagues sit in, and neither is something to point at a test.
+  It is a channel rather than a global dry-run flag so it appears where every
+  other delivery decision does, and it is **exclusive** — `Channel.Uses`
+  reports false for `log` against `both`, so a log ladder wires that notifier
+  and nothing else; a live ladder that also emitted "would notify" lines would
+  read like a dry run mid-page. It logs the recipient's **name only**, never
+  an address or a number. **A chat card does not wake anyone**
+  - the initial Chat alert already exists and the ladder exists because it
+  was not enough overnight - so `chat` alone is a real reduction in what the
+  feature does. Where it earns its place is alongside the calls, giving the
+  room sight of an escalation climbing, and as the only channel exercisable
+  end to end without a telephony account. Chat posts **once per rung**, not
+  per attempt: a rung's repeats exist because a phone went unanswered, a
+  question a posted card cannot ask, and a P1 ladder's fourteen attempts
+  would bury the room. With `both`, each channel is attempted even if the
+  other fails.
+- **`internal/notifications/ssml.go`.** `MakeSSMLCall` speaks a typed
+  `Speech` tree as real nested SSML inside `<Say>`. It exists because
+  `MakeCall`'s chardata escaping — correct, and what stops TwiML injection —
+  read an SSML *string*'s tags aloud. The tree keeps both properties: markup
+  on the wire, text that can never become markup (caller text only ever
+  reaches the document through `xml.CharData`). Opt-in via
+  `INCIDENT_ESCALATION_SSML=true`. No `<speak>` root: in TwiML, `<Say>` is
+  the root.
+
+**Wiring** (`cmd/server/main.go`): inside the Redis block, started only when
+the ladder has somebody to resolve rungs from (`escalationStartProblem`): the
+Team Schedule, with `INCIDENT_ESCALATION_RESOLVER=team-schedule` and
+`CUSTOMER_ENTITY_BASE_URL` set, or else a non-empty
+`INCIDENT_ESCALATION_ROSTER` — a ladder that can never call anyone is worse
+than an absent one, because it looks like coverage. The roster is required
+only when it is what the ladder reads (it used to be required in both modes);
+one that is set but does not parse stops the engine either way. Shares `CALL_SENDING_ENABLED` with the dispatcher's call. Startup
+warns when `INCIDENT_DEFAULT_CALL_TO` is also set: the dispatcher's single
+immediate call predates the ladder and is **not** in the specification (its
+initial reaction is the Chat alert and an email); unset it once the ladder
+covers an environment, or an incident gets both.
+
+**Not built**: the email at each rung (section 10.0), the two
+erroneous-scenario emails (section 12.0), LEVEL_0 availability filtering
+(section 8.0), a ServiceNow-backed `Resolver`. **No longer relevant**: `abtEligible` was never populated by any publisher, so
+every incident used to route as `UNKNOWN_ABT`. The updated rule table does not
+ask: whether an incident is on an ABT team is answered from the team's own
+`team.type`, which entity-service already records, and the matched rule's id is
+stamped onto the routing context by `BuildPlan` and reported everywhere. The
+field remains on the payload for decode compatibility and is unread.
+
+**Testing**: `cmd/escalation-local` runs the *real* engine against a real
+Redis with the real Twilio client pointed at a local stub (or at Twilio with
+`--live --to`), on a compressed clock, fed real envelopes — see "Testing the
+incident call escalation" in `README.md`. `cmd/ladder-harness` is the older,
+engine-less tool. `matrix_test.go` walks all fourteen rules against all five
+priorities; `store_test.go` runs against a real Redis when one is reachable
+(`REDIS_URL` first, then `REDIS_ADDR`) and skips otherwise.
 
 ## Running locally
 
