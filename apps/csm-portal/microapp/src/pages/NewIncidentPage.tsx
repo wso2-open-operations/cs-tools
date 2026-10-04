@@ -255,7 +255,7 @@ export default function NewIncidentPage() {
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary">
-            (computed by ServiceNow on creation — not sent)
+            (computed by the backing data source on creation — not sent)
           </Typography>
         </Stack>
 

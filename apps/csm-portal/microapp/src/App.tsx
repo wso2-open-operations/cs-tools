@@ -14,35 +14,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useLayoutEffect } from "react";
+import { lazy, useLayoutEffect } from "react";
 import { HashRouter as Router, Route, Routes } from "react-router-dom";
 import MainLayout from "@components/layout/MainLayout";
 import { requestDeviceSafeAreaInsets } from "@components/microapp-bridge";
 import { refreshToken } from "@src/services/auth";
 import { Logger } from "@utils/logger";
-import HomePage from "@pages/HomePage";
-import SupportPage from "@pages/SupportPage";
-import CaseDetailPage from "@pages/CaseDetailPage";
-import NewCasePage from "@pages/NewCasePage";
-import OperationsPage from "@pages/OperationsPage";
-import NewChangeRequestPage from "@pages/NewChangeRequestPage";
-import NewServiceRequestPage from "@pages/NewServiceRequestPage";
-import NewIncidentPage from "@pages/NewIncidentPage";
-import ChangeRequestDetailPage from "@pages/ChangeRequestDetailPage";
-import IncidentDetailPage from "@pages/IncidentDetailPage";
-import MorePage from "@pages/MorePage";
-import AnnouncementsPage from "@pages/AnnouncementsPage";
-import TimeCardsPage from "@pages/TimeCardsPage";
-import SecurityCenterPage from "@pages/SecurityCenterPage";
-import NewSecurityReportPage from "@pages/NewSecurityReportPage";
-import UpdatesPage from "@pages/UpdatesPage";
-import EngagementsPage from "@pages/EngagementsPage";
-import CustomersPage from "@pages/CustomersPage";
-import AccountDetailPage from "@pages/AccountDetailPage";
-import ProjectDetailPage from "@pages/ProjectDetailPage";
-import VulnerabilityDetailPage from "@pages/VulnerabilityDetailPage";
-import SettingsPage from "@pages/SettingsPage";
-import ProfilePage from "@pages/ProfilePage";
+
+// Each route loads on demand so the first paint does not pay for every screen.
+const HomePage = lazy(() => import("@pages/HomePage"));
+const SupportPage = lazy(() => import("@pages/SupportPage"));
+const CaseDetailPage = lazy(() => import("@pages/CaseDetailPage"));
+const NewCasePage = lazy(() => import("@pages/NewCasePage"));
+const OperationsPage = lazy(() => import("@pages/OperationsPage"));
+const NewChangeRequestPage = lazy(() => import("@pages/NewChangeRequestPage"));
+const NewServiceRequestPage = lazy(() => import("@pages/NewServiceRequestPage"));
+const NewIncidentPage = lazy(() => import("@pages/NewIncidentPage"));
+const ChangeRequestDetailPage = lazy(() => import("@pages/ChangeRequestDetailPage"));
+const IncidentDetailPage = lazy(() => import("@pages/IncidentDetailPage"));
+const MorePage = lazy(() => import("@pages/MorePage"));
+const AnnouncementsPage = lazy(() => import("@pages/AnnouncementsPage"));
+const TimeCardsPage = lazy(() => import("@pages/TimeCardsPage"));
+const SecurityCenterPage = lazy(() => import("@pages/SecurityCenterPage"));
+const NewSecurityReportPage = lazy(() => import("@pages/NewSecurityReportPage"));
+const UpdatesPage = lazy(() => import("@pages/UpdatesPage"));
+const EngagementsPage = lazy(() => import("@pages/EngagementsPage"));
+const CustomersPage = lazy(() => import("@pages/CustomersPage"));
+const AccountDetailPage = lazy(() => import("@pages/AccountDetailPage"));
+const ProjectDetailPage = lazy(() => import("@pages/ProjectDetailPage"));
+const VulnerabilityDetailPage = lazy(() => import("@pages/VulnerabilityDetailPage"));
+const SettingsPage = lazy(() => import("@pages/SettingsPage"));
+const ProfilePage = lazy(() => import("@pages/ProfilePage"));
 
 export default function App() {
   useLayoutEffect(() => {

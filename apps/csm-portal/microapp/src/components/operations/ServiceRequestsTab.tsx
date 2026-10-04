@@ -159,7 +159,9 @@ function ServiceRequestListContent({
 
   // sortBy: updatedOn desc is sent on every request (see cases.ts) but isn't reliably honored
   // upstream — re-sort client-side as a backstop. See compareByUpdatedOnDesc for why.
-  const items = data.pages.flatMap((page) => page.items).sort((a, b) => compareByUpdatedOnDesc(a.updatedOn, b.updatedOn));
+  const items = data.pages
+    .flatMap((page) => page.items)
+    .sort((a, b) => compareByUpdatedOnDesc(a.updatedOn, b.updatedOn));
 
   if (items.length === 0) return <EmptyState message={TAB_CONFIG.service_request.emptyMessage} />;
 

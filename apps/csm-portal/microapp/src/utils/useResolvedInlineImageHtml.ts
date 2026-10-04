@@ -15,9 +15,10 @@
 // under the License.
 
 import { useMemo } from "react";
+import DOMPurify from "dompurify";
 import { useQueries } from "@tanstack/react-query";
 import { attachments } from "@src/services/attachments";
-import { extractIixAttachmentIds, replaceInlineImageSrcs, sysidToUuid } from "./inlineImages";
+import { extractIixAttachmentIds, replaceInlineImageSrcs, compactIdToUuid } from "./inlineImages";
 
 const SAFE_IMAGE_SUBTYPES = /^(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/i;
 
@@ -49,7 +50,12 @@ function blobToDataUrl(blob: Blob): Promise<string | null> {
  * the webapp's identical hook (features/csm-cases/api/useResolvedInlineImageHtml.ts) — both apps
  * read the same csm-portal backend and the same `.iix` inline-image convention.
  *
- * @param html - Sanitized HTML that may contain `.iix` `<img>` src references.
+ * Sanitising is the last step: the `.iix` references are rewritten on the raw HTML and the result
+ * is passed through DOMPurify afterwards, so nothing rewrites markup that was already sanitised.
+ * The returned `resolvedHtml` is safe to render with `dangerouslySetInnerHTML`; callers must not
+ * modify it further.
+ *
+ * @param html - Raw (unsanitised) HTML that may contain `.iix` `<img>` src references.
  */
 export function useResolvedInlineImageHtml(html: string): { resolvedHtml: string; isLoading: boolean } {
   const attachmentIds = useMemo(() => extractIixAttachmentIds(html), [html]);
@@ -58,10 +64,10 @@ export function useResolvedInlineImageHtml(html: string): { resolvedHtml: string
     queries: attachmentIds.map((id) => ({
       queryKey: ["attachment", "inline-preview", id],
       queryFn: async (): Promise<string | null> => {
-        // The extracted id is a bare 32-char sysid; the content endpoint requires the canonical
+        // The extracted id is a bare 32-char hex id; the content endpoint requires the canonical
         // UUID shape (hyphens re-inserted), same as every other attachment id sent to this
         // backend.
-        const blob = await attachments.getContentById(sysidToUuid(id));
+        const blob = await attachments.getContentById(compactIdToUuid(id));
         const mimeType = toSafeMimeType(blob.type);
         if (!mimeType) return null;
         return blobToDataUrl(blob);
@@ -90,7 +96,7 @@ export function useResolvedInlineImageHtml(html: string): { resolvedHtml: string
     .join(",");
 
   const resolvedHtml = useMemo(
-    () => replaceInlineImageSrcs(html, dataUrls),
+    () => DOMPurify.sanitize(replaceInlineImageSrcs(html, dataUrls)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [html, dataUrlsKey],
   );

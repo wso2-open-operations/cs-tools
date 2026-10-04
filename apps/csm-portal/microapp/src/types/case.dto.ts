@@ -149,7 +149,7 @@ export interface CaseSearchViewDto {
   // This comment used to claim the case-search view returns the creator's email as a plain
   // string, unlike the by-id detail view. That was never true: openapi.yaml documents
   // CaseSearchView.createdBy as the same nullable UserReference ({id, email, name}) as the
-  // detail view, and live data confirms it (e.g. {"id":null,"email":"hesara@wso2.com","name":""}).
+  // detail view, and live data confirms it (e.g. {"id":null,"email":"jane.doe@example.com","name":""}).
   // Rendering this directly as a string (AnnouncementCard.tsx, which shows CaseSummary.createdBy)
   // crashed with "Objects are not valid as a React child" and nothing caught it, so the whole
   // Announcements page went blank. Same bug class as CaseCommentDto/AttachmentViewDto/CaseViewDto's
@@ -250,7 +250,7 @@ export interface CaseCommentCreatePayloadDto {
 // openapi.yaml declares POST /cases/{id}/comments' 201 response as the full CaseComment shape,
 // but the live response is actually a thin ack — {message, comment: {id, createdOn, createdBy}},
 // missing type/content/caseId entirely (confirmed live: {"message":"Comment created
-// successfully","comment":{"id":"...","createdOn":"...","createdBy":"hesara@wso2.com"}}).
+// successfully","comment":{"id":"...","createdOn":"...","createdBy":"jane.doe@example.com"}}).
 // Matches the webapp's own documented workaround for this same gap (usePostCsmCaseComment.ts) —
 // don't try to build a full Comment from this response; refetch the list instead.
 export interface CaseCommentCreateResponseDto {
@@ -270,7 +270,8 @@ export interface CasePatchPayloadDto {
   state?: CaseState;
   severity?: CaseSeverity;
   workState?: NonNullable<CaseWorkState>;
-  assigneeEmail?: string;
+  /** An email assigns the case; an explicit `null` clears the assignee. */
+  assigneeEmail?: string | null;
   resolutionCode?: CaseResolutionCode;
   cause?: CaseCause;
   closeNotes?: string;

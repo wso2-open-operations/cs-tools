@@ -38,8 +38,7 @@ interface CommentComposerProps {
 }
 
 /** `work_note` is restricted to internal users server-side — both options are offered here since
- * every microapp user is internal staff (see reference_csm_operations memory: no customer-facing
- * login path exists in this app). `activity` is system/backend-generated only, not user-postable.
+ * every microapp user is internal staff (this app has no customer-facing login path). `activity` is system/backend-generated only, not user-postable.
  *
  * Two independent gates, transcribed from the backend's actual guard (CreateCaseComment in
  * backend/internal/handler/cases.go — not the openapi.yaml doc, which omits both rules):

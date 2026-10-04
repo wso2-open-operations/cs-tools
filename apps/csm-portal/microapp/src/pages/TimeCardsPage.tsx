@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Alert, Skeleton, Stack, Tab, Tabs, Typography } from "@wso2/oxygen-ui";
 import { SlidersHorizontal } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -27,12 +27,7 @@ import {
 import { timecards, type TimeSheetsView } from "@src/services/timecards";
 import { users } from "@src/services/users";
 import type { CsmTimeCard, TimeCardDecisionInput } from "@src/types";
-import {
-  countActiveTimecardFilters,
-  EMPTY_TIMECARD_FILTERS,
-  isTimecardApprover,
-  type TimeCardFilters,
-} from "@utils/timecard";
+import { countActiveTimecardFilters, EMPTY_TIMECARD_FILTERS, type TimeCardFilters } from "@utils/timecard";
 import { EmptyState } from "@components/support/EmptyState";
 import { ErrorState } from "@components/support/ErrorState";
 import { TimeSheetCard } from "@components/timecards/TimeSheetCard";
@@ -48,11 +43,13 @@ interface ReviewTarget {
 
 export default function TimeCardsPage() {
   const { data: me } = useQuery(users.me());
-  const isApprover = useMemo(() => isTimecardApprover(me?.roles ?? []), [me?.roles]);
+  // The approvals queue is scoped server-side to the platform user id from /users/me (`approverId`)
+  // and the backend decides who may approve, so the tab is offered to every signed-in user and a
+  // user with nothing to approve simply sees an empty queue. No role strings are interpreted here.
+  const hasApprovalsTab = !!me?.id;
 
   const [tab, setTab] = useState<TimeCardTab>("mine");
-  // If a non-approver somehow lands on the approvals tab (e.g. role loads late), fall back to mine.
-  const activeTab: TimeCardTab = tab === "approvals" && !isApprover ? "mine" : tab;
+  const activeTab: TimeCardTab = tab === "approvals" && !hasApprovalsTab ? "mine" : tab;
 
   const [review, setReview] = useState<ReviewTarget | null>(null);
   const [filters, setFilters] = useState<TimeCardFilters>(EMPTY_TIMECARD_FILTERS);
@@ -119,7 +116,7 @@ export default function TimeCardsPage() {
       <Tabs value={activeTab} onChange={(_, value: TimeCardTab) => setTab(value)}>
         <Tab label="My sheets" value="mine" disableRipple />
         <Tab label="All" value="all" disableRipple />
-        {isApprover && <Tab label="Approvals" value="approvals" disableRipple />}
+        {hasApprovalsTab && <Tab label="Approvals" value="approvals" disableRipple />}
       </Tabs>
 
       <SheetListView

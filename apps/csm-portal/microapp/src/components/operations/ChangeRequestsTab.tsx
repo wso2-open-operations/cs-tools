@@ -156,7 +156,9 @@ function ChangeRequestListContent({ search, filters }: { search: string; filters
 
   // sortBy: updatedOn desc is sent on every request (see changeRequests.ts) but isn't reliably
   // honored upstream — re-sort client-side as a backstop. See compareByUpdatedOnDesc for why.
-  const items = data.pages.flatMap((page) => page.items).sort((a, b) => compareByUpdatedOnDesc(a.updatedOn, b.updatedOn));
+  const items = data.pages
+    .flatMap((page) => page.items)
+    .sort((a, b) => compareByUpdatedOnDesc(a.updatedOn, b.updatedOn));
 
   if (items.length === 0) return <EmptyState message="No change requests found." />;
 

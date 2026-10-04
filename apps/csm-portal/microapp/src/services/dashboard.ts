@@ -18,6 +18,8 @@ import { queryOptions } from "@tanstack/react-query";
 import type { CaseSearchFiltersDto, CaseSeverity, CaseState } from "@src/types";
 import { ALL_SEVERITIES } from "@components/support/config";
 import { ASSIGNED_TO_ME_STATES, COMPOSITION_STATES } from "@components/home/config";
+import { CASES_AGGREGATE_ENDPOINT } from "@config/endpoints";
+import apiClient from "./apiClient";
 import { getAllCases, type CaseSearchResult } from "./cases";
 
 // Mirrors the webapp's CaseComposition (useCaseComposition.ts): a 1-D breakdown by severity and a
@@ -33,11 +35,65 @@ export interface CaseComposition {
 
 const EMPTY_RESULT: CaseSearchResult = { items: [], total: 0, limit: 0, offset: 0, hasMore: false };
 
-// The backend has no count/aggregation endpoint, so — like the webapp — this fans out
-// count-only searches (`limit: 1`, read `.total`): one per severity (scoped to active states) and
-// one per active state (scoped to every severity), plus one for the closed total. 11 requests,
-// fired in parallel.
-async function fetchComposition(): Promise<CaseComposition> {
+interface AggregateBucketDto {
+  key?: string;
+  label?: string;
+  count?: number;
+}
+
+interface AggregateResponseDto {
+  groups?: AggregateBucketDto[];
+  othersCount?: number;
+  totalRecords?: number;
+}
+
+const aggregateCases = async (groupBy: "severity" | "state", filters: CaseSearchFiltersDto) => {
+  const { data } = await apiClient.post<AggregateResponseDto>(CASES_AGGREGATE_ENDPOINT, { filters, groupBy });
+  return data;
+};
+
+const normalizeBucketName = (raw: string | undefined): string =>
+  (raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+// Maps aggregate buckets onto the known values. Returns null when any non-empty bucket cannot be
+// matched (or part of the result was folded into an "others" remainder), so the caller can fall
+// back to the exact per-value counts instead of showing wrong numbers.
+function bucketsToCounts<T extends string>(
+  response: AggregateResponseDto,
+  values: readonly T[],
+  match: (normalized: string) => T | undefined,
+): Record<T, number> | null {
+  if ((response.othersCount ?? 0) > 0 || !Array.isArray(response.groups)) return null;
+  const counts = Object.fromEntries(values.map((v) => [v, 0])) as Record<T, number>;
+  for (const bucket of response.groups) {
+    const count = bucket.count ?? 0;
+    if (count === 0) continue;
+    const value = match(normalizeBucketName(bucket.key)) ?? match(normalizeBucketName(bucket.label));
+    if (!value) return null;
+    counts[value] += count;
+  }
+  return counts;
+}
+
+// Severity values may arrive decorated (for example "1 - Critical"), so also accept a bucket name
+// that contains exactly one severity word.
+const severityMatch = (normalized: string): CaseSeverity | undefined => {
+  const exact = ALL_SEVERITIES.find((s) => s === normalized);
+  if (exact) return exact;
+  const contained = ALL_SEVERITIES.filter((s) => normalized.split("_").includes(s));
+  return contained.length === 1 ? contained[0] : undefined;
+};
+
+const ALL_COMPOSITION_STATES: CaseState[] = [...COMPOSITION_STATES, "closed"];
+const stateMatch = (normalized: string): CaseState | undefined => ALL_COMPOSITION_STATES.find((s) => s === normalized);
+
+// Count-only searches (`limit: 1`, read `.total`): one per severity (scoped to active states), one
+// per active state (scoped to every severity), plus one for the closed total: 11 requests. Used
+// only as the fallback when the aggregate buckets cannot be mapped.
+async function fetchCompositionByCounts(): Promise<CaseComposition> {
   const countOf = (filters: CaseSearchFiltersDto): Promise<number> =>
     getAllCases({ filters: { types: ["case"], ...filters }, pagination: { limit: 1 } }).then((r) => r.total);
 
@@ -63,9 +119,31 @@ async function fetchComposition(): Promise<CaseComposition> {
   return { bySeverity, byState, severityTotal, stateTotal, closedTotal };
 }
 
+// Two aggregate requests (by severity over active states, by state over active plus closed)
+// replace the 11 count searches; any response that cannot be mapped cleanly falls back to them.
+async function fetchComposition(): Promise<CaseComposition> {
+  try {
+    const [severityResponse, stateResponse] = await Promise.all([
+      aggregateCases("severity", { types: ["case"], states: COMPOSITION_STATES }),
+      aggregateCases("state", { types: ["case"], severities: ALL_SEVERITIES, states: ALL_COMPOSITION_STATES }),
+    ]);
+    const bySeverity = bucketsToCounts(severityResponse, ALL_SEVERITIES, severityMatch);
+    const stateCounts = bucketsToCounts(stateResponse, ALL_COMPOSITION_STATES, stateMatch);
+    if (bySeverity && stateCounts) {
+      const byState = { ...stateCounts, reopened: 0 } as Record<CaseState, number>;
+      const severityTotal = Object.values(bySeverity).reduce((sum, n) => sum + n, 0);
+      const stateTotal = COMPOSITION_STATES.reduce((sum, state) => sum + byState[state], 0);
+      return { bySeverity, byState, severityTotal, stateTotal, closedTotal: stateCounts.closed };
+    }
+  } catch {
+    // Fall through to the per-value counts below.
+  }
+  return fetchCompositionByCounts();
+}
+
 export const dashboard = {
   // Same active-vs-closed split the webapp's dashboard donuts show; staleTime keeps a page
-  // revisit from re-firing all 11 requests immediately.
+  // revisit from re-firing the requests immediately.
   composition: () =>
     queryOptions({
       queryKey: ["dashboard", "composition"],

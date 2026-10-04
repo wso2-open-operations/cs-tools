@@ -38,20 +38,6 @@ export interface EngineerOption {
 // OpenAPI spec documenting up to 100 (confirmed live).
 export const TIME_CARD_MAX_PAGE_LIMIT = 50;
 
-// Role that grants approve/reject on time cards, matched (case-insensitively)
-// against `roles` from `GET /users/me`.
-export const TIMECARD_APPROVER_ROLE = "timecard_approver";
-
-// Time-card admin (approve by exception). Mapped to the real "admin" role for
-// now; revisit once dedicated time-card roles are provisioned.
-export const TIMECARD_ADMIN_ROLE = "admin";
-
-/** True when `roles` (from `GET /users/me`) grants time-card approval. */
-export function isTimecardApprover(roles: string[]): boolean {
-  const lower = roles.map((r) => r.toLowerCase());
-  return lower.includes(TIMECARD_APPROVER_ROLE.toLowerCase()) || lower.includes(TIMECARD_ADMIN_ROLE.toLowerCase());
-}
-
 // Label + MUI chip colour for each card state (drives the status chip).
 // `recalled`/`processed` are unreachable via the portal API but kept for
 // type completeness.

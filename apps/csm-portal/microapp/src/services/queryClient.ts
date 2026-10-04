@@ -14,6 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-export const ErrorMessages = {
-  NATIVE_BRIDGE_NOT_AVAILABLE: "Native bridge is not available",
-};
+import { QueryClient } from "@tanstack/react-query";
+import axios from "axios";
+
+/**
+ * Application-wide React Query client. Lives in its own module so that the session code can
+ * clear the cache on sign-out without importing the React tree.
+ */
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+          if (status && status >= 400 && status < 500) return false;
+        }
+        return failureCount < 3;
+      },
+    },
+  },
+});

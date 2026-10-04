@@ -44,9 +44,12 @@ const ADMIN_USERS_PAGE_LIMIT = 20;
 // generic internal-user roles ("internal"/"agent"/"admin") instead — the webapp's own past bug,
 // since fixed there — let a submitter pick literally anyone at the company; here it did the
 // opposite, since none of the ServiceNow accounts actually eligible to approve carry those
-// generic role tags, so the search always came back empty (digiops-cs#2805).
+// generic role tags, so the search always came back empty.
 const TIMECARD_APPROVER_GROUP = "timecard_approver";
 const APPROVER_SEARCH_LIMIT = 6;
+
+// Internal-staff roles, the same set the main webapp's internal-only user pickers search.
+const INTERNAL_USER_ROLES = ["internal", "agent", "admin"];
 
 export const adminUsers = {
   // Mirrors the webapp's useSearchUsers.ts (POST /users/search), paged via infinite scroll —
@@ -76,5 +79,21 @@ export const adminUsers = {
           pagination: { offset: 0, limit: APPROVER_SEARCH_LIMIT },
         }),
       enabled: searchQuery.trim().length > 0,
+    }),
+
+  // Paged type-ahead search over internal staff, for assignee filters. Never returns customers or
+  // external users. Needs a non-empty query, like `search`.
+  searchInternal: (searchQuery: string) =>
+    infiniteQueryOptions({
+      queryKey: ["admin-users", "search-internal", searchQuery],
+      queryFn: ({ pageParam }) =>
+        searchUsers({
+          filters: { searchQuery, roleIds: INTERNAL_USER_ROLES, active: true },
+          sortBy: { field: "name", order: "asc" },
+          pagination: { offset: pageParam, limit: ADMIN_USERS_PAGE_LIMIT },
+        }),
+      initialPageParam: 0,
+      getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
+      enabled: searchQuery.length > 0,
     }),
 };

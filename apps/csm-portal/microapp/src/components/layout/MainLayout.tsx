@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box } from "@wso2/oxygen-ui";
+import { Suspense } from "react";
+import { Box, CircularProgress } from "@wso2/oxygen-ui";
 import { Outlet } from "react-router-dom";
 import { TabBar } from "./TabBar";
 import { TopBar } from "./TopBar";
@@ -28,7 +29,15 @@ export default function MainLayout() {
       <TopBar />
 
       <Box component="main" flexGrow={1} p={2} pb={15}>
-        <Outlet />
+        <Suspense
+          fallback={
+            <Box display="flex" justifyContent="center" py={6}>
+              <CircularProgress size={28} aria-label="Loading" />
+            </Box>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </Box>
       <TabBar />
     </>

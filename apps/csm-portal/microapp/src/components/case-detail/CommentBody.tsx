@@ -16,7 +16,6 @@
 
 import { useState } from "react";
 import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
-import DOMPurify from "dompurify";
 import { useResolvedInlineImageHtml } from "@utils/useResolvedInlineImageHtml";
 
 // Some comments (state-change audit entries, etc.) carry real HTML (`<br><p>...</p>`) rather than
@@ -52,15 +51,10 @@ export function CommentBody({ content }: { content: string }) {
   const truncated = isLong && !expanded;
   const shown = truncated ? content.slice(0, TRUNCATE_AT) : content;
 
-  // Sanitize the sliced content on its own, then append the ellipsis outside the sanitized HTML
-  // — appending it before sanitizing risks DOMPurify swallowing it while repairing a tag the
-  // slice cut through mid-way.
-  const sanitized = isHtml ? DOMPurify.sanitize(shown) : "";
-  // Resolve `.iix` inline-image references against the already-sanitized HTML, mirroring the
-  // webapp's CsmCaseCommentBubble (sanitize, then useResolvedInlineImageHtml on the result) —
-  // comment/description HTML embeds inline images as auth-gated `.iix` refs the WebView can't
-  // fetch directly; nothing rendered this before, so images silently never appeared.
-  const { resolvedHtml, isLoading: imagesLoading } = useResolvedInlineImageHtml(sanitized);
+  // Resolve `.iix` inline-image references (comment/description HTML embeds images as auth-gated
+  // refs the WebView can't fetch directly). The hook sanitises its output as the final step, so
+  // the sliced content is passed in raw and the ellipsis is appended outside the HTML.
+  const { resolvedHtml, isLoading: imagesLoading } = useResolvedInlineImageHtml(isHtml ? shown : "");
 
   return (
     <Box sx={{ overflowWrap: "anywhere" }}>

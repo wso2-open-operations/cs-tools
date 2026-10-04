@@ -16,27 +16,17 @@
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { OxygenUIThemeProvider } from "@wso2/oxygen-ui";
-import axios from "axios";
 import App from "@src/App";
 import { AppErrorBoundary } from "@components/common/AppErrorBoundary";
+import { clearSession } from "@src/services/auth";
+import { queryClient } from "@src/services/queryClient";
 import theme from "./theme";
 import "@src/index.css";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (failureCount, error) => {
-        if (axios.isAxiosError(error)) {
-          const status = error.response?.status;
-          if (status && status >= 400 && status < 500) return false;
-        }
-        return failureCount < 3;
-      },
-    },
-  },
-});
+// Entry point for the host app to end the session when the user signs out.
+window.csmMicroApp = { clearSession };
 
 const container = document.getElementById("root");
 if (!container) throw new Error("Root container missing");

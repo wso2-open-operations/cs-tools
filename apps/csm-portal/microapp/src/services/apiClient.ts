@@ -30,9 +30,6 @@ let failedQueue: {
   reject: (reason?: unknown) => void;
 }[] = [];
 
-// Holds the refresh token promise
-let refreshTokenPromise: Promise<string | null> | null = null;
-
 // axios instance
 const apiClient = axios.create({
   baseURL: BACKEND_URL,
@@ -53,16 +50,9 @@ apiClient.interceptors.request.use(
       fullURL: `${config.baseURL || ""}${config.url || ""}`,
     });
 
-    // Use a singleton promise for token refresh
-    if (!refreshTokenPromise) {
-      refreshTokenPromise = refreshToken().finally(() => {
-        // Reset the promise once it's resolved or rejected
-        refreshTokenPromise = null;
-      });
-    }
-
+    // refreshToken() owns the single in-flight refresh shared with every other caller.
     try {
-      const idToken = await refreshTokenPromise;
+      const idToken = await refreshToken();
       const accessToken = getAccessToken();
       if (idToken && accessToken) {
         config.headers.Authorization = `Bearer ${accessToken}`;
@@ -103,13 +93,13 @@ const processQueue = (error: unknown, token: string | null = null) => {
 apiClient.interceptors.response.use(
   (response) => {
     // Any status code within the range of 2xx causes this function to trigger. Logs only the
-    // response's size, not its content — response bodies here can carry user PII (email, phone)
-    // and case content, and this log forwards to the native bridge via sendNativeLog.
+    // status line, never the body: response bodies here can carry user PII (email, phone) and case
+    // content, this log forwards to the native bridge via sendNativeLog, and serialising a large
+    // body just to measure it is wasted work on a phone.
     Logger.info(`Successful response from ${response.config.method?.toUpperCase()} ${response.config.url}`, {
       status: response.status,
       statusText: response.statusText,
       url: response.config.url,
-      dataSize: response.data ? JSON.stringify(response.data).length : 0,
     });
     return response;
   },

@@ -235,22 +235,36 @@ function CaseDetailContent({ id }: { id: string }) {
     // The backend has no single atomic "assign + start + go ongoing" operation (one field per
     // PATCH — see CasePatchPayloadDto), so this is three sequential PATCHes. The proactive
     // conflict check (goOngoingWithConflictGuard) keeps ANY of them from running until it's
-    // clear — but the reactive fallback in runOngoingAction only catches a conflict on THIS
-    // action's own last step (workState: ongoing), by which point the assignee/state PATCHes
-    // have already landed. Revert them here before re-throwing, so the pause-conflict dialog's
-    // Cancel still leaves the case untouched even on that race, matching the invariant documented
-    // on pendingOngoingAction above.
+    // clear — but a later step can still fail (the reactive 409 in runOngoingAction only fires on
+    // the last step, and any step can fail on a network or backend error), by which point the
+    // earlier PATCHes have already landed. Undo exactly the steps that succeeded, newest first,
+    // before re-throwing, so a failure or the pause-conflict dialog's Cancel leaves the case
+    // untouched, matching the invariant documented on pendingOngoingAction above. Each undo is
+    // guarded on its own: one failing must neither skip the next nor replace the original error.
+    // (A typed, server-side conflict endpoint would make this client-side compensation
+    // unnecessary; until then it is best-effort.)
     const originalAssigneeEmail = caseDetail.assignedEngineer?.email ?? null;
     const originalState = caseDetail.state;
     const action = async (): Promise<void> => {
-      if (!alreadyMine) await cases.patch(id, { assigneeEmail: currentUserEmail as string });
-      await cases.patch(id, { state: "work_in_progress" });
-      invalidateCase();
+      const undo: { label: string; run: () => Promise<unknown> }[] = [];
       try {
+        if (!alreadyMine) {
+          await cases.patch(id, { assigneeEmail: currentUserEmail as string });
+          // A null email restores an originally-unassigned case to unassigned.
+          undo.push({ label: "assignee", run: () => cases.patch(id, { assigneeEmail: originalAssigneeEmail }) });
+        }
+        await cases.patch(id, { state: "work_in_progress" });
+        undo.push({ label: "state", run: () => cases.patch(id, { state: originalState }) });
+        invalidateCase();
         await cases.patch(id, { workState: "ongoing" });
       } catch (error) {
-        await cases.patch(id, { state: originalState });
-        if (!alreadyMine && originalAssigneeEmail) await cases.patch(id, { assigneeEmail: originalAssigneeEmail });
+        for (const step of undo.reverse()) {
+          try {
+            await step.run();
+          } catch (undoError) {
+            Logger.warn(`[start-work] could not restore the case ${step.label}`, undoError);
+          }
+        }
         invalidateCase();
         throw error;
       }
