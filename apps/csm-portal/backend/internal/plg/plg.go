@@ -52,6 +52,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/handler"
 	plgmw "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/service"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/upstreamhttp"
 )
 
 // RouteFunc registers one route with the permission its caller must hold.
@@ -243,7 +244,7 @@ func entityHTTPClient(cfg config.OAuth2Config, timeout time.Duration) *http.Clie
 		cc.Scopes = strings.Split(cfg.Scope, ",")
 	}
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
-		&http.Client{Timeout: timeout})
+		upstreamhttp.TokenClient(timeout))
 	client := cc.Client(tokenCtx)
 	client.Timeout = timeout
 	return client

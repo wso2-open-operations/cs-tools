@@ -16,7 +16,10 @@
 
 package servicenow
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // ErrUnsafeQueryValue is returned by SanitizeQueryValue when value cannot be
 // safely interpolated into a ServiceNow encoded query (sysparm_query)
@@ -54,6 +57,9 @@ func SanitizeQueryValue(value string) error {
 	if strings.ContainsRune(value, '^') {
 		return &ErrUnsafeQueryValue{Value: value}
 	}
+	if strings.Contains(strings.ToLower(value), "javascript:") {
+		return &ErrUnsafeQueryValue{Value: value}
+	}
 	for _, r := range value {
 		if r < 0x20 || r == 0x7f {
 			return &ErrUnsafeQueryValue{Value: value}
@@ -74,4 +80,36 @@ func BuildEncodedQuery(clauses ...string) string {
 		}
 	}
 	return strings.Join(nonEmpty, "^")
+}
+
+var (
+	recordNumberRe = regexp.MustCompile(`^[A-Za-z]{2,5}[0-9]{1,20}$`)
+	sysIDRe        = regexp.MustCompile(`^[0-9a-f]{32}$`)
+)
+
+// ValidateRecordNumber accepts only a record number (2-5 letters then
+// digits, e.g. a case number). Used instead of SanitizeQueryValue for values
+// that are always record numbers.
+func ValidateRecordNumber(value string) error {
+	if !recordNumberRe.MatchString(value) {
+		return &ErrUnsafeQueryValue{Value: value}
+	}
+	return nil
+}
+
+// ValidateSysID accepts only a 32-character lower-case hexadecimal record id.
+func ValidateSysID(value string) error {
+	if !sysIDRe.MatchString(value) {
+		return &ErrUnsafeQueryValue{Value: value}
+	}
+	return nil
+}
+
+// ValidateRecordNumberOrSysID accepts either shape, for parameters that are
+// documented as one but reached with the other on some paths.
+func ValidateRecordNumberOrSysID(value string) error {
+	if recordNumberRe.MatchString(value) || sysIDRe.MatchString(value) {
+		return nil
+	}
+	return &ErrUnsafeQueryValue{Value: value}
 }

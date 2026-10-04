@@ -54,7 +54,7 @@ func (h *UsersHandler) withPortalRoles(ctx context.Context, raw []byte, callerID
 
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		slog.WarnContext(ctx, "withPortalRoles: decode user profile failed", "userID", callerID, "err", err)
+		slog.WarnContext(ctx, "withPortalRoles: decode user profile failed", "userID", callerID, "err", summarizeErr(err))
 		return raw
 	}
 
@@ -72,7 +72,7 @@ func (h *UsersHandler) withPortalRoles(ctx context.Context, raw []byte, callerID
 
 	info, err := h.scim.SearchUser(ctx, identity.Email)
 	if err != nil {
-		slog.WarnContext(ctx, "withPortalRoles: scim SearchUser failed", "userID", callerID, "err", err)
+		slog.WarnContext(ctx, "withPortalRoles: scim SearchUser failed", "userID", callerID, "err", summarizeErr(err))
 		return raw
 	}
 	if info == nil {
@@ -89,14 +89,14 @@ func (h *UsersHandler) withPortalRoles(ctx context.Context, raw []byte, callerID
 
 	encoded, err := json.Marshal(h.access.RolesFor(csmRoles))
 	if err != nil {
-		slog.WarnContext(ctx, "withPortalRoles: encode roles failed", "userID", callerID, "err", err)
+		slog.WarnContext(ctx, "withPortalRoles: encode roles failed", "userID", callerID, "err", summarizeErr(err))
 		return raw
 	}
 	envelope["roles"] = encoded
 
 	out, err := json.Marshal(envelope)
 	if err != nil {
-		slog.WarnContext(ctx, "withPortalRoles: encode user profile failed", "userID", callerID, "err", err)
+		slog.WarnContext(ctx, "withPortalRoles: encode user profile failed", "userID", callerID, "err", summarizeErr(err))
 		return raw
 	}
 	return out

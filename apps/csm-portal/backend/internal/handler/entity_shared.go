@@ -137,7 +137,7 @@ type entityProjectDetailsView struct {
 
 // caseStateToDisplay translates entity-service's domain.CaseState wire
 // values (lowercase snake_case, e.g. "work_in_progress") to the six display
-// labels SPL's UI has always used, which are exactly ServiceNow's own state
+// labels SPL's UI has always used, which are exactly the backing system's own state
 // labels (e.g. "Work In Progress") -- see CaseStateCard.tsx/CasesPage.tsx
 // on the frontend, which are NOT changing as part of this.
 var caseStateToDisplay = map[string]string{
@@ -151,7 +151,7 @@ var caseStateToDisplay = map[string]string{
 }
 
 // derefStr returns "" for a nil pointer, matching servicenow.CaseDetails's
-// own convention of empty-string-not-omitted for a field ServiceNow itself
+// own convention of empty-string-not-omitted for a field the backing system itself
 // never leaves absent.
 func derefStr(s *string) string {
 	if s == nil {

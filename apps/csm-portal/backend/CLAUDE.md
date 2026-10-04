@@ -4,10 +4,12 @@ Go HTTP server (`net/http`, Go 1.26+) that acts as a backend-for-frontend (BFF) 
 
 ## Middleware chain
 
-`SecurityHeaders → CorrelationID → Auth → Logger → Mux`
+`SecurityHeaders → Recover → CORS → CorrelationID → Auth → Logger → Mux`, and inside the mux every route is `AccessGuard.Require → RedactInlineImages → [ClampSearchPagination on POST …/search] → handler` (see `route()` in `cmd/server/main.go`).
 
-- `SecurityHeaders` (`internal/middleware/security_headers.go`): sets `X-Content-Type-Options: nosniff`, `Content-Security-Policy: upgrade-insecure-requests`, and `Strict-Transport-Security: max-age=31536000; includeSubDomains` on every response; outermost so headers are present even on auth failures
-- `CorrelationID` (`internal/middleware/correlation.go`): reads `X-CSM-Correlation-ID` from the incoming request or generates a UUID v4; stores the ID in context for the slog handler and for the entity client to forward; echoes the ID in the response header
+- `SecurityHeaders` (`internal/middleware/security_headers.go`): sets `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY` on every response; outermost so headers are present even on auth failures. A handler may still override one (download routes set their own `Content-Type`/`Content-Disposition`)
+- `Recover` (`internal/middleware/recover.go`): turns a handler panic into a logged 500 with the standard `{"message": …}` envelope (logging the correlation id from the response header) instead of a dropped connection; re-panics `http.ErrAbortHandler`
+- `CORS` (`internal/middleware/cors.go`): fail-closed allow-list from `CORS_ALLOWED_ORIGINS`; unset allows no cross-origin browser request. Ahead of Auth because a preflight carries no token
+- `CorrelationID` (`internal/middleware/correlation.go`): reads `X-CSM-Correlation-ID` from the incoming request (kept only if it is 1–64 letters, digits or hyphens) or generates a UUID v4; stores the ID in context for the slog handler and for the entity client to forward; echoes the ID in the response header
 - `Auth` (`internal/middleware/auth.go`): validates the `x-jwt-assertion` JWT and sets `UserInfo` in context. When `TokenValidatorEnabled` is true, the JWKS fetch runs through `x5cStrippingTransport`, which strips the `x5c` field from every key before `MicahParks/jwkset` parses the response — some IdPs (Asgardeo included) publish JWKS certs with a negative serial number, which Go's `crypto/x509` rejects since Go 1.23 and would otherwise make the whole JWK Set fail to load, even though verification only needs `n`/`e`. In Choreo deployments `TokenValidatorEnabled` is false (the gateway validates the JWT upstream), so this path only runs in local dev.
 - `Logger` (`internal/middleware/logger.go`): logs every completed request (method, path, status, elapsed) via slog; runs after Auth so both `correlationID` and `userID` are present in every record
 
@@ -21,6 +23,12 @@ Go HTTP server (`net/http`, Go 1.26+) that acts as a backend-for-frontend (BFF) 
 - **The `roles` claim is a string for one role and an array for several** (Asgardeo does this). `middleware.stringList` accepts both; a plain `[]string` would reject a single-role user's whole token with a 401. Any other shape fails the token.
 - **Every route goes through `route(pattern, perm, handler)` in `cmd/server/main.go`.** `perm` is a required argument with no default — pick `PermView` for reads/searches/aggregates, `PermViewOperations` for reads under the Operations area (incidents, change requests, problems, incident tasks, outages, alerts), `PermTimeCardsAndUpdates` for every time-card route and the update-level lookups (CS engineer, admin and time-card approver — viewing/managing, not approving, see `PermApproveTimeCard` below), `PermWrite` for other state changes, `PermAdmin` for the handful of actions reserved for admin alone (currently just `POST /users`, creating a new platform user), `PermViewSecurityCenter` for Security Center (both `/products/vulnerabilities/*` routes; see "Security Center access" below for how `/cases/*` is handled), or one of the narrower ones (`PermEscalate`, `PermDownloadAttachment`). `PermApproveTimeCard` is not a route-level permission at all — see its own note below. Case, incident and change-request comments are `PermWrite`. `PermAuthenticated` (no role needed) is only for the caller's own `/users/me`. `/health` is the only route registered directly on the mux.
 - **The policy is `NewAccessGuard`.** `admin` satisfies every permission, including `PermAdmin`; `cs_engineer` satisfies every other route permission (view, download, write, including comments, security center, time cards and updates) but **not** `PermAdmin`, `PermEscalate`, or `PermApproveTimeCard` — escalating a case and approving a time card are each a dedicated responsibility, held only by their own role (`escalator` / `timecard-approver`) plus admin, the same way `PermAdmin` is admin-only; `escalator`/`attachment-downloader` grant only their one ability plus view (so a view-only role cannot read Operations — `PermViewOperations` is CS engineer and admin only, matching the frontend's `canUseOperations`); `timecard-approver` grants view plus `PermTimeCardsAndUpdates` plus `PermApproveTimeCard`; `usage-metrics-viewer`/`dashboard-designer` grant only view here (no backend route for those features); the frontend gates them. Every role implies view, **except** `PermViewSecurityCenter` — a plain viewer/escalator/attachment_downloader/usage_metrics_viewer/timecard_approver/dashboard_designer holds `PermView` but not this.
+- **The remaining permissions** (all in `internal/handler/access.go`, each with its own doc comment):
+  - `PermViewSharedEntity` — read access to the account/project/case/team-member routes the Sales/Solutions-Architecture screens share with the CSM portal (`GET /cases/{id}`, `POST /cases/search`, `POST /cases/{id}/comments/search`, account/project reads, ...). Every `PermView` holder plus `sales_solutions`, so that role gets this slice without the rest of `PermView`.
+  - `PermViewerAccess` — the audience gate for every SupportPortalLite route (escalations by account, attachments info/download, reports, team schedule, user scan, Drive browsing, usage metrics, customer health). Granted to `viewer`. State-changing customer-health routes and `POST /scan-user` additionally require `PermWrite` inside the handler (`requireViewerWriteAccess` in `internal/handler/auth.go`).
+  - `PermUsageMetricsViewer` — the usage-metrics routes, on top of `PermViewerAccess` (usage-metrics-viewer, CS engineer, admin).
+  - `PermCreateWorkNote` — the route floor of `POST /cases/{id}/comments` (worknote-creator, CS engineer, admin); `CaseHandler` additionally requires `PermWrite` for any non-`work_note` comment.
+  - User listings: `POST /users/search` and `GET /users/{id}` stay `PermView`, but for a caller without `PermWrite` (the user-management screens' permission) the search is forced onto staff roles and an external contact's `projectAccess`/`externalAccount` are omitted (`scopeUserSearchToStaff`, `withoutExternalAccessDetail` in `users.go`).
 - **`PermApproveTimeCard` gates a state transition inside a shared route, not a route of its own.** `PATCH /time-cards/{id}` carries EITHER a plain field edit OR an approve/reject transition (`state: "approved"`/`"rejected"`, entity-service's `UpdateTimeCardRequest`) — the same shared-endpoint problem Security Center's `POST /cases/search` has, solved the identical way: `TimeCardHandler` (wired with `WithAccessGuard`, same pattern as `CaseHandler`) inspects the request body itself (`timeCardUpdateTargetsStateTransition`, checking for a non-nil `state`) and additionally requires `PermApproveTimeCard` only when it's present. A CS engineer without `timecard-approver`/`admin` can still search/create/edit their own time cards (`PermTimeCardsAndUpdates`), just not approve/reject one.
 - **PLG's routes go through this guard too, and through a second one of their own.** `internal/plg/plg.go` registers all 24 as `accessGuard.Require(perm, identity(fn))` — the guard OUTSIDE PLG's `identity` middleware, deliberately, because the guard is a set lookup while `identity` is an entity-service round trip, so a denied caller costs nothing upstream. Two permissions: `PermUsePlg` (CS engineer and admin) for 20 routes, and `PermManagePlaybooks` (admin only) for the four that author a playbook template. `PermUsePlg` is narrower than `PermView` on purpose — every portal role holds `PermView`, but PLG is a worklist staff act on, and a view-only role that could open it would meet a 403 on every control. Reading a playbook (`GET /plg/playbooks`, `GET /plg/playbooks/{id}`) and assigning one to a pairing (`POST .../playbook-runs`) are `PermUsePlg`, NOT `PermManagePlaybooks`: running a template and writing one are different jobs, so gating on the `/plg/playbooks` path prefix would be wrong. `PermManagePlaybooks` is kept separate from `PermAdmin`, which it currently matches exactly, so granting playbook authoring to a future PLG-admin role does not also hand out platform-user creation. `identity` still runs and is not redundant: it resolves the `"user".id` every PLG write records as `actorId`, and refuses anyone who is not ACTIVE INTERNAL staff — a roles claim cannot tell you somebody was offboarded this morning. `internal/plg/routes_access_test.go` pins every route's permission and the middleware ordering.
 - **`GET /users/me` reports `roles`** (from `AccessGuard.RolesFor`): the stable keys of the portal roles the token roles grant — several possible, fixed order — and is **not** the entity service's role data, which the response no longer carries. The frontend decides what to show or hide from these roles (there is deliberately no derived `permissions` list); the backend's `403` is the real gate. Dashboard-designer access is only the `AUTH_DASHBOARD_DESIGNER_ROLES` role (the old `DASHBOARD_DESIGNER_EMAILS` email allow-list is gone).
@@ -116,28 +124,25 @@ different mechanisms, because the feature isn't backed by its own exclusive rout
 - **`/products/vulnerabilities/search` and `/products/vulnerabilities/{id}`** are genuinely
   Security-Center-exclusive, so they're gated the ordinary way: `route(..., handler.PermViewSecurityCenter, ...)`
   in `cmd/server/main.go`.
-- **`POST /cases/search`** is the shared, generic case-search endpoint every case-type tab uses
-  (Support, Operations sub-tabs, Engagements, Security reports) — it stays registered at `PermView`,
-  since narrowing that route-level permission would lock out every other tab too. Instead,
-  `CaseHandler.SearchCases` inspects the request body itself: `caseSearchTargetsSecurityReports`
-  (`internal/handler/cases.go`) reads the generic filter expression (`filters.filters[]`, and each
-  `filters.anyOf[]` branch) for a `{field: "type", op: "in", values: [...]}` predicate naming
-  `security_report_analysis`, and if one is found, additionally requires `PermViewSecurityCenter` via
-  `CaseHandler.access` (wired with `WithAccessGuard`, the same pattern `UsersHandler` uses) —
-  a plain `PermView` caller gets 403 instead of the search running. This only catches an *explicit*
-  request for that type, the same way Security Center's own `caseTypes`-locked search
-  (`CsmIssuesView`, webapp) always sends one; a hypothetical unfiltered "every case type" search that
-  happens to also return security-report rows is a known, narrower gap, not handled here.
-- **`GET /cases/{id}` has no equivalent check, deliberately.** `CaseView.type` (entity-service's own
-  `openapi.yaml`) is only populated for ServiceNow cases — null on Postgres — so there is no reliable
-  way for this handler to tell a security-report case apart from any other by inspecting the response
-  alone, and a check that silently does nothing on one data source would be worse than no check at
-  all (it would look like protection without being any). See `CaseHandler.WithAccessGuard`'s own doc
-  comment for the full reasoning. Practically: since `SearchCases` is now locked down, a non-`cs_engineer`/
-  `admin` caller can no longer *discover* a security-report case's id through the portal at all — the
-  residual gap is a caller who already has one (a pre-existing bookmark, or a guess) fetching it
-  directly by id. Closing that fully needs entity-service itself to resolve and enforce it (it has
-  reliable type data on either data source), not this BFF layer.
+- **`POST /cases/search` and `POST /cases/aggregate`** are the shared, generic case endpoints every
+  case-type tab uses (Support, Operations sub-tabs, Engagements, Security reports) — they stay
+  registered at their route-level view permission, since narrowing it would lock out every other tab
+  too. Instead, for a caller without `PermViewSecurityCenter` (checked via `CaseHandler.access`, wired
+  with `WithAccessGuard` — a handler built without one fails closed), `scopeCaseSearchBody`
+  (`internal/handler/cases.go`) rewrites the body: a `{field: "type", ...}` predicate naming
+  `security_report_analysis` anywhere (top-level `filters.filters[]` or any `filters.anyOf[]` branch)
+  is refused with 403; a top-level type predicate naming only other types is left alone; and when
+  there is no top-level type predicate at all, `{field: "type", op: "in", values: <every other
+  type>}` is appended to `filters.filters[]`. The allow-list (`nonSecurityCaseTypes`) exists because
+  the entity service only accepts `op: in` on `type`, so "not this type" has to be spelled out as
+  "all the others" — keep it in step with the entity service's `validCaseType` set. The rest of the
+  body is carried through as `json.RawMessage`, so nothing else is reshaped.
+- **`GET /cases/{id}`** refuses a loaded case whose `type` is `security_report_analysis` with 403 for
+  such a caller (`caseViewIsSecurityReport`); **`POST /cases/{id}/comments/search`,
+  `POST /cases/{id}/activities/search` and `GET /cases/{id}/escalations`** first load the case through
+  `requireCaseVisibleToCaller` and apply the same test (a holder costs no extra upstream call; a load
+  failure maps like any other upstream error, so an unknown id is still 404). Entity-service populates
+  `CaseView.type` on both data sources, so the check is reliable either way.
 
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
@@ -152,25 +157,21 @@ returns to *any* caller holding `PermView` — there is no separate attachment r
 `canDownloadAttachment`, could see a pasted screenshot in a case comment despite the `.iix` mechanism
 being correctly gated.
 
-`redactRawBase64Images` strips the base64 payload out of raw response bytes (a compiled regex over
-`data:image/...;base64,<payload>`, replaced with a short inert placeholder that still starts with
-`data:image/` — the frontend's own `useResolvedInlineImageHtml` still recognizes and hides it, see
-`apps/csm-portal/webapp`'s own `CLAUDE.md`) for a caller who fails `shouldRedactInlineImages` (no
-`PermDownloadAttachment`, or `access == nil`, which fails closed the same way `CaseHandler`'s own
-Security Center check does). It operates on the raw `[]byte` response — comment/description HTML
-appears under different field names across endpoints (`content`, `bodyHtml`, `description`, ...) and
-this backend already treats these responses as raw passthrough (see "Response shape" below); a
-byte-level substitution keeps that convention and can't miss a field by name the way a typed reshape
-could.
+`redactRawBase64Images` decodes the JSON response, walks **every string value** (field names differ
+across endpoints — `content`, `bodyHtml`, `description`, ... — so none is singled out) and replaces
+each inline image data URI with a short inert placeholder that still starts with `data:image/` (the
+frontend's own `useResolvedInlineImageHtml` still recognizes and hides it, see
+`apps/csm-portal/webapp`'s own `CLAUDE.md`). Matching happens after JSON escapes are decoded, so
+`\n`/`\r\n`-wrapped base64, `\/` and `+` cannot cut a match short; it is case-insensitive and
+accepts MIME parameters before `;base64,` and URL-encoded (non-base64) payloads. An unchanged body is
+returned byte for byte; a changed one is re-encoded with numbers kept verbatim and HTML unescaped. A
+body that is not a single JSON value falls back to the same pattern over the raw bytes.
 
-**Wired into every read response that can carry comment/description HTML**: `CaseHandler.SearchCases`/
-`SearchCaseComments`/`SearchCaseActivities`/`GetCase`, `IncidentHandler.SearchIncidents`/`GetIncident`/
-`SearchIncidentComments`/`SearchIncidentActivities`, `ChangeRequestHandler.SearchChangeRequests`/
-`GetChangeRequest`/`SearchChangeRequestComments` — each calls `WithAccessGuard` at construction (same
-pattern as `CaseHandler`'s own Security Center wiring) and checks `shouldRedactInlineImages(h.access,
-user.Roles)` immediately before its final `writeJSON`. A *create* endpoint (`CreateCaseComment` and
-its incident/change-request equivalents) is deliberately **not** redacted: the caller is the one who
-just submitted that exact content, so echoing it back leaks nothing new to them.
+**Applied once, to every route**: `route()` in `cmd/server/main.go` wraps each handler in
+`handler.RedactInlineImages(accessGuard, h)`. A caller holding `PermDownloadAttachment` passes
+straight through unbuffered; for everyone else (and when the guard is nil — fails closed) the
+response is buffered and an `application/json` body is redacted, any other content type is written
+back unchanged. New endpoints are covered automatically; do not add per-handler calls.
 
 This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s own `denyRawBase64`
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
@@ -225,6 +226,14 @@ Each upstream service has its own client package under `internal/`:
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
 | `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
 | `csmintegration` | `integrations/csm-integration-service` | Same shape and same one purpose as `csmnotification` above, for `integrations/csm-integration-service` |
+| `entity` (`SalesEntityClient`) | Sales-side entity service (GraphQL) | SupportPortalLite only (`SALES_ENTITY_BASE_URL`): contact/subscription lookups for `POST /scan-user`. Shared `OAUTH2_*` credentials |
+| `servicenow` | The backing ticketing system's REST APIs (legacy data source) | SupportPortalLite only (`SERVICENOW_*`, basic auth): escalations by account (the one write: escalate), attachments info/download, team list/schedule, SLA and project reports, customer-health reads. Values interpolated into its encoded queries go through `SanitizeQueryValue` or the strict `ValidateRecordNumber`/`ValidateSysID` checks (`query.go`). Vendor vocabulary stays inside this package |
+| `risk` | MySQL customer-health/risk store | SupportPortalLite only (`SPL_RISK_MYSQL_DSN`, `tls=true` required unless local): risks, action items, comments. Closed on shutdown |
+| `googledrive` | Google Drive v3 REST API | SupportPortalLite only (`GOOGLE_DRIVE_*`, refresh-token grant with a 10s token-refresh timeout): `GET /files` and `GET /files/search`, confined to `GOOGLE_DRIVE_ROOT_FOLDER_IDS` and their descendants by a parents walk in `FilesHandler` |
+| `notifications` | Google Chat incoming webhooks | `POST /notifications/google-chat/alerts` (card built from the incident record, rate-limited per caller) |
+| `upstreamhttp` | (shared) | The one `http.Transport` every OAuth2 client uses (`upstreamhttp.TokenClient`) instead of `http.DefaultTransport` |
+
+Every upstream body is read through `io.LimitReader` (16 MiB JSON, 25 MiB attachment content, 1 MiB file-transfer management API); a larger body is an error.
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` is the exception: because it hosts multiple, separately-deployed/differently-authenticated services, it uses a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient`.
 
@@ -244,6 +253,26 @@ The server auto-loads `.env` from the working directory at startup (silently ign
 `cp .env.example .env` is enough to start: `DASHBOARDS_DIR` points at the committed `dashboards.example/` (a missing directory is fatal). For a real dashboard set, `cp -r dashboards.example dashboards` and repoint it — `./dashboards` is gitignored.
 
 `CSM_TEAM_REGISTRY` (team vocabulary: `teamKey|Display Name|FAMILY|groupId` rows, comma separated) and `CSM_USER_ROLES` (assignable-role allow-list) are read **here**, not in `entity-service` — they moved. Both are resolved once at startup into `internal/directory`, so `POST /teams/search` and `POST /roles/search` make no upstream call. A malformed row, an unknown family, or a duplicate team key/display name is fatal at startup, naming the row. Both are flat single-line strings on purpose: the deployment platform's configuration UI is one-dimensional and stringifies nested collections, so a structured registry cannot be deployed at all. Do not introduce nested-collection configuration.
+
+## SupportPortalLite and PLG configuration
+
+SupportPortalLite is off unless `SPL_ENABLED` parses true (`loadViewerConfig` in `cmd/server/main.go`); off, none of its routes is registered and none of these variables is read. On, all are required except where noted:
+
+| Variable | Purpose |
+|---|---|
+| `SPL_ENABLED` | Turns the SupportPortalLite routes on |
+| `SERVICENOW_HOST` | Backing ticketing system API host (`https`) |
+| `SERVICENOW_USERNAME`, `SERVICENOW_PASSWORD` | Basic-auth credentials for it |
+| `SERVICENOW_ESCALATION_TEMPLATE_ID` | Escalation template id (optional) |
+| `TEAM_SCHEDULE_URL` | Team schedule source (optional) |
+| `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN` | Drive refresh-token grant |
+| `GOOGLE_DRIVE_ROOT_FOLDER_IDS` | Comma-separated folder ids Drive browsing is confined to (optional; unset reaches nothing, startup warns) |
+| `SPL_RISK_MYSQL_DSN` | Risk store DSN (`parseTime=true`; `tls=true` unless the host is local) |
+| `SALES_ENTITY_BASE_URL` | Sales-side entity service (`https`) |
+
+PLG is always mounted: `PLG_CONFIG_FILE` (its JSON config, default `config.json`) and the normally-unset overrides `PLG_ENTITY_BASE_URL`, `PLG_ENTITY_OAUTH_TOKEN_URL`, `PLG_ENTITY_OAUTH_CLIENT_ID`, `PLG_ENTITY_OAUTH_CLIENT_SECRET`.
+
+`OAUTH2_TOKEN_URL`, `CUSTOMER_ENTITY_BASE_URL`, `UPDATES_BASE_URL`, `SCIM_BASE_URL` and `AUTH_JWKS_ENDPOINT` are validated at startup (`mustCredentialBaseURL`): `https`, except plain `http` for a local host (localhost, loopback IP, single-label container name).
 
 ## Feature flags: `CSM_MIGRATION_*`
 
@@ -280,7 +309,7 @@ Follow these steps in order:
 - **Path params**: guard against empty string after `r.PathValue("id")`; if the param is a UUID, also validate format using the package-level `uuidRe` compiled regex and return 400 on mismatch — fail fast before calling the upstream
 - **Field naming**: case create/patch use bare names without `Key`/`Keys` suffix — `state`, `severity`, `workState`, `type`, `engagementType`, `catalogId`, `catalogItemId`, `variables` (PATCH — the latter four only meaningful transferring into `engagement`/`service_request` respectively), `type`, `severity`, `issueType` (POST); search filters use `states`, `severities`, `types`, `issueTypes`, `engagementTypes`; deployment search uses `deploymentTypes`; case comments use `type` (not `typeKey`); case create accepts `type: "case"`, `"service_request"`, or `"security_report_analysis"` (ServiceNow only for the latter two); case-type transfer via PATCH accepts `type: "case"`, `"engagement"`, `"security_report_analysis"`, or `"service_request"` (ServiceNow only)
 - **Deployment ID injection**: two helpers exist in `deployments.go` — `injectDeploymentID` (injects `deploymentIds: [id]` array, used by search) and `injectDeploymentIDField` (injects `deploymentId: id` string, used by create/update). Use the correct one for the endpoint's upstream contract.
-- **Upstream errors**: use `mapUpstreamErrorGeneric(w, err, "<fallback message>")` for every endpoint by default — never write custom status mappings inline. Only the ten PATCH/update handlers (`PatchCase`, `PatchCallRequest`, `PatchMe`, `UpdateProject`, `PatchDeployment`, `PatchDeployedProduct`, `PatchChangeRequest`, `UpdateTimeCard`, `UpdateTask`, `PatchIncident`) use `mapUpstreamError` instead, which surfaces the upstream 400/409/422 reason (e.g. "Invalid state transition") — appropriate there because the request body just submitted is what's being rejected. Every other endpoint (search/create/get/delete) forwards a payload that's only partially validated at this layer, so a 4xx from upstream isn't reliably something the caller could have avoided; `mapUpstreamErrorGeneric` returns the fixed fallback message for those instead of echoing upstream detail. Both log the full reason via the caller's `slog.ErrorContext(ctx, ..., "err", err)` regardless of which is used.
+- **Upstream errors**: use `mapUpstreamErrorGeneric(w, err, "<fallback message>")` for every endpoint by default — never write custom status mappings inline. Only the ten PATCH/update handlers (`PatchCase`, `PatchCallRequest`, `PatchMe`, `UpdateProject`, `PatchDeployment`, `PatchDeployedProduct`, `PatchChangeRequest`, `UpdateTimeCard`, `UpdateTask`, `PatchIncident`) use `mapUpstreamError` instead, which surfaces the upstream 400/409/422 reason (e.g. "Invalid state transition") — the `message` of the upstream's JSON error envelope only, never a raw body of any other shape (`upstreamErrorMessageStrict`) — appropriate there because the request body just submitted is what's being rejected. Every other endpoint (search/create/get/delete) forwards a payload that's only partially validated at this layer, so a 4xx from upstream isn't reliably something the caller could have avoided; `mapUpstreamErrorGeneric` returns the fixed fallback message for those instead of echoing upstream detail. Either way the caller logs the failure with `slog.ErrorContext(ctx, ..., "err", summarizeErr(err))`: the upstream status (or timeout/cancel), never the upstream body or a request URL. `apierror.Error()` itself carries only the status for the same reason.
 - **`GetMe` maps an upstream 404 to 403, not 404.** A 404 here means the caller's own authenticated identity has no backing user row — not a missing resource the caller asked for by ID — and the webapp's data-fetching hook for this endpoint has no handling for a bare 404, so it spun forever instead of showing anything. Since "you don't have permission" is already a handled UI state, `GetMe` treats this upstream 404 as 403 for the response while still logging the real cause at `ERROR` (without the caller's email, to stay off the PII list above). Follow this same substitution if another identity-bound "fetch my own X" endpoint hits the same failure mode.
 - **Response**: return raw `[]byte` with `writeJSON` for simple passthroughs; unmarshal into typed structs only when the response shape needs to change
 

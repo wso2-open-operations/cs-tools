@@ -97,7 +97,7 @@ func (h *TaskHandler) SearchCaseTasks(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.SearchCaseTasks(r.Context(), caseID, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCaseTasks failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchCaseTasks failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve case tasks.")
 		return
 	}
@@ -133,7 +133,7 @@ func (h *TaskHandler) SearchTasks(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.SearchTasks(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchTasks failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchTasks failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search tasks.")
 		return
 	}
@@ -157,7 +157,7 @@ func (h *TaskHandler) GetTask(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetTask(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetTask failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetTask failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve task.")
 		return
 	}
@@ -199,7 +199,7 @@ func (h *TaskHandler) CreateCaseTask(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.CreateCaseTask(r.Context(), caseID, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCaseTask failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateCaseTask failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create case task.")
 		return
 	}
@@ -246,7 +246,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.UpdateTask(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateTask failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateTask failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update task.")
 		return
 	}

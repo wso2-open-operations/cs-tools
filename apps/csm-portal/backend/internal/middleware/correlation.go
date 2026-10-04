@@ -23,11 +23,16 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 )
 
 const correlationIDHeader = "X-CSM-Correlation-ID"
+
+// validCorrelationID is the shape a caller-supplied correlation ID must have
+// to be kept.
+var validCorrelationID = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
 type correlationIDKey struct{}
 
@@ -38,10 +43,14 @@ type correlationIDKey struct{}
 //     entity-service request
 //   - echoed in the response header so callers can reference it in support
 //     requests
+//
+// A supplied ID is used only when it matches validCorrelationID (letters,
+// digits and hyphens, at most 64 characters); anything else is replaced by a
+// freshly generated one, since the value is logged, echoed and forwarded.
 func CorrelationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(correlationIDHeader)
-		if id == "" {
+		if !validCorrelationID.MatchString(id) {
 			id = newCorrelationID()
 		}
 		w.Header().Set(correlationIDHeader, id)

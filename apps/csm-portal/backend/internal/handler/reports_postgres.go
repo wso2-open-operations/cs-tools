@@ -65,14 +65,14 @@ type entitySearchTimeCardsResponse struct {
 // postgresReportsClient implements reportsClient for
 // GetTimeLogBreakdown only, by calling entity-service (Postgres). GetSLAReport
 // and GetProjectReportDetails are NOT migrated: both are backed by bespoke
-// ServiceNow scoped-app endpoints (/api/wso2/case_sla/report,
+// The backing system scoped-app endpoints (/api/wso2/case_sla/report,
 // /api/wso2/cs_report/project-insights) computing statistics (SLA percentile
 // breakdowns, monthly case counts, subscription/SLA summaries) that don't
 // exist in any form on the Postgres side -- building them would mean
 // inventing the underlying business rules (which percentile, what counts as
-// "response" vs "workaround" vs "resolution" time) from the ServiceNow
+// "response" vs "workaround" vs "resolution" time) from the backing system
 // response shape alone, not wiring up already-defined data. Both stay on the
-// wrapped ServiceNow client.
+// wrapped the backing system client.
 type postgresReportsClient struct {
 	entity entityReportsClient
 	sn     reportsClient
@@ -80,25 +80,25 @@ type postgresReportsClient struct {
 
 // NewPostgresReportsClient builds a postgresReportsClient. entity is
 // typically the same *entity.CustomerEntityClient every other CS Portal
-// handler already uses; sn is the existing ServiceNow client, kept for the
+// handler already uses; sn is the existing the backing system client, kept for the
 // two reports above.
 func NewPostgresReportsClient(entity entityReportsClient, sn reportsClient) *postgresReportsClient {
 	return &postgresReportsClient{entity: entity, sn: sn}
 }
 
 // GetSLAReport implements reportsClient by delegating to the wrapped
-// ServiceNow client — see this type's own doc comment for why.
+// The backing system client — see this type's own doc comment for why.
 func (c *postgresReportsClient) GetSLAReport(ctx context.Context, projectSysID, from, to string) (servicenow.SLAReportDetails, error) {
 	return c.sn.GetSLAReport(ctx, projectSysID, from, to)
 }
 
 // GetProjectReportDetails implements reportsClient by delegating to the
-// wrapped ServiceNow client — see this type's own doc comment for why.
+// wrapped the backing system client — see this type's own doc comment for why.
 func (c *postgresReportsClient) GetProjectReportDetails(ctx context.Context, projectSysID, from, to string) (servicenow.CSReportDetails, error) {
 	return c.sn.GetProjectReportDetails(ctx, projectSysID, from, to)
 }
 
-// formatHoursMinutes converts a fractional-hours value to ServiceNow's own
+// formatHoursMinutes converts a fractional-hours value to the backing system's own
 // "1h 2m"/"2m" display format (mirrors internal/servicenow/reports.go's
 // formatTime, duplicated here rather than exported since it's a small,
 // self-contained formatter and this file has no other dependency on that
@@ -113,7 +113,7 @@ func formatHoursMinutes(hours float64) string {
 	return strconv.Itoa(h) + "h " + strconv.Itoa(m) + "m"
 }
 
-// resolveProjectByNumber resolves SPL's projectId (ServiceNow's project
+// resolveProjectByNumber resolves SPL's projectId (the backing system's project
 // "number", which Postgres has no distinct equivalent of -- see
 // postgresSplProjectClient's own doc comment on why Number==Key here) to
 // entity-service's internal project detail. Search-then-exact-match, the
@@ -228,7 +228,7 @@ func (c *postgresReportsClient) searchAllTimeCards(ctx context.Context, caseID s
 // GetTimeLogBreakdown implements reportsClient, paging through every
 // case in the project and every time card per case (see
 // searchAllCases/searchAllTimeCards) rather than reading a single
-// entitySearchPageLimit-sized page and truncating the rest, which ServiceNow's
+// entitySearchPageLimit-sized page and truncating the rest, which the backing system's
 // own version of this report never did either.
 func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string) (servicenow.TimeLogBreakdownDetails, error) {
 	project, err := c.resolveProjectByNumber(ctx, projectID)

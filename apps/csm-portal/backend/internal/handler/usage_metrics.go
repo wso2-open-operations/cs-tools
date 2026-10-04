@@ -26,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/servicenow"
 )
 
-// usageMetricsServiceNowClient abstracts the ServiceNow operations used by
+// usageMetricsServiceNowClient abstracts the backing-system operations used by
 // UsageMetricsHandler.
 type usageMetricsServiceNowClient interface {
 	GetAllProjects(ctx context.Context, search string) ([]byte, error)
@@ -43,7 +43,7 @@ type usageMetricsServiceNowClient interface {
 }
 
 // UsageMetricsHandler handles HTTP requests for the SupportPortalLite
-// usage-metrics domain (/usage-metrics/*), delegating to ServiceNow's
+// usage-metrics domain (/usage-metrics/*), delegating to the backing system's
 // custom scoped-app API. Every endpoint in this domain requires both the
 // blanket PermViewerAccess gate and the narrower PermUsageMetricsViewer gate —
 // mirrors Ballerina operations:checkUsageMetricsAccess, which every
@@ -104,7 +104,7 @@ func (h *UsageMetricsHandler) GetProjects(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
-		slog.ErrorContext(r.Context(), "servicenow GetAllProjects failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetAllProjects failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to list projects.")
 		return
 	}
@@ -122,7 +122,7 @@ func (h *UsageMetricsHandler) SearchInstanceMetrics(w http.ResponseWriter, r *ht
 	}
 	result, err := h.client.SearchInstanceMetrics(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchInstanceMetrics failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchInstanceMetrics failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search instance metrics.")
 		return
 	}
@@ -140,7 +140,7 @@ func (h *UsageMetricsHandler) GetInstanceMetricsStats(w http.ResponseWriter, r *
 	}
 	result, err := h.client.GetInstanceMetricsStats(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow GetInstanceMetricsStats failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetInstanceMetricsStats failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve instance metrics stats.")
 		return
 	}
@@ -158,7 +158,7 @@ func (h *UsageMetricsHandler) SearchInstanceUsages(w http.ResponseWriter, r *htt
 	}
 	result, err := h.client.SearchInstanceUsages(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchInstanceUsages failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchInstanceUsages failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search instance usages.")
 		return
 	}
@@ -176,7 +176,7 @@ func (h *UsageMetricsHandler) GetInstanceUsagesStats(w http.ResponseWriter, r *h
 	}
 	result, err := h.client.GetInstanceUsagesStats(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow GetInstanceUsagesStats failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetInstanceUsagesStats failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve instance usages stats.")
 		return
 	}
@@ -194,7 +194,7 @@ func (h *UsageMetricsHandler) SearchDeployments(w http.ResponseWriter, r *http.R
 	}
 	result, err := h.client.SearchUsageMetricsDeployments(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsDeployments failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsDeployments failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search deployments.")
 		return
 	}
@@ -212,7 +212,7 @@ func (h *UsageMetricsHandler) SearchProjects(w http.ResponseWriter, r *http.Requ
 	}
 	result, err := h.client.SearchUsageMetricsProjects(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsProjects failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsProjects failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search projects.")
 		return
 	}
@@ -230,7 +230,7 @@ func (h *UsageMetricsHandler) SearchDeployedProducts(w http.ResponseWriter, r *h
 	}
 	result, err := h.client.SearchUsageMetricsDeployedProducts(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsDeployedProducts failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsDeployedProducts failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search deployed products.")
 		return
 	}
@@ -248,7 +248,7 @@ func (h *UsageMetricsHandler) SearchInstances(w http.ResponseWriter, r *http.Req
 	}
 	result, err := h.client.SearchUsageMetricsInstances(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsInstances failed", "err", err)
+		slog.ErrorContext(r.Context(), "servicenow SearchUsageMetricsInstances failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search instances.")
 		return
 	}
@@ -299,7 +299,7 @@ func (h *UsageMetricsHandler) GetDeployedProductMetrics(w http.ResponseWriter, r
 	}
 	result, err := h.client.GetDeployedProductMetrics(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow GetDeployedProductMetrics failed", "deployedProductID", id, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetDeployedProductMetrics failed", "deployedProductID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve deployed product metrics.")
 		return
 	}
@@ -325,7 +325,7 @@ func (h *UsageMetricsHandler) GetDeployedProductUsageCounts(w http.ResponseWrite
 	}
 	result, err := h.client.GetDeployedProductUsageCounts(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow GetDeployedProductUsageCounts failed", "deployedProductID", id, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetDeployedProductUsageCounts failed", "deployedProductID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve deployed product usage counts.")
 		return
 	}

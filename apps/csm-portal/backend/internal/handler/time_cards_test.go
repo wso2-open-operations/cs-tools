@@ -104,6 +104,28 @@ func TestUpdateTimeCard(t *testing.T) {
 		assertStatus(t, w, http.StatusBadRequest)
 	})
 
+	t.Run("a body whose state cannot be decoded is 400, not a skipped permission check", func(t *testing.T) {
+		for _, body := range []string{`{"state":5}`, `{"state":5,"state":"approved"}`, `[]`, `"x"`} {
+			called := false
+			h := NewTimeCardHandler(&mockEntityTimeCardClient{
+				updateTimeCardFn: func(context.Context, string, []byte) ([]byte, error) {
+					called = true
+					return []byte(`{}`), nil
+				},
+			}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+			r := withCsEngineerUser(httptest.NewRequest(http.MethodPatch, "/time-cards/"+testTCID, strings.NewReader(body)))
+			r.SetPathValue("id", testTCID)
+			w := httptest.NewRecorder()
+			h.UpdateTimeCard(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("body %s: status = %d, want 400", body, w.Code)
+			}
+			if called {
+				t.Errorf("body %s: upstream must not be called", body)
+			}
+		}
+	})
+
 	t.Run("forwards id and body for a state transition and returns 200 for an approver", func(t *testing.T) {
 		var capturedID string
 		var capturedBody []byte

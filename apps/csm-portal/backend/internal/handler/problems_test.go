@@ -344,9 +344,11 @@ func TestUpdateProblem(t *testing.T) {
 	t.Run("surfaces upstream 409 transition rejection message", func(t *testing.T) {
 		client := &mockEntityProblemClient{
 			updateProblemFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				// The entity service's error envelope (apierror.WriteJSON there);
+				// a plain-text body would not be echoed.
 				return nil, &apierror.Error{
 					StatusCode: http.StatusConflict,
-					Body:       `Invalid transition: bogus. Must be one of: assess, confirm, fix, resolve, close`,
+					Body:       `{"code":409,"message":"Invalid transition: bogus. Must be one of: assess, confirm, fix, resolve, close"}`,
 				}
 			},
 		}

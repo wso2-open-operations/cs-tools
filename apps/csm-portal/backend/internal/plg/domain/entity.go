@@ -1209,16 +1209,7 @@ type WorkQueueSearchFilters struct {
 
 // ToFilters converts the wire shape to the repository's.
 func (f WorkQueueSearchFilters) ToFilters() WorkQueueFilters {
-	return WorkQueueFilters{
-		HealthStates:    f.HealthStates,
-		OwnerIDs:        f.OwnerIDs,
-		OrganizationIDs: f.OrganizationIDs,
-		ProductCodes:    f.ProductCodes,
-		LifecycleStages: f.LifecycleStages,
-		Reasons:         f.Reasons,
-		PlaybookIDs:     f.PlaybookIDs,
-		TaskCodes:       f.TaskCodes,
-	}
+	return WorkQueueFilters(f)
 }
 
 // SearchWorkQueueRequest is the body of POST /plg/work-queue/search.

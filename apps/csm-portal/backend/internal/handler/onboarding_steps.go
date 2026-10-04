@@ -125,7 +125,7 @@ func (h *OnboardingStepHandler) GetProjectOnboardingSteps(w http.ResponseWriter,
 
 	steps, truncated, err := h.fetchAllProjectSteps(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchOnboardingSteps failed", "userID", user.UserID, "projectID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchOnboardingSteps failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load onboarding status.")
 		return
 	}

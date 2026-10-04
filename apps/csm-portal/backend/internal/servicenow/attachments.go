@@ -49,7 +49,7 @@ type snAttachmentTableRefList struct {
 // this app's existing flat SPL access model where any authorized caller can
 // already open any case via the case list/search.
 func (c *Client) RequireCaseAttachment(ctx context.Context, attachmentSysID string) error {
-	if err := SanitizeQueryValue(attachmentSysID); err != nil {
+	if err := ValidateSysID(attachmentSysID); err != nil {
 		return err
 	}
 	raw, err := c.TableQuery(ctx, "sys_attachment", url.Values{

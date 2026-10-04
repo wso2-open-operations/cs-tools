@@ -52,8 +52,8 @@ func upstreamErrors(fallback string) []upstreamErrorCase {
 		{"apierror 400 JSON envelope body surfaces upstream message", &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"code":400,"message":"invalid type \"bogus\""}`}, http.StatusBadRequest, `invalid type "bogus"`},
 		{"apierror 400 malformed JSON body falls back", &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{not valid json`}, http.StatusBadRequest, ErrMsgBadRequest},
 		{"apierror 400 JSON body without message field falls back", &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"code":400}`}, http.StatusBadRequest, ErrMsgBadRequest},
-		{"apierror 409 plain text body", &apierror.Error{StatusCode: http.StatusConflict, Body: "conflict upstream message"}, http.StatusConflict, "conflict upstream message"},
-		{"apierror 422 plain text body", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "invalid state transition"}, http.StatusUnprocessableEntity, "invalid state transition"},
+		{"apierror 409 plain text body is not echoed", &apierror.Error{StatusCode: http.StatusConflict, Body: "conflict upstream message"}, http.StatusConflict, fallback},
+		{"apierror 422 plain text body is not echoed", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "invalid state transition"}, http.StatusUnprocessableEntity, fallback},
 		{"apierror 409 JSON envelope body", &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":"State transition rejected"}`}, http.StatusConflict, "State transition rejected"},
 		{"apierror 422 JSON envelope body", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: `{"code":422,"message":"invalid state transition"}`}, http.StatusUnprocessableEntity, "invalid state transition"},
 		{"apierror 409 empty body falls back", &apierror.Error{StatusCode: http.StatusConflict, Body: ""}, http.StatusConflict, fallback},
@@ -726,6 +726,42 @@ func TestSearchCaseComments(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects non-object JSON bodies", func(t *testing.T) {
+		for _, body := range []string{`[]`, `"s"`, `1`} {
+			h := NewCaseHandler(&mockEntityCaseClient{})
+			r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments/search", strings.NewReader(body)))
+			r.SetPathValue("id", "case-1")
+			w := httptest.NewRecorder()
+			h.SearchCaseComments(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, ErrMsgBadRequest)
+		}
+	})
+
+	t.Run("treats a null body as an empty object", func(t *testing.T) {
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			searchCommentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"comments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-42/comments/search", strings.NewReader(" null \n")))
+		r.SetPathValue("id", "case-42")
+		w := httptest.NewRecorder()
+		h.SearchCaseComments(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		var sent map[string]any
+		if err := json.Unmarshal(capturedBody, &sent); err != nil {
+			t.Fatalf("forwarded body is not JSON: %v", err)
+		}
+		if sent["referenceId"] != "case-42" || sent["referenceType"] != "case" {
+			t.Fatalf("reference fields not injected: %s", capturedBody)
+		}
+	})
+
 	t.Run("injects referenceId and referenceType into SearchComments payload", func(t *testing.T) {
 		var capturedBody []byte
 		client := &mockEntityCaseClient{
@@ -1077,9 +1113,11 @@ func TestSearchCases(t *testing.T) {
 				return []byte(`{"cases":[],"total":0}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		// A PermViewSecurityCenter holder's body is forwarded verbatim; see
+		// cases_security_center_test.go for the scoping applied to everyone else.
+		h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
 		const reqBody = `{"filters":{"parentId":"44444444-4444-4444-4444-444444444444"}}`
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
+		r := withCsEngineerUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
 		w := httptest.NewRecorder()
 		h.SearchCases(w, r)
 
@@ -1214,27 +1252,26 @@ func TestPatchCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("allows non-UUID case ID when x-user-id-token is present", func(t *testing.T) {
+	t.Run("accepts a 32-hex record id", func(t *testing.T) {
 		var capturedID string
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, caseID string) ([]byte, error) {
 				capturedID = caseID
-				return []byte(`{"id":"sn-123","state":"open"}`), nil
+				return []byte(`{"id":"0123456789abcdef0123456789abcdef","state":"open"}`), nil
 			},
 			patchCaseFn: func(_ context.Context, caseID string, _ []byte) ([]byte, error) {
 				capturedID = caseID
-				return []byte(`{"id":"sn-123","state":"work_in_progress"}`), nil
+				return []byte(`{"id":"0123456789abcdef0123456789abcdef","state":"work_in_progress"}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/sn-123", strings.NewReader(validPayload)))
-		r.SetPathValue("id", "sn-123")
-		r.Header.Set("x-user-id-token", "token-value")
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/0123456789abcdef0123456789abcdef", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "0123456789abcdef0123456789abcdef")
 		w := httptest.NewRecorder()
 		h.PatchCase(w, r)
 		assertStatus(t, w, http.StatusOK)
-		if capturedID != "sn-123" {
-			t.Errorf("upstream received caseID %q, want %q", capturedID, "sn-123")
+		if capturedID != "0123456789abcdef0123456789abcdef" {
+			t.Errorf("upstream received caseID %q, want %q", capturedID, "0123456789abcdef0123456789abcdef")
 		}
 	})
 
@@ -1448,7 +1485,7 @@ func TestPatchCase(t *testing.T) {
 			},
 			{
 				// Item 6 (revised): autocloseHoldUntil is the only supported write against
-				// ServiceNow's staged auto-closure sequence; it internally sets
+				// The backing system's staged auto-closure sequence; it internally sets
 				// autoclosureStep=ON_HOLD + autoclosureStateTime, but the BFF forwards the
 				// request/response verbatim with no knowledge of that mechanism.
 				name:       "autocloseHoldUntil",
@@ -1605,7 +1642,7 @@ func TestPatchCase(t *testing.T) {
 	})
 
 	t.Run("autocloseHoldUntil PATCH records a work note even when resent with the same hold date", func(t *testing.T) {
-		// Deliberately no dedup: ServiceNow's own case-read doesn't reliably surface
+		// Deliberately no dedup: the backing system's own case-read doesn't reliably surface
 		// autoclosureStep/autoclosureStateTime, so a dedup keyed on it can't be trusted,
 		// and the legacy ticketing UI's equivalent action has this exact same behavior
 		// (a resend posts another identical note too) — this matches established
@@ -1763,23 +1800,22 @@ func TestGetCase(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
-	t.Run("allows non-UUID case ID when x-user-id-token is present", func(t *testing.T) {
+	t.Run("accepts a 32-hex record id", func(t *testing.T) {
 		var capturedID string
 		client := &mockEntityCaseClient{
 			getCaseFn: func(_ context.Context, caseID string) ([]byte, error) {
 				capturedID = caseID
-				return []byte(`{"id":"sn-123","state":"open"}`), nil
+				return []byte(`{"id":"0123456789abcdef0123456789abcdef","state":"open"}`), nil
 			},
 		}
 		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/sn-123", nil))
-		r.SetPathValue("id", "sn-123")
-		r.Header.Set("x-user-id-token", "token-value")
+		r := withUser(httptest.NewRequest(http.MethodGet, "/cases/0123456789abcdef0123456789abcdef", nil))
+		r.SetPathValue("id", "0123456789abcdef0123456789abcdef")
 		w := httptest.NewRecorder()
 		h.GetCase(w, r)
 		assertStatus(t, w, http.StatusOK)
-		if capturedID != "sn-123" {
-			t.Errorf("upstream received caseID %q, want %q", capturedID, "sn-123")
+		if capturedID != "0123456789abcdef0123456789abcdef" {
+			t.Errorf("upstream received caseID %q, want %q", capturedID, "0123456789abcdef0123456789abcdef")
 		}
 	})
 
@@ -1875,7 +1911,7 @@ func TestGetCase(t *testing.T) {
 			{"open case with a closedOn value", `{"id":"` + testCaseID + `","type":"case","state":"open","closedOn":"` + recentClosed + `"}`, []string{caseStateWorkInProgress}},
 			{"closed service_request within the window", `{"id":"` + testCaseID + `","type":"service_request","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
 			{"closed case with no type set", `{"id":"` + testCaseID + `","state":"closed","closedOn":"` + recentClosed + `"}`, []string{}},
-			// ServiceNow-backed cases never populate closedOn today, so
+			// legacy-data-source cases never populate closedOn today, so
 			// updatedOn stands in for it.
 			{"closed case with no closedOn, falls back to a recent updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + recentClosed + `"}`, []string{caseStateReopened}},
 			{"closed case with no closedOn, falls back to an old updatedOn", `{"id":"` + testCaseID + `","type":"case","state":"closed","updatedOn":"` + oldClosed + `"}`, []string{}},
@@ -3335,9 +3371,9 @@ func TestSearchCasesForwardsTagsFilter(t *testing.T) {
 			return []byte(`{"cases":[],"total":0}`), nil
 		},
 	}
-	h := NewCaseHandler(client)
+	h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
 	const reqBody = `{"filters":{"tags":["micro-gw","ws-policy"]}}`
-	r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
+	r := withCsEngineerUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
 	w := httptest.NewRecorder()
 	h.SearchCases(w, r)
 
@@ -3986,8 +4022,8 @@ func TestAggregateCases(t *testing.T) {
 				return []byte(`{"groups":[{"key":"open","label":"Open","count":3}],"othersCount":1,"totalRecords":4}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
-		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(reqPayload)))
+		h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := withCsEngineerUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(reqPayload)))
 		w := httptest.NewRecorder()
 		h.AggregateCases(w, r)
 
@@ -4191,4 +4227,46 @@ func TestSplGetAttachmentsInfo_MissingCaseIDIs400(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.GetAttachmentsInfo(w, r)
 	assertStatus(t, w, http.StatusBadRequest)
+}
+
+// TestCaseIDValidationIgnoresHeaders: GET and PATCH /cases/{id} validate the id
+// shape whatever headers the request carries.
+func TestCaseIDValidationIgnoresHeaders(t *testing.T) {
+	good := []string{"11111111-1111-1111-1111-111111111111", "0123456789ABCDEF0123456789abcdef", "CS0001234", "cs12345678"}
+	bad := []string{"sn-123", "../admin", "CS12", "1111", "0123456789abcdef0123456789abcde", "CS0001234;x", strings.Repeat("a", 40)}
+	for _, id := range good {
+		if !caseIDRe.MatchString(id) {
+			t.Errorf("caseIDRe rejected %q", id)
+		}
+	}
+	for _, id := range bad {
+		if caseIDRe.MatchString(id) {
+			t.Errorf("caseIDRe accepted %q", id)
+		}
+		called := false
+		h := NewCaseHandler(&mockEntityCaseClient{
+			getCaseFn: func(context.Context, string) ([]byte, error) { called = true; return []byte(`{}`), nil },
+			patchCaseFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return []byte(`{}`), nil
+			},
+		})
+		for _, method := range []string{http.MethodGet, http.MethodPatch} {
+			r := withUser(httptest.NewRequest(method, "/cases/x", strings.NewReader(`{"state":"open"}`)))
+			r.SetPathValue("id", id)
+			r.Header.Set("x-user-id-token", "token-value")
+			w := httptest.NewRecorder()
+			if method == http.MethodGet {
+				h.GetCase(w, r)
+			} else {
+				h.PatchCase(w, r)
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("%s %q with x-user-id-token: status = %d, want 400", method, id, w.Code)
+			}
+		}
+		if called {
+			t.Errorf("%q: upstream must not be called", id)
+		}
+	}
 }

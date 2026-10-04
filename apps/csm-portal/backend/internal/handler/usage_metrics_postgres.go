@@ -38,21 +38,21 @@ type entityUsageMetricsClient interface {
 }
 
 // postgresUsageMetricsClient implements usageMetricsServiceNowClient by
-// calling entity-service (Postgres) instead of ServiceNow's custom
+// calling entity-service (Postgres) instead of the backing system's custom
 // x_wso2_customer_0 scoped-app API directly.
 //
 // entity-service's instance/deployment/deployed-product metrics domain
 // (instance_service.go, deployment_service.go, deployed_product_service.go)
 // is backed by real synced tables (deployment_information,
-// hourly_usage_summary, daily_usage_summary), not a ServiceNow passthrough --
+// hourly_usage_summary, daily_usage_summary), not a backing-system passthrough --
 // and several of its response types were already written to match
-// ServiceNow's own field names field-for-field (see each method's own doc
+// The backing system's own field names field-for-field (see each method's own doc
 // comment below for exactly which). Those are round-tripped through a typed
 // Go struct purely to validate shape, not to rename or reshape anything.
 //
 // Where entity-service's Postgres path genuinely has no equivalent
 // (deployment's numeric SN "type" id, deployed-product cores/tps/category/
-// updates, instance environmentType), the ServiceNow-shaped output field is
+// updates, instance environmentType), the backing-system-shaped output field is
 // still present and set to its documented empty/null value rather than
 // omitted, so existing frontend code that reads it unconditionally keeps
 // working -- same convention as postgresSplAccountClient/
@@ -71,7 +71,7 @@ func NewPostgresUsageMetricsClient(entity entityUsageMetricsClient) *postgresUsa
 // --- shared wire types ---
 
 // entityUsageMetricsFilters is entity-service's domain.InstanceSearchFilters/
-// InstanceDateRangeFilters shape, which already matches ServiceNow's own
+// InstanceDateRangeFilters shape, which already matches the backing system's own
 // UsageMetricsFilters field-for-field (startDate/endDate/projectIds/
 // deploymentIds/deployedProductIds) -- used for both the instances/search
 // request (filters is optional there) and the two metrics/usage date-range
@@ -86,7 +86,7 @@ type entityUsageMetricsFilters struct {
 }
 
 // entityInstanceMetadata mirrors entity-service's domain.InstanceMetadata,
-// whose JSON field names already match ServiceNow's SnInstanceMetadata
+// whose JSON field names already match the backing system's SnInstanceMetadata
 // exactly (id/coreCount/updates/jdkVersion/deploymentMetadata/createdOn/
 // updatedOn/customCreatedOn/customUpdatedOn).
 type entityInstanceMetadata struct {
@@ -104,7 +104,7 @@ type entityInstanceMetadata struct {
 // --- GetProjects (typeahead used outside the dedicated usage-metrics
 // projects/search endpoint below) ---
 
-// usageMetricsProjectTypeahead mirrors ServiceNow's customer_project
+// usageMetricsProjectTypeahead mirrors the backing system's customer_project
 // TableQuery projection used by GetAllProjects: {sys_id, short_description,
 // number}. Number is set to the project's key -- entity-service's project
 // table has no separate "number" distinct from "key", the same documented
@@ -144,7 +144,7 @@ func (c *postgresUsageMetricsClient) GetAllProjects(ctx context.Context, search 
 // --- SearchProjects (POST /usage-metrics/projects/search) ---
 
 // snProjectSearchRequest is the incoming request shape from the frontend --
-// filters nested under "filters", matching ServiceNow's ProjectSearchPayload.
+// filters nested under "filters", matching the backing system's ProjectSearchPayload.
 type snProjectSearchRequest struct {
 	Filters struct {
 		SearchQuery string `json:"searchQuery"`
@@ -165,7 +165,7 @@ type entityProjectsFullSearchResponse struct {
 }
 
 // snProjectListItem is the minimal project shape the usage-metrics project
-// picker actually reads (id/name/key) -- ServiceNow's SnProjectItem carries
+// picker actually reads (id/name/key) -- the backing system's SnProjectItem carries
 // several more fields (description/type/closureState/startDate/endDate) that
 // no current caller of this endpoint uses.
 type snProjectListItem struct {
@@ -216,7 +216,7 @@ func (c *postgresUsageMetricsClient) SearchUsageMetricsProjects(ctx context.Cont
 // --- SearchDeployments (POST /usage-metrics/deployments/search) ---
 
 // snDeploymentsSearchRequest is the incoming request shape from the
-// frontend, matching ServiceNow's DeploymentSearchPayload.
+// frontend, matching the backing system's DeploymentSearchPayload.
 type snDeploymentsSearchRequest struct {
 	Filters struct {
 		ProjectIDs []string `json:"projectIds"`
@@ -235,7 +235,7 @@ type entityDeploymentsSearchRequest struct {
 }
 
 // entityDeploymentView mirrors entity-service's domain.DeploymentView, minus
-// the fields this endpoint's ServiceNow-shaped output doesn't need
+// the fields this endpoint's backing-system-shaped output doesn't need
 // (createdBy).
 type entityDeploymentView struct {
 	ID                   string    `json:"id"`
@@ -258,7 +258,7 @@ type entityDeploymentsSearchResponse struct {
 }
 
 // deploymentTypeLabel maps entity-service's DeploymentType enum onto the
-// human label ServiceNow's own deployment_type reference records use --
+// human label the backing system's own deployment_type reference records use --
 // deliberately including "Production" for primary_production specifically
 // (not "Primary Production"), since the frontend's own environment-tab logic
 // does `type.label.toLowerCase() === "production"` to find the default tab.
@@ -271,8 +271,8 @@ var deploymentTypeLabel = map[string]string{
 	"development":        "Development",
 }
 
-// snDeploymentType mirrors ServiceNow's SnDeploymentType. Id is set to the
-// same enum string as Label's source rather than a numeric ServiceNow
+// snDeploymentType mirrors the backing system's SnDeploymentType. Id is set to the
+// same enum string as Label's source rather than a numeric the backing system
 // sys_id/reference id -- entity-service's Postgres schema has no separate
 // deployment_type reference table, only a check-constraint enum column, so
 // there is no numeric id to carry here. A documented substitution, not a bug.
@@ -281,9 +281,9 @@ type snDeploymentType struct {
 	Label string `json:"label"`
 }
 
-// snDeploymentItem mirrors ServiceNow's SnDeploymentItem. Version is always
+// snDeploymentItem mirrors the backing system's SnDeploymentItem. Version is always
 // null: entity-service's Postgres deployment table has no equivalent column
-// (ServiceNow-only field).
+// (legacy-data-source-only field).
 type snDeploymentItem struct {
 	ID                   string           `json:"id"`
 	Number               *string          `json:"number"`
@@ -356,7 +356,7 @@ func (c *postgresUsageMetricsClient) SearchUsageMetricsDeployments(ctx context.C
 // --- SearchDeployedProducts (POST /usage-metrics/deployed-products/search) ---
 
 // snDeployedProductsSearchRequest is the incoming request shape from the
-// frontend, matching ServiceNow's DeployedProductSearchPayload.
+// frontend, matching the backing system's DeployedProductSearchPayload.
 type snDeployedProductsSearchRequest struct {
 	Filters struct {
 		DeploymentIDs []string `json:"deploymentIds"`
@@ -410,7 +410,7 @@ type entityDeployedProductsSearchResponse struct {
 	Offset           int                         `json:"offset"`
 }
 
-// snDeployedProductItem mirrors ServiceNow's SnDeployedProductItem.
+// snDeployedProductItem mirrors the backing system's SnDeployedProductItem.
 type snDeployedProductItem struct {
 	ID          string                     `json:"id"`
 	Description *string                    `json:"description"`
@@ -481,7 +481,7 @@ func (c *postgresUsageMetricsClient) SearchUsageMetricsDeployedProducts(ctx cont
 // --- SearchInstances (POST /usage-metrics/instances/search) ---
 
 // entityInstance mirrors entity-service's domain.Instance, whose JSON field
-// names already match ServiceNow's SnInstance for everything except
+// names already match the backing system's SnInstance for everything except
 // environmentType (Postgres has no equivalent column) and the top-level
 // response's total/totalRecords naming (handled in
 // entityInstancesSearchResponse/snInstancesSearchResponse below).
@@ -576,7 +576,7 @@ func (c *postgresUsageMetricsClient) SearchUsageMetricsInstances(ctx context.Con
 // --- SearchInstanceMetrics / SearchInstanceUsages (time-series) ---
 
 // entityInstanceDataPoint mirrors entity-service's domain.InstanceDataPoint,
-// whose JSON field names already match ServiceNow's SnMetricDataPoint
+// whose JSON field names already match the backing system's SnMetricDataPoint
 // exactly.
 type entityInstanceDataPoint struct {
 	Date               string         `json:"date"`
@@ -588,7 +588,7 @@ type entityInstanceDataPoint struct {
 }
 
 // entityInstanceMetric mirrors entity-service's domain.InstanceMetric, whose
-// JSON field names already match ServiceNow's SnMetric exactly.
+// JSON field names already match the backing system's SnMetric exactly.
 type entityInstanceMetric struct {
 	InstanceID      string                    `json:"instanceId"`
 	InstanceKey     string                    `json:"instanceKey"`
@@ -601,7 +601,7 @@ type entityInstanceMetric struct {
 
 // entityInstanceMetricsResponse mirrors entity-service's own
 // domain.InstanceMetricsResponse. Its JSON shape (metrics/totalInstances/
-// startDate/endDate) already matches ServiceNow's SnMetricsSearchResponse
+// startDate/endDate) already matches the backing system's SnMetricsSearchResponse
 // exactly -- decoded and re-encoded verbatim, not reshaped.
 type entityInstanceMetricsResponse struct {
 	Metrics        []entityInstanceMetric `json:"metrics"`
@@ -634,7 +634,7 @@ func (c *postgresUsageMetricsClient) SearchInstanceMetrics(ctx context.Context, 
 }
 
 // entityInstanceSummary mirrors entity-service's domain.InstanceSummary,
-// whose JSON field names already match ServiceNow's SnPeriodSummary exactly
+// whose JSON field names already match the backing system's SnPeriodSummary exactly
 // (period/counts, with counts an open map keyed by count-type name).
 type entityInstanceSummary struct {
 	Period string         `json:"period"`
@@ -642,7 +642,7 @@ type entityInstanceSummary struct {
 }
 
 // entityInstanceUsageEntry mirrors entity-service's domain.InstanceUsageEntry,
-// whose JSON field names already match ServiceNow's SnUsage exactly.
+// whose JSON field names already match the backing system's SnUsage exactly.
 type entityInstanceUsageEntry struct {
 	InstanceID      string                  `json:"instanceId"`
 	InstanceKey     string                  `json:"instanceKey"`
@@ -655,7 +655,7 @@ type entityInstanceUsageEntry struct {
 
 // entityInstanceUsageResponse mirrors entity-service's own
 // domain.InstanceUsageResponse. Its JSON shape (usages/totalInstances/
-// startDate/endDate) already matches ServiceNow's SnUsagesSearchResponse
+// startDate/endDate) already matches the backing system's SnUsagesSearchResponse
 // exactly -- decoded and re-encoded verbatim, not reshaped.
 type entityInstanceUsageResponse struct {
 	Usages         []entityInstanceUsageEntry `json:"usages"`
@@ -714,7 +714,7 @@ type entityInstanceMetricSummary struct {
 	Avg     float64 `json:"avg"`
 }
 
-// snStatsSummary mirrors ServiceNow's SnStatsSummary -- note curr, not
+// snStatsSummary mirrors the backing system's SnStatsSummary -- note curr, not
 // current, and int-valued rather than float (entity-service's own
 // aggregation is over integer core/count columns).
 type snStatsSummary struct {
@@ -724,7 +724,7 @@ type snStatsSummary struct {
 	Avg  float64 `json:"avg"`
 }
 
-// snMetricsStatsResponse mirrors ServiceNow's SnMetricsStatsResponse --
+// snMetricsStatsResponse mirrors the backing system's SnMetricsStatsResponse --
 // TotalRecords, not Total, is the only rename needed against
 // entityInstanceMetricsStatsResponse.
 type snMetricsStatsResponse struct {
@@ -772,7 +772,7 @@ func (c *postgresUsageMetricsClient) GetInstanceMetricsStats(ctx context.Context
 }
 
 // entityInstanceUsageStatsResponse mirrors entity-service's own
-// domain.InstanceUsageStatsResponse. ServiceNow's SnUsagesStatsResponse only
+// domain.InstanceUsageStatsResponse. the backing system's SnUsagesStatsResponse only
 // requires "stats" (an open record with json...), so total/startDate/endDate
 // are included here too rather than dropped -- harmless extra fields, and
 // useful to any caller that does want them.
@@ -823,7 +823,7 @@ func (c *postgresUsageMetricsClient) GetInstanceUsagesStats(ctx context.Context,
 // --- Per-deployed-product metrics / usage counts ---
 
 // entityDeployedProductMetricsRequest mirrors both entity-service's own
-// domain.DeployedProductMetricsRequest and ServiceNow's
+// domain.DeployedProductMetricsRequest and the backing system's
 // DeployedProductMetricsPayload -- deploymentId/startDate/endDate, identical
 // on both sides -- so the incoming body is decoded and re-encoded verbatim,
 // not reshaped.
@@ -837,7 +837,7 @@ type entityDeployedProductMetricsRequest struct {
 // domain.DeployedProductMetricsResponse. Its JSON shape (deployedProduct/
 // summary/chartData, with summary.dateRange.start/end and per-entry
 // date/instanceCount/totalCores/minCores/maxCores/avgCores/instances[].id/
-// name/cores) already matches ServiceNow's SnDeployedProductMetricsResponse
+// name/cores) already matches the backing system's SnDeployedProductMetricsResponse
 // exactly -- decoded and re-encoded verbatim, not reshaped.
 type entityDeployedProductMetricsResponse struct {
 	DeployedProduct entityRef                           `json:"deployedProduct"`
@@ -897,7 +897,7 @@ func (c *postgresUsageMetricsClient) GetDeployedProductMetrics(ctx context.Conte
 
 // entityDeployedProductUsageCountInstance mirrors entity-service's
 // domain.UsageCountInstance, whose JSON field names already match
-// ServiceNow's DeployedProductUsageCountInstance exactly.
+// The backing system's DeployedProductUsageCountInstance exactly.
 type entityDeployedProductUsageCountInstance struct {
 	ID    string  `json:"id"`
 	Name  string  `json:"name"`
@@ -929,7 +929,7 @@ type entityDeployedProductUsageCountsSummary struct {
 
 // entityDeployedProductUsageCountsResponse mirrors entity-service's own
 // domain.DeployedProductUsageCountsResponse. Its JSON shape already matches
-// ServiceNow's SnDeployedProductUsageCountsResponse exactly -- decoded and
+// The backing system's SnDeployedProductUsageCountsResponse exactly -- decoded and
 // re-encoded verbatim, not reshaped.
 type entityDeployedProductUsageCountsResponse struct {
 	DeployedProduct entityRef                                    `json:"deployedProduct"`

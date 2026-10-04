@@ -113,3 +113,49 @@ func TestSearchTagsSendsPostWithBody(t *testing.T) {
 		t.Errorf("body = %s, want %s", gotBody, reqBody)
 	}
 }
+
+// TestResponseBodiesAreCapped verifies that an upstream body over the read cap
+// is an error rather than an unbounded read, for both the JSON and binary
+// paths, and that a body at the cap is still accepted.
+func TestResponseBodiesAreCapped(t *testing.T) {
+	t.Parallel()
+
+	jsonSize := maxUpstreamResponseBytes + 1
+	binSize := maxBinaryResponseBytes + 1
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`))
+	})
+	mux.HandleFunc("/cases/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, jsonSize))
+	})
+	mux.HandleFunc("/attachments/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		if r.URL.Query().Get("ok") == "1" || len(r.URL.Path) > 0 && r.URL.Path[len(r.URL.Path)-1] == 'k' {
+			_, _ = w.Write(make([]byte, maxBinaryResponseBytes))
+			return
+		}
+		_, _ = w.Write(make([]byte, binSize))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := NewCustomerEntityClient(CustomerEntityConfig{
+		BaseURL:      srv.URL,
+		TokenURL:     srv.URL + "/token",
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+	})
+
+	if _, err := client.GetCase(context.Background(), "11111111-1111-1111-1111-111111111111"); err == nil {
+		t.Error("oversized JSON body: expected an error")
+	}
+	if _, _, err := client.doBinary(context.Background(), "/attachments/x/content"); err == nil {
+		t.Error("oversized binary body: expected an error")
+	}
+	body, _, err := client.doBinary(context.Background(), "/attachments/x/ok")
+	if err != nil || len(body) != maxBinaryResponseBytes {
+		t.Errorf("binary body at the cap: len=%d err=%v", len(body), err)
+	}
+}

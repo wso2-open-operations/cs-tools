@@ -89,7 +89,7 @@ func (h *TimeCardHandler) SearchTimeCards(w http.ResponseWriter, r *http.Request
 
 	result, err := h.entity.SearchTimeCards(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchTimeCards failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchTimeCards failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search time cards.")
 		return
 	}
@@ -133,7 +133,7 @@ func (h *TimeCardHandler) CreateTimeCard(w http.ResponseWriter, r *http.Request)
 
 	result, err := h.entity.CreateTimeCard(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateTimeCard failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateTimeCard failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create time card.")
 		return
 	}
@@ -147,18 +147,17 @@ func (h *TimeCardHandler) CreateTimeCard(w http.ResponseWriter, r *http.Request)
 // state transition (`state: "approved"`/`"rejected"`) on this same PATCH
 // route, so the two can only be told apart by inspecting the body itself,
 // the same best-effort JSON-inspection approach
-// caseSearchTargetsSecurityReports uses for its own shared-route problem. A
-// body this can't make sense of is treated as not a transition, since a
-// genuinely malformed request is rejected by entity-service's own validation
-// regardless of what this check decides.
-func timeCardUpdateTargetsStateTransition(body []byte) bool {
+// scopeCaseSearchBody uses for its own shared-route problem. A body this
+// cannot decode (not an object, or a non-string state) is an error, so the
+// caller answers 400 instead of skipping the narrower permission check.
+func timeCardUpdateTargetsStateTransition(body []byte) (bool, error) {
 	var req struct {
 		State *string `json:"state"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		return false
+		return false, err
 	}
-	return req.State != nil
+	return req.State != nil, nil
 }
 
 // UpdateTimeCard handles PATCH /time-cards/{id}.
@@ -180,14 +179,19 @@ func (h *TimeCardHandler) UpdateTimeCard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if timeCardUpdateTargetsStateTransition(body) && !(h.access != nil && h.access.Permits(PermApproveTimeCard, user.Roles)) {
+	isTransition, err := timeCardUpdateTargetsStateTransition(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if isTransition && !(h.access != nil && h.access.Permits(PermApproveTimeCard, user.Roles)) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
 	result, err := h.entity.UpdateTimeCard(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateTimeCard failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateTimeCard failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update time card.")
 		return
 	}
@@ -214,7 +218,7 @@ func (h *TimeCardHandler) DeleteTimeCard(w http.ResponseWriter, r *http.Request)
 
 	result, err := h.entity.DeleteTimeCard(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteTimeCard failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity DeleteTimeCard failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to delete time card.")
 		return
 	}

@@ -101,7 +101,7 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.UpdateComment(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateComment failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateComment failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update comment.")
 		return
 	}
@@ -131,7 +131,7 @@ func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := h.entity.DeleteComment(r.Context(), id); err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteComment failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity DeleteComment failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to delete comment.")
 		return
 	}

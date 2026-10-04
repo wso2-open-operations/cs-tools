@@ -84,6 +84,20 @@ func withCsEngineerUser(r *http.Request) *http.Request {
 	return r.WithContext(middleware.WithUserInfo(r.Context(), testCsEngineerUser))
 }
 
+// testViewerWriterUser holds both PermViewerAccess (test-viewer) and PermWrite
+// (test-cs-engineer): what a SupportPortalLite state-changing route
+// (requireViewerWriteAccess) needs. testUser alone holds only the former.
+var testViewerWriterUser = &middleware.UserInfo{
+	Email:  "writer@example.com",
+	UserID: "3a1b9c4e-0f3d-4b7e-9e58-2c6a7d1f0b11",
+	Roles:  []string{"test-viewer", "test-cs-engineer"},
+}
+
+// withViewerWriterUser returns r with testViewerWriterUser stored in its context.
+func withViewerWriterUser(r *http.Request) *http.Request {
+	return r.WithContext(middleware.WithUserInfo(r.Context(), testViewerWriterUser))
+}
+
 // testWorknoteCreatorUser holds ONLY PermCreateWorkNote (test-worknote-creator)
 // -- not PermWrite -- for CreateCaseComment subtests pinning the boundary
 // PermCreateWorkNote's own doc comment describes: this caller may post a

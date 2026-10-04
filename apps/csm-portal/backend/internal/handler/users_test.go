@@ -513,8 +513,8 @@ func TestSearchUsers(t *testing.T) {
 				return []byte(`{"users":[{"id":"u-1"}],"total":1}`), nil
 			},
 		}
-		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, "")
-		r := withUser(httptest.NewRequest(http.MethodPost, "/users/search", strings.NewReader(reqPayload)))
+		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, "").WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := withCsEngineerUser(httptest.NewRequest(http.MethodPost, "/users/search", strings.NewReader(reqPayload)))
 		w := httptest.NewRecorder()
 		h.SearchUsers(w, r)
 

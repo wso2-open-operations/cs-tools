@@ -69,7 +69,7 @@ func (h *ConfigurationItemHandler) SearchConfigurationItems(w http.ResponseWrite
 
 	result, err := h.entity.SearchConfigurationItems(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchConfigurationItems failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchConfigurationItems failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search configuration items.")
 		return
 	}

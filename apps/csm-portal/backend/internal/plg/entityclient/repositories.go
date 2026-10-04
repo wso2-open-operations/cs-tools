@@ -356,12 +356,7 @@ func (c *Client) Dashboard(ctx context.Context, rng domain.AnalyticsRange) (*dom
 }
 
 func (c *Client) WorkQueue(ctx context.Context, f domain.WorkQueueFilters) (*domain.WorkQueueResponse, error) {
-	body := domain.SearchWorkQueueRequest{Filters: domain.WorkQueueSearchFilters{
-		HealthStates: f.HealthStates,
-		OwnerIDs:     f.OwnerIDs, OrganizationIDs: f.OrganizationIDs,
-		ProductCodes: f.ProductCodes, LifecycleStages: f.LifecycleStages,
-		Reasons: f.Reasons, PlaybookIDs: f.PlaybookIDs, TaskCodes: f.TaskCodes,
-	}}
+	body := domain.SearchWorkQueueRequest{Filters: domain.WorkQueueSearchFilters(f)}
 	var out domain.WorkQueueResponse
 	if err := c.post(ctx, "/plg/work-queue/search", body, &out); err != nil {
 		return nil, err

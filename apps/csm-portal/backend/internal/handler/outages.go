@@ -184,7 +184,7 @@ func (h *OutageHandler) CreateOutage(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.CreateOutage(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateOutage failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateOutage failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create outage.")
 		return
 	}
@@ -219,7 +219,7 @@ func (h *OutageHandler) SearchOutages(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.SearchOutages(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchOutages failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchOutages failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search outages.")
 		return
 	}
@@ -243,7 +243,7 @@ func (h *OutageHandler) GetOutage(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetOutage(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetOutage failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetOutage failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve outage.")
 		return
 	}
@@ -289,7 +289,7 @@ func (h *OutageHandler) PatchOutage(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.PatchOutage(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PatchOutage failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity PatchOutage failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update outage.")
 		return
 	}
@@ -335,7 +335,7 @@ func (h *OutageHandler) AddOutageCommunication(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.AddOutageCommunication(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity AddOutageCommunication failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity AddOutageCommunication failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to add outage communication.")
 		return
 	}
@@ -376,7 +376,7 @@ func (h *OutageHandler) SearchOutageCommunications(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.SearchOutageCommunications(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchOutageCommunications failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchOutageCommunications failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search outage communications.")
 		return
 	}
@@ -394,7 +394,7 @@ func (h *OutageHandler) GetOutageMetadata(w http.ResponseWriter, r *http.Request
 
 	result, err := h.entity.GetOutageMetadata(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetOutageMetadata failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetOutageMetadata failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve outage metadata.")
 		return
 	}

@@ -87,7 +87,7 @@ func (c *Client) ListFiles(ctx context.Context, folderID string) ([]DriveFile, e
 		}
 
 		for _, f := range page.Files {
-			results = append(results, DriveFile{ID: f.ID, Name: f.Name, MimeType: f.MimeType})
+			results = append(results, DriveFile(f))
 		}
 
 		if page.NextPageToken == "" {
@@ -99,11 +99,10 @@ func (c *Client) ListFiles(ctx context.Context, folderID string) ([]DriveFile, e
 	return results, nil
 }
 
-// SearchFolder finds the first Drive folder matching folderName exactly.
-// Returns ErrFolderNotFound when no match exists — mirrors the Ballerina
-// searchFolder, which only ever consumed the first entry of its result
-// stream.
-func (c *Client) SearchFolder(ctx context.Context, folderName string) (*DriveFolder, error) {
+// SearchFolders returns up to limit Drive folders whose name matches
+// folderName exactly, in the API's order. Returns ErrFolderNotFound when none
+// match. The caller picks the first one it is allowed to show.
+func (c *Client) SearchFolders(ctx context.Context, folderName string, limit int) ([]DriveFolder, error) {
 	q := fmt.Sprintf("mimeType='application/vnd.google-apps.folder' and name='%s' and trashed=false",
 		escapeDriveQueryValue(folderName))
 
@@ -111,7 +110,7 @@ func (c *Client) SearchFolder(ctx context.Context, folderName string) (*DriveFol
 	params := url.Values{
 		"q":        {q},
 		"fields":   {"files(id,name)"},
-		"pageSize": {"1"},
+		"pageSize": {fmt.Sprint(limit)},
 		"spaces":   {"drive"},
 	}
 	if err := c.get(ctx, "/files", params, &page); err != nil {
@@ -121,8 +120,24 @@ func (c *Client) SearchFolder(ctx context.Context, folderName string) (*DriveFol
 	if len(page.Files) == 0 {
 		return nil, ErrFolderNotFound
 	}
-	first := page.Files[0]
-	return &DriveFolder{ID: first.ID, Name: first.Name}, nil
+	folders := make([]DriveFolder, 0, len(page.Files))
+	for _, f := range page.Files {
+		folders = append(folders, DriveFolder{ID: f.ID, Name: f.Name})
+	}
+	return folders, nil
+}
+
+// Parents returns the ids of the folders directly containing fileID (empty
+// for a top-level item).
+func (c *Client) Parents(ctx context.Context, fileID string) ([]string, error) {
+	var meta struct {
+		Parents []string `json:"parents"`
+	}
+	params := url.Values{"fields": {"parents"}, "supportsAllDrives": {"true"}}
+	if err := c.get(ctx, "/files/"+url.PathEscape(fileID), params, &meta); err != nil {
+		return nil, fmt.Errorf("googledrive: parents of %q: %w", fileID, err)
+	}
+	return meta.Parents, nil
 }
 
 // get performs an authenticated GET against the Drive v3 API and decodes
@@ -141,9 +156,12 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, out an
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
+	}
+	if len(body) > maxUpstreamResponseBytes {
+		return fmt.Errorf("read response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {

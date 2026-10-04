@@ -36,9 +36,11 @@ func capturedSearch(t *testing.T, body string) (string, *httptest.ResponseRecord
 			captured = string(b)
 			return []byte(`{"users":[],"total":0,"limit":10,"offset":0}`), nil
 		},
-	}, testDirectory(t), false, "")
+	}, testDirectory(t), false, "").WithAccessGuard(NewAccessGuard(testAccessConfig()))
+	// A user-management caller: these tests are about filter resolution, and
+	// such a caller's body is not scoped to staff (see users_scope_test.go).
 	w := httptest.NewRecorder()
-	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search", strings.NewReader(body))))
+	h.SearchUsers(w, withCsEngineerUser(httptest.NewRequest(http.MethodPost, "/users/search", strings.NewReader(body))))
 	return captured, w
 }
 

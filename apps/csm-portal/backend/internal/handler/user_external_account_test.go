@@ -41,9 +41,11 @@ func TestGetUser_ExternalAccountStatus_AppendedForExternalContacts(t *testing.T)
 		getUserFn: func(_ context.Context, _ string) ([]byte, error) {
 			return []byte(`{"id":"` + id + `","email":"contact@example.com","userType":"external"}`), nil
 		},
-	}, testDirectory(t), false, "")
+	}, testDirectory(t), false, "").WithAccessGuard(NewAccessGuard(testAccessConfig()))
 
-	r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
+	// A user-management caller; others never get externalAccount (see
+	// users_scope_test.go).
+	r := withCsEngineerUser(httptest.NewRequest(http.MethodGet, "/users/"+id, nil))
 	r.SetPathValue("id", id)
 	w := httptest.NewRecorder()
 	h.GetUser(w, r)
@@ -98,7 +100,7 @@ func TestGetUser_ExternalAccountStatus_SkippedForInternalStaff(t *testing.T) {
 	}
 }
 
-// TestGetUser_ExternalAccountStatus_SkippedForWso2Email: a ServiceNow row can
+// TestGetUser_ExternalAccountStatus_SkippedForWso2Email: a backing-system row can
 // carry a wso2.com email under a customer-facing role/userType (e.g. a
 // wso2.com contact recorded under snc_external for testing) -- that account
 // can never exist in the SCIM "external" org, so the lookup must not run.

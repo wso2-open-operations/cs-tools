@@ -63,10 +63,10 @@ func NewChangeRequestHandler(entity entityChangeRequestClient) *ChangeRequestHan
 }
 
 // WithAccessGuard wires the same guard that authorises every route into this
-// handler, so every read response can redact an embedded raw base64 inline
-// image (see redactRawBase64Images's own doc comment) for a caller who
-// lacks PermDownloadAttachment. Returns h for chaining at the construction
-// site.
+// handler. Inline-image redaction for a caller without
+// PermDownloadAttachment is applied to every route's response by the
+// RedactInlineImages wrapper (cmd/server/main.go), not here. Returns h for
+// chaining at the construction site.
 func (h *ChangeRequestHandler) WithAccessGuard(g *AccessGuard) *ChangeRequestHandler {
 	h.access = g
 	return h
@@ -99,7 +99,7 @@ func (h *ChangeRequestHandler) CreateChangeRequest(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.CreateChangeRequest(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateChangeRequest failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateChangeRequest failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create change request.")
 		return
 	}
@@ -140,7 +140,7 @@ func (h *ChangeRequestHandler) PatchChangeRequest(w http.ResponseWriter, r *http
 
 	result, err := h.entity.PatchChangeRequest(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PatchChangeRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity PatchChangeRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update change request.")
 		return
 	}
@@ -164,12 +164,9 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 
 	result, err := h.entity.GetChangeRequest(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve change request.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -191,7 +188,7 @@ func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, 
 
 	result, err := h.entity.GetChangeRequestApprovals(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve change request approvals.")
 		return
 	}
@@ -233,7 +230,7 @@ func (h *ChangeRequestHandler) CreateChangeRequestComment(w http.ResponseWriter,
 	}
 
 	if _, err := h.entity.GetChangeRequest(r.Context(), id); err != nil {
-		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed during comment guard", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetChangeRequest failed during comment guard", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create change request comment.")
 		return
 	}
@@ -246,7 +243,7 @@ func (h *ChangeRequestHandler) CreateChangeRequestComment(w http.ResponseWriter,
 
 	result, err := h.entity.CreateComment(r.Context(), newBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create change request comment.")
 		return
 	}
@@ -295,19 +292,16 @@ func (h *ChangeRequestHandler) SearchChangeRequestComments(w http.ResponseWriter
 
 	result, err := h.entity.SearchComments(r.Context(), newBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search change request comments.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
 }
 
 // DecideChangeRequestApproval handles POST /change-requests/{id}/approvals/decision. Any user
-// with access to the change request may attempt a decision; ServiceNow itself enforces that
+// with access to the change request may attempt a decision; the backing system itself enforces that
 // only the caller's own pending approval can be acted on, so this is not a bypass-only endpoint.
 func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -348,7 +342,7 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 
 	result, err := h.entity.DecideChangeRequestApproval(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity DecideChangeRequestApproval failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity DecideChangeRequestApproval failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to submit change request approval decision.")
 		return
 	}
@@ -383,12 +377,9 @@ func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *ht
 
 	result, err := h.entity.SearchChangeRequests(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchChangeRequests failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchChangeRequests failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search change requests.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -426,7 +417,7 @@ func (h *ChangeRequestHandler) AggregateChangeRequests(w http.ResponseWriter, r 
 
 	result, err := h.entity.AggregateChangeRequests(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity AggregateChangeRequests failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity AggregateChangeRequests failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to aggregate change requests.")
 		return
 	}

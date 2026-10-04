@@ -25,11 +25,7 @@ func mapProductUpdateLevels(src []upstreamProductUpdateLevel) []ProductUpdateLev
 	for i, s := range src {
 		levels := make([]UpdateLevel, len(s.ProductUpdateLevels))
 		for j, ul := range s.ProductUpdateLevels {
-			levels[j] = UpdateLevel{
-				ProductBaseVersion: ul.ProductBaseVersion,
-				Channel:            ul.Channel,
-				UpdateLevels:       ul.UpdateLevels,
-			}
+			levels[j] = UpdateLevel(ul)
 		}
 		out[i] = ProductUpdateLevel{
 			ProductName:         s.ProductName,
@@ -88,26 +84,14 @@ func groupByUpdateLevel(src []upstreamUpdateDescription) map[string]UpdateLevelG
 func mapUpdateDescription(d upstreamUpdateDescription) UpdateDescription {
 	advisories := make([]SecurityAdvisory, len(d.SecurityAdvisories))
 	for i, a := range d.SecurityAdvisories {
-		advisories[i] = SecurityAdvisory{
-			ID:          a.ID,
-			Overview:    a.Overview,
-			Severity:    a.Severity,
-			Description: a.Description,
-			Impact:      a.Impact,
-			Solution:    a.Solution,
-			Notes:       a.Notes,
-			Credits:     a.Credits,
-		}
+		advisories[i] = SecurityAdvisory(a)
 	}
 
 	var releases []DependantRelease
 	if len(d.DependantReleases) > 0 {
 		releases = make([]DependantRelease, len(d.DependantReleases))
 		for i, r := range d.DependantReleases {
-			releases[i] = DependantRelease{
-				Repository:     r.Repository,
-				ReleaseVersion: r.ReleaseVersion,
-			}
+			releases[i] = DependantRelease(r)
 		}
 	}
 

@@ -16,10 +16,7 @@
 
 // Package notifications groups every outbound notification channel used by
 // the CSM portal backend. Each channel gets its own config/client pair in its
-// own file — e.g. email.go's EmailConfig/EmailClient, googlechat.go's
-// GoogleChatConfig/GoogleChatClient — because channels are expected to differ
-// in upstream auth scheme and base URL (email via OAuth2 client credentials;
-// Google Chat via a space's incoming webhook URL; SMS and voice/Twilio calls
-// are expected to follow, likely with their own auth schemes such as
-// Twilio's Account SID/Auth Token).
+// own file (googlechat.go's GoogleChatConfig/GoogleChatClient is the one
+// channel today; e-mail and the rest are sent by the separate notification
+// service), because channels differ in upstream auth scheme and base URL.
 package notifications

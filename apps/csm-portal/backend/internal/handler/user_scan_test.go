@@ -35,7 +35,7 @@ func scanTestRequest(t *testing.T, payload UserScanRequest) *http.Request {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	return withUser(httptest.NewRequest(http.MethodPost, "/spl/scan-user", bytes.NewReader(body)))
+	return withViewerWriterUser(httptest.NewRequest(http.MethodPost, "/spl/scan-user", bytes.NewReader(body)))
 }
 
 // scanUsersResponse builds a SearchUsers response body with a single user.
@@ -73,8 +73,15 @@ func TestSplScanUser_AuthGates(t *testing.T) {
 		assertStatus(t, w, http.StatusForbidden)
 	})
 
+	t.Run("rejects a viewer without write", func(t *testing.T) {
+		r := withUser(httptest.NewRequest(http.MethodPost, "/spl/scan-user", bytes.NewReader([]byte(`{"email":"a@b.com","subscriptionKey":"k"}`))))
+		w := httptest.NewRecorder()
+		h.ScanUser(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+	})
+
 	t.Run("rejects malformed JSON body", func(t *testing.T) {
-		r := withUser(httptest.NewRequest(http.MethodPost, "/spl/scan-user", bytes.NewReader([]byte(`{not json`))))
+		r := withViewerWriterUser(httptest.NewRequest(http.MethodPost, "/spl/scan-user", bytes.NewReader([]byte(`{not json`))))
 		w := httptest.NewRecorder()
 		h.ScanUser(w, r)
 		assertStatus(t, w, http.StatusBadRequest)
@@ -412,7 +419,7 @@ func TestSplScanUser_EntityServiceSide(t *testing.T) {
 			},
 		}
 		h := NewSplUserScanHandler(neutralSales, ent, viewerAccessGuard)
-		r := scanTestRequest(t, UserScanRequest{Email: "a@b.com", SubscriptionKey: "key-1"})
+		r := scanTestRequest(t, UserScanRequest{Email: "a@b.com", SubscriptionKey: "key-1", ResendInvitation: true})
 		w := httptest.NewRecorder()
 		h.ScanUser(w, r)
 		resp := decodeJSON[[]ScanResponse](t, w)
@@ -441,7 +448,7 @@ func TestSplScanUser_EntityServiceSide(t *testing.T) {
 			},
 		}
 		h := NewSplUserScanHandler(neutralSales, ent, viewerAccessGuard)
-		r := scanTestRequest(t, UserScanRequest{Email: "a@b.com", SubscriptionKey: "key-1"})
+		r := scanTestRequest(t, UserScanRequest{Email: "a@b.com", SubscriptionKey: "key-1", ResendInvitation: true})
 		w := httptest.NewRecorder()
 		h.ScanUser(w, r)
 		assertStatus(t, w, http.StatusOK)
@@ -449,6 +456,32 @@ func TestSplScanUser_EntityServiceSide(t *testing.T) {
 		userResult := resp[1].SystemResult[0]
 		if userResult.Information.Solution != "Could not resend the invitation automatically. Resend it manually from the project's Contacts tab." {
 			t.Errorf("solution = %q, unexpected", userResult.Information.Solution)
+		}
+	})
+
+	t.Run("locked-out user: no resend without the flag", func(t *testing.T) {
+		ent := &mockEntityScanClient{
+			searchProjectsFn: func(ctx context.Context, body []byte) ([]byte, error) {
+				return scanProjectsResponse("proj-1", "key-1", "Open"), nil
+			},
+			searchUsersFn: func(ctx context.Context, body []byte) ([]byte, error) {
+				return scanUsersResponse("a@b.com", true), nil
+			},
+			resendProjectContactInvitationFn: func(ctx context.Context, projectID, email string) ([]byte, error) {
+				t.Fatal("invitation must not be resent without resendInvitation")
+				return nil, nil
+			},
+		}
+		h := NewSplUserScanHandler(neutralSales, ent, viewerAccessGuard)
+		w := httptest.NewRecorder()
+		h.ScanUser(w, scanTestRequest(t, UserScanRequest{Email: "a@b.com", SubscriptionKey: "key-1"}))
+		assertStatus(t, w, http.StatusOK)
+		userResult := decodeJSON[[]ScanResponse](t, w)[1].SystemResult[0]
+		if userResult.State || userResult.Information.Issue != "The user didn't accept the invitation." {
+			t.Errorf("locked-out state not reported: %+v", userResult)
+		}
+		if userResult.Information.Solution == "" {
+			t.Error("solution should point at the manual resend")
 		}
 	})
 }

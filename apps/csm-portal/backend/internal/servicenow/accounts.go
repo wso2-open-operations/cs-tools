@@ -178,7 +178,7 @@ var ErrAccountNotFound = errors.New("servicenow: no account found for that accou
 // GetAccountByID retrieves a single account by its account number. Returns
 // ErrAccountNotFound when no account matches.
 func (c *Client) GetAccountByID(ctx context.Context, accountNumber string) (AccountDetails, error) {
-	if err := SanitizeQueryValue(accountNumber); err != nil {
+	if err := ValidateRecordNumberOrSysID(accountNumber); err != nil {
 		return AccountDetails{}, err
 	}
 	params := url.Values{
@@ -238,7 +238,7 @@ var escalationStateLabels = map[string]string{
 // the given account number, paginated. Returns ErrAccountNotFound when no
 // account matches accountNumber.
 func (c *Client) GetEscalationsByAccount(ctx context.Context, accountNumber string, offset, limit int) ([]EscalationDetail, error) {
-	if err := SanitizeQueryValue(accountNumber); err != nil {
+	if err := ValidateRecordNumberOrSysID(accountNumber); err != nil {
 		return nil, err
 	}
 
@@ -355,10 +355,10 @@ type snSysIDResultList struct {
 // need either a re-query-after-create reconciliation step or a ServiceNow-
 // side uniqueness constraint to fully close this.
 func (c *Client) EscalateCase(ctx context.Context, accountNumber, caseNumber string, request EscalationRequest, submittedByEmail string) (EscalationResponse, error) {
-	if err := SanitizeQueryValue(accountNumber); err != nil {
+	if err := ValidateRecordNumberOrSysID(accountNumber); err != nil {
 		return EscalationResponse{}, err
 	}
-	if err := SanitizeQueryValue(caseNumber); err != nil {
+	if err := ValidateRecordNumber(caseNumber); err != nil {
 		return EscalationResponse{}, err
 	}
 

@@ -36,9 +36,9 @@ type salesEntityClient interface {
 }
 
 // entityScanClient is the subset of internal/entity.CustomerEntityClient
-// SplUserScanHandler's ServiceNow-side checks need. Replaces the old CS-side
+// SplUserScanHandler's backing-system-side checks need. Replaces the old CS-side
 // entity GraphQL service (internal/entity/cs.go, removed): that GraphQL
-// service turned out to be ServiceNow itself behind a second, parallel
+// service turned out to be the backing system itself behind a second, parallel
 // integration, not an independent data source, so there was nothing to gain
 // from keeping it once this handler could resolve the same data through the
 // entity service every other CS Portal handler already uses.
@@ -60,7 +60,7 @@ type entitySearchUsersRequest struct {
 // entityScanUserView is the subset of entity-service's user-search result
 // this handler needs. LockedOut is populated only when entity-service's own
 // CUSTOMER_ENTITY_DATA_SOURCE is "servicenow" (its own first-party
-// ServiceNow integration, domain.SNUser) -- the "postgres" data source
+// The backing system integration, domain.SNUser) -- the "postgres" data source
 // (domain.User) has no such column, so LockedOut silently reads false
 // there. "servicenow" is this file's documented default (see
 // CUSTOMER_ENTITY_DATA_SOURCE's own .env.example comment).
@@ -101,6 +101,11 @@ type UserScanRequest struct {
 	Email           string `json:"email"`
 	SubscriptionKey string `json:"subscriptionKey"`
 	IsPartner       bool   `json:"isPartner"`
+	// ResendInvitation opts in to re-sending a locked-out contact's project
+	// invitation. Without it the scan is read-only and only reports the
+	// locked-out state, so repeating a diagnostic does not e-mail the contact
+	// each time.
+	ResendInvitation bool `json:"resendInvitation,omitempty"`
 }
 
 // SplScanInformation is additional detail attached to a ScanResult —
@@ -231,7 +236,7 @@ func NewSplUserScanHandler(sales salesEntityClient, entityClient entityScanClien
 // `post scan\-user` resource function. See that function for the
 // authoritative behavior; comments below reference its structure.
 func (h *SplUserScanHandler) ScanUser(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}
@@ -270,14 +275,14 @@ func (h *SplUserScanHandler) ScanUser(w http.ResponseWriter, r *http.Request) {
 
 	contact, err := h.sales.GetContactByEmail(ctx, payload.Email)
 	if err != nil {
-		slog.ErrorContext(ctx, "sales entity GetContactByEmail failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "sales entity GetContactByEmail failed", "userID", user.UserID, "err", summarizeErr(err))
 		writeScanError(w, "Error occurred when retrieving contact information")
 		return
 	}
 
 	subscription, err := h.sales.GetSubscriptionByKey(ctx, payload.SubscriptionKey)
 	if err != nil {
-		slog.ErrorContext(ctx, "sales entity GetSubscriptionByKey failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "sales entity GetSubscriptionByKey failed", "userID", user.UserID, "err", summarizeErr(err))
 		writeScanError(w, "Error occurred when retrieving subscription information")
 		return
 	}
@@ -349,14 +354,14 @@ func (h *SplUserScanHandler) ScanUser(w http.ResponseWriter, r *http.Request) {
 
 	entityUser, err := h.lookupScanUser(ctx, payload.Email)
 	if err != nil {
-		slog.ErrorContext(ctx, "entity SearchUsers failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "entity SearchUsers failed", "userID", user.UserID, "err", summarizeErr(err))
 		writeScanError(w, "Error occurred when retrieving user information")
 		return
 	}
 
 	project, err := h.lookupProjectByKey(ctx, payload.SubscriptionKey)
 	if err != nil {
-		slog.ErrorContext(ctx, "entity SearchProjects failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "entity SearchProjects failed", "userID", user.UserID, "err", summarizeErr(err))
 		writeScanError(w, "Error occurred when retrieving project information")
 		return
 	}
@@ -382,18 +387,19 @@ func (h *SplUserScanHandler) ScanUser(w http.ResponseWriter, r *http.Request) {
 		if entityUser == nil {
 			userStateResult.Information = infoUserNotFound
 		} else if entityUser.LockedOut {
-			// Resending here is a deliberate side effect, not just a status
-			// read: re-running this diagnostic for the same still-locked-out
-			// user re-sends their invitation email every time, rather than
-			// showing a (no-longer-available, see entityScanClient's own doc
-			// comment) existing invitation link the way this handler used
-			// to.
+			// Resending is a side effect (an e-mail to the contact), so it
+			// only happens when the caller asks for it with
+			// resendInvitation; a plain scan only reports the state. There
+			// is no existing invitation link to show instead (see
+			// entityScanClient's own doc comment).
 			info := SplScanInformation{
 				Issue:         "The user didn't accept the invitation.",
 				Documentation: infoUserLockedOutDocumentation,
 			}
-			if _, err := h.entity.ResendProjectContactInvitation(ctx, projectID, payload.Email); err != nil {
-				slog.WarnContext(ctx, "entity ResendProjectContactInvitation failed", "userID", user.UserID, "memberEmail", payload.Email, "err", err)
+			if !payload.ResendInvitation {
+				info.Solution = "Resend the invitation from the project's Contacts tab, or run the scan again with the invitation resend option."
+			} else if _, err := h.entity.ResendProjectContactInvitation(ctx, projectID, payload.Email); err != nil {
+				slog.WarnContext(ctx, "entity ResendProjectContactInvitation failed", "userID", user.UserID, "err", summarizeErr(err))
 				info.Solution = "Could not resend the invitation automatically. Resend it manually from the project's Contacts tab."
 			} else {
 				info.Solution = "A fresh invitation email has been sent. Ask the user to check their inbox and accept it."

@@ -18,7 +18,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 
@@ -142,13 +141,13 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 
 	var filters map[string]json.RawMessage
 	if err := json.Unmarshal(rawFilters, &filters); err != nil {
-		return nil, errors.New(ErrMsgBadRequest)
+		return nil, callerMessageError(ErrMsgBadRequest)
 	}
 
 	if rawRoles, ok := filters["roleIds"]; ok {
 		var roleIDs []string
 		if err := json.Unmarshal(rawRoles, &roleIDs); err != nil {
-			return nil, errors.New(ErrMsgBadRequest)
+			return nil, callerMessageError(ErrMsgBadRequest)
 		}
 		if len(roleIDs) > roleIDFilterLimit {
 			return nil, fmt.Errorf("roleIds cannot contain more than %d values", roleIDFilterLimit)
@@ -166,7 +165,7 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 	}
 	var teamIDs []string
 	if err := json.Unmarshal(rawTeams, &teamIDs); err != nil {
-		return nil, errors.New(ErrMsgBadRequest)
+		return nil, callerMessageError(ErrMsgBadRequest)
 	}
 	if len(teamIDs) > teamIDFilterLimit {
 		return nil, fmt.Errorf("teamIds cannot contain more than %d values", teamIDFilterLimit)
@@ -181,7 +180,7 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 		var groupNames []string
 		if rawNames, ok := filters["groupNames"]; ok {
 			if err := json.Unmarshal(rawNames, &groupNames); err != nil {
-				return nil, errors.New(ErrMsgBadRequest)
+				return nil, callerMessageError(ErrMsgBadRequest)
 			}
 		}
 		for _, key := range teamIDs {
@@ -201,20 +200,28 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 		}
 		encoded, err := json.Marshal(groupNames)
 		if err != nil {
-			return nil, errors.New(ErrMsgInternal)
+			return nil, callerMessageError(ErrMsgInternal)
 		}
 		filters["groupNames"] = encoded
 	}
 
 	encodedFilters, err := json.Marshal(filters)
 	if err != nil {
-		return nil, errors.New(ErrMsgInternal)
+		return nil, callerMessageError(ErrMsgInternal)
 	}
 	envelope["filters"] = encodedFilters
 
 	out, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, errors.New(ErrMsgInternal)
+		return nil, callerMessageError(ErrMsgInternal)
 	}
 	return out, nil
 }
+
+// callerMessageError carries one of the fixed caller-facing messages
+// (ErrMsgBadRequest, ErrMsgInternal) as an error value unchanged: SearchUsers
+// writes err.Error() to the client, so those sentences keep their wording
+// rather than Go's lower-case error-string style.
+type callerMessageError string
+
+func (e callerMessageError) Error() string { return string(e) }

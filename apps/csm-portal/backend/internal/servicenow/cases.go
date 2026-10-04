@@ -164,7 +164,7 @@ var caseStateToSNMap = map[string]string{
 // filters, which are mapped through a fixed lookup table — they are
 // concatenated into the query as-is.
 func (c *Client) GetCasesByProject(ctx context.Context, projectID string, stateFilters, caseTypeFilters []string, offset, limit int) ([]CaseDetails, error) {
-	if err := SanitizeQueryValue(projectID); err != nil {
+	if err := ValidateRecordNumberOrSysID(projectID); err != nil {
 		return nil, err
 	}
 	query := "project.number=" + projectID + "^ORDERBYDESCsys_updated_on"
@@ -216,7 +216,7 @@ var ErrCaseNotFound = errors.New("servicenow: no case found for that case number
 // GetCaseByNumber retrieves a single case by its case number. Returns
 // ErrCaseNotFound when no case matches.
 func (c *Client) GetCaseByNumber(ctx context.Context, caseNumber string) (CaseDetails, error) {
-	if err := SanitizeQueryValue(caseNumber); err != nil {
+	if err := ValidateRecordNumber(caseNumber); err != nil {
 		return CaseDetails{}, err
 	}
 	raw, err := c.TableQuery(ctx, "sn_customerservice_case", url.Values{
@@ -298,7 +298,7 @@ const totalCountHeader = "X-Total-Count"
 // Ballerina operations:getCommentsAndWorknotes. Returns ErrCaseNotFound
 // when no case matches caseNumber.
 func (c *Client) GetCommentsAndWorknotes(ctx context.Context, caseNumber string, offset, limit int) (CommentsResponse, error) {
-	if err := SanitizeQueryValue(caseNumber); err != nil {
+	if err := ValidateRecordNumber(caseNumber); err != nil {
 		return CommentsResponse{}, err
 	}
 	caseSysID, err := c.getCaseSysID(ctx, caseNumber)
@@ -385,7 +385,7 @@ type snAttachmentList struct {
 // operations:getAttachmentsInfo. Returns ErrCaseNotFound when no case
 // matches caseNumber.
 func (c *Client) GetAttachmentsInfo(ctx context.Context, caseNumber string, offset, limit int) ([]AttachmentInfo, error) {
-	if err := SanitizeQueryValue(caseNumber); err != nil {
+	if err := ValidateRecordNumber(caseNumber); err != nil {
 		return nil, err
 	}
 	caseSysID, err := c.getCaseSysID(ctx, caseNumber)

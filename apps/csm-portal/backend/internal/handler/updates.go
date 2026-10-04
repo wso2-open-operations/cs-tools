@@ -55,7 +55,7 @@ func (h *UpdatesHandler) GetProductUpdateLevels(w http.ResponseWriter, r *http.R
 
 	result, err := h.updates.GetProductUpdateLevels(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "updates GetProductUpdateLevels failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "updates GetProductUpdateLevels failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to get product update levels.")
 		return
 	}
@@ -90,7 +90,7 @@ func (h *UpdatesHandler) SearchUpdatesBetweenUpdateLevels(w http.ResponseWriter,
 
 	result, err := h.updates.SearchUpdatesBetweenUpdateLevels(r.Context(), payload, user.Email)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "updates SearchUpdatesBetweenUpdateLevels failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "updates SearchUpdatesBetweenUpdateLevels failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search updates.")
 		return
 	}

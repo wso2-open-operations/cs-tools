@@ -138,7 +138,7 @@ func (h *CaseHandler) RequestCaseUpdate(w http.ResponseWriter, r *http.Request) 
 
 	current, err := h.entity.GetCase(r.Context(), caseID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetCase failed during request-update guard", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetCase failed during request-update guard", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to request an update.")
 		return
 	}
@@ -160,7 +160,7 @@ func (h *CaseHandler) RequestCaseUpdate(w http.ResponseWriter, r *http.Request) 
 
 	// engagementType is compared case-insensitively because it is NOT
 	// normalized before reaching this layer: entity-service's CaseView.EngagementType
-	// carries ServiceNow's raw choice-field display label unmodified (e.g.
+	// carries the backing system's raw choice-field display label unmodified (e.g.
 	// literally "Migration", capitalized) — unlike State/WorkState, which go
 	// through explicit lowering functions before reaching the domain layer. A
 	// strict-case compare would silently misclassify every real migration
@@ -185,7 +185,7 @@ func (h *CaseHandler) RequestCaseUpdate(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.CreateCaseComment(r.Context(), caseID, commentBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateCaseComment failed during request-update", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateCaseComment failed during request-update", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to request an update.")
 		return
 	}

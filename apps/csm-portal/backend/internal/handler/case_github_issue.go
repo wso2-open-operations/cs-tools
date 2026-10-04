@@ -249,7 +249,7 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 
 	caseRaw, err := h.entity.GetCase(r.Context(), caseID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetCase failed before creating a GitHub issue", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetCase failed before creating a GitHub issue", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create GitHub issue.")
 		return
 	}
@@ -265,7 +265,7 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 			writeError(w, http.StatusBadRequest, errMsgGitHubRepoNotMapped)
 			return
 		}
-		slog.ErrorContext(r.Context(), "entity GetProductRepoMapping failed", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetProductRepoMapping failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create GitHub issue.")
 		return
 	}
@@ -287,7 +287,7 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 	// must be one it is configured with.
 	issue, err := h.engineering.CreateGitIssue(r.Context(), owner, owner, repo, title, issueBody, buildGitHubIssueLabels(mapping.GithubLabel, req))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "engineering CreateGitIssue failed", "userID", user.UserID, "caseID", caseID, "repo", owner+"/"+repo, "err", err)
+		slog.ErrorContext(r.Context(), "engineering CreateGitIssue failed", "userID", user.UserID, "caseID", caseID, "repo", owner+"/"+repo, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create GitHub issue.")
 		return
 	}
@@ -320,6 +320,6 @@ func (h *CaseHandler) recordGitHubIssueWorkNote(ctx context.Context, user *middl
 		return
 	}
 	if _, err := h.entity.CreateCaseComment(ctx, caseID, body); err != nil {
-		slog.WarnContext(ctx, "failed to record GitHub issue work note", "userID", user.UserID, "caseID", caseID, "err", err)
+		slog.WarnContext(ctx, "failed to record GitHub issue work note", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
 	}
 }

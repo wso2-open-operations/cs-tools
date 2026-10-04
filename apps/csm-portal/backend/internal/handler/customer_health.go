@@ -51,7 +51,7 @@ type riskClient interface {
 	GetActionItemComments(ctx context.Context, actionItemID int) ([]risk.ActionItemComment, error)
 }
 
-// customerHealthSNClient abstracts the two ServiceNow-backed
+// customerHealthSNClient abstracts the two legacy-data-source
 // customer-health lookups used by CustomerHealthHandler (the rest of this
 // domain is pure MySQL, via riskClient).
 type customerHealthSNClient interface {
@@ -61,7 +61,7 @@ type customerHealthSNClient interface {
 
 // CustomerHealthHandler handles HTTP requests for SupportPortalLite's
 // customer-health/risk-tracking endpoints (/customer-health/*),
-// delegating to MySQL (risk-tracking state) and ServiceNow (account/project
+// delegating to MySQL (risk-tracking state) and the backing system (account/project
 // summary data) as each endpoint requires.
 type CustomerHealthHandler struct {
 	risk        riskClient
@@ -118,12 +118,12 @@ type accountSummary struct {
 // GetSummary handles POST /customer-health/summary.
 //
 // When payload.HealthStatus names a status, this first resolves the
-// matching account sys_ids from MySQL, then paginates ServiceNow in batches
+// matching account sys_ids from MySQL, then paginates the backing system in batches
 // of 200 to fetch every account matching the other filters, intersects the
 // two sets in memory, and paginates the intersection — exactly mirroring
-// the Ballerina resource function's approach (ServiceNow's summary API has
+// the Ballerina resource function's approach (the backing system's summary API has
 // no sys_id-list filter, so the intersection can't be pushed down to it).
-// Without a health-status filter, it fetches one page from ServiceNow
+// Without a health-status filter, it fetches one page from the backing system
 // directly and enriches it with health-status values from MySQL.
 func (h *CustomerHealthHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireViewerAccess(w, r, h.accessGuard)
@@ -160,7 +160,7 @@ func (h *CustomerHealthHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 	if healthStatus != "" {
 		resp, err := h.summaryFilteredByHealthStatus(ctx, payload, healthStatus)
 		if err != nil {
-			slog.ErrorContext(ctx, "customer health summary (filtered) failed", "userID", user.UserID, "err", err)
+			slog.ErrorContext(ctx, "customer health summary (filtered) failed", "userID", user.UserID, "err", summarizeErr(err))
 			mapUpstreamErrorGeneric(w, err, "Failed to retrieve customer health summary.")
 			return
 		}
@@ -171,7 +171,7 @@ func (h *CustomerHealthHandler) GetSummary(w http.ResponseWriter, r *http.Reques
 	snResp, err := h.sn.GetCustomerHealthSummary(ctx, payload.Email, payload.Phrase, payload.Risks, payload.Region,
 		payload.Product, payload.AbtTeam, payload.Offset, payload.Limit)
 	if err != nil {
-		slog.ErrorContext(ctx, "servicenow GetCustomerHealthSummary failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "servicenow GetCustomerHealthSummary failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve customer health summary.")
 		return
 	}
@@ -209,7 +209,7 @@ func (h *CustomerHealthHandler) summaryFilteredByHealthStatus(ctx context.Contex
 	}
 
 	const batchSize = 200
-	// maxBatches bounds the loop even if ServiceNow's response is
+	// maxBatches bounds the loop even if the backing system's response is
 	// inconsistent (e.g. it ignores offset, or caps a page below batchSize
 	// while still reporting more remain) -- 500 batches is 100,000 accounts,
 	// far beyond any real account count, so hitting it means the upstream
@@ -294,7 +294,7 @@ type initHealthTrackingRequest struct {
 // InitHealthTracking handles POST
 // /customer-health/accounts/{accountSysId}/init-health-tracking.
 func (h *CustomerHealthHandler) InitHealthTracking(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}
@@ -335,7 +335,7 @@ func (h *CustomerHealthHandler) GetAccountDetail(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)
 			return
 		}
-		slog.ErrorContext(r.Context(), "servicenow GetCustomerHealthDetail failed", "userID", user.UserID, "accountId", accountID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetCustomerHealthDetail failed", "userID", user.UserID, "accountId", accountID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve account health detail.")
 		return
 	}
@@ -344,7 +344,7 @@ func (h *CustomerHealthHandler) GetAccountDetail(w http.ResponseWriter, r *http.
 
 // OpenRisk handles POST /customer-health/projects/{projectSysId}/risk.
 func (h *CustomerHealthHandler) OpenRisk(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}
@@ -370,7 +370,7 @@ func (h *CustomerHealthHandler) OpenRisk(w http.ResponseWriter, r *http.Request)
 
 // CloseRisk handles PUT /customer-health/risks/{riskId}/close.
 func (h *CustomerHealthHandler) CloseRisk(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}
@@ -401,7 +401,7 @@ func (h *CustomerHealthHandler) CloseRisk(w http.ResponseWriter, r *http.Request
 // MarkHealthy handles POST
 // /customer-health/projects/{projectSysId}/mark-healthy.
 func (h *CustomerHealthHandler) MarkHealthy(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}
@@ -428,7 +428,7 @@ func (h *CustomerHealthHandler) MarkHealthy(w http.ResponseWriter, r *http.Reque
 // RevertReview handles POST
 // /customer-health/projects/{projectSysId}/revert-review.
 func (h *CustomerHealthHandler) RevertReview(w http.ResponseWriter, r *http.Request) {
-	user, ok := requireViewerAccess(w, r, h.accessGuard)
+	user, ok := requireViewerWriteAccess(w, r, h.accessGuard)
 	if !ok {
 		return
 	}

@@ -19,6 +19,7 @@ package scim
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -52,6 +53,9 @@ const (
 // profile page's own role display, added later than that mirrored logic).
 // Returns nil if no matching user is found in the SCIM service.
 func (c *Client) SearchUser(ctx context.Context, email string) (*UserInfo, error) {
+	if err := validateFilterEmail(email); err != nil {
+		return nil, err
+	}
 	startIndex := 1
 	var found *scimUser
 
@@ -59,7 +63,7 @@ func (c *Client) SearchUser(ctx context.Context, email string) (*UserInfo, error
 		reqBody, err := json.Marshal(scimSearchRequest{
 			Domain:     domainDefault,
 			Attributes: []string{attrPhoneNumbers, attrUserName, attrSchema, attrRoles},
-			Filter:     fmt.Sprintf("userName eq %s", email),
+			Filter:     userNameEqFilter(email),
 			StartIndex: startIndex,
 		})
 		if err != nil {
@@ -105,9 +109,12 @@ func (c *Client) SearchUser(ctx context.Context, email string) (*UserInfo, error
 // asgardeo-user-check's searchUser. A single itemsPerPage=1 lookup is enough
 // to answer an existence check, so unlike SearchUser this does not paginate.
 func (c *Client) SearchExternalUser(ctx context.Context, email string) (*ExternalUserInfo, error) {
+	if err := validateFilterEmail(email); err != nil {
+		return nil, err
+	}
 	reqBody, err := json.Marshal(scimExternalSearchRequest{
 		Attributes:   []string{attrUserName, attrSchema},
-		Filter:       fmt.Sprintf("userName eq %q", email),
+		Filter:       userNameEqFilter(email),
 		ItemsPerPage: 1,
 	})
 	if err != nil {
@@ -234,3 +241,35 @@ func extractLastPasswordUpdateTime(u scimUser) *string {
 	}
 	return nil
 }
+
+// userNameEqFilter builds a `userName eq "<value>"` SCIM filter. RFC 7644
+// filter values are JSON string literals, so the value is JSON-encoded:
+// quotes, backslashes and control characters are escaped and the value can
+// never extend the filter expression.
+func userNameEqFilter(value string) string {
+	lit, _ := json.Marshal(value)
+	return "userName eq " + string(lit)
+}
+
+// validateFilterEmail rejects a value that cannot be an e-mail address before
+// it is used in a filter: empty, longer than 254 bytes, containing whitespace,
+// a control character, a quote or a backslash, or not of the form local@domain.
+func validateFilterEmail(email string) error {
+	if email == "" || len(email) > 254 {
+		return errInvalidFilterEmail
+	}
+	for _, r := range email {
+		if r <= ' ' || r == 0x7f || r == '"' || r == '\\' {
+			return errInvalidFilterEmail
+		}
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 || strings.Count(email, "@") != 1 {
+		return errInvalidFilterEmail
+	}
+	return nil
+}
+
+// errInvalidFilterEmail is returned by SearchUser/SearchExternalUser for a
+// value that is not a plausible e-mail address.
+var errInvalidFilterEmail = errors.New("scim: not a valid e-mail address")

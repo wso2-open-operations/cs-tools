@@ -35,7 +35,7 @@ import (
 // maxInlineImageSizeBytes caps a single extracted inline image's decoded
 // size. Mirrors the webapp's MAX_IMAGE_SIZE_BYTES
 // (apps/csm-portal/webapp/src/components/rich-text-editor/richTextConstants.ts)
-// and ServiceNow's own RichTextUtils.MAX_SIZE_BYTES for the equivalent
+// and the backing system's own RichTextUtils.MAX_SIZE_BYTES for the equivalent
 // SN-backed path — all three are deliberately the same 10MB limit. (SN's own
 // _validateAttachmentSize error message says "15MB", which is inconsistent
 // with its own MAX_SIZE_BYTES=10485760 constant it actually enforces — not
@@ -52,7 +52,7 @@ const maxInlineImageSizeBytes = 10 * 1024 * 1024 // 10MB
 const inlineImageUploadShareTTL = 5 * time.Minute
 
 // allowedInlineImageTypes is the set of data: URI image subtypes this
-// backend will extract and store as real attachments — mirrors ServiceNow's
+// backend will extract and store as real attachments — mirrors the backing system's
 // own RichTextUtils.processRichTextContent allow-list exactly, including
 // "jpg" alongside "jpeg" (not a registered MIME subtype, but what some
 // browsers/editors emit for a data: URI, and SN explicitly allows it too).
@@ -67,7 +67,7 @@ var allowedInlineImageTypes = map[string]bool{
 // data: URI of an image MIME type. Capture groups: 1 = the declared subtype
 // (png/jpeg/jpg/webp/...), 2 = the base64 payload, which may itself contain
 // whitespace/newlines from a rich-text editor's line wrapping — stripped via
-// base64WhitespaceRe before decoding. Mirrors ServiceNow's
+// base64WhitespaceRe before decoding. Mirrors the backing system's
 // RichTextUtils.base64ImgRegex, translated to Go's RE2 syntax; the original
 // pattern uses no backreferences or lookaround, so the translation is exact.
 var base64InlineImageTagRe = regexp.MustCompile(`(?i)<img[^>]+src=["']data:(?:@file/|image/)([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n\s]+)["'][^>]*>`)
@@ -75,7 +75,7 @@ var base64InlineImageTagRe = regexp.MustCompile(`(?i)<img[^>]+src=["']data:(?:@f
 // unsupportedInlineImageTagRe extracts the declared subtype of every base64
 // image data: URI <img> tag, regardless of whether that subtype is allowed —
 // used to reject-fast on any unsupported type before any image in the same
-// comment is uploaded, mirroring ServiceNow's own reject-fast behavior (see
+// comment is uploaded, mirroring the backing system's own reject-fast behavior (see
 // RichTextUtils.processRichTextContent's unsupportedRegex pass).
 var unsupportedInlineImageTagRe = regexp.MustCompile(`(?i)<img[^>]+src=["']data:(?:@file/|image/)([^;]+);base64,[^"']+["'][^>]*>`)
 
@@ -118,7 +118,7 @@ type inlineImageSftpgoClient interface {
 // InlineImageProcessor extracts base64 data: URI images embedded in a
 // comment's rich-text HTML, uploads each as a real SFTPGo-backed attachment,
 // and rewrites the HTML to reference it via a ".iix"-suffixed <img src> —
-// mirroring ServiceNow's own
+// mirroring the backing system's own
 // RichTextUtils.processRichTextContent/_deleteAttachments for SN-backed
 // comments
 // (notes/sn-customer-portal-api/script-includes/RichTextUtils.js). Only used
@@ -145,7 +145,7 @@ func NewInlineImageProcessor(entity entityCaseClient, sftpgo inlineImageSftpgoCl
 // image at all.
 //
 // Any unsupported inline image MIME subtype anywhere in htmlContent is
-// rejected before any image is processed, mirroring ServiceNow's reject-fast
+// rejected before any image is processed, mirroring the backing system's reject-fast
 // behavior.
 //
 // Each image follows the same pending-first ordering as the browser-driven
@@ -213,7 +213,7 @@ func (p *InlineImageProcessor) Process(ctx context.Context, email, jwtAssertion,
 			rollback()
 			return "", &inlineImageError{status: http.StatusBadRequest, message: "Failed to decode an embedded image."}
 		}
-		// Validated BEFORE any upstream write, unlike ServiceNow's own
+		// Validated BEFORE any upstream write, unlike the backing system's own
 		// implementation (which validates size only after writing the
 		// attachment and rolls back if too big) — this avoids an unnecessary
 		// entity-service + SFTPGo round trip for an oversized image.

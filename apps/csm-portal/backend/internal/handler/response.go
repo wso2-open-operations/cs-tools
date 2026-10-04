@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,7 +104,7 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 		case http.StatusBadRequest:
 			writeError(w, http.StatusBadRequest, upstreamErrorMessageStrict(apiErr.Body, ErrMsgBadRequest))
 		case http.StatusConflict, http.StatusUnprocessableEntity:
-			writeError(w, apiErr.StatusCode, upstreamErrorMessage(apiErr.Body, fallbackMsg))
+			writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
 		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			writeError(w, http.StatusServiceUnavailable, fallbackMsg)
 		default:
@@ -128,10 +129,8 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 // non-PATCH endpoint: 401/403/404 still translate to the fixed messages, but
 // every other case — 400, 409, 422, 5xx, and unmapped statuses alike — falls
 // back to fallbackMsg instead of echoing the upstream body to the caller.
-// The full upstream reason (status + body) is still expected in the caller's
-// own slog.ErrorContext(ctx, ..., "err", err) call — server-side logs are
-// operator-facing, not caller-facing, so the detail this function withholds
-// from the HTTP response is deliberately preserved there for debugging.
+// The caller logs the failure itself with "err", summarizeErr(err): the
+// upstream status, never the upstream body or a request URL.
 func mapUpstreamErrorGeneric(w http.ResponseWriter, err error, fallbackMsg string) {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) {
@@ -156,33 +155,14 @@ func mapUpstreamErrorGeneric(w http.ResponseWriter, err error, fallbackMsg strin
 	writeError(w, http.StatusInternalServerError, fallbackMsg)
 }
 
-// upstreamErrorMessage extracts the human-readable message from an upstream
-// JSON error body shaped like {"message": "..."} (the entity service's error
-// envelope). Passing the raw JSON body straight through as the outer
-// {"message": ...} value would double-encode it into an escaped JSON string
-// instead of the plain text callers expect, so it is parsed here first. Falls
-// back to the raw body when it isn't a JSON object with a message field, and
-// to fallbackMsg when the body is empty.
-func upstreamErrorMessage(body string, fallbackMsg string) string {
-	if body == "" {
-		return fallbackMsg
-	}
-	var parsed struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal([]byte(body), &parsed); err == nil && parsed.Message != "" {
-		return parsed.Message
-	}
-	return body
-}
-
-// upstreamErrorMessageStrict is like upstreamErrorMessage but never falls back
-// to the raw body: it only ever surfaces a value from body when it parses as
-// a JSON object with a non-empty message field, and returns fallbackMsg for
-// every other shape (empty, malformed JSON, or JSON without a message field).
-// Used for status codes where the upstream body is not guaranteed to be a
-// well-formed error envelope, so echoing it verbatim risks leaking upstream
-// diagnostic text (or worse) straight to the API caller.
+// upstreamErrorMessageStrict extracts the human-readable message from an
+// upstream JSON error body shaped like {"message": "..."} (the entity
+// service's error envelope), so a caller-actionable reason such as "Invalid
+// state transition" reaches the caller as plain text. It never falls back to
+// the raw body: any other shape (empty, malformed JSON, JSON without a message
+// field, plain text, another service's error document) yields fallbackMsg,
+// since echoing an arbitrary upstream body verbatim risks leaking upstream
+// diagnostic text to the API caller.
 func upstreamErrorMessageStrict(body string, fallbackMsg string) string {
 	if body == "" {
 		return fallbackMsg
@@ -204,8 +184,15 @@ func upstreamErrorMessageStrict(body string, fallbackMsg string) string {
 // parameters, so its raw text is not safe to log verbatim.
 func summarizeErr(err error) string {
 	var apiErr *apierror.Error
-	if errors.As(err, &apiErr) {
+	switch {
+	case err == nil:
+		return ""
+	case errors.As(err, &apiErr):
 		return fmt.Sprintf("upstream status %d", apiErr.StatusCode)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "upstream request timed out"
+	case errors.Is(err, context.Canceled):
+		return "upstream request canceled"
 	}
 	return "upstream request failed"
 }

@@ -169,10 +169,10 @@ func TestCustomerHealthHandler_GetSummary_HealthStatusFilterEmptyMatchShortCircu
 
 // TestCustomerHealthHandler_GetSummary_HealthStatusFilterStopsOnTotalCount
 // guards the fix for the pagination loop that only stopped on a
-// short page: with ServiceNow's page size at exactly the loop's batchSize,
+// short page: with the backing system's page size at exactly the loop's batchSize,
 // the old condition (len(batch.Data) < batchSize) never stops there,
 // requiring an extra round trip at best and looping forever at worst if
-// ServiceNow ignores offset and keeps returning a full page. The fix uses
+// The backing system ignores offset and keeps returning a full page. The fix uses
 // the response's own TotalCount instead.
 func TestCustomerHealthHandler_GetSummary_HealthStatusFilterStopsOnTotalCount(t *testing.T) {
 	fullPage := make([]servicenow.AccountSummary, 200)
@@ -183,7 +183,7 @@ func TestCustomerHealthHandler_GetSummary_HealthStatusFilterStopsOnTotalCount(t 
 	sn := &fakeSNCustomerHealthClient{
 		getCustomerHealthSummary: func(ctx context.Context, email, phrase, risks *string, region []string, product, abtTeam *string, offset, limit int) (*servicenow.AccountSummaryResponse, error) {
 			calls++
-			// Simulates ServiceNow ignoring offset (a real observed upstream
+			// Simulates the backing system ignoring offset (a real observed upstream
 			// quirk): every call returns the same full page, never a short
 			// one, and would keep this loop going indefinitely without the
 			// TotalCount-based stop condition this test guards.
@@ -243,7 +243,7 @@ func TestCustomerHealthHandler_CloseRisk_ValidationErrorMapsTo400(t *testing.T) 
 	}
 	h := NewCustomerHealthHandler(rc, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
 
-	req := withUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/risks/7/close", bytes.NewReader([]byte(`{"comment":"done"}`))))
+	req := withViewerWriterUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/risks/7/close", bytes.NewReader([]byte(`{"comment":"done"}`))))
 	req.SetPathValue("riskId", "7")
 	w := httptest.NewRecorder()
 	h.CloseRisk(w, req)
@@ -254,7 +254,7 @@ func TestCustomerHealthHandler_CloseRisk_ValidationErrorMapsTo400(t *testing.T) 
 
 func TestCustomerHealthHandler_CloseRisk_InvalidRiskIDIs400(t *testing.T) {
 	h := NewCustomerHealthHandler(&fakeRiskClient{}, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
-	req := withUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/risks/not-a-number/close", bytes.NewReader([]byte(`{}`))))
+	req := withViewerWriterUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/risks/not-a-number/close", bytes.NewReader([]byte(`{}`))))
 	req.SetPathValue("riskId", "not-a-number")
 	w := httptest.NewRecorder()
 	h.CloseRisk(w, req)
@@ -285,7 +285,7 @@ func TestCustomerHealthHandler_UpdateActionItemStatus_RequiresResolutionComment(
 	}
 	h := NewCustomerHealthHandler(rc, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
 
-	req := withUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/action-items/5/status", bytes.NewReader([]byte(`{"status":"resolved"}`))))
+	req := withViewerWriterUser(httptest.NewRequest(http.MethodPut, "/spl/customer-health/action-items/5/status", bytes.NewReader([]byte(`{"status":"resolved"}`))))
 	req.SetPathValue("actionItemId", "5")
 	w := httptest.NewRecorder()
 	h.UpdateActionItemStatus(w, req)
@@ -306,10 +306,85 @@ func TestCustomerHealthHandler_InitHealthTracking_Returns202(t *testing.T) {
 	h := NewCustomerHealthHandler(rc, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
 
 	body := []byte(`{"projectSysIds":["proj-1","proj-2"]}`)
-	req := withUser(httptest.NewRequest(http.MethodPost, "/spl/customer-health/accounts/acct-1/init-health-tracking", bytes.NewReader(body)))
+	req := withViewerWriterUser(httptest.NewRequest(http.MethodPost, "/spl/customer-health/accounts/acct-1/init-health-tracking", bytes.NewReader(body)))
 	req.SetPathValue("accountSysId", "acct-1")
 	w := httptest.NewRecorder()
 	h.InitHealthTracking(w, req)
 
 	assertStatus(t, w, http.StatusAccepted)
+}
+
+// Every state-changing customer-health route needs PermWrite on top of the
+// PermViewerAccess audience gate: a viewer-only caller is refused before any
+// store call, while a viewer who also holds write reaches the handler body.
+func TestCustomerHealthHandler_WriteRoutesRequirePermWrite(t *testing.T) {
+	h := NewCustomerHealthHandler(&fakeRiskClient{}, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
+	routes := []struct {
+		name   string
+		method string
+		path   string
+		params map[string]string
+		call   func(http.ResponseWriter, *http.Request)
+	}{
+		{"init health tracking", http.MethodPost, "/customer-health/accounts/acct-1/init-health-tracking", map[string]string{"accountSysId": "acct-1"}, h.InitHealthTracking},
+		{"open risk", http.MethodPost, "/customer-health/projects/proj-1/risk", map[string]string{"projectSysId": "proj-1"}, h.OpenRisk},
+		{"close risk", http.MethodPut, "/customer-health/risks/7/close", map[string]string{"riskId": "7"}, h.CloseRisk},
+		{"mark healthy", http.MethodPost, "/customer-health/projects/proj-1/mark-healthy", map[string]string{"projectSysId": "proj-1"}, h.MarkHealthy},
+		{"revert review", http.MethodPost, "/customer-health/projects/proj-1/revert-review", map[string]string{"projectSysId": "proj-1"}, h.RevertReview},
+		{"create action item", http.MethodPost, "/customer-health/risks/7/action-items", map[string]string{"riskId": "7"}, h.CreateActionItem},
+		{"update action item status", http.MethodPut, "/customer-health/action-items/5/status", map[string]string{"actionItemId": "5"}, h.UpdateActionItemStatus},
+		{"update action item", http.MethodPut, "/customer-health/action-items/5", map[string]string{"actionItemId": "5"}, h.UpdateActionItem},
+		{"create action item comment", http.MethodPost, "/customer-health/action-items/5/comments", map[string]string{"actionItemId": "5"}, h.CreateActionItemComment},
+	}
+	for _, rt := range routes {
+		t.Run(rt.name+": viewer without write is 403", func(t *testing.T) {
+			req := withUser(httptest.NewRequest(rt.method, rt.path, bytes.NewReader([]byte(`{}`))))
+			for k, v := range rt.params {
+				req.SetPathValue(k, v)
+			}
+			w := httptest.NewRecorder()
+			rt.call(w, req)
+			assertStatus(t, w, http.StatusForbidden)
+			assertErrorMessage(t, w, ErrMsgForbidden)
+		})
+		t.Run(rt.name+": write without viewer audience is 403", func(t *testing.T) {
+			req := withCsEngineerUser(httptest.NewRequest(rt.method, rt.path, bytes.NewReader([]byte(`{}`))))
+			for k, v := range rt.params {
+				req.SetPathValue(k, v)
+			}
+			w := httptest.NewRecorder()
+			rt.call(w, req)
+			assertStatus(t, w, http.StatusForbidden)
+		})
+		t.Run(rt.name+": viewer with write passes the gate", func(t *testing.T) {
+			req := withViewerWriterUser(httptest.NewRequest(rt.method, rt.path, bytes.NewReader([]byte(`{}`))))
+			for k, v := range rt.params {
+				req.SetPathValue(k, v)
+			}
+			w := httptest.NewRecorder()
+			func() {
+				// The fake store may be nil for a call this subtest does not
+				// stub; reaching it at all proves the gate passed.
+				defer func() { _ = recover() }()
+				rt.call(w, req)
+			}()
+			if w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+				t.Fatalf("status = %d, want the gate to pass", w.Code)
+			}
+		})
+	}
+}
+
+// The POST-as-query summary stays a read: viewer access alone suffices.
+func TestCustomerHealthHandler_SummaryStaysViewerOnly(t *testing.T) {
+	h := NewCustomerHealthHandler(&fakeRiskClient{}, &fakeSNCustomerHealthClient{}, viewerAccessGuard)
+	req := withUser(httptest.NewRequest(http.MethodPost, "/customer-health/summary", bytes.NewReader([]byte(`{}`))))
+	w := httptest.NewRecorder()
+	func() {
+		defer func() { _ = recover() }()
+		h.GetSummary(w, req)
+	}()
+	if w.Code == http.StatusForbidden {
+		t.Fatal("summary must not require write")
+	}
 }

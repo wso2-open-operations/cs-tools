@@ -1,0 +1,20 @@
+# Keeps the local-dev image build context (docker/local/csm-portal-backend.Dockerfile)
+# to what `go build` needs plus dashboards.example/, which the image ships as
+# the default DASHBOARDS_DIR; everything else stays on the host.
+.git
+.env
+.env.*
+*_test.go
+**/testdata/
+.choreo/
+docs/
+dashboards/
+plg-source-map.json
+*.md
+*.yaml
+Makefile
+bin/
+server
+*.out
+*.test
+coverage*

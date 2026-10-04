@@ -172,7 +172,7 @@ func (h *ConversationHandler) GetConversationMessages(w http.ResponseWriter, r *
 
 	result, err := h.entity.SearchComments(r.Context(), payload)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "conversationID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "conversationID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve conversation messages.")
 		return
 	}
@@ -212,7 +212,7 @@ func (h *ConversationHandler) SearchConversations(w http.ResponseWriter, r *http
 
 	result, err := h.entity.SearchConversations(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchConversations failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchConversations failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search conversations.")
 		return
 	}

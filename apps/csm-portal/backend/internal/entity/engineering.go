@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/upstreamhttp"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -72,7 +73,7 @@ func NewEngineeringEntityClient(cfg EngineeringEntityConfig) *EngineeringEntityC
 	}
 
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
-		&http.Client{Timeout: engineeringTokenFetchTimeout})
+		upstreamhttp.TokenClient(engineeringTokenFetchTimeout))
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 25 * time.Second
 
@@ -108,9 +109,12 @@ func (c *EngineeringEntityClient) do(ctx context.Context, method, path string, b
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("engineering entity: read response body: %w", err)
+	}
+	if len(respBody) > maxUpstreamResponseBytes {
+		return nil, fmt.Errorf("engineering entity: read response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
