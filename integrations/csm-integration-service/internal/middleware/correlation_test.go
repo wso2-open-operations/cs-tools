@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/middleware"
 )
 
 func TestCorrelationID_GeneratesWhenAbsent(t *testing.T) {
@@ -119,6 +119,66 @@ func TestCorrelationID_NormalizesRepeatedPrefix(t *testing.T) {
 	if gotFromContext != wantID {
 		t.Errorf("CorrelationIDFromContext() = %q, want %q", gotFromContext, wantID)
 	}
+}
+
+func TestCorrelationID_ReplacesUnusableIncoming(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"too long":             strings.Repeat("a", 129),
+		"space":                "abc def",
+		"control character":    "abc\x01def",
+		"header-ish injection": "abc;evil=1",
+		"slash":                "a/b",
+		"unicode":              "abcé",
+		"only our prefix":      "cis-",
+		"repeated prefix only": "cis-cis-",
+	}
+	for name, incoming := range cases {
+		t.Run(name, func(t *testing.T) {
+			handler := middleware.CorrelationID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header["X-Csm-Correlation-Id"] = []string{incoming}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			got := w.Header().Get("X-CSM-Correlation-ID")
+			if !strings.HasPrefix(got, "cis-") || !uuidLike(strings.TrimPrefix(got, "cis-")) {
+				t.Errorf("replacement %q is not a generated ID", got)
+			}
+		})
+	}
+}
+
+func TestCorrelationID_KeepsBoundedIncoming(t *testing.T) {
+	t.Parallel()
+
+	incoming := "Req_1.2-" + strings.Repeat("z", 120) // exactly 128 bytes
+	handler := middleware.CorrelationID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-CSM-Correlation-ID", incoming)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if got := w.Header().Get("X-CSM-Correlation-ID"); got != "cis-"+incoming {
+		t.Errorf("echoed = %q, want %q", got, "cis-"+incoming)
+	}
+}
+
+func uuidLike(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCorrelationID_GeneratesDistinctIDs(t *testing.T) {

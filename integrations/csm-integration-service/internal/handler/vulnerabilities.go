@@ -17,9 +17,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 )
@@ -46,24 +46,31 @@ func NewVulnerabilityHandler(entity entityVulnerabilityClient) *VulnerabilityHan
 // SyncProductVulnerabilities handles POST /vulnerabilities/sync. The request body is
 // forwarded to the entity service verbatim. This is a full-replace sync — the caller
 // must submit the complete current set of product-vulnerability records on every
-// call, not an incremental delta; the entity service's downstream ServiceNow-backed
+// call, not an incremental delta; the entity service's downstream externally backed
 // operation deletes any existing record not present in the submitted set. Unlike
 // UpdateProject, this entity-service operation accepts pure M2M calls with no
 // forwarded end-user token, so this call is expected to actually succeed.
 func (h *VulnerabilityHandler) SyncProductVulnerabilities(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
+	body, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	// The sync is a full replace: whatever is absent from the submitted set is
+	// deleted downstream. A body that is not an array can never be a valid set,
+	// and an empty array would be a request to delete every record, so both are
+	// refused here rather than forwarded. An intentional wipe is not something
+	// this operation offers.
+	var records []json.RawMessage
+	trimmed := bytes.TrimSpace(body)
+	// json.Unmarshal accepts "null" into a slice without error, so the array
+	// check has to look at the first byte itself.
+	if len(trimmed) == 0 || trimmed[0] != '[' || json.Unmarshal(trimmed, &records) != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgSyncNotArray)
+		return
+	}
+	if len(records) == 0 {
+		writeError(w, http.StatusBadRequest, ErrMsgSyncEmpty)
 		return
 	}
 

@@ -25,8 +25,16 @@ import "fmt"
 type Error struct {
 	StatusCode int
 	Body       string
+	// RetryAfter is the upstream's Retry-After header value, if it sent one
+	// (typically with a 429 or 503). Handlers pass it through to the caller
+	// after validating its shape; it is never interpreted here.
+	RetryAfter string
 }
 
+// Error reports the upstream status only. The response body is deliberately
+// left out: it can carry upstream data that must not reach logs or callers,
+// and any code that needs it reads the Body field explicitly (as the
+// handler's client-safety filter does).
 func (e *Error) Error() string {
-	return fmt.Sprintf("upstream returned %d: %s", e.StatusCode, e.Body)
+	return fmt.Sprintf("upstream returned %d", e.StatusCode)
 }

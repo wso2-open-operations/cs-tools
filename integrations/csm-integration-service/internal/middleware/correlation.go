@@ -25,7 +25,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/entity"
 )
 
 const correlationIDHeader = "X-CSM-Correlation-ID"
@@ -48,10 +48,16 @@ type correlationIDKey struct{}
 //     entity-service request
 //   - echoed in the response header so callers can reference it in support
 //     requests
+//
+// A caller-supplied ID is used only when it is at most maxCorrelationIDLen
+// bytes of letters, digits, '.', '_' and '-'; anything else (empty, too long,
+// or carrying spaces, control characters or other punctuation) is replaced by
+// a freshly generated ID. The ID is written to logs, response headers and the
+// upstream request, so it must never carry caller-chosen structure there.
 func CorrelationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(correlationIDHeader)
-		if id == "" {
+		if !validCorrelationID(id) {
 			id = newCorrelationID()
 		}
 		id = ensureCorrelationIDPrefix(id)
@@ -60,6 +66,31 @@ func CorrelationID(next http.Handler) http.Handler {
 		ctx = entity.WithCorrelationID(ctx, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// maxCorrelationIDLen bounds a caller-supplied correlation ID. A UUID with a
+// few service prefixes fits comfortably.
+const maxCorrelationIDLen = 128
+
+// validCorrelationID reports whether a caller-supplied ID may be used as-is.
+func validCorrelationID(id string) bool {
+	if id == "" || len(id) > maxCorrelationIDLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	// An ID made only of our own prefix carries nothing to correlate on.
+	for strings.HasPrefix(id, correlationIDPrefix) {
+		id = strings.TrimPrefix(id, correlationIDPrefix)
+	}
+	return id != ""
 }
 
 // ensureCorrelationIDPrefix returns id with exactly one "cis-" prefix, stripping

@@ -21,10 +21,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/apierror"
 )
 
 // tokenServer returns an httptest.Server that always issues a client-credentials
@@ -194,5 +195,122 @@ func TestDoWithoutCorrelationIDOmitsHeader(t *testing.T) {
 	}
 	if sawHeader {
 		t.Error("X-CSM-Correlation-ID header sent with no correlation ID in context, want omitted")
+	}
+}
+
+// TestHealthProbe verifies the reachability probe hits GET /health without a
+// token, succeeds on 2xx and fails on anything else.
+func TestHealthProbe(t *testing.T) {
+	var status int
+	var sawAuth bool
+	var tokenCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			tokenCalls++
+			return
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/health" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		sawAuth = r.Header.Get("Authorization") != ""
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	client := NewClient(Config{BaseURL: srv.URL + "/", TokenURL: srv.URL + "/token", ClientID: "c", ClientSecret: "s"})
+
+	status = http.StatusOK
+	if err := client.Health(context.Background()); err != nil {
+		t.Errorf("200: err = %v, want nil", err)
+	}
+	if sawAuth || tokenCalls != 0 {
+		t.Errorf("probe sent credentials (auth header %v, token calls %d)", sawAuth, tokenCalls)
+	}
+
+	status = http.StatusServiceUnavailable
+	err := client.Health(context.Background())
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("503: err = %v, want *apierror.Error with 503", err)
+	}
+
+	srv.Close()
+	if err := client.Health(context.Background()); err == nil {
+		t.Error("closed server: err = nil, want an error")
+	}
+}
+
+// TestDoCapturesRetryAfter verifies an upstream Retry-After header travels on
+// the typed error so handlers can pass it through.
+func TestDoCapturesRetryAfter(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"slow down"}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := NewClient(Config{
+		BaseURL:      upstream.URL,
+		TokenURL:     tokenSrv.URL,
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+	})
+
+	_, err := client.SearchAccounts(context.Background(), []byte(`{}`))
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("StatusCode = %d, want 429", apiErr.StatusCode)
+	}
+	if apiErr.RetryAfter != "30" {
+		t.Errorf("RetryAfter = %q, want %q", apiErr.RetryAfter, "30")
+	}
+}
+
+// TestDoRejectsOversizedSuccessBody verifies a 2xx body over the cap is an
+// error rather than a truncated payload.
+func TestDoRejectsOversizedSuccessBody(t *testing.T) {
+	maxResponseBodyBytes = 1024
+	t.Cleanup(func() { maxResponseBodyBytes = 32 << 20 })
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"pad":"` + strings.Repeat("x", 2048) + `"}`))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := NewClient(Config{
+		BaseURL:      upstream.URL,
+		TokenURL:     tokenSrv.URL,
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+	})
+
+	body, err := client.SearchAccounts(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatalf("expected an error for a %d-byte body over a %d-byte cap, got body of %d bytes", 2048, 1024, len(body))
+	}
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) {
+		t.Errorf("oversized body produced a typed upstream error %v; want a plain error", apiErr)
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error = %q, want it to say the body exceeds the cap", err)
+	}
+
+	// A body exactly at the cap is still accepted.
+	exact := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("x", 1024)))
+	}))
+	defer exact.Close()
+	client = NewClient(Config{BaseURL: exact.URL, TokenURL: tokenSrv.URL, ClientID: "c", ClientSecret: "s"})
+	body, err = client.SearchAccounts(context.Background(), []byte(`{}`))
+	if err != nil || len(body) != 1024 {
+		t.Errorf("body at the cap: len=%d err=%v, want 1024 and nil", len(body), err)
 	}
 }

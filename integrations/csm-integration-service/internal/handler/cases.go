@@ -19,7 +19,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -45,10 +44,11 @@ type CaseHandler struct {
 	// entity-service's AddCaseTagRequest.ActorEmail. It must match an entry
 	// in entity-service's M2M_TRUSTED_ACTOR_EMAILS allowlist or every call
 	// 403s. Never accepted from the caller — that would defeat the point of
-	// the allowlist being server-configured rather than client-asserted. An
-	// empty value here is a deploy-time misconfiguration, not something this
-	// handler special-cases; the resulting entity-service 403 surfaces
-	// normally. Despite the name (a holdover from this field's original,
+	// the allowlist being server-configured rather than client-asserted. The
+	// server refuses to start without a valid value (see cmd/server's
+	// actorEmail); a value that is set but not on the allowlist still
+	// surfaces normally as the entity service's 403. Despite the name (a
+	// holdover from this field's original,
 	// UMT-specific introduction), it is now this service's single generic
 	// M2M actor identity, used by any caller of these generic case
 	// operations — renaming it is out of scope for the current change.
@@ -67,7 +67,7 @@ func NewCaseHandler(entity entityCaseClient, umtActorEmail string) *CaseHandler 
 // the entity service enforces its own field-combination rules and 400s
 // otherwise, so this handler does not re-validate that. A state/severity/
 // workState-only update succeeds for this M2M-only service on a Postgres data
-// source; every other field this shape accepts is ServiceNow-data-source-only
+// source; every other field this shape accepts is external-data-source-only
 // and requires a forwarded end-user identity token this service cannot
 // supply, so those calls receive a mapped 401 from upstream.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
@@ -77,19 +77,8 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	body, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 
@@ -143,19 +132,8 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(raw) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	raw, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 
@@ -197,19 +175,8 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 // by case number) and the response is returned as-is. No case-number lookup
 // or other special-casing lives here; mirrors SearchAccounts's shape.
 func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	body, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 
@@ -252,19 +219,8 @@ func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(raw) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	raw, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 

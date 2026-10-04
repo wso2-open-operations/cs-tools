@@ -6,9 +6,21 @@ info:
     Project/account search and their Contacts sub-resource, incident
     creation, and alert-incident mapping create/lookup, for third-party
     (M2M) consumers. Fronted by Choreo's API Manager gateway (subscription +
-    client credentials) — this service performs no inbound auth of its own.
-security:
-  - oauth2ClientCredentials: []
+    client credentials), which authenticates every caller; this service
+    performs no authentication of its own.
+
+    Authorization is per operation: every operation except GET /health
+    names the one OAuth2 scope it requires (see the `oauth2ClientCredentials`
+    security scheme for the full list), and the service enforces it from the
+    scope claim of the caller token the gateway forwards. A request with no
+    usable token is answered 401; one whose token lacks the operation's
+    scope is answered 403, before anything is forwarded upstream.
+
+    Request bodies: every body is capped at 1 MiB (413 above that) and must
+    be valid JSON (400 otherwise). An operation whose requestBody is marked
+    required rejects an empty body with 400; the read-only searches marked
+    required: false (contacts, opportunities, invoices, project-opportunity
+    links) treat an empty body as "no filters".
 servers:
   - url: "{server}:{port}/"
     variables:
@@ -20,16 +32,34 @@ paths:
   /health:
     get:
       summary: Health check endpoint.
+      description: >
+        Reports whether this service can reach the entity service it forwards
+        every other operation to. The result is cached for up to 15 seconds,
+        so a change in reachability shows within that window. Requires no
+        token and no scope.
       operationId: getHealth
       security: []
       responses:
         "200":
-          description: Ok
+          description: Ok — the entity service is reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        "503":
+          description: ServiceUnavailable — the entity service is not reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
 
   /accounts/{id}:
     get:
       summary: Get an account by ID.
       operationId: getAccount
+      security:
+        - oauth2ClientCredentials:
+            - accounts:read
       parameters:
         - name: id
           in: path
@@ -51,7 +81,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `accounts:read` scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -62,8 +98,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -73,6 +121,9 @@ paths:
     post:
       summary: Search accounts.
       operationId: searchAccounts
+      security:
+        - oauth2ClientCredentials:
+            - accounts:read
       requestBody:
         description: Account search payload
         required: true
@@ -94,7 +145,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `accounts:read` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
@@ -105,11 +168,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /accounts/{id}/contacts/search:
     post:
       summary: Search contacts for an account.
       operationId: searchAccountContacts
+      security:
+        - oauth2ClientCredentials:
+            - contacts:read
       parameters:
         - name: id
           in: path
@@ -118,7 +190,8 @@ paths:
             type: string
             format: uuid
       requestBody:
-        description: Account contact search payload
+        description: Account contact search payload. Optional; an empty body means no filters.
+        required: false
         content:
           application/json:
             schema:
@@ -137,7 +210,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `contacts:read` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
@@ -148,11 +233,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /projects/{id}:
     get:
       summary: Get a project by ID.
       operationId: getProject
+      security:
+        - oauth2ClientCredentials:
+            - projects:read
       parameters:
         - name: id
           in: path
@@ -174,7 +268,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `projects:read` scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -185,8 +285,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -195,7 +307,7 @@ paths:
     patch:
       summary: Update closure-state fields or hasAgent/hasKbReferences toggles on a project.
       description: >
-        ServiceNow-data-source only. Used by the Account Closure Process (ACP)
+        external-data-source only. Used by the Account Closure Process (ACP)
         automation to write closure-state fields on a project. The request body
         is forwarded to the entity service verbatim — at least one field is
         required, and the entity service enforces that (400 if none is set).
@@ -204,6 +316,9 @@ paths:
         supply one, so every call here currently receives a mapped 401. Kept
         for API-shape completeness, not because it currently succeeds.
       operationId: updateProject
+      security:
+        - oauth2ClientCredentials:
+            - projects:write
       parameters:
         - name: id
           in: path
@@ -241,7 +356,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -258,8 +373,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -269,6 +396,9 @@ paths:
     post:
       summary: Search projects.
       operationId: searchProjects
+      security:
+        - oauth2ClientCredentials:
+            - projects:read
       requestBody:
         description: Project search payload
         required: true
@@ -293,7 +423,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `projects:read` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
@@ -304,11 +446,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /projects/{id}/contacts/search:
     post:
       summary: Search contacts for a project.
       operationId: searchProjectContacts
+      security:
+        - oauth2ClientCredentials:
+            - contacts:read
       parameters:
         - name: id
           in: path
@@ -317,7 +468,8 @@ paths:
             type: string
             format: uuid
       requestBody:
-        description: Project contact search payload
+        description: Project contact search payload. Optional; an empty body means no filters.
+        required: false
         content:
           application/json:
             schema:
@@ -336,7 +488,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `contacts:read` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
@@ -347,10 +511,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /cases/{id}:
     patch:
-      summary: Update a case's state, severity, or workState (or other fields on ServiceNow).
+      summary: Update a case's state, severity, or workState ((or other fields on the external data source)).
       description: >
         The request body is forwarded to the entity service verbatim; the
         entity service enforces its own field-combination rules (e.g. exactly
@@ -365,12 +535,15 @@ paths:
         autocloseHoldUntil, subject, description, deploymentId,
         deployedProductId, the fix-ETA group, acknowledge, workaroundProvided)
         is Postgres-rejected with 400, not proxied through to a token check.
-        On a ServiceNow data source, every field this operation accepts —
+        On the external data source, every field this operation accepts —
         including a bare state/severity/workState update — requires a
         forwarded identity token this service cannot supply, so every call
         currently receives a mapped 401 there, with no field combination that
         succeeds.
       operationId: patchCase
+      security:
+        - oauth2ClientCredentials:
+            - cases:write
       parameters:
         - name: id
           in: path
@@ -399,7 +572,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always when entity-service runs a ServiceNow data source, given this service's M2M-only design; not returned on a Postgres data source, where an unsupported field is a 400 instead)
+          description: Unauthorized (upstream reported a missing or invalid forwarded identity — always when entity-service runs on the external data source, given this service's M2M-only design; not returned on a Postgres data source, where an unsupported field is a 400 instead)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `cases:write` scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -416,8 +595,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -434,6 +625,9 @@ paths:
         the response is returned as-is. No special-casing for any particular
         lookup shape.
       operationId: searchCases
+      security:
+        - oauth2ClientCredentials:
+            - cases:read
       requestBody:
         description: Case search payload, mirroring entity-service's own POST /cases/search contract.
         required: true
@@ -455,13 +649,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -478,8 +672,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -498,12 +704,15 @@ paths:
         match an entry in entity-service's M2M_TRUSTED_ACTOR_EMAILS allowlist
         or every call here receives a mapped 403; when it matches, the
         comment is created successfully with no forwarded end-user identity
-        needed. On DATA_SOURCE=servicenow, entity-service's ServiceNow path
+        needed. On the external data source, entity-service's path
         still requires a forwarded end-user identity token unconditionally
         and ignores actorEmail entirely — since this service is strictly M2M
         with no mechanism to supply one, calls against that data source
         still receive a mapped 401.
       operationId: createCaseComment
+      security:
+        - oauth2ClientCredentials:
+            - cases:write
       parameters:
         - name: id
           in: path
@@ -532,7 +741,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: >
-            Unauthorized — always for DATA_SOURCE=servicenow, since this
+            Unauthorized — always for the external data source, since this
             service has no forwarded end-user identity to supply and that
             data source's entity-service path requires one unconditionally.
           content:
@@ -560,8 +769,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -580,6 +801,9 @@ paths:
         configured value matches an entry in entity-service's
         M2M_TRUSTED_ACTOR_EMAILS allowlist, and 403s otherwise.
       operationId: addCaseTag
+      security:
+        - oauth2ClientCredentials:
+            - cases:write
       parameters:
         - name: id
           in: path
@@ -608,9 +832,9 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: >
-            Unauthorized — on DATA_SOURCE=servicenow, entity-service forwards
-            this call to ServiceNow with an empty user token (this service has
-            no end-user identity to forward), and ServiceNow returns 401.
+            Unauthorized — on the external data source, entity-service forwards
+            this call to the external data source with an empty user token (this service has
+            no end-user identity to forward), and that source returns 401.
           content:
             application/json:
               schema:
@@ -635,8 +859,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -646,11 +882,14 @@ paths:
     post:
       summary: Search opportunities.
       description: >
-        Served from ServiceNow, or from the CSM database on Postgres. Read-only:
+        Served from the external data source, or from the CSM database on Postgres. Read-only:
         this operation does not require a forwarded end-user identity token, so a
-        pure M2M call through this service succeeds (unlike the ServiceNow-backed
+        pure M2M call through this service succeeds (unlike the externally backed
         write operations elsewhere in this API).
       operationId: searchOpportunities
+      security:
+        - oauth2ClientCredentials:
+            - opportunities:read
       requestBody:
         required: false
         content:
@@ -671,13 +910,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -688,8 +927,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -699,10 +950,13 @@ paths:
     get:
       summary: Get an opportunity by ID.
       description: >
-        Served from ServiceNow, or from the CSM database on Postgres. Read-only:
+        Served from the external data source, or from the CSM database on Postgres. Read-only:
         this operation does not require a forwarded end-user identity token, so a
         pure M2M call through this service succeeds.
       operationId: getOpportunity
+      security:
+        - oauth2ClientCredentials:
+            - opportunities:read
       parameters:
         - name: id
           in: path
@@ -724,13 +978,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -741,8 +995,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -752,10 +1018,13 @@ paths:
     post:
       summary: Search invoices.
       description: >
-        Served from ServiceNow, or from the CSM database on Postgres. Read-only:
+        Served from the external data source, or from the CSM database on Postgres. Read-only:
         this operation does not require a forwarded end-user identity token, so a
         pure M2M call through this service succeeds.
       operationId: searchInvoices
+      security:
+        - oauth2ClientCredentials:
+            - invoices:read
       requestBody:
         required: false
         content:
@@ -776,13 +1045,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -793,8 +1062,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -804,10 +1085,13 @@ paths:
     get:
       summary: Get an invoice by ID.
       description: >
-        Served from ServiceNow, or from the CSM database on Postgres. Read-only:
+        Served from the external data source, or from the CSM database on Postgres. Read-only:
         this operation does not require a forwarded end-user identity token, so a
         pure M2M call through this service succeeds.
       operationId: getInvoice
+      security:
+        - oauth2ClientCredentials:
+            - invoices:read
       parameters:
         - name: id
           in: path
@@ -829,13 +1113,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -846,8 +1130,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -857,12 +1153,15 @@ paths:
     post:
       summary: Search project-opportunity links.
       description: >
-        Served from ServiceNow, or from the CSM database on Postgres. A project can
+        Served from the external data source, or from the CSM database on Postgres. A project can
         have more than one linked opportunity — one row per link — so this always
         returns a list. No by-id fetch: the underlying data has no single-record
         endpoint. Read-only: this operation does not require a forwarded end-user
         identity token, so a pure M2M call through this service succeeds.
       operationId: searchProjectOpportunityLinks
+      security:
+        - oauth2ClientCredentials:
+            - opportunities:read
       requestBody:
         required: false
         content:
@@ -883,13 +1182,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -900,8 +1199,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -913,10 +1224,16 @@ paths:
       description: >
         This is a full-replace sync, not an incremental delta: the caller must
         submit the complete current set of product-vulnerability records on
-        every call. The entity service's downstream ServiceNow-backed operation
-        deletes any existing record not present in the submitted set. The
-        request body is forwarded to the entity service verbatim.
+        every call. The entity service's downstream externally backed operation
+        deletes any existing record not present in the submitted set. Because
+        of that, the body must be a non-empty JSON array: an empty array (which
+        would delete every record) or a body that is not an array is rejected
+        with 400 and never forwarded. A valid, non-empty array is forwarded to
+        the entity service verbatim.
       operationId: syncProductVulnerabilities
+      security:
+        - oauth2ClientCredentials:
+            - vulnerabilities:sync
       requestBody:
         description: Complete current set of product-vulnerability records.
         required: true
@@ -932,13 +1249,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProductVulnerabilitySyncResponse'
         "400":
-          description: BadRequest
+          description: >
+            BadRequest — the body is not valid JSON, is not an array, or is an
+            empty array (an empty set is never accepted because it would remove
+            every record); or the upstream rejected a record.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream reported an authorization failure)
+          description: Unauthorized (no usable caller token was forwarded by the gateway, or the upstream reported an authorization failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `vulnerabilities:sync` scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -949,8 +1275,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -961,10 +1299,13 @@ paths:
       summary: The public status dashboard's monitor view for one cloud.
       description: >
         Postgres-backed, forwarded to the entity service verbatim. Consumed by
-        wso2-enterprise/uptime-dashboard, which renders status.*.choreo.dev.
-        The response shape is that dashboard's and is reproduced field for
-        field from the ServiceNow resource it replaces.
+        the public cloud status dashboard. The response shape is that
+        dashboard's and is reproduced field for field from the legacy
+        resource it replaces.
       operationId: getCloudStatusMonitors
+      security:
+        - oauth2ClientCredentials:
+            - cloud-status:read
       parameters:
         - name: cloud
           in: query
@@ -992,7 +1333,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1003,14 +1344,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (upstream unreachable)
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1030,9 +1383,12 @@ paths:
 
         `comments` are the outage's customer-facing external communications,
         newest first — NOT the linked incident's comments, work notes or
-        approval history, which are internal and which ServiceNow does not
+        approval history, which are internal and which the legacy source does not
         publish either.
       operationId: getCloudStatusIncidentDetail
+      security:
+        - oauth2ClientCredentials:
+            - cloud-status:read
       parameters:
         - name: id
           in: path
@@ -1062,12 +1418,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No outage with that id belongs to that cloud.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized (upstream rejected this service's credentials)
           content:
@@ -1075,7 +1425,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No outage with that id belongs to that cloud.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError
           content:
             application/json:
               schema:
@@ -1086,8 +1454,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: InternalServerError
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1101,6 +1469,9 @@ paths:
         present whether or not it has incidents, because the dashboard renders
         a row per key.
       operationId: getCloudStatusIncidents
+      security:
+        - oauth2ClientCredentials:
+            - cloud-status:read
       parameters:
         - name: cloud
           in: query
@@ -1128,7 +1499,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1139,14 +1510,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (upstream unreachable)
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1158,10 +1541,13 @@ paths:
       description: >
         Postgres-backed, forwarded verbatim. *** THE availability FIELD IS A
         JSON STRING FOR SIX CLOUDS AND A BARE NUMBER FOR asgardeo. *** That is
-        what the ServiceNow resource emits and what the dashboard renders;
+        what the legacy resource emits and what the dashboard renders;
         anything that decodes and re-encodes this body would flatten the
         distinction. This service forwards raw bytes precisely so it cannot.
       operationId: getCloudStatusAvailabilities
+      security:
+        - oauth2ClientCredentials:
+            - cloud-status:read
       parameters:
         - name: cloud
           in: query
@@ -1189,7 +1575,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1200,14 +1586,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (upstream unreachable)
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1220,6 +1618,9 @@ paths:
         Postgres-backed, forwarded verbatim. Nested region -> group -> monitor.
         Unlike the availabilities endpoint this one applies no weighting.
       operationId: getCloudStatusAvailabilityHistory
+      security:
+        - oauth2ClientCredentials:
+            - cloud-status:read
       parameters:
         - name: cloud
           in: query
@@ -1247,7 +1648,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1258,8 +1659,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "503":
-          description: ServiceUnavailable (upstream unreachable)
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
           content:
             application/json:
               schema:
@@ -1270,19 +1671,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: ServiceUnavailable (upstream unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /incidents:
     post:
       summary: Create an incident.
       description: >
-        ServiceNow-backed. The request body is forwarded to the entity service
+        externally backed. The request body is forwarded to the entity service
         verbatim. This service is strictly M2M with no mechanism to forward an
         end-user identity token, but the entity-service operation falls back
-        to a separately-configured M2M ServiceNow credential when no end-user
+        to a separately-configured M2M credential for the external data source when no end-user
         token is present, and only returns 401 if that fallback credential is
         itself unconfigured in the target environment. A 401 is therefore a
         possible response, not a guaranteed one.
       operationId: createIncident
+      security:
+        - oauth2ClientCredentials:
+            - incidents:write
       requestBody:
         description: Incident details.
         required: true
@@ -1304,13 +1720,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target environment's M2M credential for the external data source isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1327,8 +1743,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1342,22 +1770,26 @@ paths:
         path at all: on a Postgres data source, entity-service rejects every
         call outright (503, not supported on this data source yet — several
         fields have no backing column, and others would need comment-table
-        side effects not implemented there). On a ServiceNow data source, it
+        side effects not implemented there). On the external data source, it
         goes through the same M2M-fallback mechanism as POST /incidents and
         POST /incidents/search above: this service is strictly M2M with no
         mechanism to forward an end-user identity token, but the
         entity-service operation falls back to a separately-configured M2M
-        ServiceNow credential when no end-user token is present, and only
+        credential for the external data source when no end-user token is
+        present, and only
         returns 401 if that fallback credential is itself unconfigured in the
-        target environment. So this call is unconditionally ServiceNow-backed
+        target environment. So this call is unconditionally backed by the external data source
         with no Postgres fallback — whether it succeeds depends on the target
-        environment's data source and, on ServiceNow, its M2M credential
+        environment's data source and, on the external data source, its M2M credential
         configuration, not on which fields are sent (contrast PATCH
         /cases/{id}, whose Postgres path narrows to specific fields instead
         of failing outright). The request body is forwarded to the entity
         service verbatim; it enforces its own field validation and 400s
         otherwise, so this service does not re-validate that.
       operationId: patchIncident
+      security:
+        - oauth2ClientCredentials:
+            - incidents:write
       parameters:
         - name: id
           in: path
@@ -1386,13 +1818,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target environment's M2M credential for the external data source isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1409,6 +1841,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
           content:
@@ -1421,19 +1859,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /incidents/search:
     post:
       summary: Search incidents.
       description: >
-        ServiceNow-backed, same as POST /incidents. This service is strictly
+        externally backed, same as POST /incidents. This service is strictly
         M2M with no mechanism to forward an end-user identity token, but the
         entity-service operation falls back to a separately-configured M2M
-        ServiceNow credential when no end-user token is present, and only
+        credential for the external data source when no end-user token is
+        present, and only
         returns 401 if that fallback credential is itself unconfigured in the
         target environment. A 401 is therefore a possible response, not a
         guaranteed one.
       operationId: searchIncidents
+      security:
+        - oauth2ClientCredentials:
+            - incidents:read
       requestBody:
         description: Incident search payload.
         required: true
@@ -1455,13 +1903,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target environment's M2M credential for the external data source isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1478,8 +1926,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1489,15 +1949,18 @@ paths:
     post:
       summary: Search CMDB IT services.
       description: >
-        ServiceNow-backed, same M2M-fallback mechanism as POST /incidents and
+        externally backed, same M2M-fallback mechanism as POST /incidents and
         POST /incidents/search above (confirmed to use the identical code
         path). This service is strictly M2M with no mechanism to forward an
         end-user identity token, but the entity-service operation falls back
-        to a separately-configured M2M ServiceNow credential when no
+        to a separately-configured M2M credential for the external data source when no
         end-user token is present, and only returns 401 if that fallback
         credential is itself unconfigured in the target environment. A 401
         is therefore a possible response, not a guaranteed one.
       operationId: searchITServices
+      security:
+        - oauth2ClientCredentials:
+            - services:read
       requestBody:
         description: Service search payload.
         required: true
@@ -1519,13 +1982,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target ServiceNow environment's M2M credential isn't configured — possible, not guaranteed, given this service's M2M-only design)
+          description: Unauthorized (upstream may report a missing or invalid forwarded identity if the target environment's M2M credential for the external data source isn't configured — possible, not guaranteed, given this service's M2M-only design)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
-          description: Forbidden (upstream reported an authorization failure)
+          description: Forbidden (the caller's token lacks this operation's scope, or the upstream refused the request)
           content:
             application/json:
               schema:
@@ -1542,8 +2005,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1553,12 +2028,15 @@ paths:
     post:
       summary: Create an alert-incident mapping.
       description: >
-        Postgres-only entity-service operation with no ServiceNow dependency —
+        Postgres-only entity-service operation with no external-data-source dependency —
         unlike POST /incidents above, this does not require a forwarded
         end-user identity token, so this service's M2M identity is sufficient
         and the call is expected to actually succeed today. The request body
         is forwarded to the entity service verbatim.
       operationId: createAlertIncidentMapping
+      security:
+        - oauth2ClientCredentials:
+            - alert-incident-mappings:write
       requestBody:
         description: Alert-incident mapping details.
         required: true
@@ -1585,6 +2063,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `alert-incident-mappings:write` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Conflict (an alert-incident mapping with this alertNumber already exists)
           content:
@@ -1597,8 +2081,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1608,11 +2104,14 @@ paths:
     post:
       summary: Look up alert-incident mappings by source and unique identifier.
       description: >
-        Postgres-only entity-service operation with no ServiceNow dependency —
+        Postgres-only entity-service operation with no external-data-source dependency —
         same situation as POST /alert-incident-mappings above; expected to
         actually succeed today. Returns an empty `mappings` array (not 404)
         when nothing matches.
       operationId: lookupAlertIncidentMappings
+      security:
+        - oauth2ClientCredentials:
+            - alert-incident-mappings:read
       requestBody:
         description: Lookup criteria.
         required: true
@@ -1639,14 +2138,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Forbidden (the caller's token lacks the `alert-incident-mappings:read` scope, or the upstream refused the request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "413":
           description: RequestEntityTooLarge
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: TooManyRequests (the upstream is rate limiting; its Retry-After header is passed through when it sends a well-formed one)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "504":
+          description: GatewayTimeout (the upstream did not answer in time)
           content:
             application/json:
               schema:
@@ -1661,15 +2178,33 @@ components:
           # Placeholder — fill in with the actual token endpoint for this service's
           # Choreo-managed API once it's provisioned. Not a real/guessed URL.
           tokenUrl: "<token_url>"
-          scopes: {}
+          # One scope per operation group. Every operation below except
+          # GET /health lists the single scope it requires; a consumer is
+          # granted the scopes for the operations it needs and no others.
+          scopes:
+            accounts:read: Read accounts (get by id, search).
+            contacts:read: Search an account's or a project's contacts.
+            projects:read: Read projects (get by id, search).
+            projects:write: Update a project's closure-state fields.
+            cases:read: Search cases.
+            cases:write: Update a case, add a comment or a tag to it.
+            opportunities:read: Read opportunities and project-opportunity links.
+            invoices:read: Read invoices.
+            vulnerabilities:sync: Replace the product-vulnerability record set.
+            incidents:read: Search incidents.
+            incidents:write: Create and update incidents.
+            services:read: Search IT services.
+            alert-incident-mappings:read: Look up alert-incident mappings.
+            alert-incident-mappings:write: Create alert-incident mappings.
+            cloud-status:read: Read the public cloud status dashboard data.
 
   schemas:
     CloudStatusResult:
       type: object
       description: >
-        The envelope ServiceNow's Scripted REST APIs return, reproduced here
+        The envelope the legacy status endpoints return, reproduced here
         so these endpoints are a DROP-IN REPLACEMENT rather than a second
-        integration. uptime-dashboard checks
+        integration. The dashboard checks
         `json?.result?.message == "success"` and then reads
         `json.result.data`, so cutting over is a change to its endpoint URLs
         and nothing else — no new controller, no parallel code path.
@@ -1700,6 +2235,14 @@ components:
       properties:
         message:
           type: string
+
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
 
     Pagination:
       type: object
@@ -1852,7 +2395,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing external-system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
 
@@ -1963,7 +2506,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing external-system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
 
@@ -2008,12 +2551,14 @@ components:
       description: >
         state, severity, and workState are mutually exclusive of each other
         and of every other field in this request — exactly one of them, or
-        one combination of the other (ServiceNow-only) fields, is required
+        one combination of the other (external-data-source-only) fields, is required
         per call. Only state/severity/workState succeed through this
         M2M-only service; every other field requires a forwarded end-user
         identity token this service cannot supply. See the entity service's
         own OpenAPI spec for the full field set and combination rules — this
-        is deliberately not fully re-specified here.
+        is deliberately not fully re-specified here. The body is forwarded
+        verbatim: a field the entity service does not recognise is rejected
+        there with 400, not silently accepted.
       properties:
         state:
           type: string
@@ -2028,12 +2573,11 @@ components:
             for the case. Mutually exclusive with state, severity, workState,
             and every other field in this request. A second call on an
             already-marked case is a no-op success, not an error. Postgres
-            data source only (or postgres-servicenow-dual-write, which
-            asynchronously mirrors the write to ServiceNow) — unlike
+            data source only (or the dual-write data source, which
+            asynchronously mirrors the write to the external data source) — unlike
             state/severity/workState, this succeeds through this M2M-only
             service unconditionally, with no data-source-dependent 401.
           enum: [true]
-      additionalProperties: true
 
     CaseUpdateResult:
       type: object
@@ -2064,6 +2608,9 @@ components:
 
     CaseCommentCreateRequest:
       type: object
+      description: >
+        Only type and content are read; any other field (including
+        actorEmail) is ignored and never forwarded.
       required:
         - type
         - content
@@ -2099,6 +2646,9 @@ components:
 
     CaseTagCreateRequest:
       type: object
+      description: >
+        Only label is read; any other field (including actorEmail) is
+        ignored and never forwarded.
       required:
         - label
       properties:
@@ -2170,9 +2720,12 @@ components:
 
     ProductVulnerabilitySyncPayload:
       type: array
+      minItems: 1
       description: >
         The complete current set of product-vulnerability records. Any record
-        omitted from this array is treated as removed by the downstream sync.
+        omitted from this array is treated as removed by the downstream sync,
+        which is why the array may not be empty: an empty set is rejected with
+        400 rather than forwarded.
       items:
         type: object
         additionalProperties: true
@@ -2204,7 +2757,7 @@ components:
     Opportunity:
       type: object
       description: >
-        Salesforce data, read from ServiceNow or from the CSM database on Postgres. Every field but id is nullable — ServiceNow can
+        Salesforce data, read from the external data source or from the CSM database on Postgres. Every field but id is nullable — the external data source can
         omit any of them entirely for a sparsely-populated row.
       properties:
         id:
@@ -2257,7 +2810,7 @@ components:
     Invoice:
       type: object
       description: >
-        Salesforce data, read from ServiceNow or from the CSM database on Postgres. Every field but id is nullable — ServiceNow can
+        Salesforce data, read from the external data source or from the CSM database on Postgres. Every field but id is nullable — the external data source can
         omit any of them entirely for a sparsely-populated row.
       properties:
         id:
@@ -2333,7 +2886,7 @@ components:
     ProjectOpportunityLink:
       type: object
       description: >
-        Salesforce data, read from ServiceNow or from the CSM database on Postgres. Every field but id is nullable — ServiceNow can
+        Salesforce data, read from the external data source or from the CSM database on Postgres. Every field but id is nullable — the external data source can
         omit either reference entirely for a sparsely-populated row.
       properties:
         id:

@@ -36,10 +36,9 @@ type entityCloudStatusClient interface {
 // CloudStatusHandler serves the public cloud status dashboard's reads,
 // delegating to the entity service.
 //
-// The consumer is wso2-enterprise/uptime-dashboard, which renders
-// status.*.choreo.dev. It reaches this service the same way every other M2M
-// consumer does -- through Choreo's API Manager gateway, which owns the trust
-// boundary; see AccountHandler's doc comment.
+// The consumer is the public cloud status dashboard. It reaches this service
+// the same way every other M2M consumer does -- through Choreo's API Manager
+// gateway, which owns the trust boundary; see AccountHandler's doc comment.
 //
 // WHY THIS EXISTS AT ALL, rather than the dashboard calling entity-service
 // directly: that service is not published to third parties, and the house
@@ -54,12 +53,11 @@ type CloudStatusHandler struct {
 // has always received, and is the reason these endpoints are a drop-in
 // replacement rather than a second integration.
 //
-// ServiceNow's Scripted REST APIs answer
+// The status endpoints the dashboard was built against answer
 //
 //	{"result": {"code": 0, "message": "success", "cloud": "choreo", "data": …}}
 //
-// -- the script sets code/message/cloud/data and the platform wraps the lot
-// in `result`. uptime-dashboard's servicenow.js checks
+// -- code/message/cloud/data wrapped in `result`. The dashboard checks
 // `json?.result?.message == "success"` and then reads `json.result.data`.
 //
 // *** DROPPING THIS ENVELOPE IS WHAT FORCES A REWRITE DOWNSTREAM. *** An
@@ -71,9 +69,9 @@ type CloudStatusHandler struct {
 //
 // It is deliberately added HERE and not in entity-service. This service is
 // the compatibility façade for external consumers; entity-service stays a
-// clean internal API that owes nothing to ServiceNow's platform
+// clean internal API that owes nothing to the legacy endpoints'
 // conventions, and the envelope can be retired from this one layer once
-// the dashboard is the only consumer and ServiceNow is gone.
+// the dashboard no longer depends on it.
 func writeCloudStatusResult(w http.ResponseWriter, cloud string, data []byte) {
 	// data is already JSON from upstream, so it is spliced in rather than
 	// decoded and re-encoded -- which also preserves the one thing a

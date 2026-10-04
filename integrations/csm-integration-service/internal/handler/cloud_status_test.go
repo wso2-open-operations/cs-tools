@@ -24,10 +24,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/apierror"
 )
 
-// assertCloudStatusEnvelope checks the ServiceNow-compatible wrapper and,
+// assertCloudStatusEnvelope checks the legacy-compatible wrapper and,
 // more importantly, that `data` inside it is byte-for-byte what upstream
 // sent.
 //
@@ -47,10 +47,10 @@ func assertCloudStatusEnvelope(t *testing.T, rec *httptest.ResponseRecorder, clo
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
-		t.Fatalf("response is not the ServiceNow envelope: %v\nbody: %s", err, rec.Body.String())
+		t.Fatalf("response is not the legacy envelope: %v\nbody: %s", err, rec.Body.String())
 	}
 	if env.Result.Code != 0 || env.Result.Message != "success" {
-		t.Errorf("code/message = %d/%q, want 0/\"success\" -- servicenow.js gates on this",
+		t.Errorf("code/message = %d/%q, want 0/\"success\" -- the dashboard gates on this",
 			env.Result.Code, env.Result.Message)
 	}
 	if env.Result.Cloud != cloud {
@@ -100,7 +100,7 @@ func (f *fakeCloudStatusClient) GetCloudStatusIncidentDetail(_ context.Context, 
 
 // TestCloudStatus_ForwardsCloudAndBodyVerbatim is the whole contract: the
 // upstream payload reaches the dashboard untouched, inside the envelope
-// that makes these endpoints a drop-in replacement for ServiceNow's.
+// that makes these endpoints a drop-in replacement for the legacy endpoints.
 func TestCloudStatus_ForwardsCloudAndBodyVerbatim(t *testing.T) {
 	body := []byte(`{"cp - eu":[{"display_name":"Login","subgroups":[]}]}`)
 	f := &fakeCloudStatusClient{monitors: body}

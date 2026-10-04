@@ -23,8 +23,52 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/apierror"
 )
+
+func TestMapUpstreamError_RetryAfterPassThrough(t *testing.T) {
+	cases := []struct {
+		name, retryAfter, wantHeader string
+	}{
+		{"delta seconds", "30", "30"},
+		{"delta seconds with spaces", " 120 ", "120"},
+		{"http date", "Wed, 21 Oct 2026 07:28:00 GMT", "Wed, 21 Oct 2026 07:28:00 GMT"},
+		{"absent", "", ""},
+		{"negative", "-5", ""},
+		{"garbage", "soon", ""},
+		{"too many digits", "123456789", ""},
+		{"header injection", "30\r\nX-Evil: 1", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			mapUpstreamError(w, &apierror.Error{StatusCode: http.StatusTooManyRequests, RetryAfter: tc.retryAfter}, "fallback")
+			assertStatus(t, w, http.StatusTooManyRequests)
+			assertErrorMessage(t, w, ErrMsgRateLimited)
+			if got := w.Header().Get("Retry-After"); got != tc.wantHeader {
+				t.Errorf("Retry-After = %q, want %q", got, tc.wantHeader)
+			}
+		})
+	}
+}
+
+func TestMapUpstreamError_TimeoutsBecome504(t *testing.T) {
+	for _, code := range []int{http.StatusRequestTimeout, http.StatusGatewayTimeout} {
+		w := httptest.NewRecorder()
+		mapUpstreamError(w, &apierror.Error{StatusCode: code}, "fallback")
+		assertStatus(t, w, http.StatusGatewayTimeout)
+		assertErrorMessage(t, w, "fallback")
+	}
+}
+
+func TestSafeUpstreamMessage_Fallback(t *testing.T) {
+	if got := safeUpstreamMessage(`not json`, "fb"); got != "fb" {
+		t.Errorf("got %q, want fallback", got)
+	}
+	if got := safeUpstreamMessage(`{"message":"fine"}`, "fb"); got != "fine" {
+		t.Errorf("got %q, want upstream message", got)
+	}
+}
 
 func TestUpstreamBadRequestMessage(t *testing.T) {
 	cases := []struct {
@@ -44,7 +88,7 @@ func TestUpstreamBadRequestMessage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := upstreamBadRequestMessage(tc.body); got != tc.want {
+			if got := safeUpstreamMessage(tc.body, ErrMsgBadRequest); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})

@@ -18,8 +18,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 )
@@ -27,7 +25,7 @@ import (
 // entityProjectOpportunityLinkClient abstracts the entity service
 // project-opportunity-link operation used by ProjectOpportunityLinkHandler.
 // Read-only and M2M-safe on both data sources.
-// There is no by-id fetch for this resource — the underlying ServiceNow data has
+// There is no by-id fetch for this resource — the underlying external data has
 // no single-record endpoint (search only).
 type entityProjectOpportunityLinkClient interface {
 	SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error)
@@ -50,19 +48,8 @@ func NewProjectOpportunityLinkHandler(entity entityProjectOpportunityLinkClient)
 
 // SearchProjectOpportunityLinks handles POST /project-opportunity-links/search.
 func (h *ProjectOpportunityLinkHandler) SearchProjectOpportunityLinks(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if len(body) > 0 && !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	body, ok := readJSONBody(w, r, bodyOptional)
+	if !ok {
 		return
 	}
 
