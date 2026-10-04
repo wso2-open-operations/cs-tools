@@ -23,9 +23,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
-	"strings"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/outagecomm"
 )
 
@@ -42,8 +41,8 @@ type EmailSender interface {
 // SendCommunications returns the sub-cron handler: sweep, then send one email
 // per decision.
 //
-// *** ONE EMAIL PER OUTAGE, NOT A DIGEST. *** ServiceNow sends a separate
-// message per outage per phase, and outage mail is read as it arrives.
+// *** ONE EMAIL PER OUTAGE, NOT A DIGEST. *** The legacy workflow sends a
+// separate message per outage per phase, and outage mail is read as it arrives.
 // Batching would change what an on-call reader sees at the moment it matters.
 //
 // *** A SEND THAT FAILS IS LOST, NOT RETRIED. *** entity-service writes the
@@ -55,7 +54,7 @@ type EmailSender interface {
 // silently repaired by re-mailing everyone.
 //
 // One bad recipient does not abandon the rest: every decision is attempted
-// and the failures are joined, the same rule internal/allocationreminder uses.
+// and the failures are joined, the same rule internal/announcementpublish uses.
 //
 // emailsEnabled is ALERTS_ENABLED. As everywhere else here, false — or an
 // empty `to` — skips the sweep ENTIRELY rather than sweeping and discarding.
@@ -90,14 +89,17 @@ func SendCommunications(sweeper Sweeper, email EmailSender, to, cc []string, ema
 // free text on a mirrored record. Dropping that into HTML unescaped would let
 // a stray `<` silently swallow the rest of the mail, and anything worse if
 // the field ever carried markup. Escape first, then turn newlines into
-// breaks — in that order, so the breaks survive.
+// breaks — in that order, so the breaks survive. notify.EscapeMultiline does
+// both, and also writes every non-ASCII rune as a numeric character
+// reference: the e-mail service does not reliably carry raw multi-byte
+// characters, so an em dash or accented name typed into an outage would
+// otherwise arrive as "?" — the same treatment every other e-mail here gets.
 //
 // Deliberately not a shared template: unlike the internal notifier, whose
 // three bodies are one fixed sentence apiece, these two are full messages
 // rendered upstream. The presentation decision belongs where the content is.
 func renderBody(d outagecomm.Decision) string {
-	escaped := html.EscapeString(d.Body)
-	withBreaks := strings.ReplaceAll(escaped, "\n", "<br>\n")
+	withBreaks := notify.EscapeMultiline(d.Body)
 	return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;line-height:1.6;color:#17191e">` +
 		withBreaks +
 		`</div>`

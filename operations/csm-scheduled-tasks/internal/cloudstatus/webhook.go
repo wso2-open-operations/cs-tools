@@ -28,15 +28,15 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 )
 
-// webhookPath is appended to the per-cloud base URL. Fixed in the ServiceNow
-// action and the same for every dashboard.
+// webhookPath is appended to the per-cloud base URL. The same for every
+// dashboard.
 const webhookPath = "/api/v1/webhook"
 
 // defaultSecretKey is the key in the secrets map whose value is used for any
 // cloud without its own entry.
 //
-// It exists to express today's arrangement honestly. ServiceNow chose the URL
-// per cloud but signed EVERY post with cloud_status.asgardeo.webhook.secret,
+// It exists to express today's arrangement honestly. The legacy workflow
+// chose the URL per cloud but signed EVERY post with a single shared secret,
 // including Choreo's, Bijira's, Devant's and Moesif's. Whether that is because
 // the two dashboards genuinely share a secret, or because the Choreo receiver
 // does not verify the header at all, is NOT established.
@@ -52,16 +52,16 @@ type WebhookConfig struct {
 	// BaseURLs maps a cloud slug ("asgardeo", "choreo-eu") to that
 	// dashboard's base URL. A cloud absent from this map is not posted.
 	//
-	// A MAP, not the flow's if/else chain, and that is the point. ServiceNow's
-	// Base URL script named five clouds and fell off the end returning
-	// undefined for choreo-eu and agent-manager, so their events posted to a
-	// URL of "undefined" and vanished. Configuration turns "we have not set up
+	// A MAP, not an if/else chain, and that is the point. The legacy
+	// workflow's base-URL lookup named five clouds and fell off the end
+	// returning undefined for choreo-eu and agent-manager, so their events
+	// posted to a URL of "undefined" and vanished. Configuration turns "we have not set up
 	// that dashboard yet" into a visible, skippable state instead of a silent
 	// malformed request.
 	BaseURLs map[string]string
 
 	// Secrets maps a cloud slug to its FULL X-Webhook-Signature header value,
-	// with defaultSecretKey as the fallback. ServiceNow's value carries a
+	// with defaultSecretKey as the fallback. The value carries a
 	// scheme prefix -- `Secret <token>` -- so configure the whole string, not
 	// the token alone. Sent verbatim; see Post.
 	Secrets map[string]string
@@ -104,7 +104,7 @@ func (w *Webhook) Knows(cloud string) bool {
 	return ok
 }
 
-// webhookBody is the exact payload ServiceNow's action sent. Three fields, no
+// webhookBody is the exact payload the dashboards expect. Three fields, no
 // more: the receiving dashboards parse this shape and adding to it is a
 // coordinated change with them, not a local one.
 type webhookBody struct {
@@ -118,8 +118,8 @@ type webhookBody struct {
 // The X-Webhook-Signature header carries the configured value VERBATIM, and
 // the whole value -- not just a token.
 //
-// Despite the header's name it is NOT an HMAC of the body. ServiceNow sends a
-// fixed string the receiver compares against a known one, and that string has
+// Despite the header's name it is NOT an HMAC of the body. The dashboards
+// expect a fixed string the receiver compares against a known one, and that string has
 // a scheme prefix: the literal word `Secret`, a space, then the token. So the
 // configured value must be the ENTIRE header, `Secret <token>`, and passing
 // only the token produces a request the dashboard rejects.

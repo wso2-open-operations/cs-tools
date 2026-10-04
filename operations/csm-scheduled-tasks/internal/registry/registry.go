@@ -25,6 +25,23 @@ import (
 	"time"
 )
 
+type periodKey struct{}
+
+// WithPeriod returns ctx carrying the period key the engine claimed for the
+// current Handler call. The engine sets it; handlers read it with
+// PeriodFrom when they need to tie a side effect to "this period" (see
+// internal/reportguard).
+func WithPeriod(ctx context.Context, period time.Time) context.Context {
+	return context.WithValue(ctx, periodKey{}, period)
+}
+
+// PeriodFrom returns the period key set by WithPeriod, and whether one was
+// set.
+func PeriodFrom(ctx context.Context) (time.Time, bool) {
+	p, ok := ctx.Value(periodKey{}).(time.Time)
+	return p, ok
+}
+
 // Task is one registered sub-cron. See this component's own CLAUDE.md
 // ("Adding a sub-cron") for the full walkthrough of adding a real one.
 type Task struct {
@@ -55,6 +72,14 @@ type Task struct {
 	// zero (see cmd/server/main.go) — there is no point backing off
 	// shorter than how often this process even runs.
 	RetryBackoff time.Duration
+	// Timeout bounds one Handler call. Zero means "derive it from the
+	// schedule": the shortest gap between two consecutive firings, capped
+	// (see engine.handlerTimeout) — a task that is still running when its
+	// own next period comes due has already lost. Set it explicitly only
+	// for a handler whose single-run budget is genuinely unrelated to its
+	// cadence. The engine also widens the ledger's orphaned-claim window to
+	// cover this, so a long-running handler is not reclaimed mid-run.
+	Timeout time.Duration
 	// To/Cc are additional recipients emailed when this specific task
 	// fails, on top of the standing ALERT_RECIPIENTS audience every task
 	// already alerts (see engine.Engine.AlertRecipients' own doc comment)
@@ -64,9 +89,9 @@ type Task struct {
 	// cmd/server/main.go's SUB_CRON_RECIPIENTS config (via
 	// recipientsFor), not hardcoded here — see this component's own
 	// CLAUDE.md, "Adding a sub-cron." Both nil is the common case: this
-	// task has no audience beyond ALERT_RECIPIENTS. There is no separate
-	// success email yet — see "Future: per-task report emails" in that
-	// same doc.
+	// task has no audience beyond ALERT_RECIPIENTS. Report-style tasks send
+	// their own success e-mail from inside the handler instead — see
+	// "Per-task report emails" in that same doc.
 	To []string
 	Cc []string
 }

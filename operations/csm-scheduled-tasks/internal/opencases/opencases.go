@@ -63,24 +63,37 @@ type EmailSender interface {
 // If emailsEnabled is false or to is empty, the returned handler skips the
 // case search entirely and returns nil (success) — same reasoning as
 // stalecases.SendReport.
-func SendReport(cases CaseSearcher, email EmailSender, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+//
+// guard makes the report at most once per period — see
+// stalecases.SendReport's doc comment. nil sends unguarded.
+func SendReport(cases CaseSearcher, email EmailSender, guard SendGuard, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
 		}
+		send := func(ctx context.Context) error {
+			found, err := cases.SearchCasesInStateCreatedBeforeYesterday(ctx, openState)
+			if err != nil {
+				return fmt.Errorf("opencases: search open cases: %w", err)
+			}
 
-		found, err := cases.SearchCasesInStateCreatedBeforeYesterday(ctx, openState)
-		if err != nil {
-			return fmt.Errorf("opencases: search open cases: %w", err)
+			subject := "[Action-Required][Report] Cases created before yesterday still in Open state"
+			body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
+				Cases: found,
+			})
+			if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
+				return fmt.Errorf("opencases: send report email: %w", err)
+			}
+			return nil
 		}
-
-		subject := "[Action-Required][Report] Cases created before yesterday still in Open state"
-		body := notify.RenderOpenCasesReport(notify.OpenCasesReportData{
-			Cases: found,
-		})
-		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
-			return fmt.Errorf("opencases: send report email: %w", err)
+		if guard == nil {
+			return send(ctx)
 		}
-		return nil
+		return guard.Once(ctx, send)
 	}
+}
+
+// SendGuard is the subset of *reportguard.Guard this package depends on.
+type SendGuard interface {
+	Once(ctx context.Context, send func(ctx context.Context) error) error
 }

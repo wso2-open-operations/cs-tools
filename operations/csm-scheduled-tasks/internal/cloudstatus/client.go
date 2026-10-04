@@ -15,8 +15,7 @@
 // under the License.
 
 // Package cloudstatus delivers cloud status webhooks to WSO2's public uptime
-// dashboards, completing the port of ServiceNow's `Cloud Status Event
-// Notification Flow`.
+// dashboards, replacing the legacy cloud status event notification workflow.
 //
 // The division of labour is the one this component uses everywhere:
 // entity-service decides which outage transitions the dashboards are owed and
@@ -32,37 +31,32 @@
 package cloudstatus
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 )
 
-// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
-// Overridden in tests to keep them fast.
-var tokenFetchTimeout = 10 * time.Second
+// requestTimeout bounds every entity-service request this client makes.
+const requestTimeout = 25 * time.Second
 
-// Config holds the entity-service client's configuration.
+// Config holds the entity-service client's configuration. Transport, when
+// set, is a shared entityhttp transport; when nil the client builds its own
+// from the credential fields.
 type Config struct {
 	BaseURL      string
 	TokenURL     string
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	Transport    http.RoundTripper
 }
 
 // Client is a narrow entity-service client for the cloud status endpoints.
-// Mirrors internal/announcementpublish.Client exactly -- same OAuth2 client
-// credentials grant, same httpsec guards.
 type Client struct {
 	http    *http.Client
 	baseURL string
@@ -71,57 +65,17 @@ type Client struct {
 // NewClient constructs a Client authenticated via the OAuth2 client
 // credentials grant.
 func NewClient(cfg Config) (*Client, error) {
-	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("cloudstatus: token URL: %w", err)
+	httpClient, err := entityhttp.ClientFor(cfg.Transport, entityhttp.Credentials{
+		TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Scopes: cfg.Scopes,
+	}, cfg.BaseURL, requestTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("cloudstatus: %w", err)
 	}
-	if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("cloudstatus: base URL: %w", err)
-	}
-
-	cc := clientcredentials.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
-		Scopes:       cfg.Scopes,
-	}
-
-	tokenHTTPClient := &http.Client{Timeout: tokenFetchTimeout}
-	httpsec.RejectInsecureRedirects(tokenHTTPClient)
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTPClient)
-	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
-	httpsec.RejectInsecureRedirects(httpClient)
-
-	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
+	return &Client{http: httpClient, baseURL: entityhttp.TrimBase(cfg.BaseURL)}, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	var reqBody io.Reader
-	if len(body) > 0 {
-		reqBody = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("cloudstatus: build request %s %s: %w", method, path, err)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("cloudstatus: %s %s: %w", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("cloudstatus: read response body: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}
-	}
-	return respBody, nil
+	return entityhttp.Do(ctx, c.http, c.baseURL, "cloudstatus", method, path, body)
 }
 
 // PendingWebhook is one webhook entity-service says is still owed.
@@ -191,6 +145,6 @@ func (c *Client) RecordDelivery(ctx context.Context, id string, delivered bool, 
 	if err != nil {
 		return fmt.Errorf("cloudstatus: encode delivery report: %w", err)
 	}
-	_, err = c.do(ctx, http.MethodPost, "/internal/cloud-status/"+id+"/delivery", body)
+	_, err = c.do(ctx, http.MethodPost, "/internal/cloud-status/"+url.PathEscape(id)+"/delivery", body)
 	return err
 }

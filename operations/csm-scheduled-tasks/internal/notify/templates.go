@@ -88,6 +88,12 @@ func escapeMultiline(s string) string {
 	return strings.ReplaceAll(escapeHTML(s), "\n", "<br>")
 }
 
+// EscapeMultiline is escapeMultiline for callers outside this package that
+// render their own e-mail body from free text (internal/outagecommtask):
+// HTML-escaped, every non-ASCII rune as a numeric character reference so it
+// survives the e-mail service's send path, newlines as <br>.
+func EscapeMultiline(s string) string { return escapeMultiline(s) }
+
 // AlertEmailData holds every value substituted into the "sub-cron failed"
 // HTML email template.
 type AlertEmailData struct {
@@ -233,10 +239,14 @@ func humanizeState(state string) string {
 //go:embed templates/outage_notification.html
 var outageNotificationTemplateRaw string
 
+// outageNotificationTemplate has the logo baked in once at init, like the
+// other templates above.
+var outageNotificationTemplate = bakeLogo(outageNotificationTemplateRaw)
+
 // OutageNotificationData is what RenderOutageNotification substitutes.
 //
 // Subject and Body arrive already rendered by entity-service, which owns the
-// wording so it can be tested against the ServiceNow original in one place.
+// wording so it can be tested against the legacy original in one place.
 // This only wraps them in the house shell.
 type OutageNotificationData struct {
 	// PhaseWord is Declared / Resolved / Update, for the banner.
@@ -248,19 +258,18 @@ type OutageNotificationData struct {
 
 // RenderOutageNotification wraps one outage notice in the standard shell.
 //
-// The body it wraps is deliberately thin: the ServiceNow flow this ports sends
-// three fixed sentences carrying no outage detail at all ("Outage {n}
+// The body it wraps is deliberately thin: the legacy workflow this replaces
+// sends three fixed sentences carrying no outage detail at all ("Outage {n}
 // declared." and so on), and the port reproduces that rather than inventing
 // content that cannot be checked against the original. See entity-service's
 // renderOutageNotification for the full reasoning. Making these emails useful
 // is a product decision tracked separately.
 func RenderOutageNotification(data OutageNotificationData) string {
 	replacer := strings.NewReplacer(
-		"<!-- [LOGO_SRC] -->", bakeLogo(wso2LogoURL),
 		"<!-- [PHASE_WORD] -->", escapeHTML(data.PhaseWord),
 		"<!-- [NUMBER] -->", escapeHTML(data.Number),
 		"<!-- [MESSAGE] -->", escapeHTML(data.Message),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
-	return replacer.Replace(outageNotificationTemplateRaw)
+	return replacer.Replace(outageNotificationTemplate)
 }

@@ -18,7 +18,7 @@
 // every case that's been open for more than a configured threshold and
 // emails a report of them. This is the first sub-cron in this component to
 // send an email on success rather than only on failure — see this
-// component's own CLAUDE.md ("Future: per-task report emails") for why that
+// component's own CLAUDE.md ("Per-task report emails") for why that
 // wasn't built as a generic engine feature: the report itself is sent from
 // inside SendReport's returned handler, using recipients the caller supplies
 // directly, not through engine.Engine's failure-alert path at all.
@@ -64,26 +64,42 @@ type EmailSender interface {
 // there's no reason to spend an entity-service query on every tick, in a
 // deployment that hasn't configured this task's recipients yet or has gone
 // quiet.
-func SendReport(cases CaseSearcher, email EmailSender, olderThan time.Duration, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+//
+// guard makes the report at most once per period (see internal/reportguard):
+// without it, a run whose ledger record-back failed after the e-mail went
+// out is reclaimed later and mails the identical report again. The whole
+// search-render-send runs inside the guard, so a period already sent costs
+// no query either. nil sends unguarded.
+func SendReport(cases CaseSearcher, email EmailSender, guard SendGuard, olderThan time.Duration, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
 		}
+		send := func(ctx context.Context) error {
+			found, err := cases.SearchOpenCasesOlderThan(ctx, olderThan)
+			if err != nil {
+				return fmt.Errorf("stalecases: search open cases: %w", err)
+			}
 
-		found, err := cases.SearchOpenCasesOlderThan(ctx, olderThan)
-		if err != nil {
-			return fmt.Errorf("stalecases: search open cases: %w", err)
+			thresholdDays := int(olderThan.Hours() / 24)
+			subject := fmt.Sprintf("[Action-Required][Report] Cases open for more than %d days", thresholdDays)
+			body := notify.RenderStaleCasesReport(notify.StaleCasesReportData{
+				ThresholdDays: thresholdDays,
+				Cases:         found,
+			})
+			if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
+				return fmt.Errorf("stalecases: send report email: %w", err)
+			}
+			return nil
 		}
-
-		thresholdDays := int(olderThan.Hours() / 24)
-		subject := fmt.Sprintf("[Action-Required][Report] Cases open for more than %d days", thresholdDays)
-		body := notify.RenderStaleCasesReport(notify.StaleCasesReportData{
-			ThresholdDays: thresholdDays,
-			Cases:         found,
-		})
-		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
-			return fmt.Errorf("stalecases: send report email: %w", err)
+		if guard == nil {
+			return send(ctx)
 		}
-		return nil
+		return guard.Once(ctx, send)
 	}
+}
+
+// SendGuard is the subset of *reportguard.Guard this package depends on.
+type SendGuard interface {
+	Once(ctx context.Context, send func(ctx context.Context) error) error
 }
