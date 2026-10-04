@@ -148,45 +148,51 @@ export function useSavedFilterViews(listKey: SavedFilterListKey): {
     },
   });
 
+  // `mutateAsync`/`reset` have stable identities; naming them lets the
+  // callbacks below list exactly what they use as dependencies.
+  const { mutateAsync: saveAsync, reset: resetSave } = saveMutation;
+  const { mutateAsync: deleteAsync } = deleteMutation;
+  const { mutateAsync: reorderAsync } = reorderMutation;
+
   const saveFilterView = useCallback(
     async (name: string, qs: string): Promise<void> => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await saveMutation.mutateAsync({ name: trimmed, qs });
+      await saveAsync({ name: trimmed, qs });
     },
-    [saveMutation.mutateAsync],
+    [saveAsync],
   );
 
   const deleteFilterView = useCallback(
     async (name: string): Promise<void> => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await deleteMutation.mutateAsync(trimmed);
+      await deleteAsync(trimmed);
     },
-    [deleteMutation.mutateAsync],
+    [deleteAsync],
   );
 
   const moveFilterView = useCallback(
     async (name: string, direction: "up" | "down"): Promise<void> => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await reorderMutation.mutateAsync({ name: trimmed, direction });
+      await reorderAsync({ name: trimmed, direction });
     },
-    [reorderMutation.mutateAsync],
+    [reorderAsync],
   );
 
   const reorderFilterView = useCallback(
     async (name: string, position: number): Promise<void> => {
       const trimmed = name.trim();
       if (!trimmed || position < 0) return;
-      await reorderMutation.mutateAsync({ name: trimmed, position });
+      await reorderAsync({ name: trimmed, position });
     },
-    [reorderMutation.mutateAsync],
+    [reorderAsync],
   );
 
   const resetSaveError = useCallback(() => {
-    saveMutation.reset();
-  }, [saveMutation.reset]);
+    resetSave();
+  }, [resetSave]);
 
   return {
     views: query.data?.views ?? [],

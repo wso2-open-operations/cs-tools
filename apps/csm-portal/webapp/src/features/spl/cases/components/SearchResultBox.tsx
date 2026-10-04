@@ -18,7 +18,7 @@
 // features/spl/cases/components/SearchResultBox.tsx. Routes updated to this
 // app's "/spl/*" prefix (see csmNavItems.ts).
 import { Card, Stack, Typography } from "@wso2/oxygen-ui";
-import { alpha, useColorScheme } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 import { useNavigate } from "react-router";
 import { LinearLoadingPanel, NoResultsPanel } from "./StatePanels";
 import type { CaseDetails, CaseDetailsWithCount, AccountSummary, ProjectSummary } from "../api/caseTypes";
@@ -33,13 +33,13 @@ export function SearchResultBox({
   type: SearchOptions;
 }) {
   const navigate = useNavigate();
-  // theme.palette.mode is not live under oxygen-ui's CSS-variables theme
-  // (extendTheme()) — confirmed empirically. useColorScheme() is the hook
-  // that actually tracks the live scheme.
-  const { mode: colorMode, systemMode } = useColorScheme();
-  const isDark = (colorMode === "system" ? systemMode : colorMode) === "dark";
-  // Same warm-orange hover identity in both modes — see CaseStateCard.
-  const hoverBg = alpha("#ff7300", isDark ? 0.24 : 0.35);
+  const theme = useTheme();
+  // Same warm-orange hover identity in both schemes — see CaseStateCard.
+  // Scoped with applyStyles, never a mode check.
+  const hoverSx = {
+    backgroundColor: alpha("#ff7300", 0.35),
+    ...theme.applyStyles("dark", { backgroundColor: alpha("#ff7300", 0.24) }),
+  };
 
   const navigateTo = (id: string) => {
     if (type === "case") navigate(`/spl/cases/${id}`);
@@ -61,7 +61,7 @@ export function SearchResultBox({
             <Card
               key={index}
               variant="outlined"
-              sx={{ p: 2, cursor: "pointer", "&:hover": { backgroundColor: hoverBg } }}
+              sx={{ p: 2, cursor: "pointer", "&:hover": hoverSx }}
               onClick={() => navigateTo(item.id)}
             >
               <Typography variant="subtitle1" fontWeight={700}>
@@ -76,7 +76,7 @@ export function SearchResultBox({
             <Card
               key={index}
               variant="outlined"
-              sx={{ p: 2, cursor: "pointer", "&:hover": { backgroundColor: hoverBg } }}
+              sx={{ p: 2, cursor: "pointer", "&:hover": hoverSx }}
               onClick={() => navigateTo(item.id)}
             >
               <Typography variant="subtitle1" fontWeight={700}>

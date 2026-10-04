@@ -26,7 +26,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useColorScheme } from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import { useGetAbtTeamMembers } from "../api/useAccountsApi";
 
 export default function TeamMembersDrawer({
@@ -43,14 +43,12 @@ export default function TeamMembersDrawer({
   const { data, isLoading, error } = useGetAbtTeamMembers(teamId);
 
   const capitalize = (item: string) => item.charAt(0).toUpperCase() + item.slice(1);
-  // theme.palette.mode is not live under oxygen-ui's CSS-variables theme
-  // (extendTheme()) — confirmed empirically. useColorScheme() is the hook
-  // that actually tracks the live scheme.
-  const { mode: colorMode, systemMode } = useColorScheme();
-  const isDark = (colorMode === "system" ? systemMode : colorMode) === "dark";
-  const roleBadgeColors = isDark
-    ? { backgroundColor: "#1a3c3c", color: "#80cbc4" }
-    : { backgroundColor: "#e0f7fa", color: "#00796b" };
+  const theme = useTheme();
+  const roleBadgeColors = {
+    backgroundColor: "#e0f7fa",
+    color: "#00796b",
+    ...theme.applyStyles("dark", { backgroundColor: "#1a3c3c", color: "#80cbc4" }),
+  };
 
   return (
     <Drawer anchor="right" open={open} onClose={onClose}>

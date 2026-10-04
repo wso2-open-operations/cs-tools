@@ -46,7 +46,7 @@ import { ALL_CASE_TYPES, CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseT
  * mirroring `projectId`). `resolvedOn` still doesn't appear in
  * `BeCaseFieldFilterField`, so the backend would reject it — widening that
  * enum is a backend contract change, out of scope for this FE-only builder.
- * Flagged in `PROGRESS.md`, not silently worked around.
+ * Flagged to the owners, not silently worked around.
  *
  * `tag`, `projectOnboardingStatus`, and `creTeam` were briefly excluded here
  * (2026-08-31) on the theory that a field with its own dedicated Simple-grid

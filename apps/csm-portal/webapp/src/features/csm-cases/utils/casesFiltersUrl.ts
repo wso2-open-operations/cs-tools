@@ -68,7 +68,7 @@ export const DEFAULT_CASES_FILTERS: CasesFilters = {
   anyOfBranches: [],
   // Note: `tags`/`excludeTags` are real, wired-through fields (round-trip
   // URL + `/cases/search` payload), both driven by the one tri-state
-  // "Tags" bar control (`TagsMultiSelect`, digiops-cs#2907) — see its own
+  // "Tags" bar control (`TagsMultiSelect`) — see its own
   // doc comment for the include/exclude cycling model. `useSearchTags`
   // (the same `/tags/search` type-ahead) is also used standalone by the
   // case-detail "Add tag" picker (`AddTagDialog`), which doesn't reuse

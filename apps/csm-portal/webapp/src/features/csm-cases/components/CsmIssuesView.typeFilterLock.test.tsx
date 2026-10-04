@@ -22,7 +22,7 @@ import "@testing-library/jest-dom/vitest";
 // Separate file from CsmIssuesView.test.tsx: needs its own CasesFilterBar
 // mock that actually exposes an interactive type-selector (that file's
 // mock is a static placeholder), and a useGetCsmCases spy that captures the
-// query filters it was called with, to prove digiops-cs#2907's fix: the
+// query filters it was called with, to prove the case-type fix: the
 // case-type control genuinely changes the query for the one unlocked,
 // multi-type caller (Support/CsmCasesPage), while every other, still-locked
 // caller keeps its lock enforced regardless of what the (hidden) control
@@ -101,7 +101,7 @@ function lastQueryFilters(): QueryFilters {
   return calls.length > 0 ? calls[calls.length - 1][0] : { caseTypes: [] };
 }
 
-describe("CsmIssuesView case-type lock vs. unlocked control (digiops-cs#2907)", () => {
+describe("CsmIssuesView case-type lock vs. unlocked control", () => {
   it("an unlocked view (control visible) sends the user's own type selection to the query", () => {
     render(
       <MemoryRouter initialEntries={["/cases"]}>

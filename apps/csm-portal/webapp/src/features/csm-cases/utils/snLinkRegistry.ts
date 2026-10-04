@@ -15,6 +15,13 @@
 // under the License.
 
 import { sysidToUuid } from "@features/csm-cases/utils/inlineImages";
+import {
+  replaceMatchingAnchors,
+  replaceTextNodes,
+  splitTextByPattern,
+  transformHtml,
+  type HtmlDomTransform,
+} from "@utils/renderTrustedHtml";
 
 /**
  * A generic "the backing data source embedded one of its own record links in
@@ -44,11 +51,11 @@ interface SnLinkDefinition {
   /** Bare (non-anchor) occurrence of the record's URL as plain text. */
   bareUrlRegex: RegExp;
   /**
-   * Already-wrapped `<a href="...">` occurrence of the record's URL, when the
-   * source system is known to sometimes emit it that way. Omitted for a
-   * pattern that only ever appears as a bare URL.
+   * Matched against the `href` of an `<a>`: the already-wrapped occurrence of
+   * the record's URL, when the source system is known to sometimes emit it
+   * that way. Omitted for a pattern that only ever appears as a bare URL.
    */
-  anchorRegex?: RegExp;
+  hrefRegex?: RegExp;
 }
 
 const HEX32 = "[a-f0-9]{32}";
@@ -60,11 +67,8 @@ function bareUrlPattern(table: string): RegExp {
   );
 }
 
-function anchorPattern(table: string): RegExp {
-  return new RegExp(
-    `<a\\b[^>]*href\\s*=\\s*(?:"[^"]*${table}\\.do\\?sys_id=(${HEX32})[^"]*"|'[^']*${table}\\.do\\?sys_id=(${HEX32})[^']*')[^>]*>[\\s\\S]*?<\\/a>`,
-    "gi",
-  );
+function hrefPattern(table: string): RegExp {
+  return new RegExp(`${table}\\.do\\?sys_id=(${HEX32})`, "i");
 }
 
 // The backing alert table. Appears both as a bare URL and, per the sampled
@@ -76,7 +80,7 @@ const ALERT_TABLE = "u_custom_alert";
 // bare URL on its own line, never pre-anchored — but `bareUrlRegex` alone
 // would still match the same URL text sitting inside an `<a href="...">` if
 // one ever showed up, mangling the href with an inserted `<span>`. Carrying
-// `anchorRegex` too, same as the `alert` entry, means that case is handled
+// `hrefRegex` too, same as the `alert` entry, means that case is handled
 // correctly instead of producing malformed HTML if it ever occurs.
 const SMART_ALERT_TABLE = "u_smart_alert_buffer";
 
@@ -85,13 +89,13 @@ const SN_LINK_DEFINITIONS: SnLinkDefinition[] = [
     type: "alert",
     label: "View alert",
     bareUrlRegex: bareUrlPattern(ALERT_TABLE),
-    anchorRegex: anchorPattern(ALERT_TABLE),
+    hrefRegex: hrefPattern(ALERT_TABLE),
   },
   {
     type: "smartAlert",
     label: "View smart alert",
     bareUrlRegex: bareUrlPattern(SMART_ALERT_TABLE),
-    anchorRegex: anchorPattern(SMART_ALERT_TABLE),
+    hrefRegex: hrefPattern(SMART_ALERT_TABLE),
   },
 ];
 
@@ -109,41 +113,58 @@ export function containsSnLink(html: string): boolean {
   return SN_LINK_DEFINITIONS.some(
     (def) =>
       toDetectionRegex(def.bareUrlRegex).test(html) ||
-      (def.anchorRegex ? toDetectionRegex(def.anchorRegex).test(html) : false),
+      (def.hrefRegex ? toDetectionRegex(def.hrefRegex).test(html) : false),
   );
 }
 
-function markup(type: SnLinkType, label: string, uuid: string): string {
-  return (
-    `<span data-sn-link-type="${type}" data-sn-link-id="${uuid}" role="button" tabindex="0" ` +
-    `style="color:inherit;text-decoration:underline;cursor:pointer;font-weight:600;">` +
-    `${label}</span>`
+function buildMarker(
+  doc: Document,
+  type: SnLinkType,
+  label: string,
+  uuid: string,
+): HTMLSpanElement {
+  const span = doc.createElement("span");
+  span.setAttribute("data-sn-link-type", type);
+  span.setAttribute("data-sn-link-id", uuid);
+  span.setAttribute("role", "button");
+  span.setAttribute("tabindex", "0");
+  span.setAttribute(
+    "style",
+    "color:inherit;text-decoration:underline;cursor:pointer;font-weight:600;",
   );
+  span.textContent = label;
+  return span;
 }
 
 /**
- * Replaces every recognized alert/smart-alert URL reference in `html` — bare
- * text or already wrapped in an `<a href="...">` — with a clickable in-app
- * marker (`<span data-sn-link-type="…" data-sn-link-id="…">`).
+ * DOM transform: replaces every recognized alert/smart-alert URL reference —
+ * bare text or an `<a href="...">` — with a clickable in-app marker
+ * (`<span data-sn-link-type="…" data-sn-link-id="…">`).
  *
- * Must run before {@link import("./commentContent").linkifyBareUrls}, and
- * pairs with {@link import("./callRequestLinks").replaceCallRequestLinks} —
- * either order between the two is fine since they match disjoint URL
- * patterns, but both must run before the bare-URL linkifier.
+ * Must run before `linkifyBareUrlsInDom`, and pairs with
+ * `replaceCallRequestLinksInDom` — either order between the two is fine since
+ * they match disjoint URL patterns, but both must run before the bare-URL
+ * linkifier.
+ */
+export const replaceSnLinksInDom: HtmlDomTransform = (body) => {
+  for (const def of SN_LINK_DEFINITIONS) {
+    if (def.hrefRegex) {
+      replaceMatchingAnchors(body, def.hrefRegex, (_anchor, match) =>
+        buildMarker(body.ownerDocument, def.type, def.label, sysidToUuid(match[1])),
+      );
+    }
+    replaceTextNodes(body, "a", (text, doc) =>
+      splitTextByPattern(text, def.bareUrlRegex, doc, (match) =>
+        buildMarker(doc, def.type, def.label, sysidToUuid(match[1])),
+      ),
+    );
+  }
+};
+
+/**
+ * String form of {@link replaceSnLinksInDom}. The result is NOT sanitised:
+ * pass it through `renderTrustedHtml` before it reaches the DOM.
  */
 export function replaceSnLinks(html: string): string {
-  if (!html || typeof html !== "string") return html;
-  return SN_LINK_DEFINITIONS.reduce((acc, def) => {
-    let next = acc;
-    if (def.anchorRegex) {
-      next = next.replace(def.anchorRegex, (_full, sysidDouble, sysidSingle) => {
-        const sysid = sysidDouble ?? sysidSingle;
-        return markup(def.type, def.label, sysidToUuid(sysid));
-      });
-    }
-    next = next.replace(def.bareUrlRegex, (_full, sysid) =>
-      markup(def.type, def.label, sysidToUuid(sysid)),
-    );
-    return next;
-  }, html);
+  return transformHtml(html, [replaceSnLinksInDom]);
 }

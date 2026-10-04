@@ -34,16 +34,53 @@ import "../styles/CSReportPDF.css";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- mirrors the source's own loosely-typed report records */
 
-// Business Overview and Extra Notes are free-text textareas a CS engineer
-// types into, then rendered here via innerHTML (so the \n -> <br> conversion
-// below actually produces line breaks). Escaping first means that raw text
-// can never be interpreted as markup -- without it, a literal "<img
-// onerror=...>" typed into either textarea would execute in every viewer's
-// browser when the report renders.
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+// The PDF content is built from DOM nodes only: free text (account name,
+// section titles, the Business Overview and Extra Notes textareas, SLA
+// record fields) is always set through textContent, and widget content is
+// cloned node by node, so no string is ever parsed as markup.
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function noDataParagraph(): HTMLParagraphElement {
+  return el("p", undefined, "No data to show");
+}
+
+// Wraps a copy of `source`'s rendered content as
+// <div class={outerClass}><div>…</div></div> (or a single <div>…</div> when
+// no class is given), with a "No data to show" paragraph when it is empty.
+function wrappedWidgetContent(source: Element, outerClass?: string): HTMLElement {
+  const inner = el("div");
+  if (source.innerHTML.trim()) {
+    source.childNodes.forEach((child) => inner.appendChild(child.cloneNode(true)));
+  } else {
+    inner.appendChild(noDataParagraph());
+  }
+  if (!outerClass) return inner;
+  const outer = el("div", outerClass);
+  outer.appendChild(inner);
+  return outer;
+}
+
+// A paragraph holding free text with each newline rendered as a line break.
+function multilineParagraph(text: string | null): HTMLParagraphElement {
+  const p = el("p");
+  if (text === null) {
+    p.textContent = "No data to show";
+    return p;
+  }
+  text.split("\n").forEach((line, i) => {
+    if (i > 0) p.appendChild(el("br"));
+    p.appendChild(document.createTextNode(line));
+  });
+  return p;
 }
 
 function generateAgendaPage(widgets: { selector: string; subTopic?: string }[], pdfContent: HTMLElement) {
@@ -86,13 +123,16 @@ function buildPdfContent(
     month: "long",
     day: "numeric",
   });
-  frontPage.innerHTML = `
-    <img src="${logo}" alt="Logo" class="front-page-logo" />
-    <h1 class="header-title">${escapeHtml(account)} - Customer Success Report </h1>
-    <p>Accelerating Success Together</p>
-    <hr class="section-divider"/>
-    <p class="current-date">Generated on: ${formattedDate}</p>
-  `;
+  const frontLogo = el("img", "front-page-logo");
+  frontLogo.src = logo;
+  frontLogo.alt = "Logo";
+  frontPage.append(
+    frontLogo,
+    el("h1", "header-title", `${account} - Customer Success Report `),
+    el("p", undefined, "Accelerating Success Together"),
+    el("hr", "section-divider"),
+    el("p", "current-date", `Generated on: ${formattedDate}`),
+  );
   pdfContent.appendChild(frontPage);
 
   const widgets = [
@@ -133,10 +173,7 @@ function buildPdfContent(
 
         const widgetTitlePage = document.createElement("div");
         widgetTitlePage.classList.add("sub-topic-page");
-        widgetTitlePage.innerHTML = `
-              <h1 class="header-title">${subTopic}</h1>
-              <hr class="section-divider"/>
-          `;
+        widgetTitlePage.append(el("h1", "header-title", subTopic), el("hr", "section-divider"));
         pdfContent.appendChild(widgetTitlePage);
       }
     }
@@ -146,7 +183,7 @@ function buildPdfContent(
 
     if (selector === ".cases-charts-widget" || selector === ".cases-volume-widget") {
       const heading = selector === ".cases-charts-widget" ? "Cases" : "Case Volume by Quarters";
-      widgetContainer.innerHTML = `<h2 class="widget-title">${heading}</h2>`;
+      widgetContainer.appendChild(el("h2", "widget-title", heading));
       // recharts renders SVG, not <canvas> (chart.js's rasterizable surface
       // the source relied on) — capture the chart containers themselves
       // instead of hunting for a <canvas>, so html2canvas rasterizes the SVG
@@ -157,41 +194,34 @@ function buildPdfContent(
       if (charts.length > 0) {
         charts.forEach((svg) => chartsContainer.appendChild(svg.cloneNode(true)));
       } else {
-        chartsContainer.innerHTML = "<p>No data to show</p>";
+        chartsContainer.appendChild(noDataParagraph());
       }
       widgetContainer.appendChild(chartsContainer);
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".subscription-widget") {
-      const dataContent = element.innerHTML.trim();
       widgetContainer.classList.remove("page-break");
-      widgetContainer.innerHTML = `<div class="subscription-content"><div>${dataContent || "<p>No data to show</p>"}</div></div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element, "subscription-content"));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".current-products-widget") {
-      const dataContent = element.innerHTML.trim();
-      widgetContainer.innerHTML = `<div>${dataContent || "<p>No data to show</p>"}</div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".product-versions-widget") {
-      const dataContent = element.innerHTML.trim();
-      widgetContainer.innerHTML = `<div class="product-versions-content"><div>${dataContent || "<p>No data to show</p>"}</div></div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element, "product-versions-content"));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".incident-sla-compliance-widget") {
-      const dataContent = element.innerHTML.trim();
-      widgetContainer.innerHTML = `<div class="incident-sla-compliance-widget"><div>${dataContent || "<p>No data to show</p>"}</div></div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element, "incident-sla-compliance-widget"));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".product-updates-widget") {
-      const dataContent = element.innerHTML.trim();
-      widgetContainer.innerHTML = `<div>${dataContent || "<p>No data to show</p>"}</div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".engagements-widget") {
-      const dataContent = element.innerHTML.trim();
       widgetContainer.classList.remove("page-break");
-      widgetContainer.innerHTML = `<div class="engagements-content"><div>${dataContent || "<p>No data to show</p>"}</div></div>`;
+      widgetContainer.appendChild(wrappedWidgetContent(element, "engagements-content"));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".business-overview-section" && businessOverviewText) {
       const title = element.querySelector(".widget-title")?.textContent || "Business Overview";
       const textarea = element.querySelector("textarea") as HTMLTextAreaElement | null;
-      const formattedText = textarea ? escapeHtml(textarea.value).replace(/\n/g, "<br>") : "No data to show";
-      widgetContainer.innerHTML = `<h2 class="widget-title">${title}</h2><p>${formattedText}</p>`;
+      widgetContainer.append(el("h2", "widget-title", title), multilineParagraph(textarea ? textarea.value : null));
       pdfContent.appendChild(widgetContainer);
     } else if (selector === ".deployment-image-section") {
       const title = element.querySelector(".widget-title")?.textContent || "Deployment";
@@ -199,7 +229,7 @@ function buildPdfContent(
       if (imageElement) {
         const deploymentElement = document.createElement("div");
         deploymentElement.classList.add("styled-text");
-        deploymentElement.innerHTML = `<h2 class="widget-title">${title}</h2>`;
+        deploymentElement.appendChild(el("h2", "widget-title", title));
 
         const imageWrapperDiv = document.createElement("div");
         imageWrapperDiv.style.display = "flex";
@@ -216,17 +246,16 @@ function buildPdfContent(
       const title = element.querySelector(".widget-title")?.textContent || "Notes";
       const image = element.querySelector("img") as HTMLImageElement | null;
       const textarea = element.querySelector("textarea") as HTMLTextAreaElement | null;
-      const formattedText = textarea ? escapeHtml(textarea.value).replace(/\n/g, "<br>") : "No data to show";
 
       const textElement = document.createElement("div");
       textElement.classList.add("styled-text");
-      textElement.innerHTML = `<h2 class="widget-title">${title}</h2><p>${formattedText}</p>`;
+      textElement.append(el("h2", "widget-title", title), multilineParagraph(textarea ? textarea.value : null));
       pdfContent.appendChild(textElement);
 
       if (image) {
         const imageElement = document.createElement("div");
         imageElement.classList.add("page-break");
-        imageElement.innerHTML = `<h2 class="widget-title">${title}</h2>`;
+        imageElement.appendChild(el("h2", "widget-title", title));
 
         const imageWrapperDiv = document.createElement("div");
         imageWrapperDiv.style.display = "flex";
@@ -250,7 +279,7 @@ function buildPdfContent(
 
   const recordsPage = document.createElement("div");
   recordsPage.classList.add("records-page");
-  recordsPage.innerHTML = `<h1> SLA & Other Information </h1><hr class="section-divider"/>`;
+  recordsPage.append(el("h1", undefined, " SLA & Other Information "), el("hr", "section-divider"));
   pdfContent.appendChild(recordsPage);
 
   const slaTablePage = document.createElement("div");
@@ -262,25 +291,31 @@ function buildPdfContent(
 
   const slaTable = document.createElement("table");
   slaTable.classList.add("sla-table");
+  const headRow = el("tr");
+  ["Task", "SLA Definition", "Business Elapsed Percentage(%)"].forEach((label) =>
+    headRow.appendChild(el("th", undefined, label)),
+  );
+  const thead = el("thead");
+  thead.appendChild(headRow);
+  const tbody = el("tbody");
   if (records.length === 0) {
-    slaTable.innerHTML = `
-        <thead><tr><th>Task</th><th>SLA Definition</th><th>Business Elapsed Percentage(%)</th></tr></thead>
-        <tbody><tr><td colspan="3" style="text-align: center; color: gray;">No SLA data available</td></tr></tbody>
-    `;
+    const emptyCell = el("td", undefined, "No SLA data available");
+    emptyCell.colSpan = 3;
+    emptyCell.style.textAlign = "center";
+    emptyCell.style.color = "gray";
+    const emptyRow = el("tr");
+    emptyRow.appendChild(emptyCell);
+    tbody.appendChild(emptyRow);
   } else {
-    slaTable.innerHTML = `
-        <thead><tr><th>Task</th><th>SLA Definition</th><th>Business Elapsed Percentage(%)</th></tr></thead>
-        <tbody>
-            ${records
-              .map(
-                (record: { task: string; slaDefinition: string; businessElapsedPercentage: string }) => `
-                <tr><td>${escapeHtml(record.task)}</td><td>${escapeHtml(record.slaDefinition)}</td><td>${escapeHtml(record.businessElapsedPercentage)}</td></tr>
-            `,
-              )
-              .join("")}
-        </tbody>
-    `;
+    records.forEach((record: { task: string; slaDefinition: string; businessElapsedPercentage: string }) => {
+      const row = el("tr");
+      [record.task, record.slaDefinition, record.businessElapsedPercentage].forEach((value) =>
+        row.appendChild(el("td", undefined, value == null ? "" : String(value))),
+      );
+      tbody.appendChild(row);
+    });
   }
+  slaTable.append(thead, tbody);
   slaTablePage.appendChild(slaTable);
   pdfContent.appendChild(slaTablePage);
 
@@ -290,7 +325,7 @@ function buildPdfContent(
 
   const thankPage = document.createElement("div");
   thankPage.classList.add("thank-page");
-  thankPage.innerHTML = `<h1>Thanks!</h1><hr class="section-divider"/>`;
+  thankPage.append(el("h1", undefined, "Thanks!"), el("hr", "section-divider"));
   pdfContent.appendChild(thankPage);
 
   return pdfContent;

@@ -470,7 +470,7 @@ export function clearPersistedRecentApprovers(): void {
  * The signed-in engineer's own most-recently-submitted-to approvers, most
  * recent first, deduped by id, capped at {@link RECENT_APPROVERS_MAX} —
  * powers "Log time"'s approver picker showing previously-picked approvers
- * before the engineer types anything (digiops-cs#2839), instead of requiring
+ * before the engineer types anything, instead of requiring
  * the same search every time.
  *
  * Derived entirely from the existing `POST /time-cards/search` endpoint

@@ -23,6 +23,7 @@
 // One deviation from source, defensive rather than cosmetic: the source
 // indexes percentileDataList[1..4] directly (P1/P2/P3/Query rows assumed
 // present at fixed positions). Optional-chained here too, same as source.
+import { safeRouteId } from "@features/spl/utils/routeId";
 import { useState, type JSX } from "react";
 import {
   Alert,
@@ -46,7 +47,6 @@ import DownloadIcon from "@mui/icons-material/Download";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs, { type Dayjs } from "dayjs";
-import DOMPurify from "dompurify";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useParams } from "react-router";
@@ -326,7 +326,7 @@ function MainView({
 
 export default function SlaReportPage(): JSX.Element {
   const { sysId: id } = useParams<{ sysId: string }>();
-  const projectId = id ? DOMPurify.sanitize(id) : "";
+  const projectId = safeRouteId(id);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [from, setFrom] = useState<string>(new Date().toLocaleDateString("en-CA"));
   const [to, setTo] = useState<string>(new Date().toLocaleDateString("en-CA"));
@@ -355,7 +355,7 @@ export default function SlaReportPage(): JSX.Element {
     // own dashed UUID -- sysidToUuid converts it to what SPL's own
     // /spl/cases/:caseId route (which validates a dashed UUID) needs.
     if (rowData?.caseSysId) {
-      window.open(`/spl/cases/${sysidToUuid(rowData.caseSysId)}`, "_blank");
+      window.open(`/spl/cases/${sysidToUuid(rowData.caseSysId)}`, "_blank", "noopener,noreferrer");
     } else {
       setErrorMessage("Case not found.");
     }

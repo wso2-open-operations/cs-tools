@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import {
   Box,
   Button,
@@ -61,11 +62,6 @@ const ISSUE_TYPES: { value: BeCaseIssueType; label: string }[] = ALL_ISSUE_TYPES
   value,
   label: ISSUE_TYPE_LABEL[value],
 }));
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 // Cap the case-create body, which carries the description HTML (with base64
 // inline images). FOLLOW-UP: the CSM backend currently caps POST /cases at
@@ -212,7 +208,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
       !!severity &&
       !!issueType &&
       subject.trim().length > 0 &&
-      !isEmptyHtml(description) &&
+      !isBlankHtml(description) &&
       !descriptionOverLimit &&
       !submitting,
     [

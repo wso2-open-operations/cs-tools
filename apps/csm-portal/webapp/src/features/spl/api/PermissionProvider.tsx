@@ -21,7 +21,7 @@ import { PermissionContext, type Permissions } from "./permissionsContext";
 
 // Ported from apps/support-portal-lite/webapp's own PermissionProvider,
 // now reading the same backend-`roles` array (`GET /users/me`) as every
-// other permission check in this app instead of Asgardeo groups — see
+// other permission check in this app instead of identity-provider groups — see
 // useAccess.ts for why the earlier client-side-groups exception was
 // removed. Three independent booleans, each a role-membership check — UI
 // guidance only: the Go backend enforces its own copies of these same

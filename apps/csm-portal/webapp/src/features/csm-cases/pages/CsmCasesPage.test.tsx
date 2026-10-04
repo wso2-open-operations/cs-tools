@@ -22,8 +22,8 @@ import "@testing-library/jest-dom/vitest";
 // `CsmIssuesView` does all the real search/filtering work and is covered by
 // its own tests — this file only checks the props `CsmCasesPage` (the
 // "Support" section's page) supplies to it, in particular that it no longer
-// suppresses the case-type control (digiops-cs#2907: "case-type filter is
-// hidden on the Support section").
+// suppresses the case-type control (it used to be hidden on the
+// Support section).
 const issuesViewSpy = vi.fn();
 vi.mock("@features/csm-cases/components/CsmIssuesView", () => ({
   default: (props: Record<string, unknown>) => {
@@ -103,7 +103,7 @@ describe("CsmCasesPage — case-type filter visibility", () => {
   });
 });
 
-// digiops-cs#2914: a dashboard widget's click-through carries its own
+// A dashboard widget's click-through carries its own
 // displayName as the `wt` query param (see
 // `WIDGET_RESOURCE_CONFIG.case.buildHref`), which this page must render as
 // its heading instead of the hardcoded default -- but only when present, so

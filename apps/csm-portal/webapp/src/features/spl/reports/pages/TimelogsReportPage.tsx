@@ -25,6 +25,7 @@
 // config (react-hooks/static-components, React Compiler compatibility)
 // forbids that — hoisted both to module scope, same treatment
 // SlaReportPage's FormView/MainView already needed.
+import { safeRouteId } from "@features/spl/utils/routeId";
 import { useState, type JSX, type SyntheticEvent } from "react";
 import {
   Alert,
@@ -46,7 +47,6 @@ import {
 import { ThemeProvider } from "@mui/material/styles";
 import { reportPaperTheme } from "@features/spl/reports/reportPaperTheme";
 import DownloadIcon from "@mui/icons-material/Download";
-import DOMPurify from "dompurify";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useParams } from "react-router";
@@ -352,7 +352,7 @@ function ToggleReport({
 
 export default function TimelogsReportPage(): JSX.Element {
   const { projectId: id } = useParams<{ projectId: string }>();
-  const projectId = id ? DOMPurify.sanitize(id) : "";
+  const projectId = safeRouteId(id);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCustomerReport, setCustomerReport] = useState(false);
 
@@ -367,7 +367,7 @@ export default function TimelogsReportPage(): JSX.Element {
     // own dashed UUID -- sysidToUuid converts it to what SPL's own
     // /spl/cases/:caseId route (which validates a dashed UUID) needs.
     if (rowData?.caseSysId) {
-      window.open(`/spl/cases/${sysidToUuid(rowData.caseSysId)}`, "_blank");
+      window.open(`/spl/cases/${sysidToUuid(rowData.caseSysId)}`, "_blank", "noopener,noreferrer");
     } else {
       setErrorMessage("Case not found.");
     }

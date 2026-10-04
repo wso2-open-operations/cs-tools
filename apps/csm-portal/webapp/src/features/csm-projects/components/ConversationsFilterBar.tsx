@@ -30,6 +30,7 @@ import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-i
 import { useMemo, type JSX } from "react";
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncInitiatorMultiSelect from "@features/csm-projects/components/AsyncInitiatorMultiSelect";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 import {
   ALL_CONVERSATION_STATES,
   CONVERSATION_STATE_LABEL,
@@ -161,6 +162,8 @@ export default function ConversationsFilterBar({
               <AsyncInitiatorMultiSelect
                 values={filters.createdBy}
                 onChange={(next) => onChange({ ...filters, createdBy: next })}
+                roleIds={INTERNAL_USER_ROLES}
+                active
               />
             </Grid>
             <Grid

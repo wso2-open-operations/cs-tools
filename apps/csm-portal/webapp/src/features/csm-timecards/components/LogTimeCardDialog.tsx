@@ -326,7 +326,7 @@ export default function LogTimeCardDialog({
       .map((u) => ({ id: u.id, name: fullName(u), email: u.email }));
   }, [data, hasApproverInput, me.email]);
 
-  // Previously-selected approvers (digiops-cs#2839) — surfaced before the
+  // Previously-selected approvers — surfaced before the
   // engineer types anything, and prioritized within the typed results, so
   // picking the same team lead again doesn't require retyping the same
   // search every time. Only fetched in create mode: the approver field is

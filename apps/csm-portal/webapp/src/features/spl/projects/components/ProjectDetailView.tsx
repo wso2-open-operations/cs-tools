@@ -80,11 +80,11 @@ function ProjectHeading({ data }: { data: ProjectDetails }) {
 
   const openReport = (path: string) => {
     if (!data.sysId) return;
-    window.open(`/spl/projects/${data.number}/${path}/${data.sysId}`);
+    window.open(`/spl/projects/${data.number}/${path}/${data.sysId}`, "_blank", "noopener,noreferrer");
   };
 
   const openTimelogs = () => {
-    window.open(`/spl/projects/${data.number}/timelogs-report`);
+    window.open(`/spl/projects/${data.number}/timelogs-report`, "_blank", "noopener,noreferrer");
   };
 
   return (

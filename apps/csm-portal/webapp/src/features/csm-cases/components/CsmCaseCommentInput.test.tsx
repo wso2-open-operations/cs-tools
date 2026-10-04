@@ -27,7 +27,11 @@ import "@testing-library/jest-dom/vitest";
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: vi.fn() }),
 }));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
 
+import { CommentPartiallySentError } from "@features/csm-cases/components/commentSend";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -343,5 +347,41 @@ describe("CsmCaseCommentInput — lifted draft state survives unmount/remount", 
 
     await screen.findByText("Ctrl/Cmd + Enter to send.");
     expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+  });
+});
+
+describe("CsmCaseCommentInput — partial send", () => {
+  it("clears the body and keeps only the remaining files after a partial send, so a retry never re-posts the comment", async () => {
+    const sendSpy = vi.fn();
+    const onSubmit = vi
+      .fn()
+      .mockImplementationOnce(
+        async (html: string, _i: boolean, atts: CommentAttachmentDraft[]) => {
+          sendSpy(html, atts.length);
+          throw new CommentPartiallySentError("upload failed", atts.slice(1));
+        },
+      )
+      .mockImplementation(
+        async (html: string, _i: boolean, atts: CommentAttachmentDraft[]) => {
+          sendSpy(html, atts.length);
+        },
+      );
+    render(<DraftLiftingHarness onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: "hello" },
+    });
+    const composer = screen.getByTestId("csm-comment-composer");
+    fireEvent.drop(composer, fileDrop([makeFile("a.txt", 10), makeFile("b.txt", 10)]));
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await screen.findByText("upload failed");
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await screen.findByText("Ctrl/Cmd + Enter to send.");
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "hello", 2);
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "", 1);
   });
 });

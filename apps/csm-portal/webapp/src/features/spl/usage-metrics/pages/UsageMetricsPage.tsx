@@ -23,7 +23,12 @@
 // declarative queryFn). No SplShell wrapper — audience gating (Sales/SA) is
 // RouteGuard's job; canViewUsageMetrics (from usePermissions) below is
 // the second, finer-grained check this page has always done on its own.
-import { useEffect, useMemo, useRef, useState, type JSX, type SyntheticEvent, type UIEvent } from "react";
+import {
+  clampDateInput,
+  daysAgoLocalStr,
+  todayLocalStr,
+} from "@features/spl/usage-metrics/utils/dateBounds";
+import { Fragment, useEffect, useMemo, useRef, useState, type JSX, type SyntheticEvent, type UIEvent } from "react";
 import {
   Box,
   Typography,
@@ -93,15 +98,15 @@ const DEBOUNCE_DELAY = 500;
 const PROJECTS_PAGE_SIZE = 20;
 const PROJECTS_URL = "/usage-metrics/projects/search";
 
-function todayStr(): string {
-  return new Date().toISOString().split("T")[0];
-}
-function daysAgoStr(n: number): string {
-  return new Date(Date.now() - n * 86_400_000).toISOString().split("T")[0];
-}
-const MIN_ALLOWED_DATE = daysAgoStr(MAX_RANGE_DAYS);
+// Local-calendar helpers (never the UTC date), evaluated per call so a tab left
+// open past midnight keeps the right bounds.
+const todayStr = todayLocalStr;
+const daysAgoStr = daysAgoLocalStr;
 
 export default function UsageMetricsPage(): JSX.Element {
+  // Recomputed every render, not at module load.
+  const maxAllowedDate = todayStr();
+  const minAllowedDate = daysAgoStr(MAX_RANGE_DAYS);
   const { canViewUsageMetrics } = usePermissions();
 
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -148,10 +153,20 @@ export default function UsageMetricsPage(): JSX.Element {
     clearAll: clearProdInstances,
   } = useParallelPostApi<SnInstancesResponse>();
 
-  const { dataMap: prodMetricsStats, loading: prodMetricsStatsLoading, postAll: fetchProdMetricsStats } =
+  const {
+    dataMap: prodMetricsStats,
+    failedIds: prodMetricsFailed,
+    loading: prodMetricsStatsLoading,
+    postAll: fetchProdMetricsStats,
+  } =
     useParallelPostApi<SnDeployedProductMetricsResponse>();
 
-  const { dataMap: prodUsagesStats, loading: prodUsagesStatsLoading, postAll: fetchProdUsagesStats } =
+  const {
+    dataMap: prodUsagesStats,
+    failedIds: prodUsagesFailed,
+    loading: prodUsagesStatsLoading,
+    postAll: fetchProdUsagesStats,
+  } =
     useParallelPostApi<SnDeployedProductUsageCountsResponse>();
 
   useEffect(() => {
@@ -616,8 +631,8 @@ export default function UsageMetricsPage(): JSX.Element {
                       type="date"
                       size="small"
                       value={pendingFrom}
-                      onChange={(e) => setPendingFrom(e.target.value)}
-                      slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: MIN_ALLOWED_DATE, max: todayStr() } }}
+                      onChange={(e) => setPendingFrom(clampDateInput(e.target.value, minAllowedDate, maxAllowedDate))}
+                      slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: minAllowedDate, max: maxAllowedDate } }}
                       sx={{ width: 150, "& .MuiOutlinedInput-root": { borderRadius: "8px" } }}
                     />
                     <Typography variant="body2" color="text.secondary">
@@ -627,8 +642,8 @@ export default function UsageMetricsPage(): JSX.Element {
                       type="date"
                       size="small"
                       value={pendingTo}
-                      onChange={(e) => setPendingTo(e.target.value)}
-                      slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: MIN_ALLOWED_DATE, max: todayStr() } }}
+                      onChange={(e) => setPendingTo(clampDateInput(e.target.value, minAllowedDate, maxAllowedDate))}
+                      slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: minAllowedDate, max: maxAllowedDate } }}
                       sx={{ width: 150, "& .MuiOutlinedInput-root": { borderRadius: "8px" } }}
                     />
                     <Button
@@ -643,7 +658,7 @@ export default function UsageMetricsPage(): JSX.Element {
                         !pendingTo ||
                         isNaN(new Date(pendingFrom).getTime()) ||
                         isNaN(new Date(pendingTo).getTime()) ||
-                        new Date(pendingFrom) >= new Date(pendingTo) ||
+                        new Date(pendingFrom) > new Date(pendingTo) ||
                         new Date(pendingTo).getTime() - new Date(pendingFrom).getTime() > MAX_RANGE_DAYS * 86_400_000
                       }
                       sx={{ borderRadius: "8px", textTransform: "none", px: 2 }}
@@ -663,12 +678,12 @@ export default function UsageMetricsPage(): JSX.Element {
                         Custom Range: {customFrom} → {customTo}
                       </Typography>
                     </Box>
-                    {new Date(pendingFrom) >= new Date(pendingTo) && (
+                    {new Date(pendingFrom) > new Date(pendingTo) && (
                       <Alert severity="error" sx={{ mt: 1, width: "100%", borderRadius: "8px" }}>
-                        Start date must be before end date.
+                        Start date must not be after end date.
                       </Alert>
                     )}
-                    {new Date(pendingFrom) < new Date(pendingTo) &&
+                    {new Date(pendingFrom) <= new Date(pendingTo) &&
                       new Date(pendingTo).getTime() - new Date(pendingFrom).getTime() > MAX_RANGE_DAYS * 86_400_000 && (
                         <Alert severity="warning" sx={{ mt: 1, width: "100%", borderRadius: "8px" }}>
                           This dashboard supports a maximum date range of {MAX_RANGE_DAYS} days. Please adjust your
@@ -689,8 +704,13 @@ export default function UsageMetricsPage(): JSX.Element {
                 <Typography color="text.secondary">No product data available for this deployment.</Typography>
               ) : (
                 productBreakdown.map((p) => (
+                  <Fragment key={p.id}>
+                  {(prodMetricsFailed.has(p.id) || prodUsagesFailed.has(p.id)) && (
+                    <Alert severity="warning" sx={{ mb: 1, borderRadius: "8px" }}>
+                      Couldn&apos;t load usage metrics for {p.name}. Collapse and expand the row to retry.
+                    </Alert>
+                  )}
                   <ProductBreakdownRow
-                    key={p.id}
                     {...p}
                     deploymentId={activeDepId}
                     coreMetrics={prodMetricsStats.get(p.id)}
@@ -701,6 +721,7 @@ export default function UsageMetricsPage(): JSX.Element {
                     expanded={expandedProductIds.has(p.id)}
                     onToggle={() => handleProductToggle(p.id)}
                   />
+                  </Fragment>
                 ))
               )}
             </>

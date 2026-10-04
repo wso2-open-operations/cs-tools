@@ -14,13 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { ReactNode } from "react";
 import ConversationsFilterBar from "@features/csm-projects/components/ConversationsFilterBar";
 import { DEFAULT_CONVERSATION_FILTERS } from "@features/csm-projects/utils/conversationState";
+import { INTERNAL_USER_ROLES } from "@features/csm-users/types/csmUsers";
 
 const postMock = vi.fn();
 
@@ -132,5 +133,23 @@ describe("ConversationsFilterBar", () => {
     });
 
     expect(screen.getByText("jane.doe@example.com")).toBeInTheDocument();
+  });
+
+  it("scopes the Initiator search to active internal users only", async () => {
+    postMock.mockReset();
+    postMock.mockResolvedValue({ users: [], total: 0, limit: 20, offset: 0 });
+    renderBar({ isFiltersOpen: true });
+
+    fireEvent.mouseDown(screen.getByLabelText("Initiator"));
+    fireEvent.click(screen.getByLabelText("Initiator"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith(
+        "/users/search",
+        expect.objectContaining({
+          filters: expect.objectContaining({ roleIds: INTERNAL_USER_ROLES, active: true }),
+        }),
+      ),
+    );
   });
 });

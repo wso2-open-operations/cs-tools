@@ -66,8 +66,7 @@ function nextTagState(current: TagState): TagState {
  * carry), or left unselected. Replaces the earlier include-only
  * `TagsMultiSelect` -- `excludeTags` used to be settable only via a
  * dashboard widget click-through (see `buildActiveFilterChips` in
- * `CasesFilterBar.tsx`); this is the one bar control for both lists now
- * (digiops-cs#2907).
+ * `CasesFilterBar.tsx`); this is the one bar control for both lists now.
  *
  * Still searches already-used tag labels from the backend as the user types
  * (`useSearchTags`, the same `/tags/search` type-ahead {@link AddTagDialog}

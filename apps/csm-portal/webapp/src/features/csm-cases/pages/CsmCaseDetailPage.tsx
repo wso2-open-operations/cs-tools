@@ -91,6 +91,7 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { sendCommentWithAttachments } from "@features/csm-cases/components/commentSend";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -1014,7 +1015,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         assigneeName: data.assigneeName,
       },
     });
-  }, [data, recordView]);
+  }, [data, recordView, detailPath]);
 
   // Resolve the single-active-case rule once the engineer's other ongoing
   // cases are already known: mark THIS case ongoing if there are none, or
@@ -2604,33 +2605,33 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  // Post the comment only when there's text; an attachment-only
-                  // send skips the comment endpoint and just uploads the files.
-                  const hasText =
-                    bodyHtml
-                      .replace(/<[^>]*>/g, "")
-                      .replace(/&nbsp;/g, " ")
-                      .trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      caseId,
-                      bodyHtml,
-                      authorName: engineerName,
-                      internal,
-                    });
-                  }
-                  // Attachments are case-level (no comment linkage on the BE);
-                  // upload each sequentially so a failure surfaces clearly.
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                    });
-                  }
-                  // Collapse and clear the draft only on success; on error the
-                  // input keeps its draft + files and surfaces the failure.
+                  // Comment first (only when there's text), then each
+                  // attachment sequentially. A failed upload after the comment
+                  // exists throws CommentPartiallySentError so the composer
+                  // drops the body and keeps just the files still to upload —
+                  // a retry never re-posts the comment.
+                  await sendCommentWithAttachments(
+                    bodyHtml,
+                    internal,
+                    commentAttachments,
+                    {
+                      postComment: (c) =>
+                        postComment.mutateAsync({
+                          caseId,
+                          bodyHtml: c.bodyHtml,
+                          authorName: engineerName,
+                          internal: c.internal,
+                        }),
+                      postAttachment: ({ file, name }) =>
+                        postAttachment.mutateAsync({
+                          caseId,
+                          file,
+                          name,
+                          uploadedBy: engineerName,
+                        }),
+                    },
+                  );
+                  // Collapse and clear the draft only on full success.
                   setComposerOpen(false);
                   clearComposerDraft();
                 }}

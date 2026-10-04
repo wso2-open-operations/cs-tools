@@ -18,6 +18,7 @@
 // listings from the Go backend's /spl/files proxy endpoint (internal/
 // googledrive), same auth/backend pattern as everything else in this port.
 import { useState } from "react";
+import { openExternalUrl } from "@utils/openExternalUrl";
 import { Box, Button } from "@wso2/oxygen-ui";
 import {
   ChevronRightIcon,
@@ -97,7 +98,7 @@ export function GoogleDrive({ driveLocation }: { driveLocation: string }) {
     if (file.mimeType === "application/vnd.google-apps.folder") {
       if (!path.some((p) => p.id === file.id)) setPath([...path, { id: file.id, name: file.name }]);
     } else {
-      window.open(`${FILE_VIEW_BASE_URL}${file.id}/view`, "_blank");
+      openExternalUrl(`${FILE_VIEW_BASE_URL}${file.id}/view`);
     }
   };
 
@@ -106,7 +107,7 @@ export function GoogleDrive({ driveLocation }: { driveLocation: string }) {
   };
 
   const goToCurrentFolder = () => {
-    if (currentFolderId) window.open(`${FOLDER_VIEW_BASE_URL}${currentFolderId}`, "_blank");
+    if (currentFolderId) openExternalUrl(`${FOLDER_VIEW_BASE_URL}${currentFolderId}`);
   };
 
   return (

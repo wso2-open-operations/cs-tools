@@ -41,18 +41,20 @@ import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourc
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { PORTAL_ROLE } from "@context/current-user/portalAccess";
 import { pickAccessibleText } from "@utils/contrastText";
+import { renderTrustedHtml } from "@utils/renderTrustedHtml";
 import { sanitizeRichTextHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
 import { useDarkMode } from "@utils/useDarkMode";
 import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
-import { replaceCallRequestLinks } from "@features/csm-cases/utils/callRequestLinks";
-import { replaceSnLinks, type SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
+import { replaceCallRequestLinksInDom } from "@features/csm-cases/utils/callRequestLinks";
+import { replaceSnLinksInDom, type SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
 import {
   convertCodeTagsToHtml,
   hasDisplayableContent,
   hasSingleCodeWrapper,
-  linkifyBareUrls,
+  isSafeHref,
+  linkifyBareUrlsInDom,
   stripAllCodeBlocks,
   stripCodeWrapper,
   stripCustomerCommentAddedLabel,
@@ -93,17 +95,16 @@ interface CsmCaseCommentBubbleProps {
   onDeleteComment?: () => Promise<unknown>;
 }
 
-const SAFE_PROTOCOLS = ["http:", "https:"];
-
-function isSafeHref(href: string | undefined): href is string {
-  if (!href || typeof href !== "string") return false;
-  try {
-    const parsed = new URL(href, "https://invalid.invalid");
-    return SAFE_PROTOCOLS.includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
+// Order matters: both marker passes run before the bare-URL linkifier — they
+// swap their respective bare backing-store URLs for our own `<span data-…>`
+// markers, and the linkifier would otherwise turn those same URLs into plain
+// external `<a>`s first. The order between the two marker passes doesn't
+// matter — they match disjoint URL patterns.
+const COMMENT_HTML_TRANSFORMS = [
+  replaceCallRequestLinksInDom,
+  replaceSnLinksInDom,
+  linkifyBareUrlsInDom,
+] as const;
 
 const ROLE_LABEL: Record<CsmCommentAuthorRole, string> = {
   customer: "Customer",
@@ -147,7 +148,7 @@ export default function CsmCaseCommentBubble({
   // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
   // other comment body is already rich-text HTML and goes through the same
   // code-wrapper/label-stripping pipeline the customer portal uses, since bot
-  // replies never carry ServiceNow's [code] wrapper tags or the "Customer
+  // replies never carry the backing system's [code] wrapper tags or the "Customer
   // comment added" label.
   const preprocessed = useMemo(() => {
     if (isBot) return markdownToHtml(comment.bodyHtml);
@@ -170,17 +171,12 @@ export default function CsmCaseCommentBubble({
   );
   const { resolvedHtml, isLoading: isImagesLoading } =
     useResolvedInlineImageHtml(safeHtml);
-  // All three run last, on the already-resolved/sanitized HTML — no
-  // re-sanitize. `replaceCallRequestLinks`/`replaceSnLinks` must both run
-  // before `linkifyBareUrls`: they swap their respective bare backing-store
-  // URLs for our own `<span data-…>` markers, and `linkifyBareUrls` would
-  // otherwise linkify those same bare URLs into plain external `<a>`s first.
-  // The order between the two marker passes doesn't matter — they match
-  // disjoint URL patterns. Their output is generated entirely by us from a
-  // regex-validated hex sysid (never raw comment text passed through
-  // unescaped), so running after sanitization is safe.
+  // The in-app link markers and URL linkification are DOM transforms on the
+  // already-resolved HTML, and sanitisation is the LAST step before the string
+  // reaches `dangerouslySetInnerHTML` (see `renderTrustedHtml`) — nothing is
+  // ever spliced into serialised markup after it has been sanitised.
   const renderHtml = useMemo(
-    () => linkifyBareUrls(replaceSnLinks(replaceCallRequestLinks(resolvedHtml))),
+    () => renderTrustedHtml(resolvedHtml, COMMENT_HTML_TRANSFORMS),
     [resolvedHtml],
   );
 
@@ -609,7 +605,7 @@ export default function CsmCaseCommentBubble({
               color: "text.secondary",
             }),
             // Newly generated comments no longer carry a per-run
-            // `white-space: pre-wrap` inline style (digiops-cs#2933) — this
+            // `white-space: pre-wrap` inline style — this
             // container declares it once instead, so multi-space runs and
             // leading/trailing spaces the user typed still aren't collapsed.
             // Older comments still carry their own inline style and are

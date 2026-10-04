@@ -43,6 +43,7 @@ import ListAccountSolutionDocument from "./ListAccountSolutionDocument";
 import EscalateDialog from "./EscalateDialog";
 import PathView from "./PathView";
 import TeamMembersDrawer from "./TeamMembersDrawer";
+import { openExternalUrl } from "@utils/openExternalUrl";
 
 function TabPanel({ children, value, index }: { children: ReactNode; value: number; index: number }) {
   return (
@@ -106,9 +107,7 @@ function AccountHeading({ data, showViewOnDriveButton }: { data: AccountDetails;
   const { showError } = useErrorBanner();
 
   const goToGoogleDrive = () => {
-    if (data.driveLocation) {
-      window.open(data.driveLocation, "_blank");
-    } else {
+    if (!openExternalUrl(data.driveLocation)) {
       showError("Drive location is not available.");
     }
   };

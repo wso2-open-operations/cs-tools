@@ -137,11 +137,36 @@ describe("CsmCaseCommentBubble", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it.each([
+    ["src", '<img src="https://evil.example/x/onerror=alert(1)//">'],
+    ["alt", '<img src="x" alt="https://a.test//onerror=alert(1)//">'],
+    ["title", '<p title="https://a.test//onmouseover=alert(1)//">hi</p>'],
+  ])("renders no event-handler attribute when a URL sits in %s", (_name, bodyHtml) => {
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ bodyHtml })} />,
+    );
+    const hasHandler = [...container.querySelectorAll("*")].some((el) =>
+      [...el.attributes].some((attr) => /^on/i.test(attr.name)),
+    );
+    expect(hasHandler).toBe(false);
+  });
+
+  it("keeps the src of a remote image intact", () => {
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({ bodyHtml: '<img src="https://cdn.example/sig.png" alt="sig">' })}
+      />,
+    );
+    expect(container.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://cdn.example/sig.png",
+    );
+  });
+
   it("invokes onImageClick when an inline image is clicked", () => {
     // A relative unresolved-attachment-style src (as an unresolved .iix
-    // reference would look) — a bare `https://` src would also get rewritten
-    // by linkifyBareUrls, which only special-cases `href=`, so it's avoided
-    // here to keep this test focused on the click-to-zoom wiring.
+    // reference would look), to keep this test focused on the click-to-zoom
+    // wiring.
     const onImageClick = vi.fn();
     renderWithProviders(
       <CsmCaseCommentBubble

@@ -97,6 +97,8 @@ export function usePostApi<T>(): PostApiResponse<T> {
 
 interface ParallelPostApiResponse<T> {
   dataMap: Map<string, T>;
+  /** Ids whose most recent request failed — distinct from "no data", so the UI can say so and offer a retry. */
+  failedIds: Set<string>;
   loading: boolean;
   /** When merge=true, only fetches IDs not already in the map and merges
    * results in. `url` may be a per-item builder for path-param endpoints. */
@@ -108,6 +110,7 @@ interface ParallelPostApiResponse<T> {
 export function useParallelPostApi<T>(): ParallelPostApiResponse<T> {
   const api = useBackendApi();
   const [dataMap, setDataMap] = useState<Map<string, T>>(new Map());
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   // Bumped only by a replace call (merge=false) or clearAll — these
   // invalidate any earlier in-flight call outright. A merge call must NOT
@@ -124,6 +127,7 @@ export function useParallelPostApi<T>(): ParallelPostApiResponse<T> {
   const clearAll = () => {
     generationRef.current++;
     setDataMap(new Map());
+    setFailedIds(new Set());
   };
 
   const postAll = useCallback(
@@ -144,14 +148,21 @@ export function useParallelPostApi<T>(): ParallelPostApiResponse<T> {
             try {
               const itemUrl = typeof url === "function" ? url(id) : url;
               const data = await api.post<unknown, T>(itemUrl, payload);
-              return { id, data };
+              return { id, data, failed: false };
             } catch {
-              return { id, data: null as unknown as T };
+              // Kept distinct from an empty result: recorded in `failedIds`.
+              return { id, data: null as unknown as T, failed: true };
             }
           }),
         );
         if (generation !== generationRef.current) return;
+        const failedNow = new Set(results.filter((r) => r.failed).map((r) => r.id));
         if (merge) {
+          setFailedIds((prev) => {
+            const next = new Set(prev);
+            results.forEach(({ id, failed }) => (failed ? next.add(id) : next.delete(id)));
+            return next;
+          });
           setDataMap((prev) => {
             const merged = new Map(prev);
             results.forEach(({ id, data }) => {
@@ -165,6 +176,7 @@ export function useParallelPostApi<T>(): ParallelPostApiResponse<T> {
             if (data !== null) newMap.set(id, data);
           });
           setDataMap(newMap);
+          setFailedIds(failedNow);
         }
       } finally {
         inFlightRef.current--;
@@ -174,5 +186,5 @@ export function useParallelPostApi<T>(): ParallelPostApiResponse<T> {
     [api],
   );
 
-  return { dataMap, loading, postAll, clearAll };
+  return { dataMap, failedIds, loading, postAll, clearAll };
 }
