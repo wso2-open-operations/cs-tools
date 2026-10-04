@@ -82,7 +82,7 @@ DB_PORT=5434
 DB_USER=your_user
 DB_PASSWORD=your_password
 DB_NAME=your_db
-DB_SSLMODE=disable       # use "require" for Azure PostgreSQL
+DB_SSLMODE=disable       # optional; see the table below for the default
 ```
 
 ### 3. Run
@@ -114,7 +114,7 @@ HTTP Request
 | DB_USER     | Yes      | postgres  | Database user     |
 | DB_PASSWORD | Yes      | —         | Database password |
 | DB_NAME     | Yes      | postgres  | Database name     |
-| DB_SSLMODE  | No       | require   | SSL mode          |
+| DB_SSLMODE  | No       | `disable` when `DB_HOST` is `localhost`, `127.0.0.1`, `::1` or `postgres` (local compose); `verify-full` otherwise | SSL mode: `disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`. Set `verify-full` (or at least `require`) for any remote database |
 | SERVER_PORT | No       | 8080      | Main API listener port |
 | HEALTH_PORT | No       | 8081      | Health probe listener port; must differ from `SERVER_PORT`, and must be left at its default in Choreo deployments (see below) |
 

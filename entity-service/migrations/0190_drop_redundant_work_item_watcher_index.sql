@@ -14,10 +14,13 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The same product/version can legitimately appear more than once with a
--- different deployment_profile (e.g. "All In One" vs a split profile), so
--- deployment_profile joins the uniqueness instead of just (product_id, version).
-ALTER TABLE product_version DROP CONSTRAINT IF EXISTS product_version_product_id_version_key;
-ALTER TABLE product_version DROP CONSTRAINT IF EXISTS product_version_product_id_version_deployment_profile_key;
-ALTER TABLE product_version ADD CONSTRAINT product_version_product_id_version_deployment_profile_key
-    UNIQUE (product_id, version, deployment_profile);
+-- idx_work_item_watcher_work_item_id (0042) indexes work_item_id alone, the
+-- leading column of the UNIQUE (work_item_id, user_id) constraint's own
+-- index, which serves every lookup by work_item_id. The extra index only adds
+-- write cost and WAL on every watch-list change (each one deletes and
+-- re-inserts the case's watchers).
+--
+-- DROP INDEX CONCURRENTLY does not block reads or writes on the table; it
+-- cannot run inside a transaction block, so this is the only statement in the
+-- file (see `make migrate` and the compose runner).
+DROP INDEX CONCURRENTLY IF EXISTS idx_work_item_watcher_work_item_id;

@@ -14,10 +14,12 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- The same product/version can legitimately appear more than once with a
--- different deployment_profile (e.g. "All In One" vs a split profile), so
--- deployment_profile joins the uniqueness instead of just (product_id, version).
-ALTER TABLE product_version DROP CONSTRAINT IF EXISTS product_version_product_id_version_key;
-ALTER TABLE product_version DROP CONSTRAINT IF EXISTS product_version_product_id_version_deployment_profile_key;
-ALTER TABLE product_version ADD CONSTRAINT product_version_product_id_version_deployment_profile_key
-    UNIQUE (product_id, version, deployment_profile);
+-- idx_time_card_approver_time_card_id (0041) indexes time_card_id alone, the
+-- leading column of the UNIQUE (time_card_id, approver_id) constraint's own
+-- index, which serves every lookup by time_card_id. The extra index only adds
+-- write cost and WAL on each approver insert and delete.
+--
+-- DROP INDEX CONCURRENTLY does not block reads or writes on the table; it
+-- cannot run inside a transaction block, so this is the only statement in the
+-- file (see `make migrate` and the compose runner).
+DROP INDEX CONCURRENTLY IF EXISTS idx_time_card_approver_time_card_id;

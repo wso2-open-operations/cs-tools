@@ -33,6 +33,31 @@ const (
 	poolMaxConnIdleTime time.Duration = 5 * time.Minute  // release unused connections back to the OS
 )
 
+// sessionTimeoutDefaults are server-side limits set on every pooled
+// connection, so a runaway statement, a lock wait queued behind a long
+// transaction, or a transaction left open by a stuck caller cannot hold one of
+// the pool's few connections (and its row locks) indefinitely. Values are in
+// milliseconds. statement_timeout matches the request timeout: no request can
+// use a result that arrives later. A DSN that sets any of these (e.g.
+// ?statement_timeout=120000 for a batch tool) keeps its own value; a job that
+// needs more inside one transaction can SET LOCAL it.
+var sessionTimeoutDefaults = map[string]string{
+	"statement_timeout":                   "30000",
+	"lock_timeout":                        "10000",
+	"idle_in_transaction_session_timeout": "60000",
+}
+
+// applySessionDefaults adds jit=off and sessionTimeoutDefaults to params,
+// leaving any value the DSN already set.
+func applySessionDefaults(params map[string]string) {
+	params["jit"] = "off"
+	for k, v := range sessionTimeoutDefaults {
+		if _, set := params[k]; !set {
+			params[k] = v
+		}
+	}
+}
+
 // NewPool creates a pgxpool connection pool for the given DSN, pings the
 // database to confirm connectivity, and returns the pool ready for use.
 // The caller is responsible for calling pool.Close on shutdown.
@@ -51,7 +76,7 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if cfg.ConnConfig.RuntimeParams == nil {
 		cfg.ConnConfig.RuntimeParams = map[string]string{}
 	}
-	cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	applySessionDefaults(cfg.ConnConfig.RuntimeParams)
 
 	cfg.MaxConns = poolMaxConns
 	cfg.MinConns = poolMinConns
