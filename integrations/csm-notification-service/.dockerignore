@@ -1,0 +1,18 @@
+# Keeps the local-dev image build context (docker/local/csm-notification-service.Dockerfile)
+# to what `go build` needs; everything else stays on the host. The e-mail
+# templates under internal/ are go:embed-ed and are therefore kept.
+.git
+.env
+.env.*
+*_test.go
+**/testdata/
+.choreo/
+docs/
+*.md
+*.yaml
+Makefile
+bin/
+server
+*.out
+*.test
+coverage*

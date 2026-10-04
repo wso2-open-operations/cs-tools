@@ -12,7 +12,7 @@ The only route this service exposes is `GET /health` (Choreo's liveness probe) �
 
 - **SMS and direct call channels are unused.** `TwilioClient.SendSMS` has no caller — `MakeCall` is only invoked by `incident.created`.
 
-A dead-letter queue exists (see [Event-driven notifications](#event-driven-notifications)) — a record that exhausts the main consumer's retries is published there and gets a fresh retry pass from a separate DLQ consumer, rather than being dropped immediately. There is still no third tier past that.
+Retries are two-tiered with exponential backoff and jitter (`eventbus.RetryPolicy`): the main consumer retries a failing record (default 5 attempts over roughly 15–30 s), then publishes it to the dead-letter topic stamped with an `x-retry-not-before` header (`DLQ_RETRY_DELAY`, default 5 min); the DLQ consumer waits until then and retries again (default 5 attempts over roughly 4–7.5 min). A record that exhausts that tier too — or whose dead-letter publish fails — is **parked**: published whole to `EVENT_HUB_PARKING_TOPIC` with its failure reason for a manual replay (see [Parked records](#parked-records)), and logged at ERROR. Without a parking topic it is logged and dropped; never silently acknowledged.
 
 This service deliberately has no database connection and never talks to one directly. Deduplicating a publish, or recovering one Event Hub never acknowledged, is now entirely the publishing backend's job — `entity-service`'s `event_publish_failures` table exists for that, written to only when Event Hub doesn't ack a publish, and this service never reads or writes it.
 
@@ -45,21 +45,24 @@ customer-portal-backend ┘                           │                  (rend
                                                       │ (retries exhausted)
                                                       ▼
                                               Event Hub DLQ topic ──▶ DLQ consumer group ──▶ dispatch.Dispatcher.Handle
-                                                                       (fresh retry pass, same Handle;
-                                                                        exhausting it here just logs+drops)
+                                                                       (waits for x-retry-not-before, then a
+                                                                        slower retry pass, same Handle)
+                                                                                │ (retries exhausted)
+                                                                                ▼
+                                                                  Event Hub parking topic (manual replay)
 ```
 
 Both backends publish directly to the main topic — there is no HTTP hop through this service. Two packages implement the bus→consumer side; `internal/notifications` (templates + channel clients) is the last-mile sender they call.
 
 - **`internal/events`** — the event schema and its only remaining validation boundary. `Envelope{Type, EntityID, Payload}` plus one payload struct per `Type` (`case.created`, `case.comment_added`, `case.status_changed`, `case.assigned`, `case.acknowledged`, `case.severity_changed`, `incident.created`, the two `change_request.*` notices, and `project_contact.invited` — see [Customer onboarding](#customer-onboarding-project_contactinvited)), each carrying every value its matching reaction needs. `case.acknowledged` is Chat-only (no email/`recipients`); `case.severity_changed` has both an email and a Chat reaction, same as `case.created`. `EntityID` is a case ID for the `case.*` types or an incident ID for `incident.created` — whatever this event is about; for the `case.*` types, it must match the payload's own `caseId`. `Validate(entityID, type, payload)` decodes strictly and checks required fields — moved here from a since-removed HTTP handler, since there's no request boundary to validate at anymore; `dispatch.Dispatcher.Handle` calls it before rendering/sending anything. Payloads still carry denormalized display values (names/titles) this service has no other way to obtain, but no longer carry pre-built case/comment links — five of the six `case.*` payloads (every one except `case.acknowledged`, which is Chat-only) carry `projectId`/`caseId` (and `commentId`, for `case.comment_added`) instead, and `internal/dispatch` resolves each recipient's own portal-appropriate link itself via `internal/recipientlinks`. `incident.created` has exactly one reaction — a voice call — not an email, per explicit product direction (an incident pages on-call directly; a separate Chat post was redundant with that). Its call destination (`callTo`) is caller-supplied or falls back to `INCIDENT_DEFAULT_CALL_TO`. `case.created`/`case.acknowledged`/`case.severity_changed` each post their own Google Chat alert (via their own `Send*Alert` method), always to the fixed `"Incident Monitor"` audience — no team detection, no per-product routing — and, for `case.created`/`case.severity_changed`, alongside their email (a failure in one doesn't block the other); `case.acknowledged` is Chat-only. `case.created`'s/`case.acknowledged`'s/`case.severity_changed`'s Chat alerts always target the CSM portal's case link (`recipientlinks.Resolver.CSMLink`), not a per-recipient link, since a Chat post has no per-recipient audience the way an email does.
 - **`internal/entity`** — a minimal customer-entity-service client implementing exactly two endpoints: `POST /users/search` (backs `internal/recipientlinks`'s per-recipient role lookup) and `PUT /onboarding-steps/{membershipSfId}/{step}` (`RecordOnboardingStep`, the one write — `project_contact.invited`'s step outcomes), unlike `apps/csm-portal/backend`'s own entity client, a ~60-method passthrough surface. Not a notification channel — doesn't follow the `<Name>Config`/`<Name>Client`-in-`internal/notifications` pattern below, since it's an upstream data client, not something that sends a notification itself.
-- **`internal/recipientlinks`** — `Resolver.ResolveLinks(ctx, emails, projectID, caseID)` looks up each email's role via `internal/entity` and returns the case link appropriate to their portal (customer vs CSM), with a role → role → userType → CSM-default fallback chain. A per-*recipient* decision, not per-event: the same `case.comment_added` notification can go to both a customer watcher and an internal CSM watcher at once, each needing a different link.
-- **`internal/eventbus`** — a thin wrapper around [`github.com/segmentio/kafka-go`](https://github.com/segmentio/kafka-go) (a pure-Go Kafka client, no cgo — keeps this service on Choreo's buildpack deploy, MIT licensed) for Azure Event Hub's Kafka-compatible endpoint. `Producer.Publish` does a synchronous produce — this service's own use of it today is only for publishing to the dead-letter topic, since the main topic's producer side now lives in the backends. `Consumer.Run(ctx, handle, onExhausted)` polls a consumer group, retries a failing record `handleAttempts` (3) times with a fixed delay, then calls `onExhausted` (or logs at ERROR and drops, if `onExhausted` is nil) before committing either way. `PartitionCount(ctx, cfg)` reports a topic's real partition count, used at startup to sanity-check a configured consumer count. See CLAUDE.md for the franz-go → kafka-go swap rationale and its two known trade-offs.
+- **`internal/recipientlinks`** — `Resolver.ResolveLinks(ctx, emails, projectID, caseID)` looks up each email's role via `internal/entity` and returns the case link appropriate to their portal (customer vs CSM), with a customer-role → CSM-role → email-domain fallback chain (a recipient whose roles match neither list, or who has no entity-service record, gets the CSM link for a wso2.com address and the customer link otherwise). A per-*recipient* decision, not per-event: the same `case.comment_added` notification can go to both a customer watcher and an internal CSM watcher at once, each needing a different link.
+- **`internal/eventbus`** — a thin wrapper around [`github.com/segmentio/kafka-go`](https://github.com/segmentio/kafka-go) (a pure-Go Kafka client, no cgo — keeps this service on Choreo's buildpack deploy, MIT licensed) for Azure Event Hub's Kafka-compatible endpoint. `Producer.Publish` does a synchronous produce — this service's own use of it today is only for publishing to the dead-letter topic, since the main topic's producer side now lives in the backends. `Consumer.Run(ctx, handle, onExhausted)` polls a consumer group, retries a failing record on its `RetryPolicy` (exponential backoff with jitter), then calls `onExhausted` (the dead-letter publish) or, on a last tier (`onExhausted` nil), parks the record (`WithParking`) — committing either way. On shutdown it stops fetching but lets the in-flight record finish and commit within `SHUTDOWN_DRAIN_TIMEOUT`. `Consumer.Status()` feeds `/health`. `PartitionCount(ctx, cfg)` reports a topic's real partition count, used at startup to sanity-check a configured consumer count. See CLAUDE.md for the franz-go → kafka-go swap rationale and its two known trade-offs.
 - **`internal/dispatch`** — `Dispatcher.Handle` implements `eventbus.Handle`: decode the record as an `events.Envelope`, validate it (`events.Validate`), then for the four `case.*` types, resolve each recipient's own case link (`groupByLink`, via `internal/recipientlinks`), bucket recipients by the link they resolved to, and render+send one email per distinct link (`sendPerGroup`) — recipients sharing a link still batch into one `SendEmail` call. `case.created`/`case.severity_changed` additionally post a Google Chat alert to the CSM portal's case link (fixed `"Incident Monitor"` audience), independent of the email step (a failure in one doesn't block the other); `case.acknowledged` is Chat-only. `incident.created` skips the email/link-resolution path entirely and places a voice call directly from the payload's own `callTo` field (falling back to `INCIDENT_DEFAULT_CALL_TO` when the payload omits it) — no Google Chat reaction.
 - **`internal/scim`** — a minimal SCIM operations service client (`EnsureExternalUser` → `POST /organizations/external/users`, 201 created / 200 already existed) used only by the `project_contact.invited` handler to create an invitee's Asgardeo user. Not a notification channel, so it lives beside `internal/entity` rather than in `internal/notifications`.
 - **`project_contact.invited`** — the customer onboarding flow's consumer side, published by entity-service once a Salesforce project-contact membership in state INVITED / RE-INVITED is in its database. Two sequential steps, each behind its own default-off flag and each recorded on entity-service's onboarding-step ledger as SUCCEEDED / FAILED / SKIPPED: **IDENTITY** (`CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED`) creates the Asgardeo user via `internal/scim`; **EMAIL** (`CSM_MIGRATION_ONBOARD_EMAIL_ENABLED`) sends the invitation — the "welcome, your account was created" template for a new user, the "project added to your account" template when SCIM said the user already existed — to the invitee alone, linking to `ONBOARD_PORTAL_URL`. An integration user records both steps SKIPPED and gets nothing. A failed step records FAILED with the error and returns it (normal retry/DLQ path); a retry after an email failure reuses the first attempt's identity answer rather than asking SCIM again. Step recording is best-effort: a ledger write failing is logged, never turned into a retry. Arrives on its own topic (`PROJECT_EVENT_HUB_TOPIC`, default `project-events`, with `PROJECT_EVENT_HUB_DLQ_TOPIC` as its dead-letter queue), not the main case-events one. Before sending, the handler checks entity-service's ledger and skips a membership whose EMAIL step already succeeded — the guard that stops a portal invitation and the Salesforce event it produces from both inviting the same contact. A **resend** (`isResend` on the payload, set when an admin presses "Resend invitation") deliberately bypasses that check and sends a third, short reminder template instead: the guard is for an accidental second invitation, not a requested one, and by then the Asgardeo account exists, so neither the "welcome" nor the "you already have an account" wording fits someone who may never have seen the first email. The EMAIL step is still recorded, so the ledger's attempt count keeps counting. See CLAUDE.md for the full reasoning.
 - **`project_contact.registered`** — sends the Welcome email after a contact's first sign-in, once per membership (`WELCOME_EMAIL` step).
-- **Dead-letter queue** — when the main consumer's `Handle` call fails on all `handleAttempts` attempts, the record is published to `EVENT_HUB_DLQ_TOPIC` instead of being dropped. A second, independent consumer group runs against that topic, using the same `Dispatcher.Handle` — so a dead-lettered record gets its own fresh retry pass — but with nowhere further to escalate to: exhausting retries there just logs and drops. Provision `EVENT_HUB_DLQ_TOPIC` as its own Event Hub in Azure before deploying; this service doesn't create topics itself.
+- **Dead-letter queue** — when the main consumer's `Handle` call fails on every attempt of its retry policy, the record is published to `EVENT_HUB_DLQ_TOPIC` (unchanged bytes, plus an `x-retry-not-before` header) instead of being dropped. A second, independent consumer group runs against that topic, using the same `Dispatcher.Handle`; it waits until the not-before time, then retries on the slower dead-letter policy. Exhausting that tier parks the record (see [Parked records](#parked-records)). The time-card consumer has no dead-letter tier of its own and parks directly. Provision `EVENT_HUB_DLQ_TOPIC` and `EVENT_HUB_PARKING_TOPIC` as their own Event Hubs in Azure before deploying; this service doesn't create topics itself.
 - **Configurable consumer counts** — `MAIN_CONSUMER_COUNT`/`DLQ_CONSUMER_COUNT` each start that many independent `eventbus.Consumer` instances, all joining the same consumer group; Kafka's own rebalancing splits a topic's partitions across however many are actually running. Keep each count at or below its topic's real partition count — a startup check logs a warning (not a hard failure) if it isn't, since excess consumers just sit idle rather than causing an error.
 
 ## Configuration
@@ -155,6 +158,27 @@ Required — a record that exhausts the main consumer's retries is published her
 | `EVENT_HUB_DLQ_TOPIC` | A second Event Hub in the same namespace, provisioned separately in Azure |
 | `EVENT_HUB_DLQ_CONSUMER_GROUP` | Consumer group ID the DLQ consumer's instances join. Optional — defaults to `csm-notification-service-dlq` |
 | `DLQ_CONSUMER_COUNT` | How many concurrent consumer instances to run for `EVENT_HUB_DLQ_TOPIC`. Optional — defaults to `1`; same partition-count guidance as `MAIN_CONSUMER_COUNT` |
+| `EVENT_HUB_PARKING_TOPIC` | Event Hub that receives records no retry tier will take any more (see [Parked records](#parked-records)). Optional only because it must be provisioned first — unset, such a record is logged at ERROR and dropped. Set it in every real deployment |
+| `HANDLE_MAX_ATTEMPTS` | First-tier (main, change-request, onboarding, time-card) attempts per record. Optional — defaults to `5` |
+| `HANDLE_RETRY_BASE_DELAY` / `HANDLE_RETRY_MAX_DELAY` | First-tier backoff: the pause doubles from the base up to the cap, each jittered to between half and all of it. Optional — default `2s` / `1m` |
+| `DLQ_RETRY_DELAY` | How long after being dead-lettered a record waits before the dead-letter consumer first tries it. Optional — defaults to `5m` |
+| `DLQ_HANDLE_MAX_ATTEMPTS` | Dead-letter-tier attempts per record. Optional — defaults to `5` |
+| `DLQ_HANDLE_RETRY_BASE_DELAY` / `DLQ_HANDLE_RETRY_MAX_DELAY` | Dead-letter-tier backoff. Optional — default `30s` / `5m` |
+| `CONSUMER_STALL_TIMEOUT` | `/health` reports 503 once a consumer has shown no progress (poll, handle, commit) for this long. Optional — defaults to `5m`; keep it well above one poll (30s) plus the slowest handler attempt |
+| `SHUTDOWN_DRAIN_TIMEOUT` | On SIGTERM, how long an in-flight record may still run and commit before its context is cancelled. Optional — defaults to `20s`; keep it, plus the reader close, inside the platform's termination grace period |
+
+### Change-request topics
+
+The change-request notices (`change_request.*`) ride their own topic pair.
+
+| Variable | Description |
+|---|---|
+| `CR_EVENT_HUB_TOPIC` | Event Hub carrying the change-request notices. Optional — defaults to `cr-events` |
+| `CR_EVENT_HUB_DLQ_TOPIC` | Its dead-letter Event Hub. Optional — defaults to `cr-events-dlq` |
+| `CR_CONSUMER_GROUP` | Consumer group ID for `CR_EVENT_HUB_TOPIC`. Optional — defaults to `csm-notification-service-cr` |
+| `CR_DLQ_CONSUMER_GROUP` | Consumer group ID for `CR_EVENT_HUB_DLQ_TOPIC`. Optional — defaults to `csm-notification-service-cr-dlq` |
+| `CR_CONSUMER_COUNT` | How many concurrent consumer instances to run for `CR_EVENT_HUB_TOPIC`. Optional — defaults to `1` |
+| `CR_DLQ_CONSUMER_COUNT` | Same, for `CR_EVENT_HUB_DLQ_TOPIC`. Optional — defaults to `1` |
 
 ### Customer-onboarding topics
 
@@ -171,7 +195,7 @@ Required — a record that exhausts the main consumer's retries is published her
 
 ### SLA breach-alerting engine
 
-Optional, gated on `REDIS_URL` or `REDIS_ADDR` — unset (both) means `internal/slaengine` never polls. Not a Kafka consumer: on a plain ticker, it polls entity-service's `GET /sla-status` (backed by the real, ServiceNow-synced `sla` table, not a value this service computes itself), diffs each clock's live elapsed percentage against the last tier it alerted for (a small cursor per `(caseId, clockType)` kept in Redis), and — on a genuinely new 50%/75%/100% crossing since its last poll — publishes `sla.tier_reached` and sends a Google Chat breach alert directly (not routed through `internal/dispatch`). The first time this engine ever sees a given clock, it seeds the cursor at that clock's *current* tier without alerting — avoiding an alert flood from every SLA clock already in progress the moment this engine starts polling; only a tier crossed on a later poll is a genuine new crossing. Replaces an earlier design that registered a durable clock per case on a now-removed entity-service `sla_clocks` table (a stand-in built before the real `sla` table existed) and scheduled Redis wake-ups off a locally-computed due date — see entity-service's own `CLAUDE.md` ("SLA status") for the full history. Pausing/resuming a clock never needs a signal from this service either: ServiceNow's own SLA engine freezes `businessElapsedPercent` while paused, so a paused clock's tier simply doesn't advance until it resumes.
+Optional, gated on `REDIS_URL` or `REDIS_ADDR` — unset (both) means `internal/slaengine` never polls. Not a Kafka consumer: on a plain ticker, it polls entity-service's `GET /sla-status` (backed by the real, data-source-synced `sla` table, not a value this service computes itself), diffs each clock's live elapsed percentage against the last tier it alerted for (a small cursor per `(caseId, clockType)` kept in Redis), and — on a genuinely new 50%/75%/100% crossing since its last poll — publishes `sla.tier_reached` and sends a Google Chat breach alert directly (not routed through `internal/dispatch`). The first time this engine ever sees a given clock, it seeds the cursor at that clock's *current* tier without alerting — avoiding an alert flood from every SLA clock already in progress the moment this engine starts polling; only a tier crossed on a later poll is a genuine new crossing. Replaces an earlier design that registered a durable clock per case on a now-removed entity-service `sla_clocks` table (a stand-in built before the real `sla` table existed) and scheduled Redis wake-ups off a locally-computed due date — see entity-service's own `CLAUDE.md` ("SLA status") for the full history. Pausing/resuming a clock never needs a signal from this service either: the backing data source's own SLA engine freezes `businessElapsedPercent` while paused, so a paused clock's tier simply doesn't advance until it resumes.
 
 `REDIS_URL` (a `rediss://:<password>@<host>:<port>` connection string, parsed with `redis.ParseURL`) is how a managed, TLS-only Redis is configured — Azure Managed Redis, Azure Cache for Redis — since the `rediss` scheme makes go-redis dial with TLS automatically; takes priority over `REDIS_ADDR`/`REDIS_PASSWORD` when set. `REDIS_ADDR`/`REDIS_PASSWORD` remain the plain, non-TLS pair for a local Redis.
 
@@ -192,14 +216,29 @@ This engine's own narrow entity-service client talks to the same entity-service 
 |---|---|
 | `PORT` | Server listen port — a plain number, not an address (default `8080`) |
 
+## Parked records
+
+A record is parked once no retry tier remains for it: the dead-letter consumer exhausted its attempts, the dead-letter publish itself failed, or the time-card consumer exhausted its attempts. Parking publishes one JSON message to `EVENT_HUB_PARKING_TOPIC`, keyed by the original record's key, shaped as `eventbus.ParkedRecord`:
+
+```json
+{"parkedAt": "…", "consumer": "case-events-dlq", "sourceTopic": "case-events-dlq", "sourcePartition": 0, "sourceOffset": 123,
+ "key": "<entity id>", "attempts": 5, "failure": "dispatch: …: upstream returned 503", "record": { …the original envelope… }}
+```
+
+`record` is the original value byte for byte (`recordBase64` instead, when it was not valid JSON). `failure` is a summary with any upstream response body removed. Every park is also logged at ERROR (`eventbus: record exhausted every retry tier and was parked; manual replay required`) and counted in `/health`'s `parked` counter — alert on either.
+
+**Replay**, once the cause is fixed: read the parking topic with any Kafka client using the namespace's connection string (SASL/PLAIN, username `$ConnectionString`), and for each message to replay, publish its `record` (or decoded `recordBase64`) **unchanged** to the main topic of the same family (`EVENT_HUB_TOPIC`, `CR_EVENT_HUB_TOPIC` or `PROJECT_EVENT_HUB_TOPIC`), using the parked message's key. It then gets the full retry schedule again. Replaying is safe to repeat for the onboarding emails (the ledger guards them); for case/incident/change-request notices a channel that had already succeeded before the record was parked will be sent again, so check the logs for what already went out. Give the parking topic the longest retention the namespace tier allows; nothing in this service consumes it.
+
 ## Project Structure
 
 ```text
 csm-notification-service/
 ├── cmd/
-│   └── server/main.go           # Entry point — starts the HTTP health server + both consumer groups
+│   └── server/
+│       ├── main.go              # Entry point — config, consumer groups, retry/park wiring, drain on shutdown
+│       └── health.go            # GET /health from consumer liveness; consumer registry + drain
 ├── internal/
-│   ├── apierror/               # Typed upstream error type (4xx/5xx passthrough)
+│   ├── apierror/               # Typed upstream error type + Summary (body-free form for logs)
 │   ├── middleware/
 │   │   ├── correlation.go      # X-CSM-Correlation-ID propagation + slog enrichment
 │   │   ├── logger.go           # Per-request access log
@@ -222,10 +261,18 @@ csm-notification-service/
 │   │   └── resolver.go         # Resolver.ResolveLinks — per-recipient customer/CSM portal link
 │   ├── eventbus/
 │   │   ├── config.go            # Config + SASL/PLAIN setup + PartitionCount, shared by producer/consumer
-│   │   ├── producer.go          # Producer — publish a record, wait for ack
-│   │   └── consumer.go          # Consumer — consumer-group poll loop, retry, OnExhausted, commit
+│   │   ├── producer.go          # Producer — publish a record (optionally with headers), wait for ack
+│   │   ├── consumer.go          # Consumer — poll loop, retry, OnExhausted, park, commit, status, drain
+│   │   ├── retry.go             # RetryPolicy — exponential backoff with jitter
+│   │   └── parking.go           # ParkFunc/ParkedRecord — the parking-topic envelope
 │   ├── dispatch/
-│   │   └── dispatch.go          # Dispatcher.Handle — envelope → validate → resolve links → group → template → EmailClient; handleProjectContactInvited (SCIM → invitation → step ledger)
+│   │   ├── dispatch.go          # Dispatcher, Deps/Config, NewDispatcher, Handle (envelope → validate → route)
+│   │   ├── case_handlers.go     # case.* handlers, groupByLink, sendPerGroup
+│   │   ├── incident.go          # incident.created (voice call)
+│   │   ├── change_request.go    # change_request.* notices
+│   │   ├── onboarding.go        # project_contact.invited/registered (SCIM → invitation → step ledger)
+│   │   ├── idempotency.go       # content-keyed per-record claims
+│   │   └── display.go           # case references, subject line, severity/case-type labels
 │   └── slaengine/
 │       ├── client.go            # EntityClient — narrow HTTP client for entity-service's GET /sla-status
 │       ├── redis.go             # TierStore — last-alerted-tier cursor per (caseId, clockType)
@@ -253,7 +300,7 @@ go build -o server ./cmd/server   # compile
 
 ## API Endpoints
 
-- `GET /health` — Health check (Choreo's liveness probe). This is the only inbound HTTP route this service has — everything else happens via the two Kafka consumer groups described in [Event-driven notifications](#event-driven-notifications).
+- `GET /health` — Health check (Choreo's liveness probe). 200 while every consumer is running and has made progress within `CONSUMER_STALL_TIMEOUT`; 503 once any consumer's poll loop has exited or stalled, so the platform restarts the instance. The JSON body lists each consumer's state, idle time, last fetch error and counters (handled, failed attempts, dead-lettered, parked, dropped). This is the only inbound HTTP route this service has — everything else happens via the Kafka consumer groups described in [Event-driven notifications](#event-driven-notifications).
 
 ## Security
 
@@ -261,5 +308,5 @@ go build -o server ./cmd/server   # compile
 - **No sensitive data in logs** — log only IDs and error summaries
 - **No app-level inbound auth** — this is intentional (see above), not an oversight
 - **Input validation** — `events.Validate`, called from `dispatch.Dispatcher.Handle`, is the only validation boundary this service has left; keep rejecting unexpected input there rather than letting it reach a notification client
-- **No recipient emails in logs** — `internal/recipientlinks`'s role-lookup warnings log `caseID`/`roles`/`userType`, never the recipient's email address (PII); keep it that way if this code changes
+- **No recipient emails in logs** — `internal/recipientlinks`'s role-lookup warnings log `caseID`/`found`/`isCustomer`, never the recipient's email address (PII); keep it that way if this code changes. Upstream response bodies are kept out of failure logs too (`apierror.Summary`)
 - **Security fixes in PRs** — describe security-related changes in neutral functional terms only, not called out as security fixes in the title/description

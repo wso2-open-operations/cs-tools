@@ -15,7 +15,7 @@
 // under the License.
 
 // Package scim is a minimal client for the SCIM operations service
-// (digiops-infra's scim-operations-service), used only by
+// (an internal identity-provisioning API), used only by
 // internal/dispatch's project_contact.invited handler to make sure an
 // invited customer contact has an Asgardeo identity to sign in with. Like
 // internal/entity — and unlike the channel clients in internal/notifications

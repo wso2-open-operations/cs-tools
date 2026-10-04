@@ -240,8 +240,8 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 			return err
 		}
 		// Subject and recipients are what makes this sendable at all: the
-		// flow builds the subject (reproducing ServiceNow's per-branch
-		// wording) and resolves the audience, and a notice missing either is
+		// flow builds the subject (reproducing the legacy ticketing
+		// system's per-branch wording) and resolves the audience, and a notice missing either is
 		// one this service cannot repair by retrying.
 		if p.ChangeRequestID == "" || p.Number == "" || p.State == "" || p.Subject == "" {
 			return fmt.Errorf("events: missing required field for %s", t)

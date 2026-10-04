@@ -20,13 +20,30 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	kafka "github.com/segmentio/kafka-go"
+)
+
+// publishBatchSize/publishBatchTimeout make every Publish flush at once;
+// see NewProducer.
+const (
+	publishBatchSize    = 1
+	publishBatchTimeout = 10 * time.Millisecond
 )
 
 // Producer publishes records to a single topic.
 type Producer struct {
 	writer *kafka.Writer
+}
+
+// Message is one record to publish: Key picks the partition (see Publish),
+// Value is the record body, and Headers are optional record headers (e.g.
+// HeaderNotBefore) carried alongside the body without touching it.
+type Message struct {
+	Key     []byte
+	Value   []byte
+	Headers map[string]string
 }
 
 // NewProducer constructs a Producer. Connecting is lazy — the underlying
@@ -52,6 +69,18 @@ func NewProducer(cfg Config) *Producer {
 			// matching the previous Kafka client's synchronous-produce
 			// behavior.
 			RequiredAcks: kafka.RequireAll,
+			// Flush each Publish on its own. kafka-go's synchronous Writer
+			// otherwise holds a message until BatchSize (default 100)
+			// accumulate or BatchTimeout (default 1 s) passes, so a lone
+			// Publish -- every call this service makes -- waited about a
+			// second: once per dead-letter publish while the partition
+			// was blocked, and once per crossed SLA tier inside the SLA
+			// engine's sequential tick. Async is deliberately not used:
+			// every caller acts on the result (a failed dead-letter
+			// publish falls back to parking, a failed tier publish
+			// releases the tier claim for a retry).
+			BatchSize:    publishBatchSize,
+			BatchTimeout: publishBatchTimeout,
 			Transport: &kafka.Transport{
 				TLS:  &tls.Config{MinVersion: tls.VersionTLS12},
 				SASL: cfg.saslMechanism(),
@@ -73,7 +102,16 @@ func NewProducer(cfg Config) *Producer {
 // pass the same key (e.g. an entity ID) for every event that must stay
 // ordered relative to each other.
 func (p *Producer) Publish(ctx context.Context, key, value []byte) error {
-	if err := p.writer.WriteMessages(ctx, kafka.Message{Key: key, Value: value}); err != nil {
+	return p.PublishMessage(ctx, Message{Key: key, Value: value})
+}
+
+// PublishMessage is Publish with optional record headers.
+func (p *Producer) PublishMessage(ctx context.Context, msg Message) error {
+	km := kafka.Message{Key: msg.Key, Value: msg.Value}
+	for k, v := range msg.Headers {
+		km.Headers = append(km.Headers, kafka.Header{Key: k, Value: []byte(v)})
+	}
+	if err := p.writer.WriteMessages(ctx, km); err != nil {
 		return fmt.Errorf("eventbus: publish: %w", err)
 	}
 	return nil

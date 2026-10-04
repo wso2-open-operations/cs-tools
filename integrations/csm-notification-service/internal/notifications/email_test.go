@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
@@ -181,5 +182,51 @@ func TestEmailClient_ReplyTo(t *testing.T) {
 	}
 	if got := NewEmailClient(EmailConfig{ReplyTo: []string{""}}).ReplyTo(); got != nil {
 		t.Errorf("ReplyTo() = %v, want nil for an empty config", got)
+	}
+}
+
+func TestHeaderSafe(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Plain title", "Plain title"},
+		{"[WSO2 Support] (WSO2-1/CS1) Title\r\nBcc: attacker@example.com", "[WSO2 Support] (WSO2-1/CS1) Title  Bcc: attacker@example.com"},
+		{"Line\nbreak", "Line break"},
+		{"tab\there", "tab here"},
+		{"nul\x00and\x7fdel", "nul and del"},
+		{"sep and para", "sep and para"},
+		{"  \r\n  ", ""},
+		{"Ünïcödé — fine", "Ünïcödé — fine"},
+	}
+	for _, tt := range tests {
+		if got := HeaderSafe(tt.in); got != tt.want {
+			t.Errorf("HeaderSafe(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestSendEmail_SubjectHasNoLineBreaks: a subject built from a
+// customer-controlled title reaches the email service as a single line.
+func TestSendEmail_SubjectHasNoLineBreaks(t *testing.T) {
+	var capturedBody sendEmailRequest
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer apiSrv.Close()
+	tokenSrv := newTokenServer(t)
+	defer tokenSrv.Close()
+	c := newTestClient(t, tokenSrv, apiSrv, "noreply@example.com")
+
+	if err := c.SendEmail(context.Background(), []string{"customer@example.com"}, nil, nil, nil, "Case title\r\nBcc: x@example.com", "<p>x</p>", nil); err != nil {
+		t.Fatalf("SendEmail returned error: %v", err)
+	}
+	if strings.ContainsAny(capturedBody.Subject, "\r\n") {
+		t.Errorf("Subject = %q, still contains a line break", capturedBody.Subject)
+	}
+
+	// A subject that is nothing but control characters is empty, and
+	// rejected before anything is sent.
+	if err := c.SendEmail(context.Background(), []string{"customer@example.com"}, nil, nil, nil, "\r\n", "<p>x</p>", nil); err == nil {
+		t.Error("SendEmail with a control-only subject = nil error, want subject required")
 	}
 }

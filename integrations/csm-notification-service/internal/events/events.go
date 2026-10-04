@@ -145,8 +145,8 @@ type CaseCreatedPayload struct {
 	// been updated to send CaseNumber yet.
 	CaseNumber string `json:"caseNumber,omitempty"`
 	// WSO2CaseID is the CSM portal's own case identifier (e.g.
-	// "WSO2-1000" — ServiceNow's u_wso2_case_id custom field), distinct
-	// from both CaseNumber (ServiceNow's own "CS..." number) and CaseID
+	// "WSO2-1000" — the backing data source's internal case-id field), distinct
+	// from both CaseNumber (the backing data source's own "CS..." number) and CaseID
 	// (the raw UUID) — matches the "<wso2CaseId>/<caseNumber>" pairing the
 	// CSM portal frontend already shows (see caseIdentity.ts's
 	// caseIdLabel). internal/dispatch's subjectLine uses this in the
@@ -354,7 +354,7 @@ type CRPlanDateNoticePayload struct {
 	Audience  string `json:"audience"`
 	GroupName string `json:"groupName,omitempty"`
 	// ActorName is whoever changed the date, already rendered LAST NAME FIRST
-	// by the flow, matching the ServiceNow templates' pill order.
+	// by the flow, matching the legacy ticketing system's templates' pill order.
 	ActorName        string   `json:"actorName,omitempty"`
 	ProjectID        string   `json:"projectId,omitempty"`
 	ProjectName      string   `json:"projectName,omitempty"`
@@ -389,7 +389,7 @@ type CRApprovalRequestedPayload struct {
 	// project. Absent on an internal notice, which links into the CSM portal.
 	ProjectID string `json:"projectId,omitempty"`
 	// Subject is the fully rendered subject line. Used verbatim: the flow
-	// reproduces ServiceNow's per-branch wording, and re-deriving it here would
+	// reproduces the legacy ticketing system's per-branch wording, and re-deriving it here would
 	// mean keeping two copies of that in step.
 	Subject string `json:"subject"`
 	// Recipients are already resolved and de-duplicated. Never empty — a notice

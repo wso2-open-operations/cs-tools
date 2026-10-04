@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/oauthhttp"
@@ -186,6 +187,7 @@ func (c *EmailClient) SendEmailFrom(ctx context.Context, from string, to, cc, bc
 	if len(to) == 0 {
 		return fmt.Errorf("notifications: at least one recipient (to) is required")
 	}
+	subject = HeaderSafe(subject)
 	if subject == "" {
 		return fmt.Errorf("notifications: subject is required")
 	}
@@ -206,6 +208,22 @@ func (c *EmailClient) SendEmailFrom(ctx context.Context, from string, to, cc, bc
 
 	_, err = c.do(ctx, http.MethodPost, "/send-email", reqBody)
 	return err
+}
+
+// HeaderSafe makes s safe to place in a single-line mail header such as
+// Subject: every control character -- CR and LF above all, which would
+// otherwise let a customer-controlled case title or a relayed change-
+// request subject start a new header line downstream -- and the Unicode
+// line/paragraph separators are replaced by a space (so words on either
+// side don't run together), and the result is trimmed. SendEmailFrom
+// applies it to every subject, so no caller can skip it.
+func HeaderSafe(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+			return ' '
+		}
+		return r
+	}, s))
 }
 
 // nonEmpty trims each address and drops blanks; nil when nothing is left.
