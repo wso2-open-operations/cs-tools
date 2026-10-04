@@ -37,9 +37,6 @@ import {
 import { CheckCircleIcon, XCircleIcon, CopyIcon } from "@wso2/oxygen-ui-icons-react";
 import { useScanUser, type ScanResponseItem } from "@features/spl/user-scan/api/useScanUser";
 
-function copyToClipboard(value: string) {
-  void navigator.clipboard.writeText(value);
-}
 
 export default function UserScanPage(): JSX.Element {
   const scanUser = useScanUser();
@@ -49,11 +46,24 @@ export default function UserScanPage(): JSX.Element {
   const [isPartner, setIsPartner] = useState(false);
   const [responseData, setResponseData] = useState<ScanResponseItem[]>([]);
   const [isEmailError, setIsEmailError] = useState(false);
-  const [isPageLoading, setIsPageLoading] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [isProjectKeyError, setIsProjectKeyError] = useState(false);
   const [scanErrorMessage, setScanErrorMessage] = useState("");
 
+  // Awaited so a denied clipboard permission is reported, not an unhandled rejection.
+  const copyToClipboard = async (value: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyFailed(false);
+    } catch {
+      setCopyFailed(true);
+    }
+  };
+
   const runScan = () => {
+    // Guard against a double click / Enter while a scan is already running:
+    // each scan result can carry a confidential invitation link.
+    if (scanUser.isPending) return;
     setResponseData([]);
     setScanErrorMessage("");
     if (email === "") {
@@ -90,14 +100,12 @@ export default function UserScanPage(): JSX.Element {
   const handleEmailFieldChange = (event: ChangeEvent<HTMLInputElement>) => {
     setEmail(event.target.value);
     setIsEmailError(false);
-    setIsPageLoading(true);
     clearScanResults();
   };
 
   const handleProjectFieldChange = (event: ChangeEvent<HTMLInputElement>) => {
     setProjectKey(event.target.value);
     setIsProjectKeyError(false);
-    setIsPageLoading(true);
     clearScanResults();
   };
 
@@ -144,7 +152,7 @@ export default function UserScanPage(): JSX.Element {
             size="small"
             color="secondary"
             onClick={runScan}
-            disabled={!isPageLoading || isEmailError || isProjectKeyError}
+            disabled={scanUser.isPending || !email || !projectKey || isEmailError || isProjectKeyError}
           >
             Analyze
           </Button>
@@ -157,6 +165,11 @@ export default function UserScanPage(): JSX.Element {
         {isProjectKeyError && (
           <Typography variant="body2" color="error" sx={{ mt: 1 }}>
             Please provide valid subscription key
+          </Typography>
+        )}
+        {copyFailed && (
+          <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+            Could not copy to the clipboard. Select the text and copy it manually.
           </Typography>
         )}
         {scanErrorMessage && (
@@ -218,7 +231,7 @@ export default function UserScanPage(): JSX.Element {
                             size="small"
                             aria-label="Copy invitation link"
                             sx={{ verticalAlign: "middle" }}
-                            onClick={() => copyToClipboard(systemResult.information.invitationUrl!)}
+                            onClick={() => void copyToClipboard(systemResult.information.invitationUrl!)}
                           >
                             <CopyIcon size={16} />
                           </IconButton>

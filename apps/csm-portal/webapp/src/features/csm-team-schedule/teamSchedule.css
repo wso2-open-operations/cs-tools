@@ -2088,3 +2088,7 @@
   box-shadow: none;
   background: color-mix(in srgb, var(--accent) 26%, transparent);
 }
+
+/* Editable roster cells hold a real button so the rota can be edited from the keyboard. */
+.csm-ts .roster td.c.editable > .cell-edit{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:100%;min-height:26px;cursor:pointer}
+.csm-ts .roster td.c.editable > .cell-edit:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}

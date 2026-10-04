@@ -16,14 +16,14 @@
 
 // Package slaengine is the SLA breach-alerting engine: it periodically polls
 // entity-service's GET /sla-status — which reads live from the "sla" table
-// ServiceNow's own SLA engine populates via sync, not a value this service
+// the backing data source's own SLA engine populates via sync, not a value this service
 // computes — diffs each clock's businessElapsedPercent against the last
 // tier this engine alerted for (tracked in Redis, see redis.go), and sends
 // a Google Chat breach alert plus events.TypeSLATierReached the first time a
 // 50%/75%/100% checkpoint is crossed (see engine.go). Replaces an earlier
 // design that hand-registered a durable clock per case on a now-removed
 // entity-service "sla_clocks" table (a stand-in built before the real,
-// ServiceNow-synced "sla" table existed) and scheduled wake-ups off a
+// data-source-synced "sla" table existed) and scheduled wake-ups off a
 // locally-computed due date — see entity-service's own CLAUDE.md ("SLA
 // status") for the full history. This service still has no database of its
 // own, by design (see this package's own CLAUDE.md section) — Redis here
@@ -120,7 +120,14 @@ func (c *EntityClient) do(ctx context.Context, method, path string, body []byte)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}
+		// Capped like every other upstream client here: the excerpt is for
+		// diagnosis, and an unbounded body has no place in an error value.
+		const maxErrBody = 256
+		excerpt := respBody
+		if len(excerpt) > maxErrBody {
+			excerpt = excerpt[:maxErrBody]
+		}
+		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 	return respBody, nil
 }

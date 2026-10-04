@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
@@ -90,7 +91,7 @@ func tierLabel(tier int) string {
 // its live businessElapsedPercent — HasBreached is trusted directly for the
 // 100% case rather than re-derived from the percentage alone, matching
 // entity-service's own SLAStatus doc comment on why HasBreached is trusted
-// as-is (ServiceNow's own SLA engine sets it, and it agrees with
+// as-is (the backing data source's own SLA engine sets it, and it agrees with
 // BusinessElapsedPercent >= 100 in every case checked live).
 func tierForStatus(s SLAStatus) int {
 	switch {
@@ -133,6 +134,19 @@ type Engine struct {
 	emailSendingEnabled  bool
 	emailDebugMode       bool
 	emailDebugRecipients []string
+
+	// now is the clock chataudience.Resolve's time-of-day/weekend
+	// audiences are decided against; nil means time.Now. Tests pin it so
+	// an alert's audience set does not depend on when the suite runs.
+	now func() time.Time
+}
+
+// clock returns the engine's current time (see Engine.now).
+func (e *Engine) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
 }
 
 // NewEngine constructs an Engine. emailSendingEnabled/emailDebugMode/
@@ -213,7 +227,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 //     multi-tier crossing still keeps whatever alerted successfully and
 //     retries only the remainder on the next Tick.
 //
-// A paused clock (s.IsPaused) is skipped outright: ServiceNow freezes
+// A paused clock (s.IsPaused) is skipped outright: the backing data source freezes
 // businessElapsedPercent while paused, so there is nothing to cross either
 // way, and skipping avoids a pointless Redis round trip for every paused
 // clock on every poll.
@@ -278,7 +292,7 @@ func (e *Engine) processStatus(ctx context.Context, s SLAStatus) error {
 		}
 		if err := e.alertTier(ctx, s, tier); err != nil {
 			if releaseErr := e.store.ReleaseTier(ctx, s.CaseID, s.ClockType, tier); releaseErr != nil {
-				slog.ErrorContext(ctx, "slaengine: failed to release tier claim after a failed alert, tier may be stuck until it expires", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "err", releaseErr)
+				slog.ErrorContext(ctx, "slaengine: failed to release tier claim after a failed alert, tier may be stuck until it expires", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "err", apierror.Summary(releaseErr))
 			}
 			return fmt.Errorf("alert tier %d: %w", tier, err)
 		}
@@ -358,7 +372,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, s SLAStatus, tier int) err
 		openedAt = s.StartedOn.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
 	}
 
-	audiences := chataudience.Resolve(s.Team, s.IsEvaluationAccount, s.ProjectOnboardingStatus, time.Now(), e.chat.HasAudienceSpace)
+	audiences := chataudience.Resolve(s.Team, s.IsEvaluationAccount, s.ProjectOnboardingStatus, e.clock(), e.chat.HasAudienceSpace)
 	caseLink := e.links.CSMLink(s.CaseID)
 	var errs []error
 	for _, audience := range audiences {
@@ -404,7 +418,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, s SLAStatus, tier int) {
 	}
 	claimed, err := e.store.ClaimEmail(ctx, s.CaseID, s.ClockType, tier)
 	if err != nil {
-		slog.ErrorContext(ctx, "slaengine: failed to claim sla breach email, skipping to avoid a duplicate send", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "err", err)
+		slog.ErrorContext(ctx, "slaengine: failed to claim sla breach email, skipping to avoid a duplicate send", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "err", apierror.Summary(err))
 		return
 	}
 	if !claimed {
@@ -467,7 +481,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, s SLAStatus, tier int) {
 			}
 			body := render(unresolvedLabel + " (no email on file)")
 			if err := e.email.SendEmail(ctx, e.emailDebugRecipients, nil, nil, nil, subject, body, nil); err != nil {
-				slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole, "err", err)
+				slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole, "err", apierror.Summary(err))
 				return
 			}
 			slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole, "unresolvedLabel", unresolvedLabel)
@@ -486,7 +500,7 @@ func (e *Engine) sendBreachEmails(ctx context.Context, s SLAStatus, tier int) {
 		}
 		body := render(intendedFor)
 		if err := e.email.SendEmail(ctx, to, nil, nil, nil, subject, body, nil); err != nil {
-			slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole, "err", err)
+			slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole, "err", apierror.Summary(err))
 			return
 		}
 		slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", s.CaseID, "clockType", s.ClockType, "tier", tier, "recipient", recipientRole)
@@ -516,7 +530,7 @@ func (e *Engine) RunTicker(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			if err := e.Tick(ctx); err != nil {
-				slog.ErrorContext(ctx, "slaengine: tick failed", "err", err)
+				slog.ErrorContext(ctx, "slaengine: tick failed", "err", apierror.Summary(err))
 			}
 		}
 	}

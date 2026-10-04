@@ -14,14 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package events defines the wire shape of every record on the case-events
-// Kafka topic — shared by internal/eventpublisher (the producer side) and
-// internal/caseevents (the consumer side) within csm-portal-backend, and
-// consumed by this service and csm-notification-service. It's kept in sync
-// BY HAND with csm-notification-service's own internal/events.Envelope and
-// csm-portal-backend's internal/events.events — since the three live in
-// separate Go modules and neither imports the others; all must agree on this
-// shape for either side to make sense of the other.
+// Package events defines the envelope of every record on the case-events
+// Kafka topic. entity-service is the sole producer; this service and
+// csm-notification-service consume it. The envelope is kept in sync BY HAND
+// with entity-service's and csm-notification-service's own
+// internal/events.Envelope, since the modules don't import each other.
+//
+// Only the envelope (type + entityId) is modelled here: this service never
+// reads the payload — the producer's per-type payload structs are the source
+// of truth for those, and a local copy would only drift.
 package events
 
 import "encoding/json"
@@ -41,24 +42,10 @@ const (
 // Envelope is the wire shape of every record on the case-events topic.
 // EntityID is whatever the event is about (a case ID for the case.* types,
 // an incident ID for incident.created) and is also the Kafka partition key
-// (see eventbus.Producer.Publish) — every event about the same case/incident
-// lands on the same partition and is processed in publish order.
+// the producer uses — every event about the same case/incident lands on the
+// same partition and is processed in publish order.
 type Envelope struct {
 	Type     Type            `json:"type"`
 	EntityID string          `json:"entityId"`
 	Payload  json.RawMessage `json:"payload"`
-}
-
-// CommentAddedPayload is the Payload shape for TypeCommentAdded.
-// Deliberately minimal: no comment body, no author — Envelope already
-// carries EntityID (the case), so this is only what search/replay by
-// timestamp needs.
-type CommentAddedPayload struct {
-	Timestamp string `json:"timestamp"`
-}
-
-// StatusChangedPayload is the Payload shape for TypeStatusChanged.
-type StatusChangedPayload struct {
-	Timestamp string `json:"timestamp"`
-	NewStatus string `json:"newStatus"`
 }

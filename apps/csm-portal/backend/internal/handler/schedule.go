@@ -100,7 +100,7 @@ func (h *ScheduleHandler) GetScheduleCatalogue(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.GetScheduleCatalogue(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetScheduleCatalogue failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetScheduleCatalogue failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load the schedule catalogue.")
 		return
 	}
@@ -117,7 +117,7 @@ func (h *ScheduleHandler) SearchScheduleAssignments(w http.ResponseWriter, r *ht
 
 	result, err := h.entity.SearchScheduleAssignments(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchScheduleAssignments failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchScheduleAssignments failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search the schedule.")
 		return
 	}
@@ -134,7 +134,7 @@ func (h *ScheduleHandler) SearchScheduleAbsences(w http.ResponseWriter, r *http.
 
 	result, err := h.entity.SearchScheduleAbsences(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchScheduleAbsences failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchScheduleAbsences failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search schedule absences.")
 		return
 	}
@@ -154,7 +154,7 @@ func (h *ScheduleHandler) GetScheduleOnDuty(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.entity.GetScheduleOnDuty(r.Context(), r.URL.Query().Get("at"))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetScheduleOnDuty failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetScheduleOnDuty failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load who is on duty.")
 		return
 	}
@@ -176,7 +176,7 @@ func (h *ScheduleHandler) CreateScheduleAssignment(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.CreateScheduleAssignment(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateScheduleAssignment failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateScheduleAssignment failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to add the assignment.")
 		return
 	}
@@ -193,7 +193,7 @@ func (h *ScheduleHandler) UpdateScheduleAssignment(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.UpdateScheduleAssignment(r.Context(), r.PathValue("id"), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateScheduleAssignment failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateScheduleAssignment failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to change the assignment.")
 		return
 	}
@@ -210,7 +210,7 @@ func (h *ScheduleHandler) DeleteScheduleAssignment(w http.ResponseWriter, r *htt
 	}
 
 	if _, err := h.entity.DeleteScheduleAssignment(r.Context(), r.PathValue("id"), r.URL.Query().Get("note")); err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteScheduleAssignment failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity DeleteScheduleAssignment failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to remove the assignment.")
 		return
 	}
@@ -229,7 +229,7 @@ func (h *ScheduleHandler) GetScheduleActivity(w http.ResponseWriter, r *http.Req
 	q := r.URL.Query()
 	result, err := h.entity.GetScheduleActivity(r.Context(), q.Get("teamKey"), q.Get("from"), q.Get("to"))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetScheduleActivity failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity GetScheduleActivity failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load the schedule history.")
 		return
 	}
@@ -247,7 +247,7 @@ func (h *ScheduleHandler) GetMyLeadTeams(w http.ResponseWriter, r *http.Request)
 
 	result, err := h.entity.GetMyLeadTeams(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetMyLeadTeams failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity GetMyLeadTeams failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to check your team permissions.")
 		return
 	}
@@ -264,7 +264,7 @@ func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Requ
 
 	result, err := h.entity.ApplyScheduleRange(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ApplyScheduleRange failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity ApplyScheduleRange failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to change the rota.")
 		return
 	}
@@ -281,7 +281,7 @@ func (h *ScheduleHandler) ApplyScheduleAbsence(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.ApplyScheduleAbsence(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ApplyScheduleAbsence failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity ApplyScheduleAbsence failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to change who is away.")
 		return
 	}
@@ -299,7 +299,7 @@ func (h *ScheduleHandler) DeleteScheduleAbsence(w http.ResponseWriter, r *http.R
 	}
 
 	if _, err := h.entity.DeleteScheduleAbsence(r.Context(), r.PathValue("id"), r.URL.Query().Get("note")); err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteScheduleAbsence failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity DeleteScheduleAbsence failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to remove that leave or allocation.")
 		return
 	}
@@ -317,7 +317,7 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 
 	result, err := h.entity.CreateScheduleAbsenceKind(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to add the tag.")
 		return
 	}
@@ -335,7 +335,7 @@ func (h *ScheduleHandler) DeleteScheduleAbsenceKind(w http.ResponseWriter, r *ht
 	}
 
 	if _, err := h.entity.DeleteScheduleAbsenceKind(r.Context(), r.PathValue("code")); err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteScheduleAbsenceKind failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity DeleteScheduleAbsenceKind failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to delete the tag.")
 		return
 	}
@@ -354,7 +354,7 @@ func (h *ScheduleHandler) GetScheduleEditMarkers(w http.ResponseWriter, r *http.
 	q := r.URL.Query()
 	result, err := h.entity.GetScheduleEditMarkers(r.Context(), q.Get("from"), q.Get("to"))
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetScheduleEditMarkers failed", "err", err)
+		slog.ErrorContext(r.Context(), "entity GetScheduleEditMarkers failed", "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load who changed the rota.")
 		return
 	}
@@ -362,14 +362,14 @@ func (h *ScheduleHandler) GetScheduleEditMarkers(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, result)
 }
 
-// viewerScheduleClient abstracts the ServiceNow ABT team schedule operation
+// viewerScheduleClient abstracts the backing system ABT team schedule operation
 // used by ViewerScheduleHandler.
 type viewerScheduleClient interface {
 	GetABTTeamSchedule(ctx context.Context, from, duration, teamID, eventType, teamScheduleURL string) (servicenow.ABTTeamScheduleData, error)
 }
 
 // ViewerScheduleHandler handles HTTP requests for the ABT team schedule,
-// delegating to the ServiceNow service.
+// delegating to the backing system service.
 type ViewerScheduleHandler struct {
 	servicenow      viewerScheduleClient
 	accessGuard     *AccessGuard
@@ -377,7 +377,7 @@ type ViewerScheduleHandler struct {
 }
 
 // NewViewerScheduleHandler creates a ViewerScheduleHandler backed by the given
-// ServiceNow client. accessGuard enforces PermViewerAccess, SupportPortalLite's
+// The backing system client. accessGuard enforces PermViewerAccess, SupportPortalLite's
 // blanket audience gate; teamScheduleURL is the static URL echoed back in
 // every response (TEAM_SCHEDULE_URL).
 func NewViewerScheduleHandler(sn viewerScheduleClient, accessGuard *AccessGuard, teamScheduleURL string) *ViewerScheduleHandler {
@@ -404,7 +404,7 @@ func (h *ViewerScheduleHandler) GetABTTeamSchedule(w http.ResponseWriter, r *htt
 
 	schedule, err := h.servicenow.GetABTTeamSchedule(r.Context(), from, duration, teamID, eventType, h.teamScheduleURL)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow GetABTTeamSchedule failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetABTTeamSchedule failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve team schedule.")
 		return
 	}

@@ -80,7 +80,7 @@ func (h *CatalogHandler) SearchCatalogs(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.SearchCatalogs(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchCatalogs failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchCatalogs failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search catalogs.")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *CatalogHandler) GetCatalogItemVariables(w http.ResponseWriter, r *http.
 
 	result, err := h.entity.GetCatalogItemVariables(r.Context(), catalogID, catalogItemID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetCatalogItemVariables failed", "userID", user.UserID, "catalogID", catalogID, "catalogItemID", catalogItemID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetCatalogItemVariables failed", "userID", user.UserID, "catalogID", catalogID, "catalogItemID", catalogItemID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve catalog item variables.")
 		return
 	}

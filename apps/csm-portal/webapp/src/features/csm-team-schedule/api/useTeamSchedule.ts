@@ -137,7 +137,8 @@ export function useScheduleAssignmentsByMonth(
             p,
           ),
         enabled,
-        placeholderData: keepPreviousData,
+        // No keepPreviousData: inside useQueries it carries the previous
+        // *slot's* data, so a moved window briefly showed another month's rows.
         staleTime: ROTA_STALE_MS,
       };
     }),
@@ -180,7 +181,8 @@ export function useScheduleAbsencesByMonth(
             p,
           ),
         enabled,
-        placeholderData: keepPreviousData,
+        // No keepPreviousData: inside useQueries it carries the previous
+        // *slot's* data, so a moved window briefly showed another month's rows.
         staleTime: ROTA_STALE_MS,
       };
     }),

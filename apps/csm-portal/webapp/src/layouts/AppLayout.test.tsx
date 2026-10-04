@@ -35,10 +35,6 @@ vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({ isLoading: false, isSignedIn: true }),
 }));
 
-vi.mock("@context/linear-loader/LoaderContext", () => ({
-  useLoader: () => ({ isVisible: false }),
-}));
-
 vi.mock("@context/error-page/ErrorPageContext", () => ({
   useErrorPageContext: () => ({ isErrorPageDisplayed: false }),
 }));

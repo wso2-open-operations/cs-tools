@@ -1,0 +1,26 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- idx_work_item_watcher_work_item_id (0042) indexes work_item_id alone, the
+-- leading column of the UNIQUE (work_item_id, user_id) constraint's own
+-- index, which serves every lookup by work_item_id. The extra index only adds
+-- write cost and WAL on every watch-list change (each one deletes and
+-- re-inserts the case's watchers).
+--
+-- DROP INDEX CONCURRENTLY does not block reads or writes on the table; it
+-- cannot run inside a transaction block, so this is the only statement in the
+-- file (see `make migrate` and the compose runner).
+DROP INDEX CONCURRENTLY IF EXISTS idx_work_item_watcher_work_item_id;

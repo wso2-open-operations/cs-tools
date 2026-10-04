@@ -36,7 +36,7 @@ export type PortalView = "cs-abt" | "sales-sa";
  * Detection reads a portal role off `GET /users/me` (the same
  * server-authoritative `roles` array `usePortalAccess` reads the other 8
  * portal roles from — see `internal/handler/access.go`'s `AccessConfig`),
- * not a client-side Asgardeo-groups decode — so this can never disagree
+ * not a client-side IdP-groups decode — so this can never disagree
  * with what the backend itself thinks the caller is.
  *
  * The routing rule: "cs_engineer" is CS/ABT staff's own portal-selector

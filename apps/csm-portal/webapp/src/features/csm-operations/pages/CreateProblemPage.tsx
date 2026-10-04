@@ -48,8 +48,8 @@ import type {
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
-// Live SN choice-list values for problem.category / problem.subcategory
-// (confirmed via sys_choice against wso2sndev), hardcoded here since there is
+// Live choice-list values for problem.category / problem.subcategory
+// (confirmed against the backing data source's own choice lists), hardcoded here since there is
 // no metadata endpoint for problem categories/subcategories the way there is
 // for cases. Subcategory is dependent on category — see
 // PROBLEM_SUBCATEGORY_OPTIONS_BY_CATEGORY below.

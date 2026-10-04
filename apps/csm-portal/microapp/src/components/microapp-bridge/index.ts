@@ -58,36 +58,92 @@ declare global {
       resolveMicroAppVersion: (version: string) => void;
       rejectMicroAppVersion: (error: string) => void;
     };
+    csmMicroApp?: {
+      clearSession: () => void;
+    };
     ReactNativeWebView?: {
       postMessage: (message: string) => void;
     };
   }
 }
 
-export const getAccessTokenFromBridge = (callback: Callback<string>): void => {
-  if (window.nativebridge) {
-    window.nativebridge.requestToken();
-    window.nativebridge.resolveToken = (token: string) => {
-      callback(token);
-    };
-  } else {
-    Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
-    callback();
-  }
-};
+// The host answers a request by calling a single well-known resolver on window.nativebridge, with
+// no request id, so replies cannot be matched to individual callers. Instead each topic keeps one
+// request in flight and a list of waiters: callers arriving while a request is pending join the
+// list rather than re-posting and overwriting the resolver, and the one reply settles them all.
+const BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
-// Function to get token from React Native
-export const getToken = (callback: Callback<string>): void => {
-  if (window.nativebridge) {
-    window.nativebridge.requestIdToken();
-    window.nativebridge.resolveIdToken = (token: string) => {
-      callback(token);
-    };
-  } else {
+interface Waiter<T> {
+  resolve: (value: T) => void;
+  reject: (reason: Error) => void;
+}
+
+interface PendingRequest {
+  waiters: Waiter<string>[];
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingRequests = new Map<string, PendingRequest>();
+
+function requestStringFromBridge(
+  topic: string,
+  installResolver: (bridge: NonNullable<Window["nativebridge"]>, settle: (value: string) => void) => void,
+  post: (bridge: NonNullable<Window["nativebridge"]>) => void,
+  timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS,
+): Promise<string> {
+  const bridge = window.nativebridge;
+  if (!bridge) {
     Logger.error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE);
-    callback();
+    return Promise.reject(new Error(ErrorMessages.NATIVE_BRIDGE_NOT_AVAILABLE));
   }
-};
+
+  return new Promise<string>((resolve, reject) => {
+    const existing = pendingRequests.get(topic);
+    if (existing) {
+      existing.waiters.push({ resolve, reject });
+      return;
+    }
+
+    const pending: PendingRequest = {
+      waiters: [{ resolve, reject }],
+      timer: setTimeout(() => {
+        if (pendingRequests.get(topic) !== pending) return;
+        pendingRequests.delete(topic);
+        pending.waiters.forEach((waiter) => waiter.reject(new Error(`Native bridge ${topic} request timed out`)));
+      }, timeoutMs),
+    };
+    pendingRequests.set(topic, pending);
+
+    // The resolver must be in place before the request is posted: a host that answers
+    // synchronously would otherwise reply to nobody.
+    installResolver(bridge, (value) => {
+      if (pendingRequests.get(topic) !== pending) return;
+      pendingRequests.delete(topic);
+      clearTimeout(pending.timer);
+      pending.waiters.forEach((waiter) => waiter.resolve(value));
+    });
+    post(bridge);
+  });
+}
+
+export const getAccessTokenFromBridge = (): Promise<string> =>
+  requestStringFromBridge(
+    TOPIC.TOKEN,
+    (bridge, settle) => {
+      bridge.resolveToken = settle;
+    },
+    (bridge) => bridge.requestToken(),
+  );
+
+// Function to get the ID token from React Native
+export const getToken = (): Promise<string> =>
+  requestStringFromBridge(
+    `${TOPIC.TOKEN}:id`,
+    (bridge, settle) => {
+      bridge.resolveIdToken = settle;
+    },
+    (bridge) => bridge.requestIdToken(),
+  );
 
 // Function to show alert in React Native
 export const showAlert = (title: string, message: string, buttonText: string): void => {

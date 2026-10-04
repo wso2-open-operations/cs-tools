@@ -83,7 +83,7 @@ func TestOutbound_PayloadPassesThroughUntouched(t *testing.T) {
 		"note_type":    "COMMENT",
 		"case_number":  "CS0433225",
 		"case_sys_id":  "abc-123",
-		"sn_user":      "nimal@wso2.com",
+		"sn_user":      "jane.doe@example.com",
 	}
 	d := &fakeDispatcher{}
 	if err := NewGithubOutboundService(d).Deliver(context.Background(), obItem(outboundCommentAdded, in)); err != nil {

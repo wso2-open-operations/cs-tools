@@ -43,6 +43,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -52,6 +53,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/outagenotify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/outagenotifytask"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/reportguard"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
 )
 
@@ -82,12 +84,29 @@ func main() {
 	// email client below.
 	entityServiceBaseURL := mustEnv("CUSTOMER_ENTITY_SERVICE_BASE_URL")
 	entityServiceScopes := splitComma(os.Getenv("CUSTOMER_ENTITY_SERVICE_SCOPES"))
+
+	// One authenticated transport for every entity-service client below:
+	// they share the credentials and the scopes, so they share the token —
+	// one client-credentials grant per invocation instead of one per client.
+	// Each client still applies its own request timeout on top.
+	entityTransport, err := entityhttp.NewTransport(entityhttp.Credentials{
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service transport", "err", err)
+		os.Exit(1)
+	}
+
 	ledgerClient, err := ledger.NewClient(ledger.Config{
 		BaseURL:      entityServiceBaseURL,
 		TokenURL:     oauthTokenURL,
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
 		Scopes:       entityServiceScopes,
+		Transport:    entityTransport,
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service client", "err", err)
@@ -103,6 +122,7 @@ func main() {
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
 		Scopes:       entityServiceScopes,
+		Transport:    entityTransport,
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service case-search client", "err", err)
@@ -118,6 +138,7 @@ func main() {
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
 		Scopes:       entityServiceScopes,
+		Transport:    entityTransport,
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service outage-notification client", "err", err)
@@ -125,7 +146,7 @@ func main() {
 	}
 
 	// Outage COMMUNICATION -- the SRE-facing declaration/resolution pair,
-	// and a different ServiceNow flow from the stakeholder notifier above.
+	// and a different legacy workflow from the stakeholder notifier above.
 	// Its own client because it is its own endpoint; the two sweeps answer
 	// different questions and will diverge.
 	outageCommClient, err := outagecomm.NewClient(outagecomm.Config{
@@ -134,6 +155,7 @@ func main() {
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
 		Scopes:       entityServiceScopes,
+		Transport:    entityTransport,
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service outage-communication client", "err", err)
@@ -181,6 +203,7 @@ func main() {
 		ClientID:     oauthClientID,
 		ClientSecret: oauthClientSecret,
 		Scopes:       entityServiceScopes,
+		Transport:    entityTransport,
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service announcement-publish client", "err", err)
@@ -189,10 +212,10 @@ func main() {
 
 	// Cloud status: a fifth entity-service client, and the first outbound
 	// integration this component has -- see internal/cloudstatus's package
-	// doc. cloudStatusEnabled is the double-fire guard: ServiceNow's
-	// `Cloud Status Event Notification Flow` is still live, and two systems
+	// doc. cloudStatusEnabled is the double-fire guard: the legacy cloud
+	// status notification workflow is still live, and two systems
 	// posting the same event to a PUBLIC status page is the most visible
-	// possible way to get a cutover wrong. It stays false until that flow is
+	// possible way to get a cutover wrong. It stays false until that workflow is
 	// deactivated, and turning it on is a paired change with deactivating it.
 	cloudStatusEnabled := envBool("CLOUD_STATUS_ENABLED", false)
 	var cloudStatusClient *cloudstatus.Client
@@ -204,6 +227,7 @@ func main() {
 			ClientID:     oauthClientID,
 			ClientSecret: oauthClientSecret,
 			Scopes:       entityServiceScopes,
+			Transport:    entityTransport,
 		})
 		if err != nil {
 			slog.Error("failed to construct entity-service cloud-status client", "err", err)
@@ -268,6 +292,10 @@ func main() {
 	// startup if EMAIL_BASE_URL is set but not https. Authenticates with
 	// the same shared OAUTH2_* credentials as ledgerClient above, not its
 	// own — only BaseURL/Scopes/FromAddress are specific to this client.
+	//
+	// Its own transport, not entityTransport: EMAIL_SCOPES is a separate
+	// scope set, so it needs its own token — the second (and last) grant per
+	// invocation.
 	emailClient, err := notify.NewClient(notify.Config{
 		BaseURL:      emailBaseURL,
 		TokenURL:     oauthTokenURL,
@@ -342,6 +370,7 @@ func main() {
 			Name:     staleCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, staleCasesTaskName, "0 7 * * *"),
 			Handler: stalecases.SendReport(entityCasesClient, emailClient,
+				reportguard.New(ledgerClient, staleCasesTaskName),
 				staleCaseThreshold, staleCasesTo, staleCasesCc, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
@@ -355,9 +384,11 @@ func main() {
 		{
 			Name:     openCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, emailClient, openCasesTo, openCasesCc, alertsEnabled),
-			To:       openCasesTo,
-			Cc:       openCasesCc,
+			Handler: opencases.SendReport(entityCasesClient, emailClient,
+				reportguard.New(ledgerClient, openCasesTaskName),
+				openCasesTo, openCasesCc, alertsEnabled),
+			To: openCasesTo,
+			Cc: openCasesCc,
 		},
 		// The first sub-cron here that does real, per-row, multi-step,
 		// partial-failure-tolerant work rather than a bulk delete or a
@@ -387,9 +418,9 @@ func main() {
 		// sweeping marks decisions as sent and would consume notices nobody
 		// receives.
 		//
-		// NOT yet a paired ServiceNow deactivation. Registering this is a
-		// paired change with turning off `Internal Stakeholders Email
-		// Notification - Outage Communication`, per the double-fire rule.
+		// NOT yet paired with retiring the legacy workflow. Registering this
+		// is a paired change with turning off the legacy internal-stakeholder
+		// outage e-mail, per the double-fire rule.
 		{
 			Name:     outageNotifyTaskName,
 			Schedule: scheduleFor(scheduleOverrides, outageNotifyTaskName, "*/5 * * * *"),
@@ -411,7 +442,8 @@ func main() {
 		// with nowhere to deliver would mark outages as announced to nobody
 		// and they would never be announced again.
 		//
-		// It is also inert until digiops-cs maps outage.outage_communication:
+		// It is also inert until the upstream data mirror exposes
+		// outage.outage_communication:
 		// without that column the repository degrades to "nothing to send".
 		{
 			Name:     outageCommTaskName,
@@ -487,6 +519,19 @@ func main() {
 		}
 	}
 
+	// DRIVER_INTERVAL is the one value here that must match an external
+	// setting (the Choreo trigger), and everything retry-related is derived
+	// from it: a task's default retry backoff and the ledger's orphan
+	// window. A schedule tighter than the driver can never be honoured, and
+	// worse, a failed period of such a task is superseded by its next period
+	// before its retry ever comes due — so the mismatch is fatal at startup
+	// rather than a silently wrong retry policy in production.
+	if err := engine.ValidateCadence(tasks, driverInterval, time.Now()); err != nil {
+		slog.Error("DRIVER_INTERVAL is incompatible with the registered schedules; refusing to start",
+			"driverInterval", driverInterval.String(), "err", err)
+		os.Exit(1)
+	}
+
 	// A non-empty audience with no EMAIL_BASE_URL configured would otherwise
 	// only surface the first time some task actually fails and tries to
 	// send, as an opaque "invalid URL" error from a relative "/send-email"
@@ -502,19 +547,37 @@ func main() {
 	}
 
 	eng := engine.New(tasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
+	// How many handlers may run at once. The engine starts tasks shortest-
+	// interval first regardless, so the five-minute outage/status tasks are
+	// never queued behind a slow daily one; a second worker additionally
+	// keeps a single slow handler (one announcement auto-publish can take
+	// minutes) from holding the rest of the tick. 1 makes the tick strictly
+	// sequential if that ever proves necessary.
+	eng.Concurrency = envInt("TASK_CONCURRENCY", 2)
 
 	// No app-level execution timeout here — Choreo's own Scheduled Task
 	// execution-time limit already bounds how long one invocation can run.
 	// signal.NotifyContext instead cancels this context the moment Choreo
 	// sends SIGTERM (whether that's from its own timeout firing, a
-	// redeploy, or a manual stop), so in-flight HTTP calls to entity-service
-	// abort promptly and this process can log/exit cleanly, rather than
-	// being cut off mid-request with no chance to react.
+	// redeploy, or a manual stop), so the in-flight handler aborts promptly
+	// and no further task is claimed. The engine's own record-back and
+	// alert calls do NOT run on this context — they run on a short,
+	// detached one (engine.bookkeepingContext), so the interrupted run is
+	// still recorded as failed and the alert still goes out.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The exit status is the one signal the scheduler's own run history can
+	// see. A tick in which any handler failed, any ledger call failed, or
+	// the run was interrupted exits non-zero; "not due" and "claim denied"
+	// are ordinary outcomes and exit 0. See engine.Engine.Tick.
 	start := time.Now()
-	eng.Tick(ctx, start)
+	if err := eng.Tick(ctx, start); err != nil {
+		slog.Error("tick finished with failures; exiting non-zero so the scheduler records a failed run",
+			"elapsed", time.Since(start).String(), "err", err)
+		stop()
+		os.Exit(1)
+	}
 	slog.Info("tick complete", "elapsed", time.Since(start).String())
 }
 
@@ -629,6 +692,21 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+// envInt returns the given environment variable parsed as a positive
+// integer, or def if unset, malformed, or less than 1.
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		slog.Warn("environment variable is not a positive integer; using default", "key", key, "value", v, "default", def)
+		return def
+	}
+	return n
 }
 
 // envDuration returns the given environment variable parsed with

@@ -14,7 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Alert, Box, Button, IconButton, TextField, Typography, alpha } from "@wso2/oxygen-ui";
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  TextField,
+  Typography,
+  alpha,
+} from "@wso2/oxygen-ui";
 import { SquarePen, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
@@ -70,8 +82,9 @@ function errorMessage(err: unknown, fallback: string): string {
  * Update-history tab of {@link EditDeployedProductDialog}: a vertical timeline
  * of `BeProductUpdate` entries with add/edit/delete, each saving immediately
  * via {@link onSaveUpdates} — independent of the dialog's Details tab. Only
- * the latest (highest `updateLevel`) entry is editable in place; delete has
- * no confirm step, matching customer-portal's `UpdateHistoryTab`.
+ * the latest (highest `updateLevel`) entry is editable in place; delete asks
+ * for confirmation first, since each save replaces the whole array and a
+ * removed entry cannot be recovered from the UI.
  *
  * csm-portal has no recommended-update-levels lookup (unlike customer-portal),
  * so update level is a plain number field here rather than a dropdown.
@@ -86,6 +99,7 @@ export default function UpdateHistoryPanel({
   const [editForm, setEditForm] = useState(EMPTY_FORM);
   const [saveInFlight, setSaveInFlight] = useState<UpdateHistorySaveAction | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
   const isSaving = saveInFlight !== null;
 
@@ -127,7 +141,11 @@ export default function UpdateHistoryPanel({
 
   // Keep a stable ref so the lifted `handleAdd` always calls the latest closure.
   const handleAddUpdateRef = useRef(handleAddUpdate);
-  handleAddUpdateRef.current = handleAddUpdate;
+  // Updated in an effect, not during render. Declared before the effect below
+  // that lifts `handleAdd`, so effects run in that order on every commit.
+  useEffect(() => {
+    handleAddUpdateRef.current = handleAddUpdate;
+  });
 
   useEffect(() => {
     onFormStateChange({
@@ -360,7 +378,7 @@ export default function UpdateHistoryPanel({
                           <IconButton
                             size="small"
                             aria-label={`Delete update level ${u.updateLevel}`}
-                            onClick={() => void handleDelete(originalIndex)}
+                            onClick={() => setPendingDeleteIndex(originalIndex)}
                             disabled={isSaving}
                           >
                             <Trash2 size={14} />
@@ -434,6 +452,36 @@ export default function UpdateHistoryPanel({
           disabled={isSaving}
         />
       </Box>
+
+      <Dialog
+        open={pendingDeleteIndex !== null}
+        onClose={() => setPendingDeleteIndex(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Delete this update?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            {pendingDeleteIndex !== null && updates[pendingDeleteIndex]
+              ? `Update level ${updates[pendingDeleteIndex].updateLevel} will be removed from the history. This cannot be undone.`
+              : "This entry will be removed from the history. This cannot be undone."}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingDeleteIndex(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              const index = pendingDeleteIndex;
+              setPendingDeleteIndex(null);
+              if (index !== null) void handleDelete(index);
+            }}
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

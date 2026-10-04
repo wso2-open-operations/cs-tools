@@ -59,7 +59,7 @@ type excludedProjectKeysResponse struct {
 // now — configuration-only, via CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS
 // (change it there and redeploy). This endpoint exists purely so
 // AudienceScopeControls can display which specific projects are excluded
-// (mirroring the real ServiceNow flow's own condition builder, where the
+// (mirroring the real backing-system flow's own condition builder, where the
 // excluded project keys are plainly visible), rather than leaving the
 // mandatory exclusion an opaque "a configured list" with no way to see what
 // it actually contains.
@@ -81,7 +81,7 @@ func (h *AnnouncementHandler) GetExcludedProjectKeys(w http.ResponseWriter, r *h
 // key list into a JSON request body as excludeProjectKeys, unconditionally
 // overwriting whatever the caller supplied for that field (if anything).
 // This is a mandatory policy, not a caller-toggleable filter — mirrors the
-// real ServiceNow flow this replaces, whose own "Create announcement for
+// real backing-system flow this replaces, whose own "Create announcement for
 // customers" flow hardcodes an equivalent Project Key exclusion with no way
 // for whoever triggers it to opt out.
 func injectExcludeProjectKeys(body []byte, excludedProjectKeys []string) ([]byte, error) {
@@ -151,7 +151,7 @@ func (h *AnnouncementHandler) SearchCustomerAnnouncementAudience(w http.Response
 
 	result, err := h.entity.SearchProjects(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to resolve the announcement audience.")
 		return
 	}

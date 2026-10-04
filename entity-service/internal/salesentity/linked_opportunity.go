@@ -50,7 +50,7 @@ func (c *Client) GetLinkedOpportunity(ctx context.Context, id string) (LinkedOpp
 		}
 	}
 	if len(rows) == 0 {
-		return LinkedOpportunity{}, &apierror.ServiceUnavailableError{Msg: "salesentity: linked opportunity not in search results"}
+		return LinkedOpportunity{}, NotFound("salesentity: linked opportunity not in search results")
 	}
 	return LinkedOpportunity{}, &apierror.ServiceUnavailableError{Msg: "salesentity: linked-opportunities/search returned an unexpected linked opportunity"}
 }

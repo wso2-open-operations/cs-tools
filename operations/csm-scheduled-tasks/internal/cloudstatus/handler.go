@@ -53,8 +53,9 @@ type poster interface {
 // events that have nothing to do with the failure. The sweep error is kept and
 // joined into the summary so it still reaches the alert.
 //
-// EVERY WEBHOOK IS ATTEMPTED INDEPENDENTLY, for the reason ServiceNow could
-// not: there, one action failure stopped the whole execution for that record.
+// EVERY WEBHOOK IS ATTEMPTED INDEPENDENTLY, for the reason the legacy
+// workflow could not: there, one action failure stopped the whole execution
+// for that record.
 // Here one dashboard being down must not stop another dashboard being told.
 //
 // Idempotent per period, as registry.Task.Handler requires. The sweep records
@@ -72,7 +73,7 @@ func DeliverDue(client decisionClient, hook poster) func(ctx context.Context) er
 				"scanned", res.Scanned, "recorded", res.Recorded, "skippedNoCloud", res.SkippedNoCloud)
 			if res.SkippedNoCloud > 0 {
 				// Not joined into errs: an outage with no cloud monitor is a
-				// data problem in ServiceNow, not a failure of this tick, and
+				// data problem in the source record, not a failure of this tick, and
 				// alerting on every tick until someone fixes the record would
 				// train the audience to ignore the alert.
 				slog.WarnContext(ctx, "cloudstatus: in-scope outages could not be routed to any cloud",

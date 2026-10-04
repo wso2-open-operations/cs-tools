@@ -359,11 +359,11 @@ func TestMembershipRegistration_RejectsACallerWithNoIdentity(t *testing.T) {
 			},
 		},
 		{
-			name:  "undecodable x-user-id-token",
+			name:  "x-user-id-token without an email",
 			token: "not-a-jwt",
 			check: func(err error) bool {
-				var ve *apierror.ValidationError
-				return errors.As(err, &ve)
+				var ue *apierror.UnauthorizedError
+				return errors.As(err, &ue)
 			},
 		},
 	}

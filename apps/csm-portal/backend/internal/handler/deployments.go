@@ -111,7 +111,7 @@ func (h *DeploymentHandler) PostDeployment(w http.ResponseWriter, r *http.Reques
 
 	result, err := h.entity.PostDeployment(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PostDeployment failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity PostDeployment failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create deployment.")
 		return
 	}
@@ -153,7 +153,7 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.entity.PatchDeployment(r.Context(), deploymentID, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PatchDeployment failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		slog.ErrorContext(r.Context(), "entity PatchDeployment failed", "userID", user.UserID, "deploymentID", deploymentID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update deployment.")
 		return
 	}
@@ -189,7 +189,7 @@ func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Req
 
 	result, err := h.entity.SearchDeployments(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchDeployments failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchDeployments failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search deployments.")
 		return
 	}
@@ -236,7 +236,7 @@ func (h *DeploymentHandler) SearchDeployedProducts(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.SearchDeployedProducts(r.Context(), entityBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchDeployedProducts failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchDeployedProducts failed", "userID", user.UserID, "deploymentID", deploymentID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search deployed products.")
 		return
 	}
@@ -271,7 +271,7 @@ func (h *DeploymentHandler) SearchProjectsByProductVersion(w http.ResponseWriter
 
 	result, err := h.entity.SearchProjectsByProductVersion(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchProjectsByProductVersion failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchProjectsByProductVersion failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search projects by product version.")
 		return
 	}
@@ -319,7 +319,7 @@ func (h *DeploymentHandler) PostDeployedProduct(w http.ResponseWriter, r *http.R
 
 	result, err := h.entity.PostDeployedProduct(r.Context(), entityBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PostDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		slog.ErrorContext(r.Context(), "entity PostDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create deployed product.")
 		return
 	}
@@ -373,7 +373,7 @@ func (h *DeploymentHandler) PatchDeployedProduct(w http.ResponseWriter, r *http.
 
 	result, err := h.entity.PatchDeployedProduct(r.Context(), productID, entityBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PatchDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "productID", productID, "err", err)
+		slog.ErrorContext(r.Context(), "entity PatchDeployedProduct failed", "userID", user.UserID, "deploymentID", deploymentID, "productID", productID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update deployed product.")
 		return
 	}

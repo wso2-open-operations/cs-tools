@@ -17,15 +17,14 @@
 import { jwtDecode } from "jwt-decode";
 
 import { getAccessTokenFromBridge, getToken } from "@components/microapp-bridge";
-import { LocalStorageKeys } from "@utils/constants";
 import { Logger } from "@utils/logger";
 import { useUserStore, type User } from "../store/user";
+import { queryClient } from "./queryClient";
 
 // Token Payload
 interface TokenPayload {
   email?: string;
   name?: string;
-  groups?: string[];
   given_name?: string;
   family_name?: string;
   // Either OIDC claim may carry the profile picture URL depending on the IdP — same fallback the
@@ -34,11 +33,43 @@ interface TokenPayload {
   profile?: string;
 }
 
-// These would be your actual token storage functions
-export const getAccessToken = (): string | null => localStorage.getItem(LocalStorageKeys.accessToken);
-export const setAccessToken = (token: string): void => localStorage.setItem(LocalStorageKeys.accessToken, token);
-export const getIdToken = (): string | null => localStorage.getItem(LocalStorageKeys.idToken);
-export const setIdToken = (token: string): void => localStorage.setItem(LocalStorageKeys.idToken, token);
+// Tokens are held in memory only: the host hands them over on request, so they are never
+// persisted to web storage and a new WebView session always starts with none.
+let accessToken: string | null = null;
+let idToken: string | null = null;
+
+export const getAccessToken = (): string | null => accessToken;
+export const setAccessToken = (token: string): void => {
+  accessToken = token;
+};
+export const getIdToken = (): string | null => idToken;
+export const setIdToken = (token: string): void => {
+  idToken = token;
+};
+
+// Earlier builds cached tokens in web storage under per-environment keys. Remove any such
+// leftovers once at start-up so they do not outlive the upgrade.
+const LEGACY_TOKEN_KEY = /^csm_portal_(accessToken|idToken)(_|$)|^(accessToken|idToken)$/;
+try {
+  Object.keys(localStorage)
+    .filter((key) => LEGACY_TOKEN_KEY.test(key))
+    .forEach((key) => localStorage.removeItem(key));
+} catch {
+  // Storage may be unavailable in some WebView configurations; nothing to clean up then.
+}
+
+/**
+ * Ends the local session: drops the in-memory tokens, the signed-in user and every cached query.
+ * The host calls this (via `window.csmMicroApp.clearSession()`) when the user signs out.
+ */
+export const clearSession = (): void => {
+  accessToken = null;
+  idToken = null;
+  inFlightRefresh = null;
+  sessionGeneration += 1;
+  useUserStore.getState().clearUser();
+  queryClient.clear();
+};
 
 // Refresh early rather than right at expiry, to cover in-flight request latency.
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
@@ -52,25 +83,22 @@ function isTokenExpiringSoon(token: string | null): boolean {
     return true;
   }
 }
-export const refreshToken = (force = false): Promise<string> => {
-  const currentIdToken = getIdToken();
-  if (!force && !isTokenExpiringSoon(currentIdToken)) {
-    if (!useUserStore.getState().user) {
-      decodeTokenAndStoreUser();
-    }
-    return Promise.resolve(currentIdToken as string);
-  }
+// Every refresh — the launch-time call in App, the request interceptor and the activity stream
+// hook — goes through this single in-flight promise, so overlapping callers share one bridge
+// round trip instead of each re-posting to the host.
+let inFlightRefresh: Promise<string> | null = null;
+// Bumped by clearSession so a refresh that was in flight at sign-out cannot store its tokens.
+let sessionGeneration = 0;
 
-  const idTokenPromise = new Promise<string>((resolve, reject) => {
-    getToken((token) => (token ? resolve(token) : reject("ID Token failed")));
-  });
+const requestTokensFromHost = (): Promise<string> => {
+  const generation = sessionGeneration;
 
-  const accessTokenPromise = new Promise<string>((resolve, reject) => {
-    getAccessTokenFromBridge((token) => (token ? resolve(token) : reject("Access Token failed")));
-  });
-
-  return Promise.all([idTokenPromise, accessTokenPromise])
+  return Promise.all([getToken(), getAccessTokenFromBridge()])
     .then(([newIdToken, newAccessToken]) => {
+      if (!newIdToken) throw new Error("ID Token failed");
+      if (!newAccessToken) throw new Error("Access Token failed");
+      if (generation !== sessionGeneration) throw new Error("Session ended during token refresh");
+
       setIdToken(newIdToken);
       setAccessToken(newAccessToken);
 
@@ -89,30 +117,22 @@ export const refreshToken = (force = false): Promise<string> => {
     });
 };
 
-/**
- * Checks if the user belongs to a given group or groups based on the ID token.
- * This is a direct replacement for `handleCheckGroups`.
- * @param groupNames - A single group name or an array of group names.
- * @returns boolean - True if the user is in at least one of the required groups.
- */
-export const checkUserGroups = (groupNames: string | string[]): boolean => {
-  const token = getIdToken();
-
-  if (!token) {
-    Logger.error("ID token not found for group check.");
-    return false;
+export const refreshToken = (force = false): Promise<string> => {
+  const currentIdToken = getIdToken();
+  if (!force && !isTokenExpiringSoon(currentIdToken)) {
+    if (!useUserStore.getState().user) {
+      decodeTokenAndStoreUser();
+    }
+    return Promise.resolve(currentIdToken as string);
   }
 
-  try {
-    const decoded = jwtDecode<TokenPayload>(token);
-    const userGroups = decoded.groups ?? [];
-    const requiredGroups = Array.isArray(groupNames) ? groupNames : [groupNames];
-
-    return requiredGroups.some((group) => userGroups.includes(group));
-  } catch (error) {
-    Logger.error("Failed to decode ID token for group check.", error);
-    return false;
+  if (!inFlightRefresh) {
+    const refresh = requestTokensFromHost().finally(() => {
+      if (inFlightRefresh === refresh) inFlightRefresh = null;
+    });
+    inFlightRefresh = refresh;
   }
+  return inFlightRefresh;
 };
 
 /**

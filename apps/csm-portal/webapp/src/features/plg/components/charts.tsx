@@ -4,7 +4,7 @@ import type { JSX } from "react";
 
 import type { CountByLabel, TimeSeries } from "@features/plg/api/types";
 import { EmptyState } from "@features/plg/components/common";
-import { useChartColors } from "@features/plg/config/chartPalette";
+import { chartSchemeVars, useChartColors } from "@features/plg/config/chartPalette";
 import { humanizeEnum } from "@features/plg/utils/format";
 
 /**
@@ -38,7 +38,7 @@ export function DonutChart({
   if (!rows.length) return <EmptyState message="Nothing to show for this period" />;
 
   return (
-    <Box height={280}>
+    <Box sx={(theme) => ({ height: 280, ...chartSchemeVars(theme) })}>
       <PieChart
         height="100%"
         data={rows.map((r) => ({
@@ -113,7 +113,7 @@ export function MultiLineChart({
   });
 
   return (
-    <Box height={height}>
+    <Box sx={(theme) => ({ height, ...chartSchemeVars(theme) })}>
       <LineChart
         height="100%"
         data={rows}

@@ -174,10 +174,11 @@ func TestLineItemIngest_NoOpportunityIDIsRetryable(t *testing.T) {
 
 func TestLineItemIngest_DeletedHardDeletesBy18CharID(t *testing.T) {
 	h := newLineItemHarness(sampleStandaloneLineItem(), nil, nil)
+	h.se.err = salesentity.NotFound("salesentity: opportunity line item not found")
 	if err := h.svc.HandleEvent(context.Background(), lineItemEvent("DELETED", testLineItemSfID[:15])); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if h.se.calls != 0 || len(h.repo.deletes) != 1 || h.repo.deletes[0] != testLineItemSfID {
+	if h.se.calls != 1 || len(h.repo.deletes) != 1 || h.repo.deletes[0] != testLineItemSfID {
 		t.Fatalf("fetches %d deletes %v", h.se.calls, h.repo.deletes)
 	}
 	if st := h.repo.deleteState[0]; st.Entity != domain.SalesforceIngestEntityOpportunityLineItem || st.EventType != domain.SalesforceEventDeleted {

@@ -1,6 +1,6 @@
 module github.com/wso2-open-operations/cs-tools/integrations/csm-portal-activity-stream-service
 
-go 1.26.0
+go 1.26.6
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0

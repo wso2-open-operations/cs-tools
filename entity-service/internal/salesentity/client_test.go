@@ -127,6 +127,18 @@ func TestGetCustomer_EmptyArrayIs503(t *testing.T) {
 	if !asSvcUnavailable(err, &sue) {
 		t.Fatalf("err = %v (%T), want *apierror.ServiceUnavailableError", err, err)
 	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want it to match ErrNotFound", err)
+	}
+}
+
+// TestGetCustomer_ServerErrorIsNotNotFound pins that an outage is never read
+// as "the record is gone".
+func TestGetCustomer_ServerErrorIsNotNotFound(t *testing.T) {
+	client := newTestClient(t, http.StatusInternalServerError, map[string]any{})
+	if _, err := client.GetCustomer(context.Background(), "001xx"); errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v must not match ErrNotFound", err)
+	}
 }
 
 func TestGetCustomer_ServerErrorIs503(t *testing.T) {
@@ -197,12 +209,11 @@ func deref(v *string) string {
 	return *v
 }
 
+// asSvcUnavailable matches the way the HTTP layer maps errors (errors.As), so
+// a not-found answer -- a ServiceUnavailableError that also matches
+// ErrNotFound -- is accepted as the 503 it is served as.
 func asSvcUnavailable(err error, target **apierror.ServiceUnavailableError) bool {
-	if sue, ok := err.(*apierror.ServiceUnavailableError); ok {
-		*target = sue
-		return true
-	}
-	return false
+	return errors.As(err, target)
 }
 
 func newMembershipTestClient(t *testing.T, handle func(mux *http.ServeMux)) *Client {

@@ -208,6 +208,46 @@ func main() {
 	projectDLQProducer := eventbus.NewProducer(projectDLQCfg)
 	defer projectDLQProducer.Close()
 
+	// Retry schedule, two tiers. The main consumers retry a failing record
+	// on HANDLE_* (exponential backoff with jitter, see eventbus.RetryPolicy)
+	// before dead-lettering it; the dead-letter publish stamps the record
+	// with a not-before time DLQ_RETRY_DELAY in the future, which the DLQ
+	// consumer waits out before its own DLQ_HANDLE_* schedule. Defaults are
+	// sized so a record keeps being retried for well over ten minutes from
+	// its first failure, long enough to outlast an upstream redeploy.
+	mainRetry := eventbus.RetryPolicy{
+		MaxAttempts: envInt("HANDLE_MAX_ATTEMPTS", eventbus.DefaultRetryPolicy.MaxAttempts),
+		BaseDelay:   envDuration("HANDLE_RETRY_BASE_DELAY", eventbus.DefaultRetryPolicy.BaseDelay),
+		MaxDelay:    envDuration("HANDLE_RETRY_MAX_DELAY", eventbus.DefaultRetryPolicy.MaxDelay),
+	}
+	dlqRetry := eventbus.RetryPolicy{
+		MaxAttempts: envInt("DLQ_HANDLE_MAX_ATTEMPTS", eventbus.DefaultDeadLetterRetryPolicy.MaxAttempts),
+		BaseDelay:   envDuration("DLQ_HANDLE_RETRY_BASE_DELAY", eventbus.DefaultDeadLetterRetryPolicy.BaseDelay),
+		MaxDelay:    envDuration("DLQ_HANDLE_RETRY_MAX_DELAY", eventbus.DefaultDeadLetterRetryPolicy.MaxDelay),
+	}
+	dlqRetryDelay := envDuration("DLQ_RETRY_DELAY", 5*time.Minute)
+
+	// Parking: where a record goes once the dead-letter tier has also given
+	// up on it (or the dead-letter publish itself failed). A third Event Hub
+	// with long retention, read by nobody — an operator replays from it by
+	// hand (see the README's "Parked records"). Optional only because the
+	// topic has to exist before it can be used; without it, giving up on a
+	// record still logs at ERROR and counts, but the payload is gone once
+	// the source topic's retention passes, so every real deployment should
+	// set it.
+	var park eventbus.ParkFunc
+	if parkingTopic := os.Getenv("EVENT_HUB_PARKING_TOPIC"); parkingTopic != "" {
+		parkingProducer := eventbus.NewProducer(eventbus.Config{
+			Broker:           eventBusCfg.Broker,
+			ConnectionString: eventBusCfg.ConnectionString,
+			Topic:            parkingTopic,
+		})
+		defer parkingProducer.Close()
+		park = parkTo(parkingProducer, parkingTopic)
+	} else {
+		slog.Warn("EVENT_HUB_PARKING_TOPIC is not set; a record that exhausts every retry tier will be logged and dropped rather than parked for replay")
+	}
+
 	consumerGroup := envOrDefault("EVENT_HUB_CONSUMER_GROUP", "csm-notification-service")
 	dlqConsumerGroup := envOrDefault("EVENT_HUB_DLQ_CONSUMER_GROUP", "csm-notification-service-dlq")
 	mainConsumerCount := envInt("MAIN_CONSUMER_COUNT", 1)
@@ -276,46 +316,58 @@ func main() {
 	// doc comment.
 	defaultCSMEmailCC := splitComma(os.Getenv("DEFAULT_CSM_EMAIL_CC"))
 
-	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultOnCallNumber, defaultCSMEmailCC).
-		WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient))
+	dispatcher := dispatch.NewDispatcher(
+		dispatch.Deps{
+			Email:      emailClient,
+			GoogleChat: googleChatClient,
+			Call:       twilioClient,
+			Links:      linkResolver,
+		},
+		dispatch.Config{
+			EmailSendingEnabled:  emailSendingEnabled,
+			EmailDebugMode:       emailDebugMode,
+			EmailDebugRecipients: emailDebugRecipients,
+			CallSendingEnabled:   callSendingEnabled,
+			DefaultOnCallNumber:  defaultOnCallNumber,
+			DefaultCSMEmailCC:    defaultCSMEmailCC,
+		},
+	).WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient))
 
 	// The main consumer's OnExhausted: publish the exhausted record to the
 	// dead-letter topic instead of just logging and dropping it. The DLQ's
-	// own consumer (started below) gets onExhausted=nil — there is
-	// deliberately no third tier past the DLQ; see handleAttempts' doc
-	// comment in eventbus/consumer.go.
-	toDeadLetter := func(ctx context.Context, record eventbus.Record, handleErr error) error {
-		attrs := []any{"topic", record.Topic, "partition", record.Partition,
-			"offset", record.Offset, "dlqTopic", dlqCfg.Topic}
-		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
-			append(attrs, deadLetterErrAttrs(handleErr)...)...)
-		return dlqProducer.Publish(ctx, record.Key, record.Value)
-	}
+	// own consumer (started below) gets onExhausted=nil — the dead-letter
+	// tier is the last one that retries; past it a record is parked (see
+	// park above), never retried again.
+	toDeadLetter := deadLetterTo(dlqProducer, dlqCfg.Topic, dlqRetryDelay)
 
 	// The change-request consumer dead-letters to its own topic, so a stuck
 	// change-request record cannot fill the case DLQ (and the reverse).
-	crToDeadLetter := func(ctx context.Context, record eventbus.Record, handleErr error) error {
-		attrs := []any{"topic", record.Topic, "partition", record.Partition,
-			"offset", record.Offset, "dlqTopic", crDLQCfg.Topic}
-		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
-			append(attrs, deadLetterErrAttrs(handleErr)...)...)
-		return crDLQProducer.Publish(ctx, record.Key, record.Value)
-	}
+	crToDeadLetter := deadLetterTo(crDLQProducer, crDLQCfg.Topic, dlqRetryDelay)
 
 	// Same again for the onboarding consumer: a stuck invitation cannot
 	// fill the case or change-request DLQ, and the reverse.
-	projectToDeadLetter := func(ctx context.Context, record eventbus.Record, handleErr error) error {
-		attrs := []any{"topic", record.Topic, "partition", record.Partition,
-			"offset", record.Offset, "dlqTopic", projectDLQCfg.Topic}
-		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
-			append(attrs, deadLetterErrAttrs(handleErr)...)...)
-		return projectDLQProducer.Publish(ctx, record.Key, record.Value)
-	}
+	projectToDeadLetter := deadLetterTo(projectDLQProducer, projectDLQCfg.Topic, dlqRetryDelay)
 
+	// Every consumer parks the same way; only the retry schedule differs
+	// between a first tier and a dead-letter tier.
+	// SHUTDOWN_DRAIN_TIMEOUT: how long an in-flight record may keep running
+	// after SIGTERM (see eventbus.Consumer.Run). Keep it, plus the reader
+	// close, inside the platform's termination grace period.
+	drainTimeout := envDuration("SHUTDOWN_DRAIN_TIMEOUT", eventbus.DefaultDrainTimeout)
+	firstTier := []eventbus.Option{eventbus.WithRetryPolicy(mainRetry), eventbus.WithParking(park), eventbus.WithDrainTimeout(drainTimeout)}
+	deadLetterTier := []eventbus.Option{eventbus.WithRetryPolicy(dlqRetry), eventbus.WithParking(park), eventbus.WithDrainTimeout(drainTimeout)}
+
+	// /health reflects the consumers, not just the HTTP server: 503 once
+	// any consumer's Run has exited or has made no progress for
+	// CONSUMER_STALL_TIMEOUT (see healthHandler), so the platform restarts
+	// a pod whose consumers are dead instead of leaving it to silently
+	// deliver nothing. The window must comfortably exceed one poll (30 s)
+	// plus the longest single handler attempt; a quiet topic never trips
+	// it, since an error-free empty poll counts as progress.
+	consumers := &consumerRegistry{}
+	stallTimeout := envDuration("CONSUMER_STALL_TIMEOUT", 5*time.Minute)
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	mux.HandleFunc("GET /health", healthHandler(consumers.statuses, stallTimeout, time.Now))
 
 	addr := ":" + mustPort("PORT", "8080")
 
@@ -352,18 +404,18 @@ func main() {
 		}
 	}()
 
-	mainConsumers := startConsumers(ctx, "main", eventBusCfg, consumerGroup, mainConsumerCount, dispatcher.Handle, toDeadLetter)
-	dlqConsumers := startConsumers(ctx, "dlq", dlqCfg, dlqConsumerGroup, dlqConsumerCount, dispatcher.Handle, nil)
+	consumers.add(startConsumers(ctx, "main", eventBusCfg, consumerGroup, mainConsumerCount, dispatcher.Handle, toDeadLetter, firstTier...))
+	consumers.add(startConsumers(ctx, "dlq", dlqCfg, dlqConsumerGroup, dlqConsumerCount, dispatcher.Handle, nil, deadLetterTier...))
 	// Same dispatcher as the case consumers: it already routes on the
 	// envelope's Type, and these two only ever receive change_request.* since
 	// that is all their topic carries.
-	crConsumers := startConsumers(ctx, "cr", crCfg, crConsumerGroup, crConsumerCount, dispatcher.Handle, crToDeadLetter)
-	crDLQConsumers := startConsumers(ctx, "cr-dlq", crDLQCfg, crDLQConsumerGroup, crDLQConsumerCount, dispatcher.Handle, nil)
+	consumers.add(startConsumers(ctx, "cr", crCfg, crConsumerGroup, crConsumerCount, dispatcher.Handle, crToDeadLetter, firstTier...))
+	consumers.add(startConsumers(ctx, "cr-dlq", crDLQCfg, crDLQConsumerGroup, crDLQConsumerCount, dispatcher.Handle, nil, deadLetterTier...))
 	// And the same for project_contact.invited: the one dispatcher routes
 	// on the envelope's Type already, and these two only ever receive the
 	// onboarding events since that is all their topic carries.
-	projectConsumers := startConsumers(ctx, "project", projectCfg, projectConsumerGroup, projectConsumerCount, dispatcher.Handle, projectToDeadLetter)
-	projectDLQConsumers := startConsumers(ctx, "project-dlq", projectDLQCfg, projectDLQConsumerGroup, projectDLQConsumerCount, dispatcher.Handle, nil)
+	consumers.add(startConsumers(ctx, "project", projectCfg, projectConsumerGroup, projectConsumerCount, dispatcher.Handle, projectToDeadLetter, firstTier...))
+	consumers.add(startConsumers(ctx, "project-dlq", projectDLQCfg, projectDLQConsumerGroup, projectDLQConsumerCount, dispatcher.Handle, nil, deadLetterTier...))
 
 	// The SLA breach-alerting engine is optional per deployment, gated on
 	// REDIS_ADDR or REDIS_URL being set — unset means this engine never
@@ -373,7 +425,7 @@ func main() {
 	// this replaced, it is no longer a Kafka consumer at all — see
 	// internal/slaengine's own CLAUDE.md section ("SLA breach alerting")
 	// for the full redesign: it polls entity-service's GET /sla-status
-	// (backed by the real, ServiceNow-synced "sla" table, not a value this
+	// (backed by the real, data-source-synced "sla" table, not a value this
 	// service used to compute itself) on a plain ticker instead.
 	//
 	// REDIS_URL (a rediss://:<password>@<host>:<port> connection string,
@@ -466,24 +518,12 @@ func main() {
 	<-ctx.Done()
 	stop()
 
-	for _, c := range mainConsumers {
-		c.Close()
-	}
-	for _, c := range dlqConsumers {
-		c.Close()
-	}
-	for _, c := range crConsumers {
-		c.Close()
-	}
-	for _, c := range crDLQConsumers {
-		c.Close()
-	}
-	for _, c := range projectConsumers {
-		c.Close()
-	}
-	for _, c := range projectDLQConsumers {
-		c.Close()
-	}
+	// Drain before closing: every consumer stops fetching on the signal,
+	// lets its in-flight record finish (bounded by drainTimeout) and
+	// commits it; only then are the readers closed. Closing first would
+	// abort the commit of a record whose notification has already gone
+	// out, and the redelivery after restart would send it again.
+	consumers.drainAndClose(drainTimeout + 5*time.Second)
 	if slaProducer != nil {
 		slaProducer.Close()
 	}
@@ -579,7 +619,7 @@ func loadOnboardingConfig(steps *entity.CustomerEntityClient, emailClient *notif
 // consumer group never hands out more partitions than exist, so a consumer
 // count higher than the partition count just leaves the excess consumers
 // permanently idle rather than doing anything actively wrong.
-func startConsumers(ctx context.Context, name string, cfg eventbus.Config, group string, count int, handle eventbus.Handle, onExhausted eventbus.OnExhausted) []*eventbus.Consumer {
+func startConsumers(ctx context.Context, name string, cfg eventbus.Config, group string, count int, handle eventbus.Handle, onExhausted eventbus.OnExhausted, opts ...eventbus.Option) []*eventbus.Consumer {
 	if partitions, err := eventbus.PartitionCount(ctx, cfg); err != nil {
 		slog.Warn("failed to check partition count; skipping the consumer-count sanity check", "consumer", name, "topic", cfg.Topic, "err", err)
 	} else if count > partitions {
@@ -587,9 +627,10 @@ func startConsumers(ctx context.Context, name string, cfg eventbus.Config, group
 			"consumer", name, "topic", cfg.Topic, "consumerCount", count, "partitions", partitions)
 	}
 
+	opts = append([]eventbus.Option{eventbus.WithName(name)}, opts...)
 	consumers := make([]*eventbus.Consumer, count)
 	for i := range consumers {
-		c := eventbus.NewConsumer(cfg, group)
+		c := eventbus.NewConsumer(cfg, group, opts...)
 		consumers[i] = c
 		go c.Run(ctx, handle, onExhausted)
 	}
@@ -772,6 +813,49 @@ func parseGoogleChatAudienceSpaces(raw string) []notifications.GoogleChatAudienc
 		}
 	}
 	return spaces
+}
+
+// deadLetterTo builds the OnExhausted func for a first-tier consumer:
+// publish the exhausted record to dlqTopic, byte for byte (the content hash
+// dispatch keys its idempotency on must survive the hop), stamped with a
+// not-before header delay in the future so the dead-letter consumer's first
+// attempt is genuinely later than the main consumer's last one — see
+// eventbus.HeaderNotBefore.
+func deadLetterTo(producer *eventbus.Producer, dlqTopic string, delay time.Duration) eventbus.OnExhausted {
+	return func(ctx context.Context, record eventbus.Record, handleErr error) error {
+		notBefore := time.Now().Add(delay)
+		attrs := []any{"topic", record.Topic, "partition", record.Partition,
+			"offset", record.Offset, "dlqTopic", dlqTopic, "retryNotBefore", notBefore.UTC().Format(time.RFC3339)}
+		slog.WarnContext(ctx, "eventbus: handler exhausted retries, publishing to dead-letter topic",
+			append(attrs, deadLetterErrAttrs(handleErr)...)...)
+		return producer.PublishMessage(ctx, eventbus.Message{
+			Key:     record.Key,
+			Value:   record.Value,
+			Headers: map[string]string{eventbus.HeaderNotBefore: eventbus.NotBeforeHeader(notBefore)},
+		})
+	}
+}
+
+// parkTo builds the ParkFunc every consumer shares: publish an
+// eventbus.ParkedRecord wrapping the record to parkingTopic under the
+// record's own key. The failure summary has the upstream response body
+// removed (apierror.Summary) for the same reason deadLetterErrAttrs does.
+func parkTo(producer *eventbus.Producer, parkingTopic string) eventbus.ParkFunc {
+	return func(ctx context.Context, record eventbus.Record, handleErr error) error {
+		parked := eventbus.NewParkedRecord(record.Topic, record, apierror.Summary(handleErr))
+		value, err := json.Marshal(parked)
+		if err != nil {
+			return fmt.Errorf("encode parked record: %w", err)
+		}
+		slog.WarnContext(ctx, "eventbus: publishing exhausted record to parking topic",
+			append([]any{"topic", record.Topic, "partition", record.Partition, "offset", record.Offset, "parkingTopic", parkingTopic},
+				deadLetterErrAttrs(handleErr)...)...)
+		return producer.PublishMessage(ctx, eventbus.Message{
+			Key:     record.Key,
+			Value:   value,
+			Headers: map[string]string{"x-parked-from": record.Topic},
+		})
+	}
 }
 
 // deadLetterErrAttrs describes a handler failure without reproducing it. An

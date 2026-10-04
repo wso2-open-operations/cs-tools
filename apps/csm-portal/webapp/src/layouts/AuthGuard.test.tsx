@@ -15,7 +15,7 @@
 // under the License.
 
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { lazy, type JSX } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,8 @@ const currentUserState: {
   user: undefined,
 };
 
+const refetchUserMock = vi.fn();
+
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   CurrentUserProvider: ({ children }: { children: React.ReactNode }) => children,
   useCurrentUser: () => ({
@@ -105,6 +107,7 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
     isLoading: currentUserState.isLoading,
     isError: currentUserState.isError,
     error: currentUserState.error,
+    refetch: refetchUserMock,
   }),
 }));
 
@@ -432,7 +435,7 @@ describe("AuthGuard's response to a /users/me failure once signed in", () => {
     });
   });
 
-  it("does not show the not-authorized page for an unrelated /users/me failure (e.g. 500)", async () => {
+  it("shows a retryable error state, not the routed page, for an unrelated /users/me failure (e.g. 500)", async () => {
     currentUserState.isError = true;
     currentUserState.error = new ApiError(500, "Internal Server Error");
     let rerender!: ReturnType<typeof renderAuthGuard>["rerender"];
@@ -452,9 +455,11 @@ describe("AuthGuard's response to a /users/me failure once signed in", () => {
       screen.queryByText("You don't have access to this portal yet"),
     ).not.toBeInTheDocument();
     expect(appLayoutPropsMock).toHaveBeenCalledWith({
-      minimalHeader: false,
+      minimalHeader: true,
       showCaseTabs: true,
     });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refetchUserMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -560,9 +565,9 @@ describe("AuthGuard bare mode", () => {
   // not render the real <Outlet /> — and let its widgets start firing
   // their own authenticated queries — before /users/me has confirmed this
   // caller is actually entitled to the portal, not just signed in to
-  // Asgardeo. Same gate AuthorizedAppShell already applies to every other
+  // identity provider. Same gate AuthorizedAppShell already applies to every other
   // route, rendered here without any AppLayout chrome.
-  it("shows BareAuthLoader (not the routed page) while /users/me is still resolving, even after Asgardeo sign-in", async () => {
+  it("shows BareAuthLoader (not the routed page) while /users/me is still resolving, even after identity provider sign-in", async () => {
     asgardeoState.isSignedIn = true;
     currentUserState.isLoading = true;
     let rerender!: ReturnType<typeof renderBareAuthGuard>["rerender"];
@@ -590,7 +595,7 @@ describe("AuthGuard bare mode", () => {
     expect(screen.queryByTestId("app-layout")).not.toBeInTheDocument();
   });
 
-  it("shows a chrome-free not-authorized page (not the routed page) when /users/me comes back 401, even after Asgardeo sign-in", async () => {
+  it("shows a chrome-free not-authorized page (not the routed page) when /users/me comes back 401, even after identity provider sign-in", async () => {
     asgardeoState.isSignedIn = true;
     currentUserState.isError = true;
     currentUserState.error = new ApiError(401, "Unauthorized");
@@ -624,7 +629,7 @@ describe("AuthGuard bare mode", () => {
   // through to the routed outlet — entitlement is unknown, not confirmed,
   // and this route has no one watching to notice or retry. Holds on
   // BareAuthLoader instead, same as the still-loading state.
-  it("shows BareAuthLoader (not the routed page) when /users/me fails with a non-auth error, even after Asgardeo sign-in", async () => {
+  it("shows BareAuthLoader (not the routed page) when /users/me fails with a non-auth error, even after identity provider sign-in", async () => {
     asgardeoState.isSignedIn = true;
     currentUserState.isError = true;
     currentUserState.error = new ApiError(500, "Internal Server Error");

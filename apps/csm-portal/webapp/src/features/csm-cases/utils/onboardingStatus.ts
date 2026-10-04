@@ -15,7 +15,7 @@
 // under the License.
 
 /**
- * The fixed ServiceNow choice list for `projectOnboardingStatus`. Shared
+ * The fixed backing-system choice list for `projectOnboardingStatus`. Shared
  * between the "Onboarding status" bar control (`CasesFilterBar.tsx`, which
  * offers exactly these 4 as options) and `translateCaseDashboardFilters`
  * (`widgetResourceConfig.ts`, which needs the full set to turn a dashboard

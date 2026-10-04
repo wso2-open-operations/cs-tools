@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	testIssuer = "https://api.asgardeo.io/t/example/oauth2/token"
+	testIssuer = "https://idp.example.com/t/example/oauth2/token"
 	testSPA    = "spa-client-id"
 	testM2M    = "integration-client-id"
 )
@@ -66,7 +66,7 @@ func staticValidator(key *rsa.PrivateKey) *Validator {
 }
 
 func userClaims(mod func(jwt.MapClaims)) jwt.MapClaims {
-	c := jwt.MapClaims{"iss": testIssuer, "aud": []string{testSPA}, "sub": "user-1", "userid": "asgardeo-uuid-1", "email": "Jane@Example.com", "exp": time.Now().Add(time.Hour).Unix()}
+	c := jwt.MapClaims{"iss": testIssuer, "aud": []string{testSPA}, "sub": "user-1", "userid": "idp-user-uuid-1", "email": "Jane@Example.com", "exp": time.Now().Add(time.Hour).Unix()}
 	if mod != nil {
 		mod(c)
 	}
@@ -86,7 +86,7 @@ func TestValidateUserToken(t *testing.T) {
 	v := staticValidator(key)
 
 	uc, err := v.ValidateUserToken(sign(t, key, userClaims(nil)))
-	if err != nil || uc.Email != "Jane@Example.com" || uc.Subject != "user-1" || uc.UserID != "asgardeo-uuid-1" {
+	if err != nil || uc.Email != "Jane@Example.com" || uc.Subject != "user-1" || uc.UserID != "idp-user-uuid-1" {
 		t.Fatalf("valid token: %+v, %v", uc, err)
 	}
 
@@ -231,7 +231,7 @@ func TestMiddleware_Enabled(t *testing.T) {
 	})
 	t.Run("on behalf of a user: client assertion + user token", func(t *testing.T) {
 		_, id, _ := run(t, v, map[string]string{"x-jwt-assertion": clientAssertion, "x-user-id-token": user})
-		if id.ClientID != testM2M || id.UserEmail != "Jane@Example.com" || id.UserSubject != "user-1" || id.UserID != "asgardeo-uuid-1" {
+		if id.ClientID != testM2M || id.UserEmail != "Jane@Example.com" || id.UserSubject != "user-1" || id.UserID != "idp-user-uuid-1" {
 			t.Fatalf("got %+v", id)
 		}
 	})
@@ -279,7 +279,7 @@ func TestMiddleware_IdentityHolder(t *testing.T) {
 	})
 	t.Run("on behalf of a user: holder carries the user UUID, not sub", func(t *testing.T) {
 		holder, _, _, _ := runWithHolder(t, v, map[string]string{"x-jwt-assertion": clientAssertion, "x-user-id-token": user})
-		if holder.UserID != "asgardeo-uuid-1" || holder.ClientID != testM2M {
+		if holder.UserID != "idp-user-uuid-1" || holder.ClientID != testM2M {
 			t.Fatalf("got %+v", holder)
 		}
 	})
@@ -303,7 +303,7 @@ func TestMiddleware_IdentityHolder(t *testing.T) {
 	})
 }
 
-// Asgardeo publishes x5c certs Go's x509 parser rejects; NewValidator must
+// The identity provider publishes x5c certs Go's x509 parser rejects; NewValidator must
 // still load the JWKS (the transport strips x5c) and validate real tokens.
 func TestNewValidator_LoadsJWKSDespiteUnparseableX5C(t *testing.T) {
 	key := newKey(t)

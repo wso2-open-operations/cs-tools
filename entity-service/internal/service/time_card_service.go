@@ -23,7 +23,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -80,13 +79,9 @@ func NewTimeCardServiceWithSNWriteback(repo repository.TimeCardRepository, userR
 // this data source has no other notion of who is calling, the same
 // mechanism caseService.CreateCaseComment uses to attribute a case comment.
 func (s *timeCardService) currentUserID(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", err
 	}
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {

@@ -41,7 +41,7 @@ import (
 // be pointed at it and exercised end to end.
 //
 // It omits the auth middleware the production router wraps every route in:
-// that is not part of this feature and needs a live Asgardeo token.
+// that is not part of this feature and needs a live identity-provider token.
 // Everything below the transport is what production runs.
 //
 //	OUTAGE_NOTIFY_SERVE_ADDR=127.0.0.1:9180 \

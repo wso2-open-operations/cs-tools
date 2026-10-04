@@ -136,11 +136,6 @@ type searchFilter struct {
 	args  []any
 }
 
-func (f *searchFilter) add(clause string, val any) {
-	f.args = append(f.args, val)
-	f.where += fmt.Sprintf(" AND "+clause, len(f.args))
-}
-
 func (f *searchFilter) scope(column string, scope SearchScope) {
 	if !scope.Unrestricted {
 		f.args = append(f.args, scope.ProjectIDs)

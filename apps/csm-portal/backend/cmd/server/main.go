@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -32,6 +33,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
@@ -81,10 +84,10 @@ func main() {
 	// base URL and scopes differ per service.
 	oauth2ClientID := mustEnv("OAUTH2_CLIENT_ID")
 	oauth2ClientSecret := mustEnv("OAUTH2_CLIENT_SECRET")
-	oauth2TokenURL := mustEnv("OAUTH2_TOKEN_URL")
+	oauth2TokenURL := mustCredentialBaseURL("OAUTH2_TOKEN_URL", mustEnv("OAUTH2_TOKEN_URL"))
 
 	customerEntityCfg := entity.CustomerEntityConfig{
-		BaseURL:      mustEnv("CUSTOMER_ENTITY_BASE_URL"),
+		BaseURL:      mustCredentialBaseURL("CUSTOMER_ENTITY_BASE_URL", mustEnv("CUSTOMER_ENTITY_BASE_URL")),
 		TokenURL:     oauth2TokenURL,
 		ClientID:     oauth2ClientID,
 		ClientSecret: oauth2ClientSecret,
@@ -151,7 +154,7 @@ func main() {
 	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
 		Spaces: parseGoogleChatSpaces(os.Getenv("NOTIFICATIONS_GOOGLE_CHAT_SPACES")),
 	})
-	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
+	notificationHandler := handler.NewNotificationHandler(googleChatClient, customerEntityClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
 	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
 	// When disabled, no SFTPGO_* env var is read at all and neither the client
@@ -176,11 +179,13 @@ func main() {
 	// it too.
 	accessGuard := handler.NewAccessGuard(loadAccessConfig())
 
-	// SupportPortalLite — off by default; see loadViewerConfig. Ported
-	// from digiops-cs/apps/support-portal-lite's Ballerina backend, which is
-	// being retired.
+	// SupportPortalLite — off by default; see loadViewerConfig. Ported from the
+	// retired SupportPortalLite Ballerina backend (tracked separately).
 	viewerEnabled, viewerCfg := loadViewerConfig()
 	var viewerHandlers *viewerHandlerSet
+	// closeOnShutdown holds resources released after the HTTP server has
+	// drained (e.g. the risk store's connection pool).
+	var closeOnShutdown []io.Closer
 	if viewerEnabled {
 		salesEntityClient := entity.NewSalesEntityClient(entity.SalesEntityConfig{
 			BaseURL:      viewerCfg.salesEntityBaseURL,
@@ -217,18 +222,19 @@ func main() {
 			slog.Error("failed to connect to SPL_RISK_MYSQL_DSN", "err", err)
 			os.Exit(1)
 		}
+		closeOnShutdown = append(closeOnShutdown, riskClient)
 
 		// Accounts/projects/cases/team-members read/search/comment paths used
 		// to have their own Postgres translation layer here, wrapping
-		// customerEntityClient into a ServiceNow-shaped response for SPL's
+		// customerEntityClient into a backing-system-shaped response for SPL's
 		// frontend. All four merged onto CS Portal's own /accounts,
 		// /projects, /cases, and /teams/{id}/members routes below instead,
 		// now that SPL's data source for them is the exact same
 		// entity-service data those routes already serve raw, with no
-		// ServiceNow-shape translation left to justify a second, parallel
+		// Backing-system-shape translation left to justify a second, parallel
 		// /spl/* contract. Only attachments (no entity-service storage path)
 		// and account escalations (CreateEscalation is an explicit stub on
-		// this data source) remain ServiceNow-backed and SPL-specific.
+		// this data source) remain legacy-data-source and SPL-specific.
 		postgresLookups := handler.NewPostgresLookupsClient(customerEntityClient, snClient)
 		postgresReports := handler.NewPostgresReportsClient(customerEntityClient, snClient)
 		postgresUsageMetrics := handler.NewPostgresUsageMetricsClient(customerEntityClient)
@@ -240,7 +246,7 @@ func main() {
 			attachments:    handler.NewAttachmentsHandler(snClient, accessGuard),
 			lookups:        handler.NewLookupsHandler(postgresLookups, accessGuard),
 			usageMetrics:   handler.NewUsageMetricsHandler(postgresUsageMetrics, accessGuard),
-			files:          handler.NewFilesHandler(driveClient, accessGuard),
+			files:          handler.NewFilesHandler(driveClient, accessGuard, viewerCfg.driveRootFolderIDs),
 			customerHealth: handler.NewCustomerHealthHandler(riskClient, snClient, accessGuard),
 			userInfo:       handler.NewUserInfoHandler(customerEntityClient, accessGuard),
 			userScan:       handler.NewSplUserScanHandler(salesEntityClient, customerEntityClient, accessGuard),
@@ -250,7 +256,7 @@ func main() {
 	}
 
 	updatesCfg := updates.Config{
-		BaseURL:      mustEnv("UPDATES_BASE_URL"),
+		BaseURL:      mustCredentialBaseURL("UPDATES_BASE_URL", mustEnv("UPDATES_BASE_URL")),
 		TokenURL:     oauth2TokenURL,
 		ClientID:     oauth2ClientID,
 		ClientSecret: oauth2ClientSecret,
@@ -260,7 +266,7 @@ func main() {
 	updatesHandler := handler.NewUpdatesHandler(updatesClient)
 
 	scimCfg := scim.Config{
-		BaseURL:      mustEnv("SCIM_BASE_URL"),
+		BaseURL:      mustCredentialBaseURL("SCIM_BASE_URL", mustEnv("SCIM_BASE_URL")),
 		TokenURL:     oauth2TokenURL,
 		ClientID:     oauth2ClientID,
 		ClientSecret: oauth2ClientSecret,
@@ -322,7 +328,7 @@ func main() {
 	changeRequestHandler = changeRequestHandler.WithAccessGuard(accessGuard)
 
 	authCfg := middleware.Config{
-		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
+		JWKSEndpoint:          mustCredentialBaseURL("AUTH_JWKS_ENDPOINT", mustEnv("AUTH_JWKS_ENDPOINT")),
 		Issuer:                mustEnv("AUTH_ISSUER"),
 		Audiences:             splitComma(mustEnv("AUTH_AUDIENCE")),
 		ClockSkew:             5 * time.Second,
@@ -335,8 +341,16 @@ func main() {
 	// /health/dependencies are the two exceptions and are exempt in the Auth
 	// middleware too.
 	mux := http.NewServeMux()
+	// Every route's response also passes through RedactInlineImages, which
+	// strips inline image data from JSON for a caller without the attachment
+	// download permission (a no-op pass-through for one who holds it).
+	// A POST .../search route's body additionally has its pagination bounds
+	// clamped (ClampSearchPagination) before the handler reads it.
 	route := func(pattern string, perm handler.Permission, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, accessGuard.Require(perm, h))
+		if handler.IsSearchRoute(pattern) {
+			h = handler.ClampSearchPagination(h)
+		}
+		mux.HandleFunc(pattern, accessGuard.Require(perm, handler.RedactInlineImages(accessGuard, h)))
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -428,7 +442,7 @@ func main() {
 	route("POST /teams/search", handler.PermView, referenceHandler.SearchTeams)
 	route("GET /teams/{id}/members", handler.PermViewSharedEntity, teamHandler.GetTeamMembers)
 	route("GET /accounts/{id}", handler.PermViewSharedEntity, accountHandler.GetAccount)
-	// Admin-only: CRE/SRE team is a temporary override of ServiceNow's own
+	// Admin-only: CRE/SRE team is a temporary override of the backing system's own
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
 	// staff role should be able to set it.
 	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
@@ -638,15 +652,15 @@ func main() {
 		route("GET /customer-health/action-items/{actionItemId}/comments", handler.PermViewerAccess, viewerHandlers.customerHealth.GetActionItemComments)
 	}
 
-	// Built once and reused on both listeners below: Auth() does a real JWKS
-	// fetch (when TokenValidatorEnabled), so calling it a second time would
-	// duplicate that startup network round-trip and double the chance of a
-	// transient JWKS hiccup aborting startup, for no benefit — both
-	// listeners validate the exact same tokens the exact same way.
-	authMiddleware := middleware.Auth(authCfg)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Built once: Auth does a real JWKS fetch at startup when
+	// TokenValidatorEnabled is on. Its background key refresh is bound to
+	// authCtx, cancelled once the server has shut down.
+	authCtx, cancelAuth := context.WithCancel(context.Background())
+	defer cancelAuth()
+	authMiddleware := middleware.AuthWithContext(authCtx, authCfg)
 
 	// PLG Customer Success Portal. Its config, entity-service client, services,
 	// handlers, identity middleware and 26 plg/* routes are all assembled in
@@ -690,17 +704,25 @@ func main() {
 		// this is a no-op there; it matters when the gateway isn't in the
 		// path (local development, where the browser calls this listener
 		// directly). CORS_ALLOWED_ORIGINS is a comma-separated allow-list;
-		// unset allows any origin (see middleware.CORS on why that's safe
-		// here).
+		// unset allows no cross-origin browser request (middleware.CORS is
+		// fail-closed).
+		// Recover sits directly inside SecurityHeaders so a panic anywhere
+		// further down still yields a logged 500 with the standard envelope
+		// (and the security headers) instead of a dropped connection.
 		Handler: middleware.SecurityHeaders(
-			middleware.CORS(splitComma(os.Getenv("CORS_ALLOWED_ORIGINS")))(
-				middleware.CorrelationID(
-					authMiddleware(
-						middleware.Logger(mux),
+			middleware.Recover(
+				middleware.CORS(splitComma(os.Getenv("CORS_ALLOWED_ORIGINS")))(
+					middleware.CorrelationID(
+						authMiddleware(
+							middleware.Logger(mux),
+						),
 					),
 				),
 			),
 		),
+		// Request headers are capped at 64 KiB (net/http's default is 1 MiB);
+		// a token plus the handful of headers this API reads fit easily.
+		MaxHeaderBytes:    maxHeaderBytes,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -724,6 +746,12 @@ func main() {
 	var srvErr error
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		srvErr = err
+	}
+	cancelAuth()
+	for _, c := range closeOnShutdown {
+		if err := c.Close(); err != nil {
+			slog.Error("failed to close a resource on shutdown", "err", err)
+		}
 	}
 	if srvErr != nil {
 		slog.Error("graceful shutdown failed", "err", srvErr)
@@ -932,7 +960,7 @@ func loadAccessConfig() handler.AccessConfig {
 //	                                         POST /announcements/audience/search
 //	                                         call unconditionally — the
 //	                                         caller cannot opt out — mirroring
-//	                                         the real ServiceNow flow this
+//	                                         the real backing-system flow this
 //	                                         replaces, whose own "Create
 //	                                         announcement for customers" flow
 //	                                         hardcodes an equivalent Project
@@ -1131,6 +1159,84 @@ func mustHTTPSBaseURL(key, value string) string {
 	return value
 }
 
+// mustCredentialBaseURL validates a base URL that OAuth2 client credentials,
+// tokens or token-signing keys travel over (OAUTH2_TOKEN_URL,
+// CUSTOMER_ENTITY_BASE_URL, UPDATES_BASE_URL, SCIM_BASE_URL,
+// AUTH_JWKS_ENDPOINT): validateCredentialBaseURL's rules, exiting on failure.
+func mustCredentialBaseURL(key, value string) string {
+	if err := validateCredentialBaseURL(value); err != nil {
+		slog.Error("invalid environment variable", "key", key, "err", err)
+		os.Exit(1)
+	}
+	return value
+}
+
+// validateCredentialBaseURL is validateHTTPSBaseURL, except that plain http
+// is accepted for a local host: a loopback address or "localhost", or a
+// single-label host name such as a container service name on a local compose
+// network ("entity-service", "mock-oidc"). Those never leave the machine or
+// the private container network; any dotted (routable) host must use https.
+func validateCredentialBaseURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err == nil && parsed.Scheme == "http" && isLocalHost(parsed.Hostname()) {
+		https := *parsed
+		https.Scheme = "https"
+		return validateHTTPSBaseURL(https.String())
+	}
+	return validateHTTPSBaseURL(value)
+}
+
+// isLocalHost reports whether host is "localhost", a loopback IP, or a
+// single-label name (no dot, not an IP), the shape of a local container
+// service name.
+func isLocalHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return !strings.Contains(host, ".")
+}
+
+// mustRiskMySQLDSN reads SPL_RISK_MYSQL_DSN and exits unless it passes
+// validateRiskMySQLDSN. The DSN itself is never logged: it carries the
+// database password.
+func mustRiskMySQLDSN() string {
+	dsn := mustEnv("SPL_RISK_MYSQL_DSN")
+	if err := validateRiskMySQLDSN(dsn); err != nil {
+		slog.Error("invalid environment variable", "key", "SPL_RISK_MYSQL_DSN", "err", err)
+		os.Exit(1)
+	}
+	return dsn
+}
+
+// validateRiskMySQLDSN refuses a MySQL DSN that does not request TLS
+// (`tls=true`), unless it points at a local host (see isLocalHost).
+func validateRiskMySQLDSN(dsn string) error {
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return errors.New("not a valid MySQL DSN")
+	}
+	if cfg.TLSConfig == "true" {
+		return nil
+	}
+	host := cfg.Addr
+	if h, _, splitErr := net.SplitHostPort(cfg.Addr); splitErr == nil {
+		host = h
+	}
+	if (cfg.Net == "tcp" || cfg.Net == "") && isLocalHost(host) {
+		return nil
+	}
+	if cfg.Net == "unix" {
+		return nil
+	}
+	return errors.New("must request TLS with tls=true unless the host is local")
+}
+
 func mustHTTPSURL(key, value string) string {
 	if err := validateHTTPSURL(value); err != nil {
 		// Deliberately omit the raw value from this log line: it may carry
@@ -1204,6 +1310,10 @@ func envOrDefault(key, def string) string {
 	}
 	return def
 }
+
+// maxHeaderBytes caps the size of a request's header block (http.Server's
+// MaxHeaderBytes).
+const maxHeaderBytes = 64 << 10
 
 // mustPort returns the value of the given environment variable (or def if
 // unset) as a bare port number, e.g. "8080" — not an address like ":8080" or
@@ -1296,6 +1406,7 @@ type viewerConfig struct {
 	driveClientID          string
 	driveClientSecret      string
 	driveRefreshToken      string
+	driveRootFolderIDs     []string
 	riskMySQLDSN           string
 	salesEntityBaseURL     string
 }
@@ -1314,7 +1425,7 @@ type viewerConfig struct {
 // only exercised by the escalation and ABT-team-schedule endpoints
 // respectively and default to empty. SERVICENOW_*, GOOGLE_DRIVE_*, and the
 // entity vars below have no SPL_ prefix even though they're only read when
-// SPL is on: they aren't SPL-specific concepts (ServiceNow, Google Drive,
+// SPL is on: they aren't SPL-specific concepts (the backing system, Google Drive,
 // and the sales-side entity service are just this feature's own upstreams)
 // so they follow this file's existing convention of naming a service's own
 // credentials after the service, not the caller -- SPL_RISK_MYSQL_DSN
@@ -1347,7 +1458,8 @@ func loadViewerConfig() (bool, viewerConfig) {
 		driveClientID:          mustEnv("GOOGLE_DRIVE_CLIENT_ID"),
 		driveClientSecret:      mustEnv("GOOGLE_DRIVE_CLIENT_SECRET"),
 		driveRefreshToken:      mustEnv("GOOGLE_DRIVE_REFRESH_TOKEN"),
-		riskMySQLDSN:           mustEnv("SPL_RISK_MYSQL_DSN"),
+		driveRootFolderIDs:     loadDriveRootFolderIDs(),
+		riskMySQLDSN:           mustRiskMySQLDSN(),
 		salesEntityBaseURL:     mustHTTPSBaseURL("SALES_ENTITY_BASE_URL", mustEnv("SALES_ENTITY_BASE_URL")),
 	}
 }
@@ -1362,4 +1474,16 @@ func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {
 		return nil
 	}
 	return spaces
+}
+
+// loadDriveRootFolderIDs reads GOOGLE_DRIVE_ROOT_FOLDER_IDS, the
+// comma-separated Drive folder ids the /files endpoints are confined to (each
+// root and everything below it). Unset means nothing is reachable through
+// those endpoints, which is logged as a warning rather than refusing to start.
+func loadDriveRootFolderIDs() []string {
+	ids := splitComma(os.Getenv("GOOGLE_DRIVE_ROOT_FOLDER_IDS"))
+	if len(ids) == 0 {
+		slog.Warn("GOOGLE_DRIVE_ROOT_FOLDER_IDS is not set; GET /files and GET /files/search will find nothing")
+	}
+	return ids
 }

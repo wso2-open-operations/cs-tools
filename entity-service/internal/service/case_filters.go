@@ -17,6 +17,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -863,17 +864,17 @@ func parseCaseFilterBool(f domain.CaseFieldFilter, value string) (bool, error) {
 }
 
 // resolveCaseFilterCallerEmail resolves the authenticated caller's email from
-// the request's forwarded x-user-id-token, for use as ParseCaseFieldFilters'
+// the validated request identity, for use as ParseCaseFieldFilters'
 // callerEmail/callerEmailErr pair. Safe to call unconditionally: the result is
 // only consulted by ParseCaseFieldFilters when the filter array actually
 // contains a createdBy+eq current-user filter.
-func resolveCaseFilterCallerEmail(token string) (string, error) {
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required for the createdBy current-user filter"}
-	}
-	email, err := emailFromJWT(token)
+func resolveCaseFilterCallerEmail(ctx context.Context) (string, error) {
+	email, err := optionalCallerEmail(ctx)
 	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", err
+	}
+	if email == "" {
+		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required for the createdBy current-user filter"}
 	}
 	return email, nil
 }

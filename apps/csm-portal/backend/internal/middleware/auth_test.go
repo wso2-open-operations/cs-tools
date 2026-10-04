@@ -221,8 +221,11 @@ func TestAuth_RolesClaimShapes(t *testing.T) {
 func TestAuth_SecurityHeaders(t *testing.T) {
 	wantHeaders := map[string]string{
 		"X-Content-Type-Options":    "nosniff",
-		"Content-Security-Policy":   "upgrade-insecure-requests",
+		"Content-Security-Policy":   "default-src 'none'; frame-ancestors 'none'",
 		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+		"Cache-Control":             "no-store",
+		"Referrer-Policy":           "no-referrer",
+		"X-Frame-Options":           "DENY",
 	}
 
 	cases := []struct {

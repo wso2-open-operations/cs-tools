@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 )
 
 // Status values reported by the health probes.
@@ -50,6 +52,13 @@ type DBPinger interface {
 	Ping(ctx context.Context) error
 }
 
+// dbPingTTL is how long one database round trip answers DatabaseCheck. The
+// probe is public and unauthenticated; without this, every poll -- or a flood
+// of them -- would take a connection from the same pool the API serves from.
+// Five seconds is far below any alerting interval, so an outage still shows
+// up on the next poll that matters.
+const dbPingTTL = 5 * time.Second
+
 // HealthHandler serves the health probes on the health listener.
 type HealthHandler struct {
 	// db is nil when this deployment runs without a Postgres pool. Callers
@@ -58,13 +67,40 @@ type HealthHandler struct {
 	// so `db != nil` would pass and the probe would call Ping on a nil
 	// pool. See NewHealthHandler's own call site in server.NewHealthServer.
 	db DBPinger
+
+	// now is the clock the ping cache reads; time.Now outside tests.
+	now func() time.Time
+
+	// mu guards the cached ping result below and is held across the ping
+	// itself, so concurrent probes arriving while the cache is stale share
+	// one round trip instead of each starting their own.
+	mu        sync.Mutex
+	checkedAt time.Time
+	pingErr   error
 }
 
 // NewHealthHandler builds a HealthHandler. Pass a nil DBPinger for a
 // deployment with no Postgres pool; the database check then reports the
 // database as not configured rather than down.
 func NewHealthHandler(db DBPinger) *HealthHandler {
-	return &HealthHandler{db: db}
+	return &HealthHandler{db: db, now: time.Now}
+}
+
+// pingDB returns the result of a database round trip no older than
+// dbPingTTL. A ping cut short because this request's own context ended is
+// not cached: that says nothing about the database.
+func (h *HealthHandler) pingDB(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.now()
+	if !h.checkedAt.IsZero() && now.Sub(h.checkedAt) < dbPingTTL {
+		return h.pingErr
+	}
+	err := h.db.Ping(ctx)
+	if ctx.Err() == nil {
+		h.checkedAt, h.pingErr = now, err
+	}
+	return err
 }
 
 // HealthCheck handles GET /health. It always responds 200 with
@@ -94,6 +130,9 @@ func HealthCheck(w http.ResponseWriter, _ *http.Request) {
 // fails, and 200 with "not_configured" for a deployment that has no pool at
 // all — that last one is not a failure, see dbStatusNotConfigured.
 //
+// One round trip answers every probe for dbPingTTL (see pingDB), so the
+// reported state can be up to that old.
+//
 // The failure body carries no error detail — no driver message, host, or
 // port. This endpoint is publicly reachable by design (external alerting has
 // no credentials), so it reports only whether the dependency is up, never
@@ -106,7 +145,7 @@ func (h *HealthHandler) DatabaseCheck(w http.ResponseWriter, r *http.Request) {
 	// Only a deployment that actually has a pool can fail this probe: with
 	// no pool there is no Postgres to be down (see dbStatusNotConfigured).
 	if h.db != nil {
-		if err := h.db.Ping(r.Context()); err != nil {
+		if err := h.pingDB(r.Context()); err != nil {
 			dbStatus = dbStatusDown
 			status = statusUnavailable
 			code = http.StatusServiceUnavailable

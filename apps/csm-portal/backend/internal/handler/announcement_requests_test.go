@@ -46,6 +46,7 @@ type mockEntityAnnouncementRequestClient struct {
 	listUpdatesFn             func(ctx context.Context, id string) ([]byte, error)
 	recordDeliveriesFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
 	listDeliveriesFn          func(ctx context.Context, id string) ([]byte, error)
+	getMeFn                   func(ctx context.Context) ([]byte, error)
 
 	gotApproveBody               []byte
 	gotScheduleBody              []byte
@@ -229,8 +230,8 @@ func TestCreateAnnouncementRequest(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 			t.Fatalf("decode response: %v; raw: %s", err, w.Body.String())
 		}
-		if got.CreatedBy != testUser.UserID {
-			t.Fatalf("createdBy = %q, want the authenticated caller %q — a client-supplied value must never be trusted", got.CreatedBy, testUser.UserID)
+		if got.CreatedBy != testPlatformUserID {
+			t.Fatalf("createdBy = %q, want the authenticated caller %q — a client-supplied value must never be trusted", got.CreatedBy, testPlatformUserID)
 		}
 		if got.CreatedByEmail != testUser.Email {
 			t.Fatalf("createdByEmail = %q, want the authenticated caller's email %q", got.CreatedByEmail, testUser.Email)
@@ -319,8 +320,8 @@ func TestUpdateAnnouncementRequest(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if got.ActorID != testUser.UserID {
-			t.Fatalf("actorId = %q, want the authenticated caller %q", got.ActorID, testUser.UserID)
+		if got.ActorID != testPlatformUserID {
+			t.Fatalf("actorId = %q, want the authenticated caller %q", got.ActorID, testPlatformUserID)
 		}
 		if got.Subject != "New subject" {
 			t.Fatalf("expected subject forwarded unchanged, got %q", got.Subject)
@@ -384,8 +385,8 @@ func TestRecordAnnouncementRequestDryRun(t *testing.T) {
 		if got.CaseID != "case-1" {
 			t.Fatalf("expected caseId forwarded, got %q", got.CaseID)
 		}
-		if got.ActorID != testUser.UserID {
-			t.Fatalf("actorId = %q, want the authenticated caller %q", got.ActorID, testUser.UserID)
+		if got.ActorID != testPlatformUserID {
+			t.Fatalf("actorId = %q, want the authenticated caller %q", got.ActorID, testPlatformUserID)
 		}
 	})
 }
@@ -410,8 +411,8 @@ func TestApproveAnnouncementRequest_IgnoresRequestBodyEntirely(t *testing.T) {
 	if err := json.Unmarshal(client.gotApproveBody, &got); err != nil {
 		t.Fatalf("decode forwarded body: %v", err)
 	}
-	if got.ActorID != testUser.UserID {
-		t.Fatalf("actorId = %q, want %q", got.ActorID, testUser.UserID)
+	if got.ActorID != testPlatformUserID {
+		t.Fatalf("actorId = %q, want %q", got.ActorID, testPlatformUserID)
 	}
 	if got.ActorEmail != testUser.Email {
 		t.Fatalf("actorEmail = %q, want %q", got.ActorEmail, testUser.Email)
@@ -442,8 +443,8 @@ func TestPublishAnnouncementRequest_ForwardsCaseIDsAndForcesActorID(t *testing.T
 	if err := json.Unmarshal(client.gotPublishBody, &got); err != nil {
 		t.Fatalf("decode forwarded body: %v", err)
 	}
-	if got.ActorID != testUser.UserID {
-		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testUser.UserID)
+	if got.ActorID != testPlatformUserID {
+		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testPlatformUserID)
 	}
 	if got.ActorEmail != testUser.Email {
 		t.Fatalf("actorEmail = %q, want the authenticated caller's email %q", got.ActorEmail, testUser.Email)
@@ -496,8 +497,8 @@ func TestScheduleAnnouncementRequest_ForwardsScheduledForAndForcesActorID(t *tes
 	if err := json.Unmarshal(client.gotScheduleBody, &got); err != nil {
 		t.Fatalf("decode forwarded body: %v", err)
 	}
-	if got.ActorID != testUser.UserID {
-		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testUser.UserID)
+	if got.ActorID != testPlatformUserID {
+		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testPlatformUserID)
 	}
 	if got.ActorEmail != testUser.Email {
 		t.Fatalf("actorEmail = %q, want the authenticated caller's email %q", got.ActorEmail, testUser.Email)
@@ -557,8 +558,8 @@ func TestCreateAnnouncementRequestUpdate_ForwardsContentAndForcesActorID(t *test
 	if got.ActorEmail != testUser.Email {
 		t.Fatalf("actorEmail = %q, want the authenticated caller's email %q", got.ActorEmail, testUser.Email)
 	}
-	if got.ActorID != testUser.UserID {
-		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testUser.UserID)
+	if got.ActorID != testPlatformUserID {
+		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testPlatformUserID)
 	}
 }
 
@@ -618,8 +619,8 @@ func TestRecordAnnouncementRequestDeliveries_ForwardsDeliveriesAndForcesActorID(
 	if err := json.Unmarshal(client.gotRecordDeliveriesBody, &got); err != nil {
 		t.Fatalf("decode forwarded body: %v", err)
 	}
-	if got.ActorID != testUser.UserID {
-		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testUser.UserID)
+	if got.ActorID != testPlatformUserID {
+		t.Fatalf("actorId = %q, want the authenticated caller %q, not the client-supplied value", got.ActorID, testPlatformUserID)
 	}
 	if len(got.Deliveries) != 1 || got.Deliveries[0].ProjectID != "p-1" || got.Deliveries[0].Status != "succeeded" || got.Deliveries[0].CaseID != "case-1" {
 		t.Fatalf("expected deliveries forwarded unchanged, got %+v", got.Deliveries)
@@ -709,8 +710,8 @@ func TestSubmitAnnouncementRequest(t *testing.T) {
 		if len(got.ResolvedProjectIDs) != 2 || got.ResolvedProjectIDs[0] != "proj-1" || got.ResolvedProjectIDs[1] != "proj-2" {
 			t.Fatalf("expected the picked project ids forwarded unchanged, got %+v", got.ResolvedProjectIDs)
 		}
-		if got.ActorID != testUser.UserID {
-			t.Fatalf("actorId = %q, want %q", got.ActorID, testUser.UserID)
+		if got.ActorID != testPlatformUserID {
+			t.Fatalf("actorId = %q, want %q", got.ActorID, testPlatformUserID)
 		}
 		if got.ActorEmail != testUser.Email {
 			t.Fatalf("actorEmail = %q, want %q", got.ActorEmail, testUser.Email)
@@ -935,4 +936,30 @@ func TestSubmitAnnouncementRequest(t *testing.T) {
 			t.Fatalf("expected no project search for an unrecognized scope, got %d calls", client.searchProjectsCalls)
 		}
 	})
+}
+
+// GetUserMe resolves the caller's platform user id; by default
+// testPlatformUserID, deliberately distinct from the token's user id claim.
+func (m *mockEntityAnnouncementRequestClient) GetUserMe(ctx context.Context) ([]byte, error) {
+	if m.getMeFn != nil {
+		return m.getMeFn(ctx)
+	}
+	return []byte(`{"id":"` + testPlatformUserID + `"}`), nil
+}
+
+// TestAnnouncementRequestActorFailsClosed: when the caller's platform user id
+// cannot be resolved, no announcement request write is attempted.
+func TestAnnouncementRequestActorFailsClosed(t *testing.T) {
+	created := false
+	client := &mockEntityAnnouncementRequestClient{
+		getMeFn:  func(context.Context) ([]byte, error) { return nil, context.DeadlineExceeded },
+		createFn: func(context.Context, []byte) ([]byte, error) { created = true; return []byte(`{}`), nil },
+	}
+	h := NewAnnouncementRequestHandler(client, nil)
+	w := httptest.NewRecorder()
+	h.CreateAnnouncementRequest(w, withUser(httptest.NewRequest(http.MethodPost, "/announcement-requests", strings.NewReader(`{"kind":"customer","subject":"Hi"}`))))
+	assertStatus(t, w, http.StatusInternalServerError)
+	if created {
+		t.Fatal("no write may happen without a resolved actor")
+	}
 }

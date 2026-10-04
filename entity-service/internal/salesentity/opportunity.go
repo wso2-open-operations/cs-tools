@@ -126,7 +126,7 @@ func (c *Client) GetOpportunity(ctx context.Context, id string) (Opportunity, er
 		}
 	}
 	if len(rows) == 0 {
-		return Opportunity{}, &apierror.ServiceUnavailableError{Msg: "salesentity: opportunity not found"}
+		return Opportunity{}, NotFound("salesentity: opportunity not found")
 	}
 	return Opportunity{}, &apierror.ServiceUnavailableError{Msg: "salesentity: opportunities/search returned an unexpected opportunity"}
 }

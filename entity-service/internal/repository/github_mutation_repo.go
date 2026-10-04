@@ -298,7 +298,7 @@ func (r *githubMutationRepository) SetAssignee(ctx context.Context, id, userID s
 //
 // THERE IS NO GITHUB IDENTITY ON THE USER TABLE, so this matches a login
 // against the local part of an email address and nothing else. That is a
-// heuristic: "nimalp" matches nimalp@wso2.com, and a GitHub account whose
+// heuristic: "janed" matches janed@example.com, and a GitHub account whose
 // login bears no relation to the address matches nothing.
 //
 // Deliberately returns empty rather than guessing when more than one user

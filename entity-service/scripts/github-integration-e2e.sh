@@ -5,9 +5,12 @@
 #
 #   ./github-integration-e2e.sh
 #
-# Reads its configuration from an env file (default ./staging.env, override with
-# ENV_FILE). Required: DB_*, GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET, GITHUB_OWNER,
-# GITHUB_REPO, CSM_PORTAL_BASE_URL, TEST_ACCOUNT_NAME, TEST_CASE_ID.
+# Reads its configuration from an env file OUTSIDE the repository (default
+# ${XDG_CONFIG_HOME:-~/.config}/cs-tools/e2e.env, override with ENV_FILE; see
+# e2e.env.example). It holds credentials, so it must never sit inside the
+# checkout where a `git add` could pick it up. Required: DB_*, GITHUB_TOKEN,
+# GITHUB_WEBHOOK_SECRET, GITHUB_OWNER, GITHUB_REPO, CSM_PORTAL_BASE_URL,
+# TEST_ACCOUNT_NAME, TEST_CASE_ID.
 #
 # SAFE BY CONSTRUCTION. Two gates must BOTH be open for any trigger to enqueue:
 # the account needs an active row in account_github_repo, and the case needs a
@@ -18,8 +21,8 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/opt/homebrew/opt/libpq/bin:$PATH"
 
-ENV_FILE="${ENV_FILE:-$(dirname "$0")/staging.env}"
-[ -f "$ENV_FILE" ] || { echo "no env file at $ENV_FILE" >&2; exit 2; }
+ENV_FILE="${ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/cs-tools/e2e.env}"
+[ -f "$ENV_FILE" ] || { echo "no env file at $ENV_FILE (copy e2e.env.example there, or set ENV_FILE)" >&2; exit 2; }
 set -a; . "$ENV_FILE"; set +a
 
 for v in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME GITHUB_TOKEN \

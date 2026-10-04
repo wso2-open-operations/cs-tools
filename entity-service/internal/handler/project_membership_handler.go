@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -39,26 +40,37 @@ type ProjectMembershipHandler struct {
 	svc service.ProjectMembershipWriteService
 }
 
-// membershipWriteDeadline is how long a membership write may take to send
-// its response. The server-wide WriteTimeout (15s) is shorter than a write
-// that goes through several Salesforce calls can take when Salesforce is
-// slow, and when it expires the connection is closed after the write has
-// committed: the caller then sees a failure for a change that happened. The
-// portals' own clients stop waiting well before this, so it only has to
-// outlast them.
+// membershipWriteDeadline is how long a membership write may take, end to
+// end. The server-wide request timeout (and the write timeout derived from
+// it) is shorter than a write that goes through several Salesforce calls can
+// take when Salesforce is slow; if either expired first, the caller would see
+// a failure for a change that had already committed. The portals' own
+// clients stop waiting well before this, so it only has to outlast them.
 const membershipWriteDeadline = 60 * time.Second
 
-// extendWriteDeadline raises this response's write deadline to
-// membershipWriteDeadline, leaving every other route on the server default.
-// A writer that cannot reach the connection (http.ErrNotSupported) keeps the
-// default; that is logged, not fatal.
-func extendWriteDeadline(w http.ResponseWriter, r *http.Request) {
+// extendDeadlines gives this request membershipWriteDeadline on both clocks
+// that would otherwise cut it short, leaving every other route on the server
+// defaults:
+//
+//   - the connection's write deadline, so the response can still be sent;
+//   - the context the service runs on, which is derived from the request's
+//     context with its cancellation removed (the server-wide request timeout
+//     installed by middleware.Timeout would otherwise cancel the work at the
+//     shorter deadline) and a fresh membershipWriteDeadline applied. Values
+//     on the request context -- the caller's identity, the correlation id --
+//     carry over unchanged.
+//
+// The caller must call the returned cancel function. A writer that cannot
+// reach the connection (http.ErrNotSupported) keeps the default write
+// deadline; that is logged, not fatal.
+func extendDeadlines(w http.ResponseWriter, r *http.Request) (context.Context, context.CancelFunc) {
 	err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(membershipWriteDeadline))
 	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		slog.WarnContext(r.Context(), "membership write: could not extend the write deadline", "err", err)
 	} else if errors.Is(err, http.ErrNotSupported) {
 		slog.WarnContext(r.Context(), "membership write: response writer cannot extend the write deadline")
 	}
+	return context.WithTimeout(context.WithoutCancel(r.Context()), membershipWriteDeadline)
 }
 
 // NewProjectMembershipHandler constructs a ProjectMembershipHandler.
@@ -68,12 +80,13 @@ func NewProjectMembershipHandler(svc service.ProjectMembershipWriteService) *Pro
 
 // InviteProjectContact handles POST /projects/{id}/contacts.
 func (h *ProjectMembershipHandler) InviteProjectContact(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, r)
+	ctx, cancel := extendDeadlines(w, r)
+	defer cancel()
 	var req domain.CreateProjectMembershipRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.Invite(r.Context(), r.PathValue("id"), req)
+	resp, err := h.svc.Invite(ctx, r.PathValue("id"), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -89,12 +102,13 @@ func (h *ProjectMembershipHandler) InviteProjectContact(w http.ResponseWriter, r
 // itself failed.
 func (h *ProjectMembershipHandler) ValidateProjectContact(w http.ResponseWriter, r *http.Request) {
 	// Several Salesforce reads, like the writes: the same deadline applies.
-	extendWriteDeadline(w, r)
+	ctx, cancel := extendDeadlines(w, r)
+	defer cancel()
 	var req domain.ValidateProjectMembershipRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.ValidateInvitation(r.Context(), r.PathValue("id"), req)
+	resp, err := h.svc.ValidateInvitation(ctx, r.PathValue("id"), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -105,12 +119,13 @@ func (h *ProjectMembershipHandler) ValidateProjectContact(w http.ResponseWriter,
 
 // UpdateProjectContactRoles handles PATCH /projects/{id}/contacts/{email}.
 func (h *ProjectMembershipHandler) UpdateProjectContactRoles(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, r)
+	ctx, cancel := extendDeadlines(w, r)
+	defer cancel()
 	var req domain.UpdateProjectMembershipRolesRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
-	resp, err := h.svc.UpdateRoles(r.Context(), r.PathValue("id"), pathEmail(r), req)
+	resp, err := h.svc.UpdateRoles(ctx, r.PathValue("id"), pathEmail(r), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -123,8 +138,9 @@ func (h *ProjectMembershipHandler) UpdateProjectContactRoles(w http.ResponseWrit
 // The membership is deactivated, never deleted — see the service's own doc
 // comment.
 func (h *ProjectMembershipHandler) DeactivateProjectContact(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, r)
-	if err := h.svc.Deactivate(r.Context(), r.PathValue("id"), pathEmail(r)); err != nil {
+	ctx, cancel := extendDeadlines(w, r)
+	defer cancel()
+	if err := h.svc.Deactivate(ctx, r.PathValue("id"), pathEmail(r)); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
@@ -134,8 +150,9 @@ func (h *ProjectMembershipHandler) DeactivateProjectContact(w http.ResponseWrite
 // ResendProjectContactInvitation handles
 // POST /projects/{id}/contacts/{email}/resend-invitation.
 func (h *ProjectMembershipHandler) ResendProjectContactInvitation(w http.ResponseWriter, r *http.Request) {
-	extendWriteDeadline(w, r)
-	if err := h.svc.ResendInvitation(r.Context(), r.PathValue("id"), pathEmail(r)); err != nil {
+	ctx, cancel := extendDeadlines(w, r)
+	defer cancel()
+	if err := h.svc.ResendInvitation(ctx, r.PathValue("id"), pathEmail(r)); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}

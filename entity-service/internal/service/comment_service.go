@@ -22,7 +22,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -144,25 +143,25 @@ type commentCallerVisibility struct {
 	IsAdmin    bool
 }
 
-// resolveCommentCallerVisibility never returns an error: every failure mode
-// (no token, malformed token, unknown email, repository error) degrades to
-// the conservative zero value rather than failing the whole search -- see
-// commentCallerVisibility's own doc comment for why.
+// resolveCommentCallerVisibility never returns an error. The caller is
+// internal only when its resolved scope is Unrestricted (an internal user, or
+// an allow-listed internal client); every other outcome -- a scoped customer
+// contact, or a caller whose scope cannot be resolved at all -- is treated as
+// a customer, so work notes and soft-deleted rows are never served to a
+// caller the service cannot place. Admin status is then looked up only for an
+// internal caller that carries a user token.
 func (s *commentService) resolveCommentCallerVisibility(ctx context.Context) commentCallerVisibility {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return commentCallerVisibility{}
+	scope, err := resolveCallerScope(ctx, nil)
+	if err != nil || !scope.Unrestricted {
+		return commentCallerVisibility{IsCustomer: true}
 	}
-	email, err := emailFromJWT(token)
-	if err != nil {
+	email, err := optionalCallerEmail(ctx)
+	if err != nil || email == "" {
 		return commentCallerVisibility{}
 	}
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return commentCallerVisibility{}
-	}
-	if user.UserType == domain.UserTypeCustomer || user.UserType == domain.UserTypeExternal {
-		return commentCallerVisibility{IsCustomer: true}
 	}
 	isAdmin := false
 	if roles, err := s.userRepo.GetUserRoles(ctx, user.ID); err == nil {
@@ -203,6 +202,9 @@ func (s *commentService) SearchComments(ctx context.Context, req domain.SearchCo
 	}
 
 	vis := s.resolveCommentCallerVisibility(ctx)
+	if vis.IsCustomer && typeFilter != nil && *typeFilter == commentTypeToEnum[domain.CommentTypeWorkNote] {
+		return domain.SearchCommentsResponse{}, &apierror.ForbiddenError{Msg: "only internal users may read work notes"}
+	}
 
 	rows, total, err := s.repo.SearchComments(ctx, req.ReferenceID, req.ReferenceType, typeFilter, vis.IsCustomer, req.Pagination)
 	if err != nil {
@@ -211,6 +213,12 @@ func (s *commentService) SearchComments(ctx context.Context, req domain.SearchCo
 
 	comments := make([]domain.Comment, 0, len(rows))
 	for _, row := range rows {
+		// Work notes are engineer-side. The comment table's row policy hides
+		// them from customer sessions at the source; dropping them here too
+		// keeps this path correct on its own.
+		if vis.IsCustomer && row.Type != nil && *row.Type == commentTypeToEnum[domain.CommentTypeWorkNote] {
+			continue
+		}
 		c := commentRowToDomain(row)
 		if row.DeletedAt != nil && !vis.IsAdmin {
 			c.Content = commentDeletedPlaceholder
@@ -239,6 +247,16 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	if req.Content == "" {
 		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "content is required"}
 	}
+	// Work notes are engineer-side: only an internal caller may author one.
+	if req.Type == domain.CommentTypeWorkNote {
+		scope, err := resolveCallerScope(ctx, nil)
+		if err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+		if !scope.Unrestricted {
+			return domain.CreateCommentResponse{}, &apierror.ForbiddenError{Msg: "only internal users may add a work_note entry"}
+		}
+	}
 
 	// req.CreatedBy is a caller-supplied override, documented on
 	// CreateCommentRequest as existing solely to attribute an AI-assistant
@@ -260,13 +278,9 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 		return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: `createdBy must be "agent" or omitted`}
 	}
 	if createdBy == "" {
-		token := middleware.UserIDTokenFromContext(ctx)
-		if token == "" {
-			return domain.CreateCommentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-		}
-		email, err := emailFromJWT(token)
+		email, err := callerEmail(ctx)
 		if err != nil {
-			return domain.CreateCommentResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+			return domain.CreateCommentResponse{}, err
 		}
 		user, err := s.userRepo.GetUserByEmail(ctx, email)
 		if err != nil {
@@ -319,13 +333,9 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 // NotFoundError -- the same posture CreateComment already takes for its own
 // token resolution above.
 func (s *commentService) resolveCommentActor(ctx context.Context) (email string, isAdmin bool, err error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", false, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err = emailFromJWT(token)
+	email, err = callerEmail(ctx)
 	if err != nil {
-		return "", false, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", false, err
 	}
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {

@@ -1,0 +1,22 @@
+# Keeps the local-dev image build context (docker/local/entity-service.Dockerfile)
+# to what `go build` needs; everything else stays on the host. The compose
+# stack mounts migrations/ into its own migrate container straight from the
+# checkout, never from this image.
+.git
+.env
+.env.*
+*_test.go
+**/testdata/
+.choreo/
+docs/
+scripts/
+queries/
+migrations/
+*.md
+*.yaml
+Makefile
+bin/
+dist/
+*.out
+*.test
+coverage*

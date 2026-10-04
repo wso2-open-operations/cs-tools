@@ -129,7 +129,6 @@ function detailFromBeCase(
     updatedAt: c.updatedOn ?? c.createdOn ?? "",
     description: c.description ?? "",
     issueType: c.issueType,
-    assignmentGroup: "grp.cre_team",
     conversationId: c.conversation?.id,
     createdBy: reporter,
     createdByEmail: c.createdBy?.email,

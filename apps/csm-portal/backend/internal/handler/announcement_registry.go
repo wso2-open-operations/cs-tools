@@ -524,13 +524,13 @@ func (h *AnnouncementRegistryHandler) SearchAnnouncementRegistry(w http.Response
 
 	cases, err := h.fetchAllMatchingCases(r.Context(), req)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch all matching cases for registry failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch all matching cases for registry failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}
 	requests, err := h.fetchAllPublishedRequests(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch all published announcement requests for registry failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch all published announcement requests for registry failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}
@@ -632,7 +632,7 @@ func (h *AnnouncementRegistryHandler) SearchAnnouncementRegistry(w http.Response
 	// N projects" and omit their CS numbers entirely.
 	memberLookup, err := h.registryCaseLookup(r.Context(), filteredByID, needed)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch unfiltered cases for registry batch members failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch unfiltered cases for registry batch members failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}

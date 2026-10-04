@@ -18,7 +18,7 @@ info:
     | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including case, incident and change-request comments | cs-engineer, admin |
     | `admin` | `POST /users` | admin only |
-    | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
+    | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, and any read of a case whose type is `security_report_analysis`. Without it, `POST /cases/search` and `POST /cases/aggregate` are scoped to the other case types (a request naming that type is refused with `403`), and `GET /cases/{id}`, `POST /cases/{id}/comments/search`, `POST /cases/{id}/activities/search` and `GET /cases/{id}/escalations` return `403` for such a case | cs-engineer, admin |
 security:
   - bearerAuth: []
 servers:
@@ -132,11 +132,14 @@ paths:
       parameters:
         - name: id
           in: path
-          description: UUID of the case.
+          description: >-
+            The case's UUID, the legacy data source's 32-character hexadecimal record id,
+            or a case number (2-5 letters followed by 4-12 digits). Any other shape is
+            rejected with 400.
           required: true
           schema:
             type: string
-            format: uuid
+            pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32}|[A-Za-z]{2,5}[0-9]{4,12})$'
       responses:
         "200":
           description: The enriched case with the given ID.
@@ -182,16 +185,19 @@ paths:
         `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
         `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`.
         `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
-        the ServiceNow data source is active.
+        the legacy data source is active.
       operationId: patchCasesId
       parameters:
         - name: id
           in: path
-          description: UUID of the case.
+          description: >-
+            The case's UUID, the legacy data source's 32-character hexadecimal record id,
+            or a case number (2-5 letters followed by 4-12 digits). Any other shape is
+            rejected with 400.
           required: true
           schema:
             type: string
-            format: uuid
+            pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32}|[A-Za-z]{2,5}[0-9]{4,12})$'
       requestBody:
         required: true
         content:
@@ -974,7 +980,7 @@ paths:
       summary: Get a case's escalation history.
       description: >
         Returns the full escalation history for a case (each escalate/de-escalate
-        step, newest first). Supported by the ServiceNow data source only.
+        step, newest first). Supported by the legacy data source only.
       operationId: getCasesIdEscalations
       parameters:
         - name: id
@@ -1026,7 +1032,7 @@ paths:
       description: >
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
-        effect. Supported by the ServiceNow data source only.
+        effect. Supported by the legacy data source only.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -1359,7 +1365,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     delete:
-      summary: Delete a case attachment (ServiceNow data source only).
+      summary: Delete a case attachment (legacy data source only).
       operationId: deleteCaseAttachment
       parameters:
         - name: id
@@ -1720,7 +1726,9 @@ paths:
         internal (WSO2 staff) target, `roles` is replaced with the same portal-role
         vocabulary `GET /users/me` reports (sourced from that user's own SCIM role
         assignment, not entity-service's own role data); an external contact's `roles`
-        is left as entity-service returned it.
+        is left as entity-service returned it. `projectAccess` and `externalAccount` for an
+        external contact are returned only to callers holding the `write` permission (user
+        management); other callers receive the profile without them.
       operationId: getUserById
       parameters:
         - name: id
@@ -2051,8 +2059,12 @@ paths:
       summary: Search users with optional filters, sort, and pagination.
       description: >
         Returns a paginated list of users. When the entity-service data source is
-        ServiceNow the response uses SNUser (name, timeZone, active, roles); for
+        the legacy one the response uses SNUser (name, timeZone, active, roles); for
         the postgres data source it uses User (firstName, lastName, userType).
+        For a caller without the `write` permission (user management) the search is
+        limited to staff accounts: with no `filters.roleIds` the staff roles
+        (`internal`, `agent`, `admin`) are applied, and a `roleIds` value other than those
+        or `timecard_approver` is refused with `403`.
       operationId: postUsersSearch
       requestBody:
         description: User search payload
@@ -2159,7 +2171,7 @@ paths:
     patch:
       summary: Update an account's CRE and/or SRE team.
       description: >
-        Postgres data source only; there is no ServiceNow equivalent. Provide creTeamId,
+        Postgres data source only; there is no backing-system equivalent. Provide creTeamId,
         sreTeamId, or both. A field left out of the request body leaves that team assignment
         unchanged; there is currently no way to clear an assignment back to no team once set.
         The request body is forwarded to the entity service as-is and the response is
@@ -4448,7 +4460,7 @@ paths:
 
   /deployed-products/projects/search:
     post:
-      summary: Search for the projects running a given product version (ServiceNow data source only).
+      summary: Search for the projects running a given product version (legacy data source only).
       operationId: postDeployedProductsProjectsSearch
       requestBody:
         description: Product version project search payload
@@ -4704,7 +4716,7 @@ paths:
 
   /cases/{id}/call-requests:
     post:
-      summary: Create a call request for a case (ServiceNow data source only).
+      summary: Create a call request for a case (legacy data source only).
       operationId: createCallRequest
       parameters:
         - name: id
@@ -4754,7 +4766,7 @@ paths:
 
   /cases/{id}/call-requests/search:
     post:
-      summary: Search call requests for a case (ServiceNow data source only).
+      summary: Search call requests for a case (legacy data source only).
       operationId: searchCallRequests
       parameters:
         - name: id
@@ -4806,7 +4818,7 @@ paths:
     post:
       summary: Search call requests across all cases, filtered by assignee/state.
       description: >
-        Returns a paginated list of call requests (ServiceNow data source only). Call
+        Returns a paginated list of call requests (legacy data source only). Call
         requests are inherently case-related; this endpoint provides independent search
         and filtering capabilities across cases, distinct from
         /cases/{id}/call-requests/search which is scoped to a single case. Forwards to
@@ -4853,7 +4865,7 @@ paths:
 
   /cases/{caseId}/call-requests/{callRequestId}:
     patch:
-      summary: Update a call request (ServiceNow data source only). Alias with caseId param name.
+      summary: Update a call request (legacy data source only). Alias with caseId param name.
       operationId: patchCallRequest
       parameters:
         - name: caseId
@@ -4918,7 +4930,7 @@ paths:
     post:
       summary: Create a GitHub issue from a case.
       description: |
-        By default the request is forwarded to the entity service (ServiceNow data source only).
+        By default the request is forwarded to the entity service (legacy data source only).
         When the backend is configured with an engineering entity service, the issue is filed
         through it. The repository and product label are resolved from the case product via
         product_repo_mapping (`GET /products/github-repo`). A product with no mapping returns
@@ -4987,7 +4999,7 @@ paths:
 
   /cases/{id}/tags:
     post:
-      summary: Add a free-text tag to a case (ServiceNow data source only).
+      summary: Add a free-text tag to a case (legacy data source only).
       description: >
         The case ID is taken from the URL path; the request body is forwarded to
         the integration service as-is.
@@ -5054,7 +5066,7 @@ paths:
 
   /cases/{id}/tags/{tagId}:
     delete:
-      summary: Remove a tag from a case (ServiceNow data source only).
+      summary: Remove a tag from a case (legacy data source only).
       operationId: removeCaseTag
       security:
         - bearerAuth: []
@@ -5248,7 +5260,7 @@ paths:
 
   /change-requests/{id}:
     patch:
-      summary: Update a change request (ServiceNow data source only).
+      summary: Update a change request (legacy data source only).
       operationId: patchChangeRequest
       security:
         - bearerAuth: []
@@ -5310,7 +5322,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     get:
-      summary: Get a single change request by ID (ServiceNow data source only).
+      summary: Get a single change request by ID (legacy data source only).
       operationId: getChangeRequest
       parameters:
         - name: id
@@ -5360,7 +5372,7 @@ paths:
 
   /change-requests/{id}/approvals:
     get:
-      summary: Get the approval stages for a change request (ServiceNow data source only).
+      summary: Get the approval stages for a change request (legacy data source only).
       operationId: getChangeRequestApprovals
       security:
         - bearerAuth: []
@@ -5414,9 +5426,9 @@ paths:
     post:
       summary: >-
         Decide the caller's own pending approval on a change request
-        (ServiceNow data source only). ServiceNow enforces that only the
+        (legacy data source only). The backing ticketing system enforces that only the
         caller's own pending approval can be acted on; the change request's
-        own state cascades automatically via ServiceNow's existing business
+        own state cascades automatically via backing-system's existing business
         rule.
       operationId: decideChangeRequestApproval
       security:
@@ -5481,7 +5493,7 @@ paths:
 
   /change-requests:
     post:
-      summary: Create a change request (ServiceNow data source only).
+      summary: Create a change request (legacy data source only).
       operationId: createChangeRequest
       security:
         - bearerAuth: []
@@ -5531,7 +5543,7 @@ paths:
 
   /change-requests/search:
     post:
-      summary: Search change requests (ServiceNow data source only).
+      summary: Search change requests (legacy data source only).
       operationId: postChangeRequestsSearch
       requestBody:
         required: true
@@ -5635,7 +5647,7 @@ paths:
 
   /services/search:
     post:
-      summary: Search IT services (ServiceNow data source only).
+      summary: Search IT services (legacy data source only).
       operationId: searchITServices
       security:
         - bearerAuth: []
@@ -5685,7 +5697,7 @@ paths:
 
   /service-offerings/search:
     post:
-      summary: Search service offerings (ServiceNow data source only).
+      summary: Search service offerings (legacy data source only).
       operationId: searchServiceOfferings
       security:
         - bearerAuth: []
@@ -5735,7 +5747,7 @@ paths:
 
   /groups/search:
     post:
-      summary: Search assignment groups (ServiceNow data source only).
+      summary: Search assignment groups (legacy data source only).
       operationId: searchGroups
       security:
         - bearerAuth: []
@@ -5785,7 +5797,7 @@ paths:
 
   /configuration-items/search:
     post:
-      summary: Search configuration items (CMDB, ServiceNow data source only).
+      summary: Search configuration items (CMDB, legacy data source only).
       operationId: searchConfigurationItems
       security:
         - bearerAuth: []
@@ -5835,7 +5847,7 @@ paths:
 
   /catalogs/search:
     post:
-      summary: Search service catalogs by deployed product (ServiceNow data source only).
+      summary: Search service catalogs by deployed product (legacy data source only).
       operationId: searchCatalogs
       security:
         - bearerAuth: []
@@ -5879,7 +5891,7 @@ paths:
 
   /products/vulnerabilities/search:
     post:
-      summary: Search product vulnerabilities (ServiceNow data source only).
+      summary: Search product vulnerabilities (legacy data source only).
       operationId: searchProductVulnerabilities
       security:
         - bearerAuth: []
@@ -5930,7 +5942,7 @@ paths:
 
   /products/vulnerabilities/{id}:
     get:
-      summary: Get a product vulnerability by ID (ServiceNow data source only).
+      summary: Get a product vulnerability by ID (legacy data source only).
       operationId: getProductVulnerability
       security:
         - bearerAuth: []
@@ -5982,7 +5994,7 @@ paths:
 
   /conversations/{id}/messages:
     get:
-      summary: Get messages for a conversation (ServiceNow data source only).
+      summary: Get messages for a conversation (legacy data source only).
       operationId: getConversationMessages
       security:
         - bearerAuth: []
@@ -6051,7 +6063,7 @@ paths:
 
   /conversations/search:
     post:
-      summary: Search conversations (ServiceNow data source only).
+      summary: Search conversations (legacy data source only).
       operationId: postConversationsSearch
       security:
         - bearerAuth: []
@@ -6102,7 +6114,7 @@ paths:
 
   /slas/search:
     post:
-      summary: Search task SLA records (ServiceNow data source only).
+      summary: Search task SLA records (legacy data source only).
       operationId: searchTaskSlas
       security:
         - bearerAuth: []
@@ -6152,7 +6164,7 @@ paths:
 
   /slas/{id}:
     get:
-      summary: Get a task SLA record by ID (ServiceNow data source only).
+      summary: Get a task SLA record by ID (legacy data source only).
       operationId: getTaskSla
       security:
         - bearerAuth: []
@@ -6204,7 +6216,7 @@ paths:
 
   /cases/{caseId}/tasks/search:
     post:
-      summary: Search tasks for a case, paginated (ServiceNow data source only).
+      summary: Search tasks for a case, paginated (legacy data source only).
       description: >
         The case ID is taken from the URL path; the request body is forwarded to
         the integration service as-is and the response is returned verbatim.
@@ -6272,7 +6284,7 @@ paths:
 
   /cases/{caseId}/tasks:
     post:
-      summary: Create a task on a case (ServiceNow data source only).
+      summary: Create a task on a case (legacy data source only).
       description: >
         The case ID is taken from the URL path; the request body is forwarded to
         the integration service as-is, which enforces field requirements.
@@ -6339,7 +6351,7 @@ paths:
 
   /tasks/{id}:
     get:
-      summary: Get a single task by ID (ServiceNow data source only).
+      summary: Get a single task by ID (legacy data source only).
       operationId: getTask
       security:
         - bearerAuth: []
@@ -6389,7 +6401,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
     patch:
-      summary: Update a task (ServiceNow data source only).
+      summary: Update a task (legacy data source only).
       description: >
         Updates exactly one field of the task. Provide exactly one of: `state`,
         `assignedToEmail`, or `dueDate`. The request body is forwarded to the
@@ -6457,7 +6469,7 @@ paths:
 
   /catalogs/{catalogId}/items/{catalogItemId}/variables:
     get:
-      summary: Get variables (form fields) for a catalog item (ServiceNow data source only).
+      summary: Get variables (form fields) for a catalog item (legacy data source only).
       operationId: getCatalogItemVariables
       security:
         - bearerAuth: []
@@ -6516,7 +6528,7 @@ paths:
 
   /time-cards/search:
     post:
-      summary: Search time cards (ServiceNow data source only).
+      summary: Search time cards (legacy data source only).
       operationId: searchTimeCards
       security:
         - bearerAuth: []
@@ -6566,7 +6578,7 @@ paths:
 
   /time-cards:
     post:
-      summary: Create a time card in the submitted state (ServiceNow data source only).
+      summary: Create a time card in the submitted state (legacy data source only).
       operationId: createTimeCard
       security:
         - bearerAuth: []
@@ -6617,7 +6629,7 @@ paths:
   /time-cards/{id}:
     patch:
       summary: >
-        Update a time card (ServiceNow data source only). Carries either editable
+        Update a time card (legacy data source only). Carries either editable
         fields (submitter, while submitted) or a state transition:
         {"state":"approved"} or {"state":"rejected","leadComment":"..."} (an
         eligible approver). The entity service enforces authorization.
@@ -6682,9 +6694,9 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
     delete:
       summary: >
-        Delete a time card (ServiceNow data source only). Only validates that
+        Delete a time card (legacy data source only). Only validates that
         id is a well-formed UUID; the entity service (and, underneath it,
-        ServiceNow) enforces that the caller is the card's own submitter and
+        the backing ticketing system) enforces that the caller is the card's own submitter and
         that it's still in the submitted state, the same trust model the
         PATCH operation above uses.
       operationId: deleteTimeCard
@@ -6738,7 +6750,7 @@ paths:
 
   /incidents/search:
     post:
-      summary: Search incidents (ServiceNow data source only).
+      summary: Search incidents (legacy data source only).
       operationId: postIncidentsSearch
       requestBody:
         description: Incident search payload
@@ -6844,7 +6856,7 @@ paths:
 
   /incidents:
     post:
-      summary: Create a new incident (ServiceNow data source only).
+      summary: Create a new incident (legacy data source only).
       operationId: postIncidents
       requestBody:
         description: Incident create payload
@@ -6899,7 +6911,7 @@ paths:
 
   /incidents/{id}:
     get:
-      summary: Get an incident by ID (ServiceNow data source only).
+      summary: Get an incident by ID (legacy data source only).
       operationId: getIncidentById
       parameters:
         - name: id
@@ -6947,7 +6959,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Partially update an incident (ServiceNow data source only).
+      summary: Partially update an incident (legacy data source only).
       operationId: patchIncidentById
       parameters:
         - name: id
@@ -7182,7 +7194,7 @@ paths:
 
   /problems:
     post:
-      summary: Create a new problem (ServiceNow data source only).
+      summary: Create a new problem (legacy data source only).
       operationId: postProblems
       security:
         - bearerAuth: []
@@ -7233,7 +7245,7 @@ paths:
 
   /problems/{id}:
     get:
-      summary: Get a single problem by ID (ServiceNow data source only).
+      summary: Get a single problem by ID (legacy data source only).
       operationId: getProblem
       parameters:
         - name: id
@@ -7282,7 +7294,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Partially update a problem (ServiceNow data source only).
+      summary: Partially update a problem (legacy data source only).
       operationId: patchProblemById
       parameters:
         - name: id
@@ -7339,7 +7351,7 @@ paths:
 
   /problems/search:
     post:
-      summary: Search problems (ServiceNow data source only).
+      summary: Search problems (legacy data source only).
       operationId: postProblemsSearch
       requestBody:
         description: Problem search payload
@@ -7445,7 +7457,7 @@ paths:
 
   /incident-tasks/{id}:
     get:
-      summary: Get a single incident task by ID (ServiceNow data source only).
+      summary: Get a single incident task by ID (legacy data source only).
       operationId: getIncidentTask
       parameters:
         - name: id
@@ -7495,7 +7507,7 @@ paths:
 
   /incident-tasks/search:
     post:
-      summary: Search incident tasks (ServiceNow data source only).
+      summary: Search incident tasks (legacy data source only).
       operationId: postIncidentTasksSearch
       requestBody:
         description: Incident task search payload
@@ -7607,7 +7619,7 @@ paths:
 
   /outages:
     post:
-      summary: Create a new outage (ServiceNow data source only).
+      summary: Create a new outage (legacy data source only).
       operationId: postOutages
       requestBody:
         description: Outage create payload
@@ -7662,7 +7674,7 @@ paths:
 
   /outages/search:
     post:
-      summary: Search outages (ServiceNow data source only).
+      summary: Search outages (legacy data source only).
       operationId: postOutagesSearch
       requestBody:
         description: Outage search payload
@@ -7711,7 +7723,7 @@ paths:
 
   /outages/metadata:
     get:
-      summary: Get the choice lists needed to render an outage create/edit form (ServiceNow data source only).
+      summary: Get the choice lists needed to render an outage create/edit form (legacy data source only).
       description: >
         Includes the monitored-cloud list (statusPageClouds) so the caller can
         warn about public visibility before a save rather than after a 409.
@@ -7756,7 +7768,7 @@ paths:
 
   /outages/{id}:
     get:
-      summary: Get an outage by ID (ServiceNow data source only).
+      summary: Get an outage by ID (legacy data source only).
       operationId: getOutageById
       parameters:
         - name: id
@@ -7805,7 +7817,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Partially update an outage (ServiceNow data source only).
+      summary: Partially update an outage (legacy data source only).
       description: >
         All fields are optional, but at least one must be provided. end is
         tri-state on the wire: omit to leave unchanged, send null to reopen a
@@ -7878,7 +7890,7 @@ paths:
 
   /outages/{id}/communications:
     post:
-      summary: Add a communication journal entry to an outage (ServiceNow data source only).
+      summary: Add a communication journal entry to an outage (legacy data source only).
       operationId: postOutageCommunications
       parameters:
         - name: id
@@ -7941,7 +7953,7 @@ paths:
 
   /outages/{id}/communications/search:
     post:
-      summary: Search communication journal entries on an outage (ServiceNow data source only).
+      summary: Search communication journal entries on an outage (legacy data source only).
       operationId: postOutageCommunicationsSearch
       parameters:
         - name: id
@@ -8008,6 +8020,8 @@ paths:
         Send an incident alert card message to the Google Chat space
         configured for the given product. Triggered manually today, pending
         integration into real case/incident creation.
+        The card content comes from the incident record named by caseId; each
+        caller may send at most 5 alerts per 10 minutes (429 beyond that).
       operationId: postNotificationsGoogleChatAlerts
       requestBody:
         content:
@@ -8043,8 +8057,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound (no incident with the given caseId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "413":
           description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: TooManyRequests (more than 5 alerts from this caller in 10 minutes)
           content:
             application/json:
               schema:
@@ -9316,8 +9342,8 @@ paths:
                 $ref: "#/components/schemas/ErrorPayload"
 
   # ---------------------------------------------------------------------
-  # SupportPortalLite — ported from digiops-cs's apps/support-portal-lite
-  # Ballerina backend (being retired), serving the Sales/Solutions-Architecture
+  # SupportPortalLite — ported from the retired SupportPortalLite Ballerina
+  # backend (tracked separately), serving the Sales/Solutions-Architecture
   # audience. None of the routes below carry a /spl/ prefix: SPL and this
   # API are the same backend now, and none of these routes collide with
   # anything this API's own, differently-shaped case-management domain owns.
@@ -9325,8 +9351,11 @@ paths:
   # used to live here under /spl/accounts, /spl/projects, /spl/cases) are
   # gone entirely -- consolidated onto the shared /accounts, /projects, and
   # /cases search/detail routes above. Off by default (SPL_ENABLED); see
-  # cmd/server/main.go. Path parameters here are ServiceNow sys_ids or
+  # cmd/server/main.go. Path parameters here are backing-system record ids or
   # case/account/project numbers, not UUIDs.
+  # State-changing routes here (every non-GET /customer-health route except
+  # POST /customer-health/summary, and POST /scan-user) additionally require
+  # the `write` permission; a caller without it receives 403.
   # ---------------------------------------------------------------------
 
   /accounts/{accountId}/escalations:
@@ -9520,7 +9549,7 @@ paths:
 
   /products:
     get:
-      summary: List the distinct product names known to ServiceNow deployments.
+      summary: List the distinct product names known to deployments in the backing ticketing system.
       operationId: getProducts
       responses:
         "200":
@@ -9736,7 +9765,7 @@ paths:
 
   /attachments/{attachmentId}/download:
     get:
-      summary: Download the binary content of a case attachment (ServiceNow-backed).
+      summary: Download the binary content of a case attachment (legacy-data-source).
       operationId: downloadAttachment
       parameters:
         - name: attachmentId
@@ -9846,7 +9875,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
   # SupportPortalLite usage-metrics (/usage-metrics/*) — every endpoint
-  # here forwards the request/response body close to verbatim to ServiceNow's
+  # here forwards the request/response body close to verbatim to the backing ticketing system's
   # custom scoped-app API (raw passthrough, not reshaped by this backend), so
   # request/response schemas are intentionally left open (additionalProperties:
   # true) rather than fully typed against an upstream contract this backend
@@ -9892,7 +9921,7 @@ paths:
 
   /usage-metrics/instances/metrics/search:
     post:
-      summary: Search instance-level product metrics (raw passthrough to ServiceNow's custom API).
+      summary: Search instance-level product metrics (raw passthrough to the backing ticketing system's custom API).
       operationId: searchInstanceMetrics
       requestBody:
         required: true
@@ -9942,7 +9971,7 @@ paths:
 
   /usage-metrics/instances/metrics/stats:
     post:
-      summary: Get aggregated instance metrics stats (raw passthrough to ServiceNow's custom API).
+      summary: Get aggregated instance metrics stats (raw passthrough to the backing ticketing system's custom API).
       operationId: getInstanceMetricsStats
       requestBody:
         required: true
@@ -9992,7 +10021,7 @@ paths:
 
   /usage-metrics/instances/usages/search:
     post:
-      summary: Search instance-level usage records (raw passthrough to ServiceNow's custom API).
+      summary: Search instance-level usage records (raw passthrough to the backing ticketing system's custom API).
       operationId: searchInstanceUsages
       requestBody:
         required: true
@@ -10042,7 +10071,7 @@ paths:
 
   /usage-metrics/instances/usages/stats:
     post:
-      summary: Get aggregated instance usage stats (raw passthrough to ServiceNow's custom API).
+      summary: Get aggregated instance usage stats (raw passthrough to the backing ticketing system's custom API).
       operationId: getInstanceUsagesStats
       requestBody:
         required: true
@@ -10092,7 +10121,7 @@ paths:
 
   /usage-metrics/deployments/search:
     post:
-      summary: Search deployments (raw passthrough to ServiceNow's custom API).
+      summary: Search deployments (raw passthrough to the backing ticketing system's custom API).
       operationId: searchUsageMetricsDeployments
       requestBody:
         required: true
@@ -10142,7 +10171,7 @@ paths:
 
   /usage-metrics/projects/search:
     post:
-      summary: Search projects for the usage-metrics dashboard (raw passthrough to ServiceNow's custom API).
+      summary: Search projects for the usage-metrics dashboard (raw passthrough to the backing ticketing system's custom API).
       operationId: searchUsageMetricsProjects
       requestBody:
         required: true
@@ -10192,7 +10221,7 @@ paths:
 
   /usage-metrics/deployed-products/search:
     post:
-      summary: Search deployed products (raw passthrough to ServiceNow's custom API).
+      summary: Search deployed products (raw passthrough to the backing ticketing system's custom API).
       operationId: searchUsageMetricsDeployedProducts
       requestBody:
         required: true
@@ -10242,7 +10271,7 @@ paths:
 
   /usage-metrics/instances/search:
     post:
-      summary: Search instances (raw passthrough to ServiceNow's custom API).
+      summary: Search instances (raw passthrough to the backing ticketing system's custom API).
       operationId: searchUsageMetricsInstances
       requestBody:
         required: true
@@ -10292,7 +10321,7 @@ paths:
 
   /usage-metrics/deployed-products/{id}/metrics/search:
     post:
-      summary: Get metrics for a deployed product over a date range (raw passthrough to ServiceNow's custom API).
+      summary: Get metrics for a deployed product over a date range (raw passthrough to the backing ticketing system's custom API).
       operationId: getDeployedProductMetrics
       parameters:
         - name: id
@@ -10355,7 +10384,7 @@ paths:
 
   /usage-metrics/deployed-products/{id}/metrics/usage-counts/search:
     post:
-      summary: Get usage counts for a deployed product over a date range (raw passthrough to ServiceNow's custom API).
+      summary: Get usage counts for a deployed product over a date range (raw passthrough to the backing ticketing system's custom API).
       operationId: getDeployedProductUsageCounts
       parameters:
         - name: id
@@ -10419,6 +10448,9 @@ paths:
   /files:
     get:
       summary: List files in a Google Drive folder.
+      description: >-
+        Only a configured root folder (GOOGLE_DRIVE_ROOT_FOLDER_IDS) or a folder
+        below one can be listed; any other folderId is answered with 403.
       operationId: listFiles
       parameters:
         - name: folderId
@@ -10463,6 +10495,10 @@ paths:
   /files/search:
     get:
       summary: Find a Google Drive folder by name.
+      description: >-
+        Returns the first folder with that exact name that is a configured root
+        folder (GOOGLE_DRIVE_ROOT_FOLDER_IDS) or lies below one; 404 when there
+        is none.
       operationId: searchFolder
       parameters:
         - name: folderName
@@ -10510,7 +10546,7 @@ paths:
 
   /customer-health/summary:
     post:
-      summary: Search account health summaries (ServiceNow account data enriched with MySQL-tracked review status).
+      summary: Search account health summaries (backing-system account data enriched with MySQL-tracked review status).
       operationId: getCustomerHealthSummary
       requestBody:
         required: true
@@ -10602,7 +10638,7 @@ paths:
 
   /customer-health/accounts/{accountId}:
     get:
-      summary: Get an account's detailed health breakdown (ServiceNow-backed; no MySQL involved).
+      summary: Get an account's detailed health breakdown (legacy-data-source; no MySQL involved).
       operationId: getCustomerHealthAccountDetail
       parameters:
         - name: accountId
@@ -11339,7 +11375,7 @@ paths:
     post:
       summary: >-
         Diagnostic tool cross-referencing the sales-side (Salesforce) and
-        CS-side (ServiceNow) entity services for a given email/subscription
+        CS-side (the backing ticketing system) entity services for a given email/subscription
         key, surfacing why a user might not have portal access.
       operationId: scanUser
       requestBody:
@@ -12812,10 +12848,10 @@ components:
         `acknowledge`, `type`, `subject`, `description`, `deploymentId`, `deployedProductId`,
         `relatedCaseId`, `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or
         `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
-        supported only for the ServiceNow data source.
+        supported only for the legacy data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
-        `type` transfers the case to another type, ServiceNow only. Its companion fields carry
+        `type` transfers the case to another type, legacy data source only. Its companion fields carry
         the target type's mandatory data: `severity` and `issueType` alongside `type: case`;
         `engagementType` alongside `type: engagement`; `catalogId`, `catalogItemId` and a
         non-empty `variables` alongside `type: service_request`; none for
@@ -12852,7 +12888,7 @@ components:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
           description: >
-            Transfers the case to this type (ServiceNow only). `announcement` is
+            Transfers the case to this type (legacy data source only). `announcement` is
             system-managed and never a valid transfer target.
         issueType:
           type: string
@@ -12894,11 +12930,11 @@ components:
           items:
             type: string
             format: email
-          description: List of email addresses to set as the case watch list (ServiceNow only).
+          description: List of email addresses to set as the case watch list (legacy data source only).
         assigneeEmail:
           type: string
           format: email
-          description: Email of the engineer to assign to this case (ServiceNow only).
+          description: Email of the engineer to assign to this case (legacy data source only).
         acknowledge:
           type: boolean
           enum: [true]
@@ -12926,7 +12962,7 @@ components:
             UUID of another case, incident, change request, or problem to link this case to as
             its parent — e.g. linking a service-request case back to the case or incident that
             spawned it, or establishing the hierarchical major-case/child-case relationship
-            (ServiceNow only). Linking to a closed/inactive record may silently no-op upstream;
+            (legacy data source only). Linking to a closed/inactive record may silently no-op upstream;
             the response's parentCase reflects whether the link actually changed. A case may not
             be closed while it has open children linked via this relationship.
         subject:
@@ -12958,9 +12994,9 @@ components:
           format: date-time
           description: >
             Places the case on hold in the backing data source's staged auto-closure sequence
-            until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
+            until this date, mirroring the backing system's own UX (an engineer picks a hold-until
             date). This is the only supported write against that sequence — the raw
-            `autoclosureStep` state is not directly settable (ServiceNow only).
+            `autoclosureStep` state is not directly settable (legacy data source only).
         bestCaseFixEta:
           type: string
           format: date
@@ -13143,7 +13179,7 @@ components:
 
     CaseLabelRef:
       type: object
-      description: Generic id/label pair returned by ServiceNow for choice-list fields.
+      description: Generic id/label pair returned by the backing system for choice-list fields.
       properties:
         id:
           type: string
@@ -13206,8 +13242,8 @@ components:
           description: |
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
-            - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
+            - `service_request`: catalog-based service request (legacy data source only); requires `catalogId`, `catalogItemId`, `variables`.
+            - `security_report_analysis`: security report (legacy data source only); requires `subject`, `description`, and at least one entry in `attachments`.
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -13337,7 +13373,7 @@ components:
           performance_degradation/question/security_or_compliance/
           total_outage.
         - **workState** (in): one of ongoing/paused. Only applicable when
-          state is work_in_progress. For the ServiceNow data source, ongoing
+          state is work_in_progress. For the legacy data source, ongoing
           maps to key 1 and paused maps to key 2.
         - **tag** (in / notIn): free-text case tag labels. in matches cases
           carrying any of the given tags; notIn excludes cases carrying any of
@@ -13359,7 +13395,7 @@ components:
           "on or after"; lte is inclusive "on or before".
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
-          product. Only applied by the ServiceNow data source.
+          product. Only applied by the legacy data source.
         - **projectOnboardingStatus** (in): free-text SN choice labels for the
           parent project's onboarding status (e.g. "Completed",
           "Not-Applicable" -- not a closed enum at this layer).
@@ -13385,7 +13421,7 @@ components:
           never-resolved SLA's percentage keeps climbing well past it (values
           in the tens of thousands are real, observed data), so 100 means
           "breached", not "the maximum possible value". Only applied by the
-          ServiceNow data source (a Task SLA table join); filtering logic is
+          legacy data source (a Task SLA table join); filtering logic is
           confined to the SN adapter.
         - **escalationLevel** (in): one or more escalation level ids, "0"
           (EL0, not escalated) through "5" (EL5, CEO). Matches cases whose
@@ -13394,16 +13430,16 @@ components:
           matches cases with no active escalation, isNotEmpty matches cases
           with an active escalation.
         - **slaBreached** (eq): "true"/"false". Matches cases with a
-          currently-breached SLA against ServiceNow's own named SLA
+          currently-breached SLA against the backing ticketing system's own named SLA
           definition set (task_sla.has_breached + stage=in_progress). Only
-          applied by the ServiceNow data source.
+          applied by the legacy data source.
         - **accountEscalationActive** (eq): "true"/"false". Matches cases
           whose ACCOUNT currently has an active escalation
           (active_account_escalation.state in Requested/Escalated) --
           distinct from **escalation** above, which is a case-level flag.
           The two are independent and may both be queried. Only applied by
-          the ServiceNow data source.
-        - **number** (eq): a single case number (e.g. "CS0441174"); matches
+          the legacy data source.
+        - **number** (eq): a single case number (e.g. "CS0000001"); matches
           exactly. Routed as a first-class filter rather than through the
           free-text searchQuery scan.
         - **internalId** (eq): a single WSO2 case id; matches exactly. Routed
@@ -13536,7 +13572,7 @@ components:
           type: string
           nullable: true
           description: >-
-            Human-readable case number (e.g. "CS0441331"). Null if the case
+            Human-readable case number (e.g. "CS0000002"). Null if the case
             record could not be resolved.
         caseInternalId:
           type: string
@@ -14396,7 +14432,7 @@ components:
           nullable: true
           items:
             $ref: '#/components/schemas/WatchListUser'
-          description: Users on the case watch list (ServiceNow only). null/absent when not set.
+          description: Users on the case watch list (legacy data source only). null/absent when not set.
         autoclosureStep:
           type: string
           readOnly: true
@@ -14410,7 +14446,7 @@ components:
             Where the case sits in the backing data source's staged auto-closure sequence
             (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Informational only — the
             sequence itself is fully owned by the backing data source's own flows; the only
-            supported write is `autocloseHoldUntil` on the PATCH request (ServiceNow only).
+            supported write is `autocloseHoldUntil` on the PATCH request (legacy data source only).
         autoclosureStateTime:
           type: string
           format: date-time
@@ -14418,7 +14454,7 @@ components:
           nullable: true
           description: >-
             When the auto-closure sequence next advances — e.g. the "eligible again after" date
-            for a held case (ServiceNow only).
+            for a held case (legacy data source only).
         nextStates:
           type: array
           readOnly: true
@@ -14443,21 +14479,21 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Timestamp when the case was resolved. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Timestamp when the case was resolved. Populated for resolved/closed legacy-data-source cases; null otherwise.
         resolutionCode:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/CaseResolutionCode'
-          description: Resolution code. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Resolution code. Populated for resolved/closed legacy-data-source cases; null otherwise.
         cause:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/CaseCause'
-          description: Root-cause category. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Root-cause category. Populated for resolved/closed legacy-data-source cases; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Free-text resolution/close notes. Populated for resolved/closed legacy-data-source cases; null otherwise.
         linkedServiceRequests:
           type: array
           nullable: true
@@ -14793,7 +14829,7 @@ components:
     UserType:
       type: string
       description: >
-        Whether the user is staff or a customer/partner contact. The ServiceNow data source
+        Whether the user is staff or a customer/partner contact. The legacy data source
         emits internal or external; the postgres source emits internal, customer or system.
         Callers branching on staff-vs-not must treat customer and external alike.
       enum: [internal, external, customer, system]
@@ -15041,7 +15077,7 @@ components:
           maxItems: 20
           items:
             $ref: '#/components/schemas/RoleId'
-          description: Filter by one or more roles. ServiceNow data source only.
+          description: Filter by one or more roles. legacy data source only.
         userIds:
           type: array
           maxItems: 200
@@ -15051,13 +15087,13 @@ components:
           description: >
             Restrict to specific users. Intersects with the other filters. Supplying this
             also lifts the active-only default, so a deactivated user stays retrievable by
-            id. ServiceNow data source only.
+            id. legacy data source only.
         groupIds:
           type: array
           items:
             type: string
             format: uuid
-          description: Restrict to members of these groups. ServiceNow data source only.
+          description: Restrict to members of these groups. legacy data source only.
         teamIds:
           type: array
           maxItems: 50
@@ -15067,7 +15103,7 @@ components:
             Restrict to members of these teams, by team key, as returned by POST
             /teams/search. Each key is resolved to its group name from the startup-resolved
             registry before the membership query runs; a key that is not in the registry is
-            a 400, not an empty result. ServiceNow data source only.
+            a 400, not an empty result. legacy data source only.
         userNames:
           type: array
           maxItems: 50
@@ -15083,7 +15119,7 @@ components:
         active:
           type: boolean
           nullable: true
-          description: When set, restricts results to active or inactive users. ServiceNow data source only.
+          description: When set, restricts results to active or inactive users. legacy data source only.
 
     UserSortBy:
       type: object
@@ -15091,7 +15127,7 @@ components:
         field:
           type: string
           enum: [name, createdOn, updatedOn]
-          description: Column to sort by. ServiceNow data source only.
+          description: Column to sort by. legacy data source only.
         order:
           type: string
           enum: [asc, desc]
@@ -15118,7 +15154,7 @@ components:
 
     SNUser:
       type: object
-      description: User as returned by the ServiceNow data source.
+      description: User as returned by the legacy data source.
       properties:
         id:
           type: string
@@ -15153,7 +15189,7 @@ components:
 
     SNUserSearchResponse:
       type: object
-      description: Paginated user list from the ServiceNow data source.
+      description: Paginated user list from the legacy data source.
       required: [users, total, limit, offset]
       properties:
         users:
@@ -15907,7 +15943,7 @@ components:
                 no onboarding engagement at all. "Not-Applicable" (and null) both mean
                 there is no active onboarding to surface for this project; treat either
                 as "onboarding not enabled" when deciding whether to show
-                onboardingOwner. ServiceNow data source only.
+                onboardingOwner. legacy data source only.
             onboardingOwner:
               nullable: true
               allOf:
@@ -15915,7 +15951,7 @@ components:
               description: >
                 The WSO2 staff member assigned to lead this project's onboarding. Null
                 when no owner is assigned (most projects, since it is only set for
-                onboarding-enabled projects). ServiceNow data source only.
+                onboarding-enabled projects). legacy data source only.
 
     ProjectAccountRef:
       type: object
@@ -15965,7 +16001,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing backing-system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
 
@@ -16206,8 +16242,8 @@ components:
 
     Product:
       description: >
-        Product entry. When backed by the ServiceNow data source,
-        createdOn/updatedOn are absent and class is a ServiceNow label
+        Product entry. When backed by the legacy data source,
+        createdOn/updatedOn are absent and class is a backing-system label
         (e.g. "Software Model").
       type: object
       properties:
@@ -16529,7 +16565,7 @@ components:
           enum: [work_note, comment]
           description: >
             work_note is restricted to internal users. activity is not offered here --
-            it is not supported for ServiceNow-backed comment creation (change request,
+            it is not supported for legacy-data-source comment creation (change request,
             incident).
         content:
           type: string
@@ -16708,7 +16744,7 @@ components:
       description: >
         One escalation-level change recorded against a case: either an escalate
         or a de-escalate step, with the level it moved from and to. Supported
-        by the ServiceNow data source only.
+        by the legacy data source only.
       properties:
         id:
           type: string
@@ -17210,7 +17246,7 @@ components:
             number:
               type: string
               description: >-
-                A single change request number (e.g. "CHG0010001"); matches
+                A single change request number (e.g. "CHG0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             filters:
@@ -17239,7 +17275,7 @@ components:
                   "__daysAgo:90__") bounding the change request's created
                   timestamp.
                 - **assignmentGroupId** (in): sys_user_group UUIDs.
-                - **approval** (eq): ServiceNow's raw task.approval rollup on
+                - **approval** (eq): the backing ticketing system's raw task.approval rollup on
                   the change request. Exactly one value, one of
                   "not requested", "requested", "approved", "rejected".
                   Distinct from the approvedBy/approvedOn fields on a change
@@ -17542,7 +17578,7 @@ components:
           type: string
           nullable: true
           description: >-
-            When this approval was requested. Null on the ServiceNow-backed data
+            When this approval was requested. Null on legacy-data-source data
             source, which has no equivalent field.
         respondedOn:
           type: string
@@ -17552,7 +17588,7 @@ components:
           nullable: true
           description: >-
             The approver's own comment on their decision, if any. Null on the
-            ServiceNow-backed data source, same reason as createdOn above.
+            legacy-data-source data source, same reason as createdOn above.
 
     ChangeRequestApproval:
       type: object
@@ -18213,7 +18249,7 @@ components:
             number:
               type: string
               description: >-
-                A single conversation number (e.g. "CHAT0000012345"); matches
+                A single conversation number (e.g. "CHAT0000000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             searchQuery:
@@ -18944,7 +18980,7 @@ components:
             number:
               type: string
               description: >-
-                A single incident number (e.g. "INC0010001"); matches
+                A single incident number (e.g. "INC0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             state:
@@ -18970,16 +19006,16 @@ components:
               description: >-
                 Whether the incident has a breached SLA, derived from
                 task_sla.has_breached (a related-list join), not from
-                ServiceNow's raw made_sla field -- deliberately more
+                the backing ticketing system's raw made_sla field -- deliberately more
                 reliable than made_sla, which catches only a small fraction
                 of actually-breached incidents on this instance. Prefer
                 this field for correctness-sensitive SLA-breach filtering.
             madeSla:
               type: boolean
               description: >-
-                ServiceNow's raw made_sla field on the incident. Different
+                the backing ticketing system's raw made_sla field on the incident. Different
                 from, and less reliable than, slaViolated above -- kept
-                only for exact parity with ServiceNow dashboards/reports
+                only for exact parity with the backing ticketing system dashboards/reports
                 that filter on this raw field directly. Do not use this for
                 general SLA-breach filtering; use slaViolated instead.
         sortBy:
@@ -19034,7 +19070,7 @@ components:
 
     GoogleChatAlertPayload:
       type: object
-      required: [product, title, shortDescription, caseId]
+      required: [product, caseId]
       additionalProperties: false
       properties:
         product:
@@ -19045,15 +19081,23 @@ components:
             whitespace-insensitively against NOTIFICATIONS_GOOGLE_CHAT_SPACES.
         title:
           type: string
-          description: Card header title (e.g. "P1 Incident - CASE-001").
+          deprecated: true
+          description: >-
+            Accepted for compatibility and ignored: the card title is built from
+            the incident record ("<priority> Incident - <number>").
         shortDescription:
           type: string
-          description: Card body text shown under "Short Description".
+          deprecated: true
+          description: >-
+            Accepted for compatibility and ignored: the card text is the incident
+            record's subject.
         caseId:
           type: string
+          format: uuid
           description: >-
-            Case ID used to build the "Open in CSM Portal" link
-            (/operations/incidents/{caseId}).
+            Incident id. The card is built from this incident's record
+            (HTML-escaped), and it is used to build the "Open in CSM Portal"
+            link (/operations/incidents/{caseId}).
 
     Incident:
       type: object
@@ -19317,23 +19361,23 @@ components:
         resolutionCode:
           type: string
           nullable: true
-          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Resolution code label. Populated for resolved/closed the backing ticketing system incidents; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Free-text resolution notes. Populated for resolved/closed the backing ticketing system incidents; null otherwise.
         resolvedBy:
           type: string
           nullable: true
-          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Email of the user who resolved the incident. Populated for resolved/closed the backing ticketing system incidents; null otherwise.
         resolvedOn:
           type: string
           nullable: true
-          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Timestamp when the incident was resolved. Populated for resolved/closed the backing ticketing system incidents; null otherwise.
         incidentReport:
           type: string
           nullable: true
-          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Root-cause/incident report notes. Populated for resolved/closed the backing ticketing system incidents; null otherwise.
         linkedServiceRequests:
           type: array
           nullable: true
@@ -19667,7 +19711,7 @@ components:
             number:
               type: string
               description: >-
-                A single problem number (e.g. "PRB0010001"); matches exactly.
+                A single problem number (e.g. "PRB0000001"); matches exactly.
                 Routed as a first-class filter rather than through the
                 free-text searchQuery scan.
         pagination:
@@ -19934,7 +19978,7 @@ components:
             number:
               type: string
               description: >-
-                A single incident task number (e.g. "TASK0082453"); matches
+                A single incident task number (e.g. "TASK0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
         pagination:
@@ -20026,7 +20070,7 @@ components:
             a default is applied when omitted.
 
     # -------------------------------------------------------------------
-    # Outages (ServiceNow data source only, cmdb_ci_outage). status is
+    # Outages (legacy data source only, cmdb_ci_outage). status is
     # always derived server-side, never accepted on input: in_progress
     # while end is unset, resolved once it is set. Closing an outage is
     # PATCH { end: ... } -- there is no separate close verb or state field.
@@ -21812,7 +21856,7 @@ components:
       type: object
       properties:
         fraction:
-          description: Upstream (ServiceNow) sends this as either a string or an integer; both are preserved as-is rather than coerced.
+          description: Upstream (the backing ticketing system) sends this as either a string or an integer; both are preserved as-is rather than coerced.
           oneOf:
             - type: string
             - type: integer
@@ -21973,7 +22017,7 @@ components:
       description: >-
         Populates the SPL frontend's team/event-type filter dropdowns.
         FIXED: an earlier version of this backend never decoded this field
-        from ServiceNow's response, silently leaving it empty — caught
+        from the backing ticketing system's response, silently leaving it empty — caught
         during frontend reconciliation; see internal/servicenow/schedule.go.
       properties:
         teams:
@@ -22491,6 +22535,12 @@ components:
           type: string
         isPartner:
           type: boolean
+        resendInvitation:
+          type: boolean
+          default: false
+          description: >-
+            When true and the contact has not accepted their project invitation, the invitation is
+            re-sent. Without it the scan only reports the state and sends nothing.
 
     SplScanInformation:
       type: object

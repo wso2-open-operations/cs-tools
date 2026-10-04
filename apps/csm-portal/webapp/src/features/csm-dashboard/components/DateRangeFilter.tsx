@@ -41,6 +41,12 @@ function formatDateOnly(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Today's local calendar date as a local-midnight Date. */
+function todayDateOnly(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
 export interface DateRangeFilterValue {
   /** "YYYY-MM-DD", inclusive. `undefined` means no lower bound. */
   from?: string;
@@ -80,6 +86,22 @@ export default function DateRangeFilter({
   onChange,
   label = "Date range",
 }: DateRangeFilterProps): JSX.Element {
+  // Recomputed every render (not memoized) so a session left open past
+  // midnight keeps the right cap. Neither field can be in the future.
+  const today = todayDateOnly();
+  const parsedFrom = parseDateOnly(value.from);
+  const parsedTo = parseDateOnly(value.to);
+  const fromMaxDate = parsedTo && parsedTo < today ? parsedTo : today;
+  const commit = (field: "from" | "to", date: Date | null): void => {
+    if (date instanceof Date && !Number.isNaN(date.getTime())) {
+      // The picker's maxDate does not stop a typed future date from firing
+      // onChange, so enforce the bound here too.
+      if (date > today) return;
+      onChange({ ...value, [field]: formatDateOnly(date) });
+    } else {
+      onChange({ ...value, [field]: undefined });
+    }
+  };
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <Typography variant="caption" color="text.secondary">
@@ -90,16 +112,8 @@ export default function DateRangeFilter({
           <DatePicker
             label="From"
             value={parseDateOnly(value.from)}
-            maxDate={parseDateOnly(value.to) ?? undefined}
-            onChange={(date) =>
-              onChange({
-                ...value,
-                from:
-                  date instanceof Date && !Number.isNaN(date.getTime())
-                    ? formatDateOnly(date)
-                    : undefined,
-              })
-            }
+            maxDate={fromMaxDate}
+            onChange={(date) => commit("from", date)}
             slotProps={{
               textField: { size: "small" },
               field: { clearable: true },
@@ -110,16 +124,9 @@ export default function DateRangeFilter({
           <DatePicker
             label="To"
             value={parseDateOnly(value.to)}
-            minDate={parseDateOnly(value.from) ?? undefined}
-            onChange={(date) =>
-              onChange({
-                ...value,
-                to:
-                  date instanceof Date && !Number.isNaN(date.getTime())
-                    ? formatDateOnly(date)
-                    : undefined,
-              })
-            }
+            minDate={parsedFrom ?? undefined}
+            maxDate={today}
+            onChange={(date) => commit("to", date)}
             slotProps={{
               textField: { size: "small" },
               field: { clearable: true },

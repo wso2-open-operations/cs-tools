@@ -39,6 +39,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { format, parse } from "date-fns";
 import { adminUsers } from "@src/services/adminUsers";
+import { currentUser } from "@src/services/currentUser";
 import { useUserStore } from "@src/store/user";
 import type {
   ActivityBreakdown,
@@ -177,6 +178,7 @@ export function LogTimeCardDialog({
   onSubmit,
 }: LogTimeCardDialogProps) {
   const me = useUserStore((s) => s.user);
+  const { data: currentUserId } = useQuery(currentUser.id());
 
   const isAlwaysNonBillable = !caseSeverity || NON_BILLABLE_SEVERITIES.includes(caseSeverity);
 
@@ -205,14 +207,13 @@ export function LogTimeCardDialog({
   const hasApproverInput = approverInput.trim().length > 0;
   // Approvers must be real internal accounts, and never the signed-in user —
   // nothing server-side stops picking yourself, which would let a submitter
-  // approve their own time. Mirrors the webapp's LogTimeCardDialog.
+  // approve their own time. Compares the platform user id from /users/me, not an e-mail address.
   const candidates: ApproverOption[] = useMemo(() => {
     if (!hasApproverInput) return [];
-    const myEmail = (me?.email ?? "").toLowerCase();
     return (data?.users ?? [])
-      .filter((u) => !!u.email && u.email.toLowerCase() !== myEmail && u.active !== false)
+      .filter((u) => !!u.email && u.id !== currentUserId && u.active !== false)
       .map((u) => ({ id: u.id, name: u.name || u.userName, email: u.email }));
-  }, [data, hasApproverInput, me?.email]);
+  }, [data, hasApproverInput, currentUserId]);
 
   const setActivity = (key: ActivityKey, next: number): void => setBreakdown((prev) => ({ ...prev, [key]: next }));
 

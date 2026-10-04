@@ -211,7 +211,7 @@ func (b *inlineImageBudget) allow(size int) bool {
 // wso2LogoURL switched the WSO2 logo off a baked-in data: URI. A proper
 // cid:-referenced MIME part is the universally-supported way any mail
 // client renders an inline image; entity-service has no way to produce
-// one, hence this extraction step. See ServiceNow's own outbound mail (a
+// one, hence this extraction step. See the legacy ticketing system's own outbound mail (a
 // separate, native pipeline unrelated to this one) for a real example of
 // exactly this MIME shape — multipart/related, an inline part with a
 // Content-ID, and an <img src="cid:..."> reference.
@@ -289,7 +289,7 @@ func drainAttrs(z *xhtml.Tokenizer, hasAttr bool) {
 }
 
 // sanitizeRichText converts rich-text HTML (as the portal's comment/
-// description editors produce it, or ServiceNow returns it — e.g.
+// description editors produce it, or the backing data source returns it — e.g.
 // `<p><span style="white-space: pre-wrap;">some text</span></p>`) into a
 // safe HTML fragment for embedding in an email body: structure (paragraphs,
 // line breaks, lists), basic formatting (bold/italic/underline), hyperlinks,
@@ -557,7 +557,7 @@ func RenderCommentAddedEmail(name, caseNumber, caseTitle, caseComment, commentLi
 // strap (an internal note isn't "about" the case title the way a reply
 // is), and caseNumber here is expected to be the case's WSO2CaseID
 // (dispatch.handleCommentAdded's own concern which value to pass), not
-// the ServiceNow CaseNumber every other template uses — the internal case
+// the backing data source's CaseNumber every other template uses — the internal case
 // reference is the one this audience actually recognizes.
 func RenderInternalNoteEmail(name, caseNumber, caseTitle, caseComment, commentLink, caseLink, intendedFor string) (string, []InlineImage) {
 	tmpl := applyOptionalBlock(internalNoteTemplate, "INTENDED_FOR", intendedFor)
@@ -692,7 +692,7 @@ func RenderCaseCreatedEmail(data CaseCreatedEmailData) (string, []InlineImage) {
 }
 
 // crStateLabels turn the domain state into the words a reader recognises. The
-// raw values are ServiceNow's own (ASSESS, CUSTOMER_APPROVAL, ...), which are
+// raw values are the backing data source's own (ASSESS, CUSTOMER_APPROVAL, ...), which are
 // right for a payload and wrong for an email.
 var crStateLabels = map[string]string{
 	"ASSESS":            "Assess",
@@ -722,7 +722,7 @@ type CRApprovalEmailData struct {
 // approval" template.
 //
 // The SUBJECT is not built here — it arrives already rendered on the payload,
-// because csm-flow-service reproduces ServiceNow's per-branch wording verbatim
+// because csm-flow-service reproduces the legacy ticketing system's per-branch wording verbatim
 // and keeping a second copy of that in step would guarantee they drift.
 func RenderCRApprovalRequestedEmail(d CRApprovalEmailData) string {
 	state := crStateLabels[d.State]
@@ -785,7 +785,7 @@ type CRPlanDateEmailData struct {
 	IntendedFor string
 }
 
-// crPlanDateWording is the per-kind text, reproduced from the ServiceNow
+// crPlanDateWording is the per-kind text, reproduced from the legacy ticketing system's
 // templates verbatim — including "Reject the proposed plan start date" as a
 // past-tense sentence and "<name> customer has updated…", both of which read
 // oddly and are what the original sends.

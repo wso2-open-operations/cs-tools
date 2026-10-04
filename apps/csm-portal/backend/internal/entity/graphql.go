@@ -79,9 +79,12 @@ func doGraphQL[T any](ctx context.Context, httpClient *http.Client, baseURL, que
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return zero, fmt.Errorf("%s: read response body: %w", errLabel, err)
+	}
+	if len(respBody) > maxUpstreamResponseBytes {
+		return zero, fmt.Errorf("%s: read response body: response exceeds %d bytes", errLabel, maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {

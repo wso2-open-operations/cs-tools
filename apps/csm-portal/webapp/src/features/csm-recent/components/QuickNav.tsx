@@ -636,6 +636,13 @@ export default function QuickNav(): JSX.Element | null {
     setGotoTarget(null);
     clearDeepLinkParams();
   };
+  // The goto-resolution effect below must call the latest `close` without
+  // re-running every time it is re-created (it is a plain closure over state
+  // setters and the URL-param clearer).
+  const closeRef = useRef(close);
+  useEffect(() => {
+    closeRef.current = close;
+  });
 
   const choose = (r: Result | undefined) => {
     if (!r) return;
@@ -703,7 +710,7 @@ export default function QuickNav(): JSX.Element | null {
       // in underneath it. They get cleared once the user either picks a
       // result (route changes away from `/` entirely) or closes the palette
       // manually (see `close()`, which calls `clearDeepLinkParams`).
-      close();
+      closeRef.current();
       navigate(matches[0]);
     }
     /* eslint-enable react-hooks/set-state-in-effect */

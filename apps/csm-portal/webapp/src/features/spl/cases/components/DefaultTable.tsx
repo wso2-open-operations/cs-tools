@@ -36,7 +36,7 @@ import {
   TablePagination,
   TableRow,
 } from "@wso2/oxygen-ui";
-import { alpha, useTheme, useColorScheme } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 import { ChevronsLeftIcon, ChevronsRightIcon, ChevronLeftIcon, ChevronRightIcon } from "@wso2/oxygen-ui-icons-react";
 import type { CaseDetailsWithCount, DataStruct } from "../api/caseTypes";
 import { ErrorPanel, LinearLoadingPanel, NoDataPanel } from "./StatePanels";
@@ -123,15 +123,15 @@ function PopulateTable({
   handleRowClick?: (rowData: DataStruct) => void;
 }) {
   const theme = useTheme();
-  // theme.palette.mode is not live under oxygen-ui's CSS-variables theme
-  // (extendTheme()) — confirmed empirically. useColorScheme() is the hook
-  // that actually tracks the live scheme.
-  const { mode: colorMode, systemMode } = useColorScheme();
-  const isDark = (colorMode === "system" ? systemMode : colorMode) === "dark";
+  // Per-scheme values go through `theme.applyStyles` (never a mode check —
+  // `palette.mode` is pinned to the default scheme under CSS variables).
   // Warm-orange hover identity used throughout this domain (CaseStateCard,
   // SearchResultBox) — an alpha overlay composites correctly against either
-  // mode's row background instead of a literal light-peach hex.
-  const rowHoverBg = alpha("#ff7300", isDark ? 0.24 : 0.35);
+  // scheme's row background instead of a literal light-peach hex.
+  const rowHoverSx = {
+    backgroundColor: alpha("#ff7300", 0.35),
+    ...theme.applyStyles("dark", { backgroundColor: alpha("#ff7300", 0.24) }),
+  };
 
   if (data.length === 0) return <NoDataPanel />;
 
@@ -153,7 +153,8 @@ function PopulateTable({
                 <TableCell
                   key={value}
                   sx={{
-                    backgroundColor: isDark ? theme.palette.grey[800] : "#e0e0e0",
+                    backgroundColor: "#e0e0e0",
+                    ...theme.applyStyles("dark", { backgroundColor: theme.palette.grey[800] }),
                     color: theme.palette.text.primary,
                     borderBottom: `2px solid ${theme.palette.divider}`,
                     fontWeight: "bold",
@@ -173,7 +174,7 @@ function PopulateTable({
                 sx={{
                   ...(handleRowClick ? { cursor: "pointer" } : {}),
                   "&:nth-of-type(even)": { backgroundColor: theme.palette.action.hover },
-                  "&:hover": { backgroundColor: rowHoverBg },
+                  "&:hover": rowHoverSx,
                   borderBottom: `1px solid ${theme.palette.divider}`,
                 }}
               >
@@ -190,7 +191,8 @@ function PopulateTable({
       <Box
         sx={{
           borderTop: "3px solid rgb(133, 142, 149)",
-          backgroundColor: isDark ? theme.palette.grey[900] : "#f8f9fa",
+          backgroundColor: "#f8f9fa",
+          ...theme.applyStyles("dark", { backgroundColor: theme.palette.grey[900] }),
           padding: "8px 16px",
           position: "sticky",
           bottom: 0,

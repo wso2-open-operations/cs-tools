@@ -73,6 +73,13 @@ type mockStepRecorder struct {
 	emailSentOn      string
 	emailSentErr     error
 	emailSentChecks  int
+	// identityAlreadyRecorded / identityRecordedOn / identityErr drive the
+	// durable "identity already provisioned for this version" read;
+	// identityChecks counts how often it was consulted.
+	identityAlreadyRecorded bool
+	identityRecordedOn      string
+	identityErr             error
+	identityChecks          int
 	// welcomeAlreadySent / welcomeErr drive the WELCOME_EMAIL guard.
 	welcomeAlreadySent bool
 	welcomeErr         error
@@ -108,6 +115,16 @@ func (m *mockStepRecorder) SucceededStep(ctx context.Context, id string, step en
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if step == entity.OnboardingStepIdentity {
+		m.identityChecks++
+		if m.identityErr != nil {
+			return nil, m.identityErr
+		}
+		if !m.identityAlreadyRecorded {
+			return nil, nil
+		}
+		return &entity.RecordedOnboardingStep{Step: step, Status: entity.OnboardingStepSucceeded, EventModifiedOn: m.identityRecordedOn}, nil
+	}
 	m.welcomeChecks++
 	if m.welcomeErr != nil {
 		return nil, m.welcomeErr
@@ -576,7 +593,7 @@ func TestDispatcher_Handle_ProjectContactInvited_NamelessInviteeUsesEmailLocalPa
 // not FAILED, and the identity step still runs.
 func TestDispatcher_Handle_ProjectContactInvited_Killswitch(t *testing.T) {
 	identity, email, steps := &mockIdentityProvisioner{}, &mockEmailSender{}, &mockStepRecorder{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, false, false, nil, true, "", nil).
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{CallSendingEnabled: true}).
 		WithOnboarding(OnboardingConfig{Identity: identity, Email: email, Steps: steps, IdentityEnabled: true, EmailEnabled: true, PortalURL: "https://support.wso2.com"})
 
 	if err := d.Handle(context.Background(), invitedRecord(false)); err != nil {
@@ -592,7 +609,7 @@ func TestDispatcher_Handle_ProjectContactInvited_Killswitch(t *testing.T) {
 // mode sends the invitation to the test list, never to the real contact.
 func TestDispatcher_Handle_ProjectContactInvited_DebugModeRedirects(t *testing.T) {
 	email, steps := &mockEmailSender{}, &mockStepRecorder{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true, []string{"debug@wso2.com"}, true, "", nil).
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true}).
 		WithOnboarding(OnboardingConfig{Identity: &mockIdentityProvisioner{}, Email: email, Steps: steps, IdentityEnabled: true, EmailEnabled: true, PortalURL: "https://support.wso2.com"})
 
 	if err := d.Handle(context.Background(), invitedRecord(false)); err != nil {
@@ -1059,7 +1076,7 @@ func TestDispatcher_Handle_ProjectContactRegistered_Skips(t *testing.T) {
 		},
 		"killswitch": {
 			d: func(e *mockEmailSender, s *mockStepRecorder) *Dispatcher {
-				return NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, false, false, nil, true, "", nil).
+				return NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{CallSendingEnabled: true}).
 					WithOnboarding(OnboardingConfig{Email: e, Steps: s, EmailEnabled: true})
 			},
 			record: registeredRecord(false),
@@ -1099,7 +1116,7 @@ func TestDispatcher_Handle_ProjectContactRegistered_SkipKeepsSentWelcome(t *test
 
 func TestDispatcher_Handle_ProjectContactRegistered_DebugModeRedirects(t *testing.T) {
 	email, steps := &mockEmailSender{}, &mockStepRecorder{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true, []string{"debug@wso2.com"}, true, "", nil).
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true}).
 		WithOnboarding(OnboardingConfig{Email: email, Steps: steps, EmailEnabled: true})
 
 	if err := d.Handle(context.Background(), registeredRecord(false)); err != nil {
@@ -1138,5 +1155,90 @@ func TestDispatcher_ReplyToOnlyOnOnboardingEmails(t *testing.T) {
 	}
 	if len(email.calls) != 1 || email.calls[0].replyTo != nil {
 		t.Errorf("case email calls = %+v, want one send with no Reply-To", email.calls)
+	}
+}
+
+// TestDispatcher_Handle_ProjectContactInvited_RetryInAnotherProcessUsesNeutralWording
+// is the restart / other-replica version of EmailFailureThenRetry: the
+// identity step succeeded in an earlier process (recorded on the ledger for
+// this version), the email failed, and the record arrives at a dispatcher
+// with no memo. SCIM now answers existed=true for the account that earlier
+// attempt created; the invitation must not say "you already have an
+// account" to someone who was never told they have one.
+func TestDispatcher_Handle_ProjectContactInvited_RetryInAnotherProcessUsesNeutralWording(t *testing.T) {
+	const version = "2026-09-01T10:00:00Z"
+	identity := &mockIdentityProvisioner{existed: true}
+	email := &mockEmailSender{}
+	steps := &mockStepRecorder{identityAlreadyRecorded: true, identityRecordedOn: version}
+	d := newOnboardingDispatcher(identity, email, steps, true, true)
+
+	if err := d.Handle(context.Background(), invitedRecordAt(version)); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(identity.calls) != 1 {
+		t.Errorf("EnsureExternalUser called %d times, want 1 (still ensures the account exists)", len(identity.calls))
+	}
+	if steps.identityChecks != 1 {
+		t.Errorf("identity ledger consulted %d times, want 1", steps.identityChecks)
+	}
+	if len(email.calls) != 1 {
+		t.Fatalf("sent %d emails, want 1", len(email.calls))
+	}
+	body := email.calls[0].htmlBody
+	for _, deny := range []string{"You already have a WSO2 account", "A WSO2 account has been created for you"} {
+		if strings.Contains(body, deny) {
+			t.Errorf("body claims %q, want the neutral wording when an earlier attempt provisioned the account", deny)
+		}
+	}
+	assertSteps(t, steps, "IDENTITY=SUCCEEDED", "EMAIL=SUCCEEDED")
+}
+
+// TestDispatcher_Handle_ProjectContactInvited_OlderIdentityRowStillTrustsSCIM:
+// a ledger IDENTITY row for an older membership version (a re-invitation)
+// says nothing about this version, so SCIM existed=true still selects the
+// existing-account wording.
+func TestDispatcher_Handle_ProjectContactInvited_OlderIdentityRowStillTrustsSCIM(t *testing.T) {
+	identity := &mockIdentityProvisioner{existed: true}
+	email := &mockEmailSender{}
+	steps := &mockStepRecorder{identityAlreadyRecorded: true, identityRecordedOn: "2026-08-01T10:00:00Z"}
+	d := newOnboardingDispatcher(identity, email, steps, true, true)
+
+	if err := d.Handle(context.Background(), invitedRecordAt("2026-09-01T10:00:00Z")); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(email.calls) != 1 || !strings.Contains(email.calls[0].htmlBody, "You already have a WSO2 account") {
+		t.Errorf("want the existing-account wording for a newer version, got %d emails", len(email.calls))
+	}
+}
+
+// TestDispatcher_Handle_ProjectContactInvited_IdentityLedgerUnreadableRetries:
+// a failed identity-ledger read is an error (retried), not a guess: neither
+// SCIM nor the email is touched.
+func TestDispatcher_Handle_ProjectContactInvited_IdentityLedgerUnreadableRetries(t *testing.T) {
+	identity := &mockIdentityProvisioner{}
+	email := &mockEmailSender{}
+	steps := &mockStepRecorder{identityErr: errors.New("upstream returned 503")}
+	d := newOnboardingDispatcher(identity, email, steps, true, true)
+
+	err := d.Handle(context.Background(), invitedRecord(false))
+	if err == nil || !strings.Contains(err.Error(), "check identity already provisioned") {
+		t.Fatalf("Handle() error = %v, want the ledger read failure", err)
+	}
+	if len(identity.calls) != 0 || len(email.calls) != 0 {
+		t.Errorf("SCIM calls = %d, emails = %d; want none after an unreadable ledger", len(identity.calls), len(email.calls))
+	}
+}
+
+// TestDispatcher_Handle_ProjectContactInvited_IdentityLedgerNotReadWhenEmailOff:
+// with the invitation email disabled the wording never matters, so the
+// identity step does not depend on the ledger.
+func TestDispatcher_Handle_ProjectContactInvited_IdentityLedgerNotReadWhenEmailOff(t *testing.T) {
+	steps := &mockStepRecorder{identityErr: errors.New("would fail")}
+	d := newOnboardingDispatcher(&mockIdentityProvisioner{}, &mockEmailSender{}, steps, true, false)
+	if err := d.Handle(context.Background(), invitedRecord(false)); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if steps.identityChecks != 0 {
+		t.Errorf("identity ledger consulted %d times, want 0", steps.identityChecks)
 	}
 }

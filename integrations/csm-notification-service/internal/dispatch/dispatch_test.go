@@ -209,7 +209,7 @@ func (m *mockLinkResolver) ResolveLinks(ctx context.Context, emails []string, pr
 const testRecipient = "test-recipient@example.com"
 
 func newTestDispatcher(email emailSender, chat googleChatSender, call callSender) *Dispatcher {
-	return NewDispatcher(email, chat, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	return NewDispatcher(Deps{Email: email, GoogleChat: chat, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 }
 
 func TestDispatcher_Handle_CaseCreated(t *testing.T) {
@@ -462,7 +462,7 @@ func TestDispatcher_Handle_EmailDebugMode_RedirectsToConfiguredRecipients(t *tes
 	mock := &mockEmailSender{}
 	links := &mockLinkResolver{}
 	debugRecipients := []string{"debug-1@example.com", "debug-2@example.com"}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, true, debugRecipients, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: debugRecipients, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
 
@@ -501,7 +501,7 @@ func TestDispatcher_Handle_EmailDebugMode_MultipleGroups_SendsOnePerGroup(t *tes
 		},
 	}
 	debugRecipients := []string{"debug-1@example.com", "debug-2@example.com"}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, true, debugRecipients, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: debugRecipients, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["customer@example.com","csm-agent@example.com"]}}`)}
 
@@ -524,7 +524,7 @@ func TestDispatcher_Handle_EmailDebugMode_MultipleGroups_SendsOnePerGroup(t *tes
 // recipients.
 func TestDispatcher_Handle_EmailDebugMode_NoRecipientsConfigured_SkipsSend(t *testing.T) {
 	mock := &mockEmailSender{}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
 
@@ -634,7 +634,7 @@ func TestDispatcher_Handle_CommentAdded_InternalNote_UsesInternalNoteLayout(t *t
 func TestDispatcher_Handle_CommentAdded_LinksToCommentFragment(t *testing.T) {
 	mock := &mockEmailSender{}
 	links := &mockLinkResolver{linkFor: func(string) string { return "https://csm.example.com/cases/CASE-1" }}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
 
@@ -829,7 +829,7 @@ func TestDispatcher_Handle_SeverityChanged_ChatFailureStillSendsEmail(t *testing
 func TestDispatcher_Handle_SeverityChanged_EmailFailureStillSendsChat(t *testing.T) {
 	chat := &mockGoogleChatSender{}
 	links := &mockLinkResolver{err: errors.New("entity-service unreachable")}
-	d := NewDispatcher(&mockEmailSender{}, chat, &mockCallSender{}, links, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: chat, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","product":"api-manager","recipients":["test-recipient@example.com"]}}`)}
 
@@ -872,7 +872,7 @@ func TestDispatcher_Handle_TwoRecipientsTwoLinks_SendsTwoEmails(t *testing.T) {
 		}
 		return "https://csm.example.com/cases/CASE-1"
 	}}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["customer@acme.com","agent@wso2.com"]}}`)}
 
@@ -921,7 +921,7 @@ func TestDispatcher_Handle_DefaultCSMEmailCC_OnlyOnCSMGroup(t *testing.T) {
 		// decide which group is the CSM one.
 		return "https://csm.example/cases/CASE-1"
 	}}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", []string{"cc@wso2.com"})
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true, DefaultCSMEmailCC: []string{"cc@wso2.com"}})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["customer@acme.com","agent@wso2.com"]}}`)}
 
@@ -959,7 +959,7 @@ func TestDispatcher_Handle_DefaultCSMEmailCC_OnlyOnCSMGroup(t *testing.T) {
 func TestDispatcher_Handle_DefaultCSMEmailCC_SuppressedInDebugMode(t *testing.T) {
 	mock := &mockEmailSender{}
 	links := &mockLinkResolver{linkFor: func(string) string { return "https://csm.example/cases/CASE-1" }}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, true, []string{"debug@wso2.com"}, true, "", []string{"cc@wso2.com"})
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true, DefaultCSMEmailCC: []string{"cc@wso2.com"}})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["agent@wso2.com"]}}`)}
 
@@ -997,7 +997,7 @@ func TestDispatcher_Handle_CommentAdded_RetryDoesNotResendSucceededGroup(t *test
 		}
 		return "https://csm.example.com/cases/CASE-1"
 	}}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 42, Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["customer@acme.com","agent@wso2.com"]}}`)}
 
@@ -1055,7 +1055,7 @@ func TestDispatcher_Handle_TwoRecipientsSameLink_SendsOneEmail(t *testing.T) {
 func TestDispatcher_Handle_ResolveLinksFails_NoEmailSent(t *testing.T) {
 	mock := &mockEmailSender{}
 	links := &mockLinkResolver{err: errors.New("entity-service unreachable")}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: links}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.status_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","newStatus":"Open","recipients":["test-recipient@example.com"]}}`)}
 
@@ -1150,7 +1150,7 @@ const validIncidentRecord = `{"type":"incident.created","entityId":"INC-1","payl
 
 func TestDispatcher_Handle_IncidentCreated(t *testing.T) {
 	call := &mockCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(validIncidentRecord)}
 
@@ -1178,7 +1178,7 @@ func TestDispatcher_Handle_IncidentCreated(t *testing.T) {
 // doesn't stay in d.done forever.
 func TestDispatcher_Handle_IncidentCreated_RetryDoesNotResendSucceededCall(t *testing.T) {
 	call := &mockCallSender{err: errors.New("twilio unreachable")}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 42, Value: []byte(validIncidentRecord)}
 
@@ -1202,7 +1202,7 @@ func TestDispatcher_Handle_IncidentCreated_RetryDoesNotResendSucceededCall(t *te
 // tracking entry must not leak in d.done forever.
 func TestDispatcher_Handle_IncidentCreated_ForgetsAfterFullSuccess(t *testing.T) {
 	call := &mockCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 42, Value: []byte(validIncidentRecord)}
 
@@ -1220,7 +1220,7 @@ func TestDispatcher_Handle_IncidentCreated_ForgetsAfterFullSuccess(t *testing.T)
 // default is used instead.
 func TestDispatcher_Handle_IncidentCreated_UsesDefaultWhenCallToOmitted(t *testing.T) {
 	call := &mockCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "+15559998888", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true, DefaultOnCallNumber: "+15559998888"})
 
 	record := eventbus.Record{Value: []byte(`{"type":"incident.created","entityId":"INC-1","payload":{"title":"P1 outage","shortDescription":"Everything is down"}}`)}
 
@@ -1238,7 +1238,7 @@ func TestDispatcher_Handle_IncidentCreated_UsesDefaultWhenCallToOmitted(t *testi
 // attempted with an empty destination, and Handle still succeeds.
 func TestDispatcher_Handle_IncidentCreated_SkipsCallWhenNoCallTo(t *testing.T) {
 	call := &mockCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"incident.created","entityId":"INC-1","payload":{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down"}}`)}
 
@@ -1255,7 +1255,7 @@ func TestDispatcher_Handle_IncidentCreated_SkipsCallWhenNoCallTo(t *testing.T) {
 // never invoked.
 func TestDispatcher_Handle_IncidentCreated_CallSendingDisabled(t *testing.T) {
 	call := &mockCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, false, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(validIncidentRecord)}
 
@@ -1276,7 +1276,7 @@ func TestDispatcher_Handle_IncidentCreated_CallSendingDisabled(t *testing.T) {
 func TestDispatcher_Handle_CaseCreated_EmailSendingDisabled(t *testing.T) {
 	mock := &mockEmailSender{}
 	chat := &mockGoogleChatSender{}
-	d := NewDispatcher(mock, chat, &mockCallSender{}, &mockLinkResolver{}, false, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: chat, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
 
@@ -1380,7 +1380,7 @@ func (s *concurrencyProbeCallSender) MakeCall(ctx context.Context, to, message s
 // comment for why that's a separate, already-accepted behavior).
 func TestDispatcher_Handle_ConcurrentClaimNeverOverlaps(t *testing.T) {
 	call := &concurrencyProbeCallSender{}
-	d := NewDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, call, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: &mockEmailSender{}, GoogleChat: &mockGoogleChatSender{}, Call: call, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 42, Value: []byte(validIncidentRecord)}
 
@@ -1521,7 +1521,7 @@ func (s *blockingEmailSender) SendEmail(ctx context.Context, to, cc, bcc, replyT
 // branch, so the losing call here must leave the winner's claim untouched.
 func TestDispatcher_Handle_LosingConcurrentCallDoesNotReleaseWinnersClaim(t *testing.T) {
 	mock := &blockingEmailSender{proceed: make(chan struct{})}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"fixed it","commentId":"C-1","recipients":["agent@wso2.com"]}}`)}
 	key := recordBaseKey(record) + "/email/https://csm.example/cases/CASE-1"
@@ -1578,7 +1578,7 @@ func TestDispatcher_Handle_LosingConcurrentCallDoesNotReleaseWinnersClaim(t *tes
 func TestDispatcher_Handle_CaseCreated_ConcurrentBlockedEmailDoesNotDuplicateChat(t *testing.T) {
 	email := &blockingEmailSender{proceed: make(chan struct{})}
 	chat := &mockGoogleChatSender{}
-	d := NewDispatcher(email, chat, &mockCallSender{}, &mockLinkResolver{}, true, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: email, GoogleChat: chat, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, CallSendingEnabled: true})
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"Incident","priority":"P3","product":"api-manager","createdAt":"2026-01-01","description":"desc","recipients":["test-recipient@example.com"]}}`)}
 	baseKey := recordBaseKey(record)
@@ -1696,7 +1696,7 @@ func crRecord(audience, projectID string) eventbus.Record {
 }
 
 // TestDispatcher_Handle_CRApprovalRequested_UsesTheFlowsSubject: the flow
-// reproduces ServiceNow's per-branch wording, so this service must send that
+// reproduces the legacy ticketing system's per-branch wording, so this service must send that
 // subject verbatim rather than building one of its own.
 func TestDispatcher_Handle_CRApprovalRequested_UsesTheFlowsSubject(t *testing.T) {
 	mock := &mockEmailSender{}
@@ -1756,8 +1756,7 @@ func TestDispatcher_Handle_CRApprovalRequested_LinksByAudience(t *testing.T) {
 // must silence this the same way it silences every other email here.
 func TestDispatcher_Handle_CRApprovalRequested_Killswitch(t *testing.T) {
 	mock := &mockEmailSender{}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{},
-		false, false, nil, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{CallSendingEnabled: true})
 
 	if err := d.Handle(context.Background(), crRecord("internal", "")); err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -1771,8 +1770,7 @@ func TestDispatcher_Handle_CRApprovalRequested_Killswitch(t *testing.T) {
 // mailbox instead of the real approval group.
 func TestDispatcher_Handle_CRApprovalRequested_DebugMode(t *testing.T) {
 	mock := &mockEmailSender{}
-	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{},
-		true, true, []string{"debug@wso2.com"}, true, "", nil)
+	d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true})
 
 	if err := d.Handle(context.Background(), crRecord("internal", "")); err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -1792,8 +1790,7 @@ func TestDispatcher_Handle_CRApprovalRequested_DebugMode(t *testing.T) {
 func TestDispatcher_Handle_CRPlanDateNotice_DebugMode(t *testing.T) {
 	t.Run("internal audience — To is redirected", func(t *testing.T) {
 		mock := &mockEmailSender{}
-		d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{},
-			true, true, []string{"debug@wso2.com"}, true, "", nil)
+		d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true})
 
 		if err := d.Handle(context.Background(), planDateRecord("customer_proposed", "internal", "")); err != nil {
 			t.Fatalf("Handle() error = %v", err)
@@ -1812,8 +1809,7 @@ func TestDispatcher_Handle_CRPlanDateNotice_DebugMode(t *testing.T) {
 
 	t.Run("customer audience — BCC is redirected, not the real recipient", func(t *testing.T) {
 		mock := &mockEmailSender{}
-		d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{},
-			true, true, []string{"debug@wso2.com"}, true, "", nil)
+		d := NewDispatcher(Deps{Email: mock, GoogleChat: &mockGoogleChatSender{}, Call: &mockCallSender{}, Links: &mockLinkResolver{}}, Config{EmailSendingEnabled: true, EmailDebugMode: true, EmailDebugRecipients: []string{"debug@wso2.com"}, CallSendingEnabled: true})
 
 		if err := d.Handle(context.Background(), planDateRecord("accepted", "customer", "PROJ-1")); err != nil {
 			t.Fatalf("Handle() error = %v", err)
@@ -1834,7 +1830,7 @@ func TestDispatcher_Handle_CRPlanDateNotice_DebugMode(t *testing.T) {
 }
 
 // TestDispatcher_Handle_CRApprovalRequested_CustomerAudienceIsBCC guards a real
-// exposure. ServiceNow sent one email per recipient, so no customer contact
+// exposure. The legacy ticketing system sent one email per recipient, so no customer contact
 // ever saw who else was notified; collapsing that into one message must not
 // publish a project's contact list to itself. Project contacts routinely span
 // several organisations, so a visible To would disclose addresses across
@@ -1941,7 +1937,7 @@ func TestDispatcher_Handle_CRPlanDateNotice(t *testing.T) {
 }
 
 // TestDispatcher_Handle_CRPlanDateNotice_WordingPerKind pins the three body
-// texts, reproduced from ServiceNow including its own awkward grammar.
+// texts, reproduced from the legacy ticketing system including its own awkward grammar.
 func TestDispatcher_Handle_CRPlanDateNotice_WordingPerKind(t *testing.T) {
 	tests := []struct{ kind, audience, want string }{
 		{"customer_proposed", "internal", "Customer has updated the plan start date. Please review the change."},

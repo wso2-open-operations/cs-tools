@@ -234,21 +234,20 @@ some subjects updated and the rest stale.
 
 The SRE-facing pair of outage emails: one when an outage is declared, one
 when it is resolved. Task name **`outage_communication`**, default schedule
-`*/5 * * * *`. The Go port of ServiceNow's `Outage Communication` flow.
+`*/5 * * * *`. The replacement for the legacy outage communication workflow.
 
 *** NOT THE SAME AS `outage_internal_notification`. *** That task is the
-internal-STAKEHOLDER notice, a different ServiceNow flow with a different
+internal-STAKEHOLDER notice, a different legacy workflow with a different
 audience and a different idempotency mechanism. They share the outage table
 and nothing else. Two tasks, two sub-cron names, two `SUB_CRON_RECIPIENTS`
 entries.
 
 **Recipients are configuration, and that is an evidenced decision.**
-ServiceNow resolves a group literally named `SRE Team`, which on the dev
-instance is `SRE_Team@gmail.com` with three members — a gmail address
-standing in for an internal list. Of seventeen active groups matching /SRE/,
-only one other has any address at all and it is a personal one. So there is
-no real distribution list to derive from, and the port takes its audience
-from `SUB_CRON_RECIPIENTS["outage_communication"].to` instead.
+The legacy workflow resolves a group whose only address on the
+non-production instance is an external mailbox standing in for an internal
+list, and no other matching group carries a usable distribution address. So
+there is no real distribution list to derive from, and the port takes its
+audience from `SUB_CRON_RECIPIENTS["outage_communication"].to` instead.
 
 Unlike the report tasks, `to` here is the REAL audience of the email, not
 just the failure-alert list — the same arrangement `outage_internal_notification`
@@ -261,12 +260,12 @@ row per decision, and those rows are the port's idempotency guard, so
 sweeping with nowhere to deliver would mark outages as announced to nobody
 and they would never be announced again.
 
-**It is also inert until digiops-cs mirrors `outage.outage_communication`.**
+**It is also inert until the upstream data mirror exposes `outage.outage_communication`.**
 Without that column the repository degrades to "nothing to send" rather than
 failing the sweep — narrow on purpose, so only `undefined_column` is
 swallowed.
 
-**What it will not send.** ServiceNow's declaration branch requires
+**What it will not send.** The legacy workflow's declaration branch requires
 `type=outage`, so a DEGRADATION or PLANNED outage produces no email at all.
 Reproduced deliberately; widening it is a product change, not a port.
 
@@ -331,16 +330,40 @@ report emails" below for why that's not a generic engine feature.
 | `EMAIL_FROM_ADDRESS` | No | Fixed "From" address for every email this component sends |
 | `ALERTS_ENABLED` | No (default `true`) | Global kill switch for every email this component sends — failure alerts and report-style tasks' own success emails alike — see "Alerting" above |
 | `ALERT_RECIPIENTS` | No | Comma-separated email addresses alerted on every failed sub-cron attempt, for every task — see "Alerting" above |
-| `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
+| `DRIVER_INTERVAL` | No (default `1h`), but checked at startup | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself. Startup refuses to proceed if any registered schedule fires more often than this (the default task set has `*/5` tasks, so a real deployment must set this to the trigger cadence, e.g. `5m`): a tighter schedule can never be honoured, and a failed period of such a task would be superseded by its next period before its retry (which defaults to this interval) ever came due |
+| `TASK_CONCURRENCY` | No (default `2`) | How many task handlers may run at once within one tick. Tasks always start shortest-interval first (the `*/5` tasks ahead of the `*/15` one ahead of the dailies); a second worker additionally keeps one slow handler from holding the rest of the tick. `1` makes the tick strictly sequential |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
 | `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for a report-style task, its report's actual recipients (see "Alerting" above for which tasks work which way). A task not mentioned gets no per-task recipients |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `CLOUD_STATUS_ENABLED` | No (default `false`) | Registers the `cloud_status_webhooks` task. Off by default, and turning it on is a paired change with retiring the legacy cloud status notification workflow, or every event is posted twice |
+| `CLOUD_STATUS_WEBHOOK_URLS` | Yes when `CLOUD_STATUS_ENABLED` is true (checked at startup) | JSON object of cloud slug to status-dashboard base URL. Empty or unparseable stops startup rather than losing events |
+| `CLOUD_STATUS_WEBHOOK_SECRETS` | Yes when `CLOUD_STATUS_ENABLED` is true (checked at startup) | JSON object of cloud slug to the full `X-Webhook-Signature` header value (`Secret <token>`), with a `default` key covering any cloud without its own entry |
 
-No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
-limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
-context via `signal.NotifyContext` on `SIGTERM`, so however that signal arrives (Choreo's own
-timeout firing, a redeploy, a manual stop), in-flight HTTP calls to entity-service abort promptly
-instead of being cut off mid-request with no chance to react.
+There is no whole-process execution timeout here — Choreo's own Scheduled Task execution-time
+limit bounds how long one invocation can run. Each handler, however, runs under its own
+`context.WithTimeout`: `registry.Task.Timeout` when set, otherwise the schedule's shortest
+inter-fire gap capped at 30 minutes (`engine.handlerTimeout`), since a handler still running when
+its own next period comes due has already lost. The ledger's orphaned-claim window is widened to
+cover that timeout, so a long handler is never reclaimed mid-run by the next tick.
+
+`cmd/server/main.go` cancels its context via `signal.NotifyContext` on `SIGTERM`, so however that
+signal arrives (Choreo's own timeout firing, a redeploy, a manual stop), the in-flight handler
+aborts promptly and no further task is claimed. The engine's record-back (`Complete`/`Fail`) and
+alert e-mails deliberately do **not** run on that context: they use a short context derived with
+`context.WithoutCancel` (`engine.bookkeepingContext`, bounded by `Engine.BookkeepingTimeout`,
+default 10s), so an interrupted run is still recorded as failed and the alert still goes out —
+otherwise both would fail before dialling, the row would stay claimed with no retry time, and
+nobody would be told.
+
+The process exits non-zero whenever `engine.Tick` returns an error — any handler failure, any
+ledger call that failed at any stage, an alert that could not be sent, or an interruption —
+so the scheduler's run history shows a failed run. "Not due" and "claim denied" exit 0.
+
+Ledger-stage failures (claim, complete, fail) get one aggregated **LEDGER ERROR** e-mail per tick
+(`notify.RenderLedgerAlertEmail`, `internal/notify/templates/ledger_alert.html`) listing every
+affected task with a short, summarised cause — never a response body — sent to `ALERT_RECIPIENTS`
+plus each affected task's own To/Cc. The e-mail client does not depend on the ledger, so this is
+exactly the alert that still works when entity-service is what is down.
 
 `.env` is auto-loaded from the working directory at startup if present (silently ignored if
 absent), matching `integrations/csm-notification-service`'s own convention.
@@ -366,6 +389,17 @@ stays owned per task on purpose. A future report-sending sub-cron follows the sa
 whatever's genuinely identical (a case-search method, a rendering helper), but keep its own
 template, its own render function, and its own recipients wired through in `cmd/server/main.go` —
 there still isn't, and isn't meant to be, one shared "send a report" mechanism in `engine`.
+
+**Once per period.** `registry.Task.Handler` must be idempotent per period, and a report handler on
+its own is not: if the engine's `Complete` fails after the e-mail went out (or the process dies in
+between), the row is reclaimed and the same report is mailed again. Both report tasks therefore run
+their search-render-send inside `internal/reportguard.Guard.Once`, which records the send as a
+companion ledger row named `<task>.sent` for the same period key — claimed before the send,
+completed right after. A re-run for a period whose companion row already succeeded skips the query
+and the send. This uses only the existing ledger endpoints (the companion rows are ordinary rows,
+deleted by `housekeeping_cleanup` like any other); the engine passes the claimed period to every
+handler via `registry.WithPeriod`/`PeriodFrom`. A new report-sending sub-cron should be wired the
+same way.
 
 ## Future: events
 

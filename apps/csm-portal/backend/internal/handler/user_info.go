@@ -61,14 +61,14 @@ func (h *UserInfoHandler) GetUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	raw, err := h.entity.GetUserMe(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetUserMe failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve user info.")
 		return
 	}
 
 	var resp entityUserMeResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed", "userID", user.UserID, "err", summarizeErr(err))
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
 	}

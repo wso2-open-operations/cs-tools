@@ -87,13 +87,13 @@ export function priorityFromSeverity(severity: Severity): BeCaseSeverity {
  * Map a backend case state onto the UI `CaseState` vocabulary.
  *
  * The Postgres source already sends the domain enum (`work_in_progress`), but
- * the ServiceNow case-search view sends the raw SN label (`"Work In Progress"`)
+ * the backing system case-search view sends the raw backing-source label (`"Work In Progress"`)
  * because the entity-service normalizes every sibling field (severity, work
  * state, issue type) EXCEPT state. So we normalize label → enum here at the
  * boundary — lowercase and collapse whitespace to underscores — so both sources
  * render with the curated label/colour and downstream `state === "…"` checks
  * (e.g. the in-progress work-state indicator) work regardless of source.
- * (Ideal fix is BE-side: normalize `state` in the SN search view like the other
+ * (Ideal fix is BE-side: normalize `state` in the backing-source search view like the other
  * fields — tracked as a follow-up.)
  *
  * A state the frontend has not been taught about still passes through (in
@@ -164,7 +164,7 @@ function isBotSender(comment: BeComment): boolean {
 
 // The backend normalizes `type` to the singular enum (`work_note`/`comment`/
 // `activity`); the plural forms are kept as a defensive fallback in case an
-// un-normalized SN value slips through.
+// un-normalized backing-source value slips through.
 const WORK_NOTE_TYPES = new Set(["work_note", "work_notes"]);
 const ACTIVITY_TYPES = new Set(["activity", "activities"]);
 

@@ -70,7 +70,7 @@ export interface AsyncEntitySelectProps<T> {
 /**
  * Generic single-entity type-ahead picker: type a name, get real portal-UUID
  * options back from `useSearch`. Built for the change-request create form's
- * ServiceNow reference fields (Requested by / Assigned to / Assignment group
+ * The backing system reference fields (Requested by / Assigned to / Assignment group
  * / Service / Service offering / Configuration item), each of which reuses
  * this with its own search hook and id/label accessors rather than five
  * near-identical components. Mirrors AsyncProjectSelect's shape, minus

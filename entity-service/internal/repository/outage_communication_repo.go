@@ -76,7 +76,7 @@ func NewOutageCommunicationRepository(db *pgxpool.Pool) OutageCommunicationRepos
 // earlier revision of this query mapped Impact to `o.message`, which is the
 // outage's own message and a different field entirely: it would have rendered
 // a plausible-looking wrong value in every email, which is worse than a blank.
-// Add them to the digiops-cs mapping if the blanks matter.
+// Add them to the sync service's outage mapping if the blanks matter.
 //
 // `opted_in` is outage.outage_communication, which csm-sync-service does not
 // mirror yet. Until it does, this query fails with undefined_column and the
@@ -121,7 +121,7 @@ SELECT o.id::text,
 func (r *outageCommunicationRepo) PendingOutages(ctx context.Context, limit int) ([]domain.OutageForCommunication, error) {
 	rows, err := r.db.Query(ctx, pendingOutageCommunicationsSQL, limit)
 	if err != nil {
-		// outage.outage_communication arrives with a digiops-cs mapping that
+		// outage.outage_communication arrives with a sync-side mapping that
 		// does not exist yet. A database without it should report nothing to
 		// send rather than fail the sweep. Narrow on purpose: only
 		// undefined_table/undefined_column degrade, because every other error

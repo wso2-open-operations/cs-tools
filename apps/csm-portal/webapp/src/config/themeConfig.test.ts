@@ -15,6 +15,7 @@
 // under the License.
 
 import { afterEach, describe, expect, it } from "vitest";
+import * as OxygenUI from "@wso2/oxygen-ui";
 import {
   configThemeKey,
   DEFAULT_THEME_KEY,
@@ -28,6 +29,26 @@ describe("themeConfig", () => {
 
   afterEach(() => {
     window.config = originalConfig;
+  });
+
+  it("registers every theme the installed oxygen-ui exports (add new ones to OXYGEN_THEME_EXPORTS)", () => {
+    const keyFor = (exportName: string): string => {
+      const words =
+        exportName.slice(0, -"Theme".length).match(/[A-Z]+[a-z0-9]*/g) ?? [];
+      return words.map((w, i) => (i === 0 ? w.toLowerCase() : w)).join("");
+    };
+    const exported = Object.entries(OxygenUI)
+      .filter(
+        ([name, value]) =>
+          name.endsWith("Theme") &&
+          typeof value === "object" &&
+          value !== null &&
+          "palette" in value &&
+          "typography" in value,
+      )
+      .map(([name]) => keyFor(name));
+    expect(exported.length).toBeGreaterThan(0);
+    for (const key of exported) expect(isThemeKey(key)).toBe(true);
   });
 
   it("keeps the two remaining legacy keys the picker still offers", () => {
@@ -69,7 +90,7 @@ describe("themeConfig", () => {
     expect(byKey.acrylicPurple).toBe("Acrylic Purple");
   });
 
-  it("picks up new oxygen-ui exports (e.g. WSO2Theme) without a hand-written map", () => {
+  it("offers the oxygen-ui theme set beyond the legacy keys (e.g. WSO2Theme)", () => {
     const keys = THEME_OPTIONS.map((o) => o.key);
     // These come from oxygen-ui 0.13.1's expanded theme set; if oxygen-ui
     // ever removes one this assertion should be updated, not the app code.

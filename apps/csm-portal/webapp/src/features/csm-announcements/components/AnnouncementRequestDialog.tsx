@@ -47,7 +47,7 @@ import {
   resolveDisplayTimeZone,
   zonedInputToUtcIso,
 } from "@utils/dateTime";
-import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { sanitizeRichTextHtml, isBlankHtml } from "@utils/sanitizeHtml";
 import {
   DRY_RUN_TAG_LABEL,
   useAnnouncementDryRun,
@@ -111,11 +111,6 @@ function whoWhen(who?: string | null, when?: string | null): string {
   const whenText = when ? formatAbsoluteForUser(when) : null;
   if (who && whenText) return `${who} · ${whenText}`;
   return who ?? whenText ?? "—";
-}
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
 }
 
 /**
@@ -477,12 +472,14 @@ export default function AnnouncementRequestDialog({
       };
 
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+    // Closing mid fan-out would unmount the hook while cases are still being
+    // created; block every close path (backdrop, Escape, X, Close) until done.
+    <Dialog open onClose={publish.publishing ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Typography variant="subtitle1" component="span">
           Announcement request{request ? ` · ${STATE_TITLE[request.state] ?? request.state}` : ""}
         </Typography>
-        <IconButton size="small" onClick={onClose} aria-label="Close">
+        <IconButton size="small" onClick={onClose} aria-label="Close" disabled={publish.publishing}>
           <X size={16} />
         </IconButton>
       </DialogTitle>
@@ -734,7 +731,7 @@ export default function AnnouncementRequestDialog({
                     submittingForApproval ||
                     hasUnsavedChanges ||
                     subject.trim().length === 0 ||
-                    isEmptyHtml(description) ||
+                    isBlankHtml(description) ||
                     !canWrite
                   }
                 >
@@ -1089,7 +1086,9 @@ export default function AnnouncementRequestDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose} disabled={publish.publishing}>
+          Close
+        </Button>
       </DialogActions>
 
       {confirmEditOpen && (

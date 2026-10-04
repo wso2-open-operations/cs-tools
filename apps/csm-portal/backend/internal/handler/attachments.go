@@ -26,7 +26,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/servicenow"
 )
 
-// attachmentsClient abstracts the ServiceNow attachment-download
+// attachmentsClient abstracts the backing system attachment-download
 // operation used by AttachmentsHandler.
 type attachmentsClient interface {
 	// RequireCaseAttachment confirms attachmentSysID is attached to a case
@@ -38,14 +38,14 @@ type attachmentsClient interface {
 }
 
 // AttachmentsHandler handles HTTP requests for downloading a case
-// attachment, delegating to the ServiceNow service.
+// attachment, delegating to the backing system service.
 type AttachmentsHandler struct {
 	servicenow  attachmentsClient
 	accessGuard *AccessGuard
 }
 
 // NewAttachmentsHandler creates a AttachmentsHandler backed by the
-// given ServiceNow client. accessGuard enforces PermViewerAccess,
+// given the backing system client. accessGuard enforces PermViewerAccess,
 // SupportPortalLite's blanket audience gate, plus PermDownloadAttachment for
 // DownloadAttachment specifically.
 func NewAttachmentsHandler(sn attachmentsClient, accessGuard *AccessGuard) *AttachmentsHandler {
@@ -55,7 +55,7 @@ func NewAttachmentsHandler(sn attachmentsClient, accessGuard *AccessGuard) *Atta
 // DownloadAttachment handles GET /attachments/{attachmentId}/download. Only
 // an allowlisted set of Content-Type values (safeAttachmentTypes, defined
 // in cases.go) are honored, and the response always forces
-// Content-Disposition: attachment regardless of what ServiceNow sent —
+// Content-Disposition: attachment regardless of what the backing system sent —
 // mirroring this backend's existing GetCaseAttachmentContent convention,
 // which never trusts an upstream Content-Type/Content-Disposition for
 // inline rendering.
@@ -83,14 +83,14 @@ func (h *AttachmentsHandler) DownloadAttachment(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
-		slog.ErrorContext(r.Context(), "servicenow RequireCaseAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow RequireCaseAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve attachment content.")
 		return
 	}
 
 	content, contentType, _, err := h.servicenow.DownloadAttachment(r.Context(), attachmentID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "servicenow DownloadAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow DownloadAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve attachment content.")
 		return
 	}

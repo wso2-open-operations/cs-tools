@@ -69,7 +69,7 @@ func (h *ITServiceHandler) SearchITServices(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.entity.SearchITServices(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchITServices failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchITServices failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search IT services.")
 		return
 	}

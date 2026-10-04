@@ -65,7 +65,7 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetAccount(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAccount failed", "userID", user.UserID, "accountID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetAccount failed", "userID", user.UserID, "accountID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve account.")
 		return
 	}
@@ -99,7 +99,7 @@ func (h *AccountHandler) SearchAccounts(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.SearchAccounts(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchAccounts failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search accounts.")
 		return
 	}
@@ -141,7 +141,7 @@ func (h *AccountHandler) SearchAccountContacts(w http.ResponseWriter, r *http.Re
 
 	result, err := h.entity.SearchAccountContacts(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAccountContacts failed", "userID", user.UserID, "accountID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchAccountContacts failed", "userID", user.UserID, "accountID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search account contacts.")
 		return
 	}
@@ -187,7 +187,7 @@ func (h *AccountHandler) UpdateAccountTeams(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.entity.UpdateAccountTeams(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateAccountTeams failed", "userID", user.UserID, "accountID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateAccountTeams failed", "userID", user.UserID, "accountID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to update account teams.")
 		return
 	}
@@ -195,18 +195,18 @@ func (h *AccountHandler) UpdateAccountTeams(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-// viewerAccountClient abstracts the ServiceNow operations used by
+// viewerAccountClient abstracts the backing-system operations used by
 // ViewerAccountHandler. GetAccounts/GetAccountByID/GetProjectsByAccount used to
-// live here too, backed first by ServiceNow and later by a Postgres
+// live here too, backed first by the backing system and later by a Postgres
 // translation layer -- both removed in favor of calling CS Portal's own
 // GET /accounts/{id}, POST /accounts/search, and POST /projects/search
 // (filtered by accountId) directly, now that SPL's data source for these
 // reads is the exact same entity-service Postgres data CS Portal's own
-// routes already serve, with no ServiceNow-shape translation left to
+// routes already serve, with no backing-system-shape translation left to
 // justify a second, parallel /spl/* contract for them. Escalation
 // create/read have no entity-service equivalent (CreateEscalation is an
 // explicit stub -- see entity-service's escalation_service.go), so those
-// two stay here, ServiceNow-backed, unmerged.
+// two stay here, legacy-data-source, unmerged.
 type viewerAccountClient interface {
 	GetEscalationsByAccount(ctx context.Context, accountNumber string, offset, limit int) ([]servicenow.EscalationDetail, error)
 	EscalateCase(ctx context.Context, accountNumber, caseNumber string, request servicenow.EscalationRequest, submittedByEmail string) (servicenow.EscalationResponse, error)
@@ -231,9 +231,9 @@ var escalationRequestSourceValues = map[string]bool{"Customer": true, "Internal"
 var escalationReasonValues = map[string]bool{"Inactivity": true, "Lack Of Progress": true, "Customer Imposed Deadline": true}
 var escalationSeverityValues = map[string]bool{"High Severity": true, "Medium Severity": true}
 
-// maxPaginationLimit bounds "limit" on every SPL ServiceNow-paginated
+// maxPaginationLimit bounds "limit" on every SPL backing-system-paginated
 // route: these values flow straight into sysparm_limit on the upstream
-// ServiceNow request, so an unbounded value lets a caller force this
+// The backing system request, so an unbounded value lets a caller force this
 // backend to buffer an arbitrarily large response in memory.
 const maxPaginationLimit = 100
 
@@ -295,7 +295,7 @@ func (h *ViewerAccountHandler) GetAccountEscalations(w http.ResponseWriter, r *h
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
-		slog.ErrorContext(r.Context(), "servicenow GetEscalationsByAccount failed", "userID", user.UserID, "accountID", accountID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow GetEscalationsByAccount failed", "userID", user.UserID, "accountID", accountID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve account escalations.")
 		return
 	}
@@ -355,7 +355,7 @@ func (h *ViewerAccountHandler) EscalateCase(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 			return
 		}
-		slog.ErrorContext(r.Context(), "servicenow EscalateCase failed", "userID", user.UserID, "accountID", accountID, "caseID", caseID, "err", err)
+		slog.ErrorContext(r.Context(), "servicenow EscalateCase failed", "userID", user.UserID, "accountID", accountID, "caseID", caseID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to escalate case.")
 		return
 	}

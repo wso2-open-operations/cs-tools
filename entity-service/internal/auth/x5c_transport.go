@@ -27,7 +27,7 @@ import (
 // x5cStrippingTransport removes the "x5c" certificate chain from every key in
 // a JWKS response before it reaches the jwkset parser. Verification only needs
 // the public key material ("n"/"e", or the EC equivalents); jwkset
-// unconditionally parses "x5c" as X.509 certificates, and Asgardeo publishes
+// unconditionally parses "x5c" as X.509 certificates, and the identity provider publishes
 // certs with a negative serial number that Go's x509 parser has rejected since
 // Go 1.23, which would otherwise make the whole JWK Set fail to load. Mirrors
 // apps/csm-portal/backend's middleware of the same name.

@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Controllable stand-in for the real (async) ID-token decode, so tests can
 // drive exactly when the `userid` claim "resolves" relative to a record/read,
-// instead of depending on real Asgardeo timing.
+// instead of depending on real sign-in timing.
 let mockUserid: string | undefined;
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => (mockUserid ? { userid: mockUserid } : undefined),

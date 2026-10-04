@@ -56,3 +56,38 @@ func PeriodKey(expr string, now time.Time) (time.Time, error) {
 	// that firing IS the period this tick belongs to, not the one before it.
 	return gronx.PrevTickBefore(expr, now, true)
 }
+
+// intervalSamples is how many consecutive firings MinInterval inspects. A
+// plain "*/5" or daily expression repeats after one gap; a weekday-only
+// expression needs a few to show its shortest gap rather than its longest
+// (the weekend).
+const intervalSamples = 4
+
+// MinInterval returns the shortest gap between two consecutive firings of
+// expr at or after from — "how often this schedule can fire." It is the
+// basis for two engine decisions: the order tasks run in (shortest first)
+// and each handler's default timeout; cmd/server/main.go also checks every
+// registered schedule's MinInterval against DRIVER_INTERVAL at startup,
+// since a schedule tighter than the driver's own cadence can never be
+// honoured. Returns an error if expr is not a valid cron expression.
+func MinInterval(expr string, from time.Time) (time.Duration, error) {
+	if !gronx.IsValid(expr) {
+		return 0, fmt.Errorf("schedule: invalid cron expression %q", expr)
+	}
+	prev, err := gronx.NextTickAfter(expr, from, false)
+	if err != nil {
+		return 0, fmt.Errorf("schedule: next firing of %q: %w", expr, err)
+	}
+	var shortest time.Duration
+	for i := 0; i < intervalSamples; i++ {
+		next, err := gronx.NextTickAfter(expr, prev, false)
+		if err != nil {
+			return 0, fmt.Errorf("schedule: next firing of %q: %w", expr, err)
+		}
+		if gap := next.Sub(prev); shortest == 0 || gap < shortest {
+			shortest = gap
+		}
+		prev = next
+	}
+	return shortest, nil
+}

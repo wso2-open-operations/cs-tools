@@ -389,13 +389,13 @@ func TestOpportunityIngest_FetchErrorPropagates(t *testing.T) {
 // DELETED ledger row and no Sales Entity call; a missing row is acknowledged.
 func TestOpportunityIngest_Deleted(t *testing.T) {
 	for _, rows := range []int64{1, 0} {
-		se := &fakeOpportunitySalesEntity{}
+		se := &fakeOpportunitySalesEntity{err: salesentity.NotFound("salesentity: opportunity not found")}
 		repo := &fakeOpportunityRepo{deleteRows: rows}
 		svc := newOpportunityService(se, repo, &fakeIngestStateRepo{}, nil)
 		if err := svc.HandleEvent(context.Background(), opportunityEvent("DELETED")); err != nil {
 			t.Fatalf("rows=%d: err = %v", rows, err)
 		}
-		if se.calls != 0 || len(repo.deletes) != 1 || repo.deletes[0] != testOpportunitySfID {
+		if se.calls != 1 || len(repo.deletes) != 1 || repo.deletes[0] != testOpportunitySfID {
 			t.Errorf("rows=%d: fetches %d, deletes %v", rows, se.calls, repo.deletes)
 		}
 		st := repo.deleteState[0]
@@ -409,7 +409,7 @@ func TestOpportunityIngest_Deleted(t *testing.T) {
 // deleted, locked and recorded under the 18-character Id the ingest stored.
 func TestOpportunityIngest_DeletedWidens15CharID(t *testing.T) {
 	repo := &fakeOpportunityRepo{deleteRows: 1}
-	svc := newOpportunityService(&fakeOpportunitySalesEntity{}, repo, &fakeIngestStateRepo{}, nil)
+	svc := newOpportunityService(&fakeOpportunitySalesEntity{err: salesentity.NotFound("salesentity: opportunity not found")}, repo, &fakeIngestStateRepo{}, nil)
 	req := opportunityEvent("DELETED")
 	req.ReferenceID = testOpportunitySfID[:15]
 	if err := svc.HandleEvent(context.Background(), req); err != nil {

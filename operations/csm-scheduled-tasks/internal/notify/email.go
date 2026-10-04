@@ -33,14 +33,12 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
-// emailTokenFetchTimeout is the HTTP client timeout for token-endpoint
-// requests. Overridden in tests to keep them fast.
-var emailTokenFetchTimeout = 10 * time.Second
+// sendTimeout bounds every send-email request.
+const sendTimeout = 25 * time.Second
 
 // Config holds the configuration for the email client below.
 type Config struct {
@@ -53,6 +51,10 @@ type Config struct {
 	// email — a config value, not a SendEmail argument, so every email
 	// this component sends comes from one pre-approved sender.
 	FromAddress string
+	// Transport, when set, is a shared entityhttp transport built for the
+	// e-mail scopes; when nil the client builds its own from the credential
+	// fields.
+	Transport http.RoundTripper
 }
 
 // Client is an HTTP client for the internal email notification service,
@@ -83,8 +85,15 @@ func NewClient(cfg Config) (*Client, error) {
 	// optional (both clients share OAUTH2_TOKEN_URL, which cmd/server/main.go
 	// requires via mustEnv regardless of whether email itself is
 	// configured), so it's always checked.
-	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("notify: token URL: %w", err)
+	rt := cfg.Transport
+	if rt == nil {
+		var err error
+		rt, err = entityhttp.NewTransport(entityhttp.Credentials{
+			TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Scopes: cfg.Scopes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("notify: %w", err)
+		}
 	}
 	if cfg.BaseURL != "" {
 		if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
@@ -92,22 +101,8 @@ func NewClient(cfg Config) (*Client, error) {
 		}
 	}
 
-	cc := clientcredentials.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
-		Scopes:       cfg.Scopes,
-	}
-
-	tokenHTTPClient := &http.Client{Timeout: emailTokenFetchTimeout}
-	httpsec.RejectInsecureRedirects(tokenHTTPClient)
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTPClient)
-	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
-	httpsec.RejectInsecureRedirects(httpClient)
-
 	return &Client{
-		http:        httpClient,
+		http:        entityhttp.NewClient(rt, sendTimeout),
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 		fromAddress: cfg.FromAddress,
 	}, nil

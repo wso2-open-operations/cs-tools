@@ -19,6 +19,7 @@ import { Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, T
 import type { BeCallRequestView } from "@api/backend/types";
 import RelativeTime from "@components/RelativeTime";
 import { callRequestStateColor, callRequestStateLabel } from "@features/csm-cases/utils/callRequestState";
+import { isSafeHref } from "@features/csm-cases/utils/commentContent";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 interface CallRequestDetailModalProps {
@@ -136,7 +137,7 @@ export default function CallRequestDetailModal({
             </Box>
           )}
 
-          {cr.meetingLink && (
+          {isSafeHref(cr.meetingLink) && (
             <Field
               label="Meeting link"
               value={

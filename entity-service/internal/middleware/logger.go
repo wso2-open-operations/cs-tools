@@ -59,7 +59,7 @@ var sanitizePath = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace
 // Logger is an HTTP middleware that logs each request's method, path, caller
 // id, response status code, and elapsed time.
 //
-// callerId is the same Asgardeo user UUID csm-portal-backend/customer-portal
+// callerId is the same identity-provider user UUID csm-portal-backend/customer-portal
 // backend-v2 already log for the request that reached them, when auth.
 // Middleware (further inside this chain) validated an x-user-id-token --
 // letting a request be traced across services by that one value. For a pure

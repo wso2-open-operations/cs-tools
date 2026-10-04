@@ -53,7 +53,7 @@ describe("isSimpleRepresentable", () => {
     ["tags", { tags: ["urgent"] }],
     ["excludeTags", { excludeTags: ["spam"] }],
     // The Simple-mode "State" control used to be a tri-state that read/wrote
-    // `excludeStates` directly (digiops-cs#2907); now that it's a plain
+    // `excludeStates` directly; now that it's a plain
     // include-only multi-select, `excludeStates` is only representable via
     // the Advanced-mode "State"/"is not one of" row, same as `excludeTags`.
     ["excludeStates", { excludeStates: ["closed"] }],

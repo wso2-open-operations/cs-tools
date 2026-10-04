@@ -74,7 +74,7 @@ func (h *IncidentTaskHandler) SearchIncidentTasks(w http.ResponseWriter, r *http
 
 	result, err := h.entity.SearchIncidentTasks(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchIncidentTasks failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchIncidentTasks failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search incident tasks.")
 		return
 	}
@@ -114,7 +114,7 @@ func (h *IncidentTaskHandler) AggregateIncidentTasks(w http.ResponseWriter, r *h
 
 	result, err := h.entity.AggregateIncidentTasks(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity AggregateIncidentTasks failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity AggregateIncidentTasks failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to aggregate incident tasks.")
 		return
 	}
@@ -138,7 +138,7 @@ func (h *IncidentTaskHandler) GetIncidentTask(w http.ResponseWriter, r *http.Req
 
 	result, err := h.entity.GetIncidentTask(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetIncidentTask failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetIncidentTask failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve incident task.")
 		return
 	}

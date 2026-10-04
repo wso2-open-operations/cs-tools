@@ -32,13 +32,15 @@ import { TransformWrapper, TransformComponent, type ReactZoomPanPinchRef } from 
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { PDF_JS_DIST_CDN } from "@config/endpoints";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { attachments as attachmentsService } from "@src/services/attachments";
 import { getAttachmentPreviewKind } from "@utils/attachmentPreview";
 import { Logger } from "@utils/logger";
 import type { CaseAttachment } from "@src/types";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(PDF_JS_DIST_CDN(pdfjs.version)).toString();
+// The worker ships with the bundle (same pdfjs-dist version react-pdf resolves), so PDF preview
+// does not depend on a third-party CDN at runtime.
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // Full-screen zoom/pan image + paginated PDF viewer — mirrors the customer-portal microapp's own
 // AttachmentPreviewDialog (components/shared/AttachmentPreviewDialog.tsx) UI, but sources bytes

@@ -69,7 +69,7 @@ func (h *ServiceOfferingHandler) SearchServiceOfferings(w http.ResponseWriter, r
 
 	result, err := h.entity.SearchServiceOfferings(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchServiceOfferings failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchServiceOfferings failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search service offerings.")
 		return
 	}

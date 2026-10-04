@@ -28,5 +28,5 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("upstream returned %d: %s", e.StatusCode, e.Body)
+	return fmt.Sprintf("upstream returned %d", e.StatusCode)
 }

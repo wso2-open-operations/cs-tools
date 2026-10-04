@@ -110,7 +110,9 @@ The scan should report **no vulnerabilities**. Most findings are Go standard-lib
 
 ## Configuration
 
-Copy `.env` and fill in the values:
+Copy `.env.example` to `.env` and fill in the values. The server loads `.env` from the working directory at startup.
+
+`OAUTH2_TOKEN_URL`, `CUSTOMER_ENTITY_BASE_URL`, `UPDATES_BASE_URL`, `SCIM_BASE_URL` and `AUTH_JWKS_ENDPOINT` must be `https` URLs with no userinfo, query or fragment (a path is allowed); plain `http` is accepted only for a local host — `localhost`, a loopback IP, or a single-label container name such as `entity-service`. Anything else fails startup.
 
 ### Shared OAuth2 client credentials
 
@@ -175,24 +177,50 @@ Both optional — used only to back `GET /health/dependencies` today (see "Healt
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | Base URL of `integrations/csm-integration-service`. Optional |
 | `CSM_INTEGRATION_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
-### Notifications — email channel (not yet wired in)
-
-`internal/notifications` (`EmailClient.SendEmail`) is ready to use but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today; they're documented here for when the first caller is added, which should reuse the shared `OAUTH2_*` credentials above rather than adding its own. Each notification channel gets its own `NOTIFICATIONS_<CHANNEL>_*` prefix for its channel-specific settings — SMS/Twilio will follow this same convention once added.
-
-| Variable | Description |
-|---|---|
-| `NOTIFICATIONS_EMAIL_BASE_URL` | Base URL of the email notification service (optional) |
-| `NOTIFICATIONS_EMAIL_SCOPES` | Comma-separated OAuth2 scopes (optional) |
-| `NOTIFICATIONS_EMAIL_FROM_ADDRESS` | Fixed "From" address used for every outgoing email (optional) |
-
 ### Notifications — Google Chat channel
 
-`internal/notifications` (`GoogleChatClient.SendIncidentAlert`) posts a card message — title, short description, and an "Open in CSM Portal" button — to a Google Chat space via an incoming webhook. There's one space per product (each WSO2 product has its own space), so the client is configured with a list of `{product, webhookUrl}` pairs and routes each alert to the space matching the case's product (case- and whitespace-insensitive match; an unconfigured product returns an error rather than falling back). Unlike every other upstream client it does not use the shared `OAUTH2_*` credentials; a webhook URL is the only credential needed per space (Space settings > Apps & integrations > Webhooks). It's called from `POST /notifications/google-chat/alerts` (see [API Endpoints](#notifications) below), which today is triggered manually rather than from real case/incident creation.
+E-mail and other customer-facing notifications are sent by `integrations/csm-notification-service`, not this backend.
+
+`internal/notifications` (`GoogleChatClient.SendIncidentAlert`) posts a card message — title, short description, and an "Open in CSM Portal" button — to a Google Chat space via an incoming webhook. The card content is built from the incident record the request names (HTML-escaped), and each caller may send at most 5 alerts per 10 minutes. There's one space per product (each WSO2 product has its own space), so the client is configured with a list of `{product, webhookUrl}` pairs and routes each alert to the space matching the case's product (case- and whitespace-insensitive match; an unconfigured product returns an error rather than falling back). Unlike every other upstream client it does not use the shared `OAUTH2_*` credentials; a webhook URL is the only credential needed per space (Space settings > Apps & integrations > Webhooks). It's called from `POST /notifications/google-chat/alerts` (see [API Endpoints](#notifications) below), which today is triggered manually rather than from real case/incident creation.
 
 | Variable | Description |
 |---|---|
 | `NOTIFICATIONS_GOOGLE_CHAT_SPACES` | JSON array of `{"product","webhookUrl"}` objects, one per Google Chat space — e.g. `[{"product":"api-manager","webhookUrl":"https://chat.googleapis.com/..."}]`. Optional — left unset, malformed, Google Chat alerts are unavailable but startup and every other endpoint work normally |
 | `CSM_PORTAL_WEB_BASE_URL` | Base URL of the CSM portal webapp, used to build the "Open in CSM Portal" link at `/operations/incidents/{caseId}` (e.g. `http://localhost:3001` for local dev). Optional — only needed alongside `NOTIFICATIONS_GOOGLE_CHAT_SPACES` above |
+
+### SupportPortalLite (optional, off by default)
+
+The Sales/Solutions-Architecture routes (escalations by account, attachments info and download, team schedule, reports, user scan, Drive browsing, usage metrics, customer health). Off unless `SPL_ENABLED` is a `strconv.ParseBool` true value; off means none of these routes is registered and none of the variables below is read. When on, every variable below is required unless marked optional.
+
+| Variable | Description |
+|---|---|
+| `SPL_ENABLED` | Turns the routes on (`1`, `t`, `true`, ...). An unparseable value warns and counts as off |
+| `SERVICENOW_HOST` | Base URL of the backing ticketing system's API host (`https`) |
+| `SERVICENOW_USERNAME` / `SERVICENOW_PASSWORD` | Basic-auth credentials for that host |
+| `SERVICENOW_ESCALATION_TEMPLATE_ID` | Template id used when creating an escalation. Optional (only the escalate route needs it) |
+| `TEAM_SCHEDULE_URL` | Team schedule source. Optional (only the team-schedule route needs it) |
+| `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `GOOGLE_DRIVE_REFRESH_TOKEN` | OAuth2 refresh-token grant for the Drive browsing routes |
+| `GOOGLE_DRIVE_ROOT_FOLDER_IDS` | Comma-separated Drive folder ids that `GET /files` and `GET /files/search` are confined to (each folder and everything below it). Optional; unset means those routes find nothing (startup warns) |
+| `SPL_RISK_MYSQL_DSN` | MySQL DSN for the customer-health/risk store, e.g. `user:password@tcp(host:3306)/db?parseTime=true&tls=true`. `parseTime=true` is required, and `tls=true` is required unless the host is local; startup refuses otherwise |
+| `SALES_ENTITY_BASE_URL` | Base URL of the sales-side entity service (`https`); uses the shared `OAUTH2_*` credentials |
+
+Every state-changing customer-health route and `POST /scan-user` additionally need the `write` permission.
+
+### PLG (customer-success playbooks)
+
+Mounted on the same server and auth chain (see `internal/plg`). It reuses `CUSTOMER_ENTITY_BASE_URL` and the shared `OAUTH2_*` values by default.
+
+| Variable | Description |
+|---|---|
+| `PLG_CONFIG_FILE` | Path of PLG's JSON config file (default `config.json`). Optional |
+| `PLG_ENTITY_BASE_URL` | Overrides the entity service base URL for PLG only. Optional, normally unset |
+| `PLG_ENTITY_OAUTH_TOKEN_URL` / `PLG_ENTITY_OAUTH_CLIENT_ID` / `PLG_ENTITY_OAUTH_CLIENT_SECRET` | Override the shared OAuth2 values for PLG only. Optional, normally unset |
+
+### CORS (local development)
+
+| Variable | Description |
+|---|---|
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call this service directly (e.g. `http://localhost:5173`). Unset allows no cross-origin browser request. In a deployment the gateway handles CORS |
 
 ### Dashboards
 

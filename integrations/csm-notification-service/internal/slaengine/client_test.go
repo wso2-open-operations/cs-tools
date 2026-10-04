@@ -17,11 +17,16 @@
 package slaengine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
 )
 
 func newTestEntityClient(t *testing.T, apiSrv *httptest.Server) *EntityClient {
@@ -85,5 +90,24 @@ func TestFetchAllActiveSLAStatuses_EmptyResult(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}
+
+// TestEntityClient_UpstreamErrorBodyIsCapped: a non-2xx response's body is
+// cut to a short excerpt rather than carried whole in the error.
+func TestEntityClient_UpstreamErrorBodyIsCapped(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(strings.Repeat("x", 4096)))
+	}))
+	defer apiSrv.Close()
+
+	_, err := newTestEntityClient(t, apiSrv).FetchAllActiveSLAStatuses(context.Background())
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want an *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusBadGateway || len(apiErr.Body) != 256 {
+		t.Errorf("status %d, body length %d; want 502 and a 256-byte excerpt", apiErr.StatusCode, len(apiErr.Body))
 	}
 }

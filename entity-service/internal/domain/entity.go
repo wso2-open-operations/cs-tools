@@ -396,7 +396,7 @@ type SearchAccountsFilters struct {
 // SearchAccountsRequest is the input for an account search operation.
 type SearchAccountsRequest struct {
 	Pagination Pagination            `json:"pagination"`
-	Filters    SearchAccountsFilters `json:"filters,omitempty"`
+	Filters    SearchAccountsFilters `json:"filters"`
 }
 
 // AccountView is the unified account search-result shape returned for all data
@@ -3393,7 +3393,7 @@ type CreateCommentRequest struct {
 	// otherwise derives from the caller's own x-user-id-token. Its only current
 	// use is letting an AI-assistant reply be attributed to the assistant
 	// rather than to the customer whose token relayed it — pass "agent" for
-	// that, matching the digiops-cs entity-service contract
+	// that, matching the upstream integration's contract
 	// (CommentCreatePayload.createdBy) the Ballerina customer-portal backend
 	// already uses. Omitted from the upstream payload when empty, so ordinary
 	// callers keep the caller-attributed default.

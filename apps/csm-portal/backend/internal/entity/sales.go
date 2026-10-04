@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/upstreamhttp"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -57,7 +58,7 @@ func NewSalesEntityClient(cfg SalesEntityConfig) *SalesEntityClient {
 	}
 
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
-		&http.Client{Timeout: tokenFetchTimeout})
+		upstreamhttp.TokenClient(tokenFetchTimeout))
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 25 * time.Second
 

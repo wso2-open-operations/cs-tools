@@ -192,7 +192,7 @@ func TestCallRequestService_CreateValidation(t *testing.T) {
 	for _, tt := range tests {
 		req := ok
 		tt.mod(&req)
-		_, err := svc.CreateCallRequest(context.Background(), req)
+		_, err := svc.CreateCallRequest(contextWithUserIDToken(""), req)
 		requireErrKind(t, tt.name, err, tt.want)
 	}
 }
@@ -249,7 +249,7 @@ func TestCallRequestService_UpdateValidation(t *testing.T) {
 	}
 
 	// Valid input still needs an authenticated caller.
-	_, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateCanceled})
+	_, err := svc.UpdateCallRequest(contextWithUserIDToken(""), domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateCanceled})
 	requireErrKind(t, "update without token", err, &apierror.UnauthorizedError{})
 }
 

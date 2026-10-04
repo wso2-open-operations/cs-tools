@@ -24,38 +24,33 @@
 package entitycases
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 )
 
-// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
-// Overridden in tests to keep them fast.
-var tokenFetchTimeout = 10 * time.Second
+// requestTimeout bounds every request this client makes.
+const requestTimeout = 25 * time.Second
 
-// Config holds this client's configuration.
+// Config holds this client's configuration. Transport, when set, is a
+// shared entityhttp transport; when nil the client builds its own from the
+// credential fields (see internal/ledger.Config).
 type Config struct {
 	BaseURL      string
 	TokenURL     string
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	Transport    http.RoundTripper
 }
 
-// Client is a narrow HTTP client for entity-service's case-search endpoint.
-// Mirrors internal/ledger.Client's shape exactly (same OAuth2 client
-// credentials grant, same httpsec guards) — see that package's own doc
-// comment for why this isn't just a second method set on Client there.
+// Client is a narrow HTTP client for entity-service's case-search endpoint
+// — see this package's doc comment for why this isn't just a second method
+// set on internal/ledger.Client.
 type Client struct {
 	http    *http.Client
 	baseURL string
@@ -66,72 +61,25 @@ type Client struct {
 // http is allowed for local development — see httpsec.RequireSecureURL)
 // since both carry credentials or a bearer token.
 func NewClient(cfg Config) (*Client, error) {
-	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("entitycases: token URL: %w", err)
+	httpClient, err := entityhttp.ClientFor(cfg.Transport, entityhttp.Credentials{
+		TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Scopes: cfg.Scopes,
+	}, cfg.BaseURL, requestTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("entitycases: %w", err)
 	}
-	if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("entitycases: base URL: %w", err)
-	}
-
-	cc := clientcredentials.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
-		Scopes:       cfg.Scopes,
-	}
-
-	tokenHTTPClient := &http.Client{Timeout: tokenFetchTimeout}
-	httpsec.RejectInsecureRedirects(tokenHTTPClient)
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTPClient)
-	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
-	httpsec.RejectInsecureRedirects(httpClient)
-
-	return &Client{
-		http:    httpClient,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-	}, nil
+	return &Client{http: httpClient, baseURL: entityhttp.TrimBase(cfg.BaseURL)}, nil
 }
 
-// do executes an authenticated HTTP request against entity-service and
-// returns the raw JSON response body, or an *apierror.Error for a non-2xx
-// status.
+// do executes an authenticated request — see entityhttp.Do.
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	var reqBody io.Reader
-	if len(body) > 0 {
-		reqBody = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("entitycases: build request %s %s: %w", method, path, err)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("entitycases: %s %s: %w", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("entitycases: read response body: %w", err)
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}
-	}
-	return respBody, nil
+	return entityhttp.Do(ctx, c.http, c.baseURL, "entitycases", method, path, body)
 }
 
 // Case is the report-relevant subset of entity-service's case-search result
 // (domain.SearchCaseView there). Account and AssignedTo are "" when
 // entity-service returns no value for that case — an unassigned case, or a
 // data source that doesn't populate account details (see entity-service's
-// own CLAUDE.md on DATA_SOURCE=servicenow-gated fields) — rather than a
+// own CLAUDE.md on data-source-gated fields) — rather than a
 // pointer a caller has to nil-check.
 type Case struct {
 	ID         string
@@ -216,13 +164,11 @@ type searchCaseView struct {
 // caseDateTimeLayouts are tried in order to parse a case-search
 // createdOn/updatedOn value. entity-service's own domain.SearchCaseView
 // declares these as plain strings, not a guaranteed RFC3339 shape: the
-// ServiceNow-backed data source passes ServiceNow's raw datetime fields
-// straight through unreformatted (see entity-service's own
-// internal/service.parseSNDateTime and snCreatedOnLayout/snAltCreatedOnLayout
-// — root-caused there to a GlideRecord.getDisplayValue() vs getValue() bug on
-// the ServiceNow side that occasionally renders a locale-formatted date
-// instead of canonical ISO). This client tries the same two layouts for the
-// same reason, plus RFC3339 first for a Postgres-backed data source.
+// legacy backing data source passes its raw datetime fields straight through
+// unreformatted, and occasionally renders a locale-formatted date instead of
+// canonical ISO (entity-service's own adapter for that data source accepts
+// the same two layouts). This client tries those two layouts for the same
+// reason, plus RFC3339 first for a Postgres-backed data source.
 var caseDateTimeLayouts = []string{
 	time.RFC3339,
 	"2006-01-02 15:04:05",
@@ -232,8 +178,8 @@ var caseDateTimeLayouts = []string{
 // parseCaseDateTime parses value against caseDateTimeLayouts in order,
 // returning the first successful result. A value in any of these formats
 // with no explicit zone offset is treated as UTC, matching
-// entity-service's own parseSNDateTime (time.Parse with no zone abbreviation
-// in the layout defaults to UTC).
+// entity-service's own data-source adapter (time.Parse with no zone
+// abbreviation in the layout defaults to UTC).
 func parseCaseDateTime(value string) (time.Time, error) {
 	var lastErr error
 	for _, layout := range caseDateTimeLayouts {
@@ -323,8 +269,11 @@ func (c *Client) searchCases(ctx context.Context, filters []caseFieldFilter) ([]
 			all = append(all, c)
 		}
 
-		offset += searchPageSize
-		if len(resp.Cases) == 0 || offset >= resp.Total {
+		// Advance by what actually came back, not by what was asked for: a
+		// server that returns a short non-final page (a lowered page cap)
+		// would otherwise have the rows in between skipped silently.
+		offset += len(resp.Cases)
+		if entityhttp.PageDone(len(resp.Cases), offset, resp.Total, searchPageSize) {
 			return all, nil
 		}
 		if page == maxSearchPages-1 {

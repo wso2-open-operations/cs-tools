@@ -26,7 +26,7 @@ import (
 // taskUnavailableMsg is the reason returned by every unavailableTaskService
 // method. It matches the 503 description the OpenAPI spec documents for the
 // task endpoints.
-const taskUnavailableMsg = "tasks are only supported for the ServiceNow data source"
+const taskUnavailableMsg = "tasks are not supported by this data source"
 
 // unavailableTaskService is the Postgres-data-source stand-in for TaskService.
 // Tasks live only in the ServiceNow backing store, so every operation reports

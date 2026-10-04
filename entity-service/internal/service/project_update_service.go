@@ -23,7 +23,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -106,8 +105,16 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	if s.access == nil {
 		return domain.ProjectUpdateResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 	}
-	if _, err := authorizeProject(ctx, s.access, id); err != nil {
+	scope, err := authorizeProject(ctx, s.access, id)
+	if err != nil {
 		return domain.ProjectUpdateResponse{}, err
+	}
+	// The closure-state fields are engineer-side: internal callers only, even
+	// on a project the caller is a registered contact of. hasAgent and
+	// hasKbReferences stay writable by a project's own contacts -- they are
+	// the customer-facing AI assistant settings.
+	if !scope.Unrestricted && hasClosureStateFields(req) {
+		return domain.ProjectUpdateResponse{}, &apierror.ForbiddenError{Msg: "only internal users may change endDateClosureState, invoiceDueDateClosureState or complianceViolationClosureState"}
 	}
 	if !hasStoredProjectFields(req) && req.SuspensionProcessState == nil {
 		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
@@ -153,8 +160,11 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 // resolveUpdatedBy returns the user-token caller's email, or, with no user token,
 // the client id of an allow-listed internal client.
 func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
+	email, err := optionalCallerEmail(ctx)
+	if err != nil {
+		return "", err
+	}
+	if email == "" {
 		if s.access == nil {
 			return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
 		}
@@ -170,10 +180,6 @@ func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, 
 		}
 		return "internal-client", nil
 	}
-	email, err := emailFromJWT(token)
-	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
-	}
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return "", err
@@ -182,6 +188,12 @@ func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, 
 }
 
 // hasStoredProjectFields reports whether req sets a field Postgres stores.
+// hasClosureStateFields reports whether req sets any of the three fields that
+// feed the project's closure state.
+func hasClosureStateFields(req domain.ProjectUpdateRequest) bool {
+	return req.EndDateClosureState != nil || req.InvoiceDueDateClosureState != nil || req.ComplianceViolationClosureState != nil
+}
+
 func hasStoredProjectFields(req domain.ProjectUpdateRequest) bool {
 	return req.HasAgent != nil || req.HasKbReferences != nil || req.EndDateClosureState != nil ||
 		req.InvoiceDueDateClosureState != nil || req.ComplianceViolationClosureState != nil

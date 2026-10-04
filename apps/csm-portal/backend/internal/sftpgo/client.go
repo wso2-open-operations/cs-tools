@@ -139,12 +139,19 @@ func (c *Client) do(req *http.Request, opDesc string) ([]byte, http.Header, erro
 		}
 		return nil, nil, &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(errBody)}
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("sftpgo: read %s response: %w", opDesc, err)
 	}
+	if len(body) > maxResponseBodyBytes {
+		return nil, nil, fmt.Errorf("sftpgo: read %s response: exceeds %d bytes", opDesc, maxResponseBodyBytes)
+	}
 	return body, resp.Header, nil
 }
+
+// maxResponseBodyBytes bounds a successful management-API response body; the
+// share/user documents this client reads are a few kilobytes.
+const maxResponseBodyBytes = 1 << 20
 
 // BaseURL returns the configured REST API base URL, verbatim — handed back
 // to the FE by AttachmentStorageHandler.MintUploadToken as the host it

@@ -8,10 +8,11 @@ import (
 
 // The pairing write handlers.
 //
-// Each one reads the actor from the body rather than from a header: a resolved
-// `"user".id` that the BFF has already looked up. Putting it in the body keeps
-// this service free of any notion of "the current user" — it has no
-// session, no token and no header to trust, only an id a caller vouched for.
+// Each one attributes its write to an actor resolved by PlgActorResolver: the
+// platform user behind the request's validated user token when there is one,
+// otherwise the body's actorId -- a resolved `"user".id` the caller has
+// already looked up -- which is accepted only from an allow-listed internal
+// client such as the portal backend. A body field alone never names the actor.
 
 // acknowledgeBody is the body of POST /plg/registrations/{orgPlatformId}/acknowledge.
 type acknowledgeBody struct {
@@ -25,10 +26,15 @@ func (h *PlgPairingHandler) Acknowledge(w http.ResponseWriter, r *http.Request) 
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	res, err := h.svc.Acknowledge(r.Context(), domain.AcknowledgeRequest{
 		OrgPlatformID: r.PathValue("orgPlatformId"),
 		OwnerID:       body.OwnerID,
-	}, body.ActorID)
+	}, actorID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -60,6 +66,11 @@ func (h *PlgPairingHandler) PatchPairing(w http.ResponseWriter, r *http.Request)
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	res, err := h.svc.PatchPairing(r.Context(), domain.PatchOrgPlatformRequest{
 		OrganizationID:         r.PathValue("organizationId"),
 		ProductCode:            r.PathValue("productCode"),
@@ -72,7 +83,7 @@ func (h *PlgPairingHandler) PatchPairing(w http.ResponseWriter, r *http.Request)
 		ClearTrialEndDate:      body.ClearTrialEndDate,
 		TrialExtendedDate:      body.TrialExtendedDate,
 		ClearTrialExtendedDate: body.ClearTrialExtendedDate,
-	}, body.ActorID)
+	}, actorID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -92,11 +103,16 @@ func (h *PlgPairingHandler) AttachPlaybook(w http.ResponseWriter, r *http.Reques
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	if err := h.svc.AttachPlaybook(r.Context(), domain.AttachPlaybookRequest{
 		OrganizationID: r.PathValue("organizationId"),
 		ProductCode:    r.PathValue("productCode"),
 		PlaybookID:     body.PlaybookID,
-	}, body.ActorID); err != nil {
+	}, actorID); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
@@ -131,6 +147,11 @@ func (h *PlgPairingHandler) PatchRunTask(w http.ResponseWriter, r *http.Request)
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	orgID, code, err := h.svc.PatchRunTask(r.Context(), domain.PatchRunTaskRequest{
 		ID:           r.PathValue("taskId"),
 		BoolValue:    body.BoolValue,
@@ -138,7 +159,7 @@ func (h *PlgPairingHandler) PatchRunTask(w http.ResponseWriter, r *http.Request)
 		TextValue:    body.TextValue,
 		CheckedCodes: body.CheckedCodes,
 		ClearValue:   body.ClearValue,
-	}, body.ActorID)
+	}, actorID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -160,11 +181,16 @@ func (h *PlgPairingHandler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	if err := h.svc.CreateNote(r.Context(), domain.CreateNoteRequest{
 		OrganizationID: r.PathValue("organizationId"),
 		ProductCode:    r.PathValue("productCode"),
 		Body:           body.Body,
-	}, body.ActorID); err != nil {
+	}, actorID); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
@@ -183,10 +209,15 @@ func (h *PlgPairingHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequest(w, r, &body) {
 		return
 	}
+	actorID, err := h.actors.ActorID(r.Context(), body.ActorID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
 	res, orgID, code, err := h.svc.UpdateNote(r.Context(), domain.UpdateNoteRequest{
 		ID:   r.PathValue("noteId"),
 		Body: body.Body,
-	}, body.ActorID)
+	}, actorID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

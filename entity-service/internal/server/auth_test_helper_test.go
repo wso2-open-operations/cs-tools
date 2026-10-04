@@ -24,19 +24,29 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
+
+// testInternalClientID is the one client id withTestAuth allow-lists as an
+// internal caller. A request stamped by asInternalClient resolves as
+// Unrestricted and so passes the caller-identity gate and every internalOnly
+// route; a request carrying no token at all is refused with 401 before any
+// handler runs (see callerIdentityMiddleware).
+const testInternalClientID = "test-internal-client"
 
 // testAuthConfig starts a throwaway local JWKS server and returns the three
 // Auth* fields needed to satisfy config.Config.Validate/NewRouter -- token
 // validation always runs now (there's no flag to turn it off), so every test
 // in this package that builds a real Config for NewRouter needs a real,
-// reachable JWKS. None of the tests using this actually send a token (they
-// all rely on "no tokens at all passes through unrejected"), so the key
-// itself is never used to sign anything -- only its presence matters, to let
-// auth.NewValidator load at least one key and not panic.
+// reachable JWKS. No test in this package sends a user token, so the key
+// itself is never used to sign one -- only its presence matters, to let
+// auth.NewValidator load at least one key and not panic. Tests that need to
+// reach a handler stamp the request with asInternalClient instead.
 func testAuthConfig(t *testing.T) (issuer, jwksURL string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -54,9 +64,45 @@ func testAuthConfig(t *testing.T) (issuer, jwksURL string) {
 	return "https://test-issuer.invalid/oauth2/token", srv.URL
 }
 
-// withTestAuth fills in cfg's Auth* fields in place via testAuthConfig.
+// withTestAuth fills in cfg's Auth* fields in place via testAuthConfig and
+// allow-lists testInternalClientID as an internal caller.
 func withTestAuth(t *testing.T, cfg *config.Config) {
 	t.Helper()
 	cfg.AuthIssuer, cfg.AuthJWKSURL = testAuthConfig(t)
 	cfg.AuthUserTokenAudiences = []string{"test-spa"}
+	cfg.AuthInternalClientIDs = map[string]bool{testInternalClientID: true}
+}
+
+var (
+	assertionKeyOnce sync.Once
+	assertionKey     *rsa.PrivateKey
+)
+
+// asInternalClient stamps req with an x-jwt-assertion naming
+// testInternalClientID and returns it, so a router built with withTestAuth
+// treats the request as coming from an allow-listed internal service. The
+// assertion is signed (RS256) with a key generated once per test binary; the
+// validator only decodes this header (see auth.Validator.ExtractClientID), so
+// no JWKS needs to publish the key.
+func asInternalClient(t *testing.T, req *http.Request) *http.Request {
+	t.Helper()
+	assertionKeyOnce.Do(func() {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate assertion key: %v", err)
+		}
+		assertionKey = key
+	})
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss":       "https://test-issuer.invalid/oauth2/token",
+		"client_id": testInternalClientID,
+		"exp":       time.Now().Add(time.Hour).Unix(),
+	})
+	tok.Header["kid"] = "k1"
+	signed, err := tok.SignedString(assertionKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+	req.Header.Set("x-jwt-assertion", signed)
+	return req
 }

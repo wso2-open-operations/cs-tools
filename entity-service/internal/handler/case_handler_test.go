@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
@@ -169,7 +170,7 @@ func TestCreateCaseAttachment_UnderNewLimit_OverOldLimit(t *testing.T) {
 	stub := &stubCaseService{
 		createAttachmentResp: domain.CreateAttachmentResponse{Message: "created"},
 	}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(string(body)))
 	rec := httptest.NewRecorder()
@@ -190,7 +191,7 @@ func TestCreateCaseAttachment_OverNewLimit(t *testing.T) {
 	body := attachmentRequestBody(t, 16<<20) // ~16 MiB, over the 15 MiB cap.
 
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(string(body)))
 	rec := httptest.NewRecorder()
@@ -225,7 +226,7 @@ func (s *stubCaseService) SearchTags(_ context.Context, req domain.SearchTagsReq
 // is separately pinned in the service package's tests.
 func TestSearchTags_DecodesFiltersSearchQuery(t *testing.T) {
 	stub := &stubCaseService{searchTagsTags: []domain.Tag{{ID: "t1", Label: "micro-gw"}}}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/tags/search",
 		strings.NewReader(`{"filters":{"searchQuery":"micro"},"limit":20}`))
@@ -254,7 +255,7 @@ func TestSearchTags_DecodesFiltersSearchQuery(t *testing.T) {
 // gone: `q` is now an unknown field and the decoder rejects it outright.
 func TestSearchTags_RejectsLegacyQueryParamShape(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/tags/search", strings.NewReader(`{"q":"micro"}`))
 	rec := httptest.NewRecorder()
@@ -279,7 +280,7 @@ func TestSearchTags_RejectsOutOfRangeLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubCaseService{}
-			h := NewCaseHandler(stub, nil)
+			h := NewCaseHandler(stub, nil, nil)
 
 			req := httptest.NewRequest(http.MethodPost, "/tags/search", strings.NewReader(tc.body))
 			rec := httptest.NewRecorder()
@@ -300,7 +301,7 @@ func TestSearchTags_RejectsOutOfRangeLimit(t *testing.T) {
 // old GET had when q and limit were both omitted.
 func TestSearchTags_EmptyBodyIsValid(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/tags/search", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
@@ -330,7 +331,7 @@ func TestSearchTagsQuery_MatchesPostRequest(t *testing.T) {
 	postReq := httptest.NewRequest(http.MethodPost, "/tags/search",
 		strings.NewReader(`{"filters":{"searchQuery":"micro"},"limit":5}`))
 	postRec := httptest.NewRecorder()
-	NewCaseHandler(postStub, nil).SearchTags(postRec, postReq)
+	NewCaseHandler(postStub, nil, nil).SearchTags(postRec, postReq)
 	if postRec.Code != http.StatusOK {
 		t.Fatalf("POST: expected 200, got %d: %s", postRec.Code, postRec.Body.String())
 	}
@@ -338,7 +339,7 @@ func TestSearchTagsQuery_MatchesPostRequest(t *testing.T) {
 	getStub := &stubCaseService{}
 	getReq := httptest.NewRequest(http.MethodGet, "/tags/search?q=micro&limit=5", nil)
 	getRec := httptest.NewRecorder()
-	NewCaseHandler(getStub, nil).SearchTagsQuery(getRec, getReq)
+	NewCaseHandler(getStub, nil, nil).SearchTagsQuery(getRec, getReq)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("GET: expected 200, got %d: %s", getRec.Code, getRec.Body.String())
 	}
@@ -360,7 +361,7 @@ func TestSearchTagsQuery_NoParams(t *testing.T) {
 	stub := &stubCaseService{}
 	rec := httptest.NewRecorder()
 
-	NewCaseHandler(stub, nil).SearchTagsQuery(rec, httptest.NewRequest(http.MethodGet, "/tags/search", nil))
+	NewCaseHandler(stub, nil, nil).SearchTagsQuery(rec, httptest.NewRequest(http.MethodGet, "/tags/search", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -379,7 +380,7 @@ func TestSearchTagsQuery_NoParams(t *testing.T) {
 func TestGetAttachment_PassesPathIDToService(t *testing.T) {
 	const attachmentID = "11111111-1111-1111-1111-111111111111"
 	stub := &stubCaseService{getAttachmentResp: domain.AttachmentDetails{ID: attachmentID, Name: "logs.txt"}}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/attachments/"+attachmentID, nil)
 	req.SetPathValue("id", attachmentID)
@@ -410,7 +411,7 @@ func TestUpdateAttachment_DecodesBodyAndPathID(t *testing.T) {
 	stub := &stubCaseService{
 		updateAttachmentResp: domain.UpdateAttachmentResponse{Message: "updated"},
 	}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	body := `{"referenceId":"22222222-2222-2222-2222-222222222222","referenceType":"deployment","name":"renamed.txt"}`
 	req := httptest.NewRequest(http.MethodPatch, "/attachments/"+attachmentID, strings.NewReader(body))
@@ -443,7 +444,7 @@ func TestUpdateAttachment_DecodesBodyAndPathID(t *testing.T) {
 // parse is rejected before the service layer runs.
 func TestUpdateAttachment_RejectsMalformedBody(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/attachments/x", strings.NewReader(`{"name":`))
 	req.SetPathValue("id", "11111111-1111-1111-1111-111111111111")
@@ -475,7 +476,7 @@ func TestSearchTagsQuery_RejectsBadLimit(t *testing.T) {
 			stub := &stubCaseService{}
 			rec := httptest.NewRecorder()
 
-			NewCaseHandler(stub, nil).SearchTagsQuery(rec, httptest.NewRequest(http.MethodGet, tc.url, nil))
+			NewCaseHandler(stub, nil, nil).SearchTagsQuery(rec, httptest.NewRequest(http.MethodGet, tc.url, nil))
 
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
@@ -503,7 +504,7 @@ func addCaseTagRequest(t *testing.T, caseID string, actorEmail *string, userIDTo
 	if userIDToken != "" {
 		req.Header.Set("x-user-id-token", userIDToken)
 	}
-	return req
+	return withM2MClient(req)
 }
 
 // runAddCaseTag drives h.AddCaseTag through middleware.UserIDToken, exactly
@@ -525,7 +526,7 @@ const testAddCaseTagCaseID = "11111111-1111-1111-1111-111111111111"
 // different casing to prove the comparison is case-insensitive.
 func TestAddCaseTag_AllowlistedActorEmail_NoToken(t *testing.T) {
 	stub := &stubCaseService{addCaseTagAsResp: domain.Tag{ID: "t1", Label: "micro-gw"}}
-	h := NewCaseHandler(stub, []string{"UMT-Service@Example.com"})
+	h := NewCaseHandler(stub, []string{"UMT-Service@Example.com"}, testM2MClients)
 
 	actor := "umt-service@example.com"
 	req := addCaseTagRequest(t, testAddCaseTagCaseID, &actor, "")
@@ -556,7 +557,7 @@ func TestAddCaseTag_AllowlistedActorEmail_NoToken(t *testing.T) {
 // from the handler, never reaching the service layer at all.
 func TestAddCaseTag_NonAllowlistedActorEmail_Rejected(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, []string{"umt-service@example.com"})
+	h := NewCaseHandler(stub, []string{"umt-service@example.com"}, testM2MClients)
 
 	actor := "someone-else@example.com"
 	req := addCaseTagRequest(t, testAddCaseTagCaseID, &actor, "")
@@ -575,7 +576,7 @@ func TestAddCaseTag_NonAllowlistedActorEmail_Rejected(t *testing.T) {
 // a 400, not a silent pick of one over the other.
 func TestAddCaseTag_ActorEmailAndToken_Rejected(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, []string{"umt-service@example.com"})
+	h := NewCaseHandler(stub, []string{"umt-service@example.com"}, testM2MClients)
 
 	actor := "umt-service@example.com"
 	req := addCaseTagRequest(t, testAddCaseTagCaseID, &actor, "a-real-token")
@@ -596,7 +597,7 @@ func TestAddCaseTag_ActorEmailAndToken_Rejected(t *testing.T) {
 // here) rather than AddCaseTagAs.
 func TestAddCaseTag_NeitherActorEmailNorToken_UnchangedBehavior(t *testing.T) {
 	stub := &stubCaseService{addCaseTagErr: &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := addCaseTagRequest(t, testAddCaseTagCaseID, nil, "")
 	rec := runAddCaseTag(h, req)
@@ -624,7 +625,7 @@ func createCaseCommentRequest(t *testing.T, caseID string, actorEmail *string, u
 	if userIDToken != "" {
 		req.Header.Set("x-user-id-token", userIDToken)
 	}
-	return req
+	return withM2MClient(req)
 }
 
 // runCreateCaseComment drives h.CreateCaseComment through
@@ -647,7 +648,7 @@ const testCreateCaseCommentCaseID = "22222222-2222-2222-2222-222222222222"
 // case-insensitive.
 func TestCreateCaseComment_AllowlistedActorEmail_NoToken(t *testing.T) {
 	stub := &stubCaseService{createCaseCommentAsResp: domain.CreateCaseCommentResponse{Message: "Comment created successfully"}}
-	h := NewCaseHandler(stub, []string{"UMT-Service@Example.com"})
+	h := NewCaseHandler(stub, []string{"UMT-Service@Example.com"}, testM2MClients)
 
 	actor := "umt-service@example.com"
 	req := createCaseCommentRequest(t, testCreateCaseCommentCaseID, &actor, "")
@@ -679,7 +680,7 @@ func TestCreateCaseComment_AllowlistedActorEmail_NoToken(t *testing.T) {
 // all.
 func TestCreateCaseComment_NonAllowlistedActorEmail_Rejected(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, []string{"umt-service@example.com"})
+	h := NewCaseHandler(stub, []string{"umt-service@example.com"}, testM2MClients)
 
 	actor := "someone-else@example.com"
 	req := createCaseCommentRequest(t, testCreateCaseCommentCaseID, &actor, "")
@@ -698,7 +699,7 @@ func TestCreateCaseComment_NonAllowlistedActorEmail_Rejected(t *testing.T) {
 // actorEmail is a 400, not a silent pick of one over the other.
 func TestCreateCaseComment_ActorEmailAndToken_Rejected(t *testing.T) {
 	stub := &stubCaseService{}
-	h := NewCaseHandler(stub, []string{"umt-service@example.com"})
+	h := NewCaseHandler(stub, []string{"umt-service@example.com"}, testM2MClients)
 
 	actor := "umt-service@example.com"
 	req := createCaseCommentRequest(t, testCreateCaseCommentCaseID, &actor, "a-real-token")
@@ -720,7 +721,7 @@ func TestCreateCaseComment_ActorEmailAndToken_Rejected(t *testing.T) {
 // CreateCaseCommentAs.
 func TestCreateCaseComment_NeitherActorEmailNorToken_UnchangedBehavior(t *testing.T) {
 	stub := &stubCaseService{createCaseCommentErr: &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}}
-	h := NewCaseHandler(stub, nil)
+	h := NewCaseHandler(stub, nil, nil)
 
 	req := createCaseCommentRequest(t, testCreateCaseCommentCaseID, nil, "")
 	rec := runCreateCaseComment(h, req)
@@ -733,5 +734,93 @@ func TestCreateCaseComment_NeitherActorEmailNorToken_UnchangedBehavior(t *testin
 	}
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// testM2MClient is the internal client id the M2M actorEmail tests present;
+// testM2MClients is the allow-list the handlers under test are built with.
+const testM2MClient = "m2m-client"
+
+var testM2MClients = map[string]bool{testM2MClient: true}
+
+// withM2MClient stamps req with a validated identity carrying testM2MClient,
+// as auth.Middleware would for an x-jwt-assertion naming it.
+func withM2MClient(req *http.Request) *http.Request {
+	return withClientID(req, testM2MClient)
+}
+
+func withClientID(req *http.Request, clientID string) *http.Request {
+	return req.WithContext(auth.WithIdentity(req.Context(), auth.Identity{Validated: true, ClientID: clientID}))
+}
+
+// TestActorEmail_RequiresAnAllowlistedInternalClient pins that an
+// allow-listed service-account email is not enough on its own: the request
+// must also come from an allow-listed internal client, on both endpoints that
+// accept an actorEmail.
+func TestActorEmail_RequiresAnAllowlistedInternalClient(t *testing.T) {
+	actor := "umt-service@example.com"
+	for name, clientID := range map[string]string{
+		"no client credential": "",
+		"unknown client":       "some-other-client",
+	} {
+		t.Run("tag/"+name, func(t *testing.T) {
+			stub := &stubCaseService{}
+			h := NewCaseHandler(stub, []string{actor}, testM2MClients)
+			rec := runAddCaseTag(h, withClientID(addCaseTagRequest(t, testAddCaseTagCaseID, &actor, ""), clientID))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if stub.addCaseTagCalled || stub.addCaseTagAsCalled {
+				t.Fatal("expected the request to be rejected before the service layer")
+			}
+		})
+		t.Run("comment/"+name, func(t *testing.T) {
+			stub := &stubCaseService{}
+			h := NewCaseHandler(stub, []string{actor}, testM2MClients)
+			rec := runCreateCaseComment(h, withClientID(createCaseCommentRequest(t, testCreateCaseCommentCaseID, &actor, ""), clientID))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if stub.createCaseCommentAsActor != "" {
+				t.Fatal("expected the request to be rejected before the service layer")
+			}
+		})
+	}
+}
+
+// contentCaseService serves one attachment's bytes and type.
+type contentCaseService struct {
+	service.CaseService
+	content     []byte
+	contentType string
+}
+
+func (s contentCaseService) GetCaseAttachmentContent(context.Context, string) ([]byte, string, error) {
+	return s.content, s.contentType, nil
+}
+
+// TestGetCaseAttachmentContent_DownloadHeaders pins the headers every download
+// carries: the allow-listed (or fallback) type, attachment disposition, and
+// nosniff so the browser does not second-guess that type.
+func TestGetCaseAttachmentContent_DownloadHeaders(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"text/plain; charset=utf-8", "text/plain"},
+		{"text/html", "application/octet-stream"},
+	} {
+		h := NewCaseHandler(contentCaseService{content: []byte("hello"), contentType: tc.in}, nil, nil)
+		req := httptest.NewRequest(http.MethodGet, "/attachments/a-1/content", nil)
+		req.SetPathValue("id", "a-1")
+		rec := httptest.NewRecorder()
+		h.GetCaseAttachmentContent(rec, req)
+
+		if got := rec.Header().Get("Content-Type"); got != tc.want {
+			t.Errorf("%s: Content-Type = %q, want %q", tc.in, got, tc.want)
+		}
+		if got := rec.Header().Get("Content-Disposition"); got != "attachment" {
+			t.Errorf("%s: Content-Disposition = %q, want attachment", tc.in, got)
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: X-Content-Type-Options = %q, want nosniff", tc.in, got)
+		}
 	}
 }

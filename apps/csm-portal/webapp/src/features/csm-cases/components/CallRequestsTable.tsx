@@ -34,6 +34,7 @@ import {
 } from "@features/csm-cases/utils/callRequestState";
 import RelativeTime from "@components/RelativeTime";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { isSafeHref } from "@features/csm-cases/utils/commentContent";
 import CallRequestDetailModal from "@features/csm-cases/components/CallRequestDetailModal";
 
 // ---------------------------------------------------------------------------
@@ -260,7 +261,7 @@ export function CallRequestsTable({
                     Scheduled: {formatPreferredTimes([cr.scheduleTime])}
                   </Typography>
                 )}
-                {cr.meetingLink && (
+                {isSafeHref(cr.meetingLink) && (
                   <Typography
                     variant="caption"
                     component="a"

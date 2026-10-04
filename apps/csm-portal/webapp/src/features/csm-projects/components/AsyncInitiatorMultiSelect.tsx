@@ -45,6 +45,13 @@ interface AsyncInitiatorMultiSelectProps {
    * before any search runs.
    */
   nameSeed?: Map<string, string>;
+  /**
+   * Restricts the directory search server-side to users holding one of these
+   * roles. Callers pass the internal-user roles, like every other user picker.
+   */
+  roleIds?: string[];
+  /** See {@link roleIds}; restrict to active accounts only. */
+  active?: boolean;
 }
 
 /**
@@ -66,6 +73,8 @@ export default function AsyncInitiatorMultiSelect({
   values,
   onChange,
   nameSeed,
+  roleIds,
+  active,
 }: AsyncInitiatorMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -81,7 +90,7 @@ export default function AsyncInitiatorMultiSelect({
     hasNextPage,
     isError,
     fetchNextPage,
-  } = useInfiniteUserSearch(query, open);
+  } = useInfiniteUserSearch(query, open, { roleIds, active });
 
   // Lazy-load the next page when the listbox is scrolled near its end.
   const handleListboxScroll = (event: React.UIEvent<HTMLElement>): void => {

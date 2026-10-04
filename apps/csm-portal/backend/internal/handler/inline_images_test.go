@@ -195,7 +195,7 @@ func TestInlineImageProcessorMultipleImages(t *testing.T) {
 // TestInlineImageProcessorRejectsUnsupportedType verifies an unsupported
 // inline image MIME subtype is rejected with 400 BEFORE any image (including
 // any other, allowed image earlier in the same content) is uploaded —
-// mirrors ServiceNow's reject-fast behavior.
+// mirrors the backing system's reject-fast behavior.
 func TestInlineImageProcessorRejectsUnsupportedType(t *testing.T) {
 	t.Parallel()
 	entity := &mockEntityCaseClient{}
@@ -251,7 +251,7 @@ func TestInlineImageProcessorRejectsOversizedImage(t *testing.T) {
 // TestInlineImageProcessorRollsBackOnSecondImageFailure verifies that when
 // the second of two images fails (SFTPGo upload error), the FIRST image's
 // already-created attachment is deleted (rollback) and the whole call fails —
-// mirroring ServiceNow's _deleteAttachments rollback exactly.
+// mirroring the backing system's _deleteAttachments rollback exactly.
 func TestInlineImageProcessorRollsBackOnSecondImageFailure(t *testing.T) {
 	t.Parallel()
 	entity := &mockEntityCaseClient{createCaseAttachmentFn: nextAttachmentIDFactory()}
@@ -287,7 +287,7 @@ func TestInlineImageProcessorRollsBackOnSecondImageFailure(t *testing.T) {
 	// created and uploaded, and the second image's row was created (only its
 	// bytes failed to upload) — but the WHOLE comment is being rejected, so
 	// every attachment created anywhere in this call must be deleted, exactly
-	// mirroring ServiceNow's _deleteAttachments(attachmentIds) call, which
+	// mirroring the backing system's _deleteAttachments(attachmentIds) call, which
 	// deletes every id collected so far, not just the one that failed.
 	wantDeleted := []string{
 		"aaaaaaaa-aaaa-aaaa-aaaa-000000000001",

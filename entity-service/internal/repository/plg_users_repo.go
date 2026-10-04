@@ -58,7 +58,7 @@ func userConditions(f *domain.UserSearchFilters, b *argBuilder) []string {
 	}
 	// The resolution path: the BFF holds the caller's email from their token and
 	// needs the id it maps to. Compared case-insensitively — an exact match
-	// would not find "Akilaf@wso2.com".
+	// would not find "Jane.Doe@example.com".
 	if len(f.Emails) > 0 {
 		conds = append(conds, `LOWER(u.email) = ANY(`+b.add(lowerAll(f.Emails))+`::TEXT[])`)
 	}

@@ -31,7 +31,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 )
 
-const testIssuer = "https://api.asgardeo.io/t/example/oauth2/token"
+const testIssuer = "https://idp.example.com/t/example/oauth2/token"
 
 func newTestKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
@@ -78,7 +78,7 @@ func TestLogger_CallerID(t *testing.T) {
 	)
 	userToken := sign(t, key, jwt.MapClaims{
 		"iss": testIssuer, "aud": []string{"spa-client-id"}, "sub": "session-scoped-id",
-		"userid": "asgardeo-uuid-1", "email": "jane@example.com", "exp": time.Now().Add(time.Hour).Unix(),
+		"userid": "idp-user-uuid-1", "email": "jane@example.com", "exp": time.Now().Add(time.Hour).Unix(),
 	})
 	clientAssertion := sign(t, key, jwt.MapClaims{
 		"iss": testIssuer, "aud": []string{"m2m"}, "sub": "m2m-sub", "client_id": "integration-client-id",
@@ -92,9 +92,7 @@ func TestLogger_CallerID(t *testing.T) {
 		handler := Logger(auth.Middleware(v)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})))
-		var out string
-		out = captureLog(t, func() { handler.ServeHTTP(w, r) })
-		return out
+		return captureLog(t, func() { handler.ServeHTTP(w, r) })
 	}
 
 	t.Run("a human caller logs the stable userid claim, not sub", func(t *testing.T) {
@@ -102,7 +100,7 @@ func TestLogger_CallerID(t *testing.T) {
 		out := chain(httptest.NewRecorder(), req, map[string]string{
 			"x-jwt-assertion": clientAssertion, "x-user-id-token": userToken,
 		})
-		if !strings.Contains(out, "callerId=asgardeo-uuid-1") {
+		if !strings.Contains(out, "callerId=idp-user-uuid-1") {
 			t.Fatalf("access log missing the user's stable id, got: %s", out)
 		}
 		if strings.Contains(out, "callerId=session-scoped-id") {

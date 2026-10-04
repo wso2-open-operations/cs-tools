@@ -19,7 +19,7 @@ import { isHttpUrl } from "./isHttpUrl";
 
 describe("isHttpUrl", () => {
   it("accepts absolute http(s) URLs", () => {
-    expect(isHttpUrl("https://github.com/wso2-enterprise/choreo/issues/1")).toBe(true);
+    expect(isHttpUrl("https://github.com/example-org/example-repo/issues/1")).toBe(true);
     expect(isHttpUrl("http://example.com")).toBe(true);
   });
 

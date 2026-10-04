@@ -25,6 +25,8 @@
 // instead of Quill for visual consistency with the rest of this codebase
 // (e.g. CsmCaseCommentInput). It only existed as dead code here because no
 // SPL-side role used to grant canAddWorkNotes -- see PermissionProvider.tsx.
+import { isBlankHtml } from "@utils/sanitizeHtml";
+import { safeRouteId } from "@features/spl/utils/routeId";
 import { useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import DOMPurify from "dompurify";
@@ -53,12 +55,6 @@ import { ErrorPanel, LinearLoadingPanel, NotFoundPanel } from "../components/Sta
 import { BackendApiError } from "@api/backend/client";
 import { usePermissions } from "@features/spl/api/permissionsContext";
 
-/** Strip tags + collapse whitespace to decide if the editor is effectively empty -- same check CsmCaseCommentInput uses. */
-function isEmptyHtml(html: string): boolean {
-  const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
-  return text.length === 0;
-}
-
 const PRIORITY_COLOR: Record<string, string> = {
   "Critical (P1)": "#bf2600",
   "High (P2)": "#ff8b00",
@@ -74,7 +70,7 @@ const STATE_COLOR: Record<string, string> = {
 
 export default function CaseDetailPage() {
   const { caseId: rawCaseId } = useParams<{ caseId: string }>();
-  const caseId = rawCaseId ? DOMPurify.sanitize(rawCaseId) : "";
+  const caseId = safeRouteId(rawCaseId);
 
   const { notice, showSuccess, showWarning, showError, clear } = useCaseNotice();
   const { canAddWorkNotes } = usePermissions();
@@ -97,7 +93,7 @@ export default function CaseDetailPage() {
 
   const submitWorkNote = () => {
     if (workNoteSubmissionInFlight.current) return;
-    if (isEmptyHtml(worknoteHtml)) {
+    if (isBlankHtml(worknoteHtml)) {
       showWarning("A work note cannot be empty.");
       return;
     }

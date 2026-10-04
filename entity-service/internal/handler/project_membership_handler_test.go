@@ -102,7 +102,7 @@ func TestInviteProjectContact_AnswersPastTheServerWriteTimeout(t *testing.T) {
 }
 
 // TestServerWriteTimeout_DropsASlowHandlerWithoutTheExtension is the control:
-// without extendWriteDeadline the same slow handler loses its response, which
+// without extendDeadlines the same slow handler loses its response, which
 // is the failure the extension exists to prevent.
 func TestServerWriteTimeout_DropsASlowHandlerWithoutTheExtension(t *testing.T) {
 	resp, err := serveWithWriteTimeout(t, 100*time.Millisecond, func(mux *http.ServeMux) {
@@ -161,5 +161,41 @@ func TestValidateProjectContact_RefusalIsA200(t *testing.T) {
 				t.Errorf("body = %s, want it to contain %s", rec.Body.String(), tc.wantBody)
 			}
 		})
+	}
+}
+
+// ctxAwareMembershipService answers Invite after `delay`, or with the
+// context's error if the context it was given ends first.
+type ctxAwareMembershipService struct {
+	slowMembershipService
+	delay time.Duration
+}
+
+func (s ctxAwareMembershipService) Invite(ctx context.Context, _ string, _ domain.CreateProjectMembershipRequest) (domain.ProjectMembership, error) {
+	select {
+	case <-time.After(s.delay):
+		return domain.ProjectMembership{ProjectContactID: "pc-1", State: domain.MembershipStateInvited}, nil
+	case <-ctx.Done():
+		return domain.ProjectMembership{}, ctx.Err()
+	}
+}
+
+// TestInviteProjectContact_OutlivesTheRequestTimeout: the server-wide request
+// timeout cancels the request context well before a slow membership write is
+// done. The handler must run the write on its own, longer deadline so the
+// work is not cancelled half-way.
+func TestInviteProjectContact_OutlivesTheRequestTimeout(t *testing.T) {
+	h := NewProjectMembershipHandler(ctxAwareMembershipService{delay: 150 * time.Millisecond})
+
+	req := httptest.NewRequest(http.MethodPost, "/projects/p-1/contacts",
+		bytes.NewBufferString(`{"email":"jane.doe@example.com","roles":["Portal user"]}`))
+	ctx, cancel := context.WithTimeout(req.Context(), 20*time.Millisecond)
+	defer cancel()
+	rec := httptest.NewRecorder()
+
+	h.InviteProjectContact(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 — the write was cut short by the request timeout; body %s", rec.Code, rec.Body.String())
 	}
 }

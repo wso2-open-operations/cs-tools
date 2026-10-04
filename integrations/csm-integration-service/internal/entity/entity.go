@@ -59,8 +59,8 @@ func (c *Client) SearchProjectContacts(ctx context.Context, projectID string, bo
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/projects/%s/contacts/search", url.PathEscape(projectID)), body)
 }
 
-// UpdateProject calls PATCH /projects/{id} on the entity service. This targets a
-// ServiceNow-data-source-only operation (used by the Account Closure Process
+// UpdateProject calls PATCH /projects/{id} on the entity service. This targets an
+// external-data-source-only operation (used by the Account Closure Process
 // automation to write closure-state fields on a project) that requires a
 // forwarded end-user identity token. This service is strictly M2M with no
 // mechanism to carry one, so entity-service is expected to reject this call
@@ -85,9 +85,9 @@ func (c *Client) UpdateProject(ctx context.Context, id string, body []byte) ([]b
 //     assigneeEmail, type and its companions, parentId, relatedCaseId,
 //     autocloseHoldUntil, subject, description, deploymentId,
 //     deployedProductId, the fix-ETA group, acknowledge, workaroundProvided)
-//     is ServiceNow-only and is rejected with 400 on this data source, not
+//     is external-data-source-only and is rejected with 400 on this data source, not
 //     proxied through to any token check.
-//   - On a ServiceNow data source, every field this operation accepts —
+//   - On the external data source, every field this operation accepts —
 //     including a bare state/severity/workState update — requires a forwarded
 //     end-user identity token, so every call here is expected to 401 the same
 //     way UpdateProject always does, with no field combination that succeeds.
@@ -101,7 +101,7 @@ func (c *Client) PatchCase(ctx context.Context, id string, body []byte) ([]byte,
 // SearchAccounts's shape. A generic passthrough — callers build whatever
 // filter/pagination shape they need (e.g. an exact-match filter on "number"
 // to resolve a case number to this platform's own case UUID, never a
-// ServiceNow sys_id, which the entity service's case model never exposes).
+// backing-system record id, which the entity service's case model never exposes).
 // Postgres-backed; a pure M2M call succeeds here, no forwarded identity
 // required. Response is returned as raw JSON; typed response structs are
 // deferred.
@@ -126,7 +126,7 @@ func (c *Client) AddCaseTag(ctx context.Context, caseID string, body []byte) ([]
 // M2M caller supplying an actorEmail in the request body when no end-user
 // identity token is forwarded, provided that email is on entity-service's
 // configured M2M_TRUSTED_ACTOR_EMAILS allowlist (otherwise entity-service
-// returns 403). On DATA_SOURCE=servicenow, entity-service's ServiceNow path
+// returns 403). On the external data source, entity-service's path
 // still requires a forwarded end-user identity token unconditionally and
 // ignores actorEmail, so this service (strictly M2M, no mechanism to carry
 // one) still gets a mapped 401 there. This client method forwards the body
@@ -170,7 +170,7 @@ func (c *Client) SearchProjectOpportunityLinks(ctx context.Context, body []byte)
 // SyncProductVulnerabilities calls POST /products/vulnerabilities/sync on the entity
 // service. This is a full-replace sync: the caller must submit the complete current set
 // of product-vulnerability records on every call, not an incremental delta — the
-// downstream ServiceNow-backed operation deletes any existing record not present in the
+// downstream externally backed operation deletes any existing record not present in the
 // submitted set. Unlike UpdateProject, this entity-service operation accepts pure M2M
 // calls with no forwarded end-user token, so this call is expected to succeed.
 // Response is returned as raw JSON; typed response structs are deferred.
@@ -178,31 +178,29 @@ func (c *Client) SyncProductVulnerabilities(ctx context.Context, body []byte) ([
 	return c.do(ctx, http.MethodPost, "/products/vulnerabilities/sync", body)
 }
 
-// CreateIncident calls POST /incidents on the entity service. This targets a
-// ServiceNow-backed operation that requires a forwarded end-user identity
-// token. This service is strictly M2M with no mechanism to carry one, so
-// entity-service is expected to reject this call with 401 — kept for
-// API-shape completeness so a real caller has somewhere stable to point at,
-// not because it currently succeeds. See UpdateProject's doc comment above
-// for the same situation. Response is returned as raw JSON; typed response
-// structs are deferred.
+// CreateIncident calls POST /incidents on the entity service. The backing
+// operation does not strictly require a forwarded end-user identity: when
+// none is present it falls back to a separately configured machine
+// credential for the backing data source, so this M2M-only call succeeds
+// wherever that credential is configured and is answered 401 only where it
+// is not. Unlike UpdateProject, a 401 here is therefore environment-dependent,
+// not unconditional. Response is returned as raw JSON; typed response structs
+// are deferred.
 func (c *Client) CreateIncident(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/incidents", body)
 }
 
-// SearchIncidents calls POST /incidents/search on the entity service. This
-// targets a ServiceNow-backed operation that requires a forwarded end-user
-// identity token, same as CreateIncident above — this service cannot supply
-// one, so entity-service is expected to reject this call with 401. Kept for
-// API-shape completeness, not because it currently succeeds. Response is
-// returned as raw JSON; typed response structs are deferred.
+// SearchIncidents calls POST /incidents/search on the entity service. Same
+// machine-credential fallback as CreateIncident above: it succeeds over M2M
+// where that credential is configured and 401s only where it is not.
+// Response is returned as raw JSON; typed response structs are deferred.
 func (c *Client) SearchIncidents(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/incidents/search", body)
 }
 
 // CreateAlertIncidentMapping calls POST /alert-incident-mappings on the entity
 // service. Unlike CreateIncident/SearchIncidents above, this targets a
-// Postgres-only entity-service operation with no ServiceNow dependency and no
+// Postgres-only entity-service operation with no external-data-source dependency and no
 // requirement for a forwarded end-user identity token — this service's M2M
 // identity to entity-service is sufficient, so this call is expected to
 // actually succeed today. Response is returned as raw JSON; typed response
@@ -226,14 +224,14 @@ func (c *Client) LookupAlertIncidentMappings(ctx context.Context, body []byte) (
 // unconditionally returns a 503 (not supported on this data source yet, no
 // field combination succeeds — several fields have no backing Postgres
 // column, and others would need comment-table side effects not implemented
-// there); on DATA_SOURCE=servicenow, it goes through the same M2M-fallback
+// there); on the external data source, it goes through the same M2M-fallback
 // mechanism as CreateIncident/SearchIncidents/SearchITServices above (a
-// separately-configured M2M ServiceNow credential is used when no end-user
+// separately-configured M2M credential for the external data source is used when no end-user
 // identity token is forwarded, and only 401s if that fallback credential is
 // itself unconfigured in the target environment). So this call is
-// unconditionally ServiceNow-backed with no Postgres fallback path: whether
+// unconditionally backed by the external data source with no Postgres fallback path: whether
 // it succeeds depends entirely on the target environment's data source and,
-// on ServiceNow, its M2M credential configuration — not on which fields are
+// on the external data source, its M2M credential configuration — not on which fields are
 // sent, unlike PatchCase's field-dependent behavior. Response is returned as
 // raw JSON; typed response structs are deferred.
 func (c *Client) UpdateIncident(ctx context.Context, id string, body []byte) ([]byte, error) {
@@ -241,10 +239,11 @@ func (c *Client) UpdateIncident(ctx context.Context, id string, body []byte) ([]
 }
 
 // SearchITServices calls POST /services/search on the entity service. This
-// targets a ServiceNow-backed operation with the same M2M-fallback
+// targets an externally backed operation with the same M2M-fallback
 // mechanism as CreateIncident/SearchIncidents above: when no end-user
 // identity token is forwarded, it uses a separately-configured M2M
-// ServiceNow credential instead of erroring, and only 401s if that fallback
+// credential for the external data source instead of erroring, and only
+// 401s if that fallback
 // credential is itself unconfigured in the target environment. This service
 // carries no forwarded end-user identity by design (see this file's own
 // CreateIncident doc comment), so whether this 401s depends on the target
@@ -284,7 +283,7 @@ func (c *Client) GetCloudStatusAvailabilities(ctx context.Context, cloud string)
 // entity service -- one outage's public detail view.
 //
 // The id is forwarded as given. The entity service accepts both the dashed
-// uuid and the 32-hex sys_id form, so a link created before the cutover
+// uuid and the 32-hex legacy id form, so a link created before the cutover
 // still resolves after it; normalising here would put that rule in two
 // places.
 func (c *Client) GetCloudStatusIncidentDetail(ctx context.Context, id, cloud string) ([]byte, error) {

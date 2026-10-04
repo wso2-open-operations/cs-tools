@@ -632,7 +632,7 @@ func newAttachmentID() string {
 // Cases in this Postgres/CSM-native data source are NOT guaranteed to have a
 // project: domain.Case.ProjectID exists on the schema, but nothing in
 // entity-service enforces it is always populated for a CSM-native case
-// (unlike ServiceNow-sourced cases, which are always project-scoped). Rather
+// (unlike backing-system-sourced cases, which are always project-scoped). Rather
 // than block minting a token over a missing project reference, this falls
 // back to a project-less path shape,
 // "/attachments/cases/<caseId>/<attachmentId>/<filename>", which still

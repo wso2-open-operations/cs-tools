@@ -33,16 +33,12 @@ import {
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { projects } from "@src/services/projects";
-import { adminUsers } from "@src/services/adminUsers";
+import { InternalUserMultiSelect } from "@components/common/InternalUserMultiSelect";
 import { products } from "@src/services/products";
 import type { Project } from "@src/types";
 import { ALL_WORK_STATES, FILTERABLE_STATES, STATE_LABELS, WORK_STATE_LABEL } from "@components/support/config";
 import { useDebouncedValue } from "@utils/useDebouncedValue";
-import {
-  EMPTY_SECURITY_REPORT_FILTERS,
-  type SecurityReportAssignee,
-  type SecurityReportFilters,
-} from "@utils/securityReports";
+import { EMPTY_SECURITY_REPORT_FILTERS, type SecurityReportFilters } from "@utils/securityReports";
 
 // The Acrylic theme renders popup papers translucent, so a dropdown that opens
 // over the dialog reads as see-through — force the opaque `background.default`.
@@ -78,42 +74,6 @@ function ProjectMultiSelect({ value, onChange }: { value: Project[]; onChange: (
       onInputChange={(_, next) => setInput(next)}
       slotProps={{ paper: OPAQUE_POPUP }}
       renderInput={(params) => <TextField {...params} label="Project" size="small" />}
-    />
-  );
-}
-
-// Async, type-to-search multi-select of engineers (server-side `assignedUserIds`).
-// Reuses adminUsers.search's internal-roles scope, same as EngagementFiltersSheet's own
-// AssigneeMultiSelect. Requires at least one typed character.
-function AssigneeMultiSelect({
-  value,
-  onChange,
-}: {
-  value: SecurityReportAssignee[];
-  onChange: (assignees: SecurityReportAssignee[]) => void;
-}) {
-  const [input, setInput] = useState("");
-  const debounced = useDebouncedValue(input, 300);
-  const { data, isFetching } = useQuery(adminUsers.search(debounced.trim()));
-
-  const options = useMemo(() => {
-    const results = data?.users ?? [];
-    return [...value, ...results.filter((r) => !value.some((v) => v.id === r.id))];
-  }, [data, value]);
-
-  return (
-    <Autocomplete
-      multiple
-      size="small"
-      options={options}
-      value={value}
-      loading={isFetching}
-      getOptionLabel={(o) => o.name}
-      isOptionEqualToValue={(a, b) => a.id === b.id}
-      onChange={(_, next) => onChange(next.map((o) => ({ id: o.id, name: o.name })))}
-      onInputChange={(_, next) => setInput(next)}
-      slotProps={{ paper: OPAQUE_POPUP }}
-      renderInput={(params) => <TextField {...params} label="Assignee" size="small" placeholder="Search engineers…" />}
     />
   );
 }
@@ -247,7 +207,10 @@ export function SecurityReportFiltersSheet({ open, onClose, filters, onApply }: 
             </Stack>
           </Stack>
 
-          <AssigneeMultiSelect value={draft.assignees} onChange={(next) => setDraft({ ...draft, assignees: next })} />
+          <InternalUserMultiSelect
+            value={draft.assignees}
+            onChange={(next) => setDraft({ ...draft, assignees: next })}
+          />
 
           <ProjectMultiSelect value={draft.projects} onChange={(next) => setDraft({ ...draft, projects: next })} />
 

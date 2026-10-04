@@ -62,7 +62,7 @@ type fakeCaseActivityRow struct {
 func (f fakeCaseActivityRow) Scan(dest ...any) error {
 	*dest[0].(*string) = f.id
 	*dest[1].(*string) = f.kind
-	*dest[2].(*string) = f.content
+	*dest[2].(**string) = &f.content // scanned through a pointer: comment.content is nullable
 	*dest[3].(*time.Time) = f.createdOn
 	*dest[4].(**string) = f.email
 	*dest[5].(**string) = f.firstName

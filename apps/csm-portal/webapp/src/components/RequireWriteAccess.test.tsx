@@ -21,6 +21,10 @@ import "@testing-library/jest-dom/vitest";
 import RequireWriteAccess from "@components/RequireWriteAccess";
 
 let mockCanWrite = true;
+let mockProfileUnknown = false;
+vi.mock("@context/current-user/useProfileStatus", () => ({
+  useProfileUnknown: () => mockProfileUnknown,
+}));
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
@@ -62,5 +66,14 @@ describe("RequireWriteAccess", () => {
     renderAt("/list/new");
     expect(screen.queryByText("Create form")).not.toBeInTheDocument();
     expect(screen.getByText("List page")).toBeInTheDocument();
+  });
+
+  it("does not redirect while the profile is loading or failed to load", () => {
+    mockCanWrite = false;
+    mockProfileUnknown = true;
+    renderAt("/list/new");
+    mockProfileUnknown = false;
+    expect(screen.getByText("Create form")).toBeInTheDocument();
+    expect(screen.queryByText("List page")).not.toBeInTheDocument();
   });
 });

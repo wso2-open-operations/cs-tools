@@ -97,8 +97,8 @@ shows at EL0). Either opens a short confirm dialog asking for a reason — requi
 escalating, optional when de-escalating — and posts a case work note recording the change
 automatically. Any signed-in engineer can escalate a case. De-escalating is restricted to
 whoever was notified about the case's current escalation level — the **De-escalate** button
-only shows for you if you're on that notified list. Escalation is a ServiceNow data source
-feature only; a non-ServiceNow-backed case shows no escalation level at all. The Cases list
+only shows for you if you're on that notified list. Escalation is supported only by one of the
+backing data sources; a case held in the other shows no escalation level at all. The Cases list
 also has an optional **Escalation** column
 (via **Customise columns**) that shows the level badge for escalated cases only, left blank for
 everything else.

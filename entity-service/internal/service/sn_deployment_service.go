@@ -113,11 +113,11 @@ func (s *snDeploymentService) SearchDeployments(ctx context.Context, req domain.
 
 	views := make([]domain.DeploymentView, 0, len(snResp.Deployments))
 	for _, d := range snResp.Deployments {
-		createdOn, err := time.Parse(snCreatedOnLayout, d.CreatedOn)
+		createdOn, err := parseSNDateTime(ctx, "sn_deployment_service", "createdOn", d.CreatedOn)
 		if err != nil {
 			return domain.SearchDeploymentsResponse{}, fmt.Errorf("sn deployments: parse createdOn %q: %w", d.CreatedOn, err)
 		}
-		updatedOn, err := time.Parse(snCreatedOnLayout, d.UpdatedOn)
+		updatedOn, err := parseSNDateTime(ctx, "sn_deployment_service", "updatedOn", d.UpdatedOn)
 		if err != nil {
 			return domain.SearchDeploymentsResponse{}, fmt.Errorf("sn deployments: parse updatedOn %q: %w", d.UpdatedOn, err)
 		}
@@ -225,7 +225,7 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 		return domain.CreateDeploymentResponse{}, err
 	}
 
-	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Deployment.CreatedOn)
+	createdOn, err := parseSNDateTime(ctx, "sn_deployment_service", "createdOn", snResp.Deployment.CreatedOn)
 	if err != nil {
 		return domain.CreateDeploymentResponse{}, fmt.Errorf("sn create deployment: parse createdOn %q: %w", snResp.Deployment.CreatedOn, err)
 	}
@@ -330,7 +330,7 @@ func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.U
 		return domain.UpdateDeploymentResponse{}, fmt.Errorf("sn update deployment: parse response: %w", err)
 	}
 
-	updatedOn, err := time.Parse(snCreatedOnLayout, snResp.Deployment.UpdatedOn)
+	updatedOn, err := parseSNDateTime(ctx, "sn_deployment_service", "updatedOn", snResp.Deployment.UpdatedOn)
 	if err != nil {
 		return domain.UpdateDeploymentResponse{}, fmt.Errorf("sn update deployment: parse updatedOn %q: %w", snResp.Deployment.UpdatedOn, err)
 	}

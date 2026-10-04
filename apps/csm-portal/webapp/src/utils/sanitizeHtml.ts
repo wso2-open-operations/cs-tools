@@ -28,18 +28,31 @@ if (typeof window !== "undefined") {
 }
 
 /**
- * Sanitize backend rich-text HTML (ServiceNow case comments, change-request
+ * Sanitize backend rich-text HTML (case comments, change-request
  * descriptions/plans, …) for safe rendering via dangerouslySetInnerHTML.
  *
  * Uses DOMPurify's default policy — no custom tag/attribute allow-list — to
- * stay aligned with the customer portal, which renders the same ServiceNow HTML
- * with bare `DOMPurify.sanitize(html)` (its `INLINE_COMMENT_HTML_PURIFY` is `{}`).
+ * stay aligned with the customer portal, which renders the same backing-source
+ * HTML with bare `DOMPurify.sanitize(html)` (its `INLINE_COMMENT_HTML_PURIFY` is `{}`).
  * The defaults already strip scripts, event handlers, and `javascript:` URLs; a
  * stricter allow-list here silently dropped legitimate content (tables,
  * headings) the portal keeps.
+ *
+ * This must be the LAST step before the string reaches the DOM: never rewrite
+ * the returned markup (regex or otherwise) afterwards. Decorations that need to
+ * add elements belong in a DOM transform run through `renderTrustedHtml`.
  */
 export function sanitizeRichTextHtml(html: string): string {
   return DOMPurify.sanitize(html);
+}
+
+/**
+ * Same policy as {@link sanitizeRichTextHtml}, but keeps the `target` attribute
+ * so links the app itself created (`target="_blank"`) survive. The module-load
+ * hook above forces `rel="noopener noreferrer"` on every kept `_blank` anchor.
+ */
+export function sanitizeRichTextHtmlKeepingLinkTargets(html: string): string {
+  return DOMPurify.sanitize(html, { ADD_ATTR: ["target"] });
 }
 
 /** DOMPurify config for backend description/body HTML: strips tables and code blocks. */
@@ -61,7 +74,7 @@ export function sanitizeDescriptionHtml(html: string): string {
  * Strips light/pastel inline background declarations from style attributes so
  * dark-mode containers don't end up with washed-out, low-contrast backgrounds
  * (default dark-mode text is light, so any sufficiently light background —
- * not just near-white — reads poorly against it; a ServiceNow call note with
+ * not just near-white — reads poorly against it; a backing-source call note with
  * e.g. a light pastel teal background is a real example that a pure-white-only
  * check misses). Everything else (code-block backgrounds, borders, shadows,
  * text colors) is intentionally left untouched so light-mode and structural
@@ -91,7 +104,7 @@ export function stripLightModeInlineStyles(html: string): string {
   );
 }
 
-// Small set of named CSS colors that show up in ServiceNow-authored HTML
+// Small set of named CSS colors that show up in backing-source-authored HTML
 // backgrounds; not a full CSS color table, just enough to mirror the parsing
 // coverage (hex3/hex6/rgb/named) already used for the dark-text-color check.
 const NAMED_BACKGROUND_COLORS: Record<string, [number, number, number]> = {
@@ -222,18 +235,15 @@ export function isBlankHtml(html: string): boolean {
  * *isn't* part of a real tag comes back HTML-entity-encoded (`&lt;`/`&gt;`)
  * rather than as the literal character — which would then render as the
  * literal text "&lt;" once put through plain JSX interpolation instead of
- * a decoded `<`. Round-tripping through a detached element's `innerHTML` →
- * `textContent` decodes those entities back to plain characters. This is
- * safe specifically because the input to that second `innerHTML` assign is
- * already fully tag-stripped by DOMPurify — there's nothing left to parse
- * into a live element, and even if there were, `textContent` never
- * executes anything and strips whatever tags it reads back out anyway.
+ * a decoded `<`. Parsing the stripped output into an inert `DOMParser`
+ * document and reading its `textContent` decodes those entities back to plain
+ * characters; the parsed document never runs scripts or loads resources, and
+ * `textContent` strips whatever tags it reads back out anyway.
  */
 export function stripHtmlTags(text: string): string {
   const withoutTags = DOMPurify.sanitize(text, { ALLOWED_TAGS: [] });
-  const container = document.createElement("div");
-  container.innerHTML = withoutTags;
-  return container.textContent ?? "";
+  const doc = new DOMParser().parseFromString(withoutTags, "text/html");
+  return doc.body.textContent ?? "";
 }
 
 /**

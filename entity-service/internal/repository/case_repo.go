@@ -824,7 +824,7 @@ func mapCreateCaseError(err error) error {
 	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "23503": // foreign_key_violation -- one of the referenced IDs does not exist
-			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			return fkViolationError(pgErr, "one or more referenced IDs do not exist")
 		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority) and from next_portal_wso2_id when project_id doesn't exist
 			return &apierror.ValidationError{Msg: pgErr.Message}
 		}
@@ -1194,11 +1194,11 @@ func mapCreateCaseFromServiceNowError(err error, id string) error {
 	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "23505": // unique_violation on id/number/wso2_id — see CreateCaseFromServiceNow's own doc comment for why this "shouldn't" happen
-			return &apierror.ConflictError{Msg: "a case already exists for this ServiceNow id/number/internalId: " + pgErr.Detail}
+			return &apierror.ConflictError{Msg: "a case already exists for this ServiceNow id/number/internalId"}
 		case "22P02": // invalid_text_representation — id was not a valid UUID
 			return &apierror.ValidationError{Msg: "id is not a valid UUID: " + id}
 		case "23503": // foreign_key_violation — one of the referenced IDs does not exist
-			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			return fkViolationError(pgErr, "one or more referenced IDs do not exist")
 		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority)
 			return &apierror.ValidationError{Msg: pgErr.Message}
 		}
@@ -1654,17 +1654,31 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 		typeFilter = fmt.Sprintf(" AND cc.type = $%d::comment_type_enum", len(args))
 	}
 
-	countQuery := `SELECT COUNT(*) FROM comment cc WHERE cc.work_item_id = $1` + typeFilter
+	// A soft-deleted comment (DELETE /comments/{id}, migration 0131) is
+	// retracted: it leaves the case thread for everyone. Internal notes are
+	// hidden from non-internal callers by the comment RLS policy (0179).
+	countQuery := `SELECT COUNT(*) FROM comment cc WHERE cc.work_item_id = $1 AND cc.deleted_at IS NULL` + typeFilter
 	// LEFT JOIN "user" by email match: comment.created_by is a free-text
 	// VARCHAR (see CreateCaseComment above), not a FK, so a real user id/name
 	// is only available when it happens to match a known user's email.
+	// "user".email is not unique, so the join is wrapped in DISTINCT ON
+	// (cc.id), picking the lowest user id, as SearchCaseActivities and
+	// CommentRepository.SearchComments already do; otherwise a comment whose
+	// author's address is on two user rows appears twice on a page that
+	// countQuery counts once.
 	dataQuery := fmt.Sprintf(`
-		SELECT cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
-		       u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
-		FROM comment cc
-		LEFT JOIN "user" u ON LOWER(u.email) = LOWER(cc.created_by)
-		WHERE cc.work_item_id = $1%s
-		ORDER BY cc.created_on DESC, cc.id
+		SELECT c.id, c.work_item_id, c.type, c.content, c.created_by, c.created_on, c.user_id, c.user_name
+		FROM (
+			SELECT DISTINCT ON (cc.id)
+			       cc.id, cc.work_item_id, cc.type, cc.content, cc.created_by, cc.created_on,
+			       u.id AS user_id,
+			       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')) AS user_name
+			FROM comment cc
+			LEFT JOIN "user" u ON LOWER(u.email) = LOWER(cc.created_by)
+			WHERE cc.work_item_id = $1 AND cc.deleted_at IS NULL%s
+			ORDER BY cc.id, u.id
+		) c
+		ORDER BY c.created_on DESC, c.id
 		LIMIT $%d OFFSET $%d`, typeFilter, len(args)+1, len(args)+2)
 
 	dataArgs := append(args, req.Pagination.Limit, req.Pagination.Offset)
@@ -1691,15 +1705,17 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 		result := make([]domain.CaseComment, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var c domain.CaseComment
-			var typeRaw, authorEmail string
-			var authorID, authorName *string
+			var authorEmail string
+			// comment.type and comment.content are both nullable.
+			var typeRaw, content, authorID, authorName *string
 			if err := rows.Scan(
-				&c.ID, &c.CaseID, &typeRaw, &c.Content, &authorEmail, &c.CreatedOn,
+				&c.ID, &c.CaseID, &typeRaw, &content, &authorEmail, &c.CreatedOn,
 				&authorID, &authorName,
 			); err != nil {
 				return fmt.Errorf("scan case comment: %w", err)
 			}
-			c.Type = caseCommentEnumType[typeRaw]
+			c.Type = caseCommentEnumType[stringOrEmpty(typeRaw)]
+			c.Content = stringOrEmpty(content)
 			if authorID != nil {
 				name := ""
 				if authorName != nil {
@@ -1746,13 +1762,24 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 // trick the other five use, since "" is itself a meaningful value to write
 // there (clearing existing notes), not a stand-in for "not provided" --
 // unlike an enum column, where ” is never a valid domain value anyway.
+//
+// closed_on/resolved_on: each is stamped when the case enters its state and
+// kept (COALESCE) when that state is written again, so repeating a close or a
+// solution-proposed PATCH no longer moves the timestamp. SOLUTION_PROPOSED is
+// the resolved state (it is what the backing data source's resolved state
+// maps to, see snStateIDMap). Closing keeps an existing resolved_on; moving to
+// any other state clears both, as reopening does.
 const updateCaseQuery = `
 	WITH updated_case AS (
 		UPDATE "case"
 		SET state           = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
 		    severity        = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
 		    work_state      = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
-		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN COALESCE(closed_on, NOW()) WHEN $2 <> '' THEN NULL ELSE closed_on END,
+		    resolved_on     = CASE WHEN $2 = 'SOLUTION_PROPOSED' THEN COALESCE(resolved_on, NOW())
+		                           WHEN $2 = 'CLOSED' THEN resolved_on
+		                           WHEN $2 <> '' THEN NULL
+		                           ELSE resolved_on END,
 		    resolution_code = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
 		    cause           = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
 		    close_notes     = COALESCE($7, close_notes)
@@ -1936,11 +1963,9 @@ func scanUpdatedCase(row pgx.Row) (domain.Case, error) {
 	// against for internalID/severity/etc, confirmed live the first time
 	// this path could actually return NULL here.
 	var deploymentID, deployedProductID *string
-	// projectID/description: work_item.project_id and .description are both
-	// nullable, and synced data has NULLs in each (8,414 and 510 case-like
-	// rows on the staging copy checked) -- scanned straight into
-	// domain.Case's plain strings, every update to such a row failed with
-	// "cannot scan NULL into *string" after the write had already happened.
+	// projectID/description: both nullable on work_item (project_id is ON
+	// DELETE SET NULL, description has no NOT NULL), so they are read the same
+	// way and come back as "" when absent.
 	var projectID, description *string
 	var severity, issueType, state, workStateRaw *string
 	if err := row.Scan(
@@ -2148,7 +2173,7 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
 			case "23503": // foreign_key_violation — case_id or uploaded_by does not exist
-				return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+				return domain.Attachment{}, fkViolationError(pgErr, "one or more referenced IDs do not exist")
 			case "23514": // check_violation — e.g. size_bytes <= 0 or an invalid status
 				return domain.Attachment{}, &apierror.ValidationError{Msg: pgErr.Message}
 			}
@@ -2326,7 +2351,7 @@ func (r *caseRepo) UpdateCaseAttachmentName(ctx context.Context, id, name, updat
 	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return time.Time{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			return time.Time{}, fkViolationError(pgErr, "one or more referenced IDs do not exist")
 		}
 		return time.Time{}, fmt.Errorf("update case attachment name: %w", err)
 	}
@@ -2707,6 +2732,24 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	return where, filterArgs, argIdx, nil
 }
 
+// caseSearchOrder turns the requested sort into the ORDER BY column and
+// direction SearchCases interpolates. Both come from fixed lists here, never
+// from the request text: an unknown field falls back to wi.created_on and
+// anything but "asc" to DESC (the service's own defaults), so a caller that
+// skips CaseService's validation can neither inject SQL nor produce an
+// "ORDER BY  NULLS LAST" syntax error.
+func caseSearchOrder(sort domain.CaseSort) (column, direction string) {
+	column, ok := pgSortColMap[sort.Field]
+	if !ok {
+		column = pgSortColMap[domain.CaseSortFieldCreatedOn]
+	}
+	direction = "DESC"
+	if strings.EqualFold(string(sort.Order), string(domain.CaseSortOrderAsc)) {
+		direction = "ASC"
+	}
+	return column, direction
+}
+
 // SearchCases implements CaseRepository.
 func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope SearchScope) ([]domain.SearchCaseView, int, error) {
 	// WithCallerIdentity from the explicit scope parameter -- see
@@ -2718,8 +2761,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		return nil, 0, err
 	}
 
-	sortCol := pgSortColMap[req.SortBy.Field]
-	sortDir := string(req.SortBy.Order)
+	sortCol, sortDir := caseSearchOrder(req.SortBy)
 
 	// Deployment/deployed-product/product are LEFT joins here (unlike
 	// GetCaseByID's INNER joins): SearchCases can return non-case work_item
@@ -2976,15 +3018,19 @@ func (r *caseRepo) SetCaseWatchList(ctx context.Context, caseID string, userIDs 
 			return fmt.Errorf("clear case watch list: %w", err)
 		}
 
-		for _, userID := range userIDs {
+		// One statement for the whole list. ON CONFLICT: a user id listed twice
+		// is one watcher, not a unique-violation 500.
+		if len(userIDs) > 0 {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO work_item_watcher (id, work_item_id, user_id) VALUES (gen_random_uuid(), $1, $2)`,
-				caseID, userID,
+				`INSERT INTO work_item_watcher (id, work_item_id, user_id)
+				 SELECT gen_random_uuid(), $1, u FROM unnest($2::uuid[]) AS u
+				 ON CONFLICT (work_item_id, user_id) DO NOTHING`,
+				caseID, userIDs,
 			); err != nil {
 				if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-					return &apierror.ValidationError{Msg: "one or more watch list user IDs do not exist: " + pgErr.Detail}
+					return fkViolationError(pgErr, "one or more watch list user IDs do not exist")
 				}
-				return fmt.Errorf("insert case watcher: %w", err)
+				return fmt.Errorf("insert case watchers: %w", err)
 			}
 		}
 
@@ -3208,19 +3254,59 @@ func recomputeTimeCardsBillable(ctx context.Context, q txQuerier, caseID string,
 	return tag.RowsAffected(), nil
 }
 
+// caseParentCycleQuery reports whether $2 (the case being re-parented) is $1
+// (the proposed parent) or one of $1's ancestors, i.e. whether the new link
+// would close a loop. The depth cap only stops the walk on a loop that
+// already exists in the data.
+const caseParentCycleQuery = `
+	WITH RECURSIVE ancestor(id, depth) AS (
+		SELECT $1::uuid, 0
+		UNION ALL
+		SELECT wi.parent_id, a.depth + 1
+		FROM work_item wi
+		JOIN ancestor a ON wi.id = a.id
+		WHERE wi.parent_id IS NOT NULL AND a.depth < 1000
+	)
+	SELECT EXISTS (SELECT 1 FROM ancestor WHERE id = $2::uuid)`
+
 // UpdateCaseParent implements CaseRepository.
+//
+// A case cannot be its own parent, nor a descendant of itself: with a loop
+// in parent_id, UpdateCase's "cannot close while a child case is open" guard
+// makes every case on the loop impossible to close. The ancestor walk and
+// the update run in one transaction behind a transaction-scoped advisory
+// lock, so two concurrent re-parents (A under B, B under A) cannot each pass
+// the check before the other commits.
 func (r *caseRepo) UpdateCaseParent(ctx context.Context, caseID, parentID, callerEmail string) (time.Time, error) {
+	if strings.EqualFold(caseID, parentID) {
+		return time.Time{}, &apierror.ValidationError{Msg: "parentId: a case cannot be its own parent"}
+	}
 	var updatedOn time.Time
-	err := r.db.QueryRow(ctx,
-		`UPDATE work_item SET parent_id = $2::uuid, updated_on = NOW(), updated_by = $3 WHERE id = $1 RETURNING updated_on`,
-		caseID, parentID, callerEmail,
-	).Scan(&updatedOn)
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('work-item-parent', 0))`); err != nil {
+			return fmt.Errorf("lock: %w", err)
+		}
+		var cycle bool
+		if err := tx.QueryRow(ctx, caseParentCycleQuery, parentID, caseID).Scan(&cycle); err != nil {
+			return fmt.Errorf("check parent cycle: %w", err)
+		}
+		if cycle {
+			return &apierror.ValidationError{Msg: "parentId: the selected case is already a child of this case"}
+		}
+		return tx.QueryRow(ctx,
+			`UPDATE work_item SET parent_id = $2::uuid, updated_on = NOW(), updated_by = $3 WHERE id = $1 RETURNING updated_on`,
+			caseID, parentID, callerEmail,
+		).Scan(&updatedOn)
+	})
+	if ve := (*apierror.ValidationError)(nil); errors.As(err, &ve) {
+		return time.Time{}, ve
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, &apierror.NotFoundError{Msg: "case not found"}
 	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return time.Time{}, &apierror.ValidationError{Msg: "parentId does not exist: " + pgErr.Detail}
+			return time.Time{}, &apierror.ValidationError{Msg: "parentId does not exist"}
 		}
 		return time.Time{}, fmt.Errorf("update case parent: %w", err)
 	}
@@ -3317,13 +3403,12 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	if req.RelatedCaseID != nil {
 		caseSets = append(caseSets, fmt.Sprintf("related_case_id = $%d::uuid", idx))
 		caseArgs = append(caseArgs, *req.RelatedCaseID)
-		idx++
 	}
 	if len(caseSets) > 0 {
 		tag, err := tx.Exec(ctx, `UPDATE "case" SET `+strings.Join(caseSets, ", ")+` WHERE id = $1`, caseArgs...)
 		if err != nil {
 			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return time.Time{}, &apierror.ValidationError{Msg: "relatedCaseId does not exist: " + pgErr.Detail}
+				return time.Time{}, &apierror.ValidationError{Msg: "relatedCaseId does not exist"}
 			}
 			return time.Time{}, fmt.Errorf("update case fields: case: %w", err)
 		}
@@ -3377,7 +3462,6 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 		if *req.WorkaroundProvided {
 			wiSets = append(wiSets, fmt.Sprintf("workaround_provided_on = NOW(), workaround_provided_by_user_id = $%d::uuid", widx))
 			wiArgs = append(wiArgs, actorID)
-			widx++
 		} else {
 			// Recalling the workaround clears both fields -- see
 			// domain.UpdateCaseRequest.WorkaroundProvided's own doc comment:
@@ -3393,7 +3477,7 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return time.Time{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			return time.Time{}, fkViolationError(pgErr, "one or more referenced IDs do not exist")
 		}
 		return time.Time{}, fmt.Errorf("update case fields: work_item: %w", err)
 	}
@@ -3616,7 +3700,8 @@ func caseActivityFieldChangeLabel(fieldName string) string {
 // the query's three UNION ALL branches are discriminated.
 func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity, error) {
 	var (
-		id, kind, content                string
+		id, kind                         string
+		content                          *string // a comment's content is nullable
 		createdOn                        time.Time
 		email, firstName, lastName, name *string
 		commentTypeRaw                   *string
@@ -3629,7 +3714,7 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 	}
 	a := domain.CaseActivity{
 		ID:                 id,
-		Content:            content,
+		Content:            stringOrEmpty(content),
 		CreatedOn:          createdOn,
 		CreatedByFirstName: stringOrEmpty(firstName),
 		CreatedByLastName:  stringOrEmpty(lastName),
@@ -3701,7 +3786,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 
 	countQuery := `
 		SELECT
-			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1) +
+			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1 AND deleted_at IS NULL) +
 			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete')`
 	if includeFieldChanges {
 		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
@@ -3734,7 +3819,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 					cm.type
 				FROM comment cm
 				LEFT JOIN "user" u1 ON LOWER(u1.email) = LOWER(cm.created_by)
-				WHERE cm.work_item_id = $1
+				WHERE cm.work_item_id = $1 AND cm.deleted_at IS NULL
 				ORDER BY cm.id, u1.id
 			) c
 

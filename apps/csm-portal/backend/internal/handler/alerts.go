@@ -57,7 +57,7 @@ func (h *AlertHandler) GetAlert(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetAlert(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAlert failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetAlert failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve alert.")
 		return
 	}
@@ -81,7 +81,7 @@ func (h *AlertHandler) GetSmartAlert(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetSmartAlert(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetSmartAlert failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetSmartAlert failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve smart alert.")
 		return
 	}

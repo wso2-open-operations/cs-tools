@@ -45,9 +45,9 @@ type entitySearchProductsResponse struct {
 
 // postgresLookupsClient implements lookupsClient: GetProductList reads
 // from entity-service (Postgres) — entity-service's productService already
-// exists natively. GetABTTeamList is NOT migrated: it comes off ServiceNow's
+// exists natively. GetABTTeamList is NOT migrated: it comes off the backing system's
 // sys_user_group table, and entity-service has no team/group domain object
-// yet, so it still delegates to the wrapped ServiceNow client.
+// yet, so it still delegates to the wrapped the backing system client.
 type postgresLookupsClient struct {
 	entity entityProductsClient
 	sn     lookupsClient
@@ -55,7 +55,7 @@ type postgresLookupsClient struct {
 
 // NewPostgresLookupsClient builds a postgresLookupsClient. entity is
 // the same *entity.CustomerEntityClient every other CS Portal handler uses;
-// sn is the existing ServiceNow client, kept only for ABT team names.
+// sn is the existing the backing system client, kept only for ABT team names.
 func NewPostgresLookupsClient(entity entityProductsClient, sn lookupsClient) *postgresLookupsClient {
 	return &postgresLookupsClient{entity: entity, sn: sn}
 }
@@ -63,7 +63,7 @@ func NewPostgresLookupsClient(entity entityProductsClient, sn lookupsClient) *po
 // entityProductsPageLimit is entity-service's own hard cap (confirmed
 // against a real running instance: a limit above 50 is rejected outright
 // with "limit cannot exceed 50", the same global cap normalizePagination
-// enforces everywhere else in that service) — unlike the ServiceNow-backed
+// enforces everywhere else in that service) — unlike the legacy-data-source
 // implementation, which fetches up to 500 products in one page, this must
 // page through in batches of 50. productListPageCap bounds the number of
 // pages fetched (25 * 50 = 1250 products) purely as a runaway-loop safety
@@ -94,7 +94,7 @@ func (c *postgresLookupsClient) GetProductList(ctx context.Context) ([]string, e
 			return nil, fmt.Errorf("unmarshal entity-service products response: %w", err)
 		}
 
-		// Trim/dedupe/sort matches the ServiceNow-backed implementation's
+		// Trim/dedupe/sort matches the legacy-data-source implementation's
 		// own behavior exactly (see internal/servicenow/lookups.go) so
 		// callers see no difference in shape.
 		for _, p := range resp.Products {
@@ -115,7 +115,7 @@ func (c *postgresLookupsClient) GetProductList(ctx context.Context) ([]string, e
 }
 
 // GetABTTeamList implements lookupsClient by delegating to the wrapped
-// ServiceNow client — see this type's own doc comment for why.
+// The backing system client — see this type's own doc comment for why.
 func (c *postgresLookupsClient) GetABTTeamList(ctx context.Context) ([]string, error) {
 	return c.sn.GetABTTeamList(ctx)
 }

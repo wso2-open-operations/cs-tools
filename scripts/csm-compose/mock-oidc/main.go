@@ -41,6 +41,7 @@ import (
 	"html"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -79,8 +80,22 @@ type authRequest struct {
 }
 
 func main() {
+	// Startup fence. This program mints valid tokens for anyone who asks, so
+	// it must never come up by accident -- e.g. because its service block was
+	// copied from docker-compose.yml into some other compose file. Whoever
+	// runs it has to say so explicitly.
+	if os.Getenv("MOCK_OIDC_LOCAL_DEV") != "1" {
+		log.Fatal("mock-oidc: refusing to start: this is a local-development-only mock identity provider that signs tokens for any username; set MOCK_OIDC_LOCAL_DEV=1 to acknowledge that and run it")
+	}
+
 	issuer := envOrDefault("MOCK_OIDC_ISSUER", "http://localhost:9100")
 	port := envOrDefault("PORT", "9100")
+	// Loopback by default, so running the binary directly on a workstation
+	// never exposes the token endpoint to the LAN. docker-compose.yml sets
+	// MOCK_OIDC_BIND_ADDR=0.0.0.0 because inside the container network the
+	// other services reach it by hostname, and the host-side publish there
+	// is itself restricted to 127.0.0.1.
+	bindAddr := envOrDefault("MOCK_OIDC_BIND_ADDR", "127.0.0.1")
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -106,8 +121,9 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	slog.Info("mock-oidc: listening", "port", port, "issuer", issuer)
-	log.Fatal(http.ListenAndServe(":"+port, logRequests(corsMiddleware(mux))))
+	addr := net.JoinHostPort(bindAddr, port)
+	slog.Info("mock-oidc: listening", "addr", addr, "issuer", issuer)
+	log.Fatal(http.ListenAndServe(addr, logRequests(corsMiddleware(mux))))
 }
 
 func logRequests(next http.Handler) http.Handler {

@@ -69,6 +69,10 @@ function todayDateOnly(): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 import {
+  rangeAfterFromChange,
+  rangeAfterToChange,
+} from "@features/csm-timecards/utils/timeCardDateRange";
+import {
   useAllTimeCards,
   useApprovalQueue,
   useBulkApproveCards,
@@ -387,16 +391,27 @@ export default function CsmTimeCardsPage(): JSX.Element {
   const handleFilterFromChange = (v: string): void => {
     // min/max on the date inputs only guide the picker UI — typing a date
     // directly can still commit an inverted or future-dated range, so
-    // clamp/reject here too.
-    if (v && v > formatDateOnly(todayDateOnly())) return;
-    setFilterFrom(v);
-    if (filterTo && v > filterTo) setFilterTo(v);
+    // clamp/reject here too. Compared as parsed dates; an empty/partial value
+    // only clears this field.
+    const next = rangeAfterFromChange(
+      v,
+      { from: filterFrom, to: filterTo },
+      todayDateOnly(),
+    );
+    if (!next) return;
+    setFilterFrom(next.from);
+    setFilterTo(next.to);
     resetAllPages();
   };
   const handleFilterToChange = (v: string): void => {
-    if (v && v > formatDateOnly(todayDateOnly())) return;
-    setFilterTo(v);
-    if (filterFrom && v < filterFrom) setFilterFrom(v);
+    const next = rangeAfterToChange(
+      v,
+      { from: filterFrom, to: filterTo },
+      todayDateOnly(),
+    );
+    if (!next) return;
+    setFilterFrom(next.from);
+    setFilterTo(next.to);
     resetAllPages();
   };
   const clearFilters = (): void => {

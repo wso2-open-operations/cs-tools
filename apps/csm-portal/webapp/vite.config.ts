@@ -54,6 +54,30 @@ function configVersionPlugin(): Plugin {
   };
 }
 
+// Splits third-party code into a few long-lived vendor chunks so a deploy that
+// only changes app code doesn't invalidate the browser cache of the (large)
+// UI/chart/editor libraries. All of these are still loaded up front with the
+// entry (no route-level lazy loading — see CLAUDE.md "Routing"). The PDF
+// libraries are deliberately NOT grouped: they are only ever dynamic-import()ed,
+// and putting them (or their shared helpers) in a named chunk made the entry
+// preload all of it.
+const VENDOR_GROUPS: Array<[chunk: string, packages: RegExp]> = [
+  ["vendor-lexical", /^(lexical|@lexical\/.+)$/],
+  ["vendor-charts", /^(recharts|recharts-scale|victory-vendor|d3-.+|internmap|decimal\.js-light|eventemitter3|tiny-invariant|immer|redux|react-redux|reselect|@reduxjs\/toolkit|es-toolkit|use-sync-external-store)$/],
+  ["vendor-markdown", /^(markdown-it|mdurl|linkify-it|uc\.micro|entities|punycode\.js)$/],
+  ["vendor-ui", /^(@mui\/.+|@emotion\/.+|@wso2\/oxygen-ui.*|stylis|@popperjs\/core|react-transition-group|clsx|prop-types|react-is|hoist-non-react-statics)$/],
+  ["vendor-react", /^(react|react-dom|react-router|scheduler|cookie|set-cookie-parser|turbo-stream)$/],
+];
+
+function vendorChunk(id: string): string | undefined {
+  const marker = "node_modules/";
+  const at = id.replaceAll("\\", "/").lastIndexOf(marker);
+  if (at === -1) return undefined;
+  const segments = id.replaceAll("\\", "/").slice(at + marker.length).split("/");
+  const name = segments[0].startsWith("@") ? `${segments[0]}/${segments[1]}` : segments[0];
+  return VENDOR_GROUPS.find(([, packages]) => packages.test(name))?.[0];
+}
+
 const viteConfig = defineConfig({
   plugins: [
     react({
@@ -72,56 +96,8 @@ const viteConfig = defineConfig({
       "@components": fileURLToPath(
         new URL("./src/components", import.meta.url),
       ),
-      "@update-cards": fileURLToPath(
-        new URL(
-          "./src/features/updates/components/update-cards",
-          import.meta.url,
-        ),
-      ),
-      "@case-details": fileURLToPath(
-        new URL(
-          "./src/features/support/components/case-details/header",
-          import.meta.url,
-        ),
-      ),
-      "@case-details-attachments": fileURLToPath(
-        new URL(
-          "./src/features/support/components/case-details/attachments-tab",
-          import.meta.url,
-        ),
-      ),
-      "@case-details-details": fileURLToPath(
-        new URL(
-          "./src/features/support/components/case-details/details-tab",
-          import.meta.url,
-        ),
-      ),
-      "@case-details-activity": fileURLToPath(
-        new URL(
-          "./src/features/support/components/case-details/activity-tab",
-          import.meta.url,
-        ),
-      ),
-      "@case-details-calls": fileURLToPath(
-        new URL(
-          "./src/features/support/components/case-details/calls-tab",
-          import.meta.url,
-        ),
-      ),
       "@config": fileURLToPath(new URL("./src/config", import.meta.url)),
       "@context": fileURLToPath(new URL("./src/context", import.meta.url)),
-      "@time-tracking": fileURLToPath(
-        new URL(
-          "./src/features/project-details/components/time-tracking",
-          import.meta.url,
-        ),
-      ),
-      "@deployments": fileURLToPath(
-        new URL(
-          "./src/features/project-details/components/deployments",
-          import.meta.url,
-        ),
-      ),
       "@hooks": fileURLToPath(new URL("./src/hooks", import.meta.url)),
       "@layouts": fileURLToPath(new URL("./src/layouts", import.meta.url)),
       "@features": fileURLToPath(new URL("./src/features", import.meta.url)),
@@ -135,6 +111,11 @@ const viteConfig = defineConfig({
   server: {
     port: 3001,
     strictPort: true,
+  },
+  build: {
+    rollupOptions: {
+      output: { manualChunks: vendorChunk },
+    },
   },
 });
 

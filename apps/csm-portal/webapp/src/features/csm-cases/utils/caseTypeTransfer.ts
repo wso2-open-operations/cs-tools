@@ -57,7 +57,7 @@ interface CaseTypeMeta {
   specificFields: CaseTypeSpecificField[];
   /** `security_report_analysis` requires at least one attachment. */
   requiresAttachment?: boolean;
-  /** `service_request` is driven by a ServiceNow catalog item + its answers,
+  /** `service_request` is driven by a backing-system catalog item + its answers,
    * not a fixed field list — rendered as its own picker, not a specific field. */
   requiresCatalog?: boolean;
 }
@@ -114,7 +114,7 @@ export interface TransferPreview {
   neededFields: CaseTypeSpecificField[];
   /** Target requires an attachment and the case currently has none. */
   attachmentNeeded: boolean;
-  /** Target is driven by a ServiceNow catalog item, not a fixed field. */
+  /** Target is driven by a backing-system catalog item, not a fixed field. */
   catalogNeeded: boolean;
 }
 

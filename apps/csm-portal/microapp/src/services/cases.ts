@@ -251,11 +251,21 @@ const findCaseByNumber = async (caseNumber: string): Promise<MyOngoingCase> => {
 // real, working value instead of the doc.
 const COMMENTS_PAGE_LIMIT = 50;
 
+// Upper bound on pages fetched for one case's thread (50 per page), so a runaway thread cannot
+// turn one query into an unbounded request loop.
+const COMMENTS_MAX_PAGES = 40;
+
 const getCaseComments = async (id: string): Promise<Comment[]> => {
-  const { data } = await apiClient.post<CaseCommentSearchResponseDto>(CASE_COMMENTS_SEARCH_ENDPOINT(id), {
-    pagination: { limit: COMMENTS_PAGE_LIMIT },
-  });
-  return data.comments.map(toComment);
+  const comments: Comment[] = [];
+  for (let page = 0; page < COMMENTS_MAX_PAGES; page += 1) {
+    const { data } = await apiClient.post<CaseCommentSearchResponseDto>(CASE_COMMENTS_SEARCH_ENDPOINT(id), {
+      pagination: { offset: page * COMMENTS_PAGE_LIMIT, limit: COMMENTS_PAGE_LIMIT },
+    });
+    comments.push(...data.comments.map(toComment));
+    const hasMore = data.hasMore ?? data.offset + data.comments.length < data.total;
+    if (!hasMore || data.comments.length === 0) break;
+  }
+  return comments;
 };
 
 const createCase = async (

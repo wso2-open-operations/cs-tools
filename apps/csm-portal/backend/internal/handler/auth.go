@@ -46,6 +46,23 @@ func requireViewerAccess(w http.ResponseWriter, r *http.Request, guard *AccessGu
 	return user, true
 }
 
+// requireViewerWriteAccess is requireViewerAccess for a SupportPortalLite route
+// that changes state (every non-GET /customer-health/* route except the
+// POST-as-query summary, and POST /scan-user): on top of the PermViewerAccess
+// audience gate it requires PermWrite, the floor for a state change
+// everywhere else in this backend. Same contract as requireViewerAccess: on
+// false the response (401/403) has already been written.
+func requireViewerWriteAccess(w http.ResponseWriter, r *http.Request, guard *AccessGuard) (*middleware.UserInfo, bool) {
+	user, ok := requireViewerAccess(w, r, guard)
+	if !ok {
+		return nil, false
+	}
+	if !requireViewerPermission(w, user, guard, PermWrite) {
+		return nil, false
+	}
+	return user, true
+}
+
 // requireViewerPermission performs one of SupportPortalLite's additional,
 // narrower permission checks (PermEscalate, PermDownloadAttachment,
 // PermUsageMetricsViewer) layered on top of the blanket PermViewerAccess gate

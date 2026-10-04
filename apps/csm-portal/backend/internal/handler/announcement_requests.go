@@ -47,6 +47,21 @@ type entityAnnouncementRequestClient interface {
 	ListAnnouncementRequestUpdates(ctx context.Context, id string) ([]byte, error)
 	RecordAnnouncementRequestDeliveries(ctx context.Context, id string, body []byte) ([]byte, error)
 	ListAnnouncementRequestDeliveries(ctx context.Context, id string) ([]byte, error)
+	GetUserMe(ctx context.Context) ([]byte, error)
+}
+
+// resolveActorID returns the caller's platform user id (see
+// resolvePlatformUserID) for the createdBy/actorId fields an announcement
+// request records. Those columns hold platform user ids, so the token's own
+// user id claim, an identifier from the identity provider's space, is never
+// used. When the id cannot be resolved it writes a 500 and returns false.
+func (h *AnnouncementRequestHandler) resolveActorID(w http.ResponseWriter, r *http.Request, user *middleware.UserInfo) (string, bool) {
+	id := resolvePlatformUserID(r.Context(), h.entity.GetUserMe, user)
+	if id == "" {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve the current user.")
+		return "", false
+	}
+	return id, true
 }
 
 // AnnouncementRequestHandler handles HTTP requests for the Phase 2
@@ -134,6 +149,10 @@ func (h *AnnouncementRequestHandler) CreateAnnouncementRequest(w http.ResponseWr
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		Kind                   string          `json:"kind"`
 		Subject                string          `json:"subject"`
@@ -148,7 +167,7 @@ func (h *AnnouncementRequestHandler) CreateAnnouncementRequest(w http.ResponseWr
 		Description:            req.Description,
 		IsSecurityAnnouncement: req.IsSecurityAnnouncement,
 		AudienceDefinition:     req.AudienceDefinition,
-		CreatedBy:              user.UserID,
+		CreatedBy:              actorID,
 		CreatedByEmail:         user.Email,
 	})
 	if err != nil {
@@ -158,7 +177,7 @@ func (h *AnnouncementRequestHandler) CreateAnnouncementRequest(w http.ResponseWr
 
 	result, err := h.entity.CreateAnnouncementRequest(r.Context(), upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateAnnouncementRequest failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateAnnouncementRequest failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create the announcement request.")
 		return
 	}
@@ -181,7 +200,7 @@ func (h *AnnouncementRequestHandler) GetAnnouncementRequest(w http.ResponseWrite
 
 	result, err := h.entity.GetAnnouncementRequest(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve the announcement request.")
 		return
 	}
@@ -204,7 +223,7 @@ func (h *AnnouncementRequestHandler) SearchAnnouncementRequests(w http.ResponseW
 
 	result, err := h.entity.SearchAnnouncementRequests(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAnnouncementRequests failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchAnnouncementRequests failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcement requests.")
 		return
 	}
@@ -245,6 +264,10 @@ func (h *AnnouncementRequestHandler) UpdateAnnouncementRequest(w http.ResponseWr
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		Subject                *string         `json:"subject,omitempty"`
 		Description            *string         `json:"description,omitempty"`
@@ -256,7 +279,7 @@ func (h *AnnouncementRequestHandler) UpdateAnnouncementRequest(w http.ResponseWr
 		Description:            req.Description,
 		IsSecurityAnnouncement: req.IsSecurityAnnouncement,
 		AudienceDefinition:     req.AudienceDefinition,
-		ActorID:                user.UserID,
+		ActorID:                actorID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
@@ -265,7 +288,7 @@ func (h *AnnouncementRequestHandler) UpdateAnnouncementRequest(w http.ResponseWr
 
 	result, err := h.entity.UpdateAnnouncementRequest(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity UpdateAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update the announcement request.")
 		return
 	}
@@ -306,10 +329,14 @@ func (h *AnnouncementRequestHandler) RecordAnnouncementRequestDryRun(w http.Resp
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		CaseID  string `json:"caseId"`
 		ActorID string `json:"actorId"`
-	}{CaseID: req.CaseID, ActorID: user.UserID})
+	}{CaseID: req.CaseID, ActorID: actorID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -317,7 +344,7 @@ func (h *AnnouncementRequestHandler) RecordAnnouncementRequestDryRun(w http.Resp
 
 	result, err := h.entity.RecordAnnouncementRequestDryRun(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity RecordAnnouncementRequestDryRun failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity RecordAnnouncementRequestDryRun failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to record the dry run.")
 		return
 	}
@@ -370,11 +397,15 @@ func (h *AnnouncementRequestHandler) ScheduleAnnouncementRequest(w http.Response
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		ActorID      string  `json:"actorId"`
 		ScheduledFor *string `json:"scheduledFor"`
 		ActorEmail   string  `json:"actorEmail,omitempty"`
-	}{ActorID: user.UserID, ScheduledFor: req.ScheduledFor, ActorEmail: user.Email})
+	}{ActorID: actorID, ScheduledFor: req.ScheduledFor, ActorEmail: user.Email})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -382,7 +413,7 @@ func (h *AnnouncementRequestHandler) ScheduleAnnouncementRequest(w http.Response
 
 	result, err := h.entity.ScheduleAnnouncementRequest(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ScheduleAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity ScheduleAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to schedule the announcement request.")
 		return
 	}
@@ -427,11 +458,15 @@ func (h *AnnouncementRequestHandler) PublishAnnouncementRequest(w http.ResponseW
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		ActorID    string   `json:"actorId"`
 		CaseIDs    []string `json:"caseIds"`
 		ActorEmail string   `json:"actorEmail,omitempty"`
-	}{ActorID: user.UserID, CaseIDs: req.CaseIDs, ActorEmail: user.Email})
+	}{ActorID: actorID, CaseIDs: req.CaseIDs, ActorEmail: user.Email})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -439,7 +474,7 @@ func (h *AnnouncementRequestHandler) PublishAnnouncementRequest(w http.ResponseW
 
 	result, err := h.entity.PublishAnnouncementRequest(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PublishAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity PublishAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to publish the announcement request.")
 		return
 	}
@@ -482,11 +517,15 @@ func (h *AnnouncementRequestHandler) CreateAnnouncementRequestUpdate(w http.Resp
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		Content    string `json:"content"`
 		ActorID    string `json:"actorId"`
 		ActorEmail string `json:"actorEmail,omitempty"`
-	}{Content: req.Content, ActorID: user.UserID, ActorEmail: user.Email})
+	}{Content: req.Content, ActorID: actorID, ActorEmail: user.Email})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -494,7 +533,7 @@ func (h *AnnouncementRequestHandler) CreateAnnouncementRequestUpdate(w http.Resp
 
 	result, err := h.entity.CreateAnnouncementRequestUpdate(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateAnnouncementRequestUpdate failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateAnnouncementRequestUpdate failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to post the update.")
 		return
 	}
@@ -519,7 +558,7 @@ func (h *AnnouncementRequestHandler) ListAnnouncementRequestUpdates(w http.Respo
 
 	result, err := h.entity.ListAnnouncementRequestUpdates(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestUpdates failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestUpdates failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to list updates for the announcement request.")
 		return
 	}
@@ -578,10 +617,14 @@ func (h *AnnouncementRequestHandler) RecordAnnouncementRequestDeliveries(w http.
 		}
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	upstreamBody, err := json.Marshal(struct {
 		ActorID    string                             `json:"actorId"`
 		Deliveries []announcementRequestDeliveryInput `json:"deliveries"`
-	}{ActorID: user.UserID, Deliveries: req.Deliveries})
+	}{ActorID: actorID, Deliveries: req.Deliveries})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -589,7 +632,7 @@ func (h *AnnouncementRequestHandler) RecordAnnouncementRequestDeliveries(w http.
 
 	result, err := h.entity.RecordAnnouncementRequestDeliveries(r.Context(), id, upstreamBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity RecordAnnouncementRequestDeliveries failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity RecordAnnouncementRequestDeliveries failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to record the delivery status.")
 		return
 	}
@@ -614,7 +657,7 @@ func (h *AnnouncementRequestHandler) ListAnnouncementRequestDeliveries(w http.Re
 
 	result, err := h.entity.ListAnnouncementRequestDeliveries(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestDeliveries failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestDeliveries failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to list deliveries for the announcement request.")
 		return
 	}
@@ -640,10 +683,14 @@ func (h *AnnouncementRequestHandler) actorOnlyTransition(
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	body, err := json.Marshal(struct {
 		ActorID    string `json:"actorId"`
 		ActorEmail string `json:"actorEmail,omitempty"`
-	}{ActorID: user.UserID, ActorEmail: user.Email})
+	}{ActorID: actorID, ActorEmail: user.Email})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -651,7 +698,7 @@ func (h *AnnouncementRequestHandler) actorOnlyTransition(
 
 	result, err := call(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity announcement request "+action+" failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity announcement request "+action+" failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, fallbackMsg)
 		return
 	}
@@ -836,7 +883,7 @@ func (h *AnnouncementRequestHandler) SubmitAnnouncementRequest(w http.ResponseWr
 
 	currentRaw, err := h.entity.GetAnnouncementRequest(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to load the announcement request.")
 		return
 	}
@@ -862,7 +909,7 @@ func (h *AnnouncementRequestHandler) SubmitAnnouncementRequest(w http.ResponseWr
 		return
 	}
 	if err != nil {
-		slog.ErrorContext(r.Context(), "resolve announcement request audience failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "resolve announcement request audience failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		// An *apierror.Error means SearchProjects/SearchProjectsByProductVersion
 		// itself failed (a real upstream problem — could be transient, e.g. a
 		// 503) — map it through the normal upstream-error path instead of
@@ -885,11 +932,15 @@ func (h *AnnouncementRequestHandler) SubmitAnnouncementRequest(w http.ResponseWr
 		return
 	}
 
+	actorID, ok := h.resolveActorID(w, r, user)
+	if !ok {
+		return
+	}
 	body, err := json.Marshal(struct {
 		ResolvedProjectIDs []string `json:"resolvedProjectIds"`
 		ActorID            string   `json:"actorId"`
 		ActorEmail         string   `json:"actorEmail,omitempty"`
-	}{ResolvedProjectIDs: projectIDs, ActorID: user.UserID, ActorEmail: user.Email})
+	}{ResolvedProjectIDs: projectIDs, ActorID: actorID, ActorEmail: user.Email})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 		return
@@ -897,7 +948,7 @@ func (h *AnnouncementRequestHandler) SubmitAnnouncementRequest(w http.ResponseWr
 
 	result, err := h.entity.SubmitAnnouncementRequest(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SubmitAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SubmitAnnouncementRequest failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to submit the announcement request for approval.")
 		return
 	}

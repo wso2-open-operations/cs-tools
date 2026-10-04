@@ -398,14 +398,26 @@ func TestContactWriter_FetchFailureWritesNothing(t *testing.T) {
 
 // ---- DELETED ---------------------------------------------------------------
 
-// TestContactWriter_Deleted: no fetch (Salesforce hides deleted records),
-// soft delete by sf_id, and a DELETED ledger row.
+// TestContactWriter_Deleted: one lookup to confirm the contact is gone
+// upstream (a deleted record is hidden from reads), soft delete by sf_id,
+// and a DELETED ledger row. A contact still present upstream is left alone.
 func TestContactWriter_Deleted(t *testing.T) {
 	h := newIngestHarness(sampleProjectContact("REGISTERED"), sampleWriterContact(), false)
+
+	// Still present upstream: acknowledged, nothing deactivated.
 	if err := h.svc.HandleEvent(context.Background(), contactEvent("DELETED")); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.contacts.deactivated, []string{testContactID}) || len(h.se.contactCalls) != 0 || len(h.contacts.upserts) != 0 {
+	if len(h.contacts.deactivated) != 0 {
+		t.Fatalf("a contact still present upstream was deactivated: %v", h.contacts.deactivated)
+	}
+
+	delete(h.se.contacts, testContactID)
+	h.se.contactCalls = nil
+	if err := h.svc.HandleEvent(context.Background(), contactEvent("DELETED")); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.contacts.deactivated, []string{testContactID}) || len(h.se.contactCalls) != 1 || len(h.contacts.upserts) != 0 {
 		t.Errorf("deactivated = %v contactCalls = %d upserts = %d", h.contacts.deactivated, len(h.se.contactCalls), len(h.contacts.upserts))
 	}
 	st := h.contacts.deactivateStates[0]
@@ -451,6 +463,7 @@ func TestAdminRoleBasis(t *testing.T) {
 	c.Account.Classification = sampleStr("Partner")
 	c.IsCsAdmin = boolPtr(true)
 	h := newIngestHarness(sampleProjectContact("INVITED", "Portal user"), c, false)
+	delete(h.se.projectContacts, testMembershipID)
 	if err := h.svc.HandleEvent(context.Background(), membershipEvent("DELETED", "Project_Contact__c")); err != nil {
 		t.Fatal(err)
 	}

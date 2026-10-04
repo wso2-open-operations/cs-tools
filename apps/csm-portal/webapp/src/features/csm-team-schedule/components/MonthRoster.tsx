@@ -25,13 +25,25 @@ import type {
   ScheduleShift,
   ScheduleTier,
 } from "../types";
-import { addDays, initialsOf, isRotationShift, mondayOf, toIsoDate, zoneLabelOn, type RosterSpan } from "../utils/rota";
+import {
+  addDays,
+  dateFromIso,
+  initialsOf,
+  isRotationShift,
+  mondayOf,
+  todayIsoInZone,
+  toIsoDate,
+  zoneLabelOn,
+  type RosterSpan,
+} from "../utils/rota";
 import { useTeamColour } from "../utils/teamColourContext";
 
 export type { RosterSpan };
 const SPANS: readonly RosterSpan[] = [1, 3, 6];
 
 interface MonthRosterProps {
+  /** The clock the cells render in; decides today and the current-week band. */
+  tz?: string;
   /** The first month on the grid. */
   month: Date;
   /** How many calendar months run across it, starting at `month`. The rota
@@ -191,6 +203,7 @@ export default function MonthRoster({
   editing = false,
   changedCells,
   onEditCell,
+  tz,
 }: MonthRosterProps): JSX.Element {
   const teamColourOf = useTeamColour();
   const [query, setQuery] = useState("");
@@ -402,7 +415,7 @@ export default function MonthRoster({
     ? grid.filter((r) => r.name.toLowerCase().includes(q) || r.teamKey.toLowerCase().includes(q))
     : grid;
 
-  const todayIso = toIsoDate(new Date());
+  const todayIso = todayIsoInZone(tz);
 
   /** The week the reader is actually in, Monday to Sunday.
    *
@@ -415,12 +428,12 @@ export default function MonthRoster({
    *  composes with the marks already on the grid instead of competing with
    *  them: today stays the circled date inside it, and the reader's own row
    *  stays the filled row crossing it. */
-  const weekFrom = toIsoDate(mondayOf(new Date()));
+  const weekFrom = toIsoDate(mondayOf(dateFromIso(todayIso)));
   // addDays rather than six times 86,400,000ms: a week can contain a DST
   // change that makes one local day 25 hours long, and the arithmetic then
   // lands on Saturday 23:00. The band would drop the Sunday and put its
   // closing edge on the Saturday, once a year, in one timezone.
-  const weekTo = toIsoDate(addDays(mondayOf(new Date()), 6));
+  const weekTo = toIsoDate(addDays(mondayOf(dateFromIso(todayIso)), 6));
   const inThisWeek = (iso: string): boolean => iso >= weekFrom && iso <= weekTo;
 
   /** The same marks for one zone sub-column of a split day: only the first
@@ -451,6 +464,18 @@ export default function MonthRoster({
    *  picker on. Shared by the plain grid and by SRE's zone-split one, which
    *  has three ways into the same edit -- a zone column, and a day-wide cell
    *  when leave covers the whole day -- and had none of them before. */
+  /** An editable cell's content as a real button, so the rota can be edited
+   *  from the keyboard: Enter/Space fires a click, which bubbles to the cell's
+   *  own handler (the picker anchors to the cell, not the button). */
+  const editBtn = (editable: boolean, label: string, node: JSX.Element): JSX.Element =>
+    editable ? (
+      <button type="button" className="cell-edit" aria-label={`${label} — change`}>
+        {node}
+      </button>
+    ) : (
+      node
+    );
+
   const openCell = (
     e: { currentTarget: HTMLElement },
     row: { userId: string; name: string; teamKey: string },
@@ -773,6 +798,10 @@ export default function MonthRoster({
                         }
                         onClick={editable ? (e) => openCell(e, row, iso, withAlloc(cell)) : undefined}
                       >
+                        {editBtn(
+                          editable,
+                          `${row.name} · ${shown ? (withAlloc(cell)?.title ?? shown.title) : "nothing rostered"}${touched.note}`,
+                          <>
                         {cell && alloc ? (
                           <span className="duo">
                             <span className={`chip sm ${cell.token}`}>{cell.code}</span>
@@ -782,6 +811,8 @@ export default function MonthRoster({
                           <span className={`chip sm ${shown.token}${shown === WORKING_DAY ? " dflt" : ""}`}>{shown.code}</span>
                         ) : (
                           <span className="none">·</span>
+                        )}
+                          </>,
                         )}
                       </td>
                     );
@@ -812,7 +843,13 @@ export default function MonthRoster({
                         }
                         onClick={editable ? (e) => openCell(e, row, iso, cell) : undefined}
                       >
+                        {editBtn(
+                          editable,
+                          `${row.name} · ${whole.title}`,
+                          <>
                         <span className={`chip sm ${whole.token}${whole === WORKING_DAY ? " dflt" : ""}`}>{whole.code}</span>
+                          </>,
+                        )}
                       </td>
                     );
                   }
@@ -847,6 +884,10 @@ export default function MonthRoster({
                         }
                         onClick={editable ? (e) => openCell(e, row, iso, withAlloc(row.zoned.get(`${iso}|${z}`)), z) : undefined}
                       >
+                        {editBtn(
+                          editable,
+                          `${row.name} · ${z} · ${zc ? (withAlloc(row.zoned.get(`${iso}|${z}`))?.title ?? zc.title) : "nothing rostered"}`,
+                          <>
                         {turn && under ? (
                           // The zone's turn and what it sits on, stacked: L1
                           // in TZ1 on an RnD day, or on TZ1's regular hours --
@@ -859,6 +900,8 @@ export default function MonthRoster({
                           <span className={`chip sm ${zc.token}`}>{zc.code}</span>
                         ) : (
                           <span className="zempty" />
+                        )}
+                          </>,
                         )}
                       </td>
                     );

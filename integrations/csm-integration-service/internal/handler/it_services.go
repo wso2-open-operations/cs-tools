@@ -18,8 +18,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 )
@@ -46,27 +44,16 @@ func NewITServiceHandler(entity entityITServiceClient) *ITServiceHandler {
 }
 
 // SearchITServices handles POST /services/search. Targets the same
-// ServiceNow-backed entity-service operation family as IncidentHandler's
+// externally backed entity-service operation family as IncidentHandler's
 // CreateIncident/SearchIncidents — it goes through the same M2M-credential
 // fallback described there, so a mapped 401 here is possible (if the target
-// environment's M2M ServiceNow credential isn't configured) but not
+// environment's M2M credential for the external data source isn't configured) but not
 // guaranteed. The request body is forwarded verbatim; the entity service
 // enforces its own field validation and 400s otherwise, so this handler does
 // not re-validate that.
 func (h *ITServiceHandler) SearchITServices(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
-			return
-		}
-		writeError(w, http.StatusBadRequest, errMsgReadBody)
-		return
-	}
-
-	if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+	body, ok := readJSONBody(w, r, bodyRequired)
+	if !ok {
 		return
 	}
 

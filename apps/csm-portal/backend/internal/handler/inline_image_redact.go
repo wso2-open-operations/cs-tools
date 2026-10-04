@@ -16,55 +16,165 @@
 
 package handler
 
-import "regexp"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"regexp"
 
-// base64ImagePayloadRe matches the `data:image/...;base64,<payload>` prefix
-// plus payload of an inline image embedded directly in comment/description
-// HTML — content authored before/without SFTPGo attachment storage never
-// gets its pasted image extracted into a real, separately-stored attachment
-// at all, so it stays as raw base64 image data inside the comment/case JSON
-// itself. The base64 alphabet (`A-Za-z0-9+/=`) never includes `"`, so the
-// payload capture naturally stops one character before the JSON string's
-// closing quote without needing to look for it explicitly.
-var base64ImagePayloadRe = regexp.MustCompile(`data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+`)
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+)
 
-// redactRawBase64ImagesRaw is the placeholder src substituted in for a caller
-// who may not see the real image. It deliberately keeps the "data:image/"
-// prefix — apps/csm-portal/webapp's useResolvedInlineImageHtml (see that
-// repo's own CLAUDE.md) already recognizes any `data:image/...` src as
-// gated content when the caller lacks canDownloadAttachment and swaps in its
-// own "You don't have permission to view this image" placeholder UI, so
-// this value only has to be inert, not meaningful on its own.
+// inlineImageRe matches an inline image data URI inside a (decoded) string:
+// `data:image/<subtype>[;param...][;base64],<payload>`, case-insensitively,
+// with any MIME parameters before the comma. The payload is the base64
+// alphabet plus the URL-encoding characters a non-base64 data URI uses, and
+// may be wrapped across lines (`\n` or `\r\n`, as e-mail clients wrap base64
+// at 76 columns). It stops at a quote, `<`, `>` or other whitespace, which is
+// where an HTML attribute value or the surrounding text resumes.
+var inlineImageRe = regexp.MustCompile(`(?i)data:image/[^,"'<>\s]*,(?:[A-Za-z0-9+/=%._~-]|\r?\n)*`)
+
+// redactedInlineImageSrc is the placeholder substituted for an inline image a
+// caller may not see. It deliberately keeps the "data:image/" prefix: the
+// webapp's inline-image resolver already treats any `data:image/...` src as
+// gated content for a caller without the download permission and shows its
+// own "no permission" placeholder, so this value only has to be inert.
 const redactedInlineImageSrc = "data:image/png;base64,redacted"
 
-// redactRawBase64Images replaces every embedded `data:image/...;base64,...`
-// occurrence in raw JSON response bytes with redactedInlineImageSrc, for a
-// caller who does not hold PermDownloadAttachment — so the real image bytes
-// are never sent to them at all, closing the gap the frontend's own
-// denyRawBase64 mitigation left open (that one only hides the image after
-// it already reached the browser — see apps/csm-portal/webapp's CLAUDE.md
-// for the full history of this gap).
+// redactInlineImagesInString replaces every inline image data URI in s.
+func redactInlineImagesInString(s string) string {
+	return inlineImageRe.ReplaceAllString(s, redactedInlineImageSrc)
+}
+
+// redactRawBase64Images removes inline image data from a JSON response body.
 //
-// Operates directly on the raw response bytes rather than unmarshaling into
-// a typed struct: comment/description HTML appears under different field
-// names across endpoints (content, bodyHtml, description, ...) and this
-// backend already treats these responses as raw passthrough (see this
-// file's own "Response shape" conventions in CLAUDE.md) — a byte-level
-// substitution keeps that convention rather than adding a typed reshape
-// solely for this, and can't miss a field by name.
+// Content authored before (or without) attachment storage keeps a pasted
+// image as a data URI inside the comment/description HTML itself, so every
+// read of that text would hand the image to any caller, including one
+// without PermDownloadAttachment. This walks every string value of the
+// decoded JSON — field names differ across endpoints (content, bodyHtml,
+// description, ...) and nesting varies, so no field is singled out — and
+// redacts the data URIs found after JSON escapes (`\n`, `\/`, `+`, ...)
+// are decoded, which a byte-level match on the encoded text would stop at.
 //
-// A `.iix`-referenced inline image (the SFTPGo-backed path) is untouched:
-// its bytes are never in this response at all — the frontend fetches those
-// separately via GET /attachments/{id}/content, itself already gated by
-// PermDownloadAttachment.
+// When nothing is redacted the original bytes are returned unchanged. When
+// something is, the value is re-encoded (numbers kept verbatim via
+// json.Number, HTML characters not escaped); object keys come out sorted,
+// which no JSON consumer depends on. A body that is not a single JSON value
+// falls back to a case-insensitive match over the raw bytes.
 func redactRawBase64Images(body []byte) []byte {
-	return base64ImagePayloadRe.ReplaceAll(body, []byte(redactedInlineImageSrc))
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return inlineImageRe.ReplaceAll(body, []byte(redactedInlineImageSrc))
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return inlineImageRe.ReplaceAll(body, []byte(redactedInlineImageSrc))
+	}
+	changed := false
+	v = redactInlineImagesInValue(v, &changed)
+	if !changed {
+		return body
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		// Unreachable for a value that was just decoded; never send the
+		// unredacted body.
+		return []byte(`null`)
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+}
+
+func redactInlineImagesInValue(v any, changed *bool) any {
+	switch t := v.(type) {
+	case string:
+		r := redactInlineImagesInString(t)
+		if r != t {
+			*changed = true
+		}
+		return r
+	case map[string]any:
+		for k, child := range t {
+			t[k] = redactInlineImagesInValue(child, changed)
+		}
+		return t
+	case []any:
+		for i, child := range t {
+			t[i] = redactInlineImagesInValue(child, changed)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // shouldRedactInlineImages reports whether a response about to be sent to a
 // caller holding roles needs redactRawBase64Images run over it first. A nil
-// access guard fails closed (redacts), never open — mirroring CaseHandler's
-// own "nil fails that check closed" convention for PermViewSecurityCenter.
+// access guard fails closed (redacts), never open.
 func shouldRedactInlineImages(access *AccessGuard, roles []string) bool {
 	return access == nil || !access.Permits(PermDownloadAttachment, roles)
+}
+
+// RedactInlineImages wraps a route handler so that, for a caller without
+// PermDownloadAttachment, every JSON response it writes has inline image data
+// removed (redactRawBase64Images). It is applied once to every route in
+// cmd/server/main.go, so a new read endpoint carrying rich text is covered
+// without remembering a per-handler call. A caller holding the permission is
+// passed straight through with no buffering; for everyone else the response
+// is buffered, and only an application/json body is rewritten — binary and
+// other content types are written back byte for byte.
+func RedactInlineImages(access *AccessGuard, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := middleware.UserInfoFromContext(r.Context())
+		if user != nil && !shouldRedactInlineImages(access, user.Roles) {
+			next(w, r)
+			return
+		}
+		bw := &bufferedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next(bw, r)
+		body := bw.buf.Bytes()
+		if isJSONContentType(w.Header().Get("Content-Type")) && len(body) > 0 {
+			body = redactRawBase64Images(body)
+			w.Header().Del("Content-Length")
+		}
+		w.WriteHeader(bw.status)
+		_, _ = w.Write(body)
+	}
+}
+
+// bufferedResponseWriter holds a handler's status and body so
+// RedactInlineImages can rewrite the body before anything is sent. Headers are
+// shared with the real writer.
+type bufferedResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+	buf         bytes.Buffer
+}
+
+func (b *bufferedResponseWriter) WriteHeader(code int) {
+	if b.wroteHeader {
+		return
+	}
+	b.wroteHeader = true
+	b.status = code
+}
+
+func (b *bufferedResponseWriter) Write(p []byte) (int, error) {
+	b.wroteHeader = true
+	return b.buf.Write(p)
+}
+
+func isJSONContentType(ct string) bool {
+	if ct == "" {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	return err == nil && (mt == "application/json" || mt == "application/problem+json")
 }

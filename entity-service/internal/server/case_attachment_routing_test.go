@@ -121,7 +121,10 @@ func postAttachment(t *testing.T, router http.Handler) *httptest.ResponseRecorde
 		"type": "text/plain",
 		"file": "data:text/plain;base64,aGVsbG8="
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(body))
+	// As an internal client: a caller with no token at all is refused with
+	// 401 before any route runs, and these tests are about which backend
+	// the route reaches, not the gate.
+	req := asInternalClient(t, httptest.NewRequest(http.MethodPost, "/attachments", strings.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

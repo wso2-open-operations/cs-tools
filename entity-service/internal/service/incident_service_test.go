@@ -544,7 +544,7 @@ func TestIncidentService_UpdateIncident_NoForwardedTokenFallsBackToSystemActor(t
 	svc := NewIncidentServiceWithSNMirror(repo, userRepo, mirror, nil, dispatcher)
 
 	workNotes := "auto-attached repeat alert"
-	resp, err := svc.UpdateIncident(context.Background(), domain.UpdateIncidentRequest{ID: testDeploymentUUID, WorkNotes: &workNotes})
+	resp, err := svc.UpdateIncident(contextWithUserIDToken(""), domain.UpdateIncidentRequest{ID: testDeploymentUUID, WorkNotes: &workNotes})
 	if err != nil {
 		t.Fatalf("unexpected error with no forwarded token: %v", err)
 	}

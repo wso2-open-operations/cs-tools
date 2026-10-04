@@ -291,8 +291,8 @@ describe("useCaseActivityStream", () => {
       act(() => setDocumentVisibility("visible"));
       await waitFor(() => expect(mockInstances).toHaveLength(2));
       expect(mockInstances[1].closed).toBe(false);
-      // Comments + activities, once: events emitted while closed were not delivered.
-      expect(invalidateQueriesMock).toHaveBeenCalledTimes(2);
+      // Detail + comments + activities, once: events emitted while closed were not delivered.
+      expect(invalidateQueriesMock).toHaveBeenCalledTimes(3);
     });
 
     it("closes when its case tab is deactivated, and reconnects when it is activated again", async () => {
@@ -305,7 +305,21 @@ describe("useCaseActivityStream", () => {
 
       act(() => setTabVisible(true));
       await waitFor(() => expect(mockInstances).toHaveLength(2));
-      expect(invalidateQueriesMock).toHaveBeenCalledTimes(2);
+      expect(invalidateQueriesMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("revalidates the case on activation even when no stream is configured", async () => {
+      apiConfigMock.streamEnabled = false;
+      const { setTabVisible } = renderVisibilityHook(true);
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+
+      act(() => setTabVisible(false));
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+
+      act(() => setTabVisible(true));
+      expect(mockInstances).toHaveLength(0);
+      const keys = invalidateQueriesMock.mock.calls.map((c) => c[0].queryKey[0]);
+      expect(keys).toEqual(["csm-case-detail", expect.any(String), expect.any(String)]);
     });
 
     it("cancels a pending reconnect when it goes inactive", async () => {

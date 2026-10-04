@@ -89,7 +89,7 @@ func toProjectDetailsList(data snProjectData) []ProjectDetails {
 // given account number, paginated. Mirrors Ballerina
 // operations:getProjectsByAccount.
 func (c *Client) GetProjectsByAccount(ctx context.Context, accountNumber string, offset, limit int) ([]ProjectDetails, error) {
-	if err := SanitizeQueryValue(accountNumber); err != nil {
+	if err := ValidateRecordNumberOrSysID(accountNumber); err != nil {
 		return nil, err
 	}
 	raw, err := c.TableQuery(ctx, "customer_project", url.Values{
@@ -144,7 +144,7 @@ var ErrProjectByIDNotFound = errors.New("servicenow: no project found for that p
 // GetProjectByID retrieves a single project by its project number. Returns
 // ErrProjectByIDNotFound when no project matches.
 func (c *Client) GetProjectByID(ctx context.Context, projectID string) (ProjectDetails, error) {
-	if err := SanitizeQueryValue(projectID); err != nil {
+	if err := ValidateRecordNumberOrSysID(projectID); err != nil {
 		return ProjectDetails{}, err
 	}
 	raw, err := c.TableQuery(ctx, "customer_project", url.Values{
@@ -193,7 +193,7 @@ type snContactList struct {
 // percent-encoded a second time (to "%253D"), and ServiceNow would receive
 // the literal text "%3D" instead of the "=" operator.
 func (c *Client) GetProjectContacts(ctx context.Context, projectID string, offset, limit int) ([]Contact, error) {
-	if err := SanitizeQueryValue(projectID); err != nil {
+	if err := ValidateRecordNumberOrSysID(projectID); err != nil {
 		return nil, err
 	}
 	raw, err := c.TableQuery(ctx, "project_contact", url.Values{

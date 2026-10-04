@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/upstreamhttp"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -95,7 +96,7 @@ func NewCustomerEntityClient(cfg CustomerEntityConfig) *CustomerEntityClient {
 	// HTTP 502, 503, and 504 (up to 3 attempts with a 2 s interval) to match
 	// the retryConfig defined in the Ballerina entity client.
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
-		&http.Client{Timeout: tokenFetchTimeout})
+		upstreamhttp.TokenClient(tokenFetchTimeout))
 	httpClient := cc.Client(tokenCtx)
 	httpClient.Timeout = 25 * time.Second
 
@@ -133,9 +134,12 @@ func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("entity: read response body: %w", err)
+	}
+	if len(respBody) > maxUpstreamResponseBytes {
+		return nil, fmt.Errorf("entity: read response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -150,9 +154,19 @@ func (c *CustomerEntityClient) do(ctx context.Context, method, path string, body
 	return respBody, nil
 }
 
+// maxUpstreamResponseBytes bounds how much of a JSON response body any client
+// in this package reads; a larger body is an error rather than an unbounded
+// allocation.
+const maxUpstreamResponseBytes = 16 << 20
+
+// maxBinaryResponseBytes bounds a doBinary (attachment content) response, the
+// same cap the backing-system client applies to its binary downloads.
+const maxBinaryResponseBytes = 25 << 20
+
 // doBinary executes an authenticated GET request against the entity service and
 // returns the raw response body together with the upstream Content-Type header.
-// Use this instead of do for endpoints that return non-JSON binary content.
+// Use this instead of do for endpoints that return non-JSON binary content. The
+// body is read into memory up to maxBinaryResponseBytes.
 func (c *CustomerEntityClient) doBinary(ctx context.Context, path string) (body []byte, contentType string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -171,9 +185,12 @@ func (c *CustomerEntityClient) doBinary(ctx context.Context, path string) (body 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBinaryResponseBytes+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("entity: read response body: %w", err)
+	}
+	if len(respBody) > maxBinaryResponseBytes {
+		return nil, "", fmt.Errorf("entity: read response body: response exceeds %d bytes", maxBinaryResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {

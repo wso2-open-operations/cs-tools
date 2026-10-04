@@ -377,10 +377,19 @@ func (s *snUserService) resolveMembershipUserIDs(
 	}
 
 	if len(explicit) == 0 {
+		// The member ids go upstream as the same id filter snUserIDFilterLimit
+		// caps for explicit userIds; past the cap the upstream would silently
+		// truncate the list and answer with an arbitrary subset and a wrong
+		// total. Refuse instead, so the caller narrows the group filter.
+		if len(memberIDs) > snUserIDFilterLimit {
+			return nil, &apierror.ValidationError{
+				Msg: fmt.Sprintf("the selected groups have %d members, more than the %d a user search can filter by; select fewer groups or add a userIds filter", len(memberIDs), snUserIDFilterLimit)}
+		}
 		return memberIDs, nil
 	}
 
 	// Both supplied: intersect, so the filters compose instead of one silently winning.
+	// The result is bounded by the explicit ids, already capped above.
 	intersection := make([]string, 0, len(explicit))
 	for _, id := range explicit {
 		if _, ok := seen[id]; ok {

@@ -19,16 +19,22 @@
 # ONLY: this shim is never built or deployed anywhere other than this
 # docker-compose stack.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to the patch level the go.mod directive asks for, with toolchain
+# downloads disabled, so the build is hermetic.
+FROM golang:1.26.6-alpine AS builder
+
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 WORKDIR /app
 
 COPY go.mod ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o /out/gateway-shim .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags="-s -w" -o /out/gateway-shim .
 
 FROM alpine:3.20
 
@@ -42,9 +48,9 @@ RUN adduser \
     --home "/nonexistent" \
     --shell "/sbin/nologin" \
     --no-create-home \
-    --uid 10101 \
+    --uid 10108 \
     "csmdev"
 
-USER 10101
+USER 10108
 
 ENTRYPOINT ["./gateway-shim"]

@@ -244,7 +244,7 @@ func TestCommentService_GetCommentEditHistory_NonAuthorNonAdminForbidden(t *test
 }
 
 // TestCommentRowToDomain_PrefersResolvedName covers a real bug found live:
-// the webapp showed a commenter's raw email ("dinithin@wso2.com") instead of
+// the webapp showed a commenter's raw email ("jane.doe@example.com") instead of
 // their resolved display name, while sibling activity-feed entries (state
 // changes, attachments) on the same case already showed a real name --
 // because SearchComments never resolved CommentRow.CreatedByName at all, so

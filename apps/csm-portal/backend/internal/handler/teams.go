@@ -58,7 +58,7 @@ type TeamMemberView struct {
 // (team membership, role). Originally SPL-only (GET
 // /spl/abt-team-members?teamId=...), merged into a plain, unprefixed route
 // once SPL's own data source for it became this exact entity-service
-// endpoint: there was no ServiceNow-shape translation left to justify a
+// endpoint: there was no backing-system-shape translation left to justify a
 // second, parallel /spl/* contract for it.
 type TeamHandler struct {
 	entity entityTeamsClient
@@ -71,9 +71,9 @@ func NewTeamHandler(entity entityTeamsClient) *TeamHandler {
 
 var hex32Pattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 
-// normalizeToUUID converts a bare 32-hex-character ServiceNow sys_id (no
+// normalizeToUUID converts a bare 32-hex-character the backing system sys_id (no
 // dashes -- what SPL's old teamId query param carried, back when it went
-// straight into a ServiceNow Table API query) into standard 8-4-4-4-12
+// straight into a backing-system Table API query) into standard 8-4-4-4-12
 // dashed UUID form, matching how entity-service's Postgres ids are
 // formatted. A value that doesn't match that bare-hex shape (already
 // dashed, which is what the frontend now sends via an account's own
@@ -105,7 +105,7 @@ func (h *TeamHandler) GetTeamMembers(w http.ResponseWriter, r *http.Request) {
 
 	raw, err := h.entity.GetTeamMembers(ctx, normalizeToUUID(teamID))
 	if err != nil {
-		slog.ErrorContext(ctx, "entity GetTeamMembers failed", "userID", user.UserID, "teamID", teamID, "err", err)
+		slog.ErrorContext(ctx, "entity GetTeamMembers failed", "userID", user.UserID, "teamID", teamID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve team members.")
 		return
 	}

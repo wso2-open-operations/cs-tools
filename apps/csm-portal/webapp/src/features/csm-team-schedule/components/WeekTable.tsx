@@ -33,6 +33,7 @@ import {
   isTierlessEscalation,
   shortDayName,
   standingWindowKey,
+  todayIsoInZone,
   toIsoDate,
 } from "../utils/rota";
 import { accentOf } from "../utils/rotaHues";
@@ -40,6 +41,8 @@ import { useTeamColour } from "../utils/teamColourContext";
 
 interface WeekTableProps {
   weekStart: Date;
+  /** The clock the cells render in; decides which column is "today". */
+  tz?: string;
   assignments: ScheduleAssignment[];
   shifts: Map<string, ScheduleShift>;
   /** The page's own group and team state, rendered here as well as in the
@@ -177,6 +180,7 @@ export default function WeekTable({
   families,
   absences = [],
   absenceKinds = [],
+  tz,
 }: WeekTableProps): JSX.Element {
   const teamColourOf = useTeamColour();
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -306,7 +310,7 @@ export default function WeekTable({
     return out.sort((a, b) => a.sort - b.sort);
   }, [assignments, shifts, family, days]);
 
-  const todayIso = toIsoDate(new Date());
+  const todayIso = todayIsoInZone(tz);
 
   // The clock, for "which rotation is on right now". In state rather than read
   // during render, and ticked each minute so a handover moves the mark

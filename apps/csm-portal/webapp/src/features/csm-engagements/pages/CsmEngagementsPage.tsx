@@ -34,7 +34,7 @@ import { useNavTransition } from "@hooks/useNavTransition";
  * `displayName` when this page was reached via an `engagement`-resourceType
  * widget's tile click (see `WIDGET_RESOURCE_CONFIG.engagement.buildHref` in
  * `widgetResourceConfig.ts`, and `appendWidgetTitleParam`'s own doc comment)
- * — digiops-cs#2914: several dashboard widgets all drill through to this one
+ * — several dashboard widgets all drill through to this one
  * page, and a hardcoded "Engagements" heading made it unclear which widget's
  * filtered result set was actually being shown.
  */

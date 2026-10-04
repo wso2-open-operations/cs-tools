@@ -477,7 +477,7 @@ vi.mock("@features/csm-cases/components/LinkIncidentDialog", () => ({
 vi.mock("@features/csm-cases/components/LinkCaseDialog", () => ({
   default: () => null,
 }));
-// Probe, not `null`: the digiops-cs#3111 regression test below needs to save
+// Probe, not `null`: the fix-ETA regression test below needs to save
 // from the dialog the way a user would and then assert the page unmounts it.
 // The dialog's own form/validation is covered in SetFixEtaDialog.test.tsx.
 vi.mock("@features/csm-cases/components/SetFixEtaDialog", () => ({
@@ -1966,7 +1966,7 @@ describe("CsmCaseDetailPage — no-public-comment confirm gate", () => {
   });
 });
 
-// Repro for digiops-cs#3111: saving a fix ETA leaves the dialog mounted. The
+// Regression: saving a fix ETA leaves the dialog mounted. The
 // PATCH succeeds (the ETA is stored and the SLA clock stops), but the page
 // never closes the dialog on success the way its sibling dialogs (request
 // update, add tag, create task) do.

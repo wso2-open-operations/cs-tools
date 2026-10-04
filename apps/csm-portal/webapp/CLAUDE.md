@@ -21,7 +21,7 @@ Defined once in `vite.config.ts`, mirrored in `tsconfig.app.json`. Use them inst
 | `@providers` | `src/providers` |
 | `@utils` | `src/utils` |
 
-A handful of narrower aliases (`@case-details*`, `@time-tracking`, `@deployments`, `@update-cards`) point at specific component subfolders inside individual features — a one-off pattern from a couple of features, not something to replicate for new ones.
+Do not add aliases that point at a subfolder inside a single feature (the former `@case-details*`, `@time-tracking`, `@deployments` and `@update-cards` aliases were unused and have been removed); import those through `@features/...`.
 
 ## Frontend permission gating — an exception, not the norm
 
@@ -152,7 +152,7 @@ TanStack React Query is the only data-fetching layer — no other state-manageme
 - `useGetX` — read a single resource (`useGetCsmCaseDetail`, `useGetAccount`, `useGetUsersMe`)
 - `usePostX` / `usePatchX` — mutations (`usePostCsmCase`, `usePatchUsersMe`)
 - `useSearchX` / `useXOptions` — typeahead/autocomplete queries
-- Plain domain-named hooks for composed/derived state (`useCaseComposition`, `useIsTeamLead`)
+- Plain domain-named hooks for composed/derived state (`useIsTeamLead`)
 
 **A `useQuery` hook backed by a paginated `POST /.../search` endpoint must page through every result, not just fetch page one.** `useGetCsmCaseComments`/`useGetCsmCaseActivities`/`useGetCsmIncidentComments`/`useGetCsmIncidentActivities`/`useGetCsmChangeRequestComments` used to each issue exactly one request with `pagination: { offset: 0, limit: BE_MAX_PAGE_LIMIT }` and never look at the response's own `hasMore`/`total` — silently dropping every comment/activity past the first `BE_MAX_PAGE_LIMIT` (50) on any heavily-discussed case/incident/change request, independent of and in addition to the print-CSS truncation below (reported live as "printing a case only shows a single page and drops most comments" — two separate bugs behind one symptom). Fixed with a bounded `for` loop that accumulates every page into one array before mapping, breaking on `rows.length < PAGE_LIMIT || !response.hasMore` (a `MAX_..._PAGES = 200` safety bound guards against a wrong/always-true `hasMore`) — see any of the five hooks above, or the pre-existing precedent this mirrors, `useFindMyOngoingCases.ts`'s own paged-loop. Apply the same shape to any future hook wrapping a `BeSearchResponseBase`-shaped (`{ total, limit, offset, hasMore }`) endpoint whose result set isn't guaranteed to fit in one page. `useCsmConversationMessages.ts`/`useCsmCaseAttachments.ts` deliberately keep the single-page shape — each has its own doc comment reasoning why that list is expected to stay short — so a hook backed by this same response shape isn't automatically wrong just for not paging; check whether it actually needs to.
 
@@ -229,8 +229,6 @@ pnpm run lint      # eslint .
 ## The config-driven dashboard widget system
 
 `AgentsLandingPagePilot` (rendered from `CsmDashboardPage.tsx`, alongside the older `AbtDashboardHeader` dashboard/team switcher) is a **fully backend-config-driven** widget grid — there is no frontend-side widget registry. The backend's `DASHBOARDS_CONFIG` env var (a JSON array, parsed into Go's `dashboard.Dashboard`/`dashboard.WidgetTemplate` — see `apps/csm-portal/backend/internal/dashboard/widgets.go`) is the single source of truth for which dashboards exist, which widgets each one has, and how each widget is filtered. The frontend never hardcodes a widget list; it only knows how to *render* whatever shape/resourceType combination the backend sends.
-
-Other components in this same folder (`CaseCompositionCharts`, `CompositionDonut`, `CaseCountsMatrix`, `CustomerSummarySection`, `RecentActivitySection`, `MyAssignedCases`) are a separate, older composition-chart system that isn't currently wired into `CsmDashboardPage.tsx` — don't confuse them with the widget system below.
 
 ### The wire shape (`src/api/backend/types.ts`)
 

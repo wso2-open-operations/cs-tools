@@ -30,10 +30,12 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/upstreamhttp"
 )
 
 // driveAPIBaseURL is the Google Drive v3 REST API root. Not configurable:
-// unlike ServiceNow/entity, this is a fixed Google endpoint, not a
+// unlike the backing system/entity, this is a fixed Google endpoint, not a
 // per-deployment host.
 const driveAPIBaseURL = "https://www.googleapis.com/drive/v3"
 
@@ -86,12 +88,20 @@ func NewClient(cfg Config) *Client {
 		ClientSecret: cfg.ClientSecret,
 		Endpoint:     googleOAuth2Endpoint,
 	}
-	tokenSource := oauthCfg.TokenSource(context.Background(), &oauth2.Token{RefreshToken: cfg.RefreshToken})
-	httpClient := oauth2.NewClient(context.Background(), tokenSource)
+	// The token refresh runs on its own client: without one it would use
+	// http.DefaultClient, which has no timeout, so a hung token endpoint
+	// would hang every Drive call behind it.
+	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, upstreamhttp.TokenClient(tokenRefreshTimeout))
+	tokenSource := oauthCfg.TokenSource(tokenCtx, &oauth2.Token{RefreshToken: cfg.RefreshToken})
+	httpClient := oauth2.NewClient(tokenCtx, tokenSource)
 	httpClient.Timeout = 25 * time.Second
 
 	return &Client{http: httpClient}
 }
+
+// tokenRefreshTimeout bounds one refresh-token grant against Google's token
+// endpoint.
+var tokenRefreshTimeout = 10 * time.Second
 
 // escapeDriveQueryValue escapes a value for safe interpolation inside a
 // single-quoted string literal in a Drive API "q" query, per Google's Drive
@@ -99,7 +109,7 @@ func NewClient(cfg Config) *Client {
 // backslash-escaped). The Ballerina source interpolated folderId directly
 // into its filter string with no escaping at all
 // ('${folderId}' in parents and trashed=false); this closes that same class
-// of query-injection gap ServiceNow's sysparm_query concatenation has,
+// of query-injection gap the backing system's sysparm_query concatenation has,
 // without changing which Drive API or endpoint is called.
 func escapeDriveQueryValue(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)

@@ -32,7 +32,7 @@ import { useNavTransition } from "@hooks/useNavTransition";
  * `displayName` when this page was reached via a `case`-resourceType
  * widget's tile click (see `WIDGET_RESOURCE_CONFIG.case.buildHref` in
  * `widgetResourceConfig.ts`, and `appendWidgetTitleParam`'s own doc comment)
- * — digiops-cs#2914: several dashboard widgets all drill through to this one
+ * — several dashboard widgets all drill through to this one
  * page, and a hardcoded "Cases" heading made it unclear which widget's
  * filtered result set was actually being shown.
  */
@@ -55,7 +55,7 @@ export default function CsmCasesPage(): JSX.Element {
       // when the URL carries no `types` param at all; picking a different
       // type (or clearing back to no selection, which falls through to
       // "every type" via `CsmIssuesView`'s own `ALL_CASE_TYPES` fallback)
-      // genuinely narrows/broadens the results, per digiops-cs#2907.
+      // genuinely narrows/broadens the results.
       // `lockedFilters.caseTypes` is kept in lockstep purely so the severity
       // filter/column stay visible (that hint is keyed off `lockedFilters`,
       // not the live selection or `defaultCaseTypes` — see

@@ -434,7 +434,7 @@ describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
   });
 });
 
-// The tri-state include/exclude toggle (digiops-cs#2907) was removed —
+// The tri-state include/exclude toggle was removed —
 // Simple mode's "State" control is now a plain include-only multi-select,
 // same as every other Simple-mode field (Severity, Case type, ...).
 // Exclusion (`excludeStates`) is still expressible, just Advanced-mode-only

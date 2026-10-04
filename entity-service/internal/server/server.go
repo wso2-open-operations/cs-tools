@@ -26,8 +26,17 @@ import (
 )
 
 const (
+	// requestTimeout bounds every request's context on the main listener
+	// (middleware.Timeout in NewRouter): downstream calls and queries made
+	// on the request context are cancelled when it expires.
+	requestTimeout = 30 * time.Second
+	// serverWriteTimeout must outlast requestTimeout, with room to write the
+	// error response a cancelled handler produces. If it were shorter, a
+	// handler finishing between the two deadlines would commit its work and
+	// then lose its response on a closed connection, and a retrying caller
+	// would repeat a write that already happened.
+	serverWriteTimeout = requestTimeout + 10*time.Second
 	serverReadTimeout  = 15 * time.Second
-	serverWriteTimeout = 15 * time.Second
 	serverIdleTimeout  = 60 * time.Second
 )
 

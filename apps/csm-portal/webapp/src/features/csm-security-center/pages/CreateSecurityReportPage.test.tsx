@@ -76,6 +76,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
 // module, which reads window.config at module load and throws outside a
 // configured runtime. Mock it with a real class (so `instanceof` still
 // works), mirroring CreateChangeRequestPage.test.tsx.
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;

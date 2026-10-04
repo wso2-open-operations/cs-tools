@@ -212,7 +212,7 @@ describe("CsmIssuesView column customization", () => {
   });
 });
 
-describe("CsmIssuesView defaultCaseTypes (Support page's case-type default, digiops-cs#2907 follow-up)", () => {
+describe("CsmIssuesView defaultCaseTypes (Support page's case-type default)", () => {
   function renderWithDefault(initialEntry: string) {
     return render(
       <MemoryRouter initialEntries={[initialEntry]}>

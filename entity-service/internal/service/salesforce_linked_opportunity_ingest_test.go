@@ -293,12 +293,13 @@ func TestLinkedOpportunityIngest_Deleted(t *testing.T) {
 	for _, rows := range []int64{1, 0} {
 		h := newLinkHarness(nil, nil, false, false)
 		h.links.deleteRows = rows
+		h.linkSE.err = salesentity.NotFound("salesentity: linked opportunity not in search results")
 		req := linkEvent("DELETED")
 		req.ReferenceID = testLinkSfID[:15]
 		if err := h.svc.HandleEvent(context.Background(), req); err != nil {
 			t.Fatalf("rows=%d: %v", rows, err)
 		}
-		if h.linkSE.calls != 0 || len(h.links.deletes) != 1 || h.links.deletes[0] != testLinkSfID {
+		if h.linkSE.calls != 1 || len(h.links.deletes) != 1 || h.links.deletes[0] != testLinkSfID {
 			t.Errorf("rows=%d: fetches %d deletes %v", rows, h.linkSE.calls, h.links.deletes)
 		}
 		st := h.links.deleteState[0]
@@ -317,6 +318,7 @@ func TestLinkedOpportunityIngest_DeletedStampsLaterRecordedVersion(t *testing.T)
 	h.states.rows = map[string]domain.SalesforceIngestState{domain.SalesforceIngestEntityLinkedOpportunity + "/" + testLinkSfID: {
 		Status: domain.SalesforceIngestSucceeded, EventType: "UPDATED", EventModifiedOn: ahead,
 	}}
+	h.linkSE.err = salesentity.NotFound("salesentity: linked opportunity not in search results")
 	if err := h.svc.HandleEvent(context.Background(), linkEvent("DELETED")); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}

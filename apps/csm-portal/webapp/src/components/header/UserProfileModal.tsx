@@ -149,7 +149,7 @@ export default function UserProfileModal({
     onClose,
   ]);
 
-  // The platform authorizes off its own data, not IdP claims (Asgardeo groups
+  // The platform authorizes off its own data, not IdP claims (identity provider groups
   // are auth-only, not a role list) — so this shows `/users/me`'s `roles`
   // rather than `claims.groups`.
   const roles = userMe?.roles ?? [];

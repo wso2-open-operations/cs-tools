@@ -22,8 +22,8 @@ import type { SemanticRole } from "@components/SemanticChip";
 // meta band, and the Customer widget can all share it without tripping the
 // react-refresh "components-only export" rule.
 //
-// Tier is free-form (PG `basic|enterprise` for native cases, raw ServiceNow
-// support tiers like "Enterprise" for SN-sourced ones), so these tolerate any
+// Tier is free-form (PG `basic|enterprise` for native cases, raw backing-system
+// support tiers like "Enterprise" for backing-source ones), so these tolerate any
 // string and fall back instead of assuming a closed set.
 
 /** Title-case a raw tier token, e.g. "managed_cloud" → "Managed Cloud". */

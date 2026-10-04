@@ -20,7 +20,7 @@
 // here to match csm-portal's design system.
 import { Box, LinearProgress, Paper, Stack, Typography } from "@wso2/oxygen-ui";
 import { AlertCircleIcon, SearchXIcon, type LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import { alpha, useColorScheme } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 
 export function InlineStatePanel({
   icon: Icon,
@@ -91,23 +91,22 @@ export function NoDataPanel({
 }
 
 export function LinearLoadingPanel() {
-  // theme.palette.mode is not live under oxygen-ui's CSS-variables theme
-  // (extendTheme()) — confirmed empirically. useColorScheme() is the hook
-  // that actually tracks the live scheme.
-  const { mode: colorMode, systemMode } = useColorScheme();
-  const isDark = (colorMode === "system" ? systemMode : colorMode) === "dark";
+  const theme = useTheme();
   // "#ffd1bf" (a light peach) was a fixed light-canvas track color — an
   // alpha-blended version of the same orange brand accent reads correctly
   // against a dark track background too, same pattern as the hover tints
   // elsewhere in this domain (CaseStateCard, DefaultTable, SearchResultBox).
-  const trackBg = alpha("#ff7300", isDark ? 0.24 : 0.2);
+  const trackSx = {
+    backgroundColor: alpha("#ff7300", 0.2),
+    ...theme.applyStyles("dark", { backgroundColor: alpha("#ff7300", 0.24) }),
+  };
   return (
     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <Box sx={{ mt: 2.5, width: "25%" }}>
         <LinearProgress
           sx={{
             width: "100%",
-            backgroundColor: trackBg,
+            ...trackSx,
             "& .MuiLinearProgress-barColorPrimary": { backgroundColor: "#ff7300" },
           }}
         />

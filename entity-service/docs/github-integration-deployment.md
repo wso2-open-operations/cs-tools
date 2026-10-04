@@ -200,23 +200,20 @@ column.
 - **The webhook is not reachable in any deployed environment.**
   `.choreo/component.yaml` declares one endpoint at `Organization` visibility, so
   GitHub cannot reach `/webhooks/github`. Needs a second endpoint at `Public`
-  visibility serving only that path. Tracked in
-  [#3140](https://github.com/wso2-enterprise/digiops-cs/issues/3140) — **this is
-  the blocker for production.**
+  visibility serving only that path. Tracked separately as a deployment
+  change — **this is the blocker for production.**
 - **No routing, no notification.** A service request is created with an account
   and nothing else: no assignee, no team stamped, nobody told. A team is derived
   *through* the account (`account.cre_team_id` → `group.name`, the ABT teams), and
   the case API exposes it as `creTeam`, but only a minority of accounts have it
-  set and case search has no team filter. Platform gap, tracked in
-  [#2756](https://github.com/wso2-enterprise/digiops-cs/issues/2756).
+  set and case search has no team filter. Platform gap, tracked separately.
 - **One repository, one account.** `UNIQUE (owner, repository)` prevents a shared
   repository serving two accounts.
 - **Workflow updates do not propagate.** The workflows live in each customer's
-  repository; changing them here reaches nobody.
-  [#3141](https://github.com/wso2-enterprise/digiops-cs/issues/3141).
+  repository; changing them here reaches nobody. Tracked separately.
 - **Both sides must never run at once.** Disable a repository's four ServiceNow
   flows as the native path is enabled. Duplicate comments on an issue are the
-  first symptom. [#3142](https://github.com/wso2-enterprise/digiops-cs/issues/3142).
+  first symptom. Tracked separately.
 
 ## 10. Verified
 

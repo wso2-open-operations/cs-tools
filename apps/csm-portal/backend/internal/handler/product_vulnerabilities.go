@@ -70,7 +70,7 @@ func (h *ProductVulnerabilityHandler) SearchProductVulnerabilities(w http.Respon
 
 	result, err := h.entity.SearchProductVulnerabilities(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchProductVulnerabilities failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchProductVulnerabilities failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search product vulnerabilities.")
 		return
 	}
@@ -94,7 +94,7 @@ func (h *ProductVulnerabilityHandler) GetProductVulnerability(w http.ResponseWri
 
 	result, err := h.entity.GetProductVulnerability(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetProductVulnerability failed", "userID", user.UserID, "id", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetProductVulnerability failed", "userID", user.UserID, "id", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve product vulnerability.")
 		return
 	}

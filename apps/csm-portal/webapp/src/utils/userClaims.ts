@@ -33,7 +33,7 @@ export interface IdTokenClaims {
   username?: string;
   // Either of the standard OIDC claims may carry the profile picture URL,
   // depending on the IdP. `profile` is the URL of the user's profile page in
-  // strict OIDC, but in practice IdPs (Asgardeo, Google, etc.) use it for the
+  // strict OIDC, but in practice IdPs (identity provider, Google, etc.) use it for the
   // avatar image; `picture` is the canonical OIDC field. Read both.
   profile?: string;
   picture?: string;

@@ -335,8 +335,8 @@ func ChangeRequestTypeSupported(t domain.ChangeRequestType) bool {
 // that silently offers a nonexistent state.
 //
 // This is not a guess for most of these edges: each was read directly off a
-// real change_request in that exact state on the live wso2.service-now.com
-// instance, via its own "state" field's dropdown (which ServiceNow itself
+// real change_request in that exact state on the live production
+// backing-system instance, via its own "state" field's dropdown (which ServiceNow itself
 // populates with only the choices it currently considers legal for that
 // record) -- Assess only ever offered "Authorize", Scheduled only ever
 // offered "Implement", and so on. CustomerApproval's and CustomerReview's

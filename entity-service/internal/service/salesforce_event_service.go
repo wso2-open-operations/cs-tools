@@ -277,6 +277,13 @@ func (s *salesforceEventService) HandleEvent(ctx context.Context, req domain.Sal
 // which carries an older LastModifiedDate — is still let through by the
 // guard's DELETED rule.
 func (s *salesforceEventService) softDeleteAccount(ctx context.Context, sfID string) error {
+	if s.se == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.se.GetCustomer(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityAccount), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn := time.Now().UTC()
 	if s.support.States != nil {
 		st, err := s.support.States.Get(ctx, domain.SalesforceIngestEntityAccount, sfID)

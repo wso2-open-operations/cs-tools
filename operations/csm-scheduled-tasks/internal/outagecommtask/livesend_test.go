@@ -37,8 +37,10 @@ import (
 // This test mails a real inbox. The address is not taken from the
 // environment, and the guard below refuses to run if it is ever edited to
 // anything else -- a test that sends to a standing group by accident is
-// exactly the failure this whole port exists to avoid.
-const liveTestRecipient = "sasmitha@wso2.com"
+// exactly the failure this whole port exists to avoid. The committed value
+// is a placeholder; whoever runs this edits it locally to their own single
+// address (both places below) and does not commit that edit.
+const liveTestRecipient = "jane.doe@example.com"
 
 func TestLiveSend(t *testing.T) {
 	base := os.Getenv("OUTAGE_COMM_LIVE_BASE_URL")
@@ -48,8 +50,8 @@ func TestLiveSend(t *testing.T) {
 
 	// Belt and braces. If someone widens the recipient, fail loudly here
 	// rather than in someone's inbox.
-	if liveTestRecipient != "sasmitha@wso2.com" || strings.Contains(liveTestRecipient, ",") {
-		t.Fatalf("refusing to run: recipient is %q, expected exactly sasmitha@wso2.com", liveTestRecipient)
+	if liveTestRecipient != "jane.doe@example.com" || strings.Contains(liveTestRecipient, ",") {
+		t.Fatalf("refusing to run: recipient is %q, expected exactly jane.doe@example.com", liveTestRecipient)
 	}
 
 	sweeper, err := outagecomm.NewClient(outagecomm.Config{

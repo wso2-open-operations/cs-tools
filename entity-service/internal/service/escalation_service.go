@@ -24,7 +24,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -146,13 +145,9 @@ func (s *escalationService) CreateEscalation(ctx context.Context, req domain.Cre
 		return domain.CreateEscalationResponse{}, err
 	}
 
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateEscalationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return domain.CreateEscalationResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.CreateEscalationResponse{}, err
 	}
 	actor, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {

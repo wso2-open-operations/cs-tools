@@ -84,7 +84,7 @@ function usePageVisible(): boolean {
  *
  * Token acquisition goes through useAuthTokens — the same recovery path
  * useAuthApiClient uses for every other backend call — rather than calling
- * useAsgardeo() directly: a genuinely dead refresh token then gets the same
+ * the identity SDK hook directly: a genuinely dead refresh token then gets the same
  * silent-reauth-then-sign-in-redirect treatment as the rest of the app,
  * instead of this hook just retrying forever with no way to ever recover
  * and no visible signal that anything's wrong.
@@ -96,7 +96,9 @@ function usePageVisible(): boolean {
  * (6 on HTTP/1.1), so one stream per mounted hidden tab starved every other
  * request once six case tabs were open. Going inactive closes the stream and
  * cancels any pending reconnect; coming back invalidates the queries once,
- * because events emitted in the meantime were not delivered.
+ * because events emitted in the meantime were not delivered. That
+ * revalidation (case detail, comments, activities) also runs when no stream is
+ * configured.
  *
  * A no-op when `caseId` is unset, `apiConfig.streamEnabled` is false (the
  * feature's master switch, `CSM_PORTAL_STREAM_ENABLED` — defaults off), or
@@ -112,22 +114,31 @@ export function useCaseActivityStream(caseId: string | undefined): void {
   const caseTabVisible = useIsCaseTabVisible();
   const pageVisible = usePageVisible();
   const active = caseTabVisible && pageVisible;
-  // True while the stream is deliberately closed (tab hidden / case tab
-  // deactivated), so the run that reactivates it knows it missed events.
+  // True while the case tab / browser tab is inactive, so the run that
+  // reactivates it knows it missed events.
   const wasInactiveRef = useRef(false);
 
+  // Revalidation on re-activation is independent of the stream: every opened
+  // case tab stays mounted (hidden), and window-focus refetch is off app-wide,
+  // so without this a backgrounded tab shows stale data when the stream is
+  // disabled or unconfigured. Runs whether or not a stream exists.
   useEffect(() => {
-    if (!caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    if (!caseId) return;
     if (!active) {
       wasInactiveRef.current = true;
       return;
     }
-
     if (wasInactiveRef.current) {
       wasInactiveRef.current = false;
+      void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_CASE_DETAIL, caseId] });
       void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, caseId] });
       void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_CASE_ACTIVITIES, caseId] });
     }
+  }, [caseId, active, queryClient]);
+
+  useEffect(() => {
+    if (!caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    if (!active) return;
 
     let cancelled = false;
     let source: EventSourcePolyfill | null = null;

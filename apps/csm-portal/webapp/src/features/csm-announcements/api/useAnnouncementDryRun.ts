@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import { useEffect, useMemo, useState } from "react";
 import { useBackendApi } from "@api/backend/client";
 import type { BeProjectSearchPayload, BeProjectSearchResponse } from "@api/backend/types";
@@ -34,11 +35,6 @@ import { SECURITY_ANNOUNCEMENT_TAG_LABEL } from "@features/csm-announcements/com
  * engineers already associate with this step.
  */
 export const DRY_RUN_TAG_LABEL = "Dry Run";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 export interface DryRunResult {
   caseId: string;
@@ -110,7 +106,7 @@ export function useAnnouncementDryRun({
   const canRunDryRun = useMemo(
     () =>
       subject.trim().length > 0 &&
-      !isEmptyHtml(description) &&
+      !isBlankHtml(description) &&
       extraCanRun &&
       !runningDryRun,
     [subject, description, extraCanRun, runningDryRun],

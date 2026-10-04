@@ -19,8 +19,8 @@ package middleware
 import "net/http"
 
 // corsAllowedHeaders lists every request header a browser client may need to
-// send to either listener. Authorization is what the frontend actually sets
-// (see useAuthApiClient.ts / useCaseActivityStream.ts) — Choreo's gateway is
+// send to this service. Authorization is what the frontend actually sets
+// (see useAuthApiClient.ts) — Choreo's gateway is
 // what translates it into x-jwt-assertion before this backend ever sees it in
 // a real deployment (confirmed: Choreo's own CORS response for :8080 already
 // allow-lists "authorization", not "x-jwt-assertion") — but x-jwt-assertion is
@@ -30,18 +30,15 @@ import "net/http"
 // fails without it.
 const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
 
-// corsAllowedMethods covers both listeners: the main REST API's full verb set
-// and the stream listener's GET. Advertising a method a given listener has no
-// route for is harmless — the route simply 404s if actually called.
+// corsAllowedMethods is the REST API's verb set. Advertising a method a given
+// path has no route for is harmless — the route simply 404s if called.
 const corsAllowedMethods = "GET, POST, PATCH, DELETE, OPTIONS"
 
 // CORS returns an HTTP middleware handling cross-origin browser requests. It
-// wraps both listeners (see cmd/server/main.go). In a real deployment Choreo's
-// API gateway supplies these headers itself, making this a no-op there; it
-// matters when the gateway isn't in the path — local development, where the
-// browser calls a listener directly — and as defense-in-depth for the
-// separately-declared stream endpoint, which isn't guaranteed to inherit the
-// gateway's CORS handling the same way the long-established :8080 one does.
+// wraps the server's handler (see cmd/server/main.go). In a real deployment
+// Choreo's API gateway supplies these headers itself, making this a no-op
+// there; it matters when the gateway isn't in the path — local development,
+// where the browser calls the service directly.
 //
 // MUST wrap Auth, not be wrapped by it: a CORS preflight is an OPTIONS
 // request with no x-jwt-assertion header at all, so if Auth ran first it
@@ -49,8 +46,8 @@ const corsAllowedMethods = "GET, POST, PATCH, DELETE, OPTIONS"
 // header — which the browser reports as "blocked by CORS policy", masking
 // the real cause. Worse, Auth sits *before* Logger in this backend's chain,
 // so such a rejection isn't even logged, making it invisible server-side.
-// SecurityHeaders, however, wraps *this* — see cmd/server/main.go's two
-// Handler chains — so its headers are present on every response, including
+// SecurityHeaders, however, wraps *this* — see cmd/server/main.go's
+// Handler chain — so its headers are present on every response, including
 // a preflight, which Auth-then-CORS ordering would otherwise skip since a
 // preflight never reaches the handlers CORS itself wraps. See
 // apps/customer-portal/backend-v2's identically-named middleware, whose doc

@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import {
   Box,
   Button,
@@ -43,11 +44,6 @@ import { useSearchProducts } from "@features/csm-projects/api/useSearchProducts"
 import { useSearchProductVersions } from "@features/csm-projects/api/useSearchProductVersions";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatDateOnlyForDisplay } from "@utils/dateTime";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 const PENDING_TARGET = "/announcements?tab=pending";
 
@@ -113,7 +109,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
   );
 
   const canSaveDraft =
-    !!productId && !!productVersionId && subject.trim().length > 0 && !isEmptyHtml(description) && !busy;
+    !!productId && !!productVersionId && subject.trim().length > 0 && !isBlankHtml(description) && !busy;
 
   const canSubmitForApproval =
     canRunDryRun &&

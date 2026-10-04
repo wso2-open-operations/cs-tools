@@ -34,6 +34,13 @@
 # own directory (so COPY/ADD inside the Dockerfile resolve unchanged) and
 # points `build.dockerfile` back at docker/local/ with a relative `../`
 # path.
+#
+# Every published port binds to 127.0.0.1 on the host: nothing in this stack
+# (the mock OIDC token endpoint, the SASL Kafka listener, the seeded database)
+# is meant to be reachable from the developer's LAN. The mock OIDC provider
+# additionally refuses to start unless MOCK_OIDC_LOCAL_DEV=1 is set in its
+# environment (it is, below), so copying its service block into any other
+# compose file does not silently stand up a token mint.
 
 name: csm-platform
 
@@ -172,7 +179,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       CLUSTER_ID: csm-local-dev-cluster-1
     ports:
-      - "19094:9094"
+      - "127.0.0.1:19094:9094"
     healthcheck:
       # Each probe starts a whole JVM (kafka-broker-api-versions.sh), which on a
       # laptop-sized Docker VM pins several cores while it JIT-compiles. So probe
@@ -208,11 +215,19 @@ services:
   mock-oidc:
     build:
       context: ./scripts/csm-compose/mock-oidc
+      dockerfile: ../../../docker/local/mock-oidc.Dockerfile
     environment:
+      # Explicit acknowledgement the provider requires before it will start
+      # (see the fence at the top of its main()).
+      MOCK_OIDC_LOCAL_DEV: "1"
+      # The binary binds loopback by default; inside the compose network the
+      # other services reach it as mock-oidc:9100, so it must listen on the
+      # container's interfaces here. The host publish below stays loopback.
+      MOCK_OIDC_BIND_ADDR: 0.0.0.0
       MOCK_OIDC_ISSUER: http://localhost:9100
       PORT: "9100"
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9100/oauth2/jwks"]
       interval: 3s
@@ -225,6 +240,11 @@ services:
     build:
       context: ./entity-service
       dockerfile: ../docker/local/entity-service.Dockerfile
+    # The Go service images carry a HEALTHCHECK against their own GET /health
+    # (see docker/local/*.Dockerfile), so everything that depends on one of
+    # them below waits for `service_healthy`, not merely for the process to
+    # have started.
+    restart: unless-stopped
     depends_on:
       # seed-generator itself depends on migrate completing (see above), so
       # this transitively waits for migrations + both seed steps -- not just
@@ -268,9 +288,12 @@ services:
     build:
       context: ./apps/csm-portal/backend
       dockerfile: ../../../docker/local/csm-portal-backend.Dockerfile
+    restart: unless-stopped
     depends_on:
-      - entity-service
-      - mock-oidc
+      entity-service:
+        condition: service_healthy
+      mock-oidc:
+        condition: service_healthy
     environment:
       OAUTH2_CLIENT_ID: csm-portal-backend-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret
@@ -337,7 +360,8 @@ services:
       context: ./scripts/csm-compose/gateway-shim
       dockerfile: ../../../docker/local/gateway-shim.Dockerfile
     depends_on:
-      - csm-portal-backend
+      csm-portal-backend:
+        condition: service_healthy
     environment:
       PORT: "8080"
       UPSTREAM_URL: http://csm-portal-backend:8080
@@ -346,11 +370,19 @@ services:
 
   csm-portal-webapp:
     build:
-      context: .
-      dockerfile: docker/local/csm-portal-webapp.Dockerfile
+      context: ./apps/csm-portal/webapp
+      dockerfile: ../../../docker/local/csm-portal-webapp.Dockerfile
+      # The nginx server block and the config.js entrypoint hook are shared
+      # with the customer-portal webapp image and live outside the webapp
+      # directory, so they reach the build as a second named context rather
+      # than by widening the main one to the whole repository.
+      additional_contexts:
+        csm-compose: ./scripts/csm-compose
     depends_on:
-      - csm-portal-backend
-      - mock-oidc
+      csm-portal-backend:
+        condition: service_healthy
+      mock-oidc:
+        condition: service_healthy
     environment:
       CSM_PORTAL_AUTH_BASE_URL: http://localhost:9100
       CSM_PORTAL_AUTH_CLIENT_ID: csm-portal-webapp
@@ -365,8 +397,10 @@ services:
       context: ./apps/customer-portal/backend-v2
       dockerfile: ../../../docker/local/customer-portal-backend-v2.Dockerfile
     depends_on:
-      - entity-service
-      - mock-oidc
+      entity-service:
+        condition: service_healthy
+      mock-oidc:
+        condition: service_healthy
     environment:
       OAUTH2_CLIENT_ID: customer-portal-backend-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret
@@ -440,9 +474,12 @@ services:
     build:
       context: ./integrations/csm-integration-service
       dockerfile: ../../docker/local/csm-integration-service.Dockerfile
+    restart: unless-stopped
     depends_on:
-      - entity-service
-      - mock-oidc
+      entity-service:
+        condition: service_healthy
+      mock-oidc:
+        condition: service_healthy
     environment:
       ENTITY_BASE_URL: http://entity-service:8080
       ENTITY_TOKEN_URL: http://mock-oidc:9100/oauth2/token
@@ -456,13 +493,14 @@ services:
     build:
       context: ./integrations/csm-notification-service
       dockerfile: ../../docker/local/csm-notification-service.Dockerfile
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
       kafka-topics-init:
         condition: service_completed_successfully
       entity-service:
-        condition: service_started
+        condition: service_healthy
     environment:
       EVENT_HUB_BROKER: kafka:9094
       EVENT_HUB_CONNECTION_STRING: local-dev-shared-secret
@@ -489,13 +527,14 @@ services:
     build:
       context: ./integrations/csm-portal-activity-stream-service
       dockerfile: ../../docker/local/csm-portal-activity-stream-service.Dockerfile
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
       kafka-topics-init:
         condition: service_completed_successfully
       entity-service:
-        condition: service_started
+        condition: service_healthy
     environment:
       OAUTH2_CLIENT_ID: csm-portal-activity-stream-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret
@@ -527,7 +566,7 @@ services:
       kafka-topics-init:
         condition: service_completed_successfully
       entity-service:
-        condition: service_started
+        condition: service_healthy
     environment:
       OAUTH2_CLIENT_ID: customer-portal-activity-stream-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret

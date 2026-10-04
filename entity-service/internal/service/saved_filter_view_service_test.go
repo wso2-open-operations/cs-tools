@@ -136,7 +136,7 @@ func TestSavedFilterViewService_List_RejectsInvalidListKey(t *testing.T) {
 
 func TestSavedFilterViewService_List_RequiresToken(t *testing.T) {
 	svc := NewSavedFilterViewService(&fakeSavedFilterViewRepo{}, savedFilterViewUsers())
-	_, err := svc.List(context.Background(), domain.SavedFilterListKeyCases)
+	_, err := svc.List(contextWithUserIDToken(""), domain.SavedFilterListKeyCases)
 	if _, ok := err.(*apierror.UnauthorizedError); !ok {
 		t.Fatalf("got %T %v, want UnauthorizedError", err, err)
 	}
@@ -146,9 +146,9 @@ func TestSavedFilterViewService_List_RequiresEmailClaim(t *testing.T) {
 	svc := NewSavedFilterViewService(&fakeSavedFilterViewRepo{}, savedFilterViewUsers())
 	ctx := contextWithUserIDToken(fakeJWTWithUserID(t, "asgardeo-only"))
 	_, err := svc.List(ctx, domain.SavedFilterListKeyCases)
-	var ve *apierror.ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("got %T %v, want ValidationError", err, err)
+	var ue *apierror.UnauthorizedError
+	if !errors.As(err, &ue) {
+		t.Fatalf("got %T %v, want UnauthorizedError (a token without an email identifies no user)", err, err)
 	}
 }
 

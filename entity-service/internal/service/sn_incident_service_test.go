@@ -766,7 +766,7 @@ func TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff(t *testing.T) {
 					"reasonDescription": "Runbook is not available",
 					"escalationTeam": null,
 					"handedOffAt": "2026-08-21 04:02:48",
-					"handedOffBy": "sajithe@wso2.com",
+					"handedOffBy": "jane.doe@example.com",
 					"assignmentGroup": {"id": "` + groupSysid + `", "name": "Choreo Special Ops"},
 					"task": {"number": "TASK0082502", "subject": "[Runbook Task] No entry available for INC0091926", "state": "0", "stateLabel": "Open"},
 					"githubIssueUrl": "https://github.com/wso2-enterprise/asgardeo-product/issues/36771"
@@ -810,7 +810,7 @@ func TestSNIncidentService_GetIncidentByID_MapsSpecialistHandoff(t *testing.T) {
 			if sh.EscalationTeam != nil {
 				t.Fatalf("EscalationTeam = %v, want nil", sh.EscalationTeam)
 			}
-			if sh.HandedOffAt != "2026-08-21 04:02:48" || sh.HandedOffBy == nil || *sh.HandedOffBy != "sajithe@wso2.com" {
+			if sh.HandedOffAt != "2026-08-21 04:02:48" || sh.HandedOffBy == nil || *sh.HandedOffBy != "jane.doe@example.com" {
 				t.Fatalf("HandedOffAt/HandedOffBy = %v/%v", sh.HandedOffAt, sh.HandedOffBy)
 			}
 			if sh.AssignmentGroup.ID != sysidToUUID(groupSysid) || sh.AssignmentGroup.Name != "Choreo Special Ops" {

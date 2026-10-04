@@ -10,11 +10,15 @@ import (
 // PlgPairingHandler serves the product tab and the registrations panel.
 type PlgPairingHandler struct {
 	svc service.PairingService
+	// actors decides which platform user each attributed write is recorded
+	// against; see PlgActorResolver.
+	actors *PlgActorResolver
 }
 
-// NewPlgPairingHandler wires the handler over its service.
-func NewPlgPairingHandler(svc service.PairingService) *PlgPairingHandler {
-	return &PlgPairingHandler{svc: svc}
+// NewPlgPairingHandler wires the handler over its service and the actor
+// resolver its writes attribute through.
+func NewPlgPairingHandler(svc service.PairingService, actors *PlgActorResolver) *PlgPairingHandler {
+	return &PlgPairingHandler{svc: svc, actors: actors}
 }
 
 // GetPairing serves GET /plg/organizations/{organizationId}/products/{productCode}.

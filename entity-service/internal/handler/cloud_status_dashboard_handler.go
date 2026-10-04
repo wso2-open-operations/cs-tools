@@ -25,7 +25,7 @@ import (
 
 // CloudStatusDashboardHandler serves the public cloud status dashboard's reads.
 //
-// Consumed by wso2-enterprise/uptime-dashboard through csm-integration-service,
+// Consumed by the public cloud status dashboard through csm-integration-service,
 // not by the portal. The response shapes are that dashboard's, not this
 // service's -- see the domain types for why they look the way they do.
 type CloudStatusDashboardHandler struct {

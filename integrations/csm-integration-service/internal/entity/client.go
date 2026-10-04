@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/apierror"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -33,6 +33,12 @@ import (
 // tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
 // Overridden in tests to keep them fast.
 var tokenFetchTimeout = 10 * time.Second
+
+// maxResponseBodyBytes caps a successful upstream response body. The largest
+// legitimate payloads here are paged search results, far below this; the cap
+// exists so one misbehaving upstream response cannot exhaust this process's
+// memory. Overridden in tests to exercise the limit cheaply.
+var maxResponseBodyBytes int64 = 32 << 20
 
 type ctxKey string
 
@@ -66,6 +72,32 @@ type Config struct {
 type Client struct {
 	http    *http.Client
 	baseURL string
+	// probe is a plain, unauthenticated client for the entity service's public
+	// GET /health, so a reachability check never fetches or spends a token.
+	probe *http.Client
+}
+
+// healthProbeTimeout bounds one reachability probe of the entity service.
+const healthProbeTimeout = 5 * time.Second
+
+// Health reports whether the entity service answers its public GET /health
+// with a 2xx. It is a reachability check only: no token is sent and the
+// response body is ignored.
+func (c *Client) Health(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
+	if err != nil {
+		return fmt.Errorf("entity: build health request: %w", err)
+	}
+	resp, err := c.probe.Do(req)
+	if err != nil {
+		return fmt.Errorf("entity: health: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return &apierror.Error{StatusCode: resp.StatusCode}
+	}
+	return nil
 }
 
 // NewClient constructs a Client that authenticates against the entity service
@@ -87,6 +119,7 @@ func NewClient(cfg Config) *Client {
 	return &Client{
 		http:    httpClient,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
+		probe:   &http.Client{Timeout: healthProbeTimeout},
 	}
 }
 
@@ -122,12 +155,21 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		if err != nil {
 			return nil, fmt.Errorf("entity: read error response body: %w", err)
 		}
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
+		return nil, &apierror.Error{
+			StatusCode: resp.StatusCode,
+			Body:       string(excerpt),
+			RetryAfter: resp.Header.Get("Retry-After"),
+		}
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Read one byte past the cap so an oversized body is detected rather than
+	// silently truncated into invalid JSON.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("entity: read response body: %w", err)
+	}
+	if int64(len(respBody)) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("entity: %s %s: response body exceeds %d bytes", method, path, maxResponseBodyBytes)
 	}
 
 	return respBody, nil

@@ -112,8 +112,8 @@ action) opens a form for Caller, Service, and a classification (category,
 subcategory, contact type, impact, urgency — Priority is computed live from
 impact × urgency and not itself editable). **Assignment group** is not a
 manual pick here: it's shown read-only, auto-filled from the selected
-Service's ServiceNow support group, and blank with a hint if that service
-has none set in ServiceNow.
+Service's support group in the backing data source, and blank with a hint if
+that service has none set there.
 
 The detail page shows:
 
@@ -147,7 +147,7 @@ From the detail page a CS engineer can:
   isn't eligible (wrong service, not In Progress, or already with the
   specialist group), the backing system's own rejection message is shown
   rather than the button being hidden or disabled. Once an incident has been
-  handed off (through this button, or ServiceNow's own), a **Specialist
+  handed off (through this button, or directly in the backing data source), a **Specialist
   handoff** card on the detail page shows which group it went to, why, when,
   by whom, a link to the runbook task, and a link to the GitHub issue if one
   exists. If the internal GitHub issue couldn't be created, that's called
@@ -188,8 +188,8 @@ notes, fix notes, and workaround.
 
 A **Create problem** button on the list opens a form to raise a new problem.
 
-The detail page's action bar moves a problem through ServiceNow's own
-Problem Management lifecycle, one step at a time: **New → Assess → Root
+The detail page's action bar moves a problem through the backing data source's
+own Problem Management lifecycle, one step at a time: **New → Assess → Root
 Cause Analysis → Fix In Progress → Resolved → Closed**. Only one transition
 is ever available at once (the next step in the chain); once a problem is
 Closed there is nothing further to do. Moving to Fix In Progress opens a
@@ -202,12 +202,12 @@ group, workaround, and target resolution date. Two caveats:
 
 - Assigning an engineer to a problem that has no owner yet automatically
   moves it to Assess, even without using the action bar — this is a
-  ServiceNow business rule, not a portal quirk.
+  business rule in the backing data source, not a portal quirk.
 - Assignment group and target resolution date always start blank in the
   Edit dialog, even if a value was set previously — the portal can't read
-  either one back from ServiceNow yet, so it doesn't guess. Target
-  resolution date in particular is not shown anywhere on ServiceNow's own
-  Problem form; it's a generic tracking field exposed here for the portal's
+  either one back from the backing data source yet, so it doesn't guess. Target
+  resolution date in particular is not shown anywhere on the backing data
+  source's own Problem form; it's a generic tracking field exposed here for the portal's
   own use.
 
 ## Outages

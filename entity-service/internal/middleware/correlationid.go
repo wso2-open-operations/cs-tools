@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"regexp"
 )
 
 // correlationIDHeader is the HTTP header used to propagate the correlation ID
@@ -29,14 +30,21 @@ const correlationIDHeader = "X-CSM-Correlation-ID"
 
 type correlationIDKey struct{}
 
+// validCorrelationID is the shape an inbound correlation id must have to be
+// adopted: letters, digits and hyphens, 1 to 64 characters. That covers a
+// UUID and any similar opaque token, and keeps an arbitrary caller-supplied
+// value out of the response header and every log line it is written to.
+var validCorrelationID = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
 // CorrelationID is an HTTP middleware that reads the X-CSM-Correlation-ID request
-// header (forwarded by the portal BFF) or generates a UUID v4 if absent.
+// header (forwarded by the portal BFF) or generates a UUID v4 if it is absent
+// or not a valid correlation id (see validCorrelationID).
 // The ID is stored in the request context for logging and echoed in the
 // response header so callers can reference it in support requests.
 func CorrelationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(correlationIDHeader)
-		if id == "" {
+		if !validCorrelationID.MatchString(id) {
 			id = newCorrelationID()
 		}
 		w.Header().Set(correlationIDHeader, id)

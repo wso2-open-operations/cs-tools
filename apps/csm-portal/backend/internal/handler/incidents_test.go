@@ -823,7 +823,7 @@ func TestHandOffIncidentToSpecialist(t *testing.T) {
 		}
 	})
 
-	// A handoff can succeed (ServiceNow state committed) with the internal GitHub
+	// A handoff can succeed (the backing-system state committed) with the internal GitHub
 	// issue missing -- the upstream response is still 200 with a non-nil
 	// handoff.githubIssueError. This must reach the caller unchanged rather than
 	// being swallowed or reported as a clean success with the field stripped.

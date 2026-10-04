@@ -33,6 +33,21 @@ describe("csvField", () => {
   it("quotes a value with a bare carriage return", () => {
     expect(csvField("a\rb")).toBe('"a\rb"');
   });
+
+  it.each(["=SUM(A1:A2)", "+1", "-1", "@cmd", "\tx", "\rx"])(
+    "prefixes a quote when the value starts with %j so it is not read as a formula",
+    (value) => {
+      expect(csvField(value).replace(/^"/, "").startsWith("'")).toBe(true);
+    },
+  );
+
+  it("neutralises a formula and still quotes it when it contains a comma", () => {
+    expect(csvField("=A1,B1")).toBe('"\'=A1,B1"');
+  });
+
+  it("does not touch a value with a formula character that is not leading", () => {
+    expect(csvField("a=b")).toBe("a=b");
+  });
 });
 
 describe("rowsToCsvText", () => {

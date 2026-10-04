@@ -307,11 +307,12 @@ func TestInvoiceIngest_GuardSkipsReplay(t *testing.T) {
 
 func TestInvoiceIngest_DeletedHardDeletesBy18CharID(t *testing.T) {
 	h := newInvoiceHarness(sampleInvoice(), nil, nil)
+	h.se.err = salesentity.NotFound("salesentity: invoice not found")
 	if err := h.svc.HandleEvent(context.Background(), invoiceEvent("Invoice__c", "DELETED", testInvoiceSfID[:15])); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if h.se.calls != 0 || len(h.repo.deletes) != 1 || h.repo.deletes[0] != testInvoiceSfID {
-		t.Fatalf("fetches %d deletes %v, want no fetch and the 18-character id", h.se.calls, h.repo.deletes)
+	if h.se.calls != 1 || len(h.repo.deletes) != 1 || h.repo.deletes[0] != testInvoiceSfID {
+		t.Fatalf("fetches %d deletes %v, want one confirming fetch and the 18-character id", h.se.calls, h.repo.deletes)
 	}
 	st := h.repo.deleteState[0]
 	if st.Entity != domain.SalesforceIngestEntityInvoice || st.EventType != domain.SalesforceEventDeleted || st.Status != domain.SalesforceIngestSucceeded {
@@ -346,9 +347,11 @@ func TestInvoiceIngest_DeleteThenRestoreWhenSalesforceClockIsAhead(t *testing.T)
 	h.states.apply(domain.UpsertSalesforceIngestStateRequest{Entity: domain.SalesforceIngestEntityInvoice, SfID: testInvoiceSfID,
 		EventModifiedOn: ahead.Truncate(time.Second), EventType: "UPDATED", Status: domain.SalesforceIngestSucceeded})
 
+	h.se.err = salesentity.NotFound("salesentity: invoice not found")
 	if err := h.svc.HandleEvent(context.Background(), invoiceEvent("Invoice__c", "DELETED", testInvoiceSfID)); err != nil {
 		t.Fatalf("DELETED: %v", err)
 	}
+	h.se.err = nil
 	if got := h.repo.deleteState[0].EventModifiedOn; got.Before(ahead.Truncate(time.Second)) {
 		t.Fatalf("DELETED version %v is older than the recorded %v", got, ahead)
 	}

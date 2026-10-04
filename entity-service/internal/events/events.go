@@ -71,14 +71,14 @@ type Envelope struct {
 // publishable: csm-notification-service would reject it outright. Name is
 // the comment author's resolved display name (see
 // snCaseService.publishCommentAdded's own doc comment for how this service
-// obtains it, since ServiceNow's create-comment response doesn't carry
+// obtains it, since the backing system's create-comment response doesn't carry
 // one), not the case reporter.
 type CommentAddedPayload struct {
 	Name       string `json:"name"`
 	ProjectID  string `json:"projectId"`
 	CaseID     string `json:"caseId"`
 	CaseNumber string `json:"caseNumber,omitempty"`
-	// WSO2CaseID is ServiceNow's u_wso2_case_id custom field (domain.CaseView.
+	// WSO2CaseID is the backing system's own internal case id field (domain.CaseView.
 	// InternalID) — the CSM portal's own case identifier (e.g. "WSO2-1000"),
 	// distinct from CaseNumber ("CS..."). Mirrors csm-notification-service's
 	// own WSO2CaseID field, used in its subjectLine.
@@ -214,7 +214,7 @@ type CaseCreatedPayload struct {
 	// — cv.AccountDetails.CreTeam.Name, "" when the case has no account or
 	// the account has no CRE team assigned. Displayed in
 	// csm-notification-service's Chat cards — purely a display value there,
-	// no routing role (unlike Product). Depends on ServiceNow's
+	// no routing role (unlike Product). Depends on the backing system's
 	// case-embedded account object actually carrying creTeam/sreTeam — see
 	// caseTeamName's own doc comment for the current caveat around that.
 	Team        string   `json:"team,omitempty"`

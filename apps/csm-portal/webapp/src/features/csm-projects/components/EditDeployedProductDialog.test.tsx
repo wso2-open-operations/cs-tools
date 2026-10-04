@@ -122,11 +122,14 @@ describe("EditDeployedProductDialog — Update History tab", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("deletes an update-history entry immediately, without a confirm step, and without closing", async () => {
+  it("asks for confirmation before deleting an update-history entry, then saves without closing", async () => {
     const { onSaveHistory, onClose } = renderDialog();
     switchToHistoryTab();
 
     fireEvent.click(screen.getByRole("button", { name: /delete update level 1/i }));
+    expect(onSaveHistory).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(onSaveHistory).toHaveBeenCalledWith([]));
     expect(onClose).not.toHaveBeenCalled();

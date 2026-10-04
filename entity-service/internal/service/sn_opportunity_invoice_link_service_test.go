@@ -39,7 +39,7 @@ func searchLinksRequest() domain.SearchProjectOpportunityLinksRequest {
 
 // TestSNOpportunityService_GetOpportunityByID_MissingKeysDoNotPanic verifies that a
 // sparsely-populated opportunity row (every optional key entirely omitted, matching what a
-// real ServiceNow Table API row can look like per the digiops-cs regression test for this
+// real ServiceNow Table API row can look like per the upstream integration's regression test for this
 // same shape) maps to nil fields rather than panicking or fabricating zero values.
 func TestSNOpportunityService_GetOpportunityByID_MissingKeysDoNotPanic(t *testing.T) {
 	mux := http.NewServeMux()

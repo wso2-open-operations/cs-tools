@@ -34,6 +34,7 @@ import {
   isTierlessEscalation,
   shortDayName,
   timeOf,
+  todayIsoInZone,
   toIsoDate,
 } from "../utils/rota";
 import { accentOf } from "../utils/rotaHues";
@@ -98,7 +99,7 @@ export default function MyWeekStrip({
    *  standing allocation and covers every day from its start. */
   const absenceOn = (iso: string): ScheduleAbsence | undefined =>
     myAbsences.find((ab) => ab.startsOn <= iso && (!ab.endsOn || iso <= ab.endsOn));
-  const todayIso = toIsoDate(new Date());
+  const todayIso = todayIsoInZone(tz);
 
   const hoverOpen = (iso: string): void => {
     if (openDay === iso) return;

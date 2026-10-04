@@ -86,9 +86,8 @@ const (
 	// product-data access PermView otherwise grants.
 	PermViewSecurityCenter
 	// PermViewerAccess is the blanket audience gate for every SupportPortalLite
-	// (Sales/Solutions-Architecture) route — replacing the old
-	// SPL_ALLOWED_GROUPS raw-Asgardeo-groups check (internal/splauth,
-	// removed).
+	// (Sales/Solutions-Architecture) route, decided from the token's roles
+	// like every other permission.
 	//
 	// Granted to plain Viewer, unconditionally -- including callers who
 	// also hold CsEngineer. That's deliberate: this permission answers

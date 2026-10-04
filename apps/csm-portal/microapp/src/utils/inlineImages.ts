@@ -47,11 +47,11 @@ export function extractInlineImageRefId(src: string): string {
 }
 
 /**
- * Formats a 32-character ServiceNow sysid (no hyphens) as a canonical UUID
+ * Formats a 32-character hex id (no hyphens) as a canonical UUID
  * (`8-4-4-4-12`) — the shape the backend's `/attachments/{id}/content`
  * endpoint requires. Ids already in another shape are returned unchanged.
  */
-export function sysidToUuid(id: string): string {
+export function compactIdToUuid(id: string): string {
   if (!/^[a-f0-9]{32}$/i.test(id)) return id;
   return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20, 32)}`;
 }

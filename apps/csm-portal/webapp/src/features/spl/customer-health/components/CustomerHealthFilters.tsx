@@ -75,8 +75,8 @@ interface CustomerHealthFiltersProps {
 }
 
 export default function CustomerHealthFilters({ onFilterChange, currentFilters }: CustomerHealthFiltersProps) {
-  // Source read the current user's email via a dedicated useAsgardeoUser
-  // hook; this app's equivalent is useIdTokenClaims (decodes the same
+  // Source read the current user's email via a dedicated
+  // identity-user hook; this app's equivalent is useIdTokenClaims (decodes the same
   // id_token claim), already used elsewhere in this codebase.
   const userEmail = useIdTokenClaims()?.email;
   const theme = useTheme();

@@ -72,7 +72,7 @@ function WorkLogComment({ html }: { html?: string }): JSX.Element | null {
             lineHeight: 1.5,
             wordBreak: "break-word",
             // Newly generated comments no longer carry a per-run
-            // `white-space: pre-wrap` inline style (digiops-cs#2933) —
+            // `white-space: pre-wrap` inline style —
             // declared once here instead. Older comments carry their own
             // inline style and are unaffected either way.
             whiteSpace: "pre-wrap",

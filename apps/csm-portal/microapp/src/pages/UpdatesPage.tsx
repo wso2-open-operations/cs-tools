@@ -31,7 +31,6 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useQuery } from "@tanstack/react-query";
-import DOMPurify from "dompurify";
 import { DialogPaper } from "@components/common/DialogPaper";
 import { updates } from "@src/services/updates";
 import type { ProductUpdateLevel, SearchUpdatesInput, UpdateDescription, UpdateLevelGroup } from "@src/types";
@@ -59,11 +58,9 @@ const HTML_FORMAT_RE =
 
 function HtmlOrText({ content }: { content: string }) {
   const isHtml = HTML_FORMAT_RE.test(content);
-  // Sanitize first, then resolve `.iix` inline-image references against the sanitized HTML —
-  // same order and reasoning as CommentBody.tsx: update descriptions embed inline images the same
-  // way comments do, and nothing resolved them before.
-  const sanitized = isHtml ? DOMPurify.sanitize(content) : "";
-  const { resolvedHtml, isLoading: imagesLoading } = useResolvedInlineImageHtml(sanitized);
+  // Update descriptions embed `.iix` inline images the same way comments do; the hook resolves
+  // them and sanitises the result last (see CommentBody.tsx).
+  const { resolvedHtml, isLoading: imagesLoading } = useResolvedInlineImageHtml(isHtml ? content : "");
 
   if (isHtml) {
     if (imagesLoading) return <Skeleton variant="rounded" height={80} />;

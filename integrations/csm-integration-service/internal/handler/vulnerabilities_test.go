@@ -45,6 +45,60 @@ func TestSyncProductVulnerabilities(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects an empty record set", func(t *testing.T) {
+		for name, body := range map[string]string{"empty array": `[]`, "whitespace array": ` [ ] `} {
+			t.Run(name, func(t *testing.T) {
+				var upstreamCalled bool
+				client := &mockEntityVulnerabilityClient{
+					syncProductVulnerabilitiesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						upstreamCalled = true
+						return []byte(`{}`), nil
+					},
+				}
+				h := NewVulnerabilityHandler(client)
+				r := httptest.NewRequest(http.MethodPost, "/vulnerabilities/sync", strings.NewReader(body))
+				w := httptest.NewRecorder()
+				h.SyncProductVulnerabilities(w, r)
+				assertStatus(t, w, http.StatusBadRequest)
+				assertErrorMessage(t, w, ErrMsgSyncEmpty)
+				assertContentType(t, w, "application/json")
+				if upstreamCalled {
+					t.Error("empty set was forwarded upstream")
+				}
+			})
+		}
+	})
+
+	t.Run("rejects a body that is not an array", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"object":  `{"records":[{"wso2Id":"x"}]}`,
+			"null":    `null`,
+			"string":  `"[]"`,
+			"number":  `1`,
+			"boolean": `true`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				var upstreamCalled bool
+				client := &mockEntityVulnerabilityClient{
+					syncProductVulnerabilitiesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						upstreamCalled = true
+						return []byte(`{}`), nil
+					},
+				}
+				h := NewVulnerabilityHandler(client)
+				r := httptest.NewRequest(http.MethodPost, "/vulnerabilities/sync", strings.NewReader(body))
+				w := httptest.NewRecorder()
+				h.SyncProductVulnerabilities(w, r)
+				assertStatus(t, w, http.StatusBadRequest)
+				assertErrorMessage(t, w, ErrMsgSyncNotArray)
+				assertContentType(t, w, "application/json")
+				if upstreamCalled {
+					t.Error("non-array body was forwarded upstream")
+				}
+			})
+		}
+	})
+
 	t.Run("forwards body to upstream and returns 201 with response", func(t *testing.T) {
 		const reqPayload = `[{"productId":"prod-1","vulnerabilityId":"CVE-2026-0001"}]`
 		var capturedBody []byte
@@ -80,7 +134,7 @@ func TestSyncProductVulnerabilities(t *testing.T) {
 					},
 				}
 				h := NewVulnerabilityHandler(client)
-				r := httptest.NewRequest(http.MethodPost, "/vulnerabilities/sync", strings.NewReader(`[]`))
+				r := httptest.NewRequest(http.MethodPost, "/vulnerabilities/sync", strings.NewReader(`[{"wso2Id":"x"}]`))
 				w := httptest.NewRecorder()
 				h.SyncProductVulnerabilities(w, r)
 				assertStatus(t, w, tc.wantCode)

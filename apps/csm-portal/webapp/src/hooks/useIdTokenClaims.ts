@@ -39,7 +39,7 @@ export function useIdTokenClaims(): IdTokenClaims | undefined {
   useEffect(() => {
     if (!isSignedIn) {
       // Clear claims when signed out; the async branch below subscribes to the
-      // external Asgardeo token and setStates from its callback.
+      // external identity provider token and setStates from its callback.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs to external auth state
       setClaims(undefined);
       return;

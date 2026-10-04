@@ -57,7 +57,7 @@ func phaseWord(kind string) string {
 // SendNotices returns the sub-cron handler: sweep, then send one email per
 // decision.
 //
-// *** ONE EMAIL PER OUTAGE, NOT ONE DIGEST. *** The ServiceNow flow sends a
+// *** ONE EMAIL PER OUTAGE, NOT ONE DIGEST. *** The legacy workflow sends a
 // separate message per outage per phase, and outage mail is read as it
 // arrives; batching several outages into one notice would change what an
 // on-call reader sees at the moment it matters.
@@ -71,7 +71,7 @@ func phaseWord(kind string) string {
 // visible; it is just not silently repaired by re-mailing everyone.
 //
 // One bad recipient does not abandon the rest: every decision is attempted and
-// the failures are joined, the same rule internal/allocationreminder uses.
+// the failures are joined, the same rule internal/announcementpublish uses.
 //
 // emailsEnabled is ALERTS_ENABLED. As with every other task here, false — or
 // an empty `to` — skips the sweep entirely rather than sweeping and

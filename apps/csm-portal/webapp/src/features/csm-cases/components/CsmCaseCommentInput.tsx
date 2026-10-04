@@ -50,6 +50,7 @@ import {
 import { formatBytes } from "@utils/formatBytes";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
+import { CommentPartiallySentError } from "@features/csm-cases/components/commentSend";
 
 /** A file staged for upload, with the display name chosen in the modal. */
 export interface CommentAttachmentDraft {
@@ -388,7 +389,8 @@ export default function CsmCaseCommentInput({
     }
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
-    // the comment and then failing on the upload (which would double-post on retry).
+    // the comment and then failing on the upload. (A later upload failure is
+    // handled separately: see CommentPartiallySentError.)
     const tooLarge = attachments.find(
       (a) => a.file.size > MAX_ATTACHMENT_SIZE_BYTES,
     );
@@ -410,6 +412,15 @@ export default function CsmCaseCommentInput({
       setResetTrigger(resetTriggerRef.current);
       setEditorMountKey((k) => k + 1);
     } catch (e) {
+      if (e instanceof CommentPartiallySentError) {
+        // The comment already exists: clear the body so a retry can't post it
+        // again, and keep only the files that still need uploading.
+        setHtml("");
+        setAttachments(e.remaining);
+        resetTriggerRef.current += 1;
+        setResetTrigger(resetTriggerRef.current);
+        setEditorMountKey((k) => k + 1);
+      }
       setError(e instanceof Error ? e.message : "Failed to post comment.");
     } finally {
       setSubmitting(false);

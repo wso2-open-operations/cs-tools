@@ -254,7 +254,7 @@ func TestSNProjectService_SearchProjects_OnboardingScopedFieldsAbsent(t *testing
 // TestSNProjectService_SearchProjects_WiresOnboardingScopedFilters verifies
 // that OnboardingStatus/ArrTodayGte/SubRegion on the request are translated
 // into the corresponding keys on the Choreo request body's filters object,
-// matching digiops-cs's field names exactly.
+// matching the upstream integration's field names exactly.
 func TestSNProjectService_SearchProjects_WiresOnboardingScopedFilters(t *testing.T) {
 	var gotBody map[string]any
 	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

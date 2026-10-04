@@ -111,7 +111,7 @@ func (h *wlHarness) run(t *testing.T, watchList []string) error {
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
 	svc := NewCaseServiceWithSNWriteback(repo, users, &mockEventPublisher{}, alwaysUnrestrictedAccess{}, contacts, dispatcher, mirror, nil, "")
 
-	ctx := context.Background()
+	ctx := contextWithUserIDToken("")
 	if h.callerToken {
 		ctx = contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 	}

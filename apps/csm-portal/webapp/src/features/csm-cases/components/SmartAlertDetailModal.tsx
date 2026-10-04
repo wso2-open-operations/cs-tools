@@ -20,6 +20,7 @@ import { Link as RouterLink } from "react-router";
 import RelativeTime from "@components/RelativeTime";
 import SemanticChip, { type SemanticRole } from "@components/SemanticChip";
 import { useGetSmartAlert } from "@features/csm-cases/api/useSnLinkEntities";
+import { isSafeHref } from "@features/csm-cases/utils/commentContent";
 import {
   DetailField,
   JsonOrTextBlock,
@@ -118,7 +119,7 @@ export default function SmartAlertDetailModal({
             )}
 
             <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-              {data.monitorUrl && (
+              {isSafeHref(data.monitorUrl) && (
                 <Button
                   size="small"
                   component="a"

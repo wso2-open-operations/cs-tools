@@ -120,7 +120,7 @@ export default function EditProblemDialog({
                 getId={(u) => u.id!}
                 getLabel={userLabel}
                 knownLabel={problem.assignedTo?.name}
-                helperText="Setting this on a New problem with no existing owner moves it to Assess automatically (a ServiceNow business rule)."
+                helperText="Setting this on a New problem with no existing owner moves it to Assess automatically (a business rule in the backing data source)."
               />
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>
@@ -165,7 +165,7 @@ export default function EditProblemDialog({
                   size: "small",
                   fullWidth: true,
                   helperText:
-                    "Not on the native ServiceNow Problem form — this is a generic due-date column exposed here for internal tracking only. Not shown pre-filled for the same reason as Assignment group.",
+                    "Not on the backing data source's own Problem form — this is a generic due-date column exposed here for internal tracking only. Not shown pre-filled for the same reason as Assignment group.",
                 },
               }}
             />

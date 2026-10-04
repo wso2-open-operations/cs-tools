@@ -24,7 +24,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -114,13 +113,9 @@ func NewChangeRequestServiceWithSNWriteback(repo repository.ChangeRequestReposit
 // the email (to stamp updated_by, matching PatchChangeRequest's own
 // actorEmail convention) from a single lookup.
 func (s *changeRequestService) currentUser(ctx context.Context) (domain.User, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.User{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return domain.User{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.User{}, err
 	}
 	return s.userRepo.GetUserByEmail(ctx, email)
 }
@@ -257,13 +252,9 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "environmentIds, deploymentProductIds, comment, workNote, and durationInput are not supported on this data source"}
 	}
 
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.PatchChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.PatchChangeRequestResponse{}, err
 	}
 
 	cr, err := s.repo.PatchChangeRequest(ctx, id, req, email)
@@ -316,17 +307,13 @@ func (s *changeRequestService) CreateChangeRequest(ctx context.Context, req doma
 // ChangeRequestRepository's own doc comment on CreateChangeRequestFromServiceNow
 // for why a change request specifically needs no wso2ID the way case/incident
 // do). createdBy is resolved from the caller's own JWT email claim -- the
-// same middleware.UserIDTokenFromContext + emailFromJWT chain
+// same verified-identity helper (callerEmail)
 // problemService.createProblemSNFirst already uses -- since there is no
 // ServiceNow response to take it from on this path.
 func (s *changeRequestService) createChangeRequestPortal(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateChangeRequestResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	createdBy, err := emailFromJWT(token)
+	createdBy, err := callerEmail(ctx)
 	if err != nil {
-		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.CreateChangeRequestResponse{}, err
 	}
 	// Same type check createChangeRequestSNFirst runs before calling
 	// ServiceNow -- deterministic, no I/O, so there's no reason to defer it

@@ -362,10 +362,10 @@ func NewIncidentHandler(entity entityIncidentClient) *IncidentHandler {
 }
 
 // WithAccessGuard wires the same guard that authorises every route into this
-// handler, so every read response can redact an embedded raw base64 inline
-// image (see redactRawBase64Images's own doc comment) for a caller who
-// lacks PermDownloadAttachment. Returns h for chaining at the construction
-// site.
+// handler. Inline-image redaction for a caller without
+// PermDownloadAttachment is applied to every route's response by the
+// RedactInlineImages wrapper (cmd/server/main.go), not here. Returns h for
+// chaining at the construction site.
 func (h *IncidentHandler) WithAccessGuard(g *AccessGuard) *IncidentHandler {
 	h.access = g
 	return h
@@ -403,12 +403,9 @@ func (h *IncidentHandler) SearchIncidents(w http.ResponseWriter, r *http.Request
 
 	result, err := h.entity.SearchIncidents(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchIncidents failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchIncidents failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search incidents.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	// TODO: Unmarshal result and filter to only the fields required by the frontend.
@@ -447,7 +444,7 @@ func (h *IncidentHandler) AggregateIncidents(w http.ResponseWriter, r *http.Requ
 
 	result, err := h.entity.AggregateIncidents(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity AggregateIncidents failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity AggregateIncidents failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to aggregate incidents.")
 		return
 	}
@@ -487,7 +484,7 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 
 	result, err := h.entity.CreateIncident(r.Context(), body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateIncident failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateIncident failed", "userID", user.UserID, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create incident.")
 		return
 	}
@@ -511,12 +508,9 @@ func (h *IncidentHandler) GetIncident(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.entity.GetIncident(r.Context(), id)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetIncident failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve incident.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -560,7 +554,7 @@ func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.entity.PatchIncident(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity PatchIncident failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity PatchIncident failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update incident.")
 		return
 	}
@@ -602,7 +596,7 @@ func (h *IncidentHandler) CreateIncidentComment(w http.ResponseWriter, r *http.R
 	}
 
 	if _, err := h.entity.GetIncident(r.Context(), id); err != nil {
-		slog.ErrorContext(r.Context(), "entity GetIncident failed during comment guard", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity GetIncident failed during comment guard", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create incident comment.")
 		return
 	}
@@ -615,7 +609,7 @@ func (h *IncidentHandler) CreateIncidentComment(w http.ResponseWriter, r *http.R
 
 	result, err := h.entity.CreateComment(r.Context(), newBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity CreateComment failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to create incident comment.")
 		return
 	}
@@ -659,12 +653,9 @@ func (h *IncidentHandler) SearchIncidentActivities(w http.ResponseWriter, r *htt
 
 	result, err := h.entity.SearchIncidentActivities(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchIncidentActivities failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchIncidentActivities failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search incident activities.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -711,12 +702,9 @@ func (h *IncidentHandler) SearchIncidentComments(w http.ResponseWriter, r *http.
 
 	result, err := h.entity.SearchComments(r.Context(), newBody)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamErrorGeneric(w, err, "Failed to search incident comments.")
 		return
-	}
-	if shouldRedactInlineImages(h.access, user.Roles) {
-		result = redactRawBase64Images(result)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -733,7 +721,7 @@ type handOffIncidentResponseEnvelope struct {
 }
 
 // HandOffIncidentToSpecialist handles POST /incidents/{id}/specialist-handoffs.
-// The handoff itself can succeed (ServiceNow state committed) while the internal
+// The handoff itself can succeed (the backing-system state committed) while the internal
 // GitHub issue creation fails -- the entity service reports that as a non-nil
 // handoff.githubIssueError on an otherwise-200 response rather than an error status.
 // This is surfaced explicitly in the server log rather than left to a caller who
@@ -777,14 +765,14 @@ func (h *IncidentHandler) HandOffIncidentToSpecialist(w http.ResponseWriter, r *
 
 	result, err := h.entity.HandOffIncidentToSpecialist(r.Context(), id, body)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity HandOffIncidentToSpecialist failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "entity HandOffIncidentToSpecialist failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to hand off incident to specialist group.")
 		return
 	}
 
 	var envelope handOffIncidentResponseEnvelope
 	if err := json.Unmarshal(result, &envelope); err != nil {
-		slog.WarnContext(r.Context(), "entity HandOffIncidentToSpecialist: decode response for githubIssueError check failed", "userID", user.UserID, "incidentID", id, "err", err)
+		slog.WarnContext(r.Context(), "entity HandOffIncidentToSpecialist: decode response for githubIssueError check failed", "userID", user.UserID, "incidentID", id, "err", summarizeErr(err))
 	} else if envelope.Handoff.GithubIssueError != nil {
 		slog.WarnContext(r.Context(), "incident handed off to specialist group but internal issue creation failed",
 			"userID", user.UserID, "incidentID", id, "githubIssueError", *envelope.Handoff.GithubIssueError)

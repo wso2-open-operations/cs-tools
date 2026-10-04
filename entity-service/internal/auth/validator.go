@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package auth validates the Asgardeo-issued x-user-id-token entity-service
+// Package auth validates the identity-provider-issued x-user-id-token entity-service
 // receives, and carries the verified caller identity to the services that
 // scope by it.
 //
@@ -58,7 +58,7 @@ var signingMethods = []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS51
 type UserClaims struct {
 	Email   string
 	Subject string
-	// UserID is the token's "userid" claim -- Asgardeo's stable, per-account
+	// UserID is the token's "userid" claim -- the identity provider's stable, per-account
 	// user identifier. Unlike Subject ("sub"), which csm-portal-backend's own
 	// frontend has separately documented as per-session rather than stable
 	// (see that repo's IdTokenClaims doc comment), UserID is the same value
@@ -163,8 +163,8 @@ func (v *Validator) ValidateUserToken(raw string) (UserClaims, error) {
 // service already trusts (the same reason apps/csm-portal/backend's own
 // x-jwt-assertion handling runs with signature verification off in every
 // Choreo deployment, not just locally -- see that repo's own
-// middleware.Auth). Re-verifying it here against Asgardeo's JWKS doesn't add
-// security (the token isn't necessarily even Asgardeo-issued or signed with a
+// middleware.Auth). Re-verifying it here against the identity provider's JWKS doesn't add
+// security (the token isn't necessarily even issued by the identity provider or signed with a
 // key that JWKS publishes) and did cause real outages: a JWKS refresh
 // rate-limit or transient lookup failure turned into every internal caller
 // being rejected. The client id is only ever used to check membership in

@@ -23,7 +23,7 @@ import (
 )
 
 // TestSanitizeRichText_StructureAndFormatting is a regression test for a
-// real bug: ServiceNow/the portal editors return case descriptions and
+// real bug: the backing data source/the portal editors return case descriptions and
 // comments as rich-text HTML (e.g.
 // `<p><span style="white-space: pre-wrap;">some text</span></p>`), and this
 // function must render that structure as safe HTML — never leak the

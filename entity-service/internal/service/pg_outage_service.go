@@ -210,6 +210,9 @@ func (s *pgOutageService) SearchOutages(ctx context.Context, req domain.SearchOu
 		beginFrom, defaulted = t, false
 	}
 
+	if err := checkOutageSearchLimit(req.Pagination.Limit); err != nil {
+		return domain.SearchOutagesResponse{}, err
+	}
 	outages, total, err := s.repo.Search(ctx, req, beginFrom)
 	if err != nil {
 		return domain.SearchOutagesResponse{}, err
@@ -376,6 +379,19 @@ func (s *pgOutageService) AddOutageCommunication(ctx context.Context, req domain
 	return domain.AddOutageCommunicationResponse{Message: "Communication added successfully.", Communication: comm}, nil
 }
 
+// maxOutageSearchLimit caps the page size of the outage and outage
+// communication searches; the repository passes the limit straight to SQL.
+const maxOutageSearchLimit = 100
+
+// checkOutageSearchLimit refuses a page size above maxOutageSearchLimit. A
+// zero or negative limit is left for the repository's default.
+func checkOutageSearchLimit(limit int) error {
+	if limit > maxOutageSearchLimit {
+		return &apierror.ValidationError{Msg: "limit cannot exceed 100"}
+	}
+	return nil
+}
+
 // SearchOutageCommunications implements OutageService for the Postgres data source.
 func (s *pgOutageService) SearchOutageCommunications(ctx context.Context, req domain.SearchOutageCommunicationsRequest) (domain.SearchOutageCommunicationsResponse, error) {
 	if err := validateUUIDs("id", []string{req.OutageID}); err != nil {
@@ -387,6 +403,9 @@ func (s *pgOutageService) SearchOutageCommunications(ctx context.Context, req do
 		}
 	}
 
+	if err := checkOutageSearchLimit(req.Pagination.Limit); err != nil {
+		return domain.SearchOutageCommunicationsResponse{}, err
+	}
 	items, total, err := s.repo.SearchCommunications(ctx, req)
 	if err != nil {
 		return domain.SearchOutageCommunicationsResponse{}, err

@@ -78,7 +78,7 @@ const EMPTY_FORM: { firstName: string; lastName: string; email: string; userType
  * Admin-only "Add User" form (`POST /users`). Sets the new user's type by
  * granting the matching `internal`/`external` role (see `USER_TYPE_OPTIONS`'s
  * own doc comment) -- the only role picker this form has; there is still no
- * Asgardeo-backed way to browse/assign a fuller role set at account-creation
+ * identity-provider-backed way to browse/assign a fuller role set at account-creation
  * time, so nothing beyond this one required choice is exposed here.
  *
  * An Internal user must have a `@wso2.com` email -- entity-service enforces

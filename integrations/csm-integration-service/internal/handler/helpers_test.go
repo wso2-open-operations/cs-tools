@@ -24,7 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-integration-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-integration-service/internal/apierror"
 )
 
 // ----- assertion helpers -----
@@ -85,11 +85,16 @@ func upstreamErrors(fallback string) []upstreamErrorCase {
 		{"apierror 404", &apierror.Error{StatusCode: http.StatusNotFound}, http.StatusNotFound, ErrMsgNotFound},
 		{"apierror 400", &apierror.Error{StatusCode: http.StatusBadRequest}, http.StatusBadRequest, ErrMsgBadRequest},
 		{"apierror 400 with entity-service message", &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"code":400,"message":"sortBy: \"name\" is not a valid sort field; use endDate"}`}, http.StatusBadRequest, `sortBy: "name" is not a valid sort field; use endDate`},
-		{"apierror 409", &apierror.Error{StatusCode: http.StatusConflict, Body: "conflict upstream message"}, http.StatusConflict, fallback},
-		{"apierror 422", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "invalid state"}, http.StatusUnprocessableEntity, fallback},
+		{"apierror 409 non-JSON body", &apierror.Error{StatusCode: http.StatusConflict, Body: "conflict upstream message"}, http.StatusConflict, fallback},
+		{"apierror 409 with entity-service message", &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":"a mapping for this alert already exists"}`}, http.StatusConflict, "a mapping for this alert already exists"},
+		{"apierror 409 with internal detail", &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":"duplicate key value violates unique constraint \"x_pkey\""}`}, http.StatusConflict, fallback},
+		{"apierror 422 non-JSON body", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "invalid state"}, http.StatusUnprocessableEntity, fallback},
+		{"apierror 422 with entity-service message", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: `{"code":422,"message":"state: cannot close a case that is already closed"}`}, http.StatusUnprocessableEntity, "state: cannot close a case that is already closed"},
+		{"apierror 408", &apierror.Error{StatusCode: http.StatusRequestTimeout}, http.StatusGatewayTimeout, fallback},
+		{"apierror 429", &apierror.Error{StatusCode: http.StatusTooManyRequests, Body: `{"message":"slow down"}`}, http.StatusTooManyRequests, ErrMsgRateLimited},
 		{"apierror 502", &apierror.Error{StatusCode: http.StatusBadGateway}, http.StatusServiceUnavailable, fallback},
 		{"apierror 503", &apierror.Error{StatusCode: http.StatusServiceUnavailable}, http.StatusServiceUnavailable, fallback},
-		{"apierror 504", &apierror.Error{StatusCode: http.StatusGatewayTimeout}, http.StatusServiceUnavailable, fallback},
+		{"apierror 504", &apierror.Error{StatusCode: http.StatusGatewayTimeout}, http.StatusGatewayTimeout, fallback},
 		{"apierror unmapped (418)", &apierror.Error{StatusCode: http.StatusTeapot}, http.StatusInternalServerError, fallback},
 		{"non-apierror error", errors.New("upstream connection refused"), http.StatusInternalServerError, fallback},
 	}

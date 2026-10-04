@@ -24,115 +24,59 @@
 package ledger
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 )
 
-// tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
-// Overridden in tests to keep them fast.
-var tokenFetchTimeout = 10 * time.Second
+// requestTimeout bounds every request this client makes.
+const requestTimeout = 25 * time.Second
 
 // Config holds this client's configuration. TokenURL/ClientID/ClientSecret
-// are whichever OAuth2 app is appropriate for this deployment — unlike
-// integrations/csm-notification-service's internal/entity, there is no
-// existing shared-app precedent this component is bound to, so
-// cmd/server/main.go is free to point it at the same shared app used
-// elsewhere in a given deployment, or a dedicated one.
+// are whichever OAuth2 app is appropriate for this deployment. Transport,
+// when set, is a shared entityhttp transport (cmd/server/main.go builds one
+// for every entity-service client so a tick performs one token grant);
+// when nil the client builds its own from the credential fields.
 type Config struct {
 	BaseURL      string
 	TokenURL     string
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	Transport    http.RoundTripper
 }
 
 // Client is a narrow HTTP client for entity-service's scheduled-task-runs
-// endpoints. Mirrors integrations/csm-notification-service's own
-// internal/slaengine.EntityClient do()/OAuth2 shape exactly.
+// endpoints.
 type Client struct {
 	http    *http.Client
 	baseURL string
 }
 
 // NewClient constructs a Client authenticated via the OAuth2 client
-// credentials grant. Unlike a prior version of this constructor, it can now
-// fail: cfg.TokenURL/cfg.BaseURL must both be https (loopback http is
-// allowed for local development — see httpsec.RequireSecureURL) since both
-// carry credentials or a bearer token. It still never contacts the token
-// endpoint itself — a valid-looking but wrong URL only surfaces as an error
-// the first time a method below is called.
+// credentials grant. cfg.TokenURL/cfg.BaseURL must both be https (loopback
+// http is allowed for local development — see httpsec.RequireSecureURL)
+// since both carry credentials or a bearer token. It never contacts the
+// token endpoint itself — a valid-looking but wrong URL only surfaces as an
+// error the first time a method below is called.
 func NewClient(cfg Config) (*Client, error) {
-	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("ledger: token URL: %w", err)
+	httpClient, err := entityhttp.ClientFor(cfg.Transport, entityhttp.Credentials{
+		TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Scopes: cfg.Scopes,
+	}, cfg.BaseURL, requestTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("ledger: base URL: %w", err)
-	}
-
-	cc := clientcredentials.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
-		Scopes:       cfg.Scopes,
-	}
-
-	tokenHTTPClient := &http.Client{Timeout: tokenFetchTimeout}
-	httpsec.RejectInsecureRedirects(tokenHTTPClient)
-	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTPClient)
-	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
-	httpsec.RejectInsecureRedirects(httpClient)
-
-	return &Client{
-		http:    httpClient,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-	}, nil
+	return &Client{http: httpClient, baseURL: entityhttp.TrimBase(cfg.BaseURL)}, nil
 }
 
-// do executes an authenticated HTTP request against entity-service and
-// returns the raw JSON response body, or an *apierror.Error for a non-2xx
-// status.
+// do executes an authenticated request — see entityhttp.Do.
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	var reqBody io.Reader
-	if len(body) > 0 {
-		reqBody = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: build request %s %s: %w", method, path, err)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: %s %s: %w", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: read response body: %w", err)
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(respBody)}
-	}
-	return respBody, nil
+	return entityhttp.Do(ctx, c.http, c.baseURL, "ledger", method, path, body)
 }
 
 // Run is the subset of entity-service's ScheduledTaskRun response this

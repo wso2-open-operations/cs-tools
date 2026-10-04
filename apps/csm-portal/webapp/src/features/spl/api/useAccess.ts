@@ -22,7 +22,7 @@
 // Reads a portal role off `GET /users/me` (the same server-authoritative
 // `roles` array usePortalView reads it from — see
 // `internal/handler/access.go`'s `AccessConfig`), not a client-side
-// Asgardeo-groups decode.
+// identity-provider groups decode.
 //
 // Checks plain "viewer", unconditionally — it does NOT exclude callers who
 // also hold cs_engineer. This is deliberately broader than

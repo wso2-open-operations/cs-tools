@@ -605,7 +605,7 @@ describe("DashboardWidgetPreviewPage — generic resourceTypes keep the read-onl
 });
 
 /**
- * Regression (digiops-cs#2880): a case-family widget carrying `anyOf`
+ * Regression: a case-family widget carrying `anyOf`
  * (cross-field OR branches) must NOT fall into `CaseFamilyWidgetPreview` —
  * `CasesFilters`/`CasesFilterBar` have no OR construct, so seeding them from
  * `translateCaseDashboardFilters` would silently drop `anyOf` and land on a

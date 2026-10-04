@@ -160,6 +160,13 @@ func (s *salesforceEventService) ingestOpportunityLineItem(ctx context.Context, 
 // a never-ingested line item is acknowledged.
 func (s *salesforceEventService) deleteOpportunityLineItem(ctx context.Context, sfID string) error {
 	sfID = salesforceID18(sfID)
+	if s.lineItems.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.lineItems.SalesEntity.GetOpportunityLineItem(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityOpportunityLineItem), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn, err := s.deletedEventVersion(ctx, domain.SalesforceIngestEntityOpportunityLineItem, sfID)
 	if err != nil {
 		return err

@@ -64,7 +64,7 @@ func (c *Client) GetProject(ctx context.Context, id string) (Project, error) {
 		}
 	}
 	if len(rows) == 0 {
-		return Project{}, &apierror.ServiceUnavailableError{Msg: "salesentity: project not in search results"}
+		return Project{}, NotFound("salesentity: project not in search results")
 	}
 	return Project{}, &apierror.ServiceUnavailableError{Msg: "salesentity: projects/search returned an unexpected project"}
 }

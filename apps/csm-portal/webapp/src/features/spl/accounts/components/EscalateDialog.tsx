@@ -33,7 +33,6 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import DOMPurify from "dompurify";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useEscalateCase } from "../api/useAccountsApi";
@@ -64,9 +63,10 @@ export default function EscalateDialog(props: EscalateDialogProps) {
       showError("Please fill all the required fields.");
       return;
     }
-    const sanitizedJustification = DOMPurify.sanitize(justification);
+    // Sent as typed: this is plain text, not HTML, so an HTML sanitiser would
+    // only entity-encode characters like "&" and "<" in the stored text.
     escalate.mutate(
-      { justification: sanitizedJustification, requestSource: source, reason, severity },
+      { justification, requestSource: source, reason, severity },
       {
         onSuccess: () => {
           showSuccess("Escalation added successfully.");

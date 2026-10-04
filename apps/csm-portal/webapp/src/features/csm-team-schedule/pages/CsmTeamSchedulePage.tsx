@@ -55,6 +55,7 @@ import { resolveDisplayTimeZone } from "@utils/dateTime";
 import { TeamColourProvider } from "../utils/teamColour";
 import {
   addDays,
+  dateFromIso,
   isRotationShift,
   kindsOfferedOn,
   monthPieces,
@@ -63,6 +64,7 @@ import {
   type RosterSpan,
   mondayOf,
   shiftsByCode,
+  todayIsoInZone,
   toIsoDate,
   zoneAbbreviation,
   zoneLabelOn,
@@ -158,7 +160,8 @@ export default function CsmTeamSchedulePage(): JSX.Element {
    *  rosterRange. One by default: the fortnight either side of today is what
    *  a lead opens the roster to check. */
   const [rosterSpan, setRosterSpan] = useState<RosterSpan>(1);
-  const [anchor, setAnchor] = useState<Date>(() => new Date());
+  // The day the reader navigated to; `null` follows today on the profile clock.
+  const [anchorOverride, setAnchor] = useState<Date | null>(null);
   /** Bumped by Today; a view listens to it to re-centre on the current day. */
   const [focusRequest, setFocusRequest] = useState(0);
 
@@ -171,6 +174,12 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   // disagree with the profile, and then two people comparing the same rota
   // over a call have no way of knowing whose clock they are each reading.
   const tz = resolveDisplayTimeZone(user?.timeZone);
+  // "Today" on the profile clock (the one the cells render in), recomputed each
+  // render so it rolls over at the profile's midnight, memoised on the ISO date
+  // so downstream memos only change when the day does.
+  const todayIso = todayIsoInZone(tz);
+  const today = useMemo(() => dateFromIso(todayIso), [todayIso]);
+  const anchor = anchorOverride ?? today;
   const catalogue = useScheduleCatalogue();
 
   /** The teams of the group on screen, in the order the catalogue gives them.
@@ -359,7 +368,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   // When this engineer is next on a rotation. Its own query, deliberately:
   // it looks forward from today rather than at whatever week the reader has
   // navigated to, so the answer does not change as they page around.
-  const nextFrom = useMemo(() => new Date(), []);
+  const nextFrom = today;
   const upcoming = useScheduleAssignments(
     {
       from: toIsoDate(nextFrom),
@@ -839,7 +848,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               <button
                 className="btn"
                 onClick={() => {
-                  setAnchor(new Date());
+                  setAnchor(null);
                   // Pressing Today when today is already the anchor changes no state,
                   // so a view that scrolled away would sit where it is. The press is
                   // the request, not the date, so it is counted rather than compared.
@@ -972,6 +981,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
           ) : view === "week" ? (
             <WeekTable
               weekStart={weekStart}
+              tz={tz}
               assignments={rows}
               shifts={shifts}
               absences={absences.data?.absences ?? []}
@@ -981,6 +991,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
           ) : view === "roster" ? (
             <MonthRoster
               selectedIso={toIsoDate(anchor)}
+              tz={tz}
               focusRequest={focusRequest}
               meEmail={user?.email}
               leadTeams={leadTeams.data ?? []}

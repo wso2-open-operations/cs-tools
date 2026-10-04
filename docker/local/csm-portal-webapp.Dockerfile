@@ -20,9 +20,14 @@
 # reads window.config at runtime, never at build time -- see
 # src/config/apiConfig.ts and public/config.js.example).
 #
-# Build context is the repo root (not this directory), so this Dockerfile
-# can also pull in scripts/csm-compose/ -- every app source path below is
-# therefore prefixed with apps/csm-portal/webapp/.
+# Build context is apps/csm-portal/webapp itself. The two files shared with
+# the customer-portal webapp image (the nginx server block and the config.js
+# entrypoint hook) come from a second, named build context, `csm-compose`,
+# that docker-compose.yml points at scripts/csm-compose/ via
+# build.additional_contexts. To build by hand:
+#
+#   docker build -f docker/local/csm-portal-webapp.Dockerfile \
+#     --build-context csm-compose=scripts/csm-compose apps/csm-portal/webapp
 
 FROM node:20-alpine AS builder
 
@@ -30,10 +35,10 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
-COPY apps/csm-portal/webapp/package.json apps/csm-portal/webapp/pnpm-lock.yaml apps/csm-portal/webapp/pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY apps/csm-portal/webapp/ .
+COPY . .
 RUN pnpm build
 
 FROM nginx:1.27-alpine
@@ -54,8 +59,8 @@ RUN adduser \
   && sed -i 's#pid\s*/run/nginx.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf
 
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY scripts/csm-compose/nginx-spa.conf /etc/nginx/conf.d/default.conf
-COPY scripts/csm-compose/csm-portal-config-entrypoint.sh /docker-entrypoint.d/40-render-config.sh
+COPY --from=csm-compose nginx-spa.conf /etc/nginx/conf.d/default.conf
+COPY --from=csm-compose csm-portal-config-entrypoint.sh /docker-entrypoint.d/40-render-config.sh
 
 RUN chmod +x /docker-entrypoint.d/40-render-config.sh \
   && chown -R csmdev:csmdev /usr/share/nginx/html /etc/nginx/conf.d
@@ -63,3 +68,6 @@ RUN chmod +x /docker-entrypoint.d/40-render-config.sh \
 USER 10110
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8080/config.js >/dev/null || exit 1

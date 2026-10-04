@@ -312,3 +312,63 @@ func TestLoadOnboardingStatusEnabledReadsEnv(t *testing.T) {
 		t.Error("expected off when the flag is unset/empty")
 	}
 }
+
+func TestValidateCredentialBaseURL(t *testing.T) {
+	ok := []string{
+		"https://entity.example.com",
+		"https://gateway.example.com/org/entity/v1.0",
+		"http://localhost:8081",
+		"http://127.0.0.1:9100/oauth2/token",
+		"http://[::1]:8080",
+		"http://entity-service:8080",
+		"http://mock-oidc:9100/oauth2/jwks",
+	}
+	bad := []string{
+		"http://entity.example.com",
+		"http://10.0.0.5:8080",
+		"ftp://entity.example.com",
+		"https://user:pass@entity.example.com",
+		"http://user:pass@localhost:8080",
+		"https://entity.example.com?x=1",
+		"http://localhost:8080#frag",
+		"not a url",
+		"",
+	}
+	for _, v := range ok {
+		if err := validateCredentialBaseURL(v); err != nil {
+			t.Errorf("validateCredentialBaseURL(%q) = %v, want nil", v, err)
+		}
+	}
+	for _, v := range bad {
+		if err := validateCredentialBaseURL(v); err == nil {
+			t.Errorf("validateCredentialBaseURL(%q) = nil, want an error", v)
+		}
+	}
+}
+
+func TestValidateRiskMySQLDSN(t *testing.T) {
+	ok := []string{
+		"user:pw@tcp(db.example.com:3306)/risk?tls=true",
+		"user:pw@tcp(localhost:3306)/risk",
+		"user:pw@tcp(127.0.0.1:3306)/risk?parseTime=true",
+		"user:pw@tcp(mysql:3306)/risk",
+		"user:pw@unix(/var/run/mysqld/mysqld.sock)/risk",
+	}
+	bad := []string{
+		"user:pw@tcp(db.example.com:3306)/risk",
+		"user:pw@tcp(db.example.com:3306)/risk?tls=false",
+		"user:pw@tcp(db.example.com:3306)/risk?tls=skip-verify",
+		"user:pw@tcp(10.1.2.3:3306)/risk?tls=preferred",
+		"::not a dsn::",
+	}
+	for _, v := range ok {
+		if err := validateRiskMySQLDSN(v); err != nil {
+			t.Errorf("validateRiskMySQLDSN(%q) = %v, want nil", v, err)
+		}
+	}
+	for _, v := range bad {
+		if err := validateRiskMySQLDSN(v); err == nil {
+			t.Errorf("validateRiskMySQLDSN(%q) = nil, want an error", v)
+		}
+	}
+}

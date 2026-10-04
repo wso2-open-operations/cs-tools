@@ -55,16 +55,6 @@ type UserInfo struct {
 	// Roles is the token's "roles" claim, which portal authorisation checks
 	// (see handler.AccessGuard).
 	Roles []string
-	// Groups is the token's "groups" claim — restored here for the /spl/*
-	// (SupportPortalLite) routes only, which port the original Ballerina
-	// backend's raw Asgardeo-group-based authorization model
-	// (SPL_ALLOWED_GROUPS etc, see internal/splauth) rather than this app's
-	// newer roles-based one. Deliberate, not a leftover from before the
-	// roles migration — do not remove without checking internal/splauth's
-	// callers first. If/when SPL's authorization moves onto the same
-	// roles-based model as the rest of this app, this field (and the
-	// "groups" claim decode below) can go.
-	Groups []string
 }
 
 // Config holds JWT validation configuration.
@@ -82,8 +72,6 @@ type jwtClaims struct {
 	Email  string     `json:"email"`
 	UserID string     `json:"userid"`
 	Roles  stringList `json:"roles"`
-	// Groups — see UserInfo.Groups's doc comment for why this is still read.
-	Groups stringList `json:"groups"`
 	jwt.RegisteredClaims
 }
 
@@ -120,10 +108,17 @@ func (l *stringList) UnmarshalJSON(b []byte) error {
 // When Config.TokenValidatorEnabled is false the token is only decoded without
 // signature verification — safe for local development only.
 func Auth(cfg Config) func(http.Handler) http.Handler {
+	return AuthWithContext(context.Background(), cfg)
+}
+
+// AuthWithContext is Auth with the JWKS background refresh bound to ctx: it
+// stops when ctx is cancelled (the server passes a context it cancels on
+// shutdown).
+func AuthWithContext(ctx context.Context, cfg Config) func(http.Handler) http.Handler {
 	var keyFunc jwt.Keyfunc
 	if cfg.TokenValidatorEnabled {
 		client := &http.Client{Transport: &x5cStrippingTransport{base: http.DefaultTransport}}
-		jwks, err := keyfunc.NewDefaultOverrideCtx(context.Background(), []string{cfg.JWKSEndpoint}, keyfunc.Override{Client: client})
+		jwks, err := keyfunc.NewDefaultOverrideCtx(ctx, []string{cfg.JWKSEndpoint}, keyfunc.Override{Client: client})
 		if err != nil {
 			// Misconfigured auth must not silently pass — fail at startup.
 			panic("auth: failed to initialise JWKS from " + cfg.JWKSEndpoint + ": " + err.Error())
@@ -181,10 +176,13 @@ func (t *x5cStrippingTransport) RoundTrip(req *http.Request) (*http.Response, er
 		return resp, err
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	_ = resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("read JWKS response body: %w", err)
+	}
+	if len(body) > maxUpstreamResponseBytes {
+		return nil, fmt.Errorf("read JWKS response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	var jwks struct {
@@ -234,6 +232,9 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 		}
 	} else {
 		token, err := jwt.ParseWithClaims(tokenStr, &c, keyFunc,
+			// Only RS256 is accepted; a token naming any other alg is
+			// rejected before its signature is checked.
+			jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 			jwt.WithIssuer(cfg.Issuer),
 			jwt.WithLeeway(cfg.ClockSkew),
 			jwt.WithExpirationRequired(),
@@ -263,7 +264,6 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 		Email:  c.Email,
 		UserID: c.UserID,
 		Roles:  []string(c.Roles),
-		Groups: []string(c.Groups),
 	}, nil
 }
 
@@ -278,9 +278,8 @@ func hasAnyAudience(tokenAuds jwt.ClaimStrings, expected []string) bool {
 	return false
 }
 
-// addSecurityHeaders mirrors the Ballerina ResponseInterceptor security headers.
+// addSecurityHeaders applies the same headers SecurityHeaders sets, so Auth
+// used on its own (as in its tests) still produces them.
 func addSecurityHeaders(w http.ResponseWriter) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "upgrade-insecure-requests")
-	w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	setSecurityHeaders(w.Header())
 }

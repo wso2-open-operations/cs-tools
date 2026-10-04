@@ -26,7 +26,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -130,13 +129,9 @@ func NewProblemServiceWithSNMirror(repo repository.ProblemRepository, mirror Pro
 // a comment.created_by FK-adjacent field), UpdateProblem writes no comment
 // row at all.
 func (s *problemService) resolveActorEmail(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", err
 	}
 	return email, nil
 }
@@ -209,13 +204,9 @@ func (s *problemService) CreateProblem(ctx context.Context, req domain.CreatePro
 // resolved from the caller's own JWT email claim, same chain
 // createProblemSNFirst already uses.
 func (s *problemService) createProblemPortal(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ProblemDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	createdBy, err := emailFromJWT(token)
+	createdBy, err := callerEmail(ctx)
 	if err != nil {
-		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.ProblemDetail{}, err
 	}
 	if utf8.RuneCountInString(req.Subject) > maxWorkItemSubjectLength {
 		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: fmt.Sprintf("subject cannot exceed %d characters", maxWorkItemSubjectLength)}
@@ -246,7 +237,7 @@ func (s *problemService) createProblemPortal(ctx context.Context, req domain.Cre
 // ServiceNow's response: ServiceNow's problem create endpoint
 // (snProblemDetailResponse) returns no createdBy/createdOn field at all.
 // Instead, createdBy is resolved from the requesting user's own JWT email
-// claim -- the same middleware.UserIDTokenFromContext + emailFromJWT chain
+// claim -- the same validated-identity lookup (callerEmail)
 // caseService.CreateCase already uses when req.CreatedBy is empty -- since
 // the calling user's identity is the only real signal for who actually
 // created the problem. An UnauthorizedError/ValidationError from that
@@ -254,13 +245,9 @@ func (s *problemService) createProblemPortal(ctx context.Context, req domain.Cre
 // createdBy there would be nothing valid to insert even if ServiceNow
 // accepted the create.
 func (s *problemService) createProblemSNFirst(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.ProblemDetail{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	createdBy, err := emailFromJWT(token)
+	createdBy, err := callerEmail(ctx)
 	if err != nil {
-		return domain.ProblemDetail{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.ProblemDetail{}, err
 	}
 
 	// Validate everything the Postgres insert will later depend on BEFORE the
@@ -343,7 +330,7 @@ func (s *problemService) UpdateProblem(ctx context.Context, req domain.UpdatePro
 		return domain.UpdateProblemResponse{}, err
 	}
 	if req.Transition != nil || req.AssignmentGroupID != nil {
-		return domain.UpdateProblemResponse{}, &apierror.ValidationError{Msg: "transition and assignmentGroupId are only supported for the ServiceNow data source"}
+		return domain.UpdateProblemResponse{}, &apierror.ValidationError{Msg: "transition and assignmentGroupId are not supported by this data source"}
 	}
 	if req.AssignedToID == nil && req.CauseNotes == nil && req.FixNotes == nil &&
 		req.Workaround == nil && req.TargetResolutionDate == nil {

@@ -135,9 +135,11 @@ function clearLegacyUnscopedKey(): void {
 // sign-out. Registered once at module load, not tied to any component, so
 // it fires reliably regardless of where in the tree sign-out is triggered.
 // "app:signing-out" is dispatched ONLY by the manual "Sign out" action
-// (UserProfile.tsx) and the idle-timeout auto sign-out (IdleTimeoutProvider.tsx)
-// — never by a silent re-auth/token-refresh — so this never clears data out
-// from under a user who is still signed in.
+// (UserProfile.tsx) and the idle-timeout sign-out (IdleTimeoutProvider.tsx,
+// when the prompt runs out) — never by a silent re-auth/token-refresh — so
+// this never clears data out from under a user who is still signed in. The
+// central listener in `@utils/sessionCleanup` also clears every app-owned
+// storage key; this one additionally notifies same-tab subscribers.
 if (typeof window !== "undefined") {
   window.addEventListener("app:signing-out", () => {
     try {

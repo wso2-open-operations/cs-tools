@@ -27,7 +27,7 @@ import type { ToolbarVariant } from "@components/rich-text-editor/ToolBar";
  * that needs it — first requested for the two announcement description
  * fields, so an engineer can paste/hand-edit raw markup the rich toolbar
  * can't produce (e.g. a `<table>`), matching the editing experience already
- * available elsewhere in the portal (and, before this app, in the ServiceNow
+ * available elsewhere in the portal (and, before this app, in the backing system
  * flow this replaces).
  *
  * Toggling back to rich mode remounts `Editor` (keyed on a counter) so it

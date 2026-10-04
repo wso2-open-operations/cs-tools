@@ -16,9 +16,8 @@
 
 // Package eventbus wraps github.com/segmentio/kafka-go to consume domain
 // events from Azure Event Hub's Kafka-compatible endpoint. Only a Consumer
-// exists here — the producer side lives in csm-portal-backend's
-// internal/eventpublisher. Package choice and config shape deliberately
-// mirror csm-portal-backend's eventbus so the two stay easy to compare.
+// (and its Supervisor) exists here — entity-service is the sole producer of
+// the case-events topic.
 package eventbus
 
 import (

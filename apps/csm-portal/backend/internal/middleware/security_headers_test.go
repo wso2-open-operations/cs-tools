@@ -40,8 +40,11 @@ func TestSecurityHeaders(t *testing.T) {
 		want   string
 	}{
 		{"X-Content-Type-Options", "nosniff"},
-		{"Content-Security-Policy", "upgrade-insecure-requests"},
+		{"Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"},
 		{"Strict-Transport-Security", "max-age=31536000; includeSubDomains"},
+		{"Cache-Control", "no-store"},
+		{"Referrer-Policy", "no-referrer"},
+		{"X-Frame-Options", "DENY"},
 	}
 	for _, tc := range cases {
 		if got := w.Header().Get(tc.header); got != tc.want {

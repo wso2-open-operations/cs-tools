@@ -15,6 +15,12 @@
 // under the License.
 
 import { markdownToHtml } from "@utils/renderMarkdown";
+import {
+  replaceTextNodes,
+  splitTextByPattern,
+  transformHtml,
+  type HtmlDomTransform,
+} from "@utils/renderTrustedHtml";
 import type { CsmCaseComment } from "@features/csm-cases/types/csmCases";
 
 /**
@@ -158,20 +164,60 @@ export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
   return stripCustomerCommentAddedLabel(afterCode);
 }
 
+const BARE_URL = /https?:\/\/[^\s<>"']+/g;
+
+// Text under any of these is left alone: existing anchors (no nesting), code
+// and preformatted blocks (URLs there are literal text), and the in-app link
+// markers (their label is display text, not a link).
+const LINKIFY_SKIP_SELECTOR =
+  "a, code, pre, [data-call-request-sysid], [data-sn-link-type]";
+
 /**
- * Replaces bare URLs in an HTML string (not already inside an href attribute)
- * with clickable anchor tags that open in a new tab.
+ * DOM transform: turns bare `http(s)://` URLs found in text nodes into real
+ * `<a target="_blank">` elements. Works on text nodes only, so URLs inside
+ * attribute values (`src`, `alt`, `title`, `href`) are never touched.
+ */
+export const linkifyBareUrlsInDom: HtmlDomTransform = (body) => {
+  replaceTextNodes(body, LINKIFY_SKIP_SELECTOR, (text, doc) =>
+    splitTextByPattern(text, BARE_URL, doc, (match) => {
+      const anchor = doc.createElement("a");
+      anchor.setAttribute("href", match[0]);
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+      anchor.setAttribute(
+        "style",
+        "color:inherit;text-decoration:underline;word-break:break-all;",
+      );
+      anchor.textContent = match[0];
+      return anchor;
+    }),
+  );
+};
+
+/**
+ * Linkifies bare URLs in an HTML string via {@link linkifyBareUrlsInDom}.
+ * The result is NOT sanitised: pass it through `renderTrustedHtml` (which
+ * sanitises last) before it reaches the DOM.
  */
 export function linkifyBareUrls(html: string): string {
-  // The lookahead is wrapped in `(?=(...))\1` (an atomic-group emulation)
-  // rather than matched directly, because a plain trailing negative lookahead
-  // lets the greedy URL quantifier backtrack to a shorter match that
-  // satisfies the lookahead — silently truncating the linkified URL (e.g.
-  // matching "example.co" instead of "example.com" right before `</a>`).
-  return html.replace(
-    /(?<!href=["'])(?=(https?:\/\/[^\s<>"']+))\1(?!["']?\s*<\/a>)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">$1</a>',
-  );
+  return transformHtml(html, [linkifyBareUrlsInDom]);
+}
+
+const SAFE_HREF_PROTOCOLS = ["http:", "https:"];
+
+/**
+ * True when `href` is an `http(s)` URL or a relative URL — i.e. safe to put in
+ * an anchor's `href`. Rejects `javascript:`, `data:`, `vbscript:` and anything
+ * that does not parse.
+ */
+export function isSafeHref(href: string | undefined | null): href is string {
+  if (!href || typeof href !== "string") return false;
+  try {
+    const parsed = new URL(href, "https://invalid.invalid");
+    return SAFE_HREF_PROTOCOLS.includes(parsed.protocol);
+  } catch {
+    return false;
+  }
 }
 
 /**

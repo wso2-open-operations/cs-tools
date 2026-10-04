@@ -21,9 +21,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
 )
@@ -72,16 +70,11 @@ func NewMembershipRegistrationService(
 
 // RegisterInvitedMemberships implements MembershipRegistrationService.
 func (s *membershipRegistrationService) RegisterInvitedMemberships(ctx context.Context) error {
-	// Same identity resolution as GET /users/me: the already-validated
-	// x-user-id-token's email claim. No token is a 401; an undecodable one a
-	// 400 -- the convention userService.GetMe already set.
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	// Same identity resolution as GET /users/me: the email of the identity the
+	// auth middleware validated. No user token is a 401.
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return err
 	}
 
 	memberships, err := s.repo.InvitedMembershipsByEmail(ctx, email)

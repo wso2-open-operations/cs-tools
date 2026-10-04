@@ -587,7 +587,8 @@ export interface CreateIncidentFromCaseNavState {
  */
 export interface CsmCaseDetail extends CsmCaseRow {
   description: string;
-  assignmentGroup: string;
+  /** Not returned by the case payload; left unset rather than invented. */
+  assignmentGroup?: string;
   /**
    * The engineer who acknowledged the case — a first-write-wins claim that
    * someone has seen it and picked it up, distinct from being assigned to it.

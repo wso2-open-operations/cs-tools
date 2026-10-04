@@ -39,7 +39,8 @@ import (
 // Config holds the configuration for the ServiceNow client.
 type Config struct {
 	// BaseURL is snHost in the Ballerina config — the ServiceNow instance
-	// root, e.g. "https://wso2.service-now.com". Both the Table API and the
+	// root, e.g. "https://backing-system.example.com" (configuration only; there is
+	// no default). Both the Table API and the
 	// custom scoped-app API live under this same host.
 	BaseURL  string
 	Username string
@@ -117,9 +118,12 @@ func (c *Client) TableQueryWithHeaders(ctx context.Context, table string, params
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("servicenow: read response body: %w", err)
+	}
+	if len(respBody) > maxUpstreamResponseBytes {
+		return nil, nil, fmt.Errorf("servicenow: read response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -156,12 +160,6 @@ func (c *Client) CustomGet(ctx context.Context, path string, params url.Values) 
 // custom scoped-app REST API. Returns the raw JSON response body.
 func (c *Client) CustomPost(ctx context.Context, path string, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, path, nil, body)
-}
-
-// CustomPut performs a PUT with a JSON body against SupportPortalLite's
-// custom scoped-app REST API. Returns the raw JSON response body.
-func (c *Client) CustomPut(ctx context.Context, path string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPut, path, nil, body)
 }
 
 // maxBinaryResponseBytes bounds how much of a GetBinary response this
@@ -218,9 +216,12 @@ func (c *Client) do(ctx context.Context, method, path string, params url.Values,
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("servicenow: read response body: %w", err)
+	}
+	if len(respBody) > maxUpstreamResponseBytes {
+		return nil, fmt.Errorf("servicenow: read response body: response exceeds %d bytes", maxUpstreamResponseBytes)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -269,8 +270,8 @@ func (c *Client) doRaw(ctx context.Context, method, path string, params url.Valu
 // http.NewRequestWithContext populates automatically for the []byte-backed
 // readers this package uses), are retried -- and only when the method is
 // idempotent (isIdempotentMethod): retrying a POST that creates a record
-// (e.g. createNewEscalation) or a PATCH that appends a work note (e.g.
-// linkCaseToEscalation, PostWorkNote) risks a second create/append when the
+// (e.g. createNewEscalation) or a PATCH that changes a record (e.g.
+// linkCaseToEscalation) risks a second create or update when the
 // first attempt actually succeeded upstream but the response was lost or
 // timed out. retryBackoff is a short pause between attempts rather than an
 // immediate retry, giving a transient upstream hiccup a moment to clear.

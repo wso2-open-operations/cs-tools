@@ -17,9 +17,9 @@
 // Package outagenotify is a narrow client for entity-service's outage
 // internal-notification sweep, plus the wire types it returns.
 //
-// The port of ServiceNow's `Internal Stakeholders Email Notification - Outage
-// Communication`. A sweep rather than a record trigger because nothing in this
-// stack writes `outage` — csm-sync-service mirrors it in from ServiceNow, so
+// The replacement for the legacy internal-stakeholder outage e-mail workflow.
+// A sweep rather than a record trigger because nothing in this stack writes
+// `outage` — csm-sync-service mirrors it in from the upstream data source, so
 // there is no local write to react to.
 package outagenotify
 
@@ -27,20 +27,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entityhttp"
 )
-
-var tokenFetchTimeout = 10 * time.Second
 
 // sweepTimeout bounds one sweep. The scan is small — only outages opted into
 // notification and not yet resolved — so a slow one means trouble, not volume.
@@ -53,6 +46,9 @@ type Config struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	// Transport, when set, is a shared entityhttp transport; when nil the
+	// client builds its own from the credential fields.
+	Transport http.RoundTripper
 }
 
 // Client calls entity-service's outage notification sweep.
@@ -63,25 +59,13 @@ type Client struct {
 
 // NewClient constructs a Client authenticated via the client credentials grant.
 func NewClient(cfg Config) (*Client, error) {
-	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("outagenotify: token URL: %w", err)
+	httpClient, err := entityhttp.ClientFor(cfg.Transport, entityhttp.Credentials{
+		TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Scopes: cfg.Scopes,
+	}, cfg.BaseURL, sweepTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("outagenotify: %w", err)
 	}
-	if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("outagenotify: base URL: %w", err)
-	}
-	cc := clientcredentials.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		TokenURL:     cfg.TokenURL,
-		Scopes:       cfg.Scopes,
-	}
-	tokenHTTP := &http.Client{Timeout: tokenFetchTimeout}
-	httpsec.RejectInsecureRedirects(tokenHTTP)
-	httpClient := cc.Client(context.WithValue(context.Background(), oauth2.HTTPClient, tokenHTTP))
-	httpClient.Timeout = sweepTimeout
-	httpsec.RejectInsecureRedirects(httpClient)
-
-	return &Client{http: httpClient, baseURL: strings.TrimRight(cfg.BaseURL, "/")}, nil
+	return &Client{http: httpClient, baseURL: entityhttp.TrimBase(cfg.BaseURL)}, nil
 }
 
 // Decision is one outage's evaluation: which email is due, and its rendered
@@ -120,22 +104,9 @@ func (c *Client) Sweep(ctx context.Context, limit int) (SweepResult, error) {
 		path += "?" + q.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+	body, err := entityhttp.Do(ctx, c.http, c.baseURL, "outagenotify", http.MethodPost, path, nil)
 	if err != nil {
-		return SweepResult{}, fmt.Errorf("outagenotify: build request: %w", err)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return SweepResult{}, fmt.Errorf("outagenotify: POST %s: %w", path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return SweepResult{}, fmt.Errorf("outagenotify: read response body: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return SweepResult{}, &apierror.Error{StatusCode: resp.StatusCode, Body: string(body)}
+		return SweepResult{}, err
 	}
 	var parsed SweepResult
 	if err := json.Unmarshal(body, &parsed); err != nil {

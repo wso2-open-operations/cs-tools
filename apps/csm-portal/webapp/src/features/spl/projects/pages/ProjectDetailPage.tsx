@@ -18,12 +18,12 @@
 // /spl/accounts/:accountId/projects/:projectId (same two entry points the
 // source app has) — only `projectId` is ever read; ProjectDetailView
 // resolves the account context itself from the project record.
-import DOMPurify from "dompurify";
 import { useParams } from "react-router";
+import { safeRouteId } from "@features/spl/utils/routeId";
 import ProjectDetailView from "@features/spl/projects/components/ProjectDetailView";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const id = projectId ? DOMPurify.sanitize(projectId) : "";
+  const id = safeRouteId(projectId);
   return <ProjectDetailView id={id} />;
 }

@@ -18,6 +18,7 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"unicode/utf8"
 
@@ -58,12 +59,38 @@ func sysidToUUID(sysid string) string {
 
 // uuidToSysid converts a canonical UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
 // to a 32-character ServiceNow sysid by stripping the hyphens.
-// Returns the input unchanged if it is not a canonical UUID.
+//
+// Any other input is returned only in a form that is safe as a single URL
+// path segment, because most callers splice the result straight into an
+// upstream request path: a plain id (letters, digits, '.', '_', '-' -- an
+// already-converted sysid, for one) is returned unchanged; anything else is
+// percent-escaped, and the dot segments "." and ".." are escaped too, so a
+// value can never add, remove or climb a path segment. Callers still
+// validate ids first; this keeps a missed validation from becoming a path
+// change against the upstream.
 func uuidToSysid(uuid string) string {
-	if !isCanonicalUUID(uuid) {
-		return uuid
+	if isCanonicalUUID(uuid) {
+		return uuid[0:8] + uuid[9:13] + uuid[14:18] + uuid[19:23] + uuid[24:36]
 	}
-	return uuid[0:8] + uuid[9:13] + uuid[14:18] + uuid[19:23] + uuid[24:36]
+	return pathSafeSegment(uuid)
+}
+
+// pathSafeSegment returns s unchanged when it is a plain id, and otherwise a
+// percent-escaped form that is a single, non-dot path segment.
+func pathSafeSegment(s string) string {
+	switch s {
+	case ".":
+		return "%2E"
+	case "..":
+		return "%2E%2E"
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '-') {
+			return url.PathEscape(s)
+		}
+	}
+	return s
 }
 
 // snParentIDFilter converts an optional parentId filter UUID to a sysid,

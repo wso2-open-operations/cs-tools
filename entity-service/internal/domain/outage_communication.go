@@ -59,7 +59,7 @@ type OutageForCommunication struct {
 	// and state, and NEITHER is mirrored onto the Postgres `outage` table --
 	// verified against the live schema, not assumed. They stay on the struct
 	// because the rendered email has those lines and dropping them would
-	// change the message shape; they render blank until digiops-cs maps
+	// change the message shape; they render blank until the upstream integration maps
 	// them.
 	//
 	// Do not "fix" this by sourcing them from a nearby column. An earlier

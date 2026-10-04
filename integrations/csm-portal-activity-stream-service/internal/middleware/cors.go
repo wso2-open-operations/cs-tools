@@ -27,8 +27,9 @@ import "net/http"
 // allow-listed too, both for local testing that bypasses the gateway and as
 // defense-in-depth. Content-Type is required for JSON request bodies:
 // application/json is not a CORS-safelisted value, so a POST/PATCH preflight
-// fails without it.
-const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
+// fails without it. Last-Event-ID is what an EventSource client sends on
+// reconnect to resume the stream (see handler.StreamCaseActivities).
+const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Last-Event-ID"
 
 // corsAllowedMethods covers the SSE listener's GET. Advertising a method a
 // given listener has no route for is harmless — the route simply 404s if

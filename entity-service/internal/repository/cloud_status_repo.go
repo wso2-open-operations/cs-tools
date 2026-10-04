@@ -354,7 +354,7 @@ func (r *cloudStatusRepository) AffectedMonitors(ctx context.Context, outageID s
 // setMonitorStatusSQL writes the status for a set of monitors at once.
 //
 // *** THIS WRITES A SYNC-MIRRORED COLUMN. *** cloud_monitor is populated by
-// csm-sync-service from u_cloud_monitor (digiops-cs 0079), so in any
+// csm-sync-service from the backing system's cloud monitor records, so in any
 // environment where that sync runs against a live ServiceNow, the next run
 // overwrites whatever this writes. That is understood and accepted for dev,
 // where the sync is not competing. It is NOT settled for production: either

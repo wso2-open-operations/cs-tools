@@ -23,7 +23,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -181,6 +180,11 @@ func parseIncidentFieldFiltersPostgres(f domain.SearchIncidentsFilters, now time
 			}
 			// Accepted, validated, but never applied -- no confirmed
 			// product-name-to-service mapping on this data source.
+		default:
+			// A field the shared contract accepts but this data source cannot
+			// apply (incidentStateKeys today). Dropping it would answer 200
+			// with a wider result set than asked for, so it is refused.
+			return nil, nil, nil, nil, nil, nil, nil, nil, &apierror.ValidationError{Msg: "filters: field " + f.Field + " is not supported by this data source"}
 		}
 	}
 	return priorities, states, serviceIDs, assignedUserIDs, madeSla, slaViolated, createdStartDate, createdEndDate, nil
@@ -274,13 +278,12 @@ const incidentSystemActorEmail = "system-m2m@wso2.com"
 // server-to-server automation with no end user in the loop at all, so it
 // is not.
 func (s *incidentService) resolveActor(ctx context.Context) (domain.User, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.User{Email: incidentSystemActorEmail}, nil
-	}
-	email, err := emailFromJWT(token)
+	email, err := optionalCallerEmail(ctx)
 	if err != nil {
-		return domain.User{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.User{}, err
+	}
+	if email == "" {
+		return domain.User{Email: incidentSystemActorEmail}, nil
 	}
 	return s.userRepo.GetUserByEmail(ctx, email)
 }
@@ -395,20 +398,16 @@ func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateI
 // next_portal_work_item_number(), the same product decision that used to
 // defer this (see CLAUDE.md, "CreateCase and case numbers"). createdBy is
 // resolved from the caller's own JWT email claim -- the same
-// middleware.UserIDTokenFromContext + emailFromJWT chain
+// verified-identity helper (callerEmail)
 // problemService.createProblemSNFirst already uses -- since there is no
 // ServiceNow response to take it from on this path. Unlike createIncidentSNFirst,
 // there is no publishIncidentCreatedEvent call here yet: that helper's own
 // payload assumes the ServiceNow-sourced fields this path never has (see its
 // own doc comment) -- left as a follow-up rather than guessed at.
 func (s *incidentService) createIncidentPortal(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return domain.CreateIncidentResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	createdBy, err := emailFromJWT(token)
+	createdBy, err := callerEmail(ctx)
 	if err != nil {
-		return domain.CreateIncidentResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return domain.CreateIncidentResponse{}, err
 	}
 	return s.repo.CreateIncident(ctx, req, createdBy)
 }
@@ -524,7 +523,7 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 		req.ConfigurationItemID != nil || req.ChangeRequestID != nil || req.ProblemID != nil ||
 		req.CausedByID != nil || req.ResolvedByID != nil || req.ResolutionNotes != nil ||
 		req.IncidentReport != nil || req.WatchList != nil {
-		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "subject, priority, state, category, subcategory, contactType, resolutionCode, parentId, parentIncidentId, assignmentGroupId, assignedEngineerId, serviceId, serviceOfferingId, configurationItemId, changeRequestId, problemId, causedById, resolvedById, resolutionNotes, incidentReport, and watchList are only supported for the ServiceNow data source"}
+		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "subject, priority, state, category, subcategory, contactType, resolutionCode, parentId, parentIncidentId, assignmentGroupId, assignedEngineerId, serviceId, serviceOfferingId, configurationItemId, changeRequestId, problemId, causedById, resolvedById, resolutionNotes, incidentReport, and watchList are not supported by this data source"}
 	}
 	if req.WorkNotes == nil && req.AdditionalComments == nil {
 		return domain.UpdateIncidentResponse{}, &apierror.ValidationError{Msg: "at least one of workNotes or additionalComments must be provided"}

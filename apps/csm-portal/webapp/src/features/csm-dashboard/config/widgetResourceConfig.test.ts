@@ -390,7 +390,7 @@ describe("WIDGET_RESOURCE_CONFIG — case-table resourceTypes beyond `case`", ()
     expect(params.get("states")).toBe("open");
   });
 
-  // digiops-cs#2914: case/engagement click-throughs land on real, permanent
+  // Case/engagement click-throughs land on real, permanent
   // nav pages (/cases, /engagements) with a hardcoded heading — the widget's
   // own displayName must be carried through as WIDGET_TITLE_PARAM so that
   // page can show it instead, since several widgets all drill through to the
@@ -457,7 +457,7 @@ describe("WIDGET_RESOURCE_CONFIG — case-table resourceTypes beyond `case`", ()
     expect(params.get("n")).toBe("My Incident Tasks");
   });
 
-  // Regression (digiops-cs#2880): a widget's `anyOf` cross-field OR branches
+  // Regression: a widget's `anyOf` cross-field OR branches
   // have no representation in `CasesFilters` (an AND-only model), so
   // `translateCaseDashboardFilters` used to silently drop them -- a tile
   // reading a count restricted by `anyOf` landed its "View all" click on a

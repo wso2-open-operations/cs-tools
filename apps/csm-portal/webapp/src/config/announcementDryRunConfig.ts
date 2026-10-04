@@ -16,7 +16,7 @@
 
 /**
  * The project key an announcement's "Send test" dry run creates its one real
- * test case in — mirrors the ServiceNow flow's own hardcoded
+ * test case in — mirrors backing-system flow's own hardcoded
  * `Project Key = DCPSUB` dry-run scoping (see the announcement-enhancement
  * brief's Section 2). Defaults to "DCPSUB" itself, since that's the same
  * project used for this in production; override via
