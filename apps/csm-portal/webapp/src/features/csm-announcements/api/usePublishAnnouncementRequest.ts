@@ -210,6 +210,8 @@ export function usePublishAnnouncementRequest(
     }
   }, [request?.id, deliveriesQuery.data, deliveriesQuery.isSuccess]);
 
+  const ledgerWarnedRef = useRef(false);
+
   const readyToPublish =
     !request || request.state !== "approved" || hydratedRequestId === request.id;
   const hydratingDeliveries = !readyToPublish && !deliveriesQuery.isError;
@@ -231,6 +233,10 @@ export function usePublishAnnouncementRequest(
     try {
       await recordDeliveries.mutateAsync({ id: request.id, payload: { deliveries: entries } });
     } catch {
+      // One banner per publish pass — outcomes are recorded per project, so a
+      // down ledger would otherwise raise one banner per project.
+      if (ledgerWarnedRef.current) return;
+      ledgerWarnedRef.current = true;
       showError(
         "Sent, but this progress couldn't be saved — if you close this dialog before finishing, you may need to resend to every project on reopen.",
       );
@@ -240,13 +246,23 @@ export function usePublishAnnouncementRequest(
   const handlePublish = async (): Promise<void> => {
     if (!request || request.state !== "approved" || publishing) return;
     if (!readyToPublish) return;
+    ledgerWarnedRef.current = false;
 
     const allProjectIds = request.resolvedProjectIds ?? [];
     if (allProjectIds.length === 0) {
       showError("This request has no resolved audience to publish to.");
       return;
     }
-    const pendingProjectIds = allProjectIds.filter((id) => !succeededProjectIds.includes(id));
+    // Skip projects already done locally or already recorded in the ledger
+    // (a case exists for either status) — never send a second case.
+    const recordedDoneIds = new Set(
+      (deliveriesQuery.data?.deliveries ?? [])
+        .filter((d) => d.status === "succeeded" || d.status === "tag_failed")
+        .map((d) => d.projectId),
+    );
+    const pendingProjectIds = allProjectIds.filter(
+      (id) => !succeededProjectIds.includes(id) && !recordedDoneIds.has(id),
+    );
 
     setPublishing(true);
 
@@ -306,35 +322,47 @@ export function usePublishAnnouncementRequest(
       setProgress({ completed: 0, total: pendingProjectIds.length });
       const newlyFailedTagIds: string[] = [];
       const newlyFailedTagCaseIds: Record<string, string> = {};
-      const passEntries: RecordAnnouncementRequestDeliveryEntry[] = [];
 
       const results = await settleWithConcurrencyLimit(
         pendingProjectIds,
         ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT,
         async (projectId) => {
-          const created = await postCase.mutateAsync({
-            type: "announcement",
-            projectId,
-            subject: request.subject,
-            description: request.description,
-            isSecurityAnnouncement: request.isSecurityAnnouncement,
-          });
+          let created: Awaited<ReturnType<typeof postCase.mutateAsync>>;
+          try {
+            created = await postCase.mutateAsync({
+              type: "announcement",
+              projectId,
+              subject: request.subject,
+              description: request.description,
+              isSecurityAnnouncement: request.isSecurityAnnouncement,
+            });
+          } catch (error) {
+            // Recorded right away (not after the whole fan-out) so closing
+            // mid-pass loses nothing already settled.
+            await recordDeliveryOutcomes([{ projectId, status: "failed" }]);
+            throw error;
+          }
           // The case genuinely exists the moment postCase succeeds,
           // independent of whether the security tag below then fails —
           // tracked unconditionally so a later tag-only retry (which
           // reuses this same case rather than recreating it) still has it.
           caseIdsForPublish[projectId] = created.id;
+          let entry: RecordAnnouncementRequestDeliveryEntry = {
+            projectId,
+            caseId: created.id,
+            status: "succeeded",
+          };
           if (request.isSecurityAnnouncement) {
             try {
               await addTag.mutateAsync({ caseId: created.id, label: SECURITY_ANNOUNCEMENT_TAG_LABEL });
             } catch {
               newlyFailedTagIds.push(projectId);
               newlyFailedTagCaseIds[projectId] = created.id;
-              passEntries.push({ projectId, caseId: created.id, status: "tag_failed" });
-              return created;
+              entry = { projectId, caseId: created.id, status: "tag_failed" };
             }
           }
-          passEntries.push({ projectId, caseId: created.id, status: "succeeded" });
+          // Recorded immediately after this project's own case exists.
+          await recordDeliveryOutcomes([entry]);
           return created;
         },
         (completed, total) => setProgress({ completed, total }),
@@ -342,9 +370,6 @@ export function usePublishAnnouncementRequest(
 
       const newlySucceeded = pendingProjectIds.filter((_, i) => results[i].status === "fulfilled");
       const stillFailing = pendingProjectIds.filter((_, i) => results[i].status === "rejected");
-      for (const projectId of stillFailing) {
-        passEntries.push({ projectId, status: "failed" });
-      }
 
       setSucceededProjectIds((prev) => [...prev, ...newlySucceeded]);
       setCaseIdByProjectId((prev) => ({ ...prev, ...caseIdsForPublish }));
@@ -355,7 +380,6 @@ export function usePublishAnnouncementRequest(
       setFailedTagProjectIds(newlyFailedTagIds);
       setFailedTagCaseIds((prev) => ({ ...prev, ...newlyFailedTagCaseIds }));
       setProgress(null);
-      await recordDeliveryOutcomes(passEntries);
 
       if (stillFailing.length > 0) {
         setPublishing(false);

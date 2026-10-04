@@ -318,12 +318,60 @@ describe("usePublishAnnouncementRequest — delivery ledger", () => {
     expect(recordDeliveriesMutateAsyncMock).toHaveBeenCalledWith({
       id: "req-1",
       payload: {
-        deliveries: expect.arrayContaining([
-          { projectId: "p-1", caseId: "case-p-1", status: "succeeded" },
-          { projectId: "p-2", status: "failed" },
-        ]),
+        deliveries: [{ projectId: "p-1", caseId: "case-p-1", status: "succeeded" }],
       },
     });
+    expect(recordDeliveriesMutateAsyncMock).toHaveBeenCalledWith({
+      id: "req-1",
+      payload: { deliveries: [{ projectId: "p-2", status: "failed" }] },
+    });
+  });
+
+  it("records each project's outcome before the next project's case is created, not after the whole fan-out", async () => {
+    const order: string[] = [];
+    postCaseMutateAsyncMock.mockImplementation(({ projectId }: { projectId: string }) => {
+      order.push(`create:${projectId}`);
+      return Promise.resolve({ id: `case-${projectId}`, internalId: "X-1", number: "N-1" });
+    });
+    recordDeliveriesMutateAsyncMock.mockImplementation(
+      ({ payload }: { payload: { deliveries: { projectId: string }[] } }) => {
+        order.push(`record:${payload.deliveries[0].projectId}`);
+        return Promise.resolve({ deliveries: [] });
+      },
+    );
+    postMock.mockResolvedValue({ ...APPROVED_REQUEST, state: "published" });
+
+    const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+    await act(async () => {
+      await result.current.handlePublish();
+    });
+
+    // The ledger write for p-1 happens before the whole pass finishes: it is
+    // interleaved with creates (concurrency 5 creates both first, but each
+    // record follows its own create).
+    expect(order.indexOf("record:p-1")).toBeGreaterThan(order.indexOf("create:p-1"));
+    expect(order.indexOf("record:p-2")).toBeGreaterThan(order.indexOf("create:p-2"));
+    expect(recordDeliveriesMutateAsyncMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips projects already recorded as delivered in the ledger", async () => {
+    listDeliveriesMock.mockReturnValue({
+      data: { deliveries: [{ projectId: "p-1", caseId: "case-p-1", status: "succeeded" }] },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+    });
+    postCaseMutateAsyncMock.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve({ id: `case-${projectId}`, internalId: "X-1", number: "N-1" }),
+    );
+    postMock.mockResolvedValue({ ...APPROVED_REQUEST, state: "published" });
+
+    const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+    await act(async () => {
+      await result.current.handlePublish();
+    });
+    expect(postCaseMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(postCaseMutateAsyncMock).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p-2" }));
   });
 
   it("records tag_failed (with the real caseId) when the security tag attach fails", async () => {

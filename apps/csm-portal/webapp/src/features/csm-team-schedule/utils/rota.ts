@@ -87,6 +87,22 @@ export function partsInZone(iso: string, tz: string): { date: string; minutes: n
   };
 }
 
+/**
+ * Today's calendar date (YYYY-MM-DD) on the clock of `tz` -- the same clock the
+ * cells render in. Without a zone it falls back to the browser's own calendar.
+ * Never derive "today" from `new Date()` directly in a view: near midnight the
+ * browser and profile calendars name different days.
+ */
+export function todayIsoInZone(tz?: string, now: Date = new Date()): string {
+  return tz ? partsInZone(now.toISOString(), tz).date : toIsoDate(now);
+}
+
+/** A YYYY-MM-DD calendar date as a local-midnight Date (the page's day carrier). */
+export function dateFromIso(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 /** A rota day as YYYY-MM-DD, in the reader's own clock. */
 export function toIsoDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");

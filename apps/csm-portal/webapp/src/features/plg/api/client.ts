@@ -4,7 +4,7 @@
  * WHAT THE MERGE CHANGED. Standalone, this was a module-level `fetch` that put
  * the acting engineer's email in an `X-PLG-User` header — a header the browser
  * chose and the backend believed. That is gone. Requests now go through
- * csm-portal's `useAuthApiClient`, which attaches the real Asgardeo access
+ * csm-portal's `useAuthApiClient`, which attaches the real access
  * token as a bearer and the ID token alongside it; the backend derives the
  * caller from the validated token and PLG's resolver turns that into a
  * `"user".id`. There is no header for a browser to set.

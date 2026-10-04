@@ -31,6 +31,8 @@ import {
   standingWindowKey,
   timeOf,
   toIsoDate,
+  todayIsoInZone,
+  dateFromIso,
 } from "./rota";
 
 const IST = "Asia/Colombo";
@@ -364,5 +366,30 @@ describe("readerFamily", () => {
   it("is nobody's group with neither role, or both", () => {
     expect(readerFamily(undefined, ["admin"])).toBeUndefined();
     expect(readerFamily(undefined, ["cre_rota_admin", "sre_rota_admin"])).toBeUndefined();
+  });
+});
+
+describe("todayIsoInZone", () => {
+  // 2026-09-21 20:00Z is already the 22nd in Colombo (+05:30) and still the
+  // 21st in San Francisco (-07:00).
+  const now = new Date("2026-09-21T20:00:00Z");
+
+  it("names the day on the profile's clock, not the browser's", () => {
+    expect(todayIsoInZone("Asia/Colombo", now)).toBe("2026-09-22");
+    expect(todayIsoInZone("America/Los_Angeles", now)).toBe("2026-09-21");
+  });
+
+  it("derives the week from that day", () => {
+    // Monday 2026-09-21 .. Sunday 2026-09-27, for either clock above.
+    expect(toIsoDate(mondayOf(dateFromIso(todayIsoInZone("Asia/Colombo", now))))).toBe("2026-09-21");
+    // Sunday evening in LA is already Monday in Colombo: the week moves on.
+    const sundayLate = new Date("2026-09-27T20:00:00Z");
+    expect(toIsoDate(mondayOf(dateFromIso(todayIsoInZone("America/Los_Angeles", sundayLate))))).toBe("2026-09-21");
+    expect(toIsoDate(mondayOf(dateFromIso(todayIsoInZone("Asia/Colombo", sundayLate))))).toBe("2026-09-28");
+  });
+
+  it("falls back to the browser calendar when no zone is given", () => {
+    const d = new Date(2026, 8, 21, 12);
+    expect(todayIsoInZone(undefined, d)).toBe("2026-09-21");
   });
 });

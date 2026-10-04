@@ -528,6 +528,32 @@ describe("AnnouncementRequestDialog — approved", () => {
     expect(screen.getByRole("button", { name: /publishing/i })).toBeDisabled();
   });
 
+  it("cannot be closed (X, Close, Escape) while publishing", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
+    mockedPublish.mockReturnValue({
+      publishing: true,
+      progress: { completed: 1, total: 2 },
+      succeededProjectIds: [],
+      failedProjectIds: [],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish: vi.fn(),
+    });
+    const onClose = vi.fn();
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={onClose} />);
+
+    const closeButtons = screen.getAllByRole("button", { name: "Close" });
+    expect(closeButtons.length).toBeGreaterThanOrEqual(2);
+    for (const b of closeButtons) expect(b).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("does not say 'Announcement sent' while a security-tag retry or the bookkeeping publish call is still in flight — the button already says Publishing…", () => {
     // Every case already succeeded (progress is null: neither the tag-retry
     // pass nor the final /publish bookkeeping call touches it), but the

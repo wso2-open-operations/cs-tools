@@ -274,7 +274,7 @@ function columnsViewIdForResourceType(resourceType: BeWidgetResourceType): strin
  * `CasesList` the Cases tab itself uses — not a read-only render of
  * whatever the widget happened to be configured with.
  *
- * `CasesFilterBar`'s tag control is tri-state (digiops-cs#2907) — a tag can
+ * `CasesFilterBar`'s tag control is tri-state — a tag can
  * be included, excluded, or left unselected, shown as its own `+`/`-` chip
  * — so a widget's `tag notIn [X]` now seeds `excludeTags` directly, the
  * same value the dashboard tile itself queries. No approximation needed:
@@ -482,7 +482,7 @@ function CallRequestWidgetPreview({
   // uses (`useTeams(true)`, filtered to `family === "cre-abt"`, keyed by
   // `creGroupId` — what `assignmentTeamIds` actually matches on, not the
   // registry `id`). This endpoint's `assignmentTeamIds` is CRE-only per
-  // digiops-cs#2732 ("Calls To Attend") — no SRE-team equivalent exists on
+  // the "Calls To Attend" widget — no SRE-team equivalent exists on
   // this contract, so there is no second team control to add here.
   const { data: teams } = useTeams(true);
   const creTeamOptions = useMemo(

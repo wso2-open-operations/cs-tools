@@ -446,7 +446,7 @@ export default function EditChangeRequestDialog({
             size="small"
             disabled={isSaving}
             placeholder="e.g. 30 mins"
-            helperText="Free text — ServiceNow does not parse this into a structured duration."
+            helperText="Free text — the backing data source does not parse this into a structured duration."
           />
           <FormControlLabel
             sx={{ ml: 0, justifyContent: "space-between", width: "100%" }}

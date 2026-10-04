@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import {
   Box,
   Button,
@@ -45,11 +46,6 @@ import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeploymen
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { useNavTransition } from "@hooks/useNavTransition";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 /** Today as YYYY-MM-DD, for the auto-generated report title. */
 function todayStamp(): string {
@@ -137,7 +133,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
       !!deploymentId &&
       !!deployedProductId &&
       subject.trim().length > 0 &&
-      !isEmptyHtml(description) &&
+      !isBlankHtml(description) &&
       attachments.length > 0 &&
       !overLimit &&
       !submitting,

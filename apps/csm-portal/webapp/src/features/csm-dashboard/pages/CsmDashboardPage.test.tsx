@@ -190,7 +190,10 @@ function mockTeams(
   overrides: Partial<ReturnType<typeof useTeams>> = {},
 ): void {
   mockedUseTeams.mockReturnValue({
-    data: teams,
+    // Every mocked team gets group ids unless the test sets its own: a
+    // selected team with no group id holds the widget grid back (see
+    // teamScopeState), which most tests here aren't about.
+    data: teams.map((t) => ({ creGroupId: `${t.id}-cre`, sreGroupId: `${t.id}-sre`, ...t })),
     isLoading: false,
     isError: false,
     ...overrides,
@@ -406,6 +409,7 @@ describe("CsmDashboardPage", () => {
         user: { team: { teamKey: "cs_team_leads", teamName: "CS Team Leads" } },
         isLoading: false,
       });
+      mockTeams([{ id: "cs_team_leads", name: "CS Team Leads" }]);
 
       renderAt("/dashboard");
 
@@ -518,18 +522,43 @@ describe("CsmDashboardPage", () => {
     it("does not default to 'All ABTs' when the URL already names a real team", () => {
       mockListResult({ data: LIST_WITH_TEAM_DASHBOARD, isLoading: false });
       mockCurrentUser({ user: { team: undefined }, isLoading: false });
+      mockTeams([{ id: "cs_team_leads", name: "CS Team Leads" }]);
 
       renderAt("/dashboard/team_performance/cs_team_leads");
 
       expect(currentPath()).toBe("/dashboard/team_performance/cs_team_leads");
-      // teams.data is undefined in this mock, so the real team's name can't
-      // resolve to a label either — the point of this test is that it's
-      // NOT "All ABTs" (the URL-named real team id always wins over the
-      // no-home-team default, per `selectedTeamId`'s own precedence).
+      // The point of this test is that the label is NOT "All ABTs" (the
+      // URL-named real team id always wins over the no-home-team default,
+      // per `selectedTeamId`'s own precedence).
       expect(screen.getByTestId("agents-landing-pilot")).toHaveAttribute(
         "data-team-label",
-        "",
+        "CS Team Leads",
       );
+    });
+
+    it("holds the widget grid while the teams list is still loading, instead of fetching org-wide", () => {
+      mockListResult({ data: LIST_WITH_TEAM_DASHBOARD, isLoading: false });
+      mockCurrentUser({ user: { team: undefined }, isLoading: false });
+      mockedUseTeams.mockReturnValue({
+        data: undefined,
+        isPending: true,
+        isError: false,
+      } as unknown as ReturnType<typeof useTeams>);
+
+      renderAt("/dashboard/team_performance/cs_team_leads");
+
+      expect(screen.queryByTestId("agents-landing-pilot")).not.toBeInTheDocument();
+    });
+
+    it("shows an explicit no-team-scope state for a team with no group id, instead of org-wide numbers", () => {
+      mockListResult({ data: LIST_WITH_TEAM_DASHBOARD, isLoading: false });
+      mockCurrentUser({ user: { team: undefined }, isLoading: false });
+      mockTeams([{ id: "cs_team_leads", name: "CS Team Leads", creGroupId: undefined, sreGroupId: undefined }]);
+
+      renderAt("/dashboard/team_performance/cs_team_leads");
+
+      expect(screen.queryByTestId("agents-landing-pilot")).not.toBeInTheDocument();
+      expect(screen.getByText(/No team scope/i)).toBeInTheDocument();
     });
 
     it("still lets the URL's own fragment win over the team-based default", () => {
@@ -613,9 +642,9 @@ describe("CsmDashboardPage", () => {
         user: { team: { teamKey: "unknown_team", teamName: "Unknown Team" } },
         isLoading: false,
       });
-      // The team isn't in the loaded teams list at all, so its family
+      // The team is in the list but carries no `family`, so its family
       // can't resolve.
-      mockTeams([]);
+      mockTeams([{ id: "unknown_team", name: "Unknown Team" }]);
 
       renderAt("/dashboard");
 

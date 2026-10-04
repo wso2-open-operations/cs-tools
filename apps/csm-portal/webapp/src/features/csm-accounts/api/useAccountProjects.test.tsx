@@ -21,7 +21,7 @@ import type { ReactNode } from "react";
 import type { Project, SearchProjectsResponse } from "@features/csm-projects/types/csmProjects";
 
 // useAccountProjects.ts reads window.config at module load (via
-// @config/apiConfig) and calls the real Asgardeo-backed useAuthApiClient;
+// @config/apiConfig) and calls the real identity-provider-backed useAuthApiClient;
 // neither is present under vitest, so mock both. authFetchMock stands in for
 // the fetch wrapper and is what the hook actually calls.
 const authFetchMock = vi.fn();

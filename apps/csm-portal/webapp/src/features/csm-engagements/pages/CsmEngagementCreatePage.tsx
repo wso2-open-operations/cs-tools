@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { isBlankHtml } from "@utils/sanitizeHtml";
 import {
   Box,
   Button,
@@ -51,11 +52,6 @@ const ENGAGEMENT_PAYMENT_TYPES: { value: BeEngagementPaymentType; label: string 
   { value: "paid", label: "Paid" },
   { value: "foc", label: "FOC" },
 ];
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 export default function CsmEngagementCreatePage(): JSX.Element {
   const navigate = useNavTransition();
@@ -102,7 +98,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
       !!engagementType &&
       !!engagementPaymentType &&
       subject.trim().length > 0 &&
-      !isEmptyHtml(description) &&
+      !isBlankHtml(description) &&
       !submitting,
     [
       projectId,

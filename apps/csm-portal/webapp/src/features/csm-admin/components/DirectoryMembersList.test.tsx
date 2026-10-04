@@ -24,7 +24,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const authFetchMock = vi.fn();
 
 // useSearchUsers (csm-users/api) reads runtime config via @config/apiConfig
-// and the real Asgardeo-backed useAuthApiClient at module load — neither is
+// and the real identity-provider-backed useAuthApiClient at module load — neither is
 // present under vitest, so stub both (same approach as
 // useAccountProjects.test.tsx). authFetchMock stands in for the fetch
 // wrapper the hook actually calls.

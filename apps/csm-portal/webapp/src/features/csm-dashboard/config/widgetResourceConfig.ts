@@ -463,7 +463,7 @@ function caseTypeListHref(
   // `displayName`, when given, is appended as WIDGET_TITLE_PARAM so the
   // destination page (a real, permanent nav page with its own hardcoded
   // heading -- see CsmEngagementsPage.tsx) can show the originating
-  // widget's own name instead (digiops-cs#2914) -- see
+  // widget's own name instead -- see
   // appendWidgetTitleParam's own doc comment for why this is a separate,
   // cosmetic-only param from every CasesFilters field this function
   // otherwise writes.
@@ -551,8 +551,8 @@ function translateChangeRequestDashboardFilters(
  * case's state, in vs. not-in — confirmed independent fields on this
  * contract, "either, both, or neither may be supplied", not one field with
  * an inferred op), and `assignmentTeamIds` (the parent case's assigned CRE
- * team, `creGroupId` values — confirmed CRE-only per digiops-cs#2732 "Calls
- * To Attend"; this contract has no SRE-team equivalent field). Scoped here
+ * team, `creGroupId` values — confirmed CRE-only for the "Calls
+ * To Attend" widget; this contract has no SRE-team equivalent field). Scoped here
  * rather than exported alongside `CasesFilters` from a shared filter-bar
  * component: call requests have no other list page of their own for this
  * shape to be shared with.

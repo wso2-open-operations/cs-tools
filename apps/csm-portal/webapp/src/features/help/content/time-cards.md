@@ -59,8 +59,9 @@ The Time cards page has three tabs:
 - **My time sheets**: only your own cards.
 - **All**: everyone's cards, for visibility only. No approve, reject, edit,
   or delete actions are available here, even on your own cards.
-- **Approvals**: visible only to approvers and admins. Shows cards awaiting
-  a decision from you.
+- **Approvals**: visible only to members of the time-card approver group.
+  Being a portal admin does not show this tab by itself; an admin who isn't
+  also an approver doesn't see it. Shows cards awaiting a decision from you.
 
 Each tab can be filtered by project, work item (case number), state, and
 work date range; the **All** and **Approvals** tabs can also be filtered by

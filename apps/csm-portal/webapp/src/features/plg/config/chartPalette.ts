@@ -1,4 +1,5 @@
 import { useTheme } from "@wso2/oxygen-ui";
+import type { Theme } from "@mui/material/styles";
 import { useMemo } from "react";
 
 /**
@@ -53,12 +54,28 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
   return { h: ((h * 60) % 360 + 360) % 360, s: s * 100, l: l * 100 };
 }
 
+/** CSS custom property carrying the series lightness for the active colour scheme. */
+const LIGHTNESS_VAR = "--plg-chart-l";
+
+/**
+ * Sets the series lightness for the active scheme on a chart's container. The
+ * series colours below read it through `var()`, so the scheme switch is a plain
+ * CSS rule (`applyStyles`) rather than a branch on `palette.mode`, which is
+ * pinned to the default scheme under CSS variables. Spread into the `sx` of the
+ * element that wraps a chart.
+ */
+export function chartSchemeVars(theme: Theme): Record<string, unknown> {
+  return {
+    [LIGHTNESS_VAR]: "48%",
+    ...theme.applyStyles("dark", { [LIGHTNESS_VAR]: "60%" }),
+  };
+}
+
 export function useChartColors(): string[] {
   const theme = useTheme();
 
   return useMemo(() => {
     const anchor = hexToHsl(theme.palette.primary.main);
-    const dark = theme.palette.mode === "dark";
 
     // A theme whose primary is not a plain hex (a gradient, a CSS variable) or
     // is a grey with no hue of its own: start from a warm hue so the series is
@@ -73,13 +90,12 @@ export function useChartColors(): string[] {
     // keeps the slices separable while letting the theme stay the loudest thing
     // on the page.
     const saturation = Math.round(Math.min(64, Math.max(46, (anchor?.s ?? 62) * 0.8)));
-    const lightness = dark ? 60 : 48;
 
     const step = 360 / SERIES_LENGTH;
     return SPREAD.map((position) => {
       const hue = Math.round((baseHue + position * step) % 360);
-      return `hsl(${hue} ${saturation}% ${lightness}%)`;
+      return `hsl(${hue} ${saturation}% var(${LIGHTNESS_VAR}, 48%))`;
     });
-  }, [theme.palette.primary.main, theme.palette.mode]);
+  }, [theme.palette.primary.main]);
 }
 

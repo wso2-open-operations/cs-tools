@@ -240,7 +240,7 @@ describe("widget preview URL — filter op round-trip", () => {
 });
 
 /**
- * Regression (digiops-cs#2880): `anyOf` (cross-field OR branches) used to be
+ * Regression: `anyOf` (cross-field OR branches) used to be
  * silently dropped entirely by this file -- neither serialized into the
  * preview URL nor read back out of it -- so a widget's "View more" click
  * (and, separately, `WIDGET_RESOURCE_CONFIG`'s own count-tile `buildHref`)

@@ -108,6 +108,23 @@ describe("MonthRoster: who may edit", () => {
     );
   });
 
+  it("renders an editable cell as a real button that opens the picker from the keyboard path", () => {
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({ leadTeams: ["alpha"], editing: true, onEditCell });
+    const btn = container.querySelector("td.editable > button.cell-edit") as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.type).toBe("button");
+    expect(btn.getAttribute("aria-label")).toMatch(/Asela/);
+    // Enter/Space on a button dispatch a click; it must bubble to the cell.
+    fireEvent.click(btn);
+    expect(onEditCell).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not put a button in a cell the reader cannot edit", () => {
+    const { container } = renderRoster({ leadTeams: [], editing: false });
+    expect(container.querySelector("button.cell-edit")).toBeNull();
+  });
+
   it("reports the leave on a cell so the picker can mark it and offer a clear", () => {
     const onEditCell = vi.fn();
     const { container } = renderRoster({

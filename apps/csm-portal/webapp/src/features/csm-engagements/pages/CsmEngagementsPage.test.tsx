@@ -78,7 +78,7 @@ describe("CsmEngagementsPage — Create engagement button gating", () => {
   });
 });
 
-// digiops-cs#2914: a dashboard widget's click-through carries its own
+// A dashboard widget's click-through carries its own
 // displayName as the `wt` query param (see
 // `WIDGET_RESOURCE_CONFIG.engagement.buildHref`), which this page must
 // render as its heading instead of the hardcoded default -- but only when

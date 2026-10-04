@@ -18,6 +18,7 @@ import { Box, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useParams } from "react-router";
 import AbtDashboardHeader from "@features/csm-dashboard/components/AbtDashboardHeader";
+import TeamScopeGate from "@features/csm-dashboard/components/TeamScopeGate";
 import AgentsLandingPagePilot from "@features/csm-dashboard/components/AgentsLandingPagePilot";
 import { useDashboardList } from "@features/csm-dashboard/api/useDashboardList";
 import {
@@ -138,6 +139,8 @@ export default function CsmDashboardPage(): JSX.Element {
   // react-query no longer dedupes these into one fetch. Cheap: a 5-minute
   // stale time and this list rarely changes mid-session.
   const teams = useTeams(true);
+  const teamsPending = teams.isPending === true;
+  const teamsError = teams.isError === true;
 
   // The user's own team's family, and the dashboard `type` it prefers (see
   // `dashboardTypeForTeamFamily`) — `undefined` for a user with no team, an
@@ -363,12 +366,26 @@ export default function CsmDashboardPage(): JSX.Element {
         selectedTeamId={selectedTeamId}
         onTeamChange={handleTeamChange}
       />
-      <AgentsLandingPagePilot
-        dashboardId={dashboardKey}
-        selectedTeamCreGroupId={selectedTeamCreGroupId}
-        selectedTeamSreGroupId={selectedTeamSreGroupId}
-        selectedTeamLabel={selectedTeamLabel}
-      />
+      {/* A single selected team's widgets must not fetch until its group id is
+          known (an unresolved `__current_team__` filter is dropped, which would
+          show org-wide numbers under this team's label). */}
+      <TeamScopeGate
+        isTeamBased={isTeamBased}
+        selectedTeamId={selectedTeamId}
+        dashboardType={currentEntry?.type}
+        teamsPending={teamsPending}
+        teamsError={teamsError}
+        selectedTeamFound={selectedTeam !== undefined}
+        selectedTeamHasCreGroup={Boolean(selectedTeam?.creGroupId)}
+        selectedTeamHasSreGroup={Boolean(selectedTeam?.sreGroupId)}
+      >
+        <AgentsLandingPagePilot
+          dashboardId={dashboardKey}
+          selectedTeamCreGroupId={selectedTeamCreGroupId}
+          selectedTeamSreGroupId={selectedTeamSreGroupId}
+          selectedTeamLabel={selectedTeamLabel}
+        />
+      </TeamScopeGate>
     </Box>
   );
 }

@@ -541,7 +541,7 @@ export default function CreateIncidentPage(): JSX.Element {
                 }}
                 helperText={
                   serviceId && !derivedAssignmentGroup
-                    ? "No support group set for this service in ServiceNow."
+                    ? "No support group set for this service in the backing data source."
                     : "Derived from the selected Service."
                 }
               />
