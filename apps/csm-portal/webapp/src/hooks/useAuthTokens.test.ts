@@ -42,7 +42,7 @@ vi.mock("@hooks/useLogger", () => ({
 
 const { useAuthTokens } = await import("./useAuthTokens");
 
-// Matches ASGARDEO_UNAUTHENTICATED_CODE — a dead/expired refresh token.
+// Matches IDP_UNAUTHENTICATED_CODE — a dead/expired refresh token.
 const tokenExpiredError = { code: "SPA-AUTH_CLIENT-VM-IV02" };
 
 describe("useAuthTokens", () => {

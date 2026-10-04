@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import {
-  ASGARDEO_UNAUTHENTICATED_CODE,
+  IDP_UNAUTHENTICATED_CODE,
   AUTH_NOT_READY_ERROR_MESSAGE,
 } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
@@ -29,7 +29,7 @@ import { trySilentSignInOnce } from "@hooks/silentSignIn";
 // (across different hook instances) discover a dead refresh token at once.
 let signInInFlight = false;
 
-// Only the Asgardeo "unauthenticated" code means the token was expired/missing
+// Only the identity provider "unauthenticated" code means the token was expired/missing
 // when the call ran (e.g. the refresh token itself has expired, so the SDK's
 // periodic background refresh can no longer mint a new access token). Anything
 // else (network failures, real backend 5xx) must propagate untouched so
@@ -42,12 +42,12 @@ function isTokenExpiredError(error: unknown): boolean {
     error != null &&
     typeof error === "object" &&
     "code" in error &&
-    (error as { code: string }).code === ASGARDEO_UNAUTHENTICATED_CODE
+    (error as { code: string }).code === IDP_UNAUTHENTICATED_CODE
   );
 }
 
 /**
- * True when `getAccessToken()` failed because the Asgardeo SDK had not finished
+ * True when `getAccessToken()` failed because the identity provider SDK had not finished
  * initializing yet (code `SPA-AUTH_CLIENT-VM-NF01`, "The SDK must be
  * initialized first"). This is a transient race on first paint — the silent
  * refresh added in @asgardeo/react 0.25.5 can ask for a token a tick before the

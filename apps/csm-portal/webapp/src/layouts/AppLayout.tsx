@@ -25,7 +25,6 @@ import {
   useState,
 } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorPageContext } from "@context/error-page/ErrorPageContext";
 import { useLocation, Outlet } from "react-router";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
@@ -115,7 +114,6 @@ export default function AppLayout({
     initialCollapsed: getSidebarCollapsed(),
   });
 
-  const { isVisible } = useLoader();
   const isLoginCallback =
     new URLSearchParams(location.search).has("code") &&
     new URLSearchParams(location.search).has("state");
@@ -203,21 +201,6 @@ export default function AppLayout({
                 position: "relative",
               }}
             >
-              {isVisible && (
-                <LinearProgress
-                  color="inherit"
-                  className="csm-print-hide"
-                  sx={{
-                    color: "primary.main",
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    zIndex: 1300,
-                    height: 3,
-                  }}
-                />
-              )}
               {/* Open in-app case tabs (CaseTabsProvider wraps this whole
                   layout, above): a full-bleed strip above the
                   padded/scrollable content region, like a browser's own tab

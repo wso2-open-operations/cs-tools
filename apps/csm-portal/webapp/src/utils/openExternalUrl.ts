@@ -15,13 +15,20 @@
 // under the License.
 
 /**
- * The project key an announcement's "Send test" dry run creates its one real
- * test case in — mirrors backing-system flow's own hardcoded
- * `Project Key = DCPSUB` dry-run scoping (see the announcement-enhancement
- * brief's Section 2). Defaults to "DCPSUB" itself, since that's the same
- * project used for this in production; override via
- * CSM_PORTAL_ANNOUNCEMENT_TEST_PROJECT_KEY only if a given environment needs
- * a different one (e.g. a staging-only sandbox project).
+ * Opens a backend- or data-supplied URL in a new tab, but only when it is an
+ * absolute `https:` URL. The new tab gets no `opener` and no referrer.
+ *
+ * @returns true when the URL was opened, false when it was rejected.
  */
-export const DRY_RUN_TEST_PROJECT_KEY =
-  window.config?.CSM_PORTAL_ANNOUNCEMENT_TEST_PROJECT_KEY ?? "DCPSUB";
+export function openExternalUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+  return true;
+}

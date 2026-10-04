@@ -22,10 +22,15 @@ import { saveBlob } from "@utils/saveBlob";
  * escaping RFC 4180 requires. Shared by every CSV export on the portal so the
  * escaping rules can't drift between them (originally lived only in the time
  * cards export).
+ *
+ * A value that starts with `=`, `+`, `-`, `@`, a tab or a carriage return would
+ * be read as a formula by spreadsheet applications, so it is prefixed with a
+ * single quote (shown as plain text by Excel/Sheets) before quoting.
  */
 export function csvField(value: string): string {
-  if (!/["\r\n,]/.test(value)) return value;
-  return `"${value.replace(/"/g, '""')}"`;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (!/["\r\n,]/.test(safe)) return safe;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 /** Builds RFC 4180-ish CSV text (CRLF line endings) from a header row and a

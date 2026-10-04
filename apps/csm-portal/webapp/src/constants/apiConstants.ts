@@ -180,11 +180,11 @@ export const CONNECT_HANDSHAKE_TIMEOUT_MS = 25_000;
 export const TOKEN_RETRY_DELAYS_MS = [150, 300, 600, 1000] as const;
 
 /**
- * Asgardeo SPA SDK internal error code when `getIdToken()` runs before the auth
+ * identity provider SPA SDK internal error code when `getIdToken()` runs before the auth
  * client is ready (observed with `@asgardeo/auth-react`; value may change on SDK
  * upgrades — re-verify against SDK release notes if token retrieval misbehaves).
  */
-export const ASGARDEO_UNAUTHENTICATED_CODE = "SPA-AUTH_CLIENT-VM-IV02";
+export const IDP_UNAUTHENTICATED_CODE = "SPA-AUTH_CLIENT-VM-IV02";
 
 /**
  * Synthetic error message thrown when ID token cannot be obtained after retries

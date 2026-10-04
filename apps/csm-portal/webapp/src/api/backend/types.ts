@@ -117,7 +117,7 @@ export type BeCaseWorkState = "ongoing" | "paused";
 
 /**
  * Resolution code for a closed or solution-proposed case (the Post
- * Resolution Activity — see UseCases.md ISSU-026). Only accepted by
+ * Resolution Activity — see use case ISSU-026). Only accepted by
  * `PATCH /cases/{id}` alongside `state: "closed"` or `"solution_proposed"`.
  */
 export type BeCaseResolutionCode =
@@ -179,7 +179,7 @@ export type BeCaseSortField =
  * Where a case sits in the backing data source's staged auto-closure sequence
  * (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Read-only — the
  * only supported write is `autocloseHoldUntil` on `PATCH /cases/{id}`
- * (ServiceNow only).
+ * (backing data source only).
  */
 export type BeCaseAutoclosureStep =
   | "DEFAULT"
@@ -304,15 +304,15 @@ export interface BeDeployedProductRef {
 /**
  * Account summary embedded in the CaseView. `type` is the account/support tier
  * (e.g. "Enterprise"); it is a free-form string, not the PG `basic|enterprise`
- * enum, because ServiceNow-sourced cases pass their support tier through as-is.
+ * enum, because externally sourced cases pass their support tier through as-is.
  */
 export interface BeCaseAccountRef {
   id: string;
   name?: string;
   type?: string;
-  /** The account's assigned CRE (customer reliability engineering) team, when set (ServiceNow only). */
+  /** The account's assigned CRE (customer reliability engineering) team, when set (backing data source only). */
   creTeam?: BeEntityRef | null;
-  /** The account's assigned SRE (site reliability engineering) team, when set (ServiceNow only). */
+  /** The account's assigned SRE (site reliability engineering) team, when set (backing data source only). */
   sreTeam?: BeEntityRef | null;
 }
 
@@ -381,7 +381,7 @@ export interface BeCaseView {
   workaroundProvidedBy?: BeAssignedEngineerRef | null;
   account?: BeCaseAccountRef;
   project?: BeEntityRef;
-  /** Nullable: ServiceNow-sourced cases may have no deployment / product. */
+  /** Nullable: externally sourced cases may have no deployment / product. */
   deployment?: BeEntityRef | null;
   /**
    * Deployed product instance named by the case, together with the product
@@ -433,7 +433,7 @@ export interface BeCaseView {
    */
   parentCase?: BeCaseNumberRef | null;
   /**
-   * Users on the case watch list (ServiceNow only). Null/absent when not set
+   * Users on the case watch list (backing data source only). Null/absent when not set
    * or not supported by the current data source.
    */
   watchList?: BeWatchListUser[] | null;
@@ -444,7 +444,7 @@ export interface BeCaseView {
   autoclosureStep?: BeCaseAutoclosureStep | null;
   /**
    * When the auto-closure sequence next advances — e.g. the "eligible again
-   * after" date for a held case (ServiceNow only). Read-only.
+   * after" date for a held case (backing data source only). Read-only.
    */
   autoclosureStateTime?: string | null;
   /**
@@ -472,7 +472,7 @@ export interface BeCaseView {
    * `"0"` through `"5"` (EL0 "not escalated" through EL5 "CEO") — the same id
    * space `GET /cases/{id}/escalations` and `POST /cases/{id}/escalations`
    * both use. Null when the backing case carries no escalation level (e.g.
-   * non-ServiceNow-backed cases).
+   * not externally backed cases).
    */
   escalationLevel?: string | null;
 }
@@ -535,7 +535,7 @@ export interface BeCaseVariable {
 }
 
 /**
- * Catalog-based service request (`type: "service_request"`). ServiceNow-only:
+ * Catalog-based service request (`type: "service_request"`). Backing-source-only:
  * the catalog/catalog-item come from `POST /catalogs/search` (filtered by the
  * deployed product) and the variables from the catalog-item variables endpoint.
  */
@@ -571,7 +571,7 @@ export interface BeCaseAttachmentPayload {
 }
 
 /**
- * Security report analysis (`type: "security_report_analysis"`). ServiceNow-only;
+ * Security report analysis (`type: "security_report_analysis"`). Backing-source-only;
  * requires a subject and description. Unlike the other case-creation flows,
  * at least one attachment is also required and must be included in this same
  * create payload — the backing service validates it atomically at creation
@@ -589,7 +589,7 @@ export interface BeSecurityReportCreatePayload {
 }
 
 /**
- * Engagement (`type: "engagement"`). ServiceNow-only; no severity/issueType —
+ * Engagement (`type: "engagement"`). Backing-source-only; no severity/issueType —
  * engagements aren't triaged like support cases.
  */
 export interface BeEngagementCreatePayload {
@@ -649,7 +649,7 @@ export interface BeCaseCreateResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Service catalogs (ServiceNow only) — drive service-request creation
+// Service catalogs (backing data source only) — drive service-request creation
 // ---------------------------------------------------------------------------
 
 /** A catalog item (request form) within a catalog. */
@@ -735,19 +735,19 @@ export interface BeCatalogItemVariable {
   hasMandatory?: boolean;
 
   /** The key this variable writes into the case payload's `variables[].id`
-   * mapping is still `id` above; `name` is the underlying SN field name,
+   * mapping is still `id` above; `name` is the underlying backing-source field name,
    * informational only. */
   name?: string;
   /** Correct required-ness flag — use this, not `hasMandatory`. */
   mandatory?: boolean;
   /** `false` for an inactive variable; the endpoint still returns these. */
   active?: boolean;
-  /** `read_only` in ServiceNow — render disabled, not hidden. */
+  /** `read_only` in the backing system — render disabled, not hidden. */
   readOnly?: boolean;
-  /** `hidden` in ServiceNow — do not render this variable at all. */
+  /** `hidden` in the backing system — do not render this variable at all. */
   hidden?: boolean;
   defaultValue?: string | null;
-  /** Declared max length for a text-type variable, parsed from ServiceNow's
+  /** Declared max length for a text-type variable, parsed from the backing source's
    * `attributes` string; `null` when not declared. */
   maxLength?: number | null;
   /**
@@ -811,7 +811,7 @@ interface BeCaseUpdateNever {
  * other field as `never`, via {@link BeCaseUpdateNever}) so the
  * exactly-one-field contract is enforced at compile time, not just in docs.
  * `assigneeEmail`, `watchList`, `parentId`, and `autocloseHoldUntil` are
- * supported **only** for the ServiceNow data source. `workState` is only
+ * supported **only** for the backing data source. `workState` is only
  * accepted while the case is `work_in_progress`.
  */
 export type BeCaseUpdatePayload =
@@ -841,7 +841,7 @@ export type BeCaseUpdatePayload =
    * `engagementPaymentType` are both required alongside `type` in the same
    * call, mirroring the create payload's own requirement for this type (same
    * `BeEngagementType` / `BeEngagementPaymentType` string enums as
-   * {@link BeEngagementCreatePayload}, not raw ServiceNow choice-list
+   * {@link BeEngagementCreatePayload}, not raw backing-system choice-list
    * integers — that translation is a backend concern). */
   | (Omit<BeCaseUpdateNever, "type" | "engagementType" | "engagementPaymentType"> & {
       type: "engagement";
@@ -864,7 +864,7 @@ export type BeCaseUpdatePayload =
   /** Work sub-state toggle (`ongoing` / `paused`) for an in-progress case. */
   | (Omit<BeCaseUpdateNever, "workState"> & { workState: BeCaseWorkState })
   /**
-   * Email of the engineer to assign (ServiceNow only). `null` clears the
+   * Email of the engineer to assign (backing data source only). `null` clears the
    * assignee instead of assigning one — distinct from omitting the field,
    * which the backend rejects as an empty update.
    */
@@ -880,7 +880,7 @@ export type BeCaseUpdatePayload =
   | (Omit<BeCaseUpdateNever, "watchList"> & { watchList: string[] })
   /**
    * UUID of another case, incident, change request, or problem to link this
-   * case to as its parent (ServiceNow only, the hierarchical
+   * case to as its parent (backing data source only, the hierarchical
    * major-case/child-case relationship).
    */
   | (Omit<BeCaseUpdateNever, "parentId"> & { parentId: string })
@@ -892,7 +892,7 @@ export type BeCaseUpdatePayload =
   | (Omit<BeCaseUpdateNever, "deploymentId"> & { deploymentId: string })
   /** UUID of the deployed product to associate with this case, replacing the existing one. */
   | (Omit<BeCaseUpdateNever, "deployedProductId"> & { deployedProductId: string })
-  /** UUID of another case to cross-link to this one as a related case (looser than `parentId`; ServiceNow only). */
+  /** UUID of another case to cross-link to this one as a related case (looser than `parentId`; backing data source only). */
   | (Omit<BeCaseUpdateNever, "relatedCaseId"> & { relatedCaseId: string })
   /**
    * Acknowledge the case as the signed-in engineer. Typed as the literal `true`
@@ -903,14 +903,14 @@ export type BeCaseUpdatePayload =
    */
   | (Omit<BeCaseUpdateNever, "acknowledge"> & { acknowledge: true })
   /**
-   * Mark (`true`) or recall (`false`) the case's workaround (ServiceNow only).
+   * Mark (`true`) or recall (`false`) the case's workaround (backing data source only).
    * Marking it stamps the signed-in engineer as the provider and pauses the
    * case's Workaround SLA clock; recalling clears both.
    */
   | (Omit<BeCaseUpdateNever, "workaroundProvided"> & { workaroundProvided: boolean })
   /**
    * Places the case on hold in the backing data source's staged auto-closure
-   * sequence until this ISO date-time (ServiceNow only). The raw
+   * sequence until this ISO date-time (backing data source only). The raw
    * `autoclosureStep` is not directly settable.
    */
   | (Omit<BeCaseUpdateNever, "autocloseHoldUntil"> & { autocloseHoldUntil: string })
@@ -1152,7 +1152,7 @@ export interface BeCaseSearchView {
    * {@link BeUserReference}. */
   createdBy?: BeUserReference | null;
   project?: BeEntityRef;
-  /** Nullable: ServiceNow-sourced cases may have no deployment / product. */
+  /** Nullable: externally sourced cases may have no deployment / product. */
   deployment?: BeEntityRef | null;
   /** Embedded as `{ id, name }` (name already includes the version), not the
    * `displayName`-shaped ref the GET view uses. */
@@ -1206,7 +1206,7 @@ export interface BeCaseEscalationCaseRef {
  * One escalation-level change recorded against a case: either an escalate or
  * a de-escalate step, with the level it moved from and to. `currentLevel` /
  * `previousLevel` are the same raw escalation-level id space (`"0"`-`"5"`) as
- * {@link BeCaseView.escalationLevel}, via their own `id` field. ServiceNow
+ * {@link BeCaseView.escalationLevel}, via their own `id` field. The backing system
  * data source only.
  */
 export interface BeCaseEscalation {
@@ -1303,7 +1303,7 @@ export interface BeCaseCommentSearchResponse extends BeSearchResponseBase {
  * the entity-service refactor — backs BOTH `/cases/{id}/comments/search` and
  * `/conversations/{id}/messages`. It reuses `referenceId` (the case or
  * conversation id) rather than `caseId`; the backend normalizes `type` to the
- * `BeCaseCommentType` enum (unknown SN types default to `comment`).
+ * `BeCaseCommentType` enum (unknown backing-source types default to `comment`).
  *
  * `createdBy` carries the canonical {@link BeUserReference} shape; `null`
  * when the comment has no resolvable author.
@@ -1388,9 +1388,9 @@ export type BeConversationState =
   | "CLOSED";
 
 /**
- * A chat session as returned by `POST /conversations/search` — the ServiceNow
+ * A chat session as returned by `POST /conversations/search` — the backing system
  * "conversation" record a case may originate from. `id`/`number`/`state` are
- * nullable on the wire (a conversation that never resolved to a real SN
+ * nullable on the wire (a conversation that never resolved to a real backing-source
  * record can have gaps); `case` is null for a chat that never became a case.
  *
  * `createdBy` carries the canonical {@link BeUserReference} shape, same as
@@ -1803,12 +1803,12 @@ export type BeSubscriptionType =
 
 export interface BeProject {
   id: string;
-  /** Nested on the wire (ServiceNow data source); absent when the project has no linked account. */
+  /** Nested on the wire (backing data source); absent when the project has no linked account. */
   account?: { id: string; name: string };
   sfId?: string;
   name?: string;
   projectKey?: string;
-  /** The project's short key, e.g. "WSO2-1000" (ServiceNow/entity-service field name: `key`). */
+  /** The project's short key, e.g. "WSO2-1000" (backing-system/entity-service field name: `key`). */
   key?: string;
   subscriptionType?: BeSubscriptionType;
   /** Whether this project is eligible to raise service requests, as
@@ -1817,7 +1817,7 @@ export interface BeProject {
    *  viewer-permission flag rather than a project eligibility flag — gate SR
    *  creation on both. */
   hasSr?: boolean;
-  /** "Open" | "Suspended" | "Restricted" (ServiceNow data source only). */
+  /** "Open" | "Suspended" | "Restricted" (backing data source only). */
   closureState?: string | null;
   startDate?: string | null;
   endDate?: string | null;
@@ -1828,13 +1828,13 @@ export interface BeProject {
 export interface BeProjectSearchPayload {
   pagination?: BePagination;
   searchQuery?: string;
-  /** Filter to projects belonging to this account (ServiceNow data source only). */
+  /** Filter to projects belonging to this account (backing data source only). */
   accountId?: string;
   /** Excludes projects whose closure state is any of the given values, e.g.
-   *  ["Restricted", "Suspended"] (ServiceNow data source only). */
+   *  ["Restricted", "Suspended"] (backing data source only). */
   excludeClosureStates?: string[];
   /** Excludes projects whose subscription type is any of the given values
-   *  (ServiceNow data source only). */
+   *  (backing data source only). */
   excludeSubscriptionTypes?: BeSubscriptionType[];
 }
 
@@ -1932,7 +1932,7 @@ export interface BeProjectContactSearchResponse {
 /**
  * One step of the customer onboarding flow, in the order it runs. DATABASE is
  * the csm-platform write done by the Salesforce membership ingest; IDENTITY
- * the Asgardeo user provisioned via the SCIM service; EMAIL the invitation
+ * the identity-provider user provisioned via the SCIM service; EMAIL the invitation
  * email; REGISTRATION the member's first sign-in.
  */
 export type BeOnboardingStepName = "IDENTITY" | "DATABASE" | "EMAIL" | "REGISTRATION";
@@ -2177,7 +2177,7 @@ export interface BeDeployedProduct {
   deployment?: BeEntityRef;
   product?: BeEntityRef;
   version?: BeDeployedProductVersion | null;
-  // SN-only sizing fields; the entity service returns them as numbers (and
+  // Backing-source-only sizing fields; the entity service returns them as numbers (and
   // always null for the Postgres data source).
   cores?: number | null;
   tps?: number | null;
@@ -2349,8 +2349,8 @@ export interface BeCreateCallRequestResponse {
 
 // ---------------------------------------------------------------------------
 // GitHub issue creation from a case — `POST /cases/{id}/github-issues`
-// (ServiceNow data source only; the BFF forwards the body opaquely to the
-// entity service, which validates and routes it to the SN scoped app).
+// (backing data source only; the BFF forwards the body opaquely to the
+// entity service, which validates and routes it to the backing-source app).
 // ---------------------------------------------------------------------------
 
 /**
@@ -2361,7 +2361,7 @@ export interface BeCreateCallRequestResponse {
  */
 export type BeCaseGithubIssueReason = "default" | "migration" | "rd_ticket";
 
-/** Explicit owner/repo, overriding the product-based routing lookup on the SN side. */
+/** Explicit owner/repo, overriding the product-based routing lookup on the backing-source side. */
 export interface BeCaseGithubIssueRepoOverride {
   owner: string;
   repo: string;
@@ -2372,7 +2372,7 @@ export interface BeCreateCaseGithubIssuePayload {
   reason: BeCaseGithubIssueReason;
   title: string;
   description: string;
-  /** Explicit target repo; when omitted, the SN side routes by the case's product unit. */
+  /** Explicit target repo; when omitted, the backing-source side routes by the case's product unit. */
   repoOverride?: BeCaseGithubIssueRepoOverride;
   /** Product update level, appended to the issue body. */
   updateLevel?: string;
@@ -2578,7 +2578,7 @@ export type BeUpdateTaskPayload =
   | (Omit<BeUpdateTaskNever, "dueDate"> & { dueDate: string });
 
 // ---------------------------------------------------------------------------
-// Change requests (managed-cloud; ServiceNow data source only)
+// Change requests (managed-cloud; backing data source only)
 // ---------------------------------------------------------------------------
 
 export type BeChangeRequestState =
@@ -2653,16 +2653,15 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   legalNextStates?: string[];
 
   // --- CR field parity (2026-08-20) -----------------------------------
-  // 20 keys the ServiceNow layer newly exposes on `GET /change-requests/{id}`
+  // 20 keys the backing system layer newly exposes on `GET /change-requests/{id}`
   // (and therefore also the PATCH receipt, which returns the same mapper).
   // Deliberately absent from the search/list view — the summary mapper was
   // left untouched so the list endpoint pays nothing for them.
   //
   // `priority`/`category` are read-only here on purpose: the live
-  // ServiceNow CR form has no fine-grained Priority control the portal
+  // backing-system CR form has no fine-grained Priority control the portal
   // should offer, and `category`/`categoryKey` must never get an editable
-  // control (see `notes/2026-08-19-sn-prod-cr-form-spec.md` in the planning
-  // repo) — confirmed multiple times across this workstream's decisions.
+  // control — confirmed multiple times across this workstream's decisions.
 
   /** Rich-text implementation plan. Also present (write-only) on
    * {@link BeCreateChangeRequestPayload}; this is the read-back. */
@@ -2671,11 +2670,11 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   category?: { id: string; label: string } | null;
   requestedBy?: BeEntityRef | null;
 
-  /** Real SRE content the ServiceNow layer previously never surfaced. */
+  /** Real SRE content the backing system layer previously never surfaced. */
   affectedServicesText?: string | null;
   affectedComponentsText?: string | null;
   /** Free-form; e.g. `"10 mins"`. Parsing into a structured duration, if
-   * ever needed, is CSM policy, not something ServiceNow enforces. */
+   * ever needed, is CSM policy, not something the backing system enforces. */
   rollbackDurationText?: string | null;
   environments?: BeEntityRef[];
   deploymentProducts?: BeEntityRef[];
@@ -2698,11 +2697,11 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   isPlanningVisibleToCustomers?: boolean;
   confirmCustomerUpdatedDate?: string | null;
   customerUpdatedOn?: string | null;
-  /** `read_only` in the ServiceNow dictionary — inherently read-only. */
+  /** `read_only` in the backing system dictionary — inherently read-only. */
   labels?: string[];
   deployments?: BeEntityRef[];
 
-  /** System-maintained, `read_only` in the ServiceNow dictionary. */
+  /** System-maintained, `read_only` in the backing system dictionary. */
   workStart?: string | null;
   workEnd?: string | null;
   gitReference?: string | null;
@@ -2759,7 +2758,7 @@ export interface BeChangeRequestApprovalDecisionResponse {
 }
 
 /**
- * `POST /change-requests` body (ServiceNow data source only). `subject` is
+ * `POST /change-requests` body (backing data source only). `subject` is
  * the only required field; every ID field (`groupId`, `assignedEngineerId`,
  * `requestedById`) is a portal UUID resolved server-side against the backing
  * data source, via the matching `/*\/search` endpoint (see `AsyncEntitySelect`
@@ -2771,12 +2770,12 @@ export interface BeChangeRequestApprovalDecisionResponse {
  *
  * `category`, `serviceId`, `serviceOfferingId`, `configurationItemId` and
  * `risk` are deliberately not part of this type even though the backend
- * still accepts them: the live ServiceNow CR form has no `Service`/
+ * still accepts them: the live backing-system CR form has no `Service`/
  * `Service offering`/`Configuration item`/`Risk` fields at all, and
  * `category` is left at its default on 99.9% of real change requests, so
- * neither belongs as an editable control in this portal (see
- * `notes/2026-08-19-sn-prod-cr-form-spec.md` and the field-usage census in
- * the planning repo). The backend contract is left untouched — only the
+ * neither belongs as an editable control in this portal (based on the form
+ * spec and a field-usage census of real change requests). The backend
+ * contract is left untouched — only the
  * webapp stops sending them.
  */
 export interface BeCreateChangeRequestPayload {
@@ -2814,7 +2813,7 @@ export interface BeCreateChangeRequestResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Change-request reference lookups (ServiceNow CMDB — groups, IT services,
+// Change-request reference lookups (the backing system CMDB — groups, IT services,
 // service offerings, configuration items). Each search response carries no
 // `hasMore` (same as change requests), so these don't extend
 // BeSearchResponseBase.
@@ -2960,7 +2959,7 @@ export interface BeConfigurationItemSearchResponse {
 }
 
 /**
- * `PATCH /change-requests/{id}` body (ServiceNow data source only). At least
+ * `PATCH /change-requests/{id}` body (backing data source only). At least
  * one field is required by the BE (`minProperties: 1`). `plannedStartOn` and
  * `plannedEndOn` are `YYYY-MM-DD HH:MM:SS` strings.
  *
@@ -3015,7 +3014,7 @@ export interface BePatchChangeRequestPayload {
   //   - `categoryKey` never gets an editable control (see the doc comment on
   //     `BeChangeRequestDetail.category`).
   //   - `priorityKey` has no picker in this portal yet (no metadata endpoint
-  //     for the 4 SN priority choices) — left for a follow-up.
+  //     for the 4 backing-source priority choices) — left for a follow-up.
   //   - `environmentIds`/`deploymentProductIds` have no search endpoint at
   //     this BFF (`/environments/search`, `/deployment-products/search` do
   //     not exist) — a picker cannot be built until one does.
@@ -3106,7 +3105,7 @@ export interface BeChangeRequestSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Incidents (ServiceNow data source only). Unlike change requests, every
+// Incidents (backing data source only). Unlike change requests, every
 // enum here is UPPER_SNAKE_CASE on the wire (matches
 // apps/csm-portal/backend/internal/handler/incidents.go's validation maps
 // exactly) — don't copy change requests' lowercase convention for these.
@@ -3210,7 +3209,7 @@ export interface BeIncidentWatchListItem {
  * comments, and the watch list).
  */
 export interface BeIncidentDetail extends BeIncident {
-  /** ServiceNow's incident.description field — the full free-text body, separate from the shorter Subject. */
+  /** the backing source's incident.description field — the full free-text body, separate from the shorter Subject. */
   description?: string | null;
   subcategory?: BeIncidentSubcategory | null;
   service?: BeEntityRef | null;
@@ -3231,7 +3230,7 @@ export interface BeIncidentDetail extends BeIncident {
   /**
    * Present once this incident has been handed off to a specialist group
    * (via `POST /incidents/{id}/specialist-handoffs` or the equivalent
-   * ServiceNow UI action), `null` otherwise. See
+   * The backing system UI action), `null` otherwise. See
    * {@link BeSpecialistHandoffSummary}.
    */
   specialistHandoff?: BeSpecialistHandoffSummary | null;
@@ -3241,7 +3240,7 @@ export interface BeIncidentDetail extends BeIncident {
  * `POST /incidents` body. `callerId`, `category`, `serviceId`, `impact`,
  * `urgency`, and `subject` are required by the backend
  * (`validateCreateIncidentBody` in incidents.go); everything else is
- * optional. There is no `priority` field here — ServiceNow computes it
+ * optional. There is no `priority` field here — the backing system computes it
  * server-side from `impact` × `urgency`, so it only ever appears on read
  * (see {@link BeIncident.priority}).
  */
@@ -3262,7 +3261,7 @@ export interface BeCreateIncidentPayload {
   additionalComments?: string;
   workNotes?: string;
   parentId?: string;
-  /** Links this incident to another incident as its parent (ServiceNow's
+  /** Links this incident to another incident as its parent (the backing source's
    * dedicated `parent_incident` self-reference on the Incident table) —
    * distinct from the generic `parentId` above, which links to a case,
    * change request, or problem instead. */
@@ -3299,13 +3298,13 @@ export type BeIncidentResolutionCode =
   | "NOT_ACTIONABLE";
 
 /**
- * `PATCH /incidents/{id}` body (ServiceNow data source only,
+ * `PATCH /incidents/{id}` body (backing data source only,
  * `minProperties: 1`). Covers the in-scope subset the Edit dialog sends —
  * the full `UpdateIncidentPayload` schema also documents `incidentReport` /
  * `resolvedById`, deliberately left out here since there's no read-side
  * model for them yet either (see {@link BeIncidentDetail}). `resolutionCode`
  * / `resolutionNotes` ARE included (write-only, same as `incidentReport` —
- * `IncidentDetail` never echoes them back on read) since ServiceNow requires
+ * `IncidentDetail` never echoes them back on read) since the backing system requires
  * them to move an incident to `RESOLVED`/`CLOSED` (confirmed live: those two
  * state values 500 without them).
  */
@@ -3422,7 +3421,7 @@ export interface BeIncidentSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Problems (SRE-owned; ServiceNow data source only). Enum casing mirrors
+// Problems (SRE-owned; backing data source only). Enum casing mirrors
 // incidents (UPPER_SNAKE_CASE on the wire), not change requests.
 // ---------------------------------------------------------------------------
 
@@ -3551,7 +3550,7 @@ export interface BeProblemDetail {
 }
 
 /**
- * `PATCH /problems/{id}` body (ServiceNow data source only, `minProperties:
+ * `PATCH /problems/{id}` body (backing data source only, `minProperties:
  * 1`). Two mutually-non-exclusive shapes in one payload: a `transition`
  * request may also carry any of the plain-field keys in the same call (this
  * is in fact required for `assess` on a bare New problem with no prior
@@ -3563,14 +3562,14 @@ export interface BeUpdateProblemPayload {
    * live 6-state forward chain `New -> Assess -> Root Cause Analysis -> Fix
    * in Progress -> Resolved -> Closed`. Deliberately typed as a plain
    * string, not a closed union, mirroring every layer below this one
-   * (ServiceNow, Ballerina, Go entity-service, CSM BFF): a closed-enum
-   * check here would swallow ServiceNow's own actionable "Invalid
+   * (backing system, proxy layer, entity-service, BFF): a closed-enum
+   * check here would swallow the backing source's own actionable "Invalid
    * transition: ...must be one of: ..." error behind a generic one. Do not
    * add client-side value validation beyond the state-machine-driven
    * button set already in `getNextProblemTransition`.
    *
    * A bare `assess` on a New problem with no existing owner 409s (a real
-   * ServiceNow precondition: Problem Management requires an owner before
+   * The backing system precondition: Problem Management requires an owner before
    * any state move) — pair it with `assignedToId` in the same request,
    * which is also enough on its own to trigger `assess` as a side effect
    * (see `assignedToId` below).
@@ -3578,7 +3577,7 @@ export interface BeUpdateProblemPayload {
   transition?: string;
   /**
    * Setting this on a New problem with no prior owner auto-promotes it to
-   * Assess as a ServiceNow business-rule side effect, even with no
+   * Assess as a backing-system business-rule side effect, even with no
    * `transition` key present — the response (and the refetched detail)
    * always reflects the real resulting state, never the caller's
    * assumption.
@@ -3592,9 +3591,9 @@ export interface BeUpdateProblemPayload {
   workaround?: string;
   /**
    * `YYYY-MM-DD HH:mm:ss`. Backed by the generic `task.due_date` column —
-   * confirmed writable and persistent, but **not on the native ServiceNow
+   * confirmed writable and persistent, but **not on the native backing system
    * Problem form at all**, so a value set here won't be visible to an SRE
-   * looking at the record in ServiceNow directly.
+   * looking at the record in the backing system directly.
    */
   targetResolutionDate?: string;
 }
@@ -3657,15 +3656,15 @@ export interface BeIncidentTaskSearchResponse {
 }
 
 /**
- * `POST /problems` body (ServiceNow data source only). `subject` is the only
+ * `POST /problems` body (backing data source only). `subject` is the only
  * required field. There is no `priority` field — priority is not settable on
- * create (SN computes/defaults it server-side, confirmed by live testing), so
+ * create (the backing source computes/defaults it server-side, confirmed by live testing), so
  * it's deliberately omitted here and from the create form.
  */
 export interface BeCreateProblemPayload {
   subject: string;
   // Sanitized rich-text HTML (see sanitizeRichTextHtml), same convention as
-  // BeCreateCaseRequest.description. Not yet forwarded to ServiceNow — see
+  // BeCreateCaseRequest.description. Not yet forwarded to the backing system — see
   // entity-service's own CreateProblem doc comment.
   description?: string;
   category?: string;
@@ -3675,7 +3674,7 @@ export interface BeCreateProblemPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Product vulnerabilities (managed-cloud; ServiceNow data source only)
+// Product vulnerabilities (managed-cloud; backing data source only)
 // ---------------------------------------------------------------------------
 
 /** Priority enum for product vulnerabilities. */
@@ -3761,7 +3760,7 @@ export interface BeTimeCardCaseRef {
 export interface BeTimeCardView {
   id: string;
   totalTime: number;
-  /** ServiceNow rich-text HTML (same convention as the log-time form's
+  /** The backing system rich-text HTML (same convention as the log-time form's
    * editor) — sanitize with `sanitizeRichTextHtml` before rendering. */
   workLogComment?: string;
   /**
@@ -3780,7 +3779,7 @@ export interface BeTimeCardView {
   user?: BeTimeCardRef;
   /**
    * The approver who accepted the card — populated **only** when `state` is
-   * `approved`. ServiceNow does not record who rejected a card, so this is null
+   * `approved`. The backing system does not record who rejected a card, so this is null
    * for a `rejected` card (and for an undecided one); see {@link rejectionReason}.
    */
   approvedBy?: BeTimeCardRef | null;
@@ -3793,7 +3792,7 @@ export interface BeTimeCardView {
   project?: BeTimeCardRef;
   case?: BeTimeCardCaseRef;
   /**
-   * The engineers eligible to decide this card (SN `approver_list`). Not in
+   * The engineers eligible to decide this card (backing-source `approver_list`). Not in
    * the BFF's `openapi.yaml` (stale doc — `time-cards` responses are a raw
    * passthrough of the entity-service's `TimeCardView`, which does return
    * this), but confirmed present on the wire. Used to gate the "Review"
@@ -3815,7 +3814,7 @@ export interface BeTimeCardView {
 /**
  * `entity-service`'s `openapi.yaml` also documents a `caseId` filter here
  * (and it's genuinely implemented end-to-end, forwarded through to
- * ServiceNow) — deliberately omitted: confirmed live to be non-functional,
+ * The backing system) — deliberately omitted: confirmed live to be non-functional,
  * always returning `total: 0` even for a case with cards provably matching
  * that exact id. See the note on `useCaseTimeCards` in `useTimeCards.ts`
  * before re-adding it.
@@ -3828,10 +3827,10 @@ export interface BeSearchTimeCardsFilters {
   userId?: string;
   /** Only time cards submitted by any of these users (multi-engineer filter). */
   userIds?: string[];
-  /** Only time cards this user is eligible to approve (SN `approver_list`);
+  /** Only time cards this user is eligible to approve (backing-source `approver_list`);
    * the caller's own cards are excluded unconditionally when this is set. */
   approverId?: string;
-  /** Only time cards actually approved by this user (SN `approved_by`). */
+  /** Only time cards actually approved by this user (backing-source `approved_by`). */
   approvedById?: string;
   /** ISO 8601 date (YYYY-MM-DD). */
   startDate?: string;
@@ -3875,7 +3874,7 @@ export interface BeCreateTimeCardPayload {
  * Either editable fields (no `state`), or a state transition (`state`:
  * "approved", or "rejected" with a `leadComment`) — mutually exclusive, per
  * the backend contract, and enforced server-side as submitter-only +
- * `submitted`-state-only (matches ServiceNow's own edit-in-place behavior).
+ * `submitted`-state-only (matches the backing source's own edit-in-place behavior).
  * Confirmed live: a content-fields PATCH with no `state` key persists and
  * round-trips correctly on the next search.
  */
@@ -3910,7 +3909,7 @@ export interface BeDeleteTimeCardResponse {
 /**
  * Minimal shape read out of `POST /users/search`'s response for the
  * email-to-id resolution lookup (see `useResolvedUserId`). The full response
- * is a `oneOf` (postgres `User` vs ServiceNow `SnUser` — see
+ * is a `oneOf` (postgres `User` vs the backing system `SnUser` — see
  * `features/csm-users/types/csmUsers.ts`), but `id`/`email` are common to
  * both and are all this lookup reads.
  */
@@ -4380,7 +4379,7 @@ export interface BeSmartAlertDetail {
 }
 
 // ---------------------------------------------------------------------------
-// Outages (ServiceNow data source only, `cmdb_ci_outage`). Seven resources —
+// Outages (backing data source only, `cmdb_ci_outage`). Seven resources —
 // see `entity-service/internal/domain/entity.go`'s "Outages" section, which
 // this mirrors field-for-field since the BFF is a raw passthrough here.
 // `status` is always derived (never stored/sent): `in_progress` while `end`
@@ -4607,10 +4606,10 @@ export interface BeOutageMetadataResponse {
 // ---------------------------------------------------------------------------
 // Incident specialist handoff (`POST /incidents/{id}/specialist-handoffs`).
 // Reproduces the "Escalate to Special Ops" workflow: hands an in-progress
-// incident (Choreo or Asgardeo only — anything else is a 409) to the
+// incident (Choreo or the identity provider only — anything else is a 409) to the
 // specialist group for that service, opens a `[Runbook Task]` incident task,
 // and files an internal GitHub issue. The GitHub step is best-effort: it
-// never gates the ServiceNow state, so a 200 can still carry
+// never gates the backing system state, so a 200 can still carry
 // `githubIssueError` — always check it and surface it distinctly rather than
 // reporting a clean success.
 // ---------------------------------------------------------------------------
@@ -4647,7 +4646,7 @@ export interface BeIncidentHandoffResult {
   task: BeHandoffTaskRef;
   githubIssue: BeHandoffGithubIssueRef | null;
   /**
-   * Non-null when the ServiceNow state committed successfully but the
+   * Non-null when the backing system state committed successfully but the
    * internal GitHub issue could not be created (e.g. `"GitHub issue creation
    * failed (401)"`). The handoff itself still succeeded — never treat this
    * response as a failure — but the receiving specialist team's GitHub
@@ -4667,7 +4666,7 @@ export interface BeHandOffIncidentResponse {
 /**
  * Summary of a specialist handoff, embedded on `GET /incidents/{id}` as
  * `specialistHandoff` (`null` when the incident was never handed off — either
- * through this API or the ServiceNow UI button; the read side derives it from
+ * through this API or the backing system UI button; the read side derives it from
  * the incident's own journal/assignment-group state either way).
  */
 export interface BeSpecialistHandoffSummary {

@@ -25,6 +25,22 @@ export default defineConfig([
       // `ignoreRestSiblings` to false, so the deliberately-unused binding is
       // reported as an error; opting in is the option's intended use.
       '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+      // Markup and navigation sinks. Warn (not error) while the remaining
+      // call sites are migrated; flip to 'error' once the count reaches zero.
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "AssignmentExpression[left.type='MemberExpression'][left.property.name='innerHTML']",
+          message:
+            'Do not assign innerHTML. Build DOM nodes, or render sanitised markup through renderTrustedHtml (@utils/renderTrustedHtml).',
+        },
+        {
+          selector:
+            "CallExpression[callee.object.name='window'][callee.property.name='open'][arguments.length<3]",
+          message:
+            'Do not call window.open without a features argument. Use openExternalUrl (@utils/openExternalUrl) for external URLs, or pass "noopener,noreferrer" for same-origin paths.',
+        },
+      ],
     },
   },
 ])

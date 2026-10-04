@@ -57,11 +57,9 @@ describe("sanitizeRichTextHtml", () => {
   });
 
   it("keeps the call-request in-app marker's data attribute, role, and tabindex", () => {
-    // `replaceCallRequestLinks` runs *after* `sanitizeRichTextHtml` in
-    // `CsmCaseCommentBubble`'s actual pipeline, so this marker is never
-    // itself passed back through DOMPurify there — but it's still worth
-    // pinning that DOMPurify's default policy (`ALLOW_DATA_ATTR` on by
-    // default) wouldn't strip it if that ordering ever changed.
+    // The marker is built by a DOM transform and then goes through the final
+    // sanitise in `renderTrustedHtml`, so DOMPurify's default policy
+    // (`ALLOW_DATA_ATTR` on by default) must keep it.
     const out = sanitizeRichTextHtml(
       '<span data-call-request-sysid="7a43e2d4-3b2a-4b50-9140-4c6aa5e45a41" role="button" tabindex="0">CTASK0012345</span>',
     );
@@ -147,7 +145,7 @@ describe("stripLightModeInlineStyles", () => {
     expect(cyan).toContain("color: #2fffff");
   });
 
-  it("removes a light pastel background (e.g. a ServiceNow call-note highlight)", () => {
+  it("removes a light pastel background (e.g. a call-note highlight)", () => {
     const out = stripLightModeInlineStyles(
       '<div style="background-color: #bce4e8; padding: 0.01em 16px;">x</div>',
     );

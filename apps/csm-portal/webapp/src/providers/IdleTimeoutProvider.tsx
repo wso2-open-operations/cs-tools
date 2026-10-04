@@ -24,6 +24,7 @@ import {
   IDLE_THROTTLE_MS,
 } from "@constants/authConstants";
 import { clearUserPreferredTimeZone } from "@utils/dateTime";
+import { SIGNING_OUT_EVENT } from "@utils/sessionCleanup";
 import { useLogger } from "@/hooks/useLogger";
 
 interface IdleTimeoutProviderProps {
@@ -32,7 +33,8 @@ interface IdleTimeoutProviderProps {
 
 /**
  * Provider that detects user idle time and shows a session warning dialog
- * before timeout. Continue resets the timer; Logout signs out.
+ * before timeout. Continue resets the timer; Logout signs out, and so does
+ * letting the prompt run out.
  *
  * @param {IdleTimeoutProviderProps} props - children.
  * @returns {JSX.Element} Children wrapped with idle timeout behavior.
@@ -50,15 +52,32 @@ export default function IdleTimeoutProvider({
     }
   };
 
-  // TODO(idle-auto-signout): wire onIdle to auto-sign-out when the user
-  // doesn't respond to the prompt within IDLE_PROMPT_BEFORE_MS. Currently the
-  // "Are you still there?" dialog only prompts; if the user is fully idle the
-  // session is never terminated. Tracked separately from the initial PR.
+  // Ends the session: the signing-out event lets the central cleanup listener
+  // drop app-owned storage and the query cache, then the IdP session is closed.
+  const endSession = async () => {
+    setSessionWarningOpen(false);
+    clearUserPreferredTimeZone();
+    window.dispatchEvent(new CustomEvent(SIGNING_OUT_EVENT));
+    try {
+      await signOut();
+    } catch {
+      logger.error("Error signing out");
+    }
+  };
+
+  // When the user doesn't respond to the prompt within IDLE_PROMPT_BEFORE_MS
+  // the timer goes idle and the session is ended. `crossTab` keeps one timer
+  // across tabs, so activity in any tab keeps every tab signed in and idling
+  // out signs out all of them.
   const { activate } = useIdleTimer({
     onPrompt,
+    onIdle: () => {
+      if (isSignedIn) void endSession();
+    },
     timeout: IDLE_TIMEOUT_MS,
     promptBeforeIdle: IDLE_PROMPT_BEFORE_MS,
     throttle: IDLE_THROTTLE_MS,
+    crossTab: true,
   });
 
   const handleContinue = () => {
@@ -66,16 +85,7 @@ export default function IdleTimeoutProvider({
     activate();
   };
 
-  const handleLogout = async () => {
-    setSessionWarningOpen(false);
-    clearUserPreferredTimeZone();
-    window.dispatchEvent(new CustomEvent("app:signing-out"));
-    try {
-      await signOut();
-    } catch {
-      logger.error("Error signing out");
-    }
-  };
+  const handleLogout = endSession;
 
   return (
     <>

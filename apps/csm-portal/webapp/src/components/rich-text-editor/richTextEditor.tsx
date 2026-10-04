@@ -334,7 +334,7 @@ export function collapseEmptyParagraphElements(dom: Document): boolean {
  * text run has no other reason to be wrapped in a span once that style is
  * gone.
  *
- * Per digiops-cs#2933: this HTML is only ever read by renderers we control
+ * This HTML is only ever read by renderers we control
  * (CSM Portal, Customer Portal), both via `dangerouslySetInnerHTML` in
  * components we own -- Lexical's own source comment says the per-span style
  * exists "for headless mode where people might use Lexical to generate HTML
@@ -347,8 +347,8 @@ export function collapseEmptyParagraphElements(dom: Document): boolean {
  * this on the generation side once *every* consumer that renders this HTML
  * declares `white-space: pre-wrap` on its own container CSS. A consumer that
  * doesn't will silently collapse multi-space runs and leading/trailing
- * spaces in newly generated comments. See digiops-cs#2933 for the full
- * rollout requirement across both apps.
+ * spaces in newly generated comments. This is a rollout requirement across
+ * both apps.
  */
 export function stripWhitespaceStyleAndUnwrapSpans(dom: Document): boolean {
   const body = dom.body;

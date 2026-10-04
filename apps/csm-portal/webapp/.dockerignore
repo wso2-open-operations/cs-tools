@@ -1,0 +1,23 @@
+# Build context for docker/local/csm-portal-webapp.Dockerfile.
+#
+# Dependencies are installed and the app is built inside the image. A host
+# node_modules -- a pnpm symlink farm pointing at paths that do not exist in
+# the image -- copied over the clean install makes every import fail to
+# resolve, and it is ~530MB of context besides. Build output, test artefacts
+# and per-machine config never belong in the context either.
+node_modules
+dist
+dist-ssr
+.vite
+coverage
+playwright-report
+test-results
+blob-report
+playwright/.cache
+tests/
+public/config.js
+.env
+.env.*
+*.local
+*.md
+.git

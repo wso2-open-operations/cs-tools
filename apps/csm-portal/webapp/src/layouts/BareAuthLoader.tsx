@@ -20,7 +20,7 @@ import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallb
 
 /**
  * `AuthGuard`'s own `loader` for a `bare` route (see `AuthGuardProps`) while
- * the Asgardeo sign-in flow is still resolving — a full-viewport, chrome-free
+ * the identity provider sign-in flow is still resolving — a full-viewport, chrome-free
  * equivalent of `AppLayout`'s own loading state (no header/sidebar/banners,
  * matching what the route itself renders once signed in). Kept as its own
  * small component, not inlined in `AuthGuard`, so a `bare` route's loading

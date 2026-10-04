@@ -14,8 +14,37 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import * as OxygenUI from "@wso2/oxygen-ui";
+import {
+  AcrylicOrangeTheme,
+  AcrylicPurpleTheme,
+  ClassicTheme,
+  HighContrastTheme,
+  OxygenTheme as OxygenBaseTheme,
+  PaleBaseTheme,
+  PaleGrayTheme,
+  PaleIndigoTheme,
+  WSO2Theme,
+} from "@wso2/oxygen-ui";
 import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
+
+/**
+ * Every theme `@wso2/oxygen-ui` exports, by export name. Named imports (not
+ * `import * as`) so the bundler can tree-shake the rest of the package; the
+ * derivation below still turns each name into its key/label. When an
+ * oxygen-ui upgrade adds a theme, add it here — `themeConfig.test.ts` fails
+ * until you do.
+ */
+const OXYGEN_THEME_EXPORTS: Record<string, unknown> = {
+  AcrylicOrangeTheme,
+  AcrylicPurpleTheme,
+  ClassicTheme,
+  HighContrastTheme,
+  OxygenTheme: OxygenBaseTheme,
+  PaleBaseTheme,
+  PaleGrayTheme,
+  PaleIndigoTheme,
+  WSO2Theme,
+};
 
 const THEME_EXPORT_SUFFIX = "Theme";
 
@@ -94,7 +123,7 @@ function deriveThemeMeta(exportName: string): { key: string; label: string } {
  * future oxygen-ui release adding or removing a theme doesn't need a manual
  * edit here.
  */
-const DERIVED_THEME_ENTRIES = Object.entries(OxygenUI)
+const DERIVED_THEME_ENTRIES = Object.entries(OXYGEN_THEME_EXPORTS)
   .filter(
     ([name, value]) =>
       name.endsWith(THEME_EXPORT_SUFFIX) && isOxygenThemeValue(value),

@@ -411,8 +411,7 @@ const PDF_BLOCK_TAGS = new Set([
 export function htmlToPdfPlainText(html: string): string {
   if (!html) return "";
   const safeHtml = sanitizeRichTextHtml(html);
-  const container = document.createElement("div");
-  container.innerHTML = safeHtml;
+  const container = new DOMParser().parseFromString(safeHtml, "text/html").body;
 
   let out = "";
   const walk = (node: ChildNode): void => {

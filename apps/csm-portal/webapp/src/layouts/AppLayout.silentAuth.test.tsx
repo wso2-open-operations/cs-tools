@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // Regression test for the "silent re-auth stretches the UI" bug: once the
 // app has initialized (a real page has been shown at least once), a LATER
-// transient flip of the Asgardeo SDK's `isLoading` flag -- which happens
+// transient flip of the identity provider SDK's `isLoading` flag -- which happens
 // when `useAuthApiClient.ts`'s recovery chain calls `signIn()` to force a
 // full re-authentication redirect after a dead refresh token, shortly
 // before the browser actually navigates away -- must NOT collapse the
@@ -50,10 +50,6 @@ const asgardeoState: { isLoading: boolean; isSignedIn: boolean } = {
 };
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({ ...asgardeoState }),
-}));
-
-vi.mock("@context/linear-loader/LoaderContext", () => ({
-  useLoader: () => ({ isVisible: false }),
 }));
 vi.mock("@context/error-page/ErrorPageContext", () => ({
   useErrorPageContext: () => ({ isErrorPageDisplayed: false }),

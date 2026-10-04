@@ -17,6 +17,7 @@
 import { type JSX, type ReactNode } from "react";
 import { Navigate } from "react-router";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
+import { useProfileUnknown } from "@context/current-user/useProfileStatus";
 
 interface RequireWriteAccessProps {
   /** Where a caller without canWrite is sent instead — the list page this
@@ -39,7 +40,10 @@ interface RequireWriteAccessProps {
  */
 export default function RequireWriteAccess({ to, children }: RequireWriteAccessProps): JSX.Element {
   const { canWrite } = usePortalAccess();
-  if (!canWrite) {
+  // While the profile is loading or failed to load, `canWrite` is "unknown",
+  // not false: don't redirect on it (the backend still gates the submit).
+  const profileUnknown = useProfileUnknown();
+  if (!canWrite && !profileUnknown) {
     return <Navigate to={to} replace />;
   }
   return <>{children}</>;

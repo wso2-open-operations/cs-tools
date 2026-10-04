@@ -45,7 +45,7 @@ window.config = {
   // TEMPORARY / LOCAL DEV ONLY. Bypasses the post-sign-in *authorization*
   // checks (portal-role gate, per-section capabilities, SPL audience gate)
   // for an account the real backend hasn't provisioned a portal role for
-  // yet — does NOT touch Asgardeo sign-in itself. See
+  // yet — does NOT touch identity provider sign-in itself. See
   // src/config/authConfig.ts's devBypassAccessCheck. Leave unset/false here
   // and in any committed config — only set true in your own local,
   // gitignored config.js.
@@ -55,7 +55,7 @@ window.config = {
   // ("cs-abt" or "sales-sa") the app renders — see
   // src/context/current-user/usePortalView.ts. Leave unset to let it decide
   // for itself (defaults to "cs-abt" under the bypass above, or the real
-  // Asgardeo-groups check once that flag is off). Leave unset/false here and
+  // IdP-groups check once that flag is off). Leave unset/false here and
   // in any committed config.
   // CSM_PORTAL_DEV_VIEW_OVERRIDE: "sales-sa",
 
@@ -137,7 +137,7 @@ window.config = {
   CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: false,
 
   // Project key an announcement's "Send test" dry run creates its one real
-  // test case in (mirrors the ServiceNow flow's own hardcoded
+  // test case in (mirrors the backing-system flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when
   // unset -- override only if this environment needs a different sandbox project.
   // CSM_PORTAL_ANNOUNCEMENT_TEST_PROJECT_KEY: "DCPSUB",

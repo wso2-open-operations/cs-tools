@@ -15,7 +15,7 @@
 // under the License.
 
 // Module-scope, shared by every caller across the app (AuthGuard's route-mount
-// check and useAuthApiClient's fetch-401 recovery both call this). The Asgardeo
+// check and useAuthApiClient's fetch-401 recovery both call this). The identity provider
 // SDK's `signInSilently()` opens its own hidden iframe per invocation with no
 // coordination of its own — if two independent callers each notice the same
 // expired token and call it separately, the app ends up running two

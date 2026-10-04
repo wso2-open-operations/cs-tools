@@ -22,7 +22,7 @@ export function displayUserTimezone(timezone: string | null | undefined): string
 
 /**
  * Human label for a user's `userType`. The two backing data sources disagree
- * on the external-user label (postgres emits `customer`, ServiceNow emits
+ * on the external-user label (postgres emits `customer`, the backing system emits
  * `external` — see `csmUsers.ts`'s own `UserType` doc comment), so both map
  * to the same "External (customer)" label here rather than asking every
  * caller to know about the discrepancy.
