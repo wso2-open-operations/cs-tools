@@ -18,11 +18,15 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 )
@@ -55,7 +59,31 @@ func contextWithUserIDToken(token string) context.Context {
 	middleware.UserIDToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured = r.Context()
 	})).ServeHTTP(httptest.NewRecorder(), req)
-	return captured
+	// The auth middleware is not in this chain, so stamp the identity it
+	// would have attached: validated, carrying the token's email claim (or
+	// no user at all when there is no token), the same way the production
+	// chain hands it to the services.
+	return auth.WithIdentity(captured, auth.Identity{Validated: true, UserEmail: emailClaimOfFakeJWT(token)})
+}
+
+// emailClaimOfFakeJWT reads the email claim from a token fakeJWTWithEmail
+// built; "" for no token or one without that claim.
+func emailClaimOfFakeJWT(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return claims.Email
 }
 
 func TestSNCaseGithubIssueService_CreateCaseGithubIssue_Validation(t *testing.T) {

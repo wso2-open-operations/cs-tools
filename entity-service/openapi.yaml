@@ -81,6 +81,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found (membership ingest only — the project or account the membership refers to is not in this database).
           content:
@@ -170,7 +182,7 @@ paths:
       summary: >-
         Search the onboarding status ledger (onboarding_step): one row per
         membership per step (IDENTITY, DATABASE, EMAIL, REGISTRATION, WELCOME_EMAIL), newest
-        first. Backs the onboarding dashboard. Has no ServiceNow equivalent —
+        first. Backs the onboarding dashboard. Has no external-system equivalent —
         always backed by Postgres; 404 without a pool.
       operationId: searchOnboardingSteps
       requestBody:
@@ -457,8 +469,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -487,8 +517,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -521,6 +569,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Row not found.
           content:
@@ -533,16 +593,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /sla-status:
     get:
       summary: >-
         List every currently-active SLA clock (one entry per case-like work
         item and SLA policy target: response/workaround/resolution), read
-        live from the "sla" table ServiceNow's own SLA engine populates via
+        live from the "sla" table the external system's own SLA engine populates via
         sync. Replaces the old sla-clocks endpoints — see
         SLAStatus's own doc comment for what changed and why. Has no
-        ServiceNow equivalent of its own — always backed by Postgres.
+        external-system equivalent of its own — always backed by Postgres.
       operationId: searchActiveSLAStatuses
       parameters:
         - name: limit
@@ -576,7 +642,7 @@ paths:
   /announcement-requests:
     post:
       summary: >-
-        Create a new announcement request in state draft. Has no ServiceNow
+        Create a new announcement request in state draft. Has no external-system
         equivalent — always backed by Postgres.
       operationId: createAnnouncementRequest
       requestBody:
@@ -1252,8 +1318,8 @@ paths:
     get:
       summary: >-
         The public cloud status dashboard's monitor view for one cloud, keyed
-        by region and grouped as the page renders it. Replaces the ServiceNow
-        Scripted REST API `monitors` that wso2-enterprise/uptime-dashboard
+        by region and grouped as the page renders it. Replaces the external system
+        scripted endpoint `monitors` that the public cloud status dashboard
         calls today; the response shape is that dashboard's and is reproduced
         field for field.
       operationId: getCloudStatusMonitors
@@ -1265,7 +1331,7 @@ paths:
             type: string
             enum: [asgardeo, choreo, bijira, devant, moesif, choreo-eu, agent-manager]
           description: >-
-            Seven clouds, where the ServiceNow script accepted five. choreo-eu
+            Seven clouds, where the external-system script accepted five. choreo-eu
             and agent-manager have monitors and a dashboard but have never
             been reachable, because the notification flow's URL script has no
             branch for them.
@@ -1333,10 +1399,10 @@ paths:
     get:
       summary: >-
         Weighted uptime for one cloud, one figure per region per window.
-        Replaces the ServiceNow Scripted REST API `/availabilities`. Each
+        Replaces the legacy scripted endpoint `/availabilities`. Each
         region's figure is a weighted average over the service offerings
         beneath one parent service; the weights are a product decision that
-        exists only in the deployed ServiceNow script and is reproduced
+        exists only in the deployed external-system script and is reproduced
         verbatim, not recomputed.
       operationId: getCloudStatusAvailabilities
       parameters:
@@ -1376,7 +1442,7 @@ paths:
     get:
       summary: >-
         The 90-day daily uptime chart for one cloud, nested region → group →
-        monitor. Replaces the ServiceNow Scripted REST API `/history`. Unlike
+        monitor. Replaces the legacy scripted endpoint `/history`. Unlike
         the availabilities endpoint this one applies no weighting at all.
       operationId: getCloudStatusAvailabilityHistory
       parameters:
@@ -1415,11 +1481,10 @@ paths:
   /cloud-status/incidents/{id}:
     get:
       summary: >-
-        One outage's public detail view. Replaces the ServiceNow Scripted
-        REST API `/incident/{sys_id}`.
+        One outage's public detail view. Replaces the legacy scripted endpoint `/incident/{record id}`.
       description: >
         *** THE 200 BODY HAS TWO SHAPES, AND THE SPARSE ONE IS THE COMMON
-        CASE. *** The ServiceNow script builds its payload from an incident
+        CASE. *** The external-system script builds its payload from an incident
         lookup gated on state, then assigns attachments onto whatever came
         back. An outage with no linked incident — or one whose incident is
         still New, On Hold or Canceled — therefore yields an object carrying
@@ -1431,7 +1496,7 @@ paths:
         `comments` come from the outage's external communications, NOT from
         the linked incident's comments. Postgres holds incident comments,
         work notes and approval history; publishing those here would put
-        internal commentary on a public page, and ServiceNow does not.
+        internal commentary on a public page, and the external system does not.
 
 
         `attachments` is always empty: nothing in Postgres stores outage
@@ -1532,7 +1597,7 @@ paths:
       summary: >-
         Internal-caller-only. Re-derives which outage transitions the public
         cloud status dashboards are owed and records any not already recorded.
-        Decides only — sends nothing. The port of ServiceNow's `Cloud Status
+        Decides only — sends nothing. The port of the external system's `Cloud Status
         Event Notification Flow`; invoked by operations/csm-scheduled-tasks'
         cloud_status_webhooks sub-cron immediately before it delivers.
         Idempotent: a sweep that finds nothing new records nothing, which is
@@ -1545,8 +1610,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CloudStatusSweepResult'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1566,8 +1649,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PendingCloudStatusWebhooks'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: InternalServerError.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1603,6 +1704,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No such webhook.
           content:
@@ -1615,6 +1728,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /scheduled-tasks/attempts:
     post:
       summary: >-
@@ -1622,7 +1741,7 @@ paths:
         claim it if so. Backs operations/csm-scheduled-tasks' engine — see
         that component's own CLAUDE.md and this service's CLAUDE.md
         ("Scheduled task runs") for the full decision table. Has no
-        ServiceNow equivalent — always backed by Postgres.
+        external-system equivalent — always backed by Postgres.
       operationId: attemptScheduledTaskRun
       requestBody:
         required: true
@@ -1643,6 +1762,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -1651,6 +1782,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1681,6 +1818,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -1689,6 +1838,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1722,6 +1877,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -1730,6 +1897,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1774,6 +1947,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No such run, or the claim is no longer active.
           content:
@@ -1786,6 +1971,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /alert-incident-mappings:
     post:
@@ -1793,7 +1984,7 @@ paths:
         Record that a monitoring alert contributed to a CSM incident — e.g. a
         firing event and a later resolved event for the same underlying
         condition both map onto the same incident rather than each creating
-        its own. Has no ServiceNow equivalent — always backed by Postgres.
+        its own. Has no external-system equivalent — always backed by Postgres.
       operationId: createAlertIncidentMapping
       requestBody:
         required: true
@@ -1814,6 +2005,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: alertNumber is already mapped to an incident.
           content:
@@ -1822,6 +2025,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1854,8 +2063,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -1866,7 +2093,7 @@ paths:
       summary: Get the profile of the currently authenticated user.
       description: >
         Returns profile fields for the user identified by the x-user-id-token header.
-        Supported by the ServiceNow data source only.
+        Supported by the external data source only.
       operationId: getUserMe
       responses:
         "200":
@@ -1891,7 +2118,7 @@ paths:
       summary: Update the profile of the currently authenticated user.
       description: >
         Updates mutable profile fields for the user identified by the x-user-id-token header.
-        Supported by the ServiceNow data source only.
+        Supported by the external data source only.
       operationId: patchUserMe
       requestBody:
         required: true
@@ -2161,7 +2388,7 @@ paths:
       description: >
         Inserts a new "user" row and, if `roles` is supplied, grants each role
         via `user_role` in the same transaction. Postgres-only — always
-        404s on the ServiceNow data source. The acting caller is resolved
+        404s on the external data source. The acting caller is resolved
         from `x-user-id-token` and stamped as `createdBy`/`updatedBy`.
         `roles` also decides `userType`, since `recompute_user_type`'s trigger
         derives it from role membership rather than a plain settable column —
@@ -2201,7 +2428,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: Not available on the ServiceNow data source.
+          description: Not available on the external data source.
           content:
             application/json:
               schema:
@@ -2231,7 +2458,7 @@ paths:
       description: >
         Returns the user row plus group and team membership, and for external contacts
         their per-project access with the reason access is or is not granted. Served by
-        both data sources: `SNUserDetail` on ServiceNow, `UserDetail` on postgres (which
+        both data sources: `SNUserDetail` on the external system, `UserDetail` on postgres (which
         has no lock-out, time zone or per-project notification data, so those fields are
         omitted rather than reported). A deactivated user is still returned — that state
         is usually the answer the caller is looking for.
@@ -2276,7 +2503,7 @@ paths:
     post:
       summary: Search users with optional filters, sort, and pagination.
       description: >
-        Returns a paginated list of users. When the data source is ServiceNow
+        Returns a paginated list of users. When the data source is the external system
         the response uses `SNUser` (name, timeZone, active, roles); when the
         data source is postgres it uses `User` (firstName, lastName, userType).
         Both data sources accept `sortBy`; on postgres `name` sorts
@@ -2336,6 +2563,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Account not found.
           content:
@@ -2348,10 +2587,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: Set an account's CRE and/or SRE team.
       description: |
-        Postgres data source only; there is no ServiceNow equivalent. Provide `creTeamId`,
+        Postgres data source only; there is no external-system equivalent. Provide `creTeamId`,
         `sreTeamId`, or both. A field left out of the request body leaves that team assignment
         unchanged; there is currently no way to clear an assignment back to no team once set.
       operationId: patchAccountTeams
@@ -2381,6 +2626,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Account not found.
           content:
@@ -2389,6 +2646,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -2418,6 +2681,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Team not found.
           content:
@@ -2426,6 +2701,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -2457,8 +2738,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -2495,6 +2794,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Account not found.
           content:
@@ -2507,13 +2818,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /opportunities/search:
     post:
       summary: Search opportunities.
       description: >
         On Postgres, read from the Salesforce-ingested sf_* tables and limited to
-        internal callers (403 otherwise); on ServiceNow, from the Table API.
+        internal callers (403 otherwise); on the external system, from the Table API.
       operationId: searchOpportunities
       requestBody:
         required: false
@@ -2608,7 +2925,7 @@ paths:
       summary: Search invoices.
       description: >
         On Postgres, read from the Salesforce-ingested sf_* tables and limited to
-        internal callers (403 otherwise); on ServiceNow, from the Table API.
+        internal callers (403 otherwise); on the external system, from the Table API.
       operationId: searchInvoices
       requestBody:
         required: false
@@ -2703,7 +3020,7 @@ paths:
       summary: Search project-opportunity links.
       description: >
         On Postgres, read from the Salesforce-ingested sf_* tables and limited to
-        internal callers (403 otherwise); on ServiceNow, from the Table API. A project can have more than one linked
+        internal callers (403 otherwise); on the external system, from the Table API. A project can have more than one linked
         opportunity — one row per link — so this always returns a list. No by-id
         fetch: the underlying data has no single-record endpoint.
       operationId: searchProjectOpportunityLinks
@@ -2805,7 +3122,7 @@ paths:
         At least one field must be provided. closureState itself is not settable — it
         is derived from the three closure sub-states (by an SN business rule, or on
         Postgres by the same rule in the same transaction) and returned. Sub-states
-        are accepted and returned in ServiceNow Title Case, e.g. "Pending Notified".
+        are accepted and returned in the external system's Title Case, e.g. "Pending Notified".
         On Postgres, an allow-listed internal client may call without
         x-user-id-token, and suspensionProcessState is accepted but not stored.
       operationId: updateProject
@@ -3083,7 +3400,10 @@ paths:
         - name: contactId
           in: path
           required: true
-          description: The contact's e-mail address, URL-encoded.
+          description: >-
+            The contact's e-mail address, URL-encoded. GET on this same path
+            takes the contact's platform user id (UUID) in this position
+            instead.
           schema:
             type: string
             format: email
@@ -3141,7 +3461,7 @@ paths:
       summary: Get one contact's attributes for a single project.
       description: >
         Returns the contact's roles on this project, their registration state and their
-        notification preference. ServiceNow data source only. Returns 404 when the contact is
+        notification preference. External data source only. Returns 404 when the contact is
         not a contact on this project — including when their row has no linked contact record
         and therefore no id to match.
       operationId: getProjectContact
@@ -3156,6 +3476,10 @@ paths:
         - name: contactId
           in: path
           required: true
+          description: >-
+            The contact's platform user id (UUID). PATCH, DELETE and
+            resend-invitation on this same path take the contact's
+            URL-encoded e-mail address in this position instead.
           schema:
             type: string
             format: uuid
@@ -3172,6 +3496,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'The caller has no access to any project.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Contact not found on this project.
           content:
@@ -3180,6 +3516,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -3217,7 +3559,10 @@ paths:
         - name: contactId
           in: path
           required: true
-          description: The contact's e-mail address, URL-encoded.
+          description: >-
+            The contact's e-mail address, URL-encoded. GET on this same path
+            takes the contact's platform user id (UUID) in this position
+            instead.
           schema:
             type: string
             format: email
@@ -3301,7 +3646,10 @@ paths:
         - name: contactId
           in: path
           required: true
-          description: The contact's e-mail address, URL-encoded.
+          description: >-
+            The contact's e-mail address, URL-encoded. GET on this same path
+            takes the contact's platform user id (UUID) in this position
+            instead.
           schema:
             type: string
             format: email
@@ -3378,6 +3726,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller has no access to any project.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Project not found.
           content:
@@ -3386,6 +3746,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -3436,7 +3802,7 @@ paths:
       summary: Get a project's overall statistics.
       description: >-
         Available on both data sources. On Postgres, totalHours/billableHours
-        are in MINUTES despite their names, matching ServiceNow (the portal
+        are in MINUTES despite their names, matching the external system (the portal
         divides by 60 itself); instanceCount
         falls back to 0 where deployment_node is unavailable; and slaStatus
         applies the same four conditions except the project-type-derived
@@ -3484,7 +3850,7 @@ paths:
         case-like table with a severity column), the project-type-derived
         allowed-severity and allowed-case-type narrowing is not applied (no
         feature-entitlement table exists), and choice ids are the raw enum
-        labels GET /projects/{id}/metadata also returns rather than ServiceNow
+        labels GET /projects/{id}/metadata also returns rather than the external system
         choice keys. casesTrend is a fixed placeholder on both.
       operationId: getProjectCaseStats
       parameters:
@@ -3507,7 +3873,7 @@ paths:
           description: >
             Restrict to these case types, one of case/service_request/
             security_report_analysis/announcement/engagement (matching the
-            case-search type filter's vocabulary — translated to ServiceNow's
+            case-search type filter's vocabulary — translated to the external system's
             own caseTypes values internally, e.g. case → default_case).
             `default_case` is also accepted as an alias for `case` — see
             CreateCaseRequest.type's description. Repeated for multiple
@@ -3552,7 +3918,7 @@ paths:
       summary: Get a project's conversation statistics, optionally filtered by creator.
       description: >-
         Available on both data sources. On Postgres, stateCount ids are the
-        raw conversation_state_enum labels rather than ServiceNow choice keys.
+        raw conversation_state_enum labels rather than external-system choice keys.
       operationId: getProjectConversationStats
       parameters:
         - name: id
@@ -3642,7 +4008,7 @@ paths:
       summary: Get a project's time-card statistics, optionally filtered by a date range.
       description: >-
         Available on both data sources. NOTE the figures are in MINUTES
-        despite the field names: ServiceNow sums time_card.total, which holds
+        despite the field names: the external system sums time_card.total, which holds
         minutes, into fields called *Hours, and the customer portal divides by
         60 itself. Summed from the five per-activity minute columns of
         APPROVED time cards, scoped by the time card's case rather than its
@@ -3700,7 +4066,7 @@ paths:
       summary: Get a project's change-request statistics.
       description: >-
         Available on both data sources. On Postgres, stateCount ids are the raw
-        change_request_state_enum labels, whose vocabulary matches ServiceNow's
+        change_request_state_enum labels, whose vocabulary matches the external system's
         own change-request states one for one.
       operationId: getProjectChangeRequestStats
       parameters:
@@ -3741,8 +4107,8 @@ paths:
       summary: Search products by name.
       description: >
         Returns a paginated list of products matching the search query.
-        When the ServiceNow data source is active the response uses
-        SearchSNProductsResponse (no timestamp fields; class is a ServiceNow label).
+        When the external data source is active the response uses
+        SearchSNProductsResponse (no timestamp fields; class is an external-system label).
         Otherwise the response uses SearchProductsResponse.
       operationId: searchProducts
       requestBody:
@@ -3767,7 +4133,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          description: Missing or invalid x-user-id-token header (external data source only).
           content:
             application/json:
               schema:
@@ -3846,6 +4212,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No GitHub repository is mapped for this product.
           content:
@@ -3854,6 +4232,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -4033,7 +4417,7 @@ paths:
         Updates exactly one field of the case. Provide exactly one of: `state`, `severity`,
         `workState`, `watchList`, `assigneeEmail`, `acknowledge`, `bestCaseFixEta`,
         `mostLikelyFixEta`, or `worstCaseFixEta`. `bestCaseFixEta`, `mostLikelyFixEta`, and
-        `worstCaseFixEta` are supported only when the ServiceNow data source is active;
+        `worstCaseFixEta` are supported only when the external data source is active;
         `watchList`, `assigneeEmail`, and `acknowledge` are supported by every data source.
       operationId: patchCase
       parameters:
@@ -4165,7 +4549,7 @@ paths:
         (id, number, internalId, type, subject, state, createdOn, updatedOn, createdBy
         and project); every other field of the case view is null. total equals the
         number returned. More than 10,000 matches is a 400 rather than a truncated
-        list. Available on the Postgres data source only; on the ServiceNow data source
+        list. Available on the Postgres data source only; on the external data source
         the route does not exist and the registry pages POST /cases/search instead.
       operationId: searchAnnouncementRegistryCases
       requestBody:
@@ -4251,7 +4635,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: >-
-            groupBy is only supported for the ServiceNow data source.
+            groupBy is only supported for the external data source.
           content:
             application/json:
               schema:
@@ -4591,7 +4975,7 @@ paths:
     patch:
       summary: Edit an existing comment's content.
       description: >-
-        Postgres data source only (returns 503 on ServiceNow -- its journal entries are
+        Postgres data source only (returns 503 on the external system -- its journal entries are
         append-only). Only the comment's original author or a caller holding the admin role
         may edit it. The pre-edit content is preserved as a comment_edit_history row for audit;
         GET /comments/{id}/history lists them.
@@ -4650,7 +5034,7 @@ paths:
     delete:
       summary: Soft-delete a comment.
       description: >-
-        Postgres data source only (returns 503 on ServiceNow). Content is retained in the
+        Postgres data source only (returns 503 on the external system). Content is retained in the
         database but hidden from non-admin visibility: excluded entirely from a customer
         caller's results, shown as "[deleted]" to a non-admin internal caller, and shown
         unredacted to an admin caller. Only the comment's original author or an admin may
@@ -4702,7 +5086,7 @@ paths:
     get:
       summary: List a comment's edit history.
       description: >-
-        Postgres data source only (returns 503 on ServiceNow). Newest first. Only the comment's
+        Postgres data source only (returns 503 on the external system). Newest first. Only the comment's
         original author or a caller holding the admin role may view its edit history -- the same
         restriction as PATCH/DELETE on this comment, since a prior comment body can carry the
         same sensitive content the current body does.
@@ -4886,7 +5270,7 @@ paths:
 
   /cases/{id}/github-issues:
     post:
-      summary: File a GitHub issue against a product's internal repo from a support case (ServiceNow data source only).
+      summary: File a GitHub issue against a product's internal repo from a support case (external data source only).
       operationId: createCaseGithubIssue
       parameters:
         - name: id
@@ -5084,7 +5468,7 @@ paths:
         browser reports the upload succeeded. This closes the gap where a browser upload could
         succeed in SFTPGo while the metadata-registration call never lands, leaving an
         untracked orphan file. Only the actor who created the pending row may confirm it.
-        ServiceNow-sourced attachments have no such lifecycle and are rejected with 503.
+        externally sourced attachments have no such lifecycle and are rejected with 503.
       operationId: confirmCaseAttachment
       parameters:
         - name: id
@@ -5138,7 +5522,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Not supported for the ServiceNow data source.
+          description: Not supported for the external data source.
           content:
             application/json:
               schema:
@@ -5221,7 +5605,7 @@ paths:
 
   /attachments/{id}:
     get:
-      summary: Get an attachment's metadata and base64-encoded content (ServiceNow data source only).
+      summary: Get an attachment's metadata and base64-encoded content (external data source only).
       description: >
         Distinct from GET /attachments/{id}/content, which streams the raw binary. This
         endpoint returns JSON metadata plus the content as a base64 data URI.
@@ -5260,7 +5644,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update an attachment's reference, name, or description (ServiceNow data source only).
+      summary: Update an attachment's reference, name, or description (external data source only).
       operationId: updateAttachment
       parameters:
         - name: id
@@ -5293,7 +5677,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          description: Missing or invalid x-user-id-token header (external data source only).
           content:
             application/json:
               schema:
@@ -5311,13 +5695,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Attachments are only supported for the ServiceNow data source.
+          description: Attachments are only supported for the external data source.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: Delete a case attachment (ServiceNow data source only).
+      summary: Delete a case attachment (external data source only).
       operationId: deleteCaseAttachment
       parameters:
         - name: id
@@ -5594,7 +5978,7 @@ paths:
       summary: Search call requests across all cases, filtered by assignee/state.
       description: >
         Returns a paginated list of call requests. filters.assignmentTeamIds is supported by
-        the ServiceNow data source only (400 on Postgres). Call
+        the external data source only (400 on Postgres). Call
         requests are inherently case-related; this endpoint provides independent search
         and filtering capabilities across cases, distinct from /call-requests/search
         which is scoped to a single case.
@@ -5689,7 +6073,7 @@ paths:
 
   /change-requests:
     post:
-      summary: Create a change request (ServiceNow data source only).
+      summary: Create a change request (external data source only).
       operationId: createChangeRequest
       requestBody:
         required: true
@@ -5716,8 +6100,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -5726,7 +6122,7 @@ paths:
 
   /change-requests/{id}:
     patch:
-      summary: Update a change request (ServiceNow data source only).
+      summary: Update a change request (external data source only).
       operationId: patchChangeRequest
       parameters:
         - name: id
@@ -5773,7 +6169,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     get:
-      summary: Get a single change request by ID (ServiceNow data source only).
+      summary: Get a single change request by ID (external data source only).
       operationId: getChangeRequest
       parameters:
         - name: id
@@ -5816,7 +6212,7 @@ paths:
 
   /change-requests/{id}/approvals:
     get:
-      summary: Get the approval stages for a change request (ServiceNow data source only).
+      summary: Get the approval stages for a change request (external data source only).
       operationId: getChangeRequestApprovals
       parameters:
         - name: id
@@ -6012,7 +6408,7 @@ paths:
 
   /configuration-items/search:
     post:
-      summary: Search CMDB configuration items (ServiceNow data source only).
+      summary: Search CMDB configuration items (external data source only).
       operationId: searchConfigurationItems
       requestBody:
         required: true
@@ -6832,7 +7228,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /groups/search:
     post:
-      summary: Search groups (ServiceNow data source only).
+      summary: Search groups (external data source only).
       operationId: searchGroups
       requestBody:
         required: true
@@ -6869,7 +7265,7 @@ paths:
 
   /service-offerings/search:
     post:
-      summary: Search service offerings (ServiceNow data source only).
+      summary: Search service offerings (external data source only).
       operationId: searchServiceOfferings
       requestBody:
         required: true
@@ -6906,7 +7302,7 @@ paths:
 
   /services/search:
     post:
-      summary: Search CMDB IT services (ServiceNow data source only).
+      summary: Search CMDB IT services (external data source only).
       operationId: searchITServices
       requestBody:
         required: true
@@ -6943,7 +7339,7 @@ paths:
 
   /products/vulnerabilities/search:
     post:
-      summary: Search product vulnerabilities (ServiceNow data source only).
+      summary: Search product vulnerabilities (external data source only).
       operationId: searchProductVulnerabilities
       requestBody:
         required: true
@@ -6980,7 +7376,7 @@ paths:
 
   /products/vulnerabilities/{id}:
     get:
-      summary: Get a product vulnerability by ID (ServiceNow data source only).
+      summary: Get a product vulnerability by ID (external data source only).
       operationId: getProductVulnerability
       parameters:
         - name: id
@@ -7025,7 +7421,7 @@ paths:
   /products/vulnerabilities/sync:
     post:
       summary: >-
-        Full-replace sync of product vulnerabilities (ServiceNow data source only).
+        Full-replace sync of product vulnerabilities (external data source only).
       description: >-
         This is a full-replace sync, not an incremental update. The submitted items MUST be
         the complete current set of product vulnerabilities: the downstream data source
@@ -7040,6 +7436,7 @@ paths:
           application/json:
             schema:
               type: array
+              minItems: 1
               items:
                 $ref: '#/components/schemas/ProductVulnerabilitySyncItem'
       responses:
@@ -7158,7 +7555,7 @@ paths:
 
   /change-requests/search:
     post:
-      summary: Search change requests (ServiceNow data source only).
+      summary: Search change requests (external data source only).
       operationId: searchChangeRequests
       requestBody:
         required: true
@@ -7196,7 +7593,7 @@ paths:
     post:
       summary: >-
         Server-side aggregation of change requests by a single field
-        (ServiceNow data source only).
+        (external data source only).
       operationId: aggregateChangeRequests
       requestBody:
         required: true
@@ -7226,7 +7623,7 @@ paths:
 
   /time-cards/search:
     post:
-      summary: Search time cards (ServiceNow data source only).
+      summary: Search time cards (external data source only).
       operationId: searchTimeCards
       requestBody:
         required: true
@@ -7262,7 +7659,7 @@ paths:
 
   /time-cards:
     post:
-      summary: Create a time card in the submitted state (ServiceNow data source only).
+      summary: Create a time card in the submitted state (external data source only).
       operationId: createTimeCard
       requestBody:
         required: true
@@ -7289,8 +7686,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -7298,7 +7707,7 @@ paths:
 
   /time-cards/{id}:
     patch:
-      summary: Update an editable (submitted) time card (ServiceNow data source only).
+      summary: Update an editable (submitted) time card (external data source only).
       operationId: updateTimeCard
       parameters:
         - name: id
@@ -7332,6 +7741,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Time card not found.
           content:
@@ -7344,10 +7759,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: Delete a time card (ServiceNow data source only).
+      summary: Delete a time card (external data source only).
       description: >
-        Only validates that id is a well-formed UUID; ServiceNow enforces
+        Only validates that id is a well-formed UUID; the external system enforces
         that the caller is the card's own submitter and that it's still in
         the submitted state, the same trust model the PATCH operation above
         uses.
@@ -7379,6 +7800,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Time card not found.
           content:
@@ -7391,10 +7818,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /slas/{id}:
     get:
-      summary: Get a task SLA record by ID (ServiceNow data source only).
+      summary: Get a task SLA record by ID (external data source only).
       operationId: getTaskSla
       parameters:
         - name: id
@@ -7422,6 +7855,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Task SLA not found.
           content:
@@ -7434,10 +7873,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /slas/search:
     post:
-      summary: Search task SLA records (ServiceNow data source only).
+      summary: Search task SLA records (external data source only).
       operationId: searchTaskSlas
       requestBody:
         required: true
@@ -7464,8 +7909,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -7473,7 +7930,7 @@ paths:
 
   /cases/{id}/tasks/search:
     post:
-      summary: List tasks for a case (ServiceNow data source only).
+      summary: List tasks for a case (external data source only).
       operationId: searchCaseTasks
       parameters:
         - name: id
@@ -7520,7 +7977,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Tasks are only supported for the ServiceNow data source.
+          description: Tasks are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -7528,7 +7985,7 @@ paths:
 
   /cases/{id}/tasks:
     post:
-      summary: Create a task on a case (ServiceNow data source only).
+      summary: Create a task on a case (external data source only).
       operationId: createCaseTask
       parameters:
         - name: id
@@ -7585,7 +8042,7 @@ paths:
     post:
       summary: Search tasks with optional filters, sort, and pagination.
       description: >
-        Returns a paginated list of tasks (ServiceNow data source only). Each task carries
+        Returns a paginated list of tasks (external data source only). Each task carries
         its state, due date, and assigned user. Tasks are inherently case-related; this
         endpoint provides independent search and filtering capabilities.
       operationId: searchTasks
@@ -7615,7 +8072,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Tasks are only supported for the ServiceNow data source.
+          description: Tasks are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -7623,7 +8080,7 @@ paths:
 
   /tasks/{id}:
     get:
-      summary: Get a task by ID (ServiceNow data source only).
+      summary: Get a task by ID (external data source only).
       operationId: getTask
       parameters:
         - name: id
@@ -7664,13 +8121,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Tasks are only supported for the ServiceNow data source.
+          description: Tasks are only supported for the external data source.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update a task (ServiceNow data source only).
+      summary: Update a task (external data source only).
       description: >
         Updates exactly one of state, assignedToEmail, or dueDate.
       operationId: updateTask
@@ -7727,7 +8184,7 @@ paths:
 
   /comments/search:
     post:
-      summary: Search comments by reference entity (ServiceNow data source only).
+      summary: Search comments by reference entity (external data source only).
       operationId: searchComments
       requestBody:
         required: true
@@ -7763,7 +8220,7 @@ paths:
 
   /incidents/{id}:
     get:
-      summary: Get an incident by ID (ServiceNow data source only).
+      summary: Get an incident by ID (external data source only).
       operationId: getIncident
       parameters:
         - name: id
@@ -7791,6 +8248,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Incident not found.
           content:
@@ -7803,9 +8266,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
     patch:
-      summary: Partially update an incident (ServiceNow data source only).
+      summary: Partially update an incident (external data source only).
       operationId: updateIncident
       parameters:
         - name: id
@@ -7839,6 +8308,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Incident not found.
           content:
@@ -7847,6 +8322,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -7892,8 +8373,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -7902,7 +8395,7 @@ paths:
   /incidents/{id}/specialist-handoffs:
     post:
       summary: >-
-        Hand an incident off to its specialist group (ServiceNow data source only). One
+        Hand an incident off to its specialist group (external data source only). One
         atomic call: moves the incident to the specialist group for its business service,
         clears the assignee, opens a runbook-gap task, and (by default) files an internal
         issue for the receiving team. Not routed through any case-escalation path -- this is
@@ -7940,6 +8433,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Incident not found.
           content:
@@ -7960,10 +8459,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /incidents:
     post:
-      summary: Create a new incident (ServiceNow data source only).
+      summary: Create a new incident (external data source only).
       operationId: createIncident
       requestBody:
         required: true
@@ -7990,6 +8495,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Referenced resource not found (e.g. caller, service, or assignment group).
           content:
@@ -8002,10 +8513,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /incidents/search:
     post:
-      summary: Search incidents (ServiceNow data source only).
+      summary: Search incidents (external data source only).
       operationId: searchIncidents
       requestBody:
         required: false
@@ -8032,8 +8549,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -8042,7 +8571,7 @@ paths:
   /incidents/aggregate:
     post:
       summary: >-
-        Server-side aggregation of incidents by a single field (ServiceNow
+        Server-side aggregation of incidents by a single field (external
         data source only).
       operationId: aggregateIncidents
       requestBody:
@@ -8064,8 +8593,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -8073,7 +8620,7 @@ paths:
 
   /outages:
     post:
-      summary: Create a new outage (ServiceNow data source only).
+      summary: Create a new outage (external data source only).
       operationId: createOutage
       requestBody:
         required: true
@@ -8100,6 +8647,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'On the PostgreSQL data sources, the caller is not an internal caller; this write is only available to internal callers there.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Referenced resource not found (e.g. configuration item or incident).
           content:
@@ -8118,10 +8671,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /outages/search:
     post:
-      summary: Search outages (ServiceNow data source only).
+      summary: Search outages (external data source only).
       operationId: searchOutages
       requestBody:
         required: false
@@ -8160,7 +8719,7 @@ paths:
       summary: >-
         Live choice lists (types, statuses, communication channels, and
         monitored status-page clouds) for rendering an outage create/edit form
-        (ServiceNow data source only).
+        (external data source only).
       operationId: getOutageMetadata
       responses:
         "200":
@@ -8184,7 +8743,7 @@ paths:
 
   /outages/{id}:
     get:
-      summary: Get the full detail of a single outage by id (ServiceNow data source only).
+      summary: Get the full detail of a single outage by id (external data source only).
       operationId: getOutage
       parameters:
         - name: id
@@ -8220,7 +8779,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: >-
-        Partially update an outage (ServiceNow data source only). Closing an
+        Partially update an outage (external data source only). Closing an
         outage is done by setting `end`; there is no separate state field or
         close verb. Passing `end: null` reopens the outage.
       operationId: patchOutage
@@ -8256,6 +8815,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'On the PostgreSQL data sources, the caller is not an internal caller; this write is only available to internal callers there.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Outage, configuration item, or incident not found.
           content:
@@ -8280,12 +8845,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /outage-communications/sweep:
     post:
       summary: Evaluate which outages owe an SRE communication email.
       description: >-
-        Postgres data source only. The port of ServiceNow's
+        Postgres data source only. The port of the external system's
         `Outage Communication` flow — the SRE-facing pair of emails that
         announce an outage and then announce its resolution.
 
@@ -8297,13 +8868,13 @@ paths:
 
         POST because it is not read-only: every decision is written to the
         communication log before it is returned. That log row is this port's
-        idempotency guard — ServiceNow relies on "Run Trigger: Once" and
+        idempotency guard — the external system relies on "Run Trigger: Once" and
         writes no state to the outage at all, which a sweep cannot inherit.
         Recording first means a crash loses an email rather than repeating
         it, matching the internal notifier's choice.
 
 
-        *** ONLY `type=outage` IS EVER DECLARED. *** ServiceNow's step 4
+        *** ONLY `type=outage` IS EVER DECLARED. *** The external system's step 4
         requires it, so a DEGRADATION or PLANNED outage produces no email.
         Reproduced deliberately.
 
@@ -8355,7 +8926,7 @@ paths:
         communication log.
 
 
-        Keyed on the outage NUMBER rather than its id: ServiceNow's table
+        Keyed on the outage NUMBER rather than its id: the external system's table
         carries a reference column that is empty on every row, so the number
         string has always been the only link.
 
@@ -8377,7 +8948,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The outage number, e.g. OUT0001234.
+          description: The outage number, e.g. OUT0000001.
       responses:
         "200":
           description: The outage's communication history, newest first.
@@ -8414,10 +8985,10 @@ paths:
         the emails this returns.
 
 
-        The port of ServiceNow's `Internal Stakeholders Email Notification -
+        The port of the external system's `Internal Stakeholders Email Notification -
         Outage Communication`. A sweep rather than a record trigger because
         nothing in this stack writes `outage` — csm-sync-service mirrors it in
-        from ServiceNow, so there is no local write to react to.
+        from the external system, so there is no local write to react to.
 
 
         POST rather than GET because it is not read-only: each decision is
@@ -8477,7 +9048,7 @@ paths:
 
 
         `seededFromSync` distinguishes a phase this service earned by sending
-        an email from one seeded out of ServiceNow's own mirrored value at
+        an email from one seeded out of the external system's own mirrored value at
         cutover — which is why an outage can be `DECLARED` with no
         `declaredOn`.
       operationId: getOutageNotificationState
@@ -8522,7 +9093,7 @@ paths:
   /outages/{id}/communications:
     post:
       summary: >-
-        Append a communication journal entry to an outage (ServiceNow data
+        Append a communication journal entry to an outage (external data
         source only). An external entry is a publishing action: the public
         status page returns it verbatim when the outage's configuration item
         publishes.
@@ -8559,6 +9130,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'On the PostgreSQL data sources, the caller is not an internal caller; this write is only available to internal callers there.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Outage not found.
           content:
@@ -8577,10 +9154,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /outages/{id}/communications/search:
     post:
-      summary: Search an outage's communication journal entries (ServiceNow data source only).
+      summary: Search an outage's communication journal entries (external data source only).
       operationId: searchOutageCommunications
       parameters:
         - name: id
@@ -8656,6 +9239,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: A referenced record was not found (origin case or primary incident).
           content:
@@ -8668,10 +9257,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /problems/search:
     post:
-      summary: Search problems (ServiceNow data source only).
+      summary: Search problems (external data source only).
       operationId: searchProblems
       requestBody:
         required: false
@@ -8698,8 +9293,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -8708,7 +9315,7 @@ paths:
   /problems/aggregate:
     post:
       summary: >-
-        Server-side aggregation of problems by a single field (ServiceNow
+        Server-side aggregation of problems by a single field (external
         data source only).
       operationId: aggregateProblems
       requestBody:
@@ -8730,8 +9337,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -8739,7 +9364,7 @@ paths:
 
   /problems/{id}:
     get:
-      summary: Get a single problem by ID (ServiceNow data source only).
+      summary: Get a single problem by ID (external data source only).
       operationId: getProblem
       parameters:
         - name: id
@@ -8767,6 +9392,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Problem not found.
           content:
@@ -8779,11 +9410,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
     patch:
       summary: >-
         Update a problem -- a forward state transition, plain-field updates, or both
-        (ServiceNow data source only).
+        (external data source only).
       operationId: updateProblem
       parameters:
         - name: id
@@ -8817,6 +9454,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Problem, assignedToId, or assignmentGroupId not found.
           content:
@@ -8835,10 +9478,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /incident-tasks/search:
     post:
-      summary: Search incident tasks (ServiceNow data source only). Search and get only -- no create/update.
+      summary: Search incident tasks (external data source only). Search and get only -- no create/update.
       operationId: searchIncidentTasks
       requestBody:
         required: false
@@ -8865,8 +9514,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
           content:
             application/json:
               schema:
@@ -8876,7 +9537,7 @@ paths:
     post:
       summary: >-
         Server-side aggregation of incident tasks by a single field
-        (ServiceNow data source only).
+        (external data source only).
       operationId: aggregateIncidentTasks
       requestBody:
         required: true
@@ -8897,6 +9558,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: 'No resolvable caller: neither a valid user token nor an authorized internal client credential.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
@@ -8904,7 +9577,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Incident tasks are only supported for the ServiceNow data source.
+          description: Incident tasks are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -8912,7 +9585,7 @@ paths:
 
   /incident-tasks/{id}:
     get:
-      summary: Get a single incident task by ID (ServiceNow data source only).
+      summary: Get a single incident task by ID (external data source only).
       operationId: getIncidentTask
       parameters:
         - name: id
@@ -8940,6 +9613,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Incident task not found.
           content:
@@ -8952,10 +9631,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /conversations/search:
     post:
-      summary: Search conversations (ServiceNow data source only).
+      summary: Search conversations (external data source only).
       operationId: searchConversations
       requestBody:
         required: false
@@ -9016,7 +9701,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: The ServiceNow metadata dependency is unavailable.
+          description: The external system's metadata dependency is unavailable.
           content:
             application/json:
               schema:
@@ -9030,7 +9715,7 @@ paths:
         returns paginated results for each independently.
 
 
-        On the Postgres data source, every request's tokens are validated (Asgardeo), and
+        On the Postgres data source, every request's tokens are validated against the identity provider, and
         results are scoped to the caller (the same rule GET /projects/{id}, POST
         /projects/search, GET /cases/{id}, and POST /cases/search also apply): if the
         request's `x-jwt-assertion` client-credentials token names a client id in
@@ -9083,7 +9768,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: The ServiceNow metadata/search dependency is unavailable.
+          description: The external system's metadata/search dependency is unavailable.
           content:
             application/json:
               schema:
@@ -9091,7 +9776,7 @@ paths:
 
   /products/vulnerabilities/meta:
     get:
-      summary: Get reference metadata for product vulnerabilities (ServiceNow data source only).
+      summary: Get reference metadata for product vulnerabilities (external data source only).
       description: >
         Distinct from GET /products/vulnerabilities/{id} — "meta" is a literal path segment
         here, not a vulnerability ID.
@@ -9116,7 +9801,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Vulnerability metadata is only supported for the ServiceNow data source.
+          description: Vulnerability metadata is only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9124,7 +9809,7 @@ paths:
 
   /conversations/{id}:
     get:
-      summary: Get a single conversation by ID (ServiceNow data source only).
+      summary: Get a single conversation by ID (external data source only).
       operationId: getConversation
       parameters:
         - name: id
@@ -9166,13 +9851,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Conversations are only supported for the ServiceNow data source.
+          description: Conversations are only supported for the external data source.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     patch:
-      summary: Update a conversation's state (ServiceNow data source only).
+      summary: Update a conversation's state (external data source only).
       operationId: updateConversation
       parameters:
         - name: id
@@ -9202,7 +9887,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          description: Missing or invalid x-user-id-token header (external data source only).
           content:
             application/json:
               schema:
@@ -9220,7 +9905,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Conversations are only supported for the ServiceNow data source.
+          description: Conversations are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9228,7 +9913,7 @@ paths:
 
   /conversations:
     post:
-      summary: Start a new conversation on a project (ServiceNow data source only).
+      summary: Start a new conversation on a project (external data source only).
       operationId: createConversation
       requestBody:
         required: true
@@ -9250,7 +9935,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          description: Missing or invalid x-user-id-token header (external data source only).
           content:
             application/json:
               schema:
@@ -9268,7 +9953,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Conversations are only supported for the ServiceNow data source.
+          description: Conversations are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9276,7 +9961,7 @@ paths:
 
   /cases/{id}/feedback:
     get:
-      summary: Get the feedback submitted for a case (ServiceNow data source only).
+      summary: Get the feedback submitted for a case (external data source only).
       operationId: getCaseFeedback
       parameters:
         - name: id
@@ -9318,13 +10003,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Case feedback is only supported for the ServiceNow data source.
+          description: Case feedback is only supported for the external data source.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
-      summary: Submit feedback for a case (ServiceNow data source only).
+      summary: Submit feedback for a case (external data source only).
       operationId: submitCaseFeedback
       parameters:
         - name: id
@@ -9354,7 +10039,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Missing or invalid x-user-id-token header (ServiceNow data source only).
+          description: Missing or invalid x-user-id-token header (external data source only).
           content:
             application/json:
               schema:
@@ -9372,7 +10057,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Case feedback is only supported for the ServiceNow data source.
+          description: Case feedback is only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9380,7 +10065,7 @@ paths:
 
   /deployed-products/{id}/metrics/search:
     post:
-      summary: Get deployed-product cores metrics over a date range (ServiceNow data source only).
+      summary: Get deployed-product cores metrics over a date range (external data source only).
       operationId: searchDeployedProductMetrics
       parameters:
         - name: id
@@ -9428,7 +10113,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Deployed product metrics are only supported for the ServiceNow data source.
+          description: Deployed product metrics are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9436,7 +10121,7 @@ paths:
 
   /deployed-products/{id}/metrics/usage-counts/search:
     post:
-      summary: Get deployed-product usage-count metrics over a date range (ServiceNow data source only).
+      summary: Get deployed-product usage-count metrics over a date range (external data source only).
       operationId: searchDeployedProductUsageCounts
       parameters:
         - name: id
@@ -9484,7 +10169,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Deployed product usage counts are only supported for the ServiceNow data source.
+          description: Deployed product usage counts are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9575,7 +10260,7 @@ paths:
 
   /cases/time-cards/search:
     post:
-      summary: Search time cards rolled up by case (ServiceNow data source only).
+      summary: Search time cards rolled up by case (external data source only).
       description: >
         Same request shape as POST /time-cards/search, but results are grouped by case
         with per-case billable/non-billable totals instead of returned as flat rows.
@@ -9612,7 +10297,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Case time cards are only supported for the ServiceNow data source.
+          description: Case time cards are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9620,7 +10305,7 @@ paths:
 
   /instances/search:
     post:
-      summary: Search instances (ServiceNow data source only).
+      summary: Search instances (external data source only).
       description: >
         projectIds, deploymentIds, and deployedProductIds in filters are mutually exclusive —
         at most one may be non-empty.
@@ -9657,7 +10342,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Instances are only supported for the ServiceNow data source.
+          description: Instances are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9665,7 +10350,7 @@ paths:
 
   /instances/metrics/search:
     post:
-      summary: Fetch per-instance metric time series over a date range (ServiceNow data source only).
+      summary: Fetch per-instance metric time series over a date range (external data source only).
       description: >
         filters.startDate/endDate are required. projectIds, deploymentIds, and
         deployedProductIds are mutually exclusive — at most one may be non-empty.
@@ -9702,7 +10387,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Instances are only supported for the ServiceNow data source.
+          description: Instances are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9710,7 +10395,7 @@ paths:
 
   /instances/usages/search:
     post:
-      summary: Fetch per-instance usage time series over a date range (ServiceNow data source only).
+      summary: Fetch per-instance usage time series over a date range (external data source only).
       description: >
         Same filter rules as POST /instances/metrics/search.
       operationId: searchInstanceUsage
@@ -9746,7 +10431,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Instances are only supported for the ServiceNow data source.
+          description: Instances are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9754,7 +10439,7 @@ paths:
 
   /instances/metrics/stats/search:
     post:
-      summary: Fetch aggregated instance metric statistics over a date range (ServiceNow data source only).
+      summary: Fetch aggregated instance metric statistics over a date range (external data source only).
       description: >
         Same filter rules as POST /instances/metrics/search, plus an optional dataSource filter
         (1 = API Call, 2 = File Upload).
@@ -9791,7 +10476,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Instances are only supported for the ServiceNow data source.
+          description: Instances are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9799,7 +10484,7 @@ paths:
 
   /instances/usages/stats/search:
     post:
-      summary: Fetch aggregated instance usage statistics over a date range (ServiceNow data source only).
+      summary: Fetch aggregated instance usage statistics over a date range (external data source only).
       description: >
         Same filter rules as POST /instances/metrics/stats/search.
       operationId: searchInstanceUsageStats
@@ -9835,7 +10520,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: Instances are only supported for the ServiceNow data source.
+          description: Instances are only supported for the external data source.
           content:
             application/json:
               schema:
@@ -9865,12 +10550,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/lifecycle:
     get:
       summary: The lifecycle stage catalogue.
@@ -9895,12 +10592,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/users/search:
     post:
       summary: Search PLG CS engineers.
@@ -9931,12 +10640,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -9967,12 +10688,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/organizations/{organizationId}:
     get:
       summary: One organisation with its platform cards.
@@ -10005,6 +10738,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10017,6 +10756,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: "Set the organisation's CS owner."
       description: "Stores what it is told. The rule that an organisation may not be left unassigned is a PLG lifecycle rule and lives in the BFF, which rejects an empty `ownerId` before this is called."
@@ -10054,6 +10799,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10066,6 +10817,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/organizations/{organizationId}/products/{productCode}:
     get:
       summary: One pairing.
@@ -10104,6 +10861,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10116,6 +10879,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: "Move a pairing's stage, health, tier or trial dates."
       description: "All axes apply in ONE transaction, so a request cannot half-apply. This is a GUARDED WRITE. The decision travels inside the statement as a `WHERE` clause rather than being read first, because a lock cannot span an HTTP boundary. `rowsAffected: 0` means the precondition no longer held; deciding what that means (usually `409`) is the caller's job, not this service's. Send `expectedStage` to make the stage move conditional. A reason is required for any tracked axis and is checked here as well as in the BFF \u2014 without it a missing reason surfaces as a `NOT NULL` violation, which is a true statement about the database and a useless one about the request. Stages move forward only, enforced by a trigger. Every attributed write carries `actorId`, a `user` id the caller has already resolved. This service has no notion of \"the current user\"."
@@ -10159,6 +10928,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10171,6 +10946,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/organizations/{organizationId}/products/{productCode}/playbook-runs:
     post:
       summary: Attach a playbook to a pairing.
@@ -10215,6 +10996,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10227,6 +11014,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/organizations/{organizationId}/products/{productCode}/notes:
     post:
       summary: Append a note to a pairing.
@@ -10271,6 +11064,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10283,6 +11082,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbook-runs/{playbookRunId}:
     delete:
       summary: Detach a playbook run.
@@ -10315,6 +11120,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10327,6 +11138,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbook-run-tasks/{taskId}:
     patch:
       summary: "Record a task's value."
@@ -10365,6 +11182,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10377,6 +11200,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbook-run-tasks/{taskId}/shape:
     get:
       summary: "A task's declared value type and options."
@@ -10409,6 +11238,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10421,6 +11256,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/notes/{noteId}:
     patch:
       summary: Correct a note, keeping the superseded body.
@@ -10459,6 +11300,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10471,6 +11318,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/pairings/{orgPlatformId}/location:
     get:
       summary: Which organisation and platform a pairing belongs to.
@@ -10503,6 +11356,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10515,6 +11374,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/registrations/search:
     post:
       summary: Search registrations.
@@ -10545,12 +11410,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/registrations/{orgPlatformId}/acknowledge:
     post:
       summary: Claim a registration.
@@ -10589,6 +11466,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10601,6 +11484,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbooks:
     get:
       summary: Playbook templates.
@@ -10632,12 +11521,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbooks/{playbookId}:
     get:
       summary: One playbook template.
@@ -10670,6 +11571,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10682,6 +11589,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: "Update a template's name, stage, kind or active flag."
       description: "Validation of what a playbook may BE \u2014 bookends, task codes, option lists \u2014 lives in the BFF, not here. This stores what it is told, subject to the schema's own constraints."
@@ -10719,6 +11632,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10731,6 +11650,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Delete a template.
       description: A foreign key refuses this while any run references the template. Deactivating is the usual answer.
@@ -10762,6 +11687,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10774,6 +11705,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/products/{productCode}/playbooks:
     post:
       summary: Create a playbook template.
@@ -10811,6 +11748,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10823,6 +11766,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/playbooks/{playbookId}/tasks:
     put:
       summary: "Replace a template's tasks."
@@ -10861,6 +11810,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
           content:
@@ -10873,6 +11828,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/registrations/ingest:
     post:
       summary: Land a batch of registrations.
@@ -10907,12 +11868,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/ingest-failures:
     post:
       summary: Record a registration that could not be landed.
@@ -10946,12 +11919,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/analytics/dashboard:
     get:
       summary: Dashboard aggregates.
@@ -10991,12 +11976,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /plg/work-queue/search:
     post:
       summary: The work queue and its tiles.
@@ -11027,24 +12024,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 'The caller is not an internal caller; this operation is only available to internal callers.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: 'The caller''s access scope cannot be resolved right now.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
+  parameters:
+    UserIdToken:
+      name: x-user-id-token
+      in: header
+      required: false
+      description: >-
+        The end user's ID token, forwarded by the calling backend. Verified
+        (signature, issuer, audience, expiry) on every request that carries
+        it; a present but invalid token is refused with 401.
+      schema:
+        type: string
+    ClientAssertion:
+      name: x-jwt-assertion
+      in: header
+      required: false
+      description: >-
+        The calling application's client-credentials assertion, set by the
+        API gateway. Its client id (`client_id`, else `azp`) identifies an
+        internal caller when it is on the service's internal-client
+        allow-list.
+      schema:
+        type: string
+    CorrelationId:
+      name: X-CSM-Correlation-ID
+      in: header
+      required: false
+      description: >-
+        Correlation id for logs, echoed on the response. Adopted when it is
+        1-64 letters, digits or hyphens; otherwise a new UUID is generated.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9-]{1,64}$'
   securitySchemes:
+    userIdToken:
+      type: apiKey
+      in: header
+      name: x-user-id-token
+      description: >-
+        The end user's ID token. Every operation except those declared with
+        `security: []` needs this or an internal client assertion; a request
+        with neither is refused with 401.
+    clientAssertion:
+      type: apiKey
+      in: header
+      name: x-jwt-assertion
+      description: >-
+        The calling application's client-credentials assertion, set by the
+        API gateway. A client id on the service's internal-client allow-list
+        is an internal caller.
     internalClientCredential:
       type: http
       scheme: bearer
       bearerFormat: JWT
       description: >-
         A client-credentials token whose client id appears in
-        AUTH_INTERNAL_CLIENT_IDS. Declared on the operations that verify it
-        themselves; most endpoints in this service scope by caller instead and
-        do not carry this requirement.
+        AUTH_INTERNAL_CLIENT_IDS. Presented to the gateway as a bearer token;
+        this service reads the client id from the x-jwt-assertion the gateway
+        forwards. Declared on the operations that verify it themselves; most
+        endpoints in this service scope by caller instead and do not carry
+        this requirement.
 
   schemas:
     CreateServiceRequestFromIssueRequest:
@@ -11321,7 +12380,7 @@ components:
           maxItems: 20
           items:
             type: string
-          description: Filter by one or more roles. ServiceNow data source only.
+          description: Filter by one or more roles. External data source only.
         userNames:
           type: array
           maxItems: 50
@@ -11343,7 +12402,7 @@ components:
           description: >
             Restrict to specific users. Intersects with the other filters. Supplying this
             also lifts the active-only default, so a deactivated user stays retrievable by
-            id. ServiceNow data source only.
+            id. External data source only.
         groupIds:
           type: array
           maxItems: 50
@@ -11353,7 +12412,7 @@ components:
           description: >
             Restrict to members of these groups. Resolved to a user-id set before the
             upstream call, because the data source cannot join users against group
-            membership in one query. ServiceNow data source only.
+            membership in one query. External data source only.
         groupNames:
           type: array
           maxItems: 50
@@ -11364,7 +12423,7 @@ components:
             user-id set exactly as groupIds is. It exists alongside groupIds because a
             caller's team registry is keyed by group name: group ids differ between
             environments while the names do not, and a configured team may carry no id at
-            all. ServiceNow data source only.
+            all. External data source only.
         active:
           type: boolean
           nullable: true
@@ -11452,7 +12511,7 @@ components:
 
     SNUser:
       type: object
-      description: User as returned by the ServiceNow data source.
+      description: User as returned by the external data source.
       properties:
         id:
           type: string
@@ -11488,7 +12547,7 @@ components:
     UserType:
       type: string
       description: >
-        Whether the user is staff or a customer/partner contact. The ServiceNow data source
+        Whether the user is staff or a customer/partner contact. The external data source
         emits internal or external; the postgres source emits internal, customer or system.
         Callers branching on staff-vs-not must treat customer and external alike.
       enum: [internal, external, customer, system]
@@ -11672,7 +12731,7 @@ components:
 
     SearchSNUsersResponse:
       type: object
-      description: Paginated user list from the ServiceNow data source.
+      description: Paginated user list from the external data source.
       required: [users, total, limit, offset]
       properties:
         users:
@@ -11734,11 +12793,11 @@ components:
         supportTier:
           type: string
           nullable: true
-          description: Support tier label (e.g. Platinum). ServiceNow data source only.
+          description: Support tier label (e.g. Platinum). External data source only.
         arrToday:
           type: string
           nullable: true
-          description: ServiceNow data source only.
+          description: External data source only.
         technicalOwner:
           nullable: true
           allOf:
@@ -11749,7 +12808,7 @@ components:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
           nullable: true
-          description: ServiceNow data source only.
+          description: External data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:
@@ -11811,13 +12870,13 @@ components:
           nullable: true
         supportTier:
           nullable: true
-          description: ServiceNow data source only.
+          description: External data source only.
           allOf:
             - $ref: '#/components/schemas/SNSupportTierRef'
         arrToday:
           type: string
           nullable: true
-          description: ServiceNow data source only.
+          description: External data source only.
         technicalOwner:
           nullable: true
           allOf:
@@ -11828,7 +12887,7 @@ components:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
           nullable: true
-          description: ServiceNow data source only.
+          description: External data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:
@@ -11951,7 +13010,7 @@ components:
         arrTodayGte:
           type: string
           description: >-
-            Only projects whose account ARR is at least this value. ServiceNow only;
+            Only projects whose account ARR is at least this value. External data source only;
             Postgres returns 400 because account ARR is not stored yet.
         excludeClosureStates:
           type: array
@@ -12073,7 +13132,7 @@ components:
         onboardingStatus:
           type: string
           nullable: true
-          description: Onboarding status as reported by ServiceNow.
+          description: Onboarding status as reported by the external system.
         id:
           type: string
         account:
@@ -12140,7 +13199,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing the external system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
         onboardingOwner:
@@ -12202,7 +13261,7 @@ components:
         account:
           type: object
           nullable: true
-          description: Null when the project has no linked account. arrToday is ServiceNow only.
+          description: Null when the project has no linked account. arrToday is set on the external data source only.
           properties:
             id:
               type: string
@@ -12247,7 +13306,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing the external system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
 
@@ -12292,7 +13351,7 @@ components:
           nullable: true
           description: >
             Free-form, per-dimension Account Closure Process (ACP) suspension-process
-            state (event type + action results) written by an existing ServiceNow
+            state (event type + action results) written by an existing the external system
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
 
@@ -12392,7 +13451,7 @@ components:
             contact list. The admin entry is the point: admin is stored per project, and a
             person is an account admin when any of their memberships carries the project ADMIN
             role, so both portals can render an Admin badge without a second call per row.
-            Empty for a row with no linked user, and always empty on the ServiceNow data
+            Empty for a row with no linked user, and always empty on the external data
             source, which has no notion of this role set.
         customerContactPresent:
           type: boolean
@@ -12442,7 +13501,7 @@ components:
           default: false
           description: >-
             Mark a machine account. It gets its database row and Salesforce
-            records like anyone else, but no Asgardeo identity and no
+            records like anyone else, but no identity-provider account and no
             invitation email. Only honoured when this request creates the
             Salesforce contact; an existing contact keeps its own flag.
 
@@ -12638,7 +13697,7 @@ components:
           description: Product label applied to issues filed in this repository.
 
     SNProduct:
-      description: Product returned by the ServiceNow data source. Timestamp fields are absent; class is a ServiceNow label (e.g. "Software Model").
+      description: Product returned by the external data source. Timestamp fields are absent; class is an external-system label (e.g. "Software Model").
       type: object
       properties:
         id:
@@ -12902,7 +13961,7 @@ components:
           type: array
           items:
             type: string
-          description: Optional filter by product category (e.g. "pdp"). Combines with deploymentIds rather than replacing it. Values are matched case-insensitively against the deployed product's category and are supported on both the PostgreSQL and the ServiceNow-backed data sources. The category returned on each deployed product is the same lower-case code.
+          description: Optional filter by product category (e.g. "pdp"). Combines with deploymentIds rather than replacing it. Values are matched case-insensitively against the deployed product's category and are supported on both the PostgreSQL and the externally backed data sources. The category returned on each deployed product is the same lower-case code.
 
     DeployedProductVersionRef:
       type: object
@@ -12923,7 +13982,7 @@ components:
     ProductRef:
       type: object
       description: >
-        A reference to a product, carrying the short key ServiceNow holds
+        A reference to a product, carrying the short key the external system holds
         alongside the display name.
 
         Distinct from EntityRef because abbreviation is the only identifier the
@@ -12941,7 +14000,7 @@ components:
           type: string
           nullable: true
           description: >
-            Populated from ServiceNow only. The Postgres products table has no
+            Populated from the external data source only. The Postgres products table has no
             equivalent column, so this is absent on that data source.
       required:
         - id
@@ -13024,14 +14083,14 @@ components:
         reverse of SearchDeployedProductsRequest's own deploymentIds filter,
         which starts from already-known deployments rather than a
         product/version. Supported on both data sources: Postgres resolves
-        it directly via deployed_product.project_id, ServiceNow via a
+        it directly via deployed_product.project_id, the external system via a
         platform-wide deployment scan.
 
 
         The result always excludes projects with a Restricted or Suspended
         closure state, and projects on a Cloud Support or Cloud Evaluation
         Support subscription — this is not a caller-supplied filter. It
-        mirrors the real ServiceNow flow this replaces ("DRY RUN - Create
+        mirrors the real external-system flow this replaces ("DRY RUN - Create
         [EOL] Product Announcements"), whose own first step applies this
         exact exclusion unconditionally, with no way to opt out.
       required: [productId, productVersionId]
@@ -13223,11 +14282,11 @@ components:
         four fields may be sent together in one request (e.g. all three fix-ETA estimates plus
         `workaroundProvided` in the same call) — they must not be combined with any of the
         exclusive fields above, though.
-        The combinable group is supported only for the ServiceNow data source. `watchList`,
+        The combinable group is supported only for the external data source. `watchList`,
         `assigneeEmail`, and `acknowledge` are supported by every data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
-        `type` transfers the case to another type and is supported only for the ServiceNow
+        `type` transfers the case to another type and is supported only for the external
         data source. Its companion fields carry the target type's mandatory data:
         `severity` and `issueType` alongside `type: case`; `engagementType` and
         `engagementPaymentType` alongside `type: engagement`; `catalogId`, `catalogItemId`
@@ -13261,7 +14320,7 @@ components:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
           description: >
-            Transfers the case to this type (ServiceNow only). `announcement` and the
+            Transfers the case to this type (external data source only). `announcement` and the
             hosting_* types are system-managed and are never valid transfer targets.
         engagementType:
           type: string
@@ -13319,8 +14378,8 @@ components:
           type: string
           format: email
           description: >
-            Email of the engineer to assign to this case. On the ServiceNow data
-            source, must be an email ServiceNow itself resolves to an assignable
+            Email of the engineer to assign to this case. On the external data
+            source, must be an email the external system itself resolves to an assignable
             engineer. On the Postgres data source, must match an existing platform
             user's email; a no-op re-assignment to the case's current assignee
             succeeds without publishing `case.assigned`.
@@ -13332,7 +14391,7 @@ components:
             someone has seen it and picked it up, which is distinct from assignment.
             Succeeds without changing anything if the case is already acknowledged, in
             which case the response carries `alreadyAcknowledged: true`. Only `true` is
-            accepted; there is no way to remove an acknowledgement. On the ServiceNow
+            accepted; there is no way to remove an acknowledgement. On the external
             data source this requires an elevated support role, enforced upstream; the
             Postgres data source only requires the caller to be a known authenticated
             user.
@@ -13395,25 +14454,25 @@ components:
           format: date
           description: >-
             Internal-only best-case fix-commitment date (date-only, YYYY-MM-DD), visible
-            to CSM engineers only (ServiceNow only).
+            to CSM engineers only (external data source only).
         mostLikelyFixEta:
           type: string
           format: date
           description: >-
             Internal-only most-likely fix-commitment date (date-only, YYYY-MM-DD), visible
-            to CSM engineers only (ServiceNow only).
+            to CSM engineers only (external data source only).
         worstCaseFixEta:
           type: string
           format: date
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible
-            to CSM engineers only (ServiceNow only).
+            to CSM engineers only (external data source only).
         workaroundProvided:
           type: boolean
           description: >-
             Mark (true) or recall (false) the case's workaround. Stamps the calling
             engineer as the provider and pauses the case's Workaround SLA clock while
-            set; recalling clears both (ServiceNow only).
+            set; recalling clears both (external data source only).
 
     UpdateCaseResponse:
       type: object
@@ -13635,7 +14694,7 @@ components:
           enum: [case, default_case, service_request, security_report_analysis, engagement]
           description: |
             Case type. `default_case` is also accepted as an alias for `case`
-            (ServiceNow's own raw caseType wire value; kept for the
+            (the external system's own raw caseType wire value; kept for the
             currently-in-production customer-portal frontend, which predates
             this API's `case` enum) and is normalized to `case` before any
             other validation runs. `announcement` is a valid case type
@@ -13643,8 +14702,8 @@ components:
             created through this endpoint — no code path builds a valid
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
-            - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `service_request`: catalog-based service request (external data source only); requires `catalogId`, `catalogItemId`, `variables`.
+            - `security_report_analysis`: security report (external data source only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
             - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
@@ -13712,7 +14771,7 @@ components:
           items:
             type: string
           description: |
-            Optional initial watch list (ServiceNow only). Each item is a watcher
+            Optional initial watch list (external data source only). Each item is a watcher
             email (Customer Portal) or a platform user UUID (CSM); the list must be
             all emails or all UUIDs.
 
@@ -13800,9 +14859,9 @@ components:
         - **type** (in): case type, one of case/service_request/
           security_report_analysis/announcement/engagement/hosting/
           hosting_query/hosting_task. `default_case` is also accepted as an
-          alias for `case` (ServiceNow's own raw caseType wire value; kept
+          alias for `case` (the external system's own raw caseType wire value; kept
           for the currently-in-production customer-portal frontend, which
-          predates this API's `case` enum). For the ServiceNow data source
+          predates this API's `case` enum). For the external data source
           each value is translated to its SN caseTypes equivalent (case →
           default_case).
           - `hosting`: a managed-cloud hosting case.
@@ -13827,7 +14886,7 @@ components:
           performance_degradation/question/security_or_compliance/
           total_outage.
         - **workState** (in): one of ongoing/paused. Only applicable when
-          state is work_in_progress. For the ServiceNow data source, ongoing
+          state is work_in_progress. For the external data source, ongoing
           maps to key 1 and paused maps to key 2.
         - **tag** (in / notIn): free-text case tag labels, compared
           case-insensitively. in matches cases carrying any of the given tags;
@@ -13855,7 +14914,7 @@ components:
           relational data source and is rejected there.
         - **product** (in): product family names (e.g. "API Manager",
           "Identity Server", "Asgardeo"). Matches every version of each named
-          product. Only applied by the ServiceNow data source.
+          product. Only applied by the external data source.
         - **projectOnboardingStatus** (in / notIn): free-text SN choice labels
           for the parent project's onboarding status (e.g. "Completed",
           "In-Progress", "Not-Applicable" -- not a closed enum at this
@@ -13907,7 +14966,7 @@ components:
           with an active escalation. On the relational data source this is
           `"case".is_escalated`, the flag the case detail exposes as
           `isEscalated`.
-        - **number** (eq): a single case number (e.g. "CS0441174"); matches
+        - **number** (eq): a single case number (e.g. "CS0000001"); matches
           exactly. Routed as a first-class filter rather than through the
           free-text searchQuery scan.
         - **internalId** (eq): a single WSO2 case id; matches exactly. Routed
@@ -13915,13 +14974,13 @@ components:
           searchQuery scan.
         - **slaBreached** (eq): a single boolean value ("true"/"false").
           Matches cases with a currently-breached SLA against the platform's
-          10 named SLA definitions. Only applied by the ServiceNow data
+          10 named SLA definitions. Only applied by the external data
           source.
         - **accountEscalationActive** (eq): a single boolean value
           ("true"/"false"). Matches cases whose parent ACCOUNT has an active
           escalation (state IN 100,101) — distinct from **escalation** above,
           which matches on the case's own escalation state, not its parent
-          account's. Only applied by the ServiceNow data source.
+          account's. Only applied by the external data source.
 
     CaseFilterBranch:
       type: object
@@ -13996,7 +15055,7 @@ components:
             When set, the response returns aggregated per-value counts (see
             SearchCasesResponse.groups) instead of a case list. Only fields
             backed by a small fixed enum are groupable. Implemented as a
-            fan-out of per-value count queries against the ServiceNow data
+            fan-out of per-value count queries against the external data
             source; not supported by the Postgres data source.
 
     AggregateCasesRequest:
@@ -14137,8 +15196,8 @@ components:
     Opportunity:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from the external system's Salesforce-sync data (external data source only;
+        no Postgres equivalent). Every field but id is nullable — the external system can omit
         any of them entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -14191,8 +15250,8 @@ components:
     Invoice:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from the external system's Salesforce-sync data (external data source only;
+        no Postgres equivalent). Every field but id is nullable — the external system can omit
         any of them entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -14269,8 +15328,8 @@ components:
     ProjectOpportunityLink:
       type: object
       description: >
-        Sourced from ServiceNow's Salesforce-sync data (ServiceNow data source only;
-        no Postgres equivalent). Every field but id is nullable — ServiceNow can omit
+        Sourced from the external system's Salesforce-sync data (external data source only;
+        no Postgres equivalent). Every field but id is nullable — the external system can omit
         either reference entirely for a sparsely-populated row.
       required: [id]
       properties:
@@ -14324,7 +15383,7 @@ components:
       type: object
       description: >-
         One member of a team's roster. Role is "member" or "lead" only (a
-        fixed two-value constraint), narrower than ServiceNow's free-form
+        fixed two-value constraint), narrower than the external system's free-form
         u_role on sys_user_grmember, but always populated.
       properties:
         id:
@@ -14448,11 +15507,11 @@ components:
         type:
           type: string
           nullable: true
-          description: Case type label. Populated for ServiceNow cases; null for Postgres cases.
+          description: Case type label. Populated for external-system cases; null for Postgres cases.
         engagementType:
           type: string
           nullable: true
-          description: Engagement type label. Populated for ServiceNow cases; null for Postgres cases.
+          description: Engagement type label. Populated for external-system cases; null for Postgres cases.
         createdOn:
           type: string
           format: date-time
@@ -14471,7 +15530,7 @@ components:
         deployment:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Deployment associated with the case. null for ServiceNow cases with no deployment.
+          description: Deployment associated with the case. null for external-system cases with no deployment.
         deployedProduct:
           $ref: '#/components/schemas/DeployedProductRef'
           description: |
@@ -14482,19 +15541,19 @@ components:
         catalog:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Service catalog entry. Populated for ServiceNow cases; null for Postgres cases.
+          description: Service catalog entry. Populated for external-system cases; null for Postgres cases.
         catalogItem:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Service catalog item. Populated for ServiceNow cases; null for Postgres cases.
+          description: Service catalog item. Populated for external-system cases; null for Postgres cases.
         assignedTeam:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Team assigned to the case. Populated for ServiceNow cases; null for Postgres cases.
+          description: Team assigned to the case. Populated for external-system cases; null for Postgres cases.
         conversation:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Linked conversation. Populated for ServiceNow cases; null for Postgres cases.
+          description: Linked conversation. Populated for external-system cases; null for Postgres cases.
         assignedEngineer:
           $ref: '#/components/schemas/UserReference'
           description: Engineer assigned to the case, or null when unassigned.
@@ -14511,7 +15570,7 @@ components:
           description: >-
             When the case's workaround was marked provided, or null until marked (and
             cleared again on recall). Pauses the case's Workaround SLA clock while set
-            (ServiceNow only).
+            (external data source only).
         workaroundProvidedBy:
           $ref: '#/components/schemas/AssignedEngineerRef'
           description: Engineer who marked the workaround as provided, or null until marked.
@@ -14546,42 +15605,42 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Timestamp when the case was resolved. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Timestamp when the case was resolved. Populated for resolved/closed external-system cases; null otherwise.
         resolutionCode:
           type: string
           nullable: true
           enum: [SOLVED_FIXED_BY_SUPPORT_GUIDANCE_PROVIDED, SOLVED_FIXED_BY_CLOSING_RELATED_INCIDENT, SOLVED_FIXED_BY_CLOSING_RELATED_RD_TICKET, SOLVED_WORKAROUND_PROVIDED, SOLVED_BY_CUSTOMER, CONSIDERED_FOR_ROADMAP, INCONCLUSIVE_OUT_OF_SCOPE, INCONCLUSIVE_CANNOT_REPRODUCE, INCONCLUSIVE_NO_WORKAROUND, DUPLICATE_ISSUE, VOIDED_CANCELED, ON_HOLD, CONSIDERED_FOR_ROADMAP_ALT, SOLVED_FIXED_THE_ISSUE, SOLVED_WORKAROUND_PROVIDED_ALT, SOLVED_BY_CONTRIBUTOR, SOLVED_BY_NOVERA, ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS]
-          description: Resolution code. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Resolution code. Populated for resolved/closed external-system cases; null otherwise.
         cause:
           type: string
           nullable: true
           enum: [SOLUTION_ARCHITECTURE, DEPLOYMENT_ARCHITECTURE, USER_ERROR_CONFIGURATION, USER_ERROR_PRODUCT_CONCEPT, USER_ERROR_RUNTIME, USER_ERROR_RECOMMENDATION_BEST_PRACTICES, CUSTOMIZATION_LIMITATION, CUSTOMIZATION_BUG, DOCUMENTATION_GAP, DOCUMENTATION_ERROR, PRODUCT_LIMITATION, PRODUCT_BUG, PRODUCT_REGRESSION, PRODUCT_MIGRATION, INFRASTRUCTURE_DATABASE, INFRASTRUCTURE_OS, INFRASTRUCTURE_NETWORK, INFRASTRUCTURE_JDK, INFRASTRUCTURE_LDAP, INFRASTRUCTURE_LOAD_BALANCER, INFRASTRUCTURE_IAAS, INFRASTRUCTURE_EXTERNAL_PRODUCT, INFRASTRUCTURE_PROXY, INFRASTRUCTURE_OTHER, UNKNOWN]
-          description: Root-cause category. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Root-cause category. Populated for resolved/closed external-system cases; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution/close notes. Populated for resolved/closed ServiceNow cases; null otherwise.
+          description: Free-text resolution/close notes. Populated for resolved/closed external-system cases; null otherwise.
         bestCaseFixEta:
           type: string
           format: date
           nullable: true
           description: >-
             Internal-only best-case fix-commitment date (date-only, YYYY-MM-DD), visible to
-            CSM engineers only. Populated for ServiceNow cases; null otherwise.
+            CSM engineers only. Populated for external-system cases; null otherwise.
         mostLikelyFixEta:
           type: string
           format: date
           nullable: true
           description: >-
             Internal-only most-likely fix-commitment date (date-only, YYYY-MM-DD), visible
-            to CSM engineers only. Populated for ServiceNow cases; null otherwise.
+            to CSM engineers only. Populated for external-system cases; null otherwise.
         worstCaseFixEta:
           type: string
           format: date
           nullable: true
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible to
-            CSM engineers only. Populated for ServiceNow cases; null otherwise.
+            CSM engineers only. Populated for external-system cases; null otherwise.
         escalationLevel:
           type: string
           enum: ["0", "1", "2", "3", "4", "5"]
@@ -14589,7 +15648,7 @@ components:
           description: >-
             The case's current escalation level ("0" = not escalated through "5" = highest),
             the same id space accepted by the case search's escalationLevel filter. Null when
-            the backing case carries no escalation level (e.g. non-ServiceNow-backed cases).
+            the backing case carries no escalation level (e.g. non-externally backed cases).
         slaResponseTime:
           type: string
           nullable: true
@@ -14629,10 +15688,10 @@ components:
           type: string
         createdOn:
           type: string
-          description: Creation timestamp. RFC3339 for Postgres; raw SN timestamp string for ServiceNow.
+          description: Creation timestamp. RFC3339 for Postgres; raw external timestamp string for the external system.
         updatedOn:
           type: string
-          description: Last-updated timestamp. RFC3339 for Postgres; raw SN timestamp string for ServiceNow.
+          description: Last-updated timestamp. RFC3339 for Postgres; raw external timestamp string for the external system.
         createdBy:
           $ref: '#/components/schemas/UserReference'
         subject:
@@ -14644,22 +15703,22 @@ components:
         issueType:
           type: string
           nullable: true
-          description: Issue type enum value (Postgres) or raw SN label (ServiceNow).
+          description: Issue type enum value (Postgres) or raw external label (the external system).
         state:
           type: string
-          description: State enum value (Postgres) or raw SN label (ServiceNow).
+          description: State enum value (Postgres) or raw external label (the external system).
         severity:
           type: string
           nullable: true
-          description: Severity enum value (Postgres) or raw SN label (ServiceNow). Null for non-case types.
+          description: Severity enum value (Postgres) or raw external label (the external system). Null for non-case types.
         catalog:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Populated for ServiceNow data source only.
+          description: Populated for the external data source only.
         catalogItem:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Populated for ServiceNow data source only.
+          description: Populated for the external data source only.
         assignedTeam:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
@@ -14676,7 +15735,7 @@ components:
           description: Work sub-state label. Non-null only when state is work_in_progress.
         type:
           type: string
-          description: Case type value (Postgres) or SN caseType label (ServiceNow).
+          description: Case type value (Postgres) or external caseType label (the external system).
         project:
           $ref: '#/components/schemas/EntityRef'
         projectKey:
@@ -14684,7 +15743,7 @@ components:
           nullable: true
           description: >-
             The project's short human-readable key (e.g. "TESTQUERYSUB").
-            Populated for the ServiceNow data source only; null otherwise.
+            Populated for the external data source only; null otherwise.
         deployment:
           $ref: '#/components/schemas/EntityRef'
         deployedProduct:
@@ -14701,19 +15760,19 @@ components:
         conversation:
           nullable: true
           $ref: '#/components/schemas/EntityRef'
-          description: Populated for ServiceNow data source only.
+          description: Populated for the external data source only.
         account:
           $ref: '#/components/schemas/AccountRef'
           description: >-
             The case's account, including support tier (type). Populated for
-            the ServiceNow data source only; null otherwise.
+            the external data source only; null otherwise.
         bestCaseFixEta:
           type: string
           format: date
           nullable: true
           description: >-
             Internal-only best-case fix-commitment date (date-only, YYYY-MM-DD),
-            visible to CSM engineers only. Populated for the ServiceNow data
+            visible to CSM engineers only. Populated for the external data
             source only; null otherwise.
         mostLikelyFixEta:
           type: string
@@ -14722,7 +15781,7 @@ components:
           description: >-
             Internal-only most-likely fix-commitment date (date-only,
             YYYY-MM-DD), visible to CSM engineers only. Populated for the
-            ServiceNow data source only; null otherwise.
+            external data source only; null otherwise.
         worstCaseFixEta:
           type: string
           format: date
@@ -14730,7 +15789,7 @@ components:
           description: >-
             Internal-only worst-case fix-commitment date (date-only,
             YYYY-MM-DD), visible to CSM engineers only. Populated for the
-            ServiceNow data source only; null otherwise.
+            external data source only; null otherwise.
         escalationLevel:
           type: string
           enum: ["0", "1", "2", "3", "4", "5"]
@@ -14782,11 +15841,11 @@ components:
           type: string
           description: >-
             The grouped field's value for this bucket. For an assignment-group
-            grouping this is a raw sys_id-derived value; for case,
+            grouping this is a raw record id-derived value; for case,
             change_request, incident, and problem's own "state" grouping, a
-            recognized ServiceNow value is normalized to that resource's own
+            recognized external-system value is normalized to that resource's own
             domain state enum (the same values its own "state" search filter
-            accepts) — an unrecognized value is left as the raw ServiceNow
+            accepts) — an unrecognized value is left as the raw external-system
             value instead of being dropped. Other groupings return the raw
             grouped-field value unchanged.
         label:
@@ -15061,7 +16120,7 @@ components:
     CreateAttachmentRequest:
       type: object
       description: >
-        The two data sources populate mutually exclusive fields. ServiceNow requires file
+        The two data sources populate mutually exclusive fields. The external system requires file
         (a base64 data URI) and computes sizeBytes from the decoded bytes. The CSM-native
         (Postgres) data source instead requires storageKey (the file was already uploaded to
         SFTPGo out of band, referenced by this key) and sizeBytes, since this service never
@@ -15085,7 +16144,7 @@ components:
           type: string
           description: >
             Base64 data URI of the file content (e.g. data:image/png;base64,...). Maximum
-            decoded size is 10 MB. Required for the ServiceNow data source; not accepted by
+            decoded size is 10 MB. Required for the external data source; not accepted by
             the CSM-native (Postgres) data source.
         description:
           type: string
@@ -15094,12 +16153,12 @@ components:
           type: string
           description: >
             Reference to file bytes already uploaded to SFTPGo. Required for the CSM-native
-            (Postgres) data source; not accepted by ServiceNow.
+            (Postgres) data source; not accepted by the external system.
         sizeBytes:
           type: integer
           description: >
             File size in bytes. Required for the CSM-native (Postgres) data source (this
-            service cannot compute it there); ignored for ServiceNow, which computes it from
+            service cannot compute it there); ignored for the external system, which computes it from
             the decoded file payload.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
@@ -15111,8 +16170,8 @@ components:
         - complete
       description: >
         Upload lifecycle state for a CSM-native (Postgres) data source attachment. Meaningful
-        for that data source only -- ServiceNow's /attachments API only ever returns
-        fully-uploaded files, so ServiceNow-sourced attachments are always "complete". On
+        for that data source only -- the external system's /attachments API only ever returns
+        fully-uploaded files, so externally sourced attachments are always "complete". On
         create, omitted/empty defaults to "complete" (today's behavior, preserved for every
         existing caller); pass "pending" to register the row before the file has finished
         uploading to SFTPGo, then confirm it via POST /attachments/{id}/confirm.
@@ -15135,7 +16194,7 @@ components:
           nullable: true
           description: >
             Null for a CSM-native (Postgres) data source attachment: this service holds no
-            download location for it, only its storageKey. Always set for ServiceNow-sourced
+            download location for it, only its storageKey. Always set for externally sourced
             attachments.
         storageKey:
           type: string
@@ -15200,8 +16259,8 @@ components:
           nullable: true
           description: >
             Reference to the file's location in external object storage (SFTPGo), set only for
-            CSM-native (Postgres) data source attachments. Null for ServiceNow-sourced
-            attachments, whose bytes are held by ServiceNow itself.
+            CSM-native (Postgres) data source attachments. Null for externally sourced
+            attachments, whose bytes are held by the external system itself.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
 
@@ -15281,7 +16340,7 @@ components:
           its own gte bound is rejected with a validation error.
         - **assignmentGroupId** (in): sys_user_group UUIDs to filter the
           assignment group by.
-        - **approval** (eq): ServiceNow's raw `task.approval` rollup on the
+        - **approval** (eq): the external system's raw `task.approval` rollup on the
           change request. Exactly one value, one of `"not requested"`,
           `"requested"`, `"approved"`, `"rejected"`. Distinct from
           `approvedBy`/`approvedOn` on ChangeRequestDetail, which are derived
@@ -15324,7 +16383,7 @@ components:
             number:
               type: string
               description: >-
-                A single change request number (e.g. "CHG0010001"); matches
+                A single change request number (e.g. "CHG0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             filters:
@@ -15394,7 +16453,7 @@ components:
             number:
               type: string
               description: >-
-                A single change request number (e.g. "CHG0010001"); matches
+                A single change request number (e.g. "CHG0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             filters:
@@ -15625,7 +16684,7 @@ components:
           nullable: true
           description: >-
             When this approval was requested. Always present on the Postgres data
-            source; always null on the ServiceNow-backed one (the Choreo
+            source; always null on the externally backed one (the Choreo
             GET /change-requests/{id}/approvals response carries no equivalent
             field).
         respondedOn:
@@ -15636,7 +16695,7 @@ components:
           nullable: true
           description: >-
             The approver's own comment on their decision, if any. Always null on
-            the ServiceNow-backed data source, same reason as createdOn above.
+            the externally backed data source, same reason as createdOn above.
 
     ChangeRequestApproval:
       type: object
@@ -15772,7 +16831,7 @@ components:
           type: string
           nullable: true
           description: >-
-            Human-readable case number (e.g. "CS0441331"). Null if the case
+            Human-readable case number (e.g. "CS0000002"). Null if the case
             record could not be resolved.
         caseInternalId:
           type: string
@@ -17991,7 +19050,7 @@ components:
           format: uuid
         number:
           type: string
-          example: OUT0001234
+          example: OUT0000001
         kind:
           type: string
           enum: [DECLARED, RESOLVED]
@@ -18001,7 +19060,7 @@ components:
         reason:
           type: string
           description: >-
-            The ServiceNow branch that selected this, in the flow's own
+            The external-system branch that selected this, in the flow's own
             words, so a decision can be traced back to a step.
           example: Declare Outage
         subject:
@@ -18020,7 +19079,7 @@ components:
           format: uuid
         outageNumber:
           type: string
-          example: OUT0001234
+          example: OUT0000001
         emailType:
           type: string
           description: >-
@@ -18303,7 +19362,7 @@ components:
           nullable: true
           description: >
             Plain string, not a closed enum. Known values: OPEN, CLOSED, OTHER
-            (fallback for any unmapped raw ServiceNow value), or null.
+            (fallback for any unmapped raw external-system value), or null.
         dueDate:
           type: string
           nullable: true
@@ -18353,13 +19412,13 @@ components:
             type: string
           description: >
             Filter by task states. Known values: OPEN, CLOSED, OTHER
-            (fallback for any unmapped raw ServiceNow value).
+            (fallback for any unmapped raw external-system value).
         types:
           type: array
           items:
             type: string
           description: >
-            Filter by task types (ServiceNow choice-list keys). The set of
+            Filter by task types (external-system choice-list keys). The set of
             valid values is configuration-dependent.
         assignedUserIds:
           type: array
@@ -18444,7 +19503,7 @@ components:
         state:
           type: string
           description: >
-            Plain string, not a closed enum — ServiceNow may surface undocumented
+            Plain string, not a closed enum — the external system may surface undocumented
             raw values; do not assume a closed set.
         assignedToEmail:
           type: string
@@ -18467,7 +19526,7 @@ components:
           nullable: true
           description: >
             Plain string, not a closed enum. Known values: OPEN, CLOSED, OTHER
-            (fallback for any unmapped raw ServiceNow value), or null.
+            (fallback for any unmapped raw external-system value), or null.
         dueDate:
           type: string
           nullable: true
@@ -18480,7 +19539,7 @@ components:
           type: string
           nullable: true
           description: >
-            Raw ServiceNow choice-list key. Plain string, not a closed enum,
+            Raw external-system choice-list key. Plain string, not a closed enum,
             since the set of valid keys is SN-configuration-dependent.
         requestTypeLabel:
           type: string
@@ -18531,11 +19590,11 @@ components:
         array: "field op values". Mirrors CaseFieldFilter's contract.
 
         - **state** (in): one of NEW/IN_PROGRESS/ON_HOLD/RESOLVED/CLOSED/
-          CANCELLED (the domain enum, not ServiceNow's raw numeric key).
+          CANCELLED (the domain enum, not the external system's raw numeric key).
         - **assignmentGroupId** (in): sys_user_group UUIDs to filter the
           assignment group by.
         - **businessServiceId** (in): business_service UUIDs to filter by
-          (exact sys_id match, distinct from the product-name-matched filter
+          (exact record id match, distinct from the product-name-matched filter
           used elsewhere).
         - **createdOn** (gte/lte): a single value, either an RFC3339
           timestamp, a YYYY-MM-DD date, or a relative-date placeholder (e.g.
@@ -18545,10 +19604,10 @@ components:
           Restricts to incidents with (or without) at least one breached SLA
           record.
         - **madeSla** (eq): a single boolean value ("true"/"false").
-          Restricts to incidents matching ServiceNow's raw `made_sla` field.
+          Restricts to incidents matching the external system's raw `made_sla` field.
           Deliberately separate from **slaViolated** above: slaViolated is
           derived from task_sla.has_breached and is the reliable signal;
-          madeSla is ServiceNow's own less-reliable raw field, kept only for
+          madeSla is the external system's own less-reliable raw field, kept only for
           exact parity with SN's native incident dashboards. Prefer
           slaViolated unless dashboard parity is the explicit goal.
         - **productName** (in): one or more product names to match as a
@@ -18557,7 +19616,7 @@ components:
           narrows rather than guarantees full coverage.
         - **assignedUserId** (in): assignee UUIDs to filter the incident's
           assigned user by.
-        - **incidentStateKeys** (in): one or more raw ServiceNow
+        - **incidentStateKeys** (in): one or more raw external-system
           `incident_state` numeric keys, passed through unmapped (unlike
           state above, which translates the domain IncidentState enum to
           SN's raw `state` numeric key). Deliberately separate from state:
@@ -18587,13 +19646,13 @@ components:
             number:
               type: string
               description: >-
-                A single incident number (e.g. "INC0010001"); matches
+                A single incident number (e.g. "INC0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             correlationId:
               type: string
               description: >-
-                Matches ServiceNow's correlation_id field exactly. Lets a
+                Matches the external system's correlation_id field exactly. Lets a
                 caller that set CreateIncidentRequest.correlationId find that
                 same incident again without a free-text searchQuery scan over
                 subject or workNotes.
@@ -18639,7 +19698,7 @@ components:
             number:
               type: string
               description: >-
-                A single incident number (e.g. "INC0010001"); matches
+                A single incident number (e.g. "INC0000001"); matches
                 exactly. Routed as a first-class filter rather than through
                 the free-text searchQuery scan.
             filters:
@@ -18811,7 +19870,7 @@ components:
         correlationId:
           type: string
           nullable: true
-          description: Optional caller-supplied external-system key, stored on ServiceNow's
+          description: Optional caller-supplied external-system key, stored on the external system's
             correlation_id field. Look it up via SearchIncidentsFilters.correlationId
             to find an incident this caller already created, without depending on
             free-text search over subject or workNotes.
@@ -18820,8 +19879,8 @@ components:
           nullable: true
           maxLength: 40
           description: Optional label (e.g. "Staging", "Production") identifying the
-            environment the source alert fired against. Maps to ServiceNow's own
-            custom incident.u_enviroment field (name kept as ServiceNow spells it,
+            environment the source alert fired against. Maps to the external system's own
+            custom incident.u_enviroment field (name kept as the external system spells it,
             misspelling included); also persisted on this service's own incident row.
 
     CreateIncidentResponse:
@@ -19051,29 +20110,29 @@ components:
         resolutionCode:
           type: string
           nullable: true
-          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Resolution code label. Populated for resolved/closed external-system incidents; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Free-text resolution notes. Populated for resolved/closed external-system incidents; null otherwise.
         resolvedBy:
           type: string
           nullable: true
-          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Email of the user who resolved the incident. Populated for resolved/closed external-system incidents; null otherwise.
         resolvedOn:
           type: string
           nullable: true
-          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Timestamp when the incident was resolved. Populated for resolved/closed external-system incidents; null otherwise.
         incidentReport:
           type: string
           nullable: true
-          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Root-cause/incident report notes. Populated for resolved/closed external-system incidents; null otherwise.
         description:
           type: string
           nullable: true
           description: >-
-            ServiceNow's incident.description field (distinct from subject, which maps to the
-            shorter short_description). Not yet synced from ServiceNow as of this field's
+            the external system's incident.description field (distinct from subject, which maps to the
+            shorter short_description). Not yet synced from the external system as of this field's
             introduction, so always null until the companion csm-sync-service change lands.
         specialistHandoff:
           allOf:
@@ -19370,7 +20429,7 @@ components:
           type: string
           nullable: true
           description: >-
-            Accepted and validated, but not yet forwarded to ServiceNow -- the
+            Accepted and validated, but not yet forwarded to the external system -- the
             Choreo integration's own POST /problems contract has no field to
             receive it. Silently dropped after validation until that changes.
         category:
@@ -19512,7 +20571,7 @@ components:
             number:
               type: string
               description: >-
-                A single problem number (e.g. "PRB0010001"); matches exactly.
+                A single problem number (e.g. "PRB0000001"); matches exactly.
                 Routed as a first-class filter rather than through the
                 free-text searchQuery scan.
             filters:
@@ -19538,7 +20597,7 @@ components:
             number:
               type: string
               description: >-
-                A single problem number (e.g. "PRB0010001"); matches exactly.
+                A single problem number (e.g. "PRB0000001"); matches exactly.
                 Routed as a first-class filter rather than through the
                 free-text searchQuery scan.
             filters:
@@ -20018,7 +21077,7 @@ components:
     ChoiceListItem:
       type: object
       description: >
-        One available option for a ServiceNow choice-list field — used in metadata responses
+        One available option for an external-system choice-list field — used in metadata responses
         that enumerate the valid values for a field (e.g. case states, severities) rather than
         classify a single record, and in stats responses that report a count per option.
       required: [id, label]
@@ -20034,7 +21093,7 @@ components:
     ReferenceTableItem:
       type: object
       description: >
-        A reference to a row in another ServiceNow table, used in metadata/stats responses
+        A reference to a row in another external-system table, used in metadata/stats responses
         (e.g. case types) — richer than EntityRef: adds an optional record number,
         WSO2-internal ID, and per-item count.
       required: [id, name]
@@ -20726,7 +21785,7 @@ components:
         reason:
           type: string
           description: >-
-            The branch that selected this email, in the ServiceNow flow's own
+            The branch that selected this email, in the external-system flow's own
             vocabulary, so a log line can be matched against the original.
         subject:
           type: string
@@ -20734,7 +21793,7 @@ components:
           type: string
           description: >-
             A fixed sentence carrying no outage detail, reproducing the
-            ServiceNow original exactly.
+            the external-system original exactly.
     OutageNotificationState:
       type: object
       properties:
@@ -20762,7 +21821,7 @@ components:
         seededFromSync:
           type: boolean
           description: >-
-            True when `phase` came from ServiceNow's mirrored value rather
+            True when `phase` came from the external system's mirrored value rather
             than from an email this service sent.
     OutageDetail:
       allOf:
@@ -21238,7 +22297,7 @@ components:
           description: >
             Base64 data URI of the attachment content (e.g. data:image/png;base64,...). Null
             for a CSM-native (Postgres) data source attachment: this service holds no bytes for
-            it, only its storageKey. Always set for ServiceNow-sourced attachments.
+            it, only its storageKey. Always set for externally sourced attachments.
         storageKey:
           type: string
           nullable: true
@@ -21418,7 +22477,7 @@ components:
         countTypes:
           type: object
           description: >
-            Keyed by count-type name — ServiceNow defines an open set of count types, not a
+            Keyed by count-type name — the external system defines an open set of count types, not a
             fixed enum.
           additionalProperties:
             $ref: '#/components/schemas/CountTypeAggregation'
@@ -22089,7 +23148,7 @@ components:
       type: object
       description: >
         stats is keyed by date, then by an open set of metric names (e.g. "TOTAL_CORES") —
-        an open set defined by ServiceNow, not a fixed enum.
+        an open set defined by the external system, not a fixed enum.
       required: [stats, summary, total, startDate, endDate]
       properties:
         stats:
@@ -22137,7 +23196,7 @@ components:
     EventPublishFailure:
       description: >
         A durable record that a backend's publish to the event bus was never
-        acknowledged by Event Hub. Has no ServiceNow equivalent — always
+        acknowledged by Event Hub. Has no external-system equivalent — always
         backed by Postgres. Replaces the old event_outbox — there is no
         claim/dispatch lifecycle here, since csm-notification-service is a
         pure Kafka consumer now and never talks to this table.
@@ -22201,7 +23260,7 @@ components:
       description: >
         One case-like work item's current standing against one SLA policy
         target (response/workaround/resolution), read live from the "sla"
-        table ServiceNow's own SLA engine populates via sync — not computed
+        table the external system's own SLA engine populates via sync — not computed
         or scheduled by this service. Replaces the old SLAClock (a
         hand-registered clock using a hardcoded severity->duration guess,
         built before real SLA data existed in Postgres). The eight display
@@ -22218,12 +23277,12 @@ components:
         businessElapsedPercent:
           type: number
           description: >-
-            Percentage of the SLA's business duration elapsed, as ServiceNow
+            Percentage of the SLA's business duration elapsed, as the external system
             computed it. Not capped at 100 — a long-overdue SLA keeps
             climbing well past it.
         hasBreached:
           type: boolean
-          description: ServiceNow's own breach verdict for this clock.
+          description: the external system's own breach verdict for this clock.
         isPaused:
           type: boolean
         startedOn:
@@ -22269,7 +23328,7 @@ components:
           description: >-
             The figure, rounded to three decimals. *** THE JSON TYPE VARIES BY
             CLOUD, AND THAT IS DELIBERATE. *** Six clouds emit a STRING
-            ("100.000") because the ServiceNow weighting functions end in
+            ("100.000") because the external system's weighting functions end in
             toFixed; asgardeo emits a NUMBER (100) because it takes an
             unweighted mean and parseFloat drops the trailing zeros. Verified
             against the live API on 2026-09-29. Normalising the two would
@@ -22295,7 +23354,7 @@ components:
           type: string
           format: date
           description: >-
-            The local day, YYYY-MM-DD, in the ServiceNow instance's timezone
+            The local day, YYYY-MM-DD, in the external system instance's timezone
             (Asia/Colombo), which is where the daily buckets are cut.
       required: [availability, date]
     AvailabilityHistorySubgroup:
@@ -22558,7 +23617,7 @@ components:
         published. Carries an announcement through
         draft -> pending_approval -> approved -> published while the real
         approval decision happens over email, outside this service entirely.
-        Has no ServiceNow equivalent — always backed by Postgres.
+        Has no external-system equivalent — always backed by Postgres.
       type: object
       properties:
         id:
@@ -22802,7 +23861,7 @@ components:
     AnnouncementRequestUpdate:
       description: >
         One dated follow-up comment applied, after the fact, to every case a
-        published announcement request created. Has no ServiceNow
+        published announcement request created. Has no external-system
         equivalent — always backed by Postgres.
       type: object
       properties:
@@ -22835,7 +23894,7 @@ components:
     AnnouncementRequestDelivery:
       description: >
         The durable record of one project's outcome within an announcement
-        request's own Publish fan-out. Has no ServiceNow equivalent — always
+        request's own Publish fan-out. Has no external-system equivalent — always
         backed by Postgres.
       type: object
       properties:
@@ -22943,7 +24002,7 @@ components:
       type: string
       description: >-
         One step of the customer onboarding flow. DATABASE is the csm-platform
-        write done by the Salesforce membership ingest; IDENTITY is the Asgardeo
+        write done by the Salesforce membership ingest; IDENTITY is the identity provider
         user provisioned by csm-notification-service via the SCIM service; EMAIL
         the invitation email; REGISTRATION the member's first sign-in, recorded
         by the customer portal backend; WELCOME_EMAIL the Welcome email sent
@@ -23092,7 +24151,7 @@ components:
         succeededOn (done, forever, for this period), supersededOn
         (abandoned — the next period came due first), or nextRetryOn
         (eligible for another attempt once it's in the past). Has no
-        ServiceNow equivalent — always backed by Postgres.
+        external-system equivalent — always backed by Postgres.
       type: object
       properties:
         id:
@@ -23201,7 +24260,7 @@ components:
     AlertIncidentMappingView:
       description: >
         A monitoring alert that was grouped onto a CSM incident. Has no
-        ServiceNow equivalent — always backed by Postgres.
+        external-system equivalent — always backed by Postgres.
       type: object
       properties:
         id:

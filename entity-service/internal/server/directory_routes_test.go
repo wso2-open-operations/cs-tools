@@ -61,7 +61,10 @@ func newDirectoryRouter(t *testing.T) http.Handler {
 
 func postDirectory(t *testing.T, router http.Handler, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	// As an internal client: a caller with no token at all is refused with
+	// 401 before any registered route runs, and these tests are about the
+	// routes, not the gate.
+	req := asInternalClient(t, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

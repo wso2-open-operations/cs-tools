@@ -209,6 +209,13 @@ func (s *salesforceEventService) ingestOpportunity(ctx context.Context, sfID, ev
 // ingest used, instead of the delete matching no row and being acknowledged.
 func (s *salesforceEventService) deleteOpportunity(ctx context.Context, sfID string) error {
 	sfID = salesforceID18(sfID)
+	if s.opportunity.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.opportunity.SalesEntity.GetOpportunity(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityOpportunity), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn, err := s.deletedEventVersion(ctx, domain.SalesforceIngestEntityOpportunity, sfID)
 	if err != nil {
 		return err

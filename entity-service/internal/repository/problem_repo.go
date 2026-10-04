@@ -89,7 +89,7 @@ type ProblemRepository interface {
 	// no createdBy/createdOn field at all, unlike case/incident/change
 	// request. The caller (problemService.createProblemSNFirst) instead
 	// resolves createdBy from the requesting user's own JWT email claim
-	// (same middleware.UserIDTokenFromContext + emailFromJWT chain
+	// (same verified-identity helper (callerEmail)
 	// caseService.CreateCase already uses when req.CreatedBy is empty) --
 	// the calling user's identity is the only real signal for who actually
 	// created the problem, since ServiceNow's own response gives none.
@@ -671,7 +671,6 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 		}
 		problemSets = append(problemSets, fmt.Sprintf("due_on = $%d", idx))
 		problemArgs = append(problemArgs, t)
-		idx++
 	}
 	if len(problemSets) > 0 {
 		tag, err := tx.Exec(ctx, `UPDATE problem SET `+strings.Join(problemSets, ", ")+` WHERE id = $1`, problemArgs...)
@@ -692,7 +691,6 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 	if req.AssignedToID != nil {
 		wiSets = append(wiSets, fmt.Sprintf("assigned_to_id = $%d::uuid", widx))
 		wiArgs = append(wiArgs, *req.AssignedToID)
-		widx++
 	}
 
 	var updatedOn time.Time

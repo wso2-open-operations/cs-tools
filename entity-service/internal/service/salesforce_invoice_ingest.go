@@ -158,6 +158,13 @@ func (s *salesforceEventService) ingestInvoice(ctx context.Context, sfID, eventT
 // form the ingest stored; a never-ingested invoice is acknowledged.
 func (s *salesforceEventService) deleteInvoice(ctx context.Context, sfID string) error {
 	sfID = salesforceID18(sfID)
+	if s.invoices.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.invoices.SalesEntity.GetInvoice(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityInvoice), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn, err := s.deletedEventVersion(ctx, domain.SalesforceIngestEntityInvoice, sfID)
 	if err != nil {
 		return err

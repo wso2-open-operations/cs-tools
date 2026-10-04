@@ -69,8 +69,8 @@ type snIncidentEntityRef struct {
 }
 
 type snIncidentIntLabel struct {
-	ID    int    `json:"id"`
-	Label string `json:"label"`
+	ID    snFlexibleInt `json:"id"`
+	Label string        `json:"label"`
 }
 
 type snIncidentStrLabel struct {
@@ -341,12 +341,12 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 			view.Caller = &domain.EntityRef{ID: sysidToUUID(inc.Caller.ID), Name: inc.Caller.Name}
 		}
 		if inc.Priority != nil {
-			if label, ok := snIncidentPriorityLabelMap[inc.Priority.ID]; ok {
+			if label, ok := snIncidentPriorityLabelMap[int(inc.Priority.ID)]; ok {
 				view.Priority = &label
 			}
 		}
 		if inc.State != nil {
-			if label, ok := snIncidentStateLabelMap[inc.State.ID]; ok {
+			if label, ok := snIncidentStateLabelMap[int(inc.State.ID)]; ok {
 				view.State = &label
 			}
 		}
@@ -1123,12 +1123,12 @@ func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 		view.Caller = &domain.EntityRef{ID: sysidToUUID(sn.Caller.ID), Name: sn.Caller.Name}
 	}
 	if sn.Priority != nil {
-		if label, ok := snIncidentPriorityLabelMap[sn.Priority.ID]; ok {
+		if label, ok := snIncidentPriorityLabelMap[int(sn.Priority.ID)]; ok {
 			view.Priority = &label
 		}
 	}
 	if sn.State != nil {
-		if label, ok := snIncidentStateLabelMap[sn.State.ID]; ok {
+		if label, ok := snIncidentStateLabelMap[int(sn.State.ID)]; ok {
 			view.State = &label
 		}
 	}
@@ -1169,12 +1169,12 @@ func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 		}
 	}
 	if sn.Impact != nil {
-		if label, ok := snIncidentImpactLabelMap[sn.Impact.ID]; ok {
+		if label, ok := snIncidentImpactLabelMap[int(sn.Impact.ID)]; ok {
 			view.Impact = &label
 		}
 	}
 	if sn.Urgency != nil {
-		if label, ok := snIncidentUrgencyLabelMap[sn.Urgency.ID]; ok {
+		if label, ok := snIncidentUrgencyLabelMap[int(sn.Urgency.ID)]; ok {
 			view.Urgency = &label
 		}
 	}
@@ -1508,7 +1508,7 @@ func (s *snIncidentService) SearchIncidentActivities(ctx context.Context, req do
 		return domain.SearchIncidentActivitiesResponse{}, fmt.Errorf("sn search incident activities: parse response: %w", err)
 	}
 
-	activities, err := mapSNActivitiesToDomain(snResp.Activity)
+	activities, err := mapSNActivitiesToDomain(ctx, snResp.Activity)
 	if err != nil {
 		return domain.SearchIncidentActivitiesResponse{}, fmt.Errorf("sn search incident activities: %w", err)
 	}

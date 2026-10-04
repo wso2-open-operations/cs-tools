@@ -173,23 +173,49 @@ func TestHandleEvent_CreatedUpdatedRestored(t *testing.T) {
 }
 
 func TestHandleEvent_Deleted(t *testing.T) {
-	se := &stubSalesEntityClient{}
+	se := &stubSalesEntityClient{err: salesentity.NotFound("salesentity: customer not found")}
 	repo := &stubSalesforceAccountRepo{}
 	svc := NewSalesforceEventService(repo, se, SalesforceIngestSupport{})
-
-	err := svc.HandleEvent(context.Background(), domain.SalesforceEventRequest{
+	deleted := domain.SalesforceEventRequest{
 		EventType:   domain.SalesforceEventDeleted,
 		Entity:      "account",
 		ReferenceID: "  001xx0000001  ",
-	})
-	if err != nil {
+	}
+
+	if err := svc.HandleEvent(context.Background(), deleted); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if se.calls != 0 {
-		t.Errorf("GetCustomer calls = %d, want 0", se.calls)
+	if se.calls != 1 || se.lastID != "001xx0000001" {
+		t.Errorf("GetCustomer calls = %d id = %q, want one confirming lookup of the trimmed id", se.calls, se.lastID)
 	}
 	if repo.deleteCalls != 1 || repo.lastDeleteID != "001xx0000001" {
 		t.Errorf("soft-delete calls = %d id = %q", repo.deleteCalls, repo.lastDeleteID)
+	}
+}
+
+// TestHandleEvent_DeletedButStillPresentUpstream: a DELETED whose record the
+// upstream still returns is acknowledged without changing anything, and an
+// upstream failure is returned (so the event is retried) without changing
+// anything either.
+func TestHandleEvent_DeletedButStillPresentUpstream(t *testing.T) {
+	deleted := domain.SalesforceEventRequest{EventType: domain.SalesforceEventDeleted, Entity: "account", ReferenceID: "001xx0000001"}
+
+	repo := &stubSalesforceAccountRepo{}
+	svc := NewSalesforceEventService(repo, &stubSalesEntityClient{customer: fullCustomer()}, SalesforceIngestSupport{})
+	if err := svc.HandleEvent(context.Background(), deleted); err != nil {
+		t.Fatalf("still present: %v", err)
+	}
+	if repo.deleteCalls != 0 {
+		t.Fatalf("still present: soft-delete calls = %d, want 0", repo.deleteCalls)
+	}
+
+	outage := &apierror.ServiceUnavailableError{Msg: "salesentity: customer-search returned 503"}
+	svc = NewSalesforceEventService(repo, &stubSalesEntityClient{err: outage}, SalesforceIngestSupport{})
+	if err := svc.HandleEvent(context.Background(), deleted); !errors.Is(err, outage) {
+		t.Fatalf("upstream failure: err = %v, want it returned", err)
+	}
+	if repo.deleteCalls != 0 {
+		t.Fatalf("upstream failure: soft-delete calls = %d, want 0", repo.deleteCalls)
 	}
 }
 
@@ -671,12 +697,14 @@ func TestHandleEvent_DeletedThenRestored(t *testing.T) {
 		return domain.SalesforceEventRequest{EventType: eventType, Entity: "Account", ReferenceID: testAccountID}
 	}
 
+	se.err = salesentity.NotFound("salesentity: customer not found")
 	if err := svc.HandleEvent(context.Background(), event(domain.SalesforceEventDeleted)); err != nil {
 		t.Fatalf("DELETED: %v", err)
 	}
-	if se.calls != 0 || repo.deleteCalls != 1 {
-		t.Fatalf("DELETED: GetCustomer calls = %d, soft-delete calls = %d, want 0 / 1", se.calls, repo.deleteCalls)
+	if se.calls != 1 || repo.deleteCalls != 1 {
+		t.Fatalf("DELETED: GetCustomer calls = %d, soft-delete calls = %d, want 1 / 1", se.calls, repo.deleteCalls)
 	}
+	se.err = nil
 	if repo.lastState.EventType != domain.SalesforceEventDeleted || repo.lastState.Status != domain.SalesforceIngestSucceeded {
 		t.Errorf("DELETED ledger row = %+v", repo.lastState)
 	}
@@ -708,7 +736,7 @@ func TestHandleEvent_DeletedThenRestored(t *testing.T) {
 func TestHandleEvent_DeletedUnknownAccountIsAcknowledged(t *testing.T) {
 	states := &fakeIngestStateRepo{}
 	repo := &stubSalesforceAccountRepo{states: states, deleteMissing: true}
-	svc := NewSalesforceEventService(repo, &stubSalesEntityClient{}, SalesforceIngestSupport{States: states})
+	svc := NewSalesforceEventService(repo, &stubSalesEntityClient{err: salesentity.NotFound("salesentity: customer not found")}, SalesforceIngestSupport{States: states})
 
 	if err := svc.HandleEvent(context.Background(), accountEvent(domain.SalesforceEventDeleted)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)

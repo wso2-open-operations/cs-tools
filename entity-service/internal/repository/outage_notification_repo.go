@@ -102,8 +102,8 @@ SELECT o.id::text,
 func (r *outageNotificationRepo) PendingOutages(ctx context.Context, limit int) ([]domain.OutageForNotification, error) {
 	rows, err := r.db.Query(ctx, pendingOutagesSQL, limit)
 	if err != nil {
-		// The two columns this depends on arrive with digiops-cs migration
-		// 0089. A database without them should report nothing to notify
+		// The two columns this depends on arrive with a sync-side migration.
+		// A database without them should report nothing to notify
 		// rather than fail the sweep. Narrow on purpose: only
 		// undefined_table/undefined_column degrade, because every other error
 		// looks identical to "no outages" once swallowed.
@@ -111,7 +111,7 @@ func (r *outageNotificationRepo) PendingOutages(ctx context.Context, limit int) 
 		if !errors.As(err, &pgErr) || (pgErr.Code != "42P01" && pgErr.Code != "42703") {
 			return nil, fmt.Errorf("querying outages pending internal notification: %w", err)
 		}
-		slog.WarnContext(ctx, "outage notification: mirrored outage columns absent (digiops-cs 0089 not applied); nothing to notify",
+		slog.WarnContext(ctx, "outage notification: mirrored outage columns absent (sync-side migration not applied); nothing to notify",
 			"sqlstate", pgErr.Code)
 		return nil, nil
 	}

@@ -25,7 +25,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -220,13 +219,9 @@ func validateUpdateDeploymentRequest(req domain.UpdateDeploymentRequest) error {
 // comment), so unlike caseService.resolveActor this needs no UserRepository
 // lookup to a full domain.User.
 func (s *deploymentService) resolveActorEmail(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", err
 	}
 	return email, nil
 }

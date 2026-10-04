@@ -396,7 +396,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_RequiresUserIDToken(t 
 	repo := &stubChangeRequestRepo{}
 	svc := NewChangeRequestService(repo, stubUserRepo{})
 
-	_, err := svc.DecideChangeRequestApproval(context.Background(), testUUID, "approved")
+	_, err := svc.DecideChangeRequestApproval(contextWithUserIDToken(""), testUUID, "approved")
 	var ue *apierror.UnauthorizedError
 	if !errors.As(err, &ue) {
 		t.Fatalf("expected *apierror.UnauthorizedError with no x-user-id-token, got %T: %v", err, err)

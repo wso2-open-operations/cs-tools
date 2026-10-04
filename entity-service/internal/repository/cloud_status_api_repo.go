@@ -213,7 +213,8 @@ func (r *cloudStatusDashboardRepository) Availabilities(ctx context.Context, off
 // then reading short_description and type off each outage. Batched the same
 // way, and for the same reason.
 //
-// Note this joins outage_affected_ci, which digiops-cs #3187 provides. Until
+// Note this joins outage_affected_ci, which a separately tracked sync-side
+// change provides. Until
 // that lands the query returns nothing and monitors simply carry no message --
 // degrading to the dashboard's own empty-message case rather than failing.
 const ongoingOutagesSQL = `

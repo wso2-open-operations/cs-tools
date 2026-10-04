@@ -118,7 +118,9 @@ func swapDatabase(url, name string) string {
 // rather than copied here, so a schema change cannot pass these tests without
 // being in the migration.
 func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	files, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*.sql"))
+	// Same list and order as `make migrate` (scripts/migration_order.sh): a
+	// plain glob runs the 6-digit files first and stops at file 1.
+	files, err := orderedMigrationFiles(filepath.Join("..", "..", "migrations"))
 	if err != nil {
 		return err
 	}
@@ -133,14 +135,38 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS csm_migration_applied_migration (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
 		return fmt.Errorf("csm_migration_applied_migration: %w", err)
 	}
-	for _, f := range files { // Glob returns them sorted, and the 4-digit names are ordered
-		sql, err := os.ReadFile(f)
+	for _, f := range files {
+		sql, err := os.ReadFile(f) // #nosec G304 -- path from the repo's own migrations directory
 		if err != nil {
 			return err
 		}
 		if _, err := pool.Exec(ctx, string(sql)); err != nil {
 			return fmt.Errorf("%s: %w", filepath.Base(f), err)
 		}
+		if err := applyMigrationFixture(ctx, pool, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigrationFixture loads the local stack's fixture for migration f, if
+// there is one. A few migrations backfill reference rows that only the
+// backing data source supplies and RAISE when they are absent (0130 needs
+// project_type rows); the compose runner loads these same fixtures straight
+// after the migration they belong to, and so does this.
+func applyMigrationFixture(ctx context.Context, pool *pgxpool.Pool, f string) error {
+	version := strings.TrimSuffix(filepath.Base(f), ".sql")
+	fixture := filepath.Join("..", "..", "..", "scripts", "csm-compose", "fixtures", version+".sql")
+	sql, err := os.ReadFile(fixture) // #nosec G304 -- fixed repo path built from a migration filename
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, string(sql)); err != nil {
+		return fmt.Errorf("fixture %s: %w", version, err)
 	}
 	return nil
 }

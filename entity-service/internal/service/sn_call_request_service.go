@@ -551,7 +551,12 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 func (s *snCallRequestService) verifyCallRequestBelongsToCase(ctx context.Context, token, caseSysid, callRequestSysid string) error {
 	const pageSize = 50
 	offset := 0
-	for {
+	// Advance by the rows actually returned, not by pageSize: the upstream can
+	// return a short page before the end (rows filtered after the limit is
+	// applied, while the total is counted before), and stepping a full page
+	// would skip the rows it never showed. maxOwnershipScanPages bounds the
+	// scan if the upstream keeps answering inconsistently.
+	for page := 0; page < maxOwnershipScanPages; page++ {
 		payload := snCallRequestSearchPayload{
 			CaseID:     caseSysid,
 			Pagination: snProjectPagination{Limit: pageSize, Offset: offset},
@@ -569,10 +574,13 @@ func (s *snCallRequestService) verifyCallRequestBelongsToCase(ctx context.Contex
 				return nil
 			}
 		}
-		if offset+len(resp.CallRequests) >= resp.TotalRecords {
+		if len(resp.CallRequests) == 0 || offset+len(resp.CallRequests) >= resp.TotalRecords {
 			break
 		}
-		offset += pageSize
+		offset += len(resp.CallRequests)
 	}
 	return &apierror.NotFoundError{Msg: "call request not found for this case"}
 }
+
+// maxOwnershipScanPages bounds a paged ownership scan (500 pages of 50 rows).
+const maxOwnershipScanPages = 500

@@ -123,10 +123,39 @@ func buildOptionalRef(id, name *string) *domain.ReferenceTableItem {
 	return &domain.ReferenceTableItem{ID: *id, Name: n}
 }
 
-// instanceIDFilterClause builds the WHERE fragment and args for the
-// mutually-exclusive project/deployment/deployed-product ID filters shared
-// by every instance query. argIdx is the next free placeholder index.
-func instanceIDFilterClause(projectIDs, deploymentIDs, deployedProductIDs []string, argIdx int) (string, []any) {
+// Date-range filters in this file compare the raw timestamp column against
+// day boundaries (col >= start AND col < end + 1 day) rather than casting the
+// column (col::date BETWEEN start AND end). Both read the day in the session
+// time zone, so they match the same rows, but a cast column cannot use its
+// index (idx_hourly_usage_summary_counted_on on the largest table here).
+
+// instanceIDFilterClause builds the WHERE fragment and args shared by every
+// instance query: the request's mutually-exclusive project/deployment/
+// deployed-product ID filters, then the caller's project scope. argIdx is the
+// next free placeholder index.
+//
+// The scope is applied whatever the request asks for. deployment_node and the
+// usage tables carry no row-level security, project has none either, and
+// deployment is only LEFT-joined (its policy blanks columns, it removes no
+// rows), so this predicate is the only thing keeping a non-internal caller to
+// the projects they belong to. A caller with no identity on ctx gets the zero
+// scope (not Unrestricted, no projects) and so matches nothing.
+func instanceIDFilterClause(scope SearchScope, projectIDs, deploymentIDs, deployedProductIDs []string, argIdx int) (string, []any) {
+	clause, args := instanceRequestIDFilter(projectIDs, deploymentIDs, deployedProductIDs, argIdx)
+	if !scope.Unrestricted {
+		ids := scope.ProjectIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		clause += " AND " + scopePredicate("proj.id", argIdx+len(args))
+		args = append(args, ids)
+	}
+	return clause, args
+}
+
+// instanceRequestIDFilter is the request-supplied half of
+// instanceIDFilterClause.
+func instanceRequestIDFilter(projectIDs, deploymentIDs, deployedProductIDs []string, argIdx int) (string, []any) {
 	switch {
 	case len(projectIDs) > 0:
 		return fmt.Sprintf(" AND proj.id = ANY($%d::uuid[])", argIdx), []any{projectIDs}
@@ -147,20 +176,25 @@ func (r *instanceRepo) SearchInstances(ctx context.Context, req domain.SearchIns
 
 	if req.Filters != nil {
 		if req.Filters.StartDate != nil {
-			where += fmt.Sprintf(" AND dn.created_on::date >= $%d::date", argIdx)
+			where += fmt.Sprintf(" AND dn.created_on >= $%d::date", argIdx)
 			args = append(args, *req.Filters.StartDate)
 			argIdx++
 		}
 		if req.Filters.EndDate != nil {
-			where += fmt.Sprintf(" AND dn.created_on::date <= $%d::date", argIdx)
+			where += fmt.Sprintf(" AND dn.created_on < ($%d::date + 1)", argIdx)
 			args = append(args, *req.Filters.EndDate)
 			argIdx++
 		}
-		clause, clauseArgs := instanceIDFilterClause(req.Filters.ProjectIDs, req.Filters.DeploymentIDs, req.Filters.DeployedProductIDs, argIdx)
-		where += clause
-		args = append(args, clauseArgs...)
-		argIdx += len(clauseArgs)
 	}
+	var projectIDs, deploymentIDs, deployedProductIDs []string
+	if req.Filters != nil {
+		projectIDs, deploymentIDs, deployedProductIDs = req.Filters.ProjectIDs, req.Filters.DeploymentIDs, req.Filters.DeployedProductIDs
+	}
+	scope, _ := CallerIdentityFromContext(ctx)
+	clause, clauseArgs := instanceIDFilterClause(scope, projectIDs, deploymentIDs, deployedProductIDs, argIdx)
+	where += clause
+	args = append(args, clauseArgs...)
+	argIdx += len(clauseArgs)
 
 	var total int
 	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM deployment_node dn "+instanceRefJoins+" "+where, args...).Scan(&total); err != nil {
@@ -283,9 +317,10 @@ func (r *instanceRepo) latestDeploymentInformation(ctx context.Context, nodeIDs 
 
 // SearchInstanceMetrics implements InstanceRepository.
 func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain.InstanceDateRangeFilters) ([]domain.InstanceMetric, int, error) {
-	where := "WHERE di.payload_updated_on::date BETWEEN $1::date AND $2::date"
+	where := "WHERE di.payload_updated_on >= $1::date AND di.payload_updated_on < ($2::date + 1)"
 	args := []any{filters.StartDate, filters.EndDate}
-	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
+	scope, _ := CallerIdentityFromContext(ctx)
+	clause, clauseArgs := instanceIDFilterClause(scope, filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
 	args = append(args, clauseArgs...)
 
@@ -363,9 +398,10 @@ func (r *instanceRepo) SearchInstanceMetrics(ctx context.Context, filters domain
 
 // SearchInstanceUsage implements InstanceRepository.
 func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.InstanceDateRangeFilters) ([]domain.InstanceUsageEntry, int, error) {
-	where := "WHERE uc.counted_on::date BETWEEN $1::date AND $2::date"
+	where := "WHERE uc.counted_on >= $1::date AND uc.counted_on < ($2::date + 1)"
 	args := []any{filters.StartDate, filters.EndDate}
-	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
+	scope, _ := CallerIdentityFromContext(ctx)
+	clause, clauseArgs := instanceIDFilterClause(scope, filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
 	args = append(args, clauseArgs...)
 
@@ -407,9 +443,8 @@ func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.I
 			return nil, 0, fmt.Errorf("scan instance usage: %w", err)
 		}
 
-		entry, ok := entryByInstance[instanceID]
-		if !ok {
-			entry = &domain.InstanceUsageEntry{
+		if _, ok := entryByInstance[instanceID]; !ok {
+			entryByInstance[instanceID] = &domain.InstanceUsageEntry{
 				InstanceID:      instanceID,
 				InstanceKey:     nodeID,
 				Project:         buildOptionalRef(projID, projName),
@@ -417,7 +452,6 @@ func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.I
 				Product:         buildOptionalRef(prodID, prodName),
 				DeployedProduct: buildOptionalRef(dprodID, dprodName),
 			}
-			entryByInstance[instanceID] = entry
 			summaryByInstance[instanceID] = map[string]*domain.InstanceSummary{}
 			order = append(order, instanceID)
 		}
@@ -458,9 +492,10 @@ func (r *instanceRepo) SearchInstanceUsage(ctx context.Context, filters domain.I
 // non-nil DataSource filter before this is ever called rather than silently
 // ignoring it.
 func (r *instanceRepo) SearchInstanceMetricsStats(ctx context.Context, filters domain.InstanceDateRangeFilters) (domain.InstanceMetricsStatsResponse, error) {
-	where := "WHERE di.payload_updated_on::date BETWEEN $1::date AND $2::date"
+	where := "WHERE di.payload_updated_on >= $1::date AND di.payload_updated_on < ($2::date + 1)"
 	args := []any{filters.StartDate, filters.EndDate}
-	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
+	scope, _ := CallerIdentityFromContext(ctx)
+	clause, clauseArgs := instanceIDFilterClause(scope, filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
 	args = append(args, clauseArgs...)
 
@@ -539,7 +574,8 @@ func (r *instanceRepo) SearchInstanceMetricsStats(ctx context.Context, filters d
 func (r *instanceRepo) SearchInstanceUsageStats(ctx context.Context, filters domain.InstanceDateRangeFilters, dataSource *string) (domain.InstanceUsageStatsResponse, error) {
 	where := "WHERE dus.summary_date BETWEEN $1::date AND $2::date"
 	args := []any{filters.StartDate, filters.EndDate}
-	clause, clauseArgs := instanceIDFilterClause(filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
+	scope, _ := CallerIdentityFromContext(ctx)
+	clause, clauseArgs := instanceIDFilterClause(scope, filters.ProjectIDs, filters.DeploymentIDs, filters.DeployedProductIDs, len(args)+1)
 	where += clause
 	args = append(args, clauseArgs...)
 	if dataSource != nil {

@@ -62,7 +62,7 @@ func (c *Client) GetInvoice(ctx context.Context, id string) (Invoice, error) {
 		}
 	}
 	if len(rows) == 0 {
-		return Invoice{}, &apierror.ServiceUnavailableError{Msg: "salesentity: invoice not found"}
+		return Invoice{}, NotFound("salesentity: invoice not found")
 	}
 	return Invoice{}, &apierror.ServiceUnavailableError{Msg: "salesentity: invoices/search returned an unexpected invoice"}
 }

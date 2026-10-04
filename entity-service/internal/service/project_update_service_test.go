@@ -115,7 +115,7 @@ func TestPgProjectUpdateService_IgnoresSuspensionProcessState(t *testing.T) {
 // TestPgProjectUpdateService_CallerResolution pins decision 4: an allow-listed internal
 // client may PATCH without a user token; any other tokenless caller is refused.
 func TestPgProjectUpdateService_CallerResolution(t *testing.T) {
-	open := "Open"
+	hasAgent := true
 	m2mCtx := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, ClientID: "csm-integration"})
 	cases := []struct {
 		name    string
@@ -145,7 +145,10 @@ func TestPgProjectUpdateService_CallerResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &stubProjectUpdateRepo{}
 			svc := NewProjectUpdateService(repo, testProjectUserRepo(), tc.access)
-			_, err := svc.UpdateProject(tc.ctx, "11111111-1111-1111-1111-111111111111", domain.ProjectUpdateRequest{EndDateClosureState: &open})
+			// hasAgent, not a closure-state field: a closure-state change by
+			// a restricted caller is refused (403) before identity resolution
+			// is reached, and this test is about identity resolution.
+			_, err := svc.UpdateProject(tc.ctx, "11111111-1111-1111-1111-111111111111", domain.ProjectUpdateRequest{HasAgent: &hasAgent})
 			if tc.wantErr {
 				var unauth *apierror.UnauthorizedError
 				if !errors.As(err, &unauth) || repo.called {

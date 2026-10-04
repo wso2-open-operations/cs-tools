@@ -361,7 +361,7 @@ func (s *snProjectService) fetchProjectsPage(ctx context.Context, req domain.Sea
 
 	views := make([]domain.ProjectView, 0, len(snResp.Projects))
 	for _, p := range snResp.Projects {
-		createdOn, err := time.Parse(snCreatedOnLayout, p.CreatedOn)
+		createdOn, err := parseSNDateTime(ctx, "sn_project_service", "createdOn", p.CreatedOn)
 		if err != nil {
 			return nil, 0, fmt.Errorf("sn projects: parse createdOn %q: %w", p.CreatedOn, err)
 		}
@@ -518,7 +518,7 @@ func (s *snProjectService) GetProjectByID(ctx context.Context, id string) (domai
 		return domain.ProjectDetailsView{}, fmt.Errorf("sn projects: parse detail response: %w", err)
 	}
 
-	createdOn, err := time.Parse(snCreatedOnLayout, sn.CreatedOn)
+	createdOn, err := parseSNDateTime(ctx, "sn_project_service", "createdOn", sn.CreatedOn)
 	if err != nil {
 		return domain.ProjectDetailsView{}, fmt.Errorf("sn projects: parse createdOn %q: %w", sn.CreatedOn, err)
 	}
@@ -698,7 +698,7 @@ func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		return domain.ProjectUpdateResponse{}, fmt.Errorf("sn projects: parse update response: %w", err)
 	}
 
-	updatedOn, err := time.Parse(snCreatedOnLayout, sn.Project.UpdatedOn)
+	updatedOn, err := parseSNDateTime(ctx, "sn_project_service", "updatedOn", sn.Project.UpdatedOn)
 	if err != nil {
 		return domain.ProjectUpdateResponse{}, fmt.Errorf("sn projects: parse updatedOn %q: %w", sn.Project.UpdatedOn, err)
 	}

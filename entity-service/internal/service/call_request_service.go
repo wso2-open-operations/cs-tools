@@ -25,7 +25,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -69,23 +68,6 @@ func NewCallRequestService(repo repository.CallRequestRepository, userRepo repos
 // NewCaseServiceWithSNWriteback's own doc comment.
 func NewCallRequestServiceWithSNWriteback(repo repository.CallRequestRepository, userRepo repository.UserRepository, dispatcher *SNWritebackDispatcher, mirror CallRequestService) CallRequestService {
 	return &callRequestService{repo: repo, userRepo: userRepo, snWriteback: dispatcher, snMirror: mirror}
-}
-
-// callerEmail resolves the caller's email from their x-user-id-token -- the
-// same mechanism every other Postgres write path uses (there is no other
-// notion of who is calling on this data source). customer_call.created_by/
-// updated_by are plain VARCHAR audit strings holding the email, matching
-// comment.created_by and the rest of this schema.
-func callerEmail(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
-	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
-	}
-	return email, nil
 }
 
 // CreateCallRequest implements CallRequestService.
@@ -199,7 +181,7 @@ func (s *callRequestService) SearchAllCallRequests(ctx context.Context, req doma
 	// filter cannot be honored. Reject it rather than silently ignore it: an
 	// ignored filter would widen the result set.
 	if len(req.Filters.AssignmentTeamIDs) > 0 {
-		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "filters.assignmentTeamIds is only supported for the ServiceNow data source"}
+		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "filters.assignmentTeamIds is not supported by this data source"}
 	}
 	for _, st := range req.Filters.States {
 		if _, ok := validCallRequestStates[st]; !ok {

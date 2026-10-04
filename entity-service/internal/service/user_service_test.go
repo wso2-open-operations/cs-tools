@@ -90,15 +90,17 @@ func TestUserService_GetMe_RequiresToken(t *testing.T) {
 	}
 }
 
-// TestUserService_GetMe_RejectsMalformedToken proves an undecodable
-// x-user-id-token surfaces as a ValidationError, not an opaque failure.
+// TestUserService_GetMe_RejectsMalformedToken proves a token that identifies
+// no user (the auth middleware rejects a malformed one before the service;
+// one without an email arrives with no user) is a 401, never an opaque
+// failure.
 func TestUserService_GetMe_RejectsMalformedToken(t *testing.T) {
 	svc := NewUserService(stubUserRepo{})
 	ctx := contextWithUserIDToken("not-a-jwt")
 
 	_, err := svc.GetMe(ctx)
-	if _, ok := err.(*apierror.ValidationError); !ok {
-		t.Fatalf("GetMe error = %v (%T), want *apierror.ValidationError", err, err)
+	if _, ok := err.(*apierror.UnauthorizedError); !ok {
+		t.Fatalf("GetMe error = %v (%T), want *apierror.UnauthorizedError", err, err)
 	}
 }
 
@@ -218,7 +220,7 @@ func TestUserService_SearchUsers_SortBy(t *testing.T) {
 					return nil, 0, nil
 				},
 			}
-			_, err := NewUserService(repo).SearchUsers(context.Background(), domain.SearchUsersRequest{SortBy: tt.sort})
+			_, err := NewUserService(repo).SearchUsers(internalCallerCtx(t, "jane.doe@example.com"), domain.SearchUsersRequest{SortBy: tt.sort})
 			if tt.wantErr != "" {
 				var ve *apierror.ValidationError
 				if !errors.As(err, &ve) || ve.Msg != tt.wantErr {
@@ -258,7 +260,7 @@ func TestUserService_SearchUsers_ActiveFilterReachesRepository(t *testing.T) {
 			}
 			active := active
 			req := domain.SearchUsersRequest{Filters: domain.SearchUsersFilters{Active: &active}}
-			if _, err := NewUserService(repo).SearchUsers(context.Background(), req); err != nil {
+			if _, err := NewUserService(repo).SearchUsers(internalCallerCtx(t, "jane.doe@example.com"), req); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got == nil || *got != active {
@@ -289,7 +291,7 @@ func TestUserService_SearchUsers_UserIDsGroupFiltersReachRepository(t *testing.T
 		GroupIDs:   []string{groupID},
 		GroupNames: []string{"CAB Approval"},
 	}}
-	if _, err := NewUserService(repo).SearchUsers(context.Background(), req); err != nil {
+	if _, err := NewUserService(repo).SearchUsers(internalCallerCtx(t, "jane.doe@example.com"), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(got.UserIDs) != 1 || got.UserIDs[0] != userID {
@@ -323,7 +325,7 @@ func TestUserService_SearchUsers_UserIDsGroupFilters_RejectsMalformedUUID(t *tes
 				},
 			}
 			req := domain.SearchUsersRequest{Filters: tt.filters}
-			_, err := NewUserService(repo).SearchUsers(context.Background(), req)
+			_, err := NewUserService(repo).SearchUsers(internalCallerCtx(t, "jane.doe@example.com"), req)
 			var ve *apierror.ValidationError
 			if !errors.As(err, &ve) {
 				t.Fatalf("err = %v, want ValidationError", err)
@@ -348,7 +350,7 @@ func TestUserService_GetUser(t *testing.T) {
 			},
 			// getUserProjectAccess left nil: calling it panics, proving it is skipped.
 		}
-		got, err := NewUserService(repo).GetUser(context.Background(), userDetailTestID)
+		got, err := NewUserService(repo).GetUser(internalCallerCtx(t, "jane.doe@example.com"), userDetailTestID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +368,7 @@ func TestUserService_GetUser(t *testing.T) {
 				return access, nil
 			},
 		}
-		got, err := NewUserService(repo).GetUser(context.Background(), userDetailTestID)
+		got, err := NewUserService(repo).GetUser(internalCallerCtx(t, "jane.doe@example.com"), userDetailTestID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +378,7 @@ func TestUserService_GetUser(t *testing.T) {
 	})
 
 	t.Run("malformed id is a validation error and never reaches the repository", func(t *testing.T) {
-		_, err := NewUserService(stubUserRepo{}).GetUser(context.Background(), "not-a-uuid")
+		_, err := NewUserService(stubUserRepo{}).GetUser(internalCallerCtx(t, "jane.doe@example.com"), "not-a-uuid")
 		var ve *apierror.ValidationError
 		if !errors.As(err, &ve) {
 			t.Fatalf("err = %v, want ValidationError", err)
@@ -387,7 +389,7 @@ func TestUserService_GetUser(t *testing.T) {
 		repo := stubUserRepo{getUserDetail: func(context.Context, string) (domain.UserDetail, error) {
 			return domain.UserDetail{}, &apierror.NotFoundError{Msg: "no user"}
 		}}
-		_, err := NewUserService(repo).GetUser(context.Background(), userDetailTestID)
+		_, err := NewUserService(repo).GetUser(internalCallerCtx(t, "jane.doe@example.com"), userDetailTestID)
 		var nf *apierror.NotFoundError
 		if !errors.As(err, &nf) {
 			t.Fatalf("err = %v, want NotFoundError", err)
@@ -400,7 +402,7 @@ func TestUserService_GetUser(t *testing.T) {
 			getUserDetail: func(context.Context, string) (domain.UserDetail, error) { return staff, nil },
 			getUserRoles:  func(context.Context, string) ([]string, error) { return nil, boom },
 		}
-		if _, err := NewUserService(repo).GetUser(context.Background(), userDetailTestID); !errors.Is(err, boom) {
+		if _, err := NewUserService(repo).GetUser(internalCallerCtx(t, "jane.doe@example.com"), userDetailTestID); !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want %v", err, boom)
 		}
 	})
@@ -418,7 +420,7 @@ func TestUserService_CreateUser(t *testing.T) {
 				return domain.User{ID: userDetailTestID, Email: req.Email}, nil
 			},
 		}
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		got, err := NewUserService(repo).CreateUser(ctx, validReq)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -442,7 +444,7 @@ func TestUserService_CreateUser(t *testing.T) {
 	})
 
 	t.Run("rejects a missing or malformed email before reaching the repository", func(t *testing.T) {
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		for name, req := range map[string]domain.CreateUserRequest{
 			"empty":     {FirstName: "Jane", LastName: "Doe"},
 			"malformed": {FirstName: "Jane", LastName: "Doe", Email: "not-an-email"},
@@ -457,7 +459,7 @@ func TestUserService_CreateUser(t *testing.T) {
 	})
 
 	t.Run("requires at least a first or last name", func(t *testing.T) {
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		_, err := NewUserService(stubUserRepo{}).CreateUser(ctx, domain.CreateUserRequest{Email: "jane.doe@example.com"})
 		if _, ok := err.(*apierror.ValidationError); !ok {
 			t.Fatalf("err = %v (%T), want *apierror.ValidationError", err, err)
@@ -465,7 +467,7 @@ func TestUserService_CreateUser(t *testing.T) {
 	})
 
 	t.Run("rejects granting an internal-resolving role to a non-wso2.com email", func(t *testing.T) {
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		for _, role := range []domain.UserRole{"internal", "admin", "Admin"} {
 			t.Run(string(role), func(t *testing.T) {
 				req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com", Roles: []domain.UserRole{role}}
@@ -483,7 +485,7 @@ func TestUserService_CreateUser(t *testing.T) {
 				return domain.User{ID: userDetailTestID, Email: req.Email}, nil
 			},
 		}
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@wso2.com", Roles: []domain.UserRole{"internal"}}
 		if _, err := NewUserService(repo).CreateUser(ctx, req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -496,7 +498,7 @@ func TestUserService_CreateUser(t *testing.T) {
 				return domain.User{ID: userDetailTestID, Email: req.Email}, nil
 			},
 		}
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com", Roles: []domain.UserRole{"agent"}}
 		if _, err := NewUserService(repo).CreateUser(ctx, req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -504,7 +506,7 @@ func TestUserService_CreateUser(t *testing.T) {
 	})
 
 	t.Run("rejects granting an external-resolving role -- creating an external-type user is temporarily disabled", func(t *testing.T) {
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		for _, role := range []domain.UserRole{"external", "partner", "customer", "partner_admin", "customer_admin", "External"} {
 			t.Run(string(role), func(t *testing.T) {
 				req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com", Roles: []domain.UserRole{role}}
@@ -522,7 +524,7 @@ func TestUserService_CreateUser(t *testing.T) {
 				return domain.User{}, &apierror.ConflictError{Msg: "a user with this email already exists"}
 			},
 		}
-		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "admin@example.com"))
+		ctx := internalCallerCtx(t, "admin@example.com")
 		_, err := NewUserService(repo).CreateUser(ctx, validReq)
 		ce, ok := err.(*apierror.ConflictError)
 		if !ok {

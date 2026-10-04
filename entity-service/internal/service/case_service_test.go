@@ -4299,9 +4299,15 @@ func TestCaseService_UpdateCase_DualWriteRequiresResolutionFieldsAndMirrorsThem(
 			gotMirror <- r
 			return domain.UpdatedCase{}, nil
 		}}
-		svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, stubAccess{scope: AccessScope{Unrestricted: false}}, nil, dispatcher, mirror, nil, "")
+		// A non-Unrestricted caller must carry a user token that resolves to a
+		// known user before UpdateCase reaches the resolution-field defaults.
+		users := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+			return domain.User{ID: "00000000-0000-0000-0000-000000000001", Email: email, UserType: domain.UserTypeExternal}, nil
+		}}
+		svc := NewCaseServiceWithSNWriteback(repo, users, nil, stubAccess{scope: AccessScope{Unrestricted: false}}, nil, dispatcher, mirror, nil, "")
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
-		if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &closed}); err != nil {
+		if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &closed}); err != nil {
 			t.Fatalf("unexpected error closing a case with no resolution fields as an external caller: %v", err)
 		}
 		if gotReq.ResolutionCode == nil || *gotReq.ResolutionCode != domain.CaseResolutionCodeSolvedByCustomer {

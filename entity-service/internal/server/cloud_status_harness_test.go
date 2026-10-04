@@ -42,7 +42,7 @@ import (
 //
 // It deliberately omits the auth middleware the production router wraps every
 // route in. That middleware is not part of this feature and requires a live
-// Asgardeo token; including it would test Asgardeo, not the cloud status port.
+// identity-provider token; including it would test the identity provider, not the cloud status port.
 // Everything below the transport is exactly what production runs.
 //
 //	CLOUD_STATUS_SERVE_ADDR=127.0.0.1:9120 \

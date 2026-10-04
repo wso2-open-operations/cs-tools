@@ -21,7 +21,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -47,17 +46,19 @@ func (s *conversationService) SearchConversations(ctx context.Context, req domai
 	// that doesn't set it works fine with no caller identity at all, so a
 	// missing/unparsable token isn't an error here the way it is for a
 	// write (e.g. UpdateConversation).
-	var callerEmail string
+	var createdByEmail string
 	if req.Filters.CreatedByMe {
-		token := middleware.UserIDTokenFromContext(ctx)
-		email, err := emailFromJWT(token)
+		email, err := optionalCallerEmail(ctx)
 		if err != nil {
+			return domain.SearchConversationsResponse{}, err
+		}
+		if email == "" {
 			return domain.SearchConversationsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required to filter by createdByMe"}
 		}
-		callerEmail = email
+		createdByEmail = email
 	}
 
-	views, total, err := s.repo.SearchConversations(ctx, req, callerEmail)
+	views, total, err := s.repo.SearchConversations(ctx, req, createdByEmail)
 	if err != nil {
 		return domain.SearchConversationsResponse{}, err
 	}
@@ -96,13 +97,12 @@ func (s *conversationService) UpdateConversation(ctx context.Context, id string,
 		return domain.UpdateConversationResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(req.State)}
 	}
 
-	token := middleware.UserIDTokenFromContext(ctx)
-	callerEmail, err := emailFromJWT(token)
+	actorEmail, err := callerEmail(ctx)
 	if err != nil {
-		return domain.UpdateConversationResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
+		return domain.UpdateConversationResponse{}, err
 	}
 
-	updated, err := s.repo.UpdateConversation(ctx, id, req.State, callerEmail)
+	updated, err := s.repo.UpdateConversation(ctx, id, req.State, actorEmail)
 	if err != nil {
 		return domain.UpdateConversationResponse{}, err
 	}

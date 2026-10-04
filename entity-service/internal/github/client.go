@@ -238,7 +238,7 @@ func (c *Client) SetLabels(ctx context.Context, issue Issue, labels []string) er
 // A label that is not there is not an error: the caller wants it gone, and it
 // is gone. GitHub says 404, which would otherwise make a retry fail where the
 // first attempt succeeded.
-// Dispatch fires a repository_dispatch event, which is how ServiceNow drove
+// Dispatch fires a repository_dispatch event, which is how the backing system drove
 // this integration: it never wrote to the issue itself. A GitHub Actions
 // workflow in the target repository listens for the event type and decides
 // what to do -- comment, label, close.

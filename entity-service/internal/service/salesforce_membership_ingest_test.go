@@ -50,7 +50,7 @@ func (f *fakeMembershipSalesEntity) GetProjectContact(_ context.Context, id stri
 	}
 	pc, ok := f.projectContacts[id]
 	if !ok {
-		return salesentity.ProjectContact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: project contact not found"}
+		return salesentity.ProjectContact{}, salesentity.NotFound("salesentity: project contact not found")
 	}
 	return pc, nil
 }
@@ -62,7 +62,7 @@ func (f *fakeMembershipSalesEntity) GetContact(_ context.Context, id string) (sa
 	}
 	c, ok := f.contacts[id]
 	if !ok {
-		return salesentity.Contact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: contact not found"}
+		return salesentity.Contact{}, salesentity.NotFound("salesentity: contact not found")
 	}
 	return c, nil
 }
@@ -788,10 +788,11 @@ func TestMembershipIngest_RoleStringFallback(t *testing.T) {
 
 func TestMembershipIngest_DeletedDeactivates(t *testing.T) {
 	h := newIngestHarness(sampleProjectContact("INVITED", "Portal user"), sampleContact(), true)
+	delete(h.se.projectContacts, testMembershipID)
 	if err := h.svc.HandleEvent(context.Background(), membershipEvent("DELETED", "Project_Contact__c")); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.repo.deactivated, []string{testMembershipID}) || len(h.repo.upserts) != 0 || len(h.se.pcCalls) != 0 {
+	if !reflect.DeepEqual(h.repo.deactivated, []string{testMembershipID}) || len(h.repo.upserts) != 0 || len(h.se.pcCalls) != 1 {
 		t.Errorf("DELETED must only deactivate: deactivated=%v upserts=%d pcCalls=%d", h.repo.deactivated, len(h.repo.upserts), len(h.se.pcCalls))
 	}
 	if h.repo.deactivateBasis == nil {

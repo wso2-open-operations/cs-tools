@@ -168,17 +168,6 @@ func splitSalesforceRoles(raw string) []string {
 	return out
 }
 
-// hasSalesforceRole reports whether roles contains want (case-insensitive,
-// whitespace-insensitive).
-func hasSalesforceRole(roles []string, want string) bool {
-	for _, r := range roles {
-		if strings.EqualFold(strings.TrimSpace(r), want) {
-			return true
-		}
-	}
-	return false
-}
-
 // splitIgnoredRoles separates the ignored Role__c labels into the ones the
 // ingest drops by decision (ignoredSalesforceRoles) and the ones it has
 // never heard of, so the caller can log a vocabulary gap louder than a

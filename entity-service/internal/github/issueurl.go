@@ -30,7 +30,7 @@ import (
 // This is the join between a change request and its issue: the stored
 // reference is the html_url, and every API call needs owner/repo/number.
 //
-// Parsed as a URL rather than pattern-matched. ServiceNow used
+// Parsed as a URL rather than pattern-matched. The backing system used
 // /([^\/]+)\/([^\/]+)\/issues\/(\d+)$/ against the raw string, which takes
 // whatever two path segments happen to precede "/issues/" -- so a pull-request
 // URL, a query string, or a trailing slash all produce a confidently wrong

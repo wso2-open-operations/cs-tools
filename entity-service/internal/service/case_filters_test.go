@@ -29,7 +29,8 @@ import (
 )
 
 // fakeJWTWithEmail builds an unsigned-but-well-formed JWT (3 base64url segments)
-// whose payload carries the given email claim, matching what emailFromJWT reads.
+// whose payload carries the given email claim; contextWithUserIDToken stamps
+// that claim as the validated identity, as the auth middleware would.
 func fakeJWTWithEmail(t *testing.T, email string) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))

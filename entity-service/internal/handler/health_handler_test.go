@@ -23,15 +23,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type stubPinger struct {
 	err    error
 	called bool
+	calls  int
 }
 
 func (s *stubPinger) Ping(context.Context) error {
 	s.called = true
+	s.calls++
 	return s.err
 }
 
@@ -149,4 +152,39 @@ func contains(haystack, needle string) bool {
 			}
 			return false
 		}()
+}
+
+// TestDatabaseCheck_SharesOneRoundTripPerTTL: the probe is public, so a burst
+// of polls must not each take a pooled connection. Within dbPingTTL one ping
+// answers every request; after it, the next request pings again and sees the
+// database's current state.
+func TestDatabaseCheck_SharesOneRoundTripPerTTL(t *testing.T) {
+	pinger := &stubPinger{}
+	h := NewHealthHandler(pinger)
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return clock }
+
+	probe := func() int {
+		rec := httptest.NewRecorder()
+		h.DatabaseCheck(rec, httptest.NewRequest(http.MethodGet, "/health/database", nil))
+		return rec.Code
+	}
+
+	for range 3 {
+		if code := probe(); code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", code)
+		}
+	}
+	if pinger.calls != 1 {
+		t.Fatalf("pinged %d times within the TTL, want 1", pinger.calls)
+	}
+
+	pinger.err = errors.New("connection refused")
+	clock = clock.Add(dbPingTTL)
+	if code := probe(); code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d after the TTL with the database down, want 503", code)
+	}
+	if pinger.calls != 2 {
+		t.Fatalf("pinged %d times, want a fresh ping once the TTL elapsed", pinger.calls)
+	}
 }

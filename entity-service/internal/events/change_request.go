@@ -76,7 +76,7 @@ type CRPlanDateNoticePayload struct {
 	// for a customer one.
 	GroupName string `json:"groupName,omitempty"`
 	// ActorName is whoever changed the date, rendered LAST NAME FIRST because
-	// that is the order the ServiceNow templates interpolate the two pills in.
+	// that is the order the backing-system templates interpolate the two pills in.
 	ActorName        string `json:"actorName,omitempty"`
 	ProjectID        string `json:"projectId,omitempty"`
 	ProjectName      string `json:"projectName,omitempty"`
@@ -97,7 +97,7 @@ type CRApprovalRequestedPayload struct {
 	// State is the approval state the CR just entered, as the domain value
 	// (ASSESS / AUTHORIZE / CUSTOMER_APPROVAL / REVIEW / CUSTOMER_REVIEW).
 	State string `json:"state"`
-	// Audience selects which of the two ServiceNow subflows this reproduces.
+	// Audience selects which of the two backing-system subflows this reproduces.
 	Audience CRApprovalAudience `json:"audience"`
 	// Team is the owning team derived from the change request's git reference
 	// (Choreo / Asgardeo / MS). Empty for a customer-audience notice: the

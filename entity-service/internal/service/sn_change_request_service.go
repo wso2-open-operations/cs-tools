@@ -108,16 +108,6 @@ type snChangeRequestFilters struct {
 	AssignedUserIDs []string `json:"assignedUserIds,omitempty"`
 }
 
-// snCRTypeIDMap maps domain ChangeRequestType enums to SN numeric type IDs.
-var snCRTypeIDMap = map[domain.ChangeRequestType]int{
-	domain.ChangeRequestTypeStandard:           1,
-	domain.ChangeRequestTypeNormal:             2,
-	domain.ChangeRequestTypeEmergency:          3,
-	domain.ChangeRequestTypeModel:              4,
-	domain.ChangeRequestTypeSiteReliabilityOps: 100,
-	domain.ChangeRequestTypeAzure:              200,
-}
-
 // snCRStateIDMap maps domain ChangeRequestState enums to SN numeric state IDs.
 var snCRStateIDMap = map[domain.ChangeRequestState]int{
 	domain.ChangeRequestStateNew:              -5,
@@ -680,8 +670,8 @@ var validChangeRequestCategory = map[domain.ChangeRequestCategory]bool{
 
 // snCRIntChoice mirrors a Choreo {id: <int>, label: <string>} choice-field shape.
 type snCRIntChoice struct {
-	ID    int    `json:"id"`
-	Label string `json:"label"`
+	ID    snFlexibleInt `json:"id"`
+	Label string        `json:"label"`
 }
 
 // snCRStrChoice mirrors a Choreo {id: <string>, label: <string>} choice-field shape.
@@ -1536,7 +1526,7 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 		result.ApprovedBy = &domain.EntityRef{ID: sysidToUUID(cr.ApprovedBy.ID), Name: cr.ApprovedBy.Name}
 	}
 	if cr.Priority != nil {
-		if label, ok := snCRPriorityLabelMap[cr.Priority.ID]; ok {
+		if label, ok := snCRPriorityLabelMap[int(cr.Priority.ID)]; ok {
 			result.Priority = &label
 		} else {
 			result.Priority = &cr.Priority.Label

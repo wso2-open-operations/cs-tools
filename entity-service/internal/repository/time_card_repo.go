@@ -422,11 +422,11 @@ func (r *timeCardRepo) SearchCaseTimeCards(ctx context.Context, req domain.Searc
 	dataQuery := fmt.Sprintf(`
 		SELECT wi.id, wi.number, wi.subject, wi.created_on, wi.updated_on, wi.created_by, wi.updated_by,
 		       p.id, p.name,
-		       COALESCE(SUM(tc.analyzing_minutes + tc.setting_up_minutes + tc.reproducing_debugging_minutes + tc.providing_solution_minutes + tc.patching_minutes), 0) AS total_minutes,
+		       COALESCE(SUM(`+timeCardMinutesExpr+`), 0) AS total_minutes,
 		       COUNT(tc.id) AS total_count,
-		       COALESCE(SUM(CASE WHEN tc.is_billable THEN tc.analyzing_minutes + tc.setting_up_minutes + tc.reproducing_debugging_minutes + tc.providing_solution_minutes + tc.patching_minutes ELSE 0 END), 0) AS billable_minutes,
+		       COALESCE(SUM(CASE WHEN tc.is_billable THEN `+timeCardMinutesExpr+` ELSE 0 END), 0) AS billable_minutes,
 		       COUNT(*) FILTER (WHERE tc.is_billable) AS billable_count,
-		       COALESCE(SUM(CASE WHEN NOT COALESCE(tc.is_billable, false) THEN tc.analyzing_minutes + tc.setting_up_minutes + tc.reproducing_debugging_minutes + tc.providing_solution_minutes + tc.patching_minutes ELSE 0 END), 0) AS non_billable_minutes,
+		       COALESCE(SUM(CASE WHEN NOT COALESCE(tc.is_billable, false) THEN `+timeCardMinutesExpr+` ELSE 0 END), 0) AS non_billable_minutes,
 		       COUNT(*) FILTER (WHERE NOT COALESCE(tc.is_billable, false)) AS non_billable_count
 		FROM time_card tc
 		JOIN work_item wi ON wi.id = tc.case_id
@@ -604,7 +604,7 @@ func createTimeCardTx(ctx context.Context, tx pgx.Tx, req domain.CreateTimeCardR
 	).Scan(&id)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return "", &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			return "", fkViolationError(pgErr, "one or more referenced IDs do not exist")
 		}
 		if IsRLSPolicyViolation(err) {
 			// NotFoundError, not ValidationError, and no UUID echoed back --
@@ -624,7 +624,7 @@ func createTimeCardTx(ctx context.Context, tx pgx.Tx, req domain.CreateTimeCardR
 			userID, id, approverID,
 		); err != nil {
 			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return "", &apierror.ValidationError{Msg: "one or more approver IDs do not exist: " + pgErr.Detail}
+				return "", fkViolationError(pgErr, "one or more approver IDs do not exist")
 			}
 			return "", fmt.Errorf("insert time card approver: %w", err)
 		}
@@ -694,7 +694,7 @@ func (r *timeCardRepo) UpdateTimeCardFields(ctx context.Context, req domain.Upda
 				return &apierror.ConflictError{Msg: "time card is not editable (it may not exist, may not belong to you, or is no longer in the submitted state)"}
 			}
 			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+				return fkViolationError(pgErr, "one or more referenced IDs do not exist")
 			}
 			return fmt.Errorf("update time card fields: %w", err)
 		}
@@ -710,7 +710,7 @@ func (r *timeCardRepo) UpdateTimeCardFields(ctx context.Context, req domain.Upda
 					actorID, id, approverID,
 				); err != nil {
 					if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-						return &apierror.ValidationError{Msg: "one or more approver IDs do not exist: " + pgErr.Detail}
+						return fkViolationError(pgErr, "one or more approver IDs do not exist")
 					}
 					return fmt.Errorf("insert time card approver: %w", err)
 				}
@@ -761,7 +761,7 @@ func (r *timeCardRepo) TransitionTimeCardState(ctx context.Context, id string, s
 		}
 		// time_card_state_enum is UPPER_SNAKE_CASE; domain.TimeCardStateSubmitted
 		// is lowercase.
-		if currentState == nil || strings.ToUpper(*currentState) != strings.ToUpper(string(domain.TimeCardStateSubmitted)) {
+		if currentState == nil || !strings.EqualFold(*currentState, string(domain.TimeCardStateSubmitted)) {
 			return &apierror.ConflictError{Msg: "time card is not in the submitted state (it may already have been approved, rejected, processed, or recalled)"}
 		}
 
@@ -783,7 +783,7 @@ func (r *timeCardRepo) TransitionTimeCardState(ctx context.Context, id string, s
 
 		if err := tx.QueryRow(ctx, query, id, strings.ToUpper(string(state)), leadComment, actorID).Scan(&returnedID); err != nil {
 			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return &apierror.ValidationError{Msg: pgErr.Detail}
+				return fkViolationError(pgErr, "the acting user does not exist")
 			}
 			return fmt.Errorf("transition time card state: %w", err)
 		}

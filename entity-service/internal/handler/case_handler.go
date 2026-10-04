@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
@@ -73,19 +74,34 @@ type CaseHandler struct {
 	// Lowercased once here so every comparison in AddCaseTag is a cheap
 	// case-insensitive exact match.
 	m2mTrustedActorEmails map[string]bool
+	// internalClientIDs is config.Config.AuthInternalClientIDs. An ActorEmail
+	// is honoured only on a request whose validated client id is in this set:
+	// naming an allow-listed service account is not by itself enough to act
+	// as it.
+	internalClientIDs map[string]bool
 }
 
 // NewCaseHandler constructs a CaseHandler with the given service and the
 // allowlist of M2M service-account emails permitted to use
 // AddCaseTagRequest.ActorEmail (see that field's own doc comment). Passing a
 // nil/empty allowlist is safe -- it simply means no ActorEmail is ever
-// trusted, matching the config's default-closed posture.
-func NewCaseHandler(svc service.CaseService, m2mTrustedActorEmails []string) *CaseHandler {
+// trusted, matching the config's default-closed posture. internalClientIDs
+// (config.Config.AuthInternalClientIDs) is the set of client ids that may
+// present an ActorEmail at all; nil means none may.
+func NewCaseHandler(svc service.CaseService, m2mTrustedActorEmails []string, internalClientIDs map[string]bool) *CaseHandler {
 	allowlist := make(map[string]bool, len(m2mTrustedActorEmails))
 	for _, e := range m2mTrustedActorEmails {
 		allowlist[strings.ToLower(strings.TrimSpace(e))] = true
 	}
-	return &CaseHandler{svc: svc, m2mTrustedActorEmails: allowlist}
+	return &CaseHandler{svc: svc, m2mTrustedActorEmails: allowlist, internalClientIDs: internalClientIDs}
+}
+
+// trustedM2MActor reports whether r may act as actorEmail: the request must
+// carry a validated, allow-listed internal client id AND actorEmail must be
+// on the M2M service-account allowlist.
+func (h *CaseHandler) trustedM2MActor(r *http.Request, actorEmail string) bool {
+	id := auth.IdentityFromContext(r.Context())
+	return id.Validated && id.ClientID != "" && h.internalClientIDs[id.ClientID] && h.m2mTrustedActorEmails[actorEmail]
 }
 
 // GetCase handles GET /cases/{id}.
@@ -176,7 +192,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 
 	case req.ActorEmail != nil:
 		actorEmail := strings.ToLower(strings.TrimSpace(*req.ActorEmail))
-		if !h.m2mTrustedActorEmails[actorEmail] {
+		if !h.trustedM2MActor(r, actorEmail) {
 			writeServiceError(w, r, &apierror.ForbiddenError{
 				Msg: "actorEmail is not an authorized M2M service account",
 			})
@@ -317,6 +333,9 @@ func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Disposition", "attachment")
+	// Tell the browser to honour the Content-Type above rather than sniff
+	// the bytes for a type of its own choosing.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(content) // #nosec G705 -- Content-Type is allowlisted above; Content-Disposition: attachment prevents inline rendering
 }
 
@@ -430,7 +449,7 @@ func (h *CaseHandler) AddCaseTag(w http.ResponseWriter, r *http.Request) {
 
 	case req.ActorEmail != nil:
 		actorEmail := strings.ToLower(strings.TrimSpace(*req.ActorEmail))
-		if !h.m2mTrustedActorEmails[actorEmail] {
+		if !h.trustedM2MActor(r, actorEmail) {
 			writeServiceError(w, r, &apierror.ForbiddenError{
 				Msg: "actorEmail is not an authorized M2M service account",
 			})

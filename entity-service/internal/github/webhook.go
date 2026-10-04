@@ -29,7 +29,7 @@ import (
 //
 // ONE ERROR FOR EVERY FAILURE, ON PURPOSE. A caller must not be able to learn
 // which of those it was, and must never be told what the expected signature
-// would have been. ServiceNow's equivalent returned the computed HMAC in the
+// would have been. The backing system's equivalent returned the computed HMAC in the
 // 401 body, which let anyone who could reach the endpoint sign arbitrary
 // payloads.
 var ErrInvalidSignature = errors.New("github: invalid webhook signature")

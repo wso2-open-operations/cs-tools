@@ -33,13 +33,9 @@ import (
 // against a future authorization decision (e.g. restricting an EXTERNAL
 // caller to their own account/project) -- not enforced yet.
 func resolveCallerEmail(ctx context.Context) (string, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-	if token == "" {
-		return "", &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
-	}
-	email, err := emailFromJWT(token)
+	email, err := callerEmail(ctx)
 	if err != nil {
-		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
+		return "", err
 	}
 	return email, nil
 }

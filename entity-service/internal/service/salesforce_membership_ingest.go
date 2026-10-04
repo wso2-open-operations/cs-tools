@@ -60,6 +60,10 @@ func (s *salesforceEventService) handleProjectContactEvent(ctx context.Context, 
 	case domain.SalesforceEventCreated, domain.SalesforceEventUpdated, domain.SalesforceEventRestored:
 		return s.ingestMembership(ctx, req.ReferenceID, req.EventType, nil)
 	case domain.SalesforceEventDeleted:
+		_, fetchErr := s.membership.SalesEntity.GetProjectContact(ctx, req.ReferenceID)
+		if gone, err := confirmDeletedUpstream(ctx, "Project_Contact__c", req.ReferenceID, fetchErr); err != nil || !gone {
+			return err
+		}
 		found, err := s.membership.Memberships.DeactivateBySfID(ctx, req.ReferenceID, s.adminRoleBasis)
 		if err != nil {
 			return err

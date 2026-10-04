@@ -216,10 +216,6 @@ func crDelivery() Delivery {
 		[]string{"CR/NormalChange"})
 }
 
-func newGhSvc(r *fakeGhRepo, c *fakeGhClient) GithubSyncService {
-	return NewGithubSyncService(r, c, "wso2-integration-bot")
-}
-
 func writingSvc(r *fakeGhRepo, m *fakeGhMutations, c *fakeGhClient) GithubSyncService {
 	return NewGithubSyncServiceWriting(r, m, c, "wso2-integration-bot", DefaultGithubLabels())
 }

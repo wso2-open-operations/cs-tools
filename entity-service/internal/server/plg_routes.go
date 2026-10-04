@@ -31,7 +31,7 @@ import (
 // `GET /plg/health` is deliberately absent. entity-service has its own
 // `/health`, and a second liveness endpoint answering for one application
 // inside a shared service is a probe that lies.
-func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
+func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool, access service.AccessService, users service.UserService, internalClientIDs map[string]bool) {
 	// Reference data — the platform catalogue and the lifecycle stages.
 	referenceRepo := repository.NewReferenceRepository(db)
 	referenceHandler := handler.NewPlgReferenceHandler(service.NewReferenceService(referenceRepo))
@@ -45,8 +45,13 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 	// Being ACTIVE is a separate filter and the caller chooses it: an owner
 	// picker asks for active engineers only, while an attribution lookup does
 	// not, because a note written by someone who has since left must still
-	// render their name. The BFF's identity middleware — the gate on every PLG
-	// route — asks for both.
+	// render their name. The portal backend asks for both.
+	//
+	// Every PLG route is internalOnly: the portal backend (an allow-listed
+	// internal client) and internal staff reach them, nobody else does. The
+	// pairing writes attribute through PlgActorResolver, which takes the actor
+	// from the validated identity and accepts a body actorId only from an
+	// allow-listed internal client.
 	userRepo := repository.NewPlgUserRepository(db)
 	usersHandler := handler.NewPlgUsersHandler(service.NewPlgUserService(userRepo))
 
@@ -61,7 +66,8 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 	playbookHandler := handler.NewPlgPlaybookHandler(service.NewPlaybookService(playbookRepo))
 
 	pairingRepo := repository.NewOrgPlatformRepository(db, playbookRepo)
-	pairingHandler := handler.NewPlgPairingHandler(service.NewPairingService(pairingRepo))
+	pairingHandler := handler.NewPlgPairingHandler(service.NewPairingService(pairingRepo),
+		handler.NewPlgActorResolver(users, internalClientIDs))
 
 	ingestHandler := handler.NewPlgIngestHandler(service.NewIngestService(
 		repository.NewIngestRepository(db), repository.NewFailureRepository(db)))
@@ -70,58 +76,53 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 	analyticsHandler := handler.NewPlgAnalyticsHandler(service.NewAnalyticsService(analyticsRepo))
 
 	// --- reference -----------------------------------------------------------
-	mux.HandleFunc("GET /plg/products", referenceHandler.ListProducts)
-	mux.HandleFunc("GET /plg/lifecycle", referenceHandler.Lifecycle)
-	mux.HandleFunc("POST /plg/users/search", usersHandler.SearchUsers)
+	mux.HandleFunc("GET /plg/products", internalOnly(access, referenceHandler.ListProducts))
+	mux.HandleFunc("GET /plg/lifecycle", internalOnly(access, referenceHandler.Lifecycle))
+	mux.HandleFunc("POST /plg/users/search", internalOnly(access, usersHandler.SearchUsers))
 
 	// --- organisations -------------------------------------------------------
-	mux.HandleFunc("POST /plg/organizations/search", organizationHandler.SearchOrganizations)
-	mux.HandleFunc("GET /plg/organizations/{organizationId}", organizationHandler.GetOrganization)
-	mux.HandleFunc("PATCH /plg/organizations/{organizationId}", organizationHandler.PatchOrganization)
+	mux.HandleFunc("POST /plg/organizations/search", internalOnly(access, organizationHandler.SearchOrganizations))
+	mux.HandleFunc("GET /plg/organizations/{organizationId}", internalOnly(access, organizationHandler.GetOrganization))
+	mux.HandleFunc("PATCH /plg/organizations/{organizationId}", internalOnly(access, organizationHandler.PatchOrganization))
 
 	// --- the product tab: one organisation, one platform ---------------------
-	mux.HandleFunc("GET /plg/organizations/{organizationId}/products/{productCode}",
-		pairingHandler.GetPairing)
-	mux.HandleFunc("PATCH /plg/organizations/{organizationId}/products/{productCode}",
-		pairingHandler.PatchPairing) // W2
-	mux.HandleFunc("POST /plg/organizations/{organizationId}/products/{productCode}/playbook-runs",
-		pairingHandler.AttachPlaybook) // W3
-	mux.HandleFunc("POST /plg/organizations/{organizationId}/products/{productCode}/notes",
-		pairingHandler.CreateNote) // S2
+	mux.HandleFunc("GET /plg/organizations/{organizationId}/products/{productCode}", internalOnly(access, pairingHandler.GetPairing))
+	mux.HandleFunc("PATCH /plg/organizations/{organizationId}/products/{productCode}", internalOnly(access, pairingHandler.PatchPairing))                // W2
+	mux.HandleFunc("POST /plg/organizations/{organizationId}/products/{productCode}/playbook-runs", internalOnly(access, pairingHandler.AttachPlaybook)) // W3
+	mux.HandleFunc("POST /plg/organizations/{organizationId}/products/{productCode}/notes", internalOnly(access, pairingHandler.CreateNote))             // S2
 
 	// --- playbook execution --------------------------------------------------
-	mux.HandleFunc("DELETE /plg/playbook-runs/{playbookRunId}", pairingHandler.DetachRun) // W4
-	mux.HandleFunc("PATCH /plg/playbook-run-tasks/{taskId}", pairingHandler.PatchRunTask) // W5
-	mux.HandleFunc("PATCH /plg/notes/{noteId}", pairingHandler.UpdateNote)                // W6
+	mux.HandleFunc("DELETE /plg/playbook-runs/{playbookRunId}", internalOnly(access, pairingHandler.DetachRun)) // W4
+	mux.HandleFunc("PATCH /plg/playbook-run-tasks/{taskId}", internalOnly(access, pairingHandler.PatchRunTask)) // W5
+	mux.HandleFunc("PATCH /plg/notes/{noteId}", internalOnly(access, pairingHandler.UpdateNote))                // W6
 
 	// Two small reads the BFF needs to apply its own rules: the shape lets it
 	// reject a value a task cannot hold, by name, before writing; the location
 	// turns a pairing id into the org+product the portal addresses it by.
-	mux.HandleFunc("GET /plg/playbook-run-tasks/{taskId}/shape", pairingHandler.GetRunTaskShape)
-	mux.HandleFunc("GET /plg/pairings/{orgPlatformId}/location", pairingHandler.LocatePairing)
+	mux.HandleFunc("GET /plg/playbook-run-tasks/{taskId}/shape", internalOnly(access, pairingHandler.GetRunTaskShape))
+	mux.HandleFunc("GET /plg/pairings/{orgPlatformId}/location", internalOnly(access, pairingHandler.LocatePairing))
 
 	// --- registrations -------------------------------------------------------
-	mux.HandleFunc("POST /plg/registrations/search", pairingHandler.SearchRegistrations)
-	mux.HandleFunc("POST /plg/registrations/{orgPlatformId}/acknowledge",
-		pairingHandler.Acknowledge) // W1
+	mux.HandleFunc("POST /plg/registrations/search", internalOnly(access, pairingHandler.SearchRegistrations))
+	mux.HandleFunc("POST /plg/registrations/{orgPlatformId}/acknowledge", internalOnly(access, pairingHandler.Acknowledge)) // W1
 
 	// --- playbook templates --------------------------------------------------
-	mux.HandleFunc("GET /plg/playbooks", playbookHandler.ListPlaybooks)
-	mux.HandleFunc("GET /plg/playbooks/{playbookId}", playbookHandler.GetPlaybook)
-	mux.HandleFunc("POST /plg/products/{productCode}/playbooks", playbookHandler.CreatePlaybook)  // W7
-	mux.HandleFunc("PATCH /plg/playbooks/{playbookId}", playbookHandler.PatchPlaybook)            // S3
-	mux.HandleFunc("PUT /plg/playbooks/{playbookId}/tasks", playbookHandler.ReplacePlaybookTasks) // W8
-	mux.HandleFunc("DELETE /plg/playbooks/{playbookId}", playbookHandler.DeletePlaybook)          // S4
+	mux.HandleFunc("GET /plg/playbooks", internalOnly(access, playbookHandler.ListPlaybooks))
+	mux.HandleFunc("GET /plg/playbooks/{playbookId}", internalOnly(access, playbookHandler.GetPlaybook))
+	mux.HandleFunc("POST /plg/products/{productCode}/playbooks", internalOnly(access, playbookHandler.CreatePlaybook))  // W7
+	mux.HandleFunc("PATCH /plg/playbooks/{playbookId}", internalOnly(access, playbookHandler.PatchPlaybook))            // S3
+	mux.HandleFunc("PUT /plg/playbooks/{playbookId}/tasks", internalOnly(access, playbookHandler.ReplacePlaybookTasks)) // W8
+	mux.HandleFunc("DELETE /plg/playbooks/{playbookId}", internalOnly(access, playbookHandler.DeletePlaybook))          // S4
 
 	// --- ingest --------------------------------------------------------------
 	// The poller lives in the BFF and calls these, so the transaction that
 	// lands a registration stays on this side of the wire.
-	mux.HandleFunc("POST /plg/registrations/ingest", ingestHandler.Register) // I1
-	mux.HandleFunc("POST /plg/ingest-failures", ingestHandler.RecordFailure) // I2
+	mux.HandleFunc("POST /plg/registrations/ingest", internalOnly(access, ingestHandler.Register)) // I1
+	mux.HandleFunc("POST /plg/ingest-failures", internalOnly(access, ingestHandler.RecordFailure)) // I2
 
 	// --- analytics -----------------------------------------------------------
 	// The work queue is a POST search because it takes eight repeatable filter
 	// dimensions; the dashboard is a GET because it takes two optional dates.
-	mux.HandleFunc("GET /plg/analytics/dashboard", analyticsHandler.Dashboard)
-	mux.HandleFunc("POST /plg/work-queue/search", analyticsHandler.SearchWorkQueue)
+	mux.HandleFunc("GET /plg/analytics/dashboard", internalOnly(access, analyticsHandler.Dashboard))
+	mux.HandleFunc("POST /plg/work-queue/search", internalOnly(access, analyticsHandler.SearchWorkQueue))
 }

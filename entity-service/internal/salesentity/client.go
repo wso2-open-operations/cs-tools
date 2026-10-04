@@ -274,7 +274,7 @@ func (c *Client) GetProjectContact(ctx context.Context, id string) (ProjectConta
 		}
 	}
 	if len(rows) == 0 {
-		return ProjectContact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: project contact not found"}
+		return ProjectContact{}, NotFound("salesentity: project contact not found")
 	}
 	return ProjectContact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: project-contacts/search returned an unexpected project contact"}
 }
@@ -292,7 +292,7 @@ func (c *Client) GetContact(ctx context.Context, id string) (Contact, error) {
 		}
 	}
 	if len(rows) == 0 {
-		return Contact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: contact not found"}
+		return Contact{}, NotFound("salesentity: contact not found")
 	}
 	return Contact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: contacts/search returned an unexpected contact"}
 }
@@ -407,7 +407,7 @@ func (c *Client) getCustomer(ctx context.Context, id string) (Customer, error) {
 			return Customer{}, fmt.Errorf("salesentity: parse customer-search response: %w", err)
 		}
 		if len(customers) == 0 {
-			return Customer{}, &apierror.ServiceUnavailableError{Msg: "salesentity: customer not found"}
+			return Customer{}, NotFound("salesentity: customer not found")
 		}
 		cust, ok := matchingCustomer(customers, id)
 		if !ok {

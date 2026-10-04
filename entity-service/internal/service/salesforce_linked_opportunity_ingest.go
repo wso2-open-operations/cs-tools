@@ -189,6 +189,13 @@ func (s *salesforceEventService) ingestLinkedOpportunity(ctx context.Context, sf
 // stores first. A link never ingested is acknowledged.
 func (s *salesforceEventService) deleteLinkedOpportunity(ctx context.Context, sfID string) error {
 	sfID = salesforceID18(sfID)
+	if s.linkedOpportunity.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.linkedOpportunity.SalesEntity.GetLinkedOpportunity(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityLinkedOpportunity), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn, err := s.deletedEventVersion(ctx, domain.SalesforceIngestEntityLinkedOpportunity, sfID)
 	if err != nil {
 		return err

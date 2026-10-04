@@ -55,8 +55,8 @@ type snEntityRef struct {
 }
 
 type snConversationIntLabel struct {
-	ID    int    `json:"id"`
-	Label string `json:"label"`
+	ID    snFlexibleInt `json:"id"`
+	Label string        `json:"label"`
 }
 
 // snConversationSearchPayload is the Choreo POST /conversations/search request body.
@@ -285,7 +285,7 @@ func (s *snConversationService) SearchConversations(ctx context.Context, req dom
 			view.Case = &domain.EntityRef{ID: sysidToUUID(c.Case.ID), Name: c.Case.Name}
 		}
 		if c.State != nil {
-			if label, ok := snConversationStateLabelMap[c.State.ID]; ok {
+			if label, ok := snConversationStateLabelMap[int(c.State.ID)]; ok {
 				view.State = &label
 			}
 		}
@@ -351,7 +351,7 @@ func (s *snConversationService) GetConversation(ctx context.Context, id string) 
 		details.Case = &domain.EntityRef{ID: sysidToUUID(snResp.Case.ID), Name: snResp.Case.Name}
 	}
 	if snResp.State != nil {
-		if label, ok := snConversationStateLabelMap[snResp.State.ID]; ok {
+		if label, ok := snConversationStateLabelMap[int(snResp.State.ID)]; ok {
 			details.State = &label
 		}
 	}
@@ -404,7 +404,7 @@ func (s *snConversationService) CreateConversation(ctx context.Context, req doma
 		return domain.CreateConversationResponse{}, fmt.Errorf("sn create conversation: parse response: %w", err)
 	}
 
-	state := snConversationStateLabelMap[snResp.Conversation.State.ID]
+	state := snConversationStateLabelMap[int(snResp.Conversation.State.ID)]
 	var statePtr *string
 	if state != "" {
 		statePtr = &state
@@ -463,7 +463,7 @@ func (s *snConversationService) UpdateConversation(ctx context.Context, id strin
 		return domain.UpdateConversationResponse{}, fmt.Errorf("sn update conversation: parse response: %w", err)
 	}
 
-	state := snConversationStateLabelMap[snResp.Conversation.State.ID]
+	state := snConversationStateLabelMap[int(snResp.Conversation.State.ID)]
 	var statePtr *string
 	if state != "" {
 		statePtr = &state

@@ -40,7 +40,7 @@ func (c *Client) GetOpportunityLineItem(ctx context.Context, id string) (Subscri
 		}
 	}
 	if len(rows) == 0 {
-		return SubscriptionLineItem{}, &apierror.ServiceUnavailableError{Msg: "salesentity: opportunity line item not found"}
+		return SubscriptionLineItem{}, NotFound("salesentity: opportunity line item not found")
 	}
 	return SubscriptionLineItem{}, &apierror.ServiceUnavailableError{Msg: "salesentity: opportunity-line-items/search returned an unexpected line item"}
 }

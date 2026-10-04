@@ -346,6 +346,13 @@ func (s *salesforceEventService) softDeleteProject(ctx context.Context, sfID str
 		return errors.New("salesforce: salesforce_ingest_state ledger is not configured")
 	}
 	sfID = salesforceID18(sfID)
+	if s.project.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.project.SalesEntity.GetProject(ctx, sfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityProject), sfID, fetchErr); err != nil || !gone {
+		return err
+	}
 	modifiedOn := time.Now().UTC()
 	st, err := s.support.States.Get(ctx, domain.SalesforceIngestEntityProject, sfID)
 	if err != nil {

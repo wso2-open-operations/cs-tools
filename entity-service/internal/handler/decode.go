@@ -66,16 +66,11 @@ func decodeRequestWithLimit[T any](w http.ResponseWriter, r *http.Request, dst *
 	return true
 }
 
-// decodeErrMsg converts a JSON decode error into a human-readable message that
-// is safe to return to the caller. Infrastructure details (e.g. raw Go type
-// names) are replaced with user-friendly descriptions.
-func decodeErrMsg(err error) string {
-	return decodeErrMsgWithLimit(err, "request body too large")
-}
-
-// decodeErrMsgWithLimit behaves like decodeErrMsg but lets the caller supply
-// an endpoint-specific message for the body-too-large case, so a handler with
-// a raised size cap (see decodeRequestWithLimit) can tell the caller what the
+// decodeErrMsgWithLimit converts a JSON decode error into a human-readable
+// message that is safe to return to the caller. Infrastructure details (e.g.
+// raw Go type names) are replaced with user-friendly descriptions. The caller
+// supplies the message for the body-too-large case, so a handler with a
+// raised size cap (see decodeRequestWithLimit) can tell the caller what the
 // actual limit is instead of the generic message.
 func decodeErrMsgWithLimit(err error, tooLargeMsg string) string {
 	var maxBytes *http.MaxBytesError
@@ -167,9 +162,12 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		apierror.WriteJSON(w, http.StatusServiceUnavailable, "service temporarily unavailable, please try again later")
 
 	case errors.Is(err, context.DeadlineExceeded):
-		// 408 – request timed out waiting for a downstream call or DB query.
+		// 504 – this service ran out of time waiting for a downstream call or
+		// DB query. Not 408: that status says the CLIENT was too slow sending
+		// its request, and many clients retry it transparently, which is the
+		// wrong reaction to a server-side timeout on a write.
 		log.Printf("Request timeout: %s %s", r.Method, sanitizeLog(r.URL.Path)) // #nosec G706 -- path sanitized
-		apierror.WriteJSON(w, http.StatusRequestTimeout, "request timed out")
+		apierror.WriteJSON(w, http.StatusGatewayTimeout, "request timed out")
 
 	case errors.Is(err, context.Canceled):
 		// Client closed the connection — log it and return nothing; the response is already gone.

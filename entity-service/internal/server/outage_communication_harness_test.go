@@ -41,8 +41,8 @@ import (
 // it and exercised end to end.
 //
 // It wraps the mux in an identity shim rather than the production auth
-// middleware: that middleware needs a live Asgardeo token and would be testing
-// Asgardeo, not this port. Everything below the transport is what production
+// middleware: that middleware needs a live identity-provider token and would be testing
+// the identity provider, not this port. Everything below the transport is what production
 // runs.
 //
 //	OUTAGE_COMM_SERVE_ADDR=127.0.0.1:9190 \

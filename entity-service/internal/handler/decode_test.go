@@ -17,6 +17,9 @@
 package handler
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -57,5 +60,17 @@ func TestDecodeRequestWithLimit_OversizedTrailingData(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "must contain a single JSON object") {
 		t.Errorf("response body = %q, should not fall back to the generic trailing-data message for a size-limit case", rec.Body.String())
+	}
+}
+
+// TestWriteServiceError_DeadlineIsAGatewayTimeout: a downstream call or query
+// that ran out of time is this service's timeout, reported as 504 — never
+// 408, which tells the client it was too slow and invites a blind retry.
+func TestWriteServiceError_DeadlineIsAGatewayTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeServiceError(rec, httptest.NewRequest(http.MethodPost, "/cases", nil),
+		fmt.Errorf("query: %w", context.DeadlineExceeded))
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGatewayTimeout)
 	}
 }

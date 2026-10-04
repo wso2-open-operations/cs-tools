@@ -350,11 +350,11 @@ func TestProjectIngest_FetchErrorPropagates(t *testing.T) {
 }
 
 // TestProjectIngest_DeletedSoftMarks: DELETED marks the project with a
-// DELETED ledger row, widening a 15-character id, without a fetch; a project
+// DELETED ledger row, widening a 15-character id, once a lookup confirms it is gone; a project
 // CSM does not have is acknowledged.
 func TestProjectIngest_DeletedSoftMarks(t *testing.T) {
 	for _, found := range []bool{true, false} {
-		se := &fakeProjectSalesEntity{}
+		se := &fakeProjectSalesEntity{err: salesentity.NotFound("salesentity: project not in search results")}
 		repo := newProjectRepo(nil)
 		repo.deleteFound = found
 		svc := newProjectService(se, repo, &fakeIngestStateRepo{}, false)
@@ -363,7 +363,7 @@ func TestProjectIngest_DeletedSoftMarks(t *testing.T) {
 		if err := svc.HandleEvent(context.Background(), req); err != nil {
 			t.Fatalf("found=%v: err = %v", found, err)
 		}
-		if se.calls != 0 || len(repo.deletes) != 1 || repo.deletes[0] != testProjectSfID {
+		if se.calls != 1 || len(repo.deletes) != 1 || repo.deletes[0] != testProjectSfID {
 			t.Errorf("found=%v: fetches %d deletes %v", found, se.calls, repo.deletes)
 		}
 		st := repo.deleteState[0]

@@ -148,12 +148,20 @@ func (s *salesforceEventService) writeContact(ctx context.Context, contactSfID, 
 	return nil
 }
 
-// deactivateContact is the Contact writer's DELETED branch: no fetch
-// (Salesforce hides a deleted record from reads), soft delete by sf_id, and a
-// DELETED ledger row so a later RESTORED is not skipped as a duplicate.
+// deactivateContact is the Contact writer's DELETED branch: confirm the
+// contact is gone upstream (a deleted record is hidden from reads, so the
+// lookup answers "not found"), soft delete by sf_id, and a DELETED ledger row
+// so a later RESTORED is not skipped as a duplicate.
 func (s *salesforceEventService) deactivateContact(ctx context.Context, contactSfID string) error {
 	if s.membership.Contacts == nil || s.support.States == nil {
 		return errContactWriterNotConfigured
+	}
+	if s.membership.SalesEntity == nil {
+		return errDeleteUnconfirmable
+	}
+	_, fetchErr := s.membership.SalesEntity.GetContact(ctx, contactSfID)
+	if gone, err := confirmDeletedUpstream(ctx, string(domain.SalesforceIngestEntityContact), contactSfID, fetchErr); err != nil || !gone {
+		return err
 	}
 	found, err := s.membership.Contacts.DeactivateBySfID(ctx, contactSfID, domain.UpsertSalesforceIngestStateRequest{
 		Entity:          domain.SalesforceIngestEntityContact,

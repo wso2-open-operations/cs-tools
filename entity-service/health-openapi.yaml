@@ -42,6 +42,8 @@ paths:
       summary: >-
         Database probe. Answers 503 when a round trip to PostgreSQL fails,
         so a database outage is a usable alert condition on its own.
+        One round trip answers every probe for up to five seconds, so the
+        reported state can be that old.
       operationId: getHealthDatabase
       security: []
       responses:
