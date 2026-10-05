@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 // stubProblemRepo is a minimal repository.ProblemRepository whose
@@ -35,7 +36,8 @@ type stubProblemRepo struct {
 	createProblem               func(ctx context.Context, req domain.CreateProblemRequest, createdBy string) (domain.ProblemDetail, error)
 	createProblemFromServiceNow func(ctx context.Context, req domain.CreateProblemRequest, id, number, createdBy string, state *string) (domain.ProblemDetail, error)
 	getProblem                  func(ctx context.Context, id string) (domain.ProblemDetail, error)
-	updateProblemFields         func(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error)
+	updateProblemFields         func(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (repository.ProblemWriteResult, error)
+	transitionProblem           func(ctx context.Context, req domain.UpdateProblemRequest, t domain.ProblemTransition, actorEmail string) (repository.ProblemWriteResult, error)
 }
 
 func (s *stubProblemRepo) SearchProblems(context.Context, domain.SearchProblemsRequest, []string, []string) ([]domain.SearchProblemView, int, error) {
@@ -62,11 +64,17 @@ func (s *stubProblemRepo) CreateProblem(ctx context.Context, req domain.CreatePr
 	}
 	panic("CreateProblem called unexpectedly")
 }
-func (s *stubProblemRepo) UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error) {
+func (s *stubProblemRepo) UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (repository.ProblemWriteResult, error) {
 	if s.updateProblemFields != nil {
 		return s.updateProblemFields(ctx, req, actorEmail)
 	}
 	panic("not implemented")
+}
+func (s *stubProblemRepo) TransitionProblem(ctx context.Context, req domain.UpdateProblemRequest, t domain.ProblemTransition, actorEmail string) (repository.ProblemWriteResult, error) {
+	if s.transitionProblem != nil {
+		return s.transitionProblem(ctx, req, t, actorEmail)
+	}
+	panic("TransitionProblem called unexpectedly")
 }
 
 // stubMirrorProblemService embeds ProblemService (nil) and overrides only
@@ -263,31 +271,191 @@ func TestProblemService_UpdateProblem_UnsupportedOnPlainDataSource(t *testing.T)
 	}
 }
 
-// TestProblemService_UpdateProblem_TransitionRejected and
-// TestProblemService_UpdateProblem_AssignmentGroupIDRejected guard the two
-// fields with nowhere to write them: Transition (ServiceNow's workflow
-// engine owns transition validation, no fixed rule set to reimplement) and
-// AssignmentGroupID (no CMDB/assignment-group table anywhere in this
-// schema). Both must be rejected before ever reaching the repository or the
-// mirror.
-func TestProblemService_UpdateProblem_TransitionRejected(t *testing.T) {
+// TestProblemService_UpdateProblem_UnknownTransitionRejected guards the
+// transition-name check: an unknown name must be rejected with
+// ProblemUtils' own "must be one of" wording before reaching the repository
+// or the mirror.
+func TestProblemService_UpdateProblem_UnknownTransitionRejected(t *testing.T) {
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
 	svc := NewProblemServiceWithSNMirror(&stubProblemRepo{}, &stubMirrorProblemService{}, dispatcher)
 
-	transition := "assess"
-	_, err := svc.UpdateProblem(context.Background(), domain.UpdateProblemRequest{ID: testDeploymentUUID, Transition: &transition})
-	var ve *apierror.ValidationError
-	if !asValidationError(err, &ve) {
-		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	for _, name := range []string{"reopen", "", "Assess"} {
+		transition := name
+		_, err := svc.UpdateProblem(context.Background(), domain.UpdateProblemRequest{ID: testDeploymentUUID, Transition: &transition})
+		var ve *apierror.ValidationError
+		if !asValidationError(err, &ve) {
+			t.Fatalf("transition %q: expected *apierror.ValidationError, got %T: %v", name, err, err)
+		}
+		if !strings.Contains(ve.Msg, "assess, confirm, fix, resolve, close") {
+			t.Errorf("transition %q: message %q does not name the valid transitions", name, ve.Msg)
+		}
 	}
 }
 
-func TestProblemService_UpdateProblem_AssignmentGroupIDRejected(t *testing.T) {
-	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
-	svc := NewProblemServiceWithSNMirror(&stubProblemRepo{}, &stubMirrorProblemService{}, dispatcher)
+// TestProblemService_UpdateProblem_TransitionAppliedAndMirrored covers the
+// transition path end to end: each name reaches TransitionProblem with its
+// ported from/to pair and the plain fields from the same body, and the
+// mirror carries the transition so ServiceNow moves in step.
+// targetResolutionDate is dropped, as ProblemUtils' transition path does.
+func TestProblemService_UpdateProblem_TransitionAppliedAndMirrored(t *testing.T) {
+	want := map[string][2]domain.ProblemState{
+		"assess":  {domain.ProblemStateNew, domain.ProblemStateAssess},
+		"confirm": {domain.ProblemStateAssess, domain.ProblemStateRootCauseAnalysis},
+		"fix":     {domain.ProblemStateRootCauseAnalysis, domain.ProblemStateFixInProgress},
+		"resolve": {domain.ProblemStateFixInProgress, domain.ProblemStateResolved},
+		"close":   {domain.ProblemStateResolved, domain.ProblemStateClosed},
+	}
+	for name, fromTo := range want {
+		t.Run(name, func(t *testing.T) {
+			var gotReq domain.UpdateProblemRequest
+			var gotT domain.ProblemTransition
+			repo := &stubProblemRepo{
+				transitionProblem: func(_ context.Context, req domain.UpdateProblemRequest, tr domain.ProblemTransition, _ string) (repository.ProblemWriteResult, error) {
+					gotReq, gotT = req, tr
+					return repository.ProblemWriteResult{UpdatedOn: time.Now(), AssignmentGroup: &domain.EntityRef{ID: testUUID, Name: "Problem Managers"}}, nil
+				},
+				getProblem: func(_ context.Context, id string) (domain.ProblemDetail, error) {
+					state := string(fromTo[1])
+					return domain.ProblemDetail{ID: &id, State: &state}, nil
+				},
+			}
+			mirrorCalled := make(chan domain.UpdateProblemRequest, 1)
+			mirror := &stubMirrorProblemService{
+				updateProblem: func(_ context.Context, req domain.UpdateProblemRequest) (domain.UpdateProblemResponse, error) {
+					mirrorCalled <- req
+					return domain.UpdateProblemResponse{}, nil
+				},
+			}
+			svc := NewProblemServiceWithSNMirror(repo, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
+
+			transition := name
+			causeNotes := "bad cache key"
+			groupID := testUUID
+			due := "2026-11-01T00:00:00Z"
+			ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+			resp, err := svc.UpdateProblem(ctx, domain.UpdateProblemRequest{
+				ID: testDeploymentUUID, Transition: &transition, CauseNotes: &causeNotes,
+				AssignmentGroupID: &groupID, TargetResolutionDate: &due,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotT.Name != name || gotT.From != fromTo[0] || gotT.To != fromTo[1] {
+				t.Errorf("TransitionProblem got %+v, want %s %s->%s", gotT, name, fromTo[0], fromTo[1])
+			}
+			if gotReq.CauseNotes == nil || *gotReq.CauseNotes != causeNotes || gotReq.AssignmentGroupID == nil {
+				t.Errorf("TransitionProblem req %+v, want the plain fields from the same body", gotReq)
+			}
+			if gotReq.TargetResolutionDate != nil {
+				t.Errorf("TransitionProblem got targetResolutionDate %q, want it dropped on a transition", *gotReq.TargetResolutionDate)
+			}
+			if resp.Problem.State == nil || *resp.Problem.State != string(fromTo[1]) {
+				t.Errorf("response state = %v, want %s", resp.Problem.State, fromTo[1])
+			}
+			if resp.Problem.AssignmentGroup == nil || resp.Problem.AssignmentGroup.ID != testUUID {
+				t.Errorf("response assignmentGroup = %+v, want the written group", resp.Problem.AssignmentGroup)
+			}
+
+			select {
+			case m := <-mirrorCalled:
+				if m.Transition == nil || *m.Transition != name {
+					t.Errorf("mirror transition = %v, want %q", m.Transition, name)
+				}
+				if m.AssignmentGroupID == nil || *m.AssignmentGroupID != groupID {
+					t.Errorf("mirror assignmentGroupId = %v, want %q", m.AssignmentGroupID, groupID)
+				}
+				if m.TargetResolutionDate != nil {
+					t.Errorf("mirror targetResolutionDate = %q, want nil on a transition", *m.TargetResolutionDate)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("mirror.UpdateProblem was never called")
+			}
+		})
+	}
+}
+
+// TestProblemService_UpdateProblem_RevertedTransitionIsConflictButMirrored
+// covers ServiceNow's Assess rule: when the repository reports the
+// transition was kept in ASSESS, the caller gets a 409 (ProblemUtils'
+// answer), yet the committed write is still mirrored.
+func TestProblemService_UpdateProblem_RevertedTransitionIsConflictButMirrored(t *testing.T) {
+	repo := &stubProblemRepo{
+		transitionProblem: func(context.Context, domain.UpdateProblemRequest, domain.ProblemTransition, string) (repository.ProblemWriteResult, error) {
+			return repository.ProblemWriteResult{UpdatedOn: time.Now(), Reverted: true}, nil
+		},
+	}
+	mirrorCalled := make(chan domain.UpdateProblemRequest, 1)
+	mirror := &stubMirrorProblemService{
+		updateProblem: func(_ context.Context, req domain.UpdateProblemRequest) (domain.UpdateProblemResponse, error) {
+			mirrorCalled <- req
+			return domain.UpdateProblemResponse{}, nil
+		},
+	}
+	svc := NewProblemServiceWithSNMirror(repo, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
+
+	transition := "confirm"
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	_, err := svc.UpdateProblem(ctx, domain.UpdateProblemRequest{ID: testDeploymentUUID, Transition: &transition})
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *apierror.ConflictError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ce.Msg, "ROOT_CAUSE_ANALYSIS") {
+		t.Errorf("conflict message %q does not name the target state", ce.Msg)
+	}
+
+	select {
+	case m := <-mirrorCalled:
+		if m.Transition == nil || *m.Transition != transition {
+			t.Errorf("mirror transition = %v, want %q", m.Transition, transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.UpdateProblem was never called for a committed write")
+	}
+}
+
+// TestProblemService_UpdateProblem_AssignmentGroupOnlyIsPlainUpdate covers
+// assignmentGroupId on its own: it is a plain field, written through
+// UpdateProblemFields, never TransitionProblem.
+func TestProblemService_UpdateProblem_AssignmentGroupOnlyIsPlainUpdate(t *testing.T) {
+	var gotReq domain.UpdateProblemRequest
+	repo := &stubProblemRepo{
+		updateProblemFields: func(_ context.Context, req domain.UpdateProblemRequest, _ string) (repository.ProblemWriteResult, error) {
+			gotReq = req
+			return repository.ProblemWriteResult{UpdatedOn: time.Now(), AssignmentGroup: &domain.EntityRef{ID: testUUID, Name: "Problem Managers"}}, nil
+		},
+		getProblem: func(_ context.Context, id string) (domain.ProblemDetail, error) {
+			return domain.ProblemDetail{ID: &id}, nil
+		},
+	}
+	mirror := &stubMirrorProblemService{
+		updateProblem: func(context.Context, domain.UpdateProblemRequest) (domain.UpdateProblemResponse, error) {
+			return domain.UpdateProblemResponse{}, nil
+		},
+	}
+	svc := NewProblemServiceWithSNMirror(repo, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
 
 	groupID := testUUID
-	_, err := svc.UpdateProblem(context.Background(), domain.UpdateProblemRequest{ID: testDeploymentUUID, AssignmentGroupID: &groupID})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	resp, err := svc.UpdateProblem(ctx, domain.UpdateProblemRequest{ID: testDeploymentUUID, AssignmentGroupID: &groupID})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotReq.AssignmentGroupID == nil || *gotReq.AssignmentGroupID != groupID {
+		t.Errorf("UpdateProblemFields assignmentGroupId = %v, want %q", gotReq.AssignmentGroupID, groupID)
+	}
+	if resp.Problem.AssignmentGroup == nil || resp.Problem.AssignmentGroup.Name != "Problem Managers" {
+		t.Errorf("response assignmentGroup = %+v, want the written group", resp.Problem.AssignmentGroup)
+	}
+}
+
+// TestProblemService_UpdateProblem_InvalidAssignmentGroupIDRejected guards
+// the UUID check on assignmentGroupId before any write.
+func TestProblemService_UpdateProblem_InvalidAssignmentGroupIDRejected(t *testing.T) {
+	svc := NewProblemServiceWithSNMirror(&stubProblemRepo{}, &stubMirrorProblemService{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
+
+	bad := "not-a-uuid"
+	_, err := svc.UpdateProblem(context.Background(), domain.UpdateProblemRequest{ID: testDeploymentUUID, AssignmentGroupID: &bad})
 	var ve *apierror.ValidationError
 	if !asValidationError(err, &ve) {
 		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
@@ -295,9 +463,8 @@ func TestProblemService_UpdateProblem_AssignmentGroupIDRejected(t *testing.T) {
 }
 
 // TestProblemService_UpdateProblem_AtLeastOneFieldRequired guards the
-// "nothing to do" rejection: a request setting none of the 5 supported
-// fields (and neither of the 2 rejected ones) must fail validation rather
-// than silently no-op a write.
+// "nothing to do" rejection: a request setting no transition and none of
+// the plain fields must fail validation rather than silently no-op a write.
 func TestProblemService_UpdateProblem_AtLeastOneFieldRequired(t *testing.T) {
 	dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
 	svc := NewProblemServiceWithSNMirror(&stubProblemRepo{}, &stubMirrorProblemService{}, dispatcher)
@@ -318,10 +485,10 @@ func TestProblemService_UpdateProblem_WritesOnlyNonNilFields(t *testing.T) {
 	var gotActorEmail string
 	updatedOn := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 	repo := &stubProblemRepo{
-		updateProblemFields: func(_ context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error) {
+		updateProblemFields: func(_ context.Context, req domain.UpdateProblemRequest, actorEmail string) (repository.ProblemWriteResult, error) {
 			gotUpdateReq = req
 			gotActorEmail = actorEmail
-			return updatedOn, nil
+			return repository.ProblemWriteResult{UpdatedOn: updatedOn}, nil
 		},
 		getProblem: func(_ context.Context, id string) (domain.ProblemDetail, error) {
 			return domain.ProblemDetail{ID: &id}, nil
@@ -354,7 +521,7 @@ func TestProblemService_UpdateProblem_WritesOnlyNonNilFields(t *testing.T) {
 	if gotUpdateReq.ID != testDeploymentUUID || gotUpdateReq.FixNotes == nil || *gotUpdateReq.FixNotes != fixNotes {
 		t.Errorf("UpdateProblemFields got %+v, want ID=%q FixNotes=%q", gotUpdateReq, testDeploymentUUID, fixNotes)
 	}
-	if gotUpdateReq.CauseNotes != nil || gotUpdateReq.Workaround != nil || gotUpdateReq.TargetResolutionDate != nil || gotUpdateReq.AssignedToID != nil {
+	if gotUpdateReq.CauseNotes != nil || gotUpdateReq.Workaround != nil || gotUpdateReq.TargetResolutionDate != nil || gotUpdateReq.AssignedToID != nil || gotUpdateReq.AssignmentGroupID != nil {
 		t.Errorf("UpdateProblemFields got extra fields set: %+v, want only FixNotes", gotUpdateReq)
 	}
 	if gotActorEmail != "jane.doe@example.com" {
@@ -424,8 +591,8 @@ func TestProblemService_UpdateProblem_MirrorNotConfiguredReturnsUnavailable(t *t
 // an error and UpdateProblem itself therefore also returns an error.
 func TestProblemService_UpdateProblem_MirrorDispatchedEvenWhenReReadFails(t *testing.T) {
 	repo := &stubProblemRepo{
-		updateProblemFields: func(context.Context, domain.UpdateProblemRequest, string) (time.Time, error) {
-			return time.Now(), nil
+		updateProblemFields: func(context.Context, domain.UpdateProblemRequest, string) (repository.ProblemWriteResult, error) {
+			return repository.ProblemWriteResult{UpdatedOn: time.Now()}, nil
 		},
 		getProblem: func(context.Context, string) (domain.ProblemDetail, error) {
 			return domain.ProblemDetail{}, errors.New("re-read: connection reset")

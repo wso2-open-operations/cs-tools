@@ -8833,7 +8833,15 @@ paths:
     patch:
       summary: >-
         Update a problem -- a forward state transition, plain-field updates, or both
-        (ServiceNow data source only).
+        (ServiceNow and postgres-servicenow-dual-write data sources).
+      description: >-
+        On postgres-servicenow-dual-write, entity-service applies ServiceNow's ProblemUtils
+        rules itself (each transition is allowed from exactly one state; "resolve" sets
+        resolutionCode FIX_APPLIED; "close" is refused when resolutionCode is RISK_ACCEPTED)
+        and mirrors the request to ServiceNow asynchronously. It also reproduces ServiceNow's
+        "Update Problem State to Assess" rule: a problem with an assigned user stays in
+        ASSESS, so any transition past "assess" on it answers 409 after the rest of the
+        request has been saved.
       operationId: updateProblem
       parameters:
         - name: id
@@ -8874,13 +8882,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: State transition rejected by the data source.
+          description: >-
+            State transition rejected: the problem has an assigned user and was kept in
+            ASSESS. The request's other fields were saved.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Updating a problem is not available on the plain postgres data source.
           content:
             application/json:
               schema:
@@ -19523,7 +19539,8 @@ components:
             Forward state transition to request: one of "assess", "confirm", "fix", "resolve",
             "close". Left as an open string (validated server-side by the data source, not a
             closed enum here) so an invalid value's actionable error message reaches the
-            caller unchanged.
+            caller unchanged. targetResolutionDate is not applied in the same request as a
+            transition, matching ServiceNow's ProblemUtils.
         assignedToId:
           type: string
           format: uuid
@@ -19536,7 +19553,9 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: 404 if not a real group.
+          description: >-
+            404 if not a real group on the ServiceNow data source, 400 on
+            postgres-servicenow-dual-write.
         causeNotes:
           type: string
           nullable: true

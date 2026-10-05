@@ -4118,12 +4118,17 @@ explicitly. `CreateConversation` was not attempted alongside these -- no
 reported need for it yet, and extending the same fix to it is a similarly
 small, mechanical follow-up should one come up.
 
-**`UpdateProblem`/`UpdateIncident`/`HandOffIncidentToSpecialist` are also not
-implemented**: `UpdateProblem.Transition` is validated
-server-side by ServiceNow's own workflow engine with no fixed, confirmed
-transition rule set to reimplement (see that field's own doc comment --
-deliberately not a closed enum for exactly this reason);
-`UpdateIncident` touches several fields with no backing column at all
+**`UpdateProblem`** is implemented for `DATA_SOURCE=postgres-servicenow-dual-write`
+only (plain `postgres` still 503s). It ports ServiceNow's
+`ProblemUtils.updateProblem`: `domain.ProblemTransitions` holds the five
+forward moves, `ProblemRepository.TransitionProblem` applies one with its
+side effects, and `assignmentGroupId` writes `work_item.assignment_group_id`.
+It also reproduces SN's "Update Problem State to Assess" business rule (an
+assigned problem stays in ASSESS, answered with 409) -- an SN quirk kept on
+purpose, not a bug to fix here.
+
+**`UpdateIncident`/`HandOffIncidentToSpecialist` are also not
+implemented**: `UpdateIncident` touches several fields with no backing column at all
 (`AssignmentGroupID`, `ConfigurationItemID`, `WatchList`) alongside ones
 that do, and would need `comment`-table side effects for
 `AdditionalComments`/`WorkNotes` mirroring `caseService.UpdateCase`'s own

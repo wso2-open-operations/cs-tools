@@ -41,18 +41,13 @@ import (
 // Incident's category/resolution-code, there's no domain enum to reconcile
 // against the real column values at all; they're rendered as-is.
 //
-// AssignmentGroup is always nil: problem has no assignment-group column
-// anywhere (same gap as change_request's own AssignedTeamID), and a
-// caller's "assignmentGroupId" filter is silently not applied, matching
-// changeRequestWhereClause's own precedent for the identical gap.
+// The assignment group lives on work_item.assignment_group_id (migration
+// 0075), the generic column every work_item type shares. Writes set it
+// (UpdateProblemFields/TransitionProblem); reads and the "assignmentGroupId"
+// search filter do not use it yet, so ProblemDetail carries no group.
 //
-// CreateProblem/UpdateProblem have no Postgres implementation: CreateProblem
-// needs work_item.number, which has no DB default or backing sequence
-// anywhere in migrations/ (same blocker as CaseRepository.CreateCase);
-// UpdateProblem's Transition field is validated server-side by the data
-// source itself, with no fixed, confirmed transition rule set to reimplement
-// here (see domain.UpdateProblemRequest's own doc comment -- deliberately
-// not a closed enum for exactly this reason).
+// TransitionProblem ports ServiceNow's ProblemUtils._applyProblemTransition;
+// see its own doc comment.
 //
 // CreateProblemFromServiceNow (below) is the exception, same as
 // CaseRepository.CreateCaseFromServiceNow/IncidentRepository.CreateIncidentFromServiceNow:
@@ -129,15 +124,12 @@ type ProblemRepository interface {
 	CreateProblem(ctx context.Context, req domain.CreateProblemRequest, createdBy string) (domain.ProblemDetail, error)
 
 	// UpdateProblemFields writes any subset of the PATCH /problems/{id}
-	// fields that have an unambiguous, established Postgres column mapping --
-	// req.CauseNotes/FixNotes/Workaround/TargetResolutionDate (problem.cause_notes/
-	// fix_notes/workaround/due_on) and req.AssignedToID (work_item.assigned_to_id,
-	// the same generic column CaseRepository.UpdateCaseFields already writes for
-	// "case"). req.Transition and req.AssignmentGroupID are rejected earlier, by
-	// problemService.UpdateProblem's own validation -- there is no
-	// state-transition rule set or assignment-group column to apply them to
-	// (see this file's own package doc comment) -- so this method never sees
-	// them set.
+	// plain fields: req.CauseNotes/FixNotes/Workaround/TargetResolutionDate
+	// (problem.cause_notes/fix_notes/workaround/due_on), req.AssignedToID
+	// (work_item.assigned_to_id, the same generic column
+	// CaseRepository.UpdateCaseFields writes for "case") and
+	// req.AssignmentGroupID (work_item.assignment_group_id). req.Transition
+	// is ignored here; TransitionProblem handles it.
 	//
 	// work_item.updated_on/updated_by are bumped unconditionally, matching
 	// UpdateCaseFields' identical convention, using actorEmail (the caller's
@@ -145,10 +137,31 @@ type ProblemRepository interface {
 	// updated_by.
 	//
 	// Returns a NotFoundError if id does not name an existing PROBLEM work
-	// item, or a ValidationError if assignedToId does not reference a real
-	// user row (FK violation) or targetResolutionDate is not a valid RFC3339
-	// timestamp.
-	UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error)
+	// item, or a ValidationError if assignedToId/assignmentGroupId does not
+	// reference a real user/group row (FK violation) or targetResolutionDate
+	// is not a valid RFC3339 timestamp.
+	UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (ProblemWriteResult, error)
+	// TransitionProblem applies transition t to the problem, together with
+	// any plain fields req carries, in one transaction. See its
+	// implementation's doc comment for the ServiceNow behaviour it ports.
+	//
+	// Returns a NotFoundError if id does not name an existing PROBLEM work
+	// item, or a ValidationError if the problem is not in t.From or the
+	// transition's own guard refuses it. A write the Assess rule moved back
+	// to ASSESS is committed and reported via ProblemWriteResult.Reverted,
+	// not as an error.
+	TransitionProblem(ctx context.Context, req domain.UpdateProblemRequest, t domain.ProblemTransition, actorEmail string) (ProblemWriteResult, error)
+}
+
+// ProblemWriteResult is what a problem write reports back.
+type ProblemWriteResult struct {
+	UpdatedOn time.Time
+	// AssignmentGroup is the row's work_item.assignment_group_id after the
+	// write, with the group's name; nil when the problem has no group.
+	AssignmentGroup *domain.EntityRef
+	// Reverted is set by TransitionProblem when the Assess rule kept the
+	// problem in ASSESS instead of the transition's target state.
+	Reverted bool
 }
 
 type problemRepo struct {
@@ -630,22 +643,22 @@ func (r *problemRepo) CreateProblemFromServiceNow(ctx context.Context, req domai
 // UpdateProblemFields implements ProblemRepository. "problem" is updated
 // first (if it has any columns to touch), so a nonexistent id is caught
 // before work_item's own row is touched at all -- if req names no "problem"
-// column (i.e. only AssignedToID was set), work_item's own
+// column (i.e. only AssignedToID/AssignmentGroupID was set), work_item's own
 // UPDATE ... WHERE id = $1 AND type = 'PROBLEM' alone still correctly
 // reports not-found, and the explicit type check keeps this from silently
 // bumping updated_on/updated_by on a work_item row of some other type that
 // happens to share the id (same shared-primary-key space every work_item
 // extension table uses). Same overall shape as
 // CaseRepository.UpdateCaseFields.
-func (r *problemRepo) UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error) {
-	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (time.Time, error) {
+func (r *problemRepo) UpdateProblemFields(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (ProblemWriteResult, error) {
+	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (ProblemWriteResult, error) {
 		return updateProblemFieldsTx(ctx, tx, req, actorEmail)
 	})
 }
 
 // updateProblemFieldsTx is UpdateProblemFields' body, extracted so it can
-// run inside r.db.InTx's closure.
-func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error) {
+// run inside r.db.InTx's closure and inside TransitionProblem's transaction.
+func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProblemRequest, actorEmail string) (ProblemWriteResult, error) {
 	var problemSets []string
 	problemArgs := []any{req.ID}
 	idx := 2
@@ -667,7 +680,7 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 	if req.TargetResolutionDate != nil {
 		t, err := time.Parse(time.RFC3339, *req.TargetResolutionDate)
 		if err != nil {
-			return time.Time{}, &apierror.ValidationError{Msg: "targetResolutionDate must be a valid RFC3339 timestamp"}
+			return ProblemWriteResult{}, &apierror.ValidationError{Msg: "targetResolutionDate must be a valid RFC3339 timestamp"}
 		}
 		problemSets = append(problemSets, fmt.Sprintf("due_on = $%d", idx))
 		problemArgs = append(problemArgs, t)
@@ -676,10 +689,10 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 	if len(problemSets) > 0 {
 		tag, err := tx.Exec(ctx, `UPDATE problem SET `+strings.Join(problemSets, ", ")+` WHERE id = $1`, problemArgs...)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("update problem fields: problem: %w", err)
+			return ProblemWriteResult{}, fmt.Errorf("update problem fields: problem: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return time.Time{}, &apierror.NotFoundError{Msg: "problem not found"}
+			return ProblemWriteResult{}, &apierror.NotFoundError{Msg: "problem not found"}
 		}
 	}
 
@@ -694,18 +707,149 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 		wiArgs = append(wiArgs, *req.AssignedToID)
 		widx++
 	}
+	if req.AssignmentGroupID != nil {
+		wiSets = append(wiSets, fmt.Sprintf("assignment_group_id = $%d::uuid", widx))
+		wiArgs = append(wiArgs, *req.AssignmentGroupID)
+		widx++
+	}
 
-	var updatedOn time.Time
-	err := tx.QueryRow(ctx, `UPDATE work_item SET `+strings.Join(wiSets, ", ")+` WHERE id = $1 AND type = 'PROBLEM' RETURNING updated_on`, wiArgs...).Scan(&updatedOn)
+	var (
+		res                ProblemWriteResult
+		groupID, groupName *string
+	)
+	err := tx.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE work_item SET `+strings.Join(wiSets, ", ")+`
+			WHERE id = $1 AND type = 'PROBLEM'
+			RETURNING updated_on, assignment_group_id
+		)
+		SELECT u.updated_on, g.id::TEXT, g.name
+		FROM updated u
+		LEFT JOIN "group" g ON g.id = u.assignment_group_id`, wiArgs...).Scan(&res.UpdatedOn, &groupID, &groupName)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, &apierror.NotFoundError{Msg: "problem not found"}
+		return ProblemWriteResult{}, &apierror.NotFoundError{Msg: "problem not found"}
 	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return time.Time{}, &apierror.ValidationError{Msg: "assignedToId does not exist: " + pgErr.Detail}
+			field := "assignedToId"
+			if strings.Contains(pgErr.ConstraintName, "assignment_group") || strings.Contains(pgErr.Detail, "assignment_group_id") {
+				field = "assignmentGroupId"
+			}
+			return ProblemWriteResult{}, &apierror.ValidationError{Msg: field + " does not exist: " + pgErr.Detail}
 		}
-		return time.Time{}, fmt.Errorf("update problem fields: work_item: %w", err)
+		return ProblemWriteResult{}, fmt.Errorf("update problem fields: work_item: %w", err)
+	}
+	if groupID != nil {
+		res.AssignmentGroup = &domain.EntityRef{ID: *groupID, Name: stringOrEmpty(groupName)}
 	}
 
-	return updatedOn, nil
+	return res, nil
+}
+
+// TransitionProblem implements ProblemRepository. It ports ServiceNow's
+// ProblemUtils._applyProblemTransition, including what ServiceNow does
+// around it on save:
+//
+//   - The problem must be in t.From, else a ValidationError naming the
+//     current state. The row is locked (FOR UPDATE) for the check, so two
+//     concurrent transitions cannot both pass it. The check reads
+//     problem.state, the column every Postgres write path fills;
+//     problem_state is written alongside it below but is NULL on problems
+//     created in Postgres.
+//   - "close" is refused when resolution_code is RISK_ACCEPTED (the native
+//     "Complete" UI action's canComplete() guard).
+//   - cause_notes, fix_notes, workaround, assigned_to and assignment_group
+//     ride along in the same save. targetResolutionDate does not:
+//     ProblemUtils' transition path never applies due_date.
+//   - state and problem_state are both set to the target.
+//   - "resolve" sets resolution_code = FIX_APPLIED (the native "Resolve"
+//     UI action's hardcoded value); "close" sets is_active = false.
+//
+// ServiceNow's "Update Problem State to Assess" before business rule forces
+// the problem back to Assess on any save where assigned_to is non-empty,
+// regardless of the state just written (live-verified 2026-08-23 per
+// ProblemUtils' own comment). This reproduces it: with an assignee after the
+// save, state and problem_state land on ASSESS, the other writes stand, and
+// Reverted is set so the caller can answer 409 the way ProblemUtils' re-read
+// does. The whole write is committed either way, as it is in ServiceNow.
+//
+// resolved_on/resolved_by_id and closed_on are set when the problem lands
+// on RESOLVED/CLOSED, the job ServiceNow's own task/problem business rules
+// do for resolved_at/resolved_by/closed_at. resolved_by_id is the "user"
+// row matching actorEmail, or NULL when there is none.
+func (r *problemRepo) TransitionProblem(ctx context.Context, req domain.UpdateProblemRequest, t domain.ProblemTransition, actorEmail string) (ProblemWriteResult, error) {
+	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (ProblemWriteResult, error) {
+		var state, resolutionCode, assignedToID *string
+		err := tx.QueryRow(ctx, `
+			SELECT pr.state::TEXT, pr.resolution_code::TEXT, wi.assigned_to_id::TEXT
+			FROM problem pr
+			JOIN work_item wi ON wi.id = pr.id
+			WHERE pr.id = $1 AND wi.type = 'PROBLEM'
+			FOR UPDATE OF pr, wi`, req.ID).Scan(&state, &resolutionCode, &assignedToID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProblemWriteResult{}, &apierror.NotFoundError{Msg: "problem not found"}
+		}
+		if err != nil {
+			return ProblemWriteResult{}, fmt.Errorf("transition problem: read state: %w", err)
+		}
+
+		current := stringOrEmpty(state)
+		if current != string(t.From) {
+			return ProblemWriteResult{}, &apierror.ValidationError{Msg: fmt.Sprintf(
+				"Invalid state transition: '%s' can only be used when the problem is in state %s. Current state: %s",
+				t.Name, t.From, current)}
+		}
+		if t.Name == "close" && stringOrEmpty(resolutionCode) == "RISK_ACCEPTED" {
+			return ProblemWriteResult{}, &apierror.ValidationError{
+				Msg: "Invalid state transition: 'close' is not available when resolution_code is 'RISK_ACCEPTED'"}
+		}
+
+		fields := domain.UpdateProblemRequest{
+			ID:                req.ID,
+			CauseNotes:        req.CauseNotes,
+			FixNotes:          req.FixNotes,
+			Workaround:        req.Workaround,
+			AssignedToID:      req.AssignedToID,
+			AssignmentGroupID: req.AssignmentGroupID,
+		}
+		res, err := updateProblemFieldsTx(ctx, tx, fields, actorEmail)
+		if err != nil {
+			return ProblemWriteResult{}, err
+		}
+
+		assignee := stringOrEmpty(assignedToID)
+		if req.AssignedToID != nil {
+			assignee = *req.AssignedToID
+		}
+		landed := t.To
+		if assignee != "" && landed != domain.ProblemStateAssess {
+			landed = domain.ProblemStateAssess
+			res.Reverted = true
+		}
+
+		sets := []string{
+			"state = $2::TEXT::problem_state_enum",
+			"problem_state = $2::TEXT::problem_problem_state_enum",
+		}
+		args := []any{req.ID, string(landed)}
+		switch t.Name {
+		case "resolve":
+			sets = append(sets, "resolution_code = 'FIX_APPLIED'")
+		case "close":
+			sets = append(sets, "is_active = FALSE")
+		}
+		switch landed {
+		case domain.ProblemStateResolved:
+			args = append(args, actorEmail)
+			sets = append(sets, "resolved_on = NOW()",
+				fmt.Sprintf(`resolved_by_id = (SELECT id FROM "user" WHERE LOWER(email) = LOWER($%d) LIMIT 1)`, len(args)))
+		case domain.ProblemStateClosed:
+			sets = append(sets, "closed_on = NOW()")
+		}
+		if _, err := tx.Exec(ctx, `UPDATE problem SET `+strings.Join(sets, ", ")+` WHERE id = $1`, args...); err != nil {
+			return ProblemWriteResult{}, fmt.Errorf("transition problem: %w", err)
+		}
+
+		return res, nil
+	})
 }

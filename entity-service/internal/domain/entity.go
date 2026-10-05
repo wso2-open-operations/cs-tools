@@ -5928,7 +5928,9 @@ type CreateProblemRequest struct {
 // enum. Do not add strict validation against this list here: the data source's own "Invalid
 // transition" error names the valid values, and a Go-side closed check would swallow that
 // message with a generic one instead, the same mistake the Ballerina layer made and reverted
-// (see CHANGES-problem-update.md).
+// (see CHANGES-problem-update.md). On the Postgres data source, entity-service IS the data
+// source: problemService validates it against ProblemTransitions, a port of ServiceNow's
+// ProblemUtils._PROBLEM_TRANSITIONS, and returns the same "Invalid transition" wording.
 type UpdateProblemRequest struct {
 	ID                   string  `json:"-"`
 	Transition           *string `json:"transition,omitempty"`
@@ -5939,6 +5941,31 @@ type UpdateProblemRequest struct {
 	Workaround           *string `json:"workaround,omitempty"`
 	TargetResolutionDate *string `json:"targetResolutionDate,omitempty"`
 }
+
+// ProblemTransition is one forward move through problem's state machine.
+type ProblemTransition struct {
+	Name string
+	From ProblemState
+	To   ProblemState
+}
+
+// ProblemTransitions ports ServiceNow's ProblemUtils._PROBLEM_TRANSITIONS
+// (x_wso2_customer_0): the five forward moves the native Problem Management
+// UI actions perform (move_to_assess, move_to_rca "Confirm",
+// move_to_fix_in_progress "Fix", move_to_resolved "Resolve", move_to_closed
+// "Complete"), each allowed from exactly one state. Not a general state
+// machine: there is no backward move.
+var ProblemTransitions = map[string]ProblemTransition{
+	"assess":  {Name: "assess", From: ProblemStateNew, To: ProblemStateAssess},
+	"confirm": {Name: "confirm", From: ProblemStateAssess, To: ProblemStateRootCauseAnalysis},
+	"fix":     {Name: "fix", From: ProblemStateRootCauseAnalysis, To: ProblemStateFixInProgress},
+	"resolve": {Name: "resolve", From: ProblemStateFixInProgress, To: ProblemStateResolved},
+	"close":   {Name: "close", From: ProblemStateResolved, To: ProblemStateClosed},
+}
+
+// ProblemTransitionNames lists ProblemTransitions' keys in state-machine
+// order, for the "must be one of" error (the order ProblemUtils prints).
+var ProblemTransitionNames = []string{"assess", "confirm", "fix", "resolve", "close"}
 
 // UpdateProblemResponse is the output for PATCH /problems/{id}.
 type UpdateProblemResponse struct {
