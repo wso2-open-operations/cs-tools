@@ -144,7 +144,7 @@ type IncidentRepository interface {
 	// -- createIncidentPortalQuery's own doc comment has the full
 	// field-by-field reasoning, which mirrors CreateIncidentFromServiceNow's
 	// exactly except identity (id/number) is generated here via
-	// gen_random_uuid()/next_portal_work_item_number() instead of being
+	// uuidv7()/next_work_item_number('INCIDENT') instead of being
 	// supplied by a prior ServiceNow response, and createdBy is the calling
 	// user's own resolved email rather than ServiceNow's echoed value.
 	//
@@ -745,8 +745,9 @@ func (r *incidentRepo) CreateIncidentComment(ctx context.Context, incidentID str
 // createIncidentPortalQuery is CreateIncident's (the plain-Postgres,
 // caller-initiated path) insert of both halves of the row -- structurally
 // identical to createIncidentFromServiceNowQuery except id/number are
-// generated here (gen_random_uuid()/next_portal_work_item_number(), migration
-// 0140) instead of supplied by a prior ServiceNow response. incident.state is
+// generated here (uuidv7() and next_work_item_number('INCIDENT'), the INC
+// series, migrations 0179/0180; uuidv7() needs PostgreSQL 18 or newer) instead
+// of supplied by a prior external-system response. incident.state is
 // left to its own column default ('NEW'), which is the state ServiceNow's
 // IncidentUtils.createIncident hard-sets.
 //
@@ -758,8 +759,8 @@ const createIncidentPortalQuery = `
 			number, subject, type, parent_id, assignment_group_id, assigned_to_id
 		)
 		VALUES (
-			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, 'INCIDENT'::work_item_type_enum, $3::uuid, $4::uuid, $18::uuid
+			uuidv7(), NOW(), NOW(), $1, $1,
+			next_work_item_number('INCIDENT'::work_item_type_enum), $2, 'INCIDENT'::work_item_type_enum, $3::uuid, $4::uuid, $18::uuid
 		)
 		RETURNING id, number, subject, created_on, updated_on, created_by
 	),

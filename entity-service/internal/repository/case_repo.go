@@ -571,19 +571,15 @@ func NewCaseRepository(db *Scoped) CaseRepository {
 // chain returns zero rows), reported as a validation error rather than a bare
 // foreign-key failure.
 //
-// work_item.number (every type) and wso2_id (the five case-like types all
-// require one, per work_item_wso2_id_required_by_type) come from
-// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140),
-// which resolves the product decision this method used to defer (see
-// CLAUDE.md, "CreateCase and case numbers"): a portal-created record gets a
-// visually distinct number/id rather than one drawn from the same series
-// ServiceNow's still-running sync allocates from, so the two can never
-// collide. service_request/engagement/security_report_analysis/announcement
-// were previously rejected outright on this data source
-// (caseService.CreateCase's own "supported only for dual-write" check,
-// updated alongside this) purely because this method had nowhere to write
-// them -- now that it does, that restriction only applies to the plain
-// ServiceNow-less gap that no longer exists.
+// work_item.id, number and wso2_id are generated natively: id from uuidv7()
+// (time-ordered; needs PostgreSQL 18 or newer, so this path cannot run on an
+// older database), number from next_work_item_number(type) (migrations 0179,
+// 0180: all five case-like types draw from the one shared CS series), and
+// wso2_id from next_wso2_id(project) ("<project key>-<n>"), which every one of
+// the five case-like types requires (work_item_wso2_id_required_by_type).
+// This path is reached only on the Postgres-only data source: in dual-write
+// the external system allocates the identity and createCaseSNFirst stores it
+// via the createXFromServiceNowQuery statements instead.
 func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (domain.Case, error) {
 		return createCaseTx(ctx, tx, req)
@@ -657,8 +653,8 @@ const createCasePortalQuery = `
 			number, wso2_id, subject, description, type,
 			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
 		)
-		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
+		SELECT uuidv7(), NOW(), NOW(), creator.email, creator.email,
+		       next_work_item_number('CASE'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
@@ -691,8 +687,8 @@ const createAnnouncementPortalQuery = `
 			number, wso2_id, subject, description, type,
 			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
 		)
-		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
+		SELECT uuidv7(), NOW(), NOW(), creator.email, creator.email,
+		       next_work_item_number('ANNOUNCEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
 		       $2::uuid, NULL, NULL, creator.id, p.account_id
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
@@ -728,8 +724,8 @@ const createServiceRequestPortalQuery = `
 			number, wso2_id, subject, description, type,
 			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
 		)
-		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
+		SELECT uuidv7(), NOW(), NOW(), creator.email, creator.email,
+		       next_work_item_number('SERVICE_REQUEST'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
@@ -766,8 +762,8 @@ const createEngagementPortalQuery = `
 			number, wso2_id, subject, description, type,
 			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
 		)
-		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
+		SELECT uuidv7(), NOW(), NOW(), creator.email, creator.email,
+		       next_work_item_number('ENGAGEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
@@ -801,8 +797,8 @@ const createSecurityReportAnalysisPortalQuery = `
 			number, wso2_id, subject, description, type,
 			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
 		)
-		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
+		SELECT uuidv7(), NOW(), NOW(), creator.email, creator.email,
+		       next_work_item_number('SECURITY_REPORT_ANALYSIS'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
@@ -840,7 +836,7 @@ func mapCreateCaseError(err error) error {
 		switch pgErr.Code {
 		case "23503": // foreign_key_violation -- one of the referenced IDs does not exist
 			return &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
-		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority) and from next_portal_wso2_id when project_id doesn't exist
+		case "P0001": // raise_exception from integrity triggers (deployment/project, deployed_product/deployment, catastrophic priority) and from next_wso2_id when project_id doesn't exist, and from next_work_item_number for a work item type with no number series
 			return &apierror.ValidationError{Msg: pgErr.Message}
 		}
 	}

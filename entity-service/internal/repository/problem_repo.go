@@ -120,7 +120,7 @@ type ProblemRepository interface {
 	// createProblemPortalQuery's own doc comment has the full field-by-field
 	// reasoning, which mirrors CreateProblemFromServiceNow's exactly except
 	// identity (id/number) is generated here via
-	// gen_random_uuid()/next_portal_work_item_number() instead of being
+	// uuidv7()/next_work_item_number('PROBLEM') instead of being
 	// supplied by a prior ServiceNow response, createdBy is the calling
 	// user's own resolved email, and state is hardcoded to NEW (there is no
 	// ServiceNow response to confirm one from, and problem.state has no
@@ -450,8 +450,9 @@ func (r *problemRepo) GetProblem(ctx context.Context, id string) (domain.Problem
 // createProblemPortalQuery is CreateProblem's (the plain-Postgres,
 // caller-initiated path) query -- structurally identical to
 // createProblemFromServiceNowQuery except id/number are generated here
-// (gen_random_uuid()/next_portal_work_item_number(), migration 0140) instead
-// of supplied by a prior ServiceNow response, and state is a fixed literal
+// (uuidv7() and next_work_item_number('PROBLEM'), the PRB series, migrations
+// 0179/0180; uuidv7() needs PostgreSQL 18 or newer) instead
+// of supplied by a prior external-system response, and state is a fixed literal
 // ('NEW') rather than a parameter -- there is no ServiceNow response to
 // confirm one from on this path, and problem.state has no column default of
 // its own (confirmed against the live schema, unlike incident's).
@@ -464,8 +465,8 @@ const createProblemPortalQuery = `
 			number, subject, description, type, parent_id
 		)
 		VALUES (
-			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, $6, 'PROBLEM'::work_item_type_enum, $3::uuid
+			uuidv7(), NOW(), NOW(), $1, $1,
+			next_work_item_number('PROBLEM'::work_item_type_enum), $2, $6, 'PROBLEM'::work_item_type_enum, $3::uuid
 		)
 		RETURNING id, number, subject, description, created_on, updated_on, created_by
 	),

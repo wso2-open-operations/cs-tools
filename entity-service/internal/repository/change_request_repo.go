@@ -137,7 +137,7 @@ type ChangeRequestRepository interface {
 	// at all) -- createChangeRequestPortalQuery's own doc comment has the
 	// full field-by-field reasoning, which mirrors CreateChangeRequestFromServiceNow's
 	// exactly except identity (id/number) is generated here via
-	// gen_random_uuid()/next_portal_work_item_number() instead of being
+	// uuidv7()/next_work_item_number('CHANGE_REQUEST') instead of being
 	// supplied by a prior ServiceNow response, and createdBy is the calling
 	// user's own resolved email rather than ServiceNow's echoed value.
 	CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest, createdBy string) (domain.CreateChangeRequestResponse, error)
@@ -1337,8 +1337,9 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 // createChangeRequestPortalQuery is CreateChangeRequest's (the plain-Postgres,
 // caller-initiated path) query -- structurally identical to
 // createChangeRequestFromServiceNowQuery except id/number are generated here
-// (gen_random_uuid()/next_portal_work_item_number(), migration 0140) instead
-// of supplied by a prior ServiceNow response, and there is no wso2_id column
+// (uuidv7() and next_work_item_number('CHANGE_REQUEST'), the CHG series,
+// migrations 0179/0180; uuidv7() needs PostgreSQL 18 or newer) instead
+// of supplied by a prior external-system response, and there is no wso2_id column
 // at all either way (change_request is excluded from
 // work_item_wso2_id_required_by_type, per this file's own package doc
 // comment on CreateChangeRequestFromServiceNow). state is hardcoded to NEW
@@ -1353,8 +1354,8 @@ const createChangeRequestPortalQuery = `
 			number, subject, description, type, assigned_to_id
 		)
 		VALUES (
-			gen_random_uuid(), NOW(), NOW(), $1, $1,
-			next_portal_work_item_number(), $2, $3, 'CHANGE_REQUEST'::work_item_type_enum, $4::uuid
+			uuidv7(), NOW(), NOW(), $1, $1,
+			next_work_item_number('CHANGE_REQUEST'::work_item_type_enum), $2, $3, 'CHANGE_REQUEST'::work_item_type_enum, $4::uuid
 		)
 		RETURNING id, number, subject, created_on, updated_on, created_by
 	),

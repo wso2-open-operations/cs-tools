@@ -402,9 +402,8 @@ func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateI
 //   - incident.created published after the insert commits, the event the
 //     ServiceNow path publishes and csm-notification-service consumes.
 //
-// The number is the portal's own (next_portal_work_item_number, migration
-// 0140), as for every other type created natively; INC numbers come with the
-// native numbering cutover (migration 0180).
+// The id and number are generated natively: uuidv7() and the INC series
+// (next_work_item_number, migrations 0179/0180).
 //
 // The actor is the caller's validated identity (actorOf): the user's email,
 // or the client id of a machine caller such as alert ingestion, which has no
