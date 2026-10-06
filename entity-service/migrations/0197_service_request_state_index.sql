@@ -15,6 +15,6 @@
 -- under the License.
 
 -- See migration 0195's own doc comment -- the third of the four indexes
--- that SearchCases' rewritten, sargable state filter (case_field_predicates.go)
--- now lets the planner use.
+-- kept for whenever SearchCases' state filter is reattempted as a sargable
+-- rewrite; not currently usable by the live COALESCE-based predicate.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_service_request_state ON service_request (state);

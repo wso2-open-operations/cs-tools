@@ -11431,6 +11431,11 @@ paths:
   /users/by-ids:
     post:
       summary: Resolve a batch of user ids to their profiles.
+      description: >-
+        Values in `ids` that are not well-formed UUIDs cannot match a user and are
+        skipped, rather than failing the request: callers build the list from
+        records whose user reference can be free text (for example an email
+        address). Users that do match are still returned.
       operationId: getUsersByIDs
       requestBody:
         required: true

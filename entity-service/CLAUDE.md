@@ -5938,6 +5938,39 @@ lookups (`GetUserByEmail`) leave it nil. Two things worth knowing:
 - `GET /users/{id}` (the profile page) is registered only for the ServiceNow data
   source; it is not available on Postgres at all.
 
+## POST /users/by-ids failed the whole batch on one non-UUID id
+
+Reported live: the staff portal's Knowledge page called `POST /users/by-ids` to
+resolve author names and got a 500 ("Failed to look up users."), so no row showed
+an author. The page builds the id list from each article's `authorId` **and**
+`updatedBy`, and `knowledge_article.updated_by` (migration 0044) is a free-text
+`VARCHAR(255)`, not a user reference: on one page of 20 articles, 6 values were sent,
+4 shaped like UUIDs, 1 like an email address and 1 a short plain string. `"user".id`
+is a UUID column, so `WHERE id = ANY($1)` makes Postgres reject the whole statement
+(`invalid input syntax for type uuid`, SQLSTATE 22P02) on the first value that is not
+a UUID, which also drops the lookup for the valid ids in the same batch.
+
+Fixed in `userService.GetUsersByIDs`: values that are not well-formed UUIDs
+(`validate.IsUUID`, case-insensitive) are skipped before the repository is called,
+and a batch with none left answers `{"users": []}` without querying. Skipping
+rather than rejecting is deliberate: a value that is not a UUID can never match a
+row, so the answer is the one a query would have given for an unknown id, and a 400
+(what `validateUUIDs` returns for a single path or body id) would fail the page just
+as the 500 did. The wire contract is unchanged (`openapi.yaml` only gained a
+description), the repository is untouched, and no webapp change is needed: the
+lookup tolerates whatever a caller builds its list from, and every caller of
+`useUsersByIds` (the KB All, List, Admin and Review Queue pages and the article
+timeline) benefits at once.
+
+Because ids are filtered here, a free-text `updated_by` never resolves to a name; a
+caller that wants to show one has to fall back to the raw value itself.
+
+`user_service_by_ids_test.go` pins what reaches the repository (valid ids only, in
+order; no query when none are valid; errors still propagate).
+`user_by_ids_integration_test.go` (skipped without `CASE_STATS_TEST_DSN`) runs the
+service over the real repository on a real `"user"` table; against the unfiltered
+code it fails with Postgres's own `invalid input syntax for type uuid`.
+
 ## GET /users/{id} on the Postgres data source
 
 The route was registered only for ServiceNow, so opening a user in the CSM portal

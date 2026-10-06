@@ -119,16 +119,16 @@ import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 import RouteGuard from "@features/spl/pages/RouteGuard";
 import AccountsPage from "@features/spl/accounts/pages/AccountsPage";
 import AccountDetailPage from "@features/spl/accounts/pages/AccountDetailPage";
-import ProjectsPage from "@features/spl/projects/pages/ProjectsPage";
-import ProjectDetailPage from "@features/spl/projects/pages/ProjectDetailPage";
-import SlaReportPage from "@features/spl/reports/pages/SlaReportPage";
-import CsReportPage from "@features/spl/reports/pages/CsReportPage";
-import TimelogsReportPage from "@features/spl/reports/pages/TimelogsReportPage";
-import TeamSchedulePage from "@features/spl/schedule/pages/TeamSchedulePage";
-import UserScanPage from "@features/spl/user-scan/pages/UserScanPage";
+import ProjectsPage from "@features/sales-sa/projects/pages/ProjectsPage";
+import ProjectDetailPage from "@features/sales-sa/projects/pages/ProjectDetailPage";
+import SlaReportPage from "@features/sales-sa/reports/pages/SlaReportPage";
+import CsReportPage from "@features/sales-sa/reports/pages/CsReportPage";
+import TimelogsReportPage from "@features/sales-sa/reports/pages/TimelogsReportPage";
+import TeamSchedulePage from "@features/sales-sa/schedule/pages/TeamSchedulePage";
+import UserScanPage from "@features/sales-sa/user-scan/pages/UserScanPage";
 import UsageMetricsPage from "@features/spl/usage-metrics/pages/UsageMetricsPage";
-import CustomerHealthDashboardPage from "@features/spl/customer-health/pages/CustomerHealthDashboardPage";
-import CustomerHealthDetailPage from "@features/spl/customer-health/pages/CustomerHealthDetailPage";
+import CustomerHealthDashboardPage from "@features/sales-sa/customer-health/pages/CustomerHealthDashboardPage";
+import CustomerHealthDetailPage from "@features/sales-sa/customer-health/pages/CustomerHealthDetailPage";
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a

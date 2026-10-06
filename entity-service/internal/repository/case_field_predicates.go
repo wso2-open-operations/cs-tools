@@ -106,47 +106,7 @@ func caseFieldPredicates(f caseFieldSet, argIdx int) ([]string, []any, int, erro
 		add("wi.deployment_id = ANY($%d::uuid[])", f.DeploymentIDs)
 	}
 	if len(f.States) > 0 {
-		// caseLikeStateColumn's own COALESCE(c.state, eng.state, sr.state,
-		// sra.state, ann.state-normalized) = ANY(...) shape can never be
-		// satisfied by an index on any one table's state column -- Postgres
-		// cannot push an index scan through a COALESCE expression spanning
-		// five joined tables, so this was a real, confirmed source of a slow
-		// case-count query with no index able to fix it (the rest of the
-		// WHERE clause's work_item.type filter is the only part an index
-		// could ever help). Rewritten as a sargable OR of per-table
-		// conditions instead: case_state_enum/engagement_state_enum/
-		// service_request_state_enum/security_report_analysis_state_enum are
-		// four distinct Postgres types (confirmed against migrations 0023/
-		// 0024), but share an identical 7-label set validCaseState already
-		// restricts every caller to (service's own validateCaseFieldValues
-		// checks every state against it before this ever runs), so the one
-		// uppercased array is safe to cast into all four. announcement_
-		// state_enum only has OPEN/CLOSE (migration 0024), so it gets its own,
-		// separately filtered-and-mapped array (CLOSED -> CLOSE, matching
-		// caseLikeStateColumn's own normalization in reverse; every other
-		// requested state is dropped, not kept -- casting an unsupported
-		// label into this enum would error the whole query, not just fail to
-		// match that branch) rather than reusing the first array's cast.
-		upperStates := upper(len(f.States), func(i int) string { return string(f.States[i]) })
-		annStates := make([]string, 0, len(upperStates))
-		for _, s := range upperStates {
-			switch s {
-			case "CLOSED":
-				annStates = append(annStates, "CLOSE")
-			case "OPEN":
-				annStates = append(annStates, "OPEN")
-			}
-		}
-		preds = append(preds, fmt.Sprintf(
-			`(c.state = ANY($%d::case_state_enum[])
-			  OR eng.state = ANY($%d::engagement_state_enum[])
-			  OR sr.state = ANY($%d::service_request_state_enum[])
-			  OR sra.state = ANY($%d::security_report_analysis_state_enum[])
-			  OR ann.state = ANY($%d::announcement_state_enum[]))`,
-			argIdx, argIdx, argIdx, argIdx, argIdx+1,
-		))
-		args = append(args, upperStates, annStates)
-		argIdx += 2
+		add(caseLikeStateColumn+" = ANY($%d::text[])", upper(len(f.States), func(i int) string { return string(f.States[i]) }))
 	}
 	if len(f.Severities) > 0 {
 		sev := make([]string, len(f.Severities))

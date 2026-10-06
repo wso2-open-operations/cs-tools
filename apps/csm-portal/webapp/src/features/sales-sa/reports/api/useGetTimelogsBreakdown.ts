@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
-import type { TimeLogBreakdownDetails } from "@features/spl/reports/api/reportTypes";
+import type { TimeLogBreakdownDetails } from "@features/sales-sa/reports/api/reportTypes";
 
 /** `GET /generate-timelogs-breakdown-report` — see internal/servicenow/reports.go. */
 export function useGetTimelogsBreakdown(

@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
-import type { CSReportDetailsResponse } from "@features/spl/reports/api/reportTypes";
+import type { CSReportDetailsResponse } from "@features/sales-sa/reports/api/reportTypes";
 
 export interface CsReportDetailsParams {
   projectSysId: string;

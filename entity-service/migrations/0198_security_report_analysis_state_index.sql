@@ -15,8 +15,9 @@
 -- under the License.
 
 -- See migration 0195's own doc comment -- the fourth of the four indexes
--- that SearchCases' rewritten, sargable state filter (case_field_predicates.go)
--- now lets the planner use. announcement_state_enum's own state column is
--- deliberately left unindexed -- it only ever has two values (OPEN/CLOSE),
--- far too low-cardinality to be worth a secondary index on.
+-- kept for whenever SearchCases' state filter is reattempted as a sargable
+-- rewrite; not currently usable by the live COALESCE-based predicate.
+-- announcement_state_enum's own state column is deliberately left
+-- unindexed -- it only ever has two values (OPEN/CLOSE), far too
+-- low-cardinality to be worth a secondary index on.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_security_report_analysis_state ON security_report_analysis (state);

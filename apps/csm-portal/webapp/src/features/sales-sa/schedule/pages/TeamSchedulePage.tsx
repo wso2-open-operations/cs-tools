@@ -69,9 +69,9 @@ function formatDateOnly(date: Date): string {
 }
 import DOMPurify from "dompurify";
 import { BackendApiError } from "@api/backend/client";
-import { useGetTeamSchedule } from "@features/spl/schedule/api/useGetTeamSchedule";
-import type { ABTTeamScheduleList } from "@features/spl/schedule/scheduleTypes";
-import "@features/spl/schedule/ScheduleTable.css";
+import { useGetTeamSchedule } from "@features/sales-sa/schedule/api/useGetTeamSchedule";
+import type { ABTTeamScheduleList } from "@features/sales-sa/schedule/scheduleTypes";
+import "@features/sales-sa/schedule/ScheduleTable.css";
 
 enum EventType {
   Default = "ops_default",

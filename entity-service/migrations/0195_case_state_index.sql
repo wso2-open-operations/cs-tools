@@ -14,16 +14,25 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- SearchCases' own state filter (case_field_predicates.go) used to compare
+-- SearchCases' own state filter (case_field_predicates.go) compares
 -- COALESCE(c.state, eng.state, sr.state, sra.state, ann.state) against the
 -- requested values -- an expression spanning five joined tables that no
--- index on any single table's state column could ever satisfy, confirmed
--- as a real, reported source of a slow case-count dashboard query (several
--- seconds per call, some outright timing out client-side). That predicate
--- was rewritten into a sargable OR of per-table conditions; this is the
--- first of the four indexes that rewrite now lets the planner actually use
--- -- a BitmapOr across this and its three siblings (migrations 0196-0198)
--- is exactly what a `type IN ('case') AND state IN (...)` search needs.
+-- index on any single table's state column can satisfy, confirmed as a
+-- real, reported source of a slow case-count dashboard query (several
+-- seconds per call, some outright timing out client-side).
+--
+-- A sargable OR-of-per-table-conditions rewrite was attempted and reverted:
+-- it reused one bind placeholder across four different enum casts
+-- (case_state_enum[]/engagement_state_enum[]/etc), which Postgres rejects
+-- at PREPARE time ("cannot cast type X to Y", SQLSTATE 42846) since a
+-- placeholder's type is resolved once per index, not per occurrence -- a
+-- real production outage, not a hypothetical. The predicate is back to the
+-- COALESCE form above, which this index (and its three siblings, migrations
+-- 0196-0198) cannot currently help: Postgres can't push an index scan
+-- through a COALESCE spanning five joined tables. Kept anyway, at explicit
+-- request, for whenever the sargable rewrite is reattempted correctly (a
+-- separate placeholder per cast, not a reused one) -- that version is what
+-- would actually let the planner use these.
 --
 -- CREATE INDEX CONCURRENTLY cannot run inside a transaction block, so this
 -- file (like migration 0152, the identical fix for work_item.type) stays

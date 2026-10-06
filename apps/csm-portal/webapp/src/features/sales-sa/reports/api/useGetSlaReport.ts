@@ -16,7 +16,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
-import type { SLAReportResponse } from "@features/spl/reports/api/reportTypes";
+import type { SLAReportResponse } from "@features/sales-sa/reports/api/reportTypes";
 
 export interface SlaReportParams {
   projectSysId: string;

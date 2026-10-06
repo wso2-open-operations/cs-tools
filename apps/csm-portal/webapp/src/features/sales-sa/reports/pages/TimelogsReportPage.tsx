@@ -44,18 +44,18 @@ import {
   Typography,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
-import { reportPaperTheme } from "@features/spl/reports/reportPaperTheme";
+import { reportPaperTheme } from "@features/sales-sa/reports/reportPaperTheme";
 import DownloadIcon from "@mui/icons-material/Download";
 import DOMPurify from "dompurify";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useParams } from "react-router";
 import { BackendApiError } from "@api/backend/client";
-import { useGetTimelogsBreakdown } from "@features/spl/reports/api/useGetTimelogsBreakdown";
-import PieChart from "@features/spl/reports/components/PieChart";
-import type { DataStruct, TimeCardDetails, TimeLogBreakdownDetails } from "@features/spl/reports/api/reportTypes";
+import { useGetTimelogsBreakdown } from "@features/sales-sa/reports/api/useGetTimelogsBreakdown";
+import PieChart from "@features/sales-sa/reports/components/PieChart";
+import type { DataStruct, TimeCardDetails, TimeLogBreakdownDetails } from "@features/sales-sa/reports/api/reportTypes";
 import { sysidToUuid } from "@features/csm-cases/utils/inlineImages";
-import "@features/spl/reports/styles/TimelogsReport.css";
+import "@features/sales-sa/reports/styles/TimelogsReport.css";
 
 function downloadPDF() {
   const input = document.getElementById("timelogs-report");
@@ -361,7 +361,7 @@ export default function TimelogsReportPage(): JSX.Element {
 
   const handleRowClick = (rowData: DataStruct) => {
     // This report's case rows are still ServiceNow-sourced (see
-    // postgresSplReportsClient's own doc comment on the backend -- report
+    // postgresReportsClient's own doc comment on the backend -- report
     // case data isn't part of the accounts/projects/cases entity-service
     // merge), so caseSysId is a bare ServiceNow sysid, not entity-service's
     // own dashed UUID -- sysidToUuid converts it to what the normal

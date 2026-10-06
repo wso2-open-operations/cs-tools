@@ -53,9 +53,9 @@ function readStored(key: string, fallback: string[]): string[] {
 export default function ProjectCasesTable({ id, isTypeCloud }: { id: string; isTypeCloud: boolean }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [stateValues, setStateValues] = useState<string[]>(() => readStored("spl.stateValues", DEFAULT_STATES));
+  const [stateValues, setStateValues] = useState<string[]>(() => readStored("viewer.stateValues", DEFAULT_STATES));
   const [caseTypeValues, setCaseTypeValues] = useState<string[]>(() =>
-    isTypeCloud ? [] : readStored("spl.caseTypeValues", DEFAULT_CASE_TYPES),
+    isTypeCloud ? [] : readStored("viewer.caseTypeValues", DEFAULT_CASE_TYPES),
   );
 
   const { data, isLoading, error } = useGetProjectCases({
@@ -67,8 +67,8 @@ export default function ProjectCasesTable({ id, isTypeCloud }: { id: string; isT
   });
 
   useEffect(() => {
-    if (!isTypeCloud) localStorage.setItem("spl.caseTypeValues", JSON.stringify(caseTypeValues));
-    localStorage.setItem("spl.stateValues", JSON.stringify(stateValues));
+    if (!isTypeCloud) localStorage.setItem("viewer.caseTypeValues", JSON.stringify(caseTypeValues));
+    localStorage.setItem("viewer.stateValues", JSON.stringify(stateValues));
   }, [isTypeCloud, caseTypeValues, stateValues]);
 
   const handleCaseTypeChange = (event: SelectChangeEvent<string[]>) => {
