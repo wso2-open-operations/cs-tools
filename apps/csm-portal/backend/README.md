@@ -131,6 +131,16 @@ Backs `entity.CustomerEntityClient` (this repo's entity-service; cases, accounts
 | `CUSTOMER_ENTITY_BASE_URL` | Base URL of the customer entity service |
 | `CUSTOMER_ENTITY_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
+### Request timeouts
+
+Go duration strings (e.g. `45s`, `2m`); unset or empty uses the default. All must be greater than 0; the service exits at startup otherwise. No ordering between them is enforced, though keeping `ENTITY_SERVICE_TIMEOUT` shorter than `REST_WRITE_TIMEOUT` lets the handler return a clean error. The defaults deliberately raise the previous values (server 30s, entity client 25s) so large inline-attachment uploads are not cut off, matching the customer-portal backend.
+
+| Variable | Default | Description |
+|---|---|---|
+| `REST_READ_TIMEOUT` | `60s` | Main REST server read timeout |
+| `REST_WRITE_TIMEOUT` | `60s` | Main REST server write timeout |
+| `ENTITY_SERVICE_TIMEOUT` | `60s` | Per-request timeout of the customer entity service client |
+
 ### Engineering entity service (optional)
 
 Backs `entity.EngineeringEntityClient.CreateGitIssue` (a separate internal engineering entity service). When `ENGINEERING_ENTITY_BASE_URL` is set, `POST /cases/{id}/github-issues` files the issue through it instead of forwarding to the entity service; unset, that endpoint behaves exactly as before. It uses the same shared OAuth2 credentials above (`OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own. The same configuration also backs its `GET /health/dependencies` check (see [Health](#health) above); unset, that dependency reports `not_configured` there too.

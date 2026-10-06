@@ -45,8 +45,16 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `DB_NAME`     | yes*     | —       | Database name              |
 | `DB_SSLMODE`  | no       | —       | `disable` or `require`    |
 | `DB_SCHEMA`   | no       | `DB_USER,public` | Pins the connection's `search_path` (`DSN`'s `options=-c search_path=...`), same purpose as `operations/csm-sync-service`'s own `DB_SCHEMA` — see that config's `withSchema`. The fallback makes explicit what Postgres' own default `search_path` (`"$user", public`) would already do implicitly — `public` must survive it, since every deployment's tables live there today (unqualified migrations). An explicit value is used verbatim, with no `public` appended |
+| `DB_POOL_MAX_CONNS` | no | `20` | pgxpool max open connections (see "Connection pool settings" below) |
+| `DB_POOL_MIN_CONNS` | no | `2` | pgxpool connections kept warm when idle; `0` is a valid, accepted value |
+| `DB_POOL_MAX_CONN_LIFETIME` | no | `30m` | pgxpool connection rotation interval |
+| `DB_POOL_MAX_CONN_IDLE_TIME` | no | `5m` | pgxpool idle-connection release interval |
 | `SERVER_PORT` | no       | `8080`  | Main API listen port       |
 | `HEALTH_PORT` | no       | `8081`  | Health probe listen port; `Validate` rejects it being equal to `SERVER_PORT` (see "Health probes" below) |
+| `SERVER_READ_TIMEOUT` | no | `60s` | Main API server read timeout (Go duration, e.g. `60s`); must be > 0 |
+| `SERVER_WRITE_TIMEOUT` | no | `60s` | Main API server write timeout; must be > 0 |
+| `REQUEST_TIMEOUT` | no | `60s` | Per-request context timeout; must be > 0 |
+| `UPSTREAM_CLIENT_TIMEOUT` | no | `60s` | Data-source HTTP client timeout; must be > 0 |
 | `EVENT_HUB_BROKER` | no | — | Kafka-compatible bootstrap address; feature-gates `EventPublisherService` (see "Event Hub publishing" below) |
 | `EVENT_HUB_CONNECTION_STRING` | no* | — | Event Hub namespace Shared Access Policy connection string. *Required once `EVENT_HUB_BROKER` is set |
 | `EVENT_HUB_TOPIC` | no* | — | Event Hub (Kafka topic) name. *Required once `EVENT_HUB_BROKER` is set |
@@ -1440,7 +1448,7 @@ is), each bounded by its own 5s `context.WithTimeout`
 (`publishCaseCreatedTimeout`/`publishIncidentCreatedTimeout`/
 `publishCommentAddedTimeout`/`publishStatusChangedTimeout`/
 `publishSeverityChangedTimeout`) so a slow
-ServiceNow or Event Hub round trip can't consume this service's own 30s
+ServiceNow or Event Hub round trip can't consume this service's own
 request timeout — a deliberate simplicity trade-off over the async+
 `WaitGroup`-drain pattern, made because this service (unlike that backend)
 has no existing per-handler struct to hold a drain hook, and adding one
@@ -6081,6 +6089,48 @@ other reader of it. `GetProjectDetails`'s own `sf_id` scan (a separate query,
 a separate endpoint) was not touched -- not reported broken, so left alone
 rather than fixed speculatively.
 
+## SearchKBArticles failed on any page containing a row with a NULL body/state/author_id
+
+Reported live: `POST /kb-articles/search` returning 500 (`cannot scan NULL into
+*string`), which the staff portal's Knowledge page surfaced as "Failed to search
+KB articles". `knowledge_article` (migration 0044) allows NULL in `body`, `state`,
+`knowledge_base_id`, `author_id` and `latest`, and on staging 2,386 of the 7,794
+`latest = true` rows have a NULL `body`, 2,403 a NULL `author_id` and 1 a NULL
+`state` (`knowledge_base_id` had none). `domain.KBArticle` declares all five as
+required, non-pointer fields, and `scanKBArticle` scanned the columns straight
+into them, so a single such row failed the whole page.
+
+Fixed the same way as `CaseView.InternalID` and `DeploymentView.Type` (see those
+sections above): the wire contract is unchanged (`KnowledgeBaseID`/`Body`/`State`/
+`AuthorID` stay required strings, `Latest` a plain bool, `""`/`false` when the
+column is NULL, so `openapi.yaml` and the portal clients are unaffected), and only
+the scan side changes. `scanKBArticle` scans those five columns into pointer
+locals and converts them with `stringOrEmpty(...)` (`latest != nil && *latest`
+for the bool). It is the only place that scans `knowledge_article` columns, and
+`CreateKBArticle`, `GetKBArticleByID`, `SearchKBArticles`, `UpdateKBArticleState`
+and `UpdateKBArticleContent` all go through it, so every read path and every
+`RETURNING` scan is covered by the one change.
+
+`kb_article_repo_test.go` scans rows with NULL columns through a fake row that,
+like pgx, rejects a NULL into a non-pointer destination, so it fails if the scan
+reverts to plain destinations. `kb_article_repo_integration_test.go` runs search,
+get-by-id and edit against a real `knowledge_article` table (skipped without
+`CASE_STATS_TEST_DSN`).
+
+An article whose `state` is NULL reads as `state: ""`. The service's
+`isLegalKBArticleTransition` has no transition out of an unrecognised state, so
+`PATCH` on such an article returns a 400 ("invalid state transition") rather than
+a 500 — it is listed and viewable, but needs its state set before it can move
+through review.
+
+Not covered here: `knowledge_article_history` (legacy migration
+`000030_knowledge_article_history.up.sql`) is absent from the staging database.
+Two paths use it — `ListKBArticleHistory`, and the history insert inside
+`UpdateKBArticleState`'s transaction (so a state transition rolls back entirely
+there) — and both still fail until the table exists. `UpdateKBArticleContent` does
+not touch it. That is a schema gap, separate from the NULL scan above, and does not
+affect search.
+
 ## Case feedback silently 404'd on the Postgres data source instead of a documented 503
 
 Reported live: a case's Activity timeline always showed "Could not load Case
@@ -6303,14 +6353,16 @@ Key conventions enforced at the DB level:
 
 ## Connection pool settings
 
-Configured in `internal/db/postgres.go`:
+Tuned via `config.Config`, applied by `internal/db.NewPool`. Each is env-configurable (`internal/config/config.go`); the values below are what an unset deployment gets — identical to what this file used to hardcode before these existed:
 
-| Setting             | Value   |
-|---------------------|---------|
-| Max connections     | 20      |
-| Min connections     | 2       |
-| Max conn lifetime   | 30 min  |
-| Max idle time       | 5 min   |
+| Setting             | Env var                       | Default |
+|---------------------|--------------------------------|---------|
+| Max connections     | `DB_POOL_MAX_CONNS`            | 20      |
+| Min connections     | `DB_POOL_MIN_CONNS`            | 2       |
+| Max conn lifetime   | `DB_POOL_MAX_CONN_LIFETIME`    | 30 min  |
+| Max idle time       | `DB_POOL_MAX_CONN_IDLE_TIME`   | 5 min   |
+
+`DB_POOL_MAX_CONNS` falls back to its default on an unset, non-numeric, or non-positive value (a pool that may open no connections at all can never serve a single query). `DB_POOL_MIN_CONNS` falls back the same way **except zero is accepted** — pgxpool genuinely permits a minimum of 0 (a deployment that doesn't want to retain any idle connections) — same fail-safe-to-default posture `getDurationOrDefault` already uses for every duration-shaped env var here, now shared by `getInt32OrDefault`. An invalid value for any of the four surfaces through `Config.Validate()` at startup (`loadErr`), the same mechanism `SERVER_READ_TIMEOUT`/etc. already use.
 
 ## Pagination response conventions
 

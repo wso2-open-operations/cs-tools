@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
@@ -98,7 +99,7 @@ func TestClient_TaggedDownstreamMessage_NotLeakedToClient(t *testing.T) {
 		TokenURL:     srv.URL + "/oauth2/token",
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
-	})
+	}, 45*time.Second)
 
 	_, err := client.Patch(context.Background(), "/cases/abc", "test-id-token", map[string]any{"workState": "ongoing"})
 	if err == nil {

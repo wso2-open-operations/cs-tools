@@ -43,7 +43,8 @@ session, ever, so that code path would be permanently dead here.
   resolution. `ResolveCustomerContacts` implements the three-tier fallback
   (business-contact-role Project Contacts → account-level Primary Contacts →
   signal to nudge the Account Manager instead). Each tier returns **every**
-  match, not the first — see "The customer notice goes to every customer
+  match, not the first; `HasBusinessContacts` reports whether tier 1 alone
+  resolves, so callers can skip fetching account contacts — see "The customer notice goes to every customer
   contact" below. `AccountManagerEmail`
   extracts an email from an already-fetched `PersonRef`, treating "no AM
   assigned" and "AM assigned but no email" both as legitimate absence
@@ -603,14 +604,33 @@ wrong answer:
   `projectKey` by an openapi.yaml update, verify live behavior again before
   copying it — don't just trust the spec.
 
-## Open dependencies
+## Business Contacts come only from the CSM database (v1.1)
 
-- **Business-contact role string** (`internal/recipients`'s
-  `businessContactRole` constant, marked `PLACEHOLDER`) — exact
-  ServiceNow-side literal still unconfirmed with the API team. Broad-sweep
-  testing against real data shows this role is rarely configured in
-  practice regardless — most real resolutions land on `primary_contact` or
-  `am_nudge`, not `business_contact`.
+`businessContactRole` is `"BUSINESS_CONTACT"`, the upper-case label
+csm-integration-service **v1.1** returns in a project contact's `roles`
+(confirmed against a live response on 2026-10-01; other values there are
+`PORTAL_USER`, `SECURITY_CONTACT`, `LEAD_USER`, `ADMIN`). Project roles live
+in the CSM Postgres database, copied from Salesforce. ServiceNow has no
+project-role field at all, so **v1.0 (ServiceNow) never returns them**: its
+`roles` only holds ServiceNow access roles such as
+`sn_customerservice.customer`, which every contact has and which must never
+be read as "business contact". On v1.0, then, no contact matches and the
+customer notice goes to the Primary Contacts. This was checked live, not
+assumed: a contact added as Business Contact in Salesforce shows up in v1.0
+with `roles: []`, then `["sn_customerservice.customer"]` once synced.
+
+v1.1 is planned to be merged into v1.0 (v1.0 will then read from Postgres),
+and ACP stays on v1.0 until then. As of 2026-10-01, v1.1 isn't ready for
+ACP: `PATCH /projects/{id}` accepts `suspensionProcessState` but doesn't save
+it (ACP would resend the same notice daily), and the data migration from
+ServiceNow isn't complete (closure states, `isPartner`, contacts). Retest
+everything against the merged version before relying on it.
+
+`fetchContacts` skips the account-contacts search when
+`recipients.HasBusinessContacts` is true: account contacts only feed the
+Primary Contact fallback, so fetching every page of them anyway would let a
+failure there block a notice that never needed them (CodeRabbit, PR #2134).
+The decision stays in `recipients`, the fetching in `sweep`.
 
 ## Both HTTP clients share one set of transport guards
 
@@ -754,6 +774,7 @@ plain authenticated HTTP call.
   trivial fixture would silently paper over.
 - TDD throughout: red before green, one seam at a time. Seams under test:
   `closure.Decide`, `recipients.ResolveCustomerContacts` /
+  `HasBusinessContacts` /
   `AccountManagerEmail`, `suspensionstate.LastNoticeWindow` /
   `WithSubscriptionEndDateState`, `sweep.processProject`, `sweep.Run`, the
   pure subject/body builders (`internalNoticeSubject`,

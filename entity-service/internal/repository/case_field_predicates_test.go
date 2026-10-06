@@ -40,7 +40,12 @@ func TestEscalationEnumLabels(t *testing.T) {
 }
 
 func TestCaseFieldPredicates(t *testing.T) {
-	// Placeholders continue from argIdx and every predicate carries exactly one arg.
+	// Placeholders continue from argIdx; every predicate carries exactly one
+	// arg except State, which carries two -- see its own branch's doc
+	// comment: one array reused (via separate casts) across the four
+	// case-like enum types that share its label set, and a second, smaller
+	// array specifically for announcement_state_enum's own OPEN/CLOSE-only
+	// vocabulary.
 	preds, args, next, err := caseFieldPredicates(caseFieldSet{
 		Severities:       []domain.CaseSeverity{domain.CaseSeverityCritical},
 		EscalationLevels: []string{"3", "4"},
@@ -53,11 +58,19 @@ func TestCaseFieldPredicates(t *testing.T) {
 	if len(preds) != 4 { // default types + state + severity + escalation
 		t.Fatalf("preds = %d %v", len(preds), preds)
 	}
-	if len(args) != 3 || next != 8 {
-		t.Fatalf("args=%d next=%d, want 3 and 8 (the default-types predicate binds nothing)", len(args), next)
+	if len(args) != 4 || next != 9 {
+		t.Fatalf("args=%d next=%d, want 4 and 9 (default-types binds nothing; state binds two)", len(args), next)
 	}
 	joined := strings.Join(preds, " | ")
-	for _, want := range []string{"$5::text[]", "$6::case_severity_enum[]", "$7::text[]::case_escalation_level_enum[]"} {
+	for _, want := range []string{
+		"c.state = ANY($5::case_state_enum[])",
+		"eng.state = ANY($5::engagement_state_enum[])",
+		"sr.state = ANY($5::service_request_state_enum[])",
+		"sra.state = ANY($5::security_report_analysis_state_enum[])",
+		"ann.state = ANY($6::announcement_state_enum[])",
+		"$7::case_severity_enum[]",
+		"$8::text[]::case_escalation_level_enum[]",
+	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in %s", want, joined)
 		}
@@ -78,6 +91,35 @@ func TestCaseFieldPredicates(t *testing.T) {
 	// An invalid escalation id is rejected before it can reach SQL.
 	if _, _, _, err := caseFieldPredicates(caseFieldSet{EscalationLevels: []string{"9"}}, 1); err == nil {
 		t.Error("escalation level 9 must be rejected")
+	}
+}
+
+// TestCaseFieldPredicates_StateAnnouncementMapping is the regression guard
+// for the part of the State branch most likely to silently break: the
+// second, announcement-only array must map CLOSED -> CLOSE (the label
+// announcement_state_enum actually has) and must DROP every state that
+// enum doesn't define at all, rather than passing it through -- casting an
+// unsupported label into announcement_state_enum would error the whole
+// query, not just fail to match that one branch.
+func TestCaseFieldPredicates_StateAnnouncementMapping(t *testing.T) {
+	_, args, _, err := caseFieldPredicates(caseFieldSet{
+		States: []domain.CaseState{
+			domain.CaseStateOpen, domain.CaseStateClosed, domain.CaseStateWorkInProgress,
+		},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 2 {
+		t.Fatalf("args = %d, want 2 (the shared array, then the announcement-mapped one)", len(args))
+	}
+	shared, ok := args[0].([]string)
+	if !ok || strings.Join(shared, ",") != "OPEN,CLOSED,WORK_IN_PROGRESS" {
+		t.Errorf("shared array = %v, want [OPEN CLOSED WORK_IN_PROGRESS] unchanged", args[0])
+	}
+	annStates, ok := args[1].([]string)
+	if !ok || strings.Join(annStates, ",") != "OPEN,CLOSE" {
+		t.Errorf("announcement array = %v, want [OPEN CLOSE] (CLOSED mapped, WORK_IN_PROGRESS dropped)", args[1])
 	}
 }
 

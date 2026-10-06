@@ -545,9 +545,10 @@ func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, 
 	// changeRequestApprovalDecisions (sn_change_request_service.go) is
 	// reused directly rather than redeclared: both data sources accept
 	// exactly the same two request-level values ("approved"/"rejected"),
-	// and approval_stage_approver.status stores those same raw strings
-	// verbatim (migration 0089's own comment), so there is no separate
-	// translation table to keep in lockstep here.
+	// and approval_stage_approver.state (renamed from status by migration
+	// 0138) stores those same raw strings verbatim (migration 0089's own
+	// comment), so there is no separate translation table to keep in
+	// lockstep here.
 	if !changeRequestApprovalDecisions[decision] {
 		return domain.ChangeRequestApprovalDecisionResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid decision %q", decision)}
 	}

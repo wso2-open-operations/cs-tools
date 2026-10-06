@@ -842,7 +842,7 @@ func liveCustomerStages(ctx context.Context, q crQuerier, workItemID string) ([]
 		LEFT JOIN "group" g ON g.id = ast.assignment_group_id
 		WHERE ast.work_item_id = $1
 		  AND ast.checkpoint_label IN ($2, $3)
-		  AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.status = 'requested')
+		  AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.state = 'REQUESTED')
 		ORDER BY ast.created_on ASC, ast.id ASC`,
 		workItemID, approvalStageLabelCustomerApproval, approvalStageLabelCustomerReview)
 	if err != nil {
@@ -920,8 +920,8 @@ func customerStageManualRefusal(target string, spec *customerStageSpec, live *li
 // stage itself stays, as a record: all its rows read CANCELLED).
 func cancelLiveStageApprovers(ctx context.Context, tx pgx.Tx, stageID, actorEmail string) error {
 	if _, err := tx.Exec(ctx,
-		`UPDATE approval_stage_approver SET status = 'cancelled', updated_on = NOW(), updated_by = $2
-		 WHERE stage_id = $1 AND status = 'requested'`, stageID, actorEmail); err != nil {
+		`UPDATE approval_stage_approver SET state = 'CANCELLED', updated_on = NOW(), updated_by = $2
+		 WHERE stage_id = $1 AND state = 'REQUESTED'`, stageID, actorEmail); err != nil {
 		return fmt.Errorf("cancel customer stage approvers: %w", err)
 	}
 	return nil
@@ -972,7 +972,7 @@ func provisionReauthorizationStage(ctx context.Context, tx pgx.Tx, workItemID, a
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM approval_stage ast
 		                 WHERE ast.work_item_id = $1 AND ast.checkpoint_label = $2
-		                   AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.status = 'requested'))`,
+		                   AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.state = 'REQUESTED'))`,
 		workItemID, cp.Label).Scan(&live); err != nil {
 		return fmt.Errorf("re-schedule: check live %s stage: %w", cp.Label, err)
 	}
@@ -1023,8 +1023,8 @@ func cancelPendingApprovers(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 		return fmt.Errorf("cancel pending approvers: escalate identity: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`UPDATE approval_stage_approver SET status = 'cancelled', updated_on = NOW(), updated_by = $2
-		 WHERE work_item_id = $1 AND status = 'requested'`, workItemID, actorEmail); err != nil {
+		`UPDATE approval_stage_approver SET state = 'CANCELLED', updated_on = NOW(), updated_by = $2
+		 WHERE work_item_id = $1 AND state = 'REQUESTED'`, workItemID, actorEmail); err != nil {
 		return fmt.Errorf("cancel pending approvers: %w", err)
 	}
 	return nil
@@ -1183,7 +1183,7 @@ func reconcileStaleApprovers(ctx context.Context, tx pgx.Tx, workItemID, actorEm
 		           AND (earlier.created_on, earlier.id) < (ast.created_on, ast.id))
 		FROM approval_stage ast
 		WHERE ast.work_item_id = $1
-		  AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.status = 'requested')`,
+		  AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.state = 'REQUESTED')`,
 		workItemID)
 	if err != nil {
 		return fmt.Errorf("reconcile approvers: list live stages: %w", err)
@@ -1209,8 +1209,8 @@ func reconcileStaleApprovers(ctx context.Context, tx pgx.Tx, workItemID, actorEm
 		return nil
 	}
 	tag, err := tx.Exec(ctx,
-		`UPDATE approval_stage_approver SET status = 'cancelled', updated_on = NOW(), updated_by = $3
-		 WHERE work_item_id = $1 AND stage_id = ANY($2::uuid[]) AND status = 'requested'`,
+		`UPDATE approval_stage_approver SET state = 'CANCELLED', updated_on = NOW(), updated_by = $3
+		 WHERE work_item_id = $1 AND stage_id = ANY($2::uuid[]) AND state = 'REQUESTED'`,
 		workItemID, stale, actorEmail)
 	if err != nil {
 		return fmt.Errorf("reconcile approvers: cancel stale approvers: %w", err)
@@ -1307,7 +1307,7 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 	var decided bool
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM approval_stage_approver asa JOIN approval_stage ast ON ast.id = asa.stage_id
-		                 WHERE ast.work_item_id = $1 AND ast.checkpoint_label = $2 AND asa.status IN ('approved', 'rejected'))`,
+		                 WHERE ast.work_item_id = $1 AND ast.checkpoint_label = $2 AND asa.state IN ('APPROVED', 'REJECTED'))`,
 		workItemID, spec.label).Scan(&decided); err != nil {
 		return false, fmt.Errorf("provision customer stage: check decided stage: %w", err)
 	}

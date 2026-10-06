@@ -892,6 +892,11 @@ type SearchDeploymentsRequest struct {
 	SearchQuery     string     `json:"searchQuery,omitempty"`
 	ProjectIDs      []string   `json:"projectIds,omitempty"`
 	DeploymentTypes []string   `json:"deploymentTypes,omitempty"`
+	// IDs filters by the deployment's own UUID -- used by
+	// handler.deploymentAttachmentIsVisible to resolve a single deployment
+	// with no project context at all. Postgres data source only (see
+	// entity-service's own SearchDeploymentsRequest.IDs doc comment).
+	IDs []string `json:"ids,omitempty"`
 }
 
 // DeploymentView is a single search result item from POST /deployments/search.

@@ -3756,6 +3756,8 @@ export interface BeProblemDetail {
   linkedIncidents?: BeProblemRef[];
   linkedChangeRequest?: BeProblemRef | null;
   assignedTo?: BeEntityRef | null;
+  /** The problem's assignment group; null when it has none. */
+  assignmentGroup?: BeEntityRef | null;
   resolutionCode?: string | null;
   causeNotes?: string | null;
   fixNotes?: string | null;

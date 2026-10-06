@@ -44,19 +44,17 @@ var incidentTaskStateEnumSet = map[string]bool{
 // SearchIncidentTasksFilters.Filters for the Postgres data source: reuses
 // incident_task_filters.go's field/op allow-lists, but "state" values are
 // validated as incident_task_state_enum labels (case-insensitive) rather
-// than SN raw integers. "assignmentGroupId" is accepted (validated as UUIDs)
-// but never applied by the repository -- incident_task has no assignment-group
-// column at all, same as change_request's own AssignedTeamID gap.
-func parseIncidentTaskFieldFiltersPostgres(filters []domain.IncidentTaskFieldFilter) (states, incidentIDs []string, err error) {
+// than SN raw integers.
+func parseIncidentTaskFieldFiltersPostgres(filters []domain.IncidentTaskFieldFilter) (states, incidentIDs, assignmentGroupIDs []string, err error) {
 	for _, f := range filters {
 		if !incidentTaskFilterFieldSet[f.Field] {
-			return nil, nil, &apierror.ValidationError{Msg: "filters: unsupported field: " + f.Field}
+			return nil, nil, nil, &apierror.ValidationError{Msg: "filters: unsupported field: " + f.Field}
 		}
 		if !incidentTaskFilterOpSet[f.Op] {
-			return nil, nil, &apierror.ValidationError{Msg: "filters: unsupported op: " + f.Op}
+			return nil, nil, nil, &apierror.ValidationError{Msg: "filters: unsupported op: " + f.Op}
 		}
 		if err := requireIncidentTaskFilterValues(f); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		switch f.Field {
@@ -64,23 +62,23 @@ func parseIncidentTaskFieldFiltersPostgres(filters []domain.IncidentTaskFieldFil
 			for _, v := range f.Values {
 				upper := strings.ToUpper(v)
 				if !incidentTaskStateEnumSet[upper] {
-					return nil, nil, &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q value %q is not a valid state", f.Field, v)}
+					return nil, nil, nil, &apierror.ValidationError{Msg: fmt.Sprintf("filters: field %q value %q is not a valid state", f.Field, v)}
 				}
 				states = append(states, upper)
 			}
 		case "assignmentGroupId":
 			if err := validateUUIDs("filters: assignmentGroupId", f.Values); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			// Accepted, validated, but never applied -- no backing column.
+			assignmentGroupIDs = append(assignmentGroupIDs, f.Values...)
 		case "incidentId":
 			if err := validateUUIDs("filters: incidentId", f.Values); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			incidentIDs = append(incidentIDs, f.Values...)
 		}
 	}
-	return states, incidentIDs, nil
+	return states, incidentIDs, assignmentGroupIDs, nil
 }
 
 type incidentTaskService struct {
@@ -97,12 +95,12 @@ func (s *incidentTaskService) SearchIncidentTasks(ctx context.Context, req domai
 	if err := normalizePagination(&req.Pagination); err != nil {
 		return domain.SearchIncidentTasksResponse{}, err
 	}
-	states, incidentIDs, err := parseIncidentTaskFieldFiltersPostgres(req.Filters.Filters)
+	states, incidentIDs, assignmentGroupIDs, err := parseIncidentTaskFieldFiltersPostgres(req.Filters.Filters)
 	if err != nil {
 		return domain.SearchIncidentTasksResponse{}, err
 	}
 
-	tasks, total, err := s.repo.SearchIncidentTasks(ctx, req, states, incidentIDs)
+	tasks, total, err := s.repo.SearchIncidentTasks(ctx, req, states, incidentIDs, assignmentGroupIDs)
 	if err != nil {
 		return domain.SearchIncidentTasksResponse{}, err
 	}
@@ -121,18 +119,18 @@ func (s *incidentTaskService) SearchIncidentTasks(ctx context.Context, req domai
 // contract's full groupBy allow-list ("state"/"assignmentGroup", matching
 // openapi.yaml); this only checks the value is a legal groupBy at all. The
 // repository rejects "assignmentGroup" specifically with its own,
-// data-source-specific message (no assignment-group column exists here).
+// data-source-specific message.
 func (s *incidentTaskService) AggregateIncidentTasks(ctx context.Context, req domain.AggregateIncidentTasksRequest) (domain.AggregateResponse, error) {
 	if !validIncidentTaskAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
 	}
-	states, incidentIDs, err := parseIncidentTaskFieldFiltersPostgres(req.Filters.Filters)
+	states, incidentIDs, assignmentGroupIDs, err := parseIncidentTaskFieldFiltersPostgres(req.Filters.Filters)
 	if err != nil {
 		return domain.AggregateResponse{}, err
 	}
 
 	searchReq := domain.SearchIncidentTasksRequest{Filters: req.Filters}
-	return s.repo.AggregateIncidentTasks(ctx, searchReq, states, incidentIDs, req.GroupBy, req.MaxGroups)
+	return s.repo.AggregateIncidentTasks(ctx, searchReq, states, incidentIDs, assignmentGroupIDs, req.GroupBy, req.MaxGroups)
 }
 
 // GetIncidentTask implements IncidentTaskService.

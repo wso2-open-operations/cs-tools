@@ -54,11 +54,15 @@ const (
 	ResolvedViaNone            ResolvedVia = "none"
 )
 
-// businessContactRole is the literal Roles value matched against each
-// ProjectContact. Pending confirmation from the API team (Sajith) of the
-// exact ServiceNow-side string — swap this constant once confirmed; no
-// other code in this package needs to change.
-const businessContactRole = "business_contact" // PLACEHOLDER
+// businessContactRole is the Roles value that marks a project's Business
+// Contact. Project roles come from the CSM Postgres database (copied from
+// Salesforce), as upper-case enum labels in the contacts search's "roles"
+// field: confirmed against a live csm-integration-service v1.1 response on
+// 2026-10-01. csm-integration-service v1.0 (ServiceNow) doesn't return
+// project roles at all, only ServiceNow access roles such as
+// sn_customerservice.customer, so on v1.0 no contact matches and the
+// Primary Contact fallback is used.
+const businessContactRole = "BUSINESS_CONTACT"
 
 // Resolution is the outcome of resolving who should receive a project's
 // customer-facing ACP notice. NeedsAMNudge signals a *different* email (a
@@ -83,13 +87,7 @@ type Resolution struct {
 // with no usable contact falls through to the next. Each address is listed
 // once (compared case-insensitively), in the order the contacts came.
 func ResolveCustomerContacts(projectContacts []ProjectContact, accountContacts []AccountContact) Resolution {
-	var business []Contact
-	for _, c := range projectContacts {
-		if hasBusinessContactRole(c) {
-			business = appendUniqueEmail(business, Contact{Name: c.Name, Email: c.Email})
-		}
-	}
-	if len(business) > 0 {
+	if business := businessContacts(projectContacts); len(business) > 0 {
 		return Resolution{CustomerContacts: business, ResolvedVia: ResolvedViaBusinessContact}
 	}
 
@@ -140,6 +138,27 @@ func AccountManagerEmail(accountManager *PersonRef) string {
 		return ""
 	}
 	return *accountManager.Email
+}
+
+// HasBusinessContacts reports whether ResolveCustomerContacts will resolve
+// from projectContacts alone and never look at account contacts. Callers use
+// it to skip fetching account contacts that wouldn't be used. It shares
+// businessContacts with the resolver, so the two can't disagree about what a
+// usable business contact is.
+func HasBusinessContacts(projectContacts []ProjectContact) bool {
+	return len(businessContacts(projectContacts)) > 0
+}
+
+// businessContacts returns the usable business contacts: the role and an
+// email, each address once, in order.
+func businessContacts(projectContacts []ProjectContact) []Contact {
+	var business []Contact
+	for _, c := range projectContacts {
+		if hasBusinessContactRole(c) {
+			business = appendUniqueEmail(business, Contact{Name: c.Name, Email: c.Email})
+		}
+	}
+	return business
 }
 
 func hasBusinessContactRole(c ProjectContact) bool {

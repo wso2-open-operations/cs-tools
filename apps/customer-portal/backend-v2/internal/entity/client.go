@@ -84,7 +84,18 @@ type Config struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	// Timeout bounds one entity-service request end to end. Zero means
+	// DefaultTimeout.
+	Timeout time.Duration
 }
+
+// DefaultTimeout is the entity-service request timeout used when
+// Config.Timeout is unset. create-case relays inline base64 attachments (up
+// to ~15 MiB), so it is longer than a typical API timeout. Operators may
+// override it (ENTITY_SERVICE_TIMEOUT); it is advisable to keep it below the
+// backend server's WriteTimeout so a clean error can be returned, but that is
+// not enforced.
+const DefaultTimeout = 60 * time.Second
 
 // Client is an HTTP client for cs-tools/entity-service, authenticated via the
 // OAuth2 client credentials grant. Tokens are acquired and refreshed
@@ -125,9 +136,13 @@ func NewClient(cfg Config) *Client {
 	// wrap it in a fresh http.Client we own instead of setting fields
 	// directly on the returned one.
 	oauthClient := cc.Client(tokenCtx)
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
 	httpClient := &http.Client{
 		Transport:     oauthClient.Transport,
-		Timeout:       25 * time.Second,
+		Timeout:       timeout,
 		CheckRedirect: noRedirect,
 	}
 

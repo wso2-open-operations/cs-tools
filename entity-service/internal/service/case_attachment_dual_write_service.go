@@ -125,7 +125,24 @@ func NewCaseAttachmentDualWriteService(base CaseService, mirror caseAttachmentSN
 // so a Postgres user record must exist for the caller before there's any
 // point attempting the ServiceNow upload at all -- failing fast here avoids
 // creating a ServiceNow attachment that Postgres could never record.
+//
+// A deployment-referenced attachment skips both the actor resolution and the
+// Postgres insert entirely -- same "no Postgres deployment attachment table
+// yet" gap SearchCaseAttachments already works around (see that method's own
+// doc comment). case_attachment.case_id has a hard FK into "case", so a
+// deployment id can never satisfy it; attempting the insert below failed
+// every deployment attachment upload with a 23503 foreign-key violation,
+// reported back to the caller as an error even though ServiceNow had already
+// accepted it -- the live-reported symptom was "the upload doesn't show as
+// submitted, but shows up after a page refresh" (a refresh re-reads via
+// SearchCaseAttachments' own, already-correct ServiceNow fallback). There is
+// nothing to resolve an actor for or write to Postgres on this path, so the
+// ServiceNow response is returned directly.
 func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+	if req.ReferenceType == domain.ReferenceTypeDeployment {
+		return s.snMirror.CreateCaseAttachment(ctx, req)
+	}
+
 	user, err := s.resolveActor(ctx)
 	if err != nil {
 		return domain.CreateAttachmentResponse{}, err

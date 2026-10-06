@@ -55,12 +55,19 @@ func main() {
 	oauth2ClientSecret := os.Getenv("OAUTH2_CLIENT_SECRET")
 	oauth2TokenURL := optionalURL("OAUTH2_TOKEN_URL", "http", "https")
 
+	timeouts, err := loadTimeouts(os.Getenv)
+	if err != nil {
+		slog.Error("invalid timeout configuration", "err", err)
+		os.Exit(1)
+	}
+
 	entityCfg := entity.Config{
 		BaseURL:      mustURL("ENTITY_SERVICE_BASE_URL", "http", "https"),
 		TokenURL:     oauth2TokenURL,
 		ClientID:     oauth2ClientID,
 		ClientSecret: oauth2ClientSecret,
 		Scopes:       splitComma(os.Getenv("ENTITY_SERVICE_SCOPES")),
+		Timeout:      timeouts.entity,
 	}
 	entityClient := entity.NewClient(entityCfg)
 
@@ -388,9 +395,15 @@ func main() {
 			),
 		),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// Read/WriteTimeout default to 60s because create-case carries inline
+		// base64 attachments (up to ~15 MiB) relayed through two hops. The
+		// values are operator-configurable and not ordered by the code;
+		// keeping the entity client timeout shorter than the server write
+		// timeout lets the handler return a clean error before the server
+		// gives up.
+		ReadTimeout:  timeouts.read,
+		WriteTimeout: timeouts.write,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Established before the WebSocket listener binds, so that listener's setup

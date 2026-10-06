@@ -158,6 +158,59 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_Succeeds(t *testing
 	}
 }
 
+// TestCaseAttachmentDualWriteService_CreateCaseAttachment_DeploymentSkipsPostgres
+// covers the real bug this skip fixes: case_attachment.case_id has a hard FK
+// into "case", so inserting a deployment-referenced attachment there always
+// failed with a 23503 foreign-key violation -- reported back to the caller
+// as an error even though ServiceNow had already accepted the upload (the
+// live-reported symptom was "the upload doesn't show as submitted, but shows
+// up after a page refresh"). Neither the repo insert nor actor resolution
+// (which that insert alone needed, for uploaded_by) should be reached at
+// all for a deployment reference -- stubCaseRepo panics on
+// CreateCaseAttachmentFromServiceNow and stubUserRepo{} (no GetUserByEmail
+// configured) panics on actor resolution, so either happening fails the test.
+func TestCaseAttachmentDualWriteService_CreateCaseAttachment_DeploymentSkipsPostgres(t *testing.T) {
+	const snAttachmentID = "33333333-3333-3333-3333-333333333333"
+	snCreatedOn := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	mirror := &stubCaseAttachmentSNMirror{
+		createCaseAttachment: func(_ context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+			if req.ReferenceType != domain.ReferenceTypeDeployment {
+				t.Fatalf("mirror got referenceType %q, want deployment", req.ReferenceType)
+			}
+			return domain.CreateAttachmentResponse{
+				Message: "Attachment created successfully.",
+				Attachment: domain.AttachmentDetail{
+					ID:        snAttachmentID,
+					SizeBytes: 5,
+					CreatedOn: snCreatedOn,
+					CreatedBy: "jane.doe@example.com",
+					Status:    domain.AttachmentStatusComplete,
+				},
+			}, nil
+		},
+	}
+
+	svc := newDualWriteAttachmentService(&stubCaseRepo{}, stubUserRepo{}, mirror, nil)
+	req := domain.CreateAttachmentRequest{
+		ReferenceID:   testWorkItemID,
+		ReferenceType: domain.ReferenceTypeDeployment,
+		Name:          "plan.pdf",
+		Type:          "application/pdf",
+		File:          "data:application/pdf;base64,aGVsbG8=",
+	}
+
+	resp, err := svc.CreateCaseAttachment(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateCaseAttachment returned error: %v", err)
+	}
+	if resp.Attachment.ID != snAttachmentID {
+		t.Errorf("response id = %q, want %q", resp.Attachment.ID, snAttachmentID)
+	}
+	if resp.Attachment.CreatedBy != "jane.doe@example.com" {
+		t.Errorf("response CreatedBy = %q, want ServiceNow's own value (no Postgres actor was resolved)", resp.Attachment.CreatedBy)
+	}
+}
+
 // TestCaseAttachmentDualWriteService_CreateCaseAttachment_SNFailureLeavesPostgresUntouched
 // proves that when ServiceNow rejects the attachment, nothing is written to
 // Postgres at all -- stubCaseRepo panics if CreateCaseAttachmentFromServiceNow

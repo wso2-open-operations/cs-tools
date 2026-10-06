@@ -38,6 +38,7 @@ import (
 // reach them.
 type stubCaseService struct {
 	service.CaseService
+	createCaseCalled       bool
 	createAttachmentCalled bool
 	createAttachmentResp   domain.CreateAttachmentResponse
 	createAttachmentErr    error
@@ -107,6 +108,11 @@ func (s *stubCaseService) CreateCaseCommentAs(_ context.Context, req domain.Crea
 	s.createCaseCommentAsReq = req
 	s.createCaseCommentAsActor = actorEmail
 	return s.createCaseCommentAsResp, s.createCaseCommentAsErr
+}
+
+func (s *stubCaseService) CreateCase(_ context.Context, _ domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
+	s.createCaseCalled = true
+	return domain.CreateCaseResponse{}, nil
 }
 
 func (s *stubCaseService) GetAttachmentByID(_ context.Context, attachmentID string) (domain.AttachmentDetails, error) {
@@ -209,6 +215,66 @@ func TestCreateCaseAttachment_OverNewLimit(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "request body too large") {
 		t.Fatalf("expected the generic message to be replaced by the attachment-specific one, got: %s", rec.Body.String())
+	}
+}
+
+func createCaseRequestBody(t *testing.T, payloadBytes int) []byte {
+	t.Helper()
+	body, err := json.Marshal(domain.CreateCaseRequest{
+		Subject: "Case with attachment",
+		Attachments: []domain.CaseAttachment{{
+			Name: "test-file.bin",
+			File: base64.StdEncoding.EncodeToString(make([]byte, payloadBytes)),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	return body
+}
+
+// TestCreateCase_InlineAttachment_UnderLimit verifies a ~5 MB inline
+// attachment (~6.7 MB body) passes the decode step instead of being rejected
+// by the generic 1 MiB cap.
+func TestCreateCase_InlineAttachment_UnderLimit(t *testing.T) {
+	body := createCaseRequestBody(t, 5<<20)
+	if int64(len(body)) <= maxRequestBodySize || int64(len(body)) >= maxAttachmentBodySize {
+		t.Fatalf("test body (%d bytes) must sit between %d and %d", len(body), maxRequestBodySize, maxAttachmentBodySize)
+	}
+	stub := &stubCaseService{}
+	h := NewCaseHandler(stub, nil)
+	req := httptest.NewRequest(http.MethodPost, "/cases", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+
+	h.CreateCase(rec, req)
+
+	if !stub.createCaseCalled {
+		t.Fatalf("expected CreateCase to reach the service layer, got status %d body %q", rec.Code, rec.Body.String())
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateCase_OverLimit verifies a body over 15 MiB is rejected with the
+// size-limit message before reaching the service layer.
+func TestCreateCase_OverLimit(t *testing.T) {
+	body := createCaseRequestBody(t, 16<<20)
+	stub := &stubCaseService{}
+	h := NewCaseHandler(stub, nil)
+	req := httptest.NewRequest(http.MethodPost, "/cases", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+
+	h.CreateCase(rec, req)
+
+	if stub.createCaseCalled {
+		t.Fatalf("expected the request to be rejected before reaching the service layer")
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), attachmentTooLargeMsg) {
+		t.Fatalf("expected the too-large message, got: %s", rec.Body.String())
 	}
 }
 

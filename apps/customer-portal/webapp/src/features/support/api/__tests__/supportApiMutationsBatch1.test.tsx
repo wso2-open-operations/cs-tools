@@ -181,11 +181,11 @@ describe("support API mutation hooks - batch 1", () => {
       result.current.mutateAsync({
         caseId: "case-1",
         body: {
-          content: "x".repeat(10 * 1024 * 1024 + 200),
+          content: "x".repeat(1024 * 1024 + 200),
           type: CommentType.COMMENT,
         },
       }),
-    ).rejects.toThrow("exceeds the 10 MB limit");
+    ).rejects.toThrow("The comment exceeds the 1.00 MB limit");
   });
 
   it("usePostConversationMessages should POST follow-up message", async () => {

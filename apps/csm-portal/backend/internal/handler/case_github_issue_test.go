@@ -90,7 +90,8 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 			t.Fatalf("CreateGitIssue calls = %d, want 1", len(eng.calls))
 		}
 		c := eng.calls[0]
-		if c.orgName != "example-org" || c.owner != "example-org" || c.repo != "alpha-repo" || c.title != "Crash on startup" || c.body != "It fails." {
+		wantBody := "Product : Alpha\n\nIt fails."
+		if c.orgName != "example-org" || c.owner != "example-org" || c.repo != "alpha-repo" || c.title != "Crash on startup" || c.body != wantBody {
 			t.Errorf("call = %+v", c)
 		}
 		if !slices.Equal(c.labels, []string{"Origin/CS", "Alpha"}) {
@@ -143,11 +144,11 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"updateLevel":"U12","publicIssueUrl":"https://example.com/i/1","hotFixRequired":true,"regression":true,"reason":"migration","onboardingInProgress":true,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/High"}`)
 		assertStatus(t, w, http.StatusCreated)
 		c := eng.calls[0]
-		wantBody := "It fails.\n\nUpdate Level : U12\n\nPublic Issue : https://example.com/i/1\n\nHotfix Required : Yes"
+		wantBody := "Product : Alpha\nUpdate Level : U12\n\nIt fails.\n\nPublic Issue : https://example.com/i/1\n\nHotfix Required : Yes"
 		if c.body != wantBody {
 			t.Errorf("body = %q, want %q", c.body, wantBody)
 		}
-		if want := []string{"Origin/CS", "U12", "Alpha", "Priority/High", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
+		if want := []string{"Origin/CS", "Alpha", "Priority/High", "Require/Hotfix", "regression", "Affected/Migration", "Onboarding/affected"}; !slices.Equal(c.labels, want) {
 			t.Errorf("labels = %v, want %v", c.labels, want)
 		}
 	})
@@ -161,6 +162,66 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		}
 		if want := []string{"Origin/CS", "Alpha", "Priority/Critical"}; !slices.Equal(eng.calls[1].labels, want) {
 			t.Errorf("labels = %v, want %v", eng.calls[1].labels, want)
+		}
+	})
+
+	t.Run("the fixed info block carries the case's own fields and omits what's missing", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		entityClient := &mockEntityCaseClient{
+			getCaseFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{
+					"number":"CS0000001",
+					"internalId":"ACME-1",
+					"assignedTeam":{"id":"t1","name":"Falcon"},
+					"createdBy":{"email":"reporter@example.com","name":"Test Reporter"},
+					"deployedProduct":{"product":{"name":"Alpha"}}
+				}`), nil
+			},
+		}
+		post(t, newHandler(eng, entityClient), "{"+base+`,"updateLevel":"86"}`)
+		wantBody := "Product : Alpha\nUpdate Level : 86\nWSO2 Case Id : ACME-1\nCase Number : CS0000001\nABT Team : Falcon\nOpened By : reporter@example.com\n\nIt fails."
+		if got := eng.calls[0].body; got != wantBody {
+			t.Errorf("body = %q, want %q", got, wantBody)
+		}
+		want := []string{"Origin/CS", "Alpha"}
+		if !slices.Equal(eng.calls[0].labels, want) {
+			t.Errorf("labels = %v, want %v -- the update level must never appear as a label", eng.calls[0].labels, want)
+		}
+	})
+
+	t.Run("a case missing team/reporter omits those lines instead of rendering them empty", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		entityClient := &mockEntityCaseClient{
+			getCaseFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"number":"CS0000001","deployedProduct":{"product":{"name":"Alpha"}}}`), nil
+			},
+		}
+		post(t, newHandler(eng, entityClient), "{"+base+"}")
+		wantBody := "Product : Alpha\nCase Number : CS0000001\n\nIt fails."
+		if got := eng.calls[0].body; got != wantBody {
+			t.Errorf("body = %q, want %q", got, wantBody)
+		}
+	})
+
+	t.Run("an empty mapping label falls back to the case's own product name for the Product line", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		entityClient := &mockEntityCaseClient{
+			getCaseFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"deployedProduct":{"product":{"name":"Beta"}}}`), nil
+			},
+			getProductRepoMappingFn: func(context.Context, string) ([]byte, error) {
+				return []byte(`{"productName":"Beta","owner":"example-org","repository":"alpha-repo","githubLabel":""}`), nil
+			},
+		}
+		post(t, newHandler(eng, entityClient), "{"+base+"}")
+		wantBody := "Product : Beta\n\nIt fails."
+		if got := eng.calls[0].body; got != wantBody {
+			t.Errorf("body = %q, want %q", got, wantBody)
+		}
+		// The empty label must not become a GitHub label either -- buildGitHubIssueLabels
+		// is unaffected by this fallback, which is body-only.
+		if want := []string{"Origin/CS"}; !slices.Equal(eng.calls[0].labels, want) {
+			t.Errorf("labels = %v, want %v", eng.calls[0].labels, want)
 		}
 	})
 

@@ -78,29 +78,50 @@ describe("IncidentTaskDetailPage", () => {
     patchMutateMock.mockReset();
   });
 
-  it("closes an open task with the chosen outcome and notes", () => {
+  // ServiceNow's incident task State is a free dropdown: any state from any state.
+  function chooseState(label: string): void {
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: label }));
+  }
+
+  it("applies a not-closed state straight away", () => {
     useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Close task" }));
+    chooseState("Work in Progress");
+    expect(patchMutateMock).toHaveBeenCalledWith({ id: TASK_ID, patch: { state: "WORK_IN_PROGRESS" } });
+  });
+
+  it("closes through the dialog, pre-set to the chosen closed state", () => {
+    useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
+    renderPage();
+    chooseState("Closed Incomplete");
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Closed Incomplete")).toBeChecked();
     fireEvent.click(screen.getByLabelText("Closed Skipped"));
     fireEvent.change(screen.getByLabelText("Close notes"), { target: { value: "  covered by INC0099783  " } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Close task" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Close task" }));
     expect(patchMutateMock).toHaveBeenCalledWith(
       { id: TASK_ID, patch: { state: "CLOSED_SKIPPED", closeNotes: "covered by INC0099783" } },
       expect.anything(),
     );
   });
 
-  it("offers Reopen instead of Close on a closed task, and shows its close notes", () => {
+  it("does nothing when the current state is chosen again", () => {
+    useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
+    renderPage();
+    chooseState("Open");
+    expect(patchMutateMock).not.toHaveBeenCalled();
+  });
+
+  it("reopens a closed task from the menu, and shows its close notes", () => {
     useGetIncidentTaskMock.mockReturnValue({
       data: { ...TASK, state: "CLOSED_COMPLETE", stateLabel: "Closed Complete", closeNotes: "Report filed." },
       isLoading: false,
       isError: false,
     });
     renderPage();
-    expect(screen.queryByRole("button", { name: "Close task" })).not.toBeInTheDocument();
     expect(screen.getByText("Report filed.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    chooseState("Open");
     expect(patchMutateMock).toHaveBeenCalledWith({ id: TASK_ID, patch: { state: "OPEN" } });
   });
 
@@ -111,7 +132,8 @@ describe("IncidentTaskDetailPage", () => {
     expect(useGetIncidentTaskMock).toHaveBeenCalledWith(TASK_ID);
     expect(screen.getByText("CS-PORTAL-000021")).toBeInTheDocument();
     expect(screen.getByText(TASK.subject as string)).toBeInTheDocument();
-    expect(screen.getByText("Open")).toBeInTheDocument();
+    // The state chip (kept for print) and the State dropdown.
+    expect(screen.getAllByText("Open")).toHaveLength(2);
     expect(screen.getByText("Moderate")).toBeInTheDocument();
     expect(screen.getByText("Choreo SRE Team")).toBeInTheDocument();
     expect(screen.getByText("Sasmitha Ekanayaka")).toBeInTheDocument();

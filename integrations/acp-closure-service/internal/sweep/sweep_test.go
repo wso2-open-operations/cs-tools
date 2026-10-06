@@ -209,7 +209,7 @@ func TestProcessProject_SkipsNotifyWhenAlreadyClosedForAnyReason(t *testing.T) {
 func TestProcessProject_CustomerAudienceWindowNotifiesBusinessContact(t *testing.T) {
 	reader := &mockEntityReader{
 		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
-			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["business_contact"]}]}`), nil
+			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["BUSINESS_CONTACT"]}]}`), nil
 		},
 	}
 	updater := &mockProjectUpdater{}
@@ -275,7 +275,7 @@ func TestProcessProject_CustomerAudienceWindowNotifiesBusinessContact(t *testing
 func TestProcessProject_RecordsIgnoredWhenOnlyCustomerNoticeWasntDelivered(t *testing.T) {
 	reader := &mockEntityReader{
 		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
-			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["business_contact"]}]}`), nil
+			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["BUSINESS_CONTACT"]}]}`), nil
 		},
 	}
 	updater := &mockProjectUpdater{}
@@ -548,7 +548,7 @@ func TestProcessProject_InvoiceCascadeErrorDoesNotBlockSubscriptionCascade(t *te
 func TestProcessProject_Day0SuccessfulNotifyThenSuspend(t *testing.T) {
 	reader := &mockEntityReader{
 		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
-			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["business_contact"]}]}`), nil
+			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["BUSINESS_CONTACT"]}]}`), nil
 		},
 	}
 	updater := &mockProjectUpdater{}
@@ -721,7 +721,7 @@ func TestProcessProject_SuspendGuardSkipsWhenEndDateClosureStateIsClosed(t *test
 func TestProcessProject_SuspendProceedsWhenEndDateClosureStateIsExplicitlyOpen(t *testing.T) {
 	reader := &mockEntityReader{
 		searchProjectContactsFn: func(ctx context.Context, projectID string, body []byte) ([]byte, error) {
-			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["business_contact"]}]}`), nil
+			return []byte(`{"contacts":[{"name":"Bob","email":"bob@customer.example","roles":["BUSINESS_CONTACT"]}]}`), nil
 		},
 	}
 	updater := &mockProjectUpdater{}

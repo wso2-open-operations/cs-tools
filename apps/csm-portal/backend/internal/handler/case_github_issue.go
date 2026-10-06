@@ -99,25 +99,83 @@ type caseGitHubIssueResult struct {
 	Repo   string `json:"repo"`
 }
 
-// buildGitHubIssueBody is the caller's description followed by the optional
-// context lines, one per line.
-func buildGitHubIssueBody(req caseGitHubIssueRequest) string {
-	var b strings.Builder
-	b.WriteString(strings.TrimSpace(req.Description))
-	extra := func(line string) {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(line)
+// caseGitHubIssueContext is the subset of a case this handler needs beyond
+// what the request body itself carries, to fill the fixed info block at the
+// top of every filed issue's body. A field is left "" when the case has none
+// (e.g. no assigned team) -- buildGitHubIssueBody omits its line rather than
+// rendering it empty.
+type caseGitHubIssueContext struct {
+	Number     string
+	InternalID string
+	Team       string
+	OpenedBy   string
+}
+
+// caseGitHubIssueContextFromCase reads the same raw GetCase response
+// productNameFromCase already decodes a different projection of.
+func caseGitHubIssueContextFromCase(raw []byte) caseGitHubIssueContext {
+	var view struct {
+		Number       string `json:"number"`
+		InternalID   string `json:"internalId"`
+		AssignedTeam *struct {
+			Name string `json:"name"`
+		} `json:"assignedTeam"`
+		CreatedBy *struct {
+			Email string `json:"email"`
+		} `json:"createdBy"`
 	}
-	if v := strings.TrimSpace(req.UpdateLevel); v != "" {
-		extra("\nUpdate Level : " + v)
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return caseGitHubIssueContext{}
+	}
+	ctx := caseGitHubIssueContext{Number: view.Number, InternalID: view.InternalID}
+	if view.AssignedTeam != nil {
+		ctx.Team = strings.TrimSpace(view.AssignedTeam.Name)
+	}
+	if view.CreatedBy != nil {
+		ctx.OpenedBy = strings.TrimSpace(view.CreatedBy.Email)
+	}
+	return ctx
+}
+
+// buildGitHubIssueBody opens with a fixed Product/Update Level/WSO2 Case Id/
+// Case Number/ABT Team/Opened By block (each line omitted when its value is
+// unknown, never rendered as "Label : " with nothing after it), then the
+// caller's own description, then the same optional Public Issue/Hotfix
+// Required lines this body has always carried.
+func buildGitHubIssueBody(req caseGitHubIssueRequest, productLabel string, caseCtx caseGitHubIssueContext) string {
+	var info strings.Builder
+	line := func(label, value string) {
+		if value = strings.TrimSpace(value); value == "" {
+			return
+		}
+		if info.Len() > 0 {
+			info.WriteString("\n")
+		}
+		info.WriteString(label + " : " + value)
+	}
+	line("Product", productLabel)
+	line("Update Level", req.UpdateLevel)
+	line("WSO2 Case Id", caseCtx.InternalID)
+	line("Case Number", caseCtx.Number)
+	line("ABT Team", caseCtx.Team)
+	line("Opened By", caseCtx.OpenedBy)
+
+	var b strings.Builder
+	b.WriteString(info.String())
+	extra := func(value string) {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(value)
+	}
+	if v := strings.TrimSpace(req.Description); v != "" {
+		extra(v)
 	}
 	if v := strings.TrimSpace(req.PublicIssueURL); v != "" {
-		extra("\nPublic Issue : " + v)
+		extra("Public Issue : " + v)
 	}
 	if req.HotFixRequired {
-		extra("\nHotfix Required : Yes")
+		extra("Hotfix Required : Yes")
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -138,12 +196,6 @@ func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []s
 		labels = append(labels, l)
 	}
 	add(originLabel)
-	// The update level is free text from the case. It is a version label only
-	// when it is not one of the labels this function assigns itself, so a
-	// value such as Priority/Critical cannot land on a Patch issue.
-	if !reservedIssueLabel(req.UpdateLevel) {
-		add(req.UpdateLevel)
-	}
 	add(productLabel)
 	issueType := strings.TrimSpace(req.IssueTypeLabel)
 	switch issueType {
@@ -166,31 +218,6 @@ func buildGitHubIssueLabels(productLabel string, req caseGitHubIssueRequest) []s
 		add(onboardingLabel)
 	}
 	return labels
-}
-
-// reservedIssueLabel reports whether s is a label this builder assigns for a
-// reason other than the product version.
-//
-// The three priority strings are the values of SEVERITY_OPTIONS in
-// CreateGithubIssueDialog.tsx. A new severity there has to be added here too,
-// or an update level with that text would be filed as a label.
-func reservedIssueLabel(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case strings.ToLower(originLabel),
-		strings.ToLower(patchIssueTypeLabel),
-		strings.ToLower(patchExtraLabel),
-		strings.ToLower(discussionIssueTypeLabel),
-		strings.ToLower(hotfixLabel),
-		strings.ToLower(migrationLabel),
-		strings.ToLower(onboardingLabel),
-		strings.ToLower(regressionLabel),
-		"priority/critical",
-		"priority/high",
-		"priority/medium":
-		return true
-	default:
-		return false
-	}
 }
 
 // productNameFromCase prefers the catalogue product name, then the versioned
@@ -241,8 +268,11 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, errMsgGitHubTitleInvalid)
 		return
 	}
-	issueBody := buildGitHubIssueBody(req)
-	if utf8.RuneCountInString(issueBody) > maxGitHubIssueBodyChars {
+	// A cheap early guard on the caller's own description -- the real body
+	// (built below, once the case and its product mapping are in hand) can
+	// only be longer, so a description already over the limit is rejected
+	// before any upstream call.
+	if utf8.RuneCountInString(strings.TrimSpace(req.Description)) > maxGitHubIssueBodyChars {
 		writeError(w, http.StatusBadRequest, errMsgGitHubBodyTooLong)
 		return
 	}
@@ -280,6 +310,20 @@ func (h *CaseHandler) createGitHubIssueViaEngineering(w http.ResponseWriter, r *
 	}
 	owner := strings.TrimSpace(mapping.Owner)
 	repo := strings.TrimSpace(mapping.Repository)
+
+	// github_label is NOT NULL but not constrained against being blank, and
+	// this table is known to carry occasional data-quality gaps -- fall back
+	// to the case's own product name (already validated non-empty above)
+	// rather than silently dropping the Product line.
+	productLabel := strings.TrimSpace(mapping.GithubLabel)
+	if productLabel == "" {
+		productLabel = productName
+	}
+	issueBody := buildGitHubIssueBody(req, productLabel, caseGitHubIssueContextFromCase(caseRaw))
+	if utf8.RuneCountInString(issueBody) > maxGitHubIssueBodyChars {
+		writeError(w, http.StatusBadRequest, errMsgGitHubBodyTooLong)
+		return
+	}
 
 	// The mapping's owner is the GitHub organisation, so it is passed as both
 	// the organisation and the owner the engineering service asks for. The

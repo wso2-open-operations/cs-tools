@@ -245,3 +245,48 @@ func TestResolveCustomerContacts_ListsEachEmailOnce(t *testing.T) {
 		t.Errorf("CustomerContacts = %+v, want %+v", got.CustomerContacts, want)
 	}
 }
+
+// TestResolveCustomerContacts_MatchesTheRealBusinessContactRole pins the
+// role value to what the API actually returns. csm-integration-service v1.1
+// (CSM Postgres) puts project roles in "roles" as upper-case enum labels
+// (BUSINESS_CONTACT, PORTAL_USER, SECURITY_CONTACT, LEAD_USER, ADMIN),
+// confirmed against a live response on 2026-10-01. ServiceNow access roles
+// such as sn_customerservice.customer, which is all v1.0 returns, never
+// count as a business contact.
+func TestResolveCustomerContacts_MatchesTheRealBusinessContactRole(t *testing.T) {
+	projectContacts := []ProjectContact{
+		{Name: "Bea Business", Email: "bea.business@customer.example", Roles: []string{"BUSINESS_CONTACT"}},
+		{Name: "Paul Portal", Email: "paul.portal@customer.example", Roles: []string{"PORTAL_USER", "SECURITY_CONTACT"}},
+		{Name: "Pat Partner", Email: "pat.partner@customer.example", Roles: []string{"sn_customerservice.partner", "sn_customerservice.customer"}},
+	}
+
+	got := ResolveCustomerContacts(projectContacts, nil)
+
+	if got.ResolvedVia != ResolvedViaBusinessContact {
+		t.Errorf("ResolvedVia = %v, want %v", got.ResolvedVia, ResolvedViaBusinessContact)
+	}
+	want := []Contact{{Name: "Bea Business", Email: "bea.business@customer.example"}}
+	if !slices.Equal(got.CustomerContacts, want) {
+		t.Errorf("CustomerContacts = %+v, want %+v", got.CustomerContacts, want)
+	}
+}
+
+func TestHasBusinessContacts(t *testing.T) {
+	tests := []struct {
+		name     string
+		contacts []ProjectContact
+		want     bool
+	}{
+		{"business contact with email", []ProjectContact{{Email: "a@customer.example", Roles: []string{"PORTAL_USER", businessContactRole}}}, true},
+		{"business contact without email", []ProjectContact{{Email: "", Roles: []string{businessContactRole}}}, false},
+		{"only other roles", []ProjectContact{{Email: "a@customer.example", Roles: []string{"PORTAL_USER", "sn_customerservice.customer"}}}, false},
+		{"no contacts", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasBusinessContacts(tt.contacts); got != tt.want {
+				t.Errorf("HasBusinessContacts() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

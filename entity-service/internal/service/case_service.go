@@ -3141,6 +3141,18 @@ func (s *caseService) DeleteCaseAttachment(ctx context.Context, req domain.Delet
 		return domain.DeleteAttachmentResponse{}, err
 	}
 	if err := s.repo.DeleteCaseAttachment(ctx, req.AttachmentID); err != nil {
+		// No Postgres case_attachment row for this id -- same "no Postgres
+		// deployment attachment table yet" gap SearchCaseAttachments already
+		// falls back to ServiceNow for (see that method's own doc comment):
+		// a deployment-referenced attachment has no case_attachment row at
+		// all in dual-write mode (its id never satisfies case_attachment's
+		// hard FK into "case"), so a bare NotFoundError here is just as
+		// likely "this is a deployment attachment, not a missing one" as a
+		// genuinely absent attachment. Try ServiceNow before giving up.
+		var notFound *apierror.NotFoundError
+		if s.snMirror != nil && errors.As(err, &notFound) {
+			return s.snMirror.DeleteCaseAttachment(ctx, req)
+		}
 		return domain.DeleteAttachmentResponse{}, err
 	}
 	return domain.DeleteAttachmentResponse{Message: "Attachment deleted successfully"}, nil
@@ -3350,6 +3362,16 @@ func (s *caseService) SubmitCaseFeedback(_ context.Context, _ string, _ domain.S
 // Postgres-sourced attachment, only its storage_key -- see
 // GetCaseAttachmentContent's doc comment for why content must be resolved
 // externally via StorageKey instead.
+//
+// Falls back to ServiceNow on a Postgres NotFoundError when s.snMirror != nil
+// (DATA_SOURCE=postgres-servicenow-dual-write) -- the same "no Postgres
+// deployment attachment table yet" gap SearchCaseAttachments already handles
+// by checking req.ReferenceType up front. This method takes only a bare id,
+// with no reference type to branch on ahead of time, so the Postgres lookup
+// is tried first regardless, and a miss there is resolved against ServiceNow
+// instead of reported as a genuine 404 -- it's at least as likely to be a
+// deployment-referenced attachment (which can only ever live in ServiceNow
+// under this data source) as an actually-missing one.
 func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.AttachmentDetails{}, err
@@ -3357,6 +3379,10 @@ func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.
 
 	a, err := s.repo.GetCaseAttachmentByID(ctx, id)
 	if err != nil {
+		var notFound *apierror.NotFoundError
+		if s.snMirror != nil && errors.As(err, &notFound) {
+			return s.snMirror.GetAttachmentByID(ctx, id)
+		}
 		return domain.AttachmentDetails{}, err
 	}
 

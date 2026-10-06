@@ -163,3 +163,20 @@ func TestGetGroupSendsGetToGroupsID(t *testing.T) {
 		t.Error("empty response")
 	}
 }
+
+func TestNewCustomerEntityClientTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  time.Duration
+		want time.Duration
+	}{
+		{"unset uses default", 0, 60 * time.Second},
+		{"configured value applied", 90 * time.Second, 90 * time.Second},
+	} {
+		c := NewCustomerEntityClient(CustomerEntityConfig{Timeout: tc.cfg})
+		if c.http.Timeout != tc.want {
+			t.Errorf("%s: client timeout = %v, want %v", tc.name, c.http.Timeout, tc.want)
+		}
+	}
+}

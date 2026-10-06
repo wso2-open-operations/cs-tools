@@ -36,7 +36,8 @@ import (
 // maxRequestBodyBytes caps request bodies accepted by search/create/update endpoints.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
-// maxAttachmentBodyBytes caps attachment-create bodies at 15 MiB. The webapp
+// maxAttachmentBodyBytes caps attachment-create bodies, and case-create bodies
+// carrying inline attachments, at 15 MiB. The webapp
 // base64-encodes the file client-side before embedding it in the JSON body:
 // entity-service enforces a 10 MB decoded-file limit, and base64 inflates
 // that to ~13.3 MB of encoded data, so the blanket 1 MiB maxRequestBodyBytes

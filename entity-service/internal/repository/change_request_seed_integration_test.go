@@ -287,7 +287,7 @@ func TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPers
 	if cab.groupID != crCABGroupID {
 		t.Fatalf("CAB stage group = %s, want the CAB group", cab.groupID)
 	}
-	assertApprovers(t, "CAB", cab.approvers, map[string]string{seedAliceID: "requested", seedBobID: "requested", seedCarolID: "requested"})
+	assertApprovers(t, "CAB", cab.approvers, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 	if err := f.decide(id, seedBobID, "approved"); err != nil {
 		t.Fatalf("bob CAB approval: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPers
 	if _, err := f.repo.PatchChangeRequest(f.sys, eid, domain.PatchChangeRequestRequest{State: stateptr(domain.ChangeRequestStateAssess)}, "jane.doe@example.com"); err != nil {
 		t.Fatalf("Emergency Request Approval: %v", err)
 	}
-	assertApprovers(t, "ECAB", f.stage(eid, "ECAB Approval").approvers, map[string]string{seedAliceID: "requested", seedBobID: "requested", seedCarolID: "requested"})
+	assertApprovers(t, "ECAB", f.stage(eid, "ECAB Approval").approvers, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 	if err := f.decide(eid, seedCarolID, "approved"); err != nil {
 		t.Fatalf("carol ECAB approval: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestChangeRequestSeedIntegration_DevopsApprovalFallback(t *testing.T) {
 	if err := f.scoped.QueryRow(f.sys, `SELECT name FROM "group" WHERE id = $1`, st.groupID).Scan(&name); err != nil || name != domain.PeerApprovalFallbackGroupName {
 		t.Fatalf("peer stage group name = %q (%v), want %q", name, err, domain.PeerApprovalFallbackGroupName)
 	}
-	assertApprovers(t, "fallback peer stage", st.approvers, map[string]string{seedAliceID: "requested", seedBobID: "requested", seedCarolID: "requested"})
+	assertApprovers(t, "fallback peer stage", st.approvers, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 }
 
 // Re-running the seed converges a database seeded BEFORE the personas (jane.doe
@@ -393,7 +393,7 @@ func TestChangeRequestSeedIntegration_SeedIsSelfHealing(t *testing.T) {
 	                       ('00000000-0000-0000-0000-000000001432'::uuid, '00000000-0000-0000-0000-000000001422'::uuid)) AS c(id, contact), project_group pg
 	          WHERE pg."group" = 'General Access' ON CONFLICT (id) DO NOTHING`)
 	mustExec(`DELETE FROM approval_stage_approver WHERE work_item_id IN ($1, $2, $3)`, seedCR003, seedCR007, seedCR008)
-	mustExec(`INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, status)
+	mustExec(`INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, state)
 	          VALUES (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $4, 'requested'),
 	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $5, 'requested'),
 	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001305', $2, $4, 'requested'),
@@ -423,13 +423,13 @@ func TestChangeRequestSeedIntegration_SeedIsSelfHealing(t *testing.T) {
 			t.Errorf("%s: contacts of project 401 = %q", pass, got)
 		}
 		for _, tc := range []struct{ id, want string }{
-			{seedCR003, "Peer Approval:alice.perera=requested,bob.fernando=requested,carol.silva=requested"},
-			{seedCR004, "Peer Approval:alice.perera=approved,bob.fernando=cancelled,carol.silva=cancelled"},
-			{seedCR007, "Customer Approval:dave.mendis=requested,erin.jayawardena=requested"},
-			{seedCR008, "Customer Review:dave.mendis=requested,erin.jayawardena=requested"},
+			{seedCR003, "Peer Approval:alice.perera=REQUESTED,bob.fernando=REQUESTED,carol.silva=REQUESTED"},
+			{seedCR004, "Peer Approval:alice.perera=APPROVED,bob.fernando=CANCELLED,carol.silva=CANCELLED"},
+			{seedCR007, "Customer Approval:dave.mendis=REQUESTED,erin.jayawardena=REQUESTED"},
+			{seedCR008, "Customer Review:dave.mendis=REQUESTED,erin.jayawardena=REQUESTED"},
 		} {
 			got := scalar(`SELECT string_agg(ast.checkpoint_label || ':' ||
-			                 (SELECT string_agg(split_part(u.email, '@', 1) || '=' || asa.status, ',' ORDER BY u.email)
+			                 (SELECT string_agg(split_part(u.email, '@', 1) || '=' || asa.state, ',' ORDER BY u.email)
 			                    FROM approval_stage_approver asa JOIN "user" u ON u.id = asa.approver_user_id WHERE asa.stage_id = ast.id),
 			               ' | ' ORDER BY ast.created_on, ast.id)
 			               FROM approval_stage ast WHERE ast.work_item_id = $1`, tc.id)

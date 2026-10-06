@@ -98,6 +98,36 @@ func validCreateDeploymentRequest() domain.CreateDeploymentRequest {
 	}
 }
 
+// SearchDeployments passes the ids filter straight through to the
+// repository, and rejects a non-UUID value the same way it already does
+// for projectIds -- added so a caller holding only a deployment id (no
+// project context) can resolve it, e.g. backend-v2's attachment
+// authorization check for a deployment-referenced attachment.
+func TestDeploymentService_SearchDeployments_IDsFilter(t *testing.T) {
+	var gotReq domain.SearchDeploymentsRequest
+	svc := NewDeploymentService(&stubDeploymentRepo{
+		searchDeployments: func(_ context.Context, req domain.SearchDeploymentsRequest) ([]domain.DeploymentView, int, error) {
+			gotReq = req
+			return []domain.DeploymentView{{ID: testDeploymentUUID}}, 1, nil
+		},
+	})
+
+	resp, err := svc.SearchDeployments(context.Background(), domain.SearchDeploymentsRequest{IDs: []string{testDeploymentUUID}})
+	if err != nil {
+		t.Fatalf("SearchDeployments: unexpected error: %v", err)
+	}
+	if len(gotReq.IDs) != 1 || gotReq.IDs[0] != testDeploymentUUID {
+		t.Errorf("repository did not receive the ids filter: got %v", gotReq.IDs)
+	}
+	if resp.Total != 1 || len(resp.Deployments) != 1 {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+
+	if _, err := svc.SearchDeployments(context.Background(), domain.SearchDeploymentsRequest{IDs: []string{"not-a-uuid"}}); err == nil {
+		t.Error("expected a validation error for a non-UUID id")
+	}
+}
+
 // A plain Postgres data source (no SN mirror wired at all) must keep
 // rejecting CreateDeployment/UpdateDeployment exactly as before this
 // dual-write path existed -- no regression for DATA_SOURCE=postgres.

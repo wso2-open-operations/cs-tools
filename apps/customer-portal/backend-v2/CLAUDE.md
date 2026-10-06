@@ -415,6 +415,12 @@ and no `CORS`**: `Auth` is impossible there (a browser cannot send `x-jwt-assert
 handshake, so `WebSocketHandler` authenticates the token itself), and `CORS` is irrelevant since a
 WebSocket handshake is not subject to preflight. See "The AI chat agent" above.
 
+**REST timeouts are configurable** (`cmd/server/timeouts.go`): `REST_READ_TIMEOUT` (60s),
+`REST_WRITE_TIMEOUT` (60s) and `ENTITY_SERVICE_TIMEOUT` (60s), as Go duration strings. Each must parse
+and be > 0, otherwise the server exits at startup; no ordering between them is enforced. Advice only:
+keep the entity timeout shorter than the write timeout so the handler can return a clean error. The
+defaults are sized for create-case relaying ~15 MiB of inline attachments.
+
 **`CORS` must be outermost, wrapping everything including `Auth`.** A CORS preflight is a bare
 `OPTIONS` request with no JWT at all; if `Auth` ran before `CORS`, it would reject every preflight
 with 401 before the browser ever received a CORS header — which the browser then reports as

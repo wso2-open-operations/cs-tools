@@ -1,0 +1,34 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- SearchCases' own state filter (case_field_predicates.go) used to compare
+-- COALESCE(c.state, eng.state, sr.state, sra.state, ann.state) against the
+-- requested values -- an expression spanning five joined tables that no
+-- index on any single table's state column could ever satisfy, confirmed
+-- as a real, reported source of a slow case-count dashboard query (several
+-- seconds per call, some outright timing out client-side). That predicate
+-- was rewritten into a sargable OR of per-table conditions; this is the
+-- first of the four indexes that rewrite now lets the planner actually use
+-- -- a BitmapOr across this and its three siblings (migrations 0196-0198)
+-- is exactly what a `type IN ('case') AND state IN (...)` search needs.
+--
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block, so this
+-- file (like migration 0152, the identical fix for work_item.type) stays
+-- the only statement in its own file, run without BEGIN/COMMIT -- see that
+-- migration's own doc comment for why ("case" is as large and as actively
+-- written as work_item, so a plain CREATE INDEX would hold a write lock for
+-- the whole build).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_case_state ON "case" (state);

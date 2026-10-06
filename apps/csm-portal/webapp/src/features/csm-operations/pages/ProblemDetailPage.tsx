@@ -416,6 +416,7 @@ export default function ProblemDetailPage(): JSX.Element {
             <Typography variant="body2">{problem.subcategory || "—"}</Typography>
           </MetaCell>
           <MetaCell label="Assigned to"><RefText value={problem.assignedTo} /></MetaCell>
+          <MetaCell label="Assignment group"><RefText value={problem.assignmentGroup} /></MetaCell>
           <MetaCell label="Opened">
             <Typography variant="body2">{formatDateTime(problem.openedOn)}</Typography>
           </MetaCell>

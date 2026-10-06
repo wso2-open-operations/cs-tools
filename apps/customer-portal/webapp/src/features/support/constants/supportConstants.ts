@@ -183,6 +183,12 @@ export type CaseType = (typeof CaseType)[keyof typeof CaseType];
 // Maximum allowed attachment file size in bytes.
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Whole-request cap for POST /cases bodies that carry base64 attachments. The
+// BE accepts up to 15 MiB; a 10 MB raw file encodes to ~13.4 MB, so the cap
+// must sit well above 10 MiB. The margin keeps the FE check from ever passing
+// a body the BE would reject.
+export const MAX_CASE_REQUEST_BODY_BYTES = 15 * 1024 * 1024 - 16 * 1024;
+
 // Deliberately stricter than the BE's own request-body cap for
 // POST /cases/{id}/comments (backend-v2's generic `readJSONBody` helper,
 // capped at the blanket `maxRequestBodyBytes = 1 << 20`, i.e. 1 MiB — this was

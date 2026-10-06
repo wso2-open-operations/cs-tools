@@ -22,6 +22,11 @@ import type { CreateCaseRequest } from "@features/support/types/cases";
 import type { CreateServiceRequestPayload } from "@features/operations/types/serviceRequests";
 import type { CreateCaseResponse } from "@features/support/types/cases";
 import { parseApiResponseMessage } from "@utils/ApiError";
+import { MAX_CASE_REQUEST_BODY_BYTES } from "@features/support/constants/supportConstants";
+import {
+  checkPayloadSize,
+  payloadSizeErrorMessage,
+} from "@features/support/utils/payloadSize";
 
 /**
  * Posts a new support case or service request to the backend.
@@ -69,11 +74,18 @@ export function usePostCase(): UseMutationResult<
         }
 
         const serializedBody = JSON.stringify(body);
-        const payloadBytes = new TextEncoder().encode(serializedBody).length;
-        const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
-        if (payloadBytes > MAX_PAYLOAD_BYTES) {
+        const sizeCheck = checkPayloadSize(
+          serializedBody,
+          MAX_CASE_REQUEST_BODY_BYTES,
+          body.attachments,
+        );
+        if (!sizeCheck.ok) {
           throw new Error(
-            "The case description exceeds the 10 MB limit. Please reduce the size or the number of inline images and try again.",
+            payloadSizeErrorMessage(
+              sizeCheck,
+              "case description",
+              MAX_CASE_REQUEST_BODY_BYTES,
+            ),
           );
         }
 

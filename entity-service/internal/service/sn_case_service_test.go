@@ -52,7 +52,7 @@ func newTestCaseClient(t *testing.T, apiHandler http.HandlerFunc) *integrationse
 		TokenURL:     srv.URL + "/oauth2/token",
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
-	})
+	}, 45*time.Second)
 }
 
 // sysid32 pads/truncates a repeated hex rune to exactly 32 characters, the

@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -204,7 +205,7 @@ func newIncidentLifecycleServer(t *testing.T) (http.Handler, *fakeSNIncidentStor
 		TokenURL:     sn.URL + "/oauth2/token",
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
-	})
+	}, 45*time.Second)
 
 	h := NewIncidentHandler(service.NewServiceNowIncidentService(client, nil))
 	mux := http.NewServeMux()

@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,5 +172,75 @@ func TestCreateCase_BareSysIDProjectID_ForwardedDashed(t *testing.T) {
 	}
 	if want := "11111111-1111-1111-1111-111111111111"; mock.gotProjectID != want {
 		t.Errorf("entity GetProject got project id %q, want %q", mock.gotProjectID, want)
+	}
+}
+
+// createCaseJSONBody builds a valid CreateCaseRequest body of exactly
+// totalBytes whose single inline attachment carries the padding as its file.
+func createCaseJSONBody(totalBytes int) string {
+	const prefix = `{"projectId":"11111111-1111-1111-1111-111111111111","title":"Test Case","description":"Details","attachments":[{"name":"logs.txt","file":"`
+	const suffix = `"}]}`
+	padLen := totalBytes - len(prefix) - len(suffix)
+	if padLen < 0 {
+		padLen = 0
+	}
+	return prefix + strings.Repeat("A", padLen) + suffix
+}
+
+// TestCreateCase_BodySizeLimit covers POST /cases with inline base64
+// attachments: a ~6 MB body (a 5 MB file) must not be rejected as too large,
+// while a body over 15 MiB must be rejected with 413.
+func TestCreateCase_BodySizeLimit(t *testing.T) {
+	tests := map[string]struct {
+		bodySize   int
+		wantStatus int
+	}{
+		"just over the old 1 MiB cap succeeds": {
+			bodySize:   (1 << 20) + 1024,
+			wantStatus: http.StatusCreated,
+		},
+		"6 MB body with an inline attachment succeeds": {
+			bodySize:   6 * 1000 * 1000,
+			wantStatus: http.StatusCreated,
+		},
+		"over the 15 MiB cap is rejected": {
+			bodySize:   (15 << 20) + 1024,
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			mock := &mockCreateCaseClient{
+				project: entity.ProjectDetailsView{
+					ID:      "11111111-1111-1111-1111-111111111111",
+					EndDate: time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC),
+				},
+				createdCase: entity.CreateCaseResponse{
+					Case: entity.CreateCaseDetails{
+						ID:     "22222222-2222-2222-2222-222222222222",
+						Number: "CS12345",
+					},
+				},
+			}
+			h := NewCaseHandler(mock)
+
+			req := authedRequest(http.MethodPost, "/cases", createCaseJSONBody(tc.bodySize))
+			rec := httptest.NewRecorder()
+
+			h.CreateCase(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusRequestEntityTooLarge {
+				if msg := decodeMessage(t, rec); msg != ErrMsgTooLarge {
+					t.Errorf("message = %q, want %q", msg, ErrMsgTooLarge)
+				}
+				if mock.gotProjectID != "" {
+					t.Error("entity-service GetProject was called for an oversized body")
+				}
+			}
+		})
 	}
 }

@@ -28,6 +28,11 @@ import type {
   PostCommentVariables,
 } from "@features/support/types/supportApi";
 import { parseApiResponseMessage } from "@utils/ApiError";
+import { MAX_COMMENT_BODY_BYTES } from "@features/support/constants/supportConstants";
+import {
+  checkPayloadSize,
+  payloadSizeErrorMessage,
+} from "@features/support/utils/payloadSize";
 
 export type { PostCommentRequest, PostCommentVariables };
 
@@ -71,11 +76,17 @@ export function usePostComment(): UseMutationResult<
         content: body.content,
         type: body.type,
       });
-      const payloadBytes = new TextEncoder().encode(serializedBody).length;
-      const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
-      if (payloadBytes > MAX_PAYLOAD_BYTES) {
+      const sizeCheck = checkPayloadSize(
+        serializedBody,
+        MAX_COMMENT_BODY_BYTES,
+      );
+      if (!sizeCheck.ok) {
         throw new Error(
-          "The comment exceeds the 10 MB limit. Please reduce the size or the number of inline images and try again.",
+          payloadSizeErrorMessage(
+            sizeCheck,
+            "comment",
+            MAX_COMMENT_BODY_BYTES,
+          ),
         );
       }
 

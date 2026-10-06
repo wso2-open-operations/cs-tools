@@ -189,6 +189,9 @@ Every flag for that cutover is named `CSM_MIGRATION_*`, is opt-in (on only when 
 |---|---|
 | `PORT` | REST server listen port — a plain number, not an address (default `8080`) |
 | `WS_PORT` | WebSocket (`GET /ws`) listen port — a separate listener from `PORT`, must match the `customer-portal-websocket` endpoint in `.choreo/component.yaml` (default `8081`) |
+| `REST_READ_TIMEOUT` | REST server `ReadTimeout` as a Go duration (e.g. `60s`, `1m30s`); must be > 0 (default `60s`) |
+| `REST_WRITE_TIMEOUT` | REST server `WriteTimeout` as a Go duration; must be > 0 (default `60s`) |
+| `ENTITY_SERVICE_TIMEOUT` | Timeout of the entity-service HTTP client as a Go duration; must be > 0 (default `60s`); no ordering against `REST_WRITE_TIMEOUT` is enforced, but keeping it shorter lets the server return a clean error |
 
 ## Project Structure
 

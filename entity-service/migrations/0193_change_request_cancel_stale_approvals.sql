@@ -31,7 +31,7 @@
 -- written before that.
 --
 -- WHAT IT CHANGES (approval_stage_approver only; stages stay as a record, and the
--- change request itself is never touched). Every row whose status is `requested`:
+-- change request itself is never touched). Every row whose state is `requested`:
 --
 --   (a) on a change request that is CLOSED, CANCELED or ROLLBACK -- the change is
 --       final, nothing on it can be approved any more (whatever the stage);
@@ -55,7 +55,7 @@
 -- stage whose label matches the change's current state (live approvals); rows of
 -- a change with a NULL state.
 --
--- Each cancelled row gets status = 'cancelled', updated_on = NOW() and
+-- Each cancelled row gets state = 'CANCELLED', updated_on = NOW() and
 -- updated_by = 'migration:0193_change_request_cancel_stale_approvals', like the
 -- application's own cancel helpers stamp the acting user. The approvals read
 -- model then shows them as Cancelled and canDecide is false.
@@ -74,10 +74,10 @@
 SELECT set_config('app.is_internal', 'true', false);
 
 UPDATE approval_stage_approver asa
-SET status = 'cancelled',
+SET state = 'CANCELLED',
     updated_on = NOW(),
     updated_by = 'migration:0193_change_request_cancel_stale_approvals'
-WHERE asa.status = 'requested'
+WHERE asa.state = 'REQUESTED'
   AND (
     -- (a) the change request is final
     EXISTS (

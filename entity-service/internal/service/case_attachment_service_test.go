@@ -478,7 +478,9 @@ func TestCaseService_GetAttachmentByID_ReturnsStorageKeyNotContent(t *testing.T)
 }
 
 // TestCaseService_GetAttachmentByID_NotFound proves a missing attachment
-// surfaces as a NotFoundError, not a generic error.
+// surfaces as a NotFoundError, not a generic error, on the plain Postgres
+// data source (no snMirror configured) -- there is nowhere else to fall
+// back to.
 func TestCaseService_GetAttachmentByID_NotFound(t *testing.T) {
 	repo := &stubCaseRepo{
 		getCaseAttachmentByID: func(context.Context, string) (domain.Attachment, error) {
@@ -492,6 +494,81 @@ func TestCaseService_GetAttachmentByID_NotFound(t *testing.T) {
 	if !errorsAsNotFound(err, &nfe) {
 		t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
 	}
+}
+
+// stubAttachmentByIDMirror is a mirror CaseService that only implements
+// GetAttachmentByID/DeleteCaseAttachment; any other method panics via the
+// nil embed -- same shape as stubAttachmentSearchMirror above.
+type stubAttachmentByIDMirror struct {
+	CaseService
+	getByID    func(ctx context.Context, id string) (domain.AttachmentDetails, error)
+	deleteCall func(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
+	getCalls   int
+	delCalls   int
+}
+
+func (m *stubAttachmentByIDMirror) GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error) {
+	m.getCalls++
+	return m.getByID(ctx, id)
+}
+
+func (m *stubAttachmentByIDMirror) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
+	m.delCalls++
+	return m.deleteCall(ctx, req)
+}
+
+// TestCaseService_GetAttachmentByID_FallsBackToServiceNowForDeploymentAttachment
+// covers the real bug this fallback fixes: a deployment-referenced
+// attachment has no case_attachment row at all under
+// DATA_SOURCE=postgres-servicenow-dual-write (its id can never satisfy that
+// table's hard FK into "case" -- see CreateCaseAttachmentFromServiceNow's own
+// doc comment), so the Postgres lookup always misses for one. Before this
+// fix, that NotFoundError was returned straight to the caller -- GetAttachment/
+// GetAttachmentContent/DeleteAttachment 404'd unconditionally for every
+// deployment-tab attachment regardless of who uploaded it or whether
+// ServiceNow actually has it.
+func TestCaseService_GetAttachmentByID_FallsBackToServiceNowForDeploymentAttachment(t *testing.T) {
+	repo := &stubCaseRepo{
+		getCaseAttachmentByID: func(context.Context, string) (domain.Attachment, error) {
+			return domain.Attachment{}, &apierror.NotFoundError{Msg: "attachment not found"}
+		},
+	}
+	deploymentType := domain.ReferenceTypeDeployment
+	mirror := &stubAttachmentByIDMirror{
+		getByID: func(_ context.Context, id string) (domain.AttachmentDetails, error) {
+			if id != testAttachmentID {
+				t.Fatalf("mirror got id %q, want %q", id, testAttachmentID)
+			}
+			return domain.AttachmentDetails{ID: id, ReferenceID: testWorkItemID, ReferenceType: &deploymentType, Name: "plan.pdf"}, nil
+		},
+	}
+
+	t.Run("dual-write falls back to ServiceNow", func(t *testing.T) {
+		svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, mirror, nil, "")
+		details, err := svc.GetAttachmentByID(context.Background(), testAttachmentID)
+		if err != nil {
+			t.Fatalf("GetAttachmentByID returned error: %v", err)
+		}
+		if mirror.getCalls != 1 {
+			t.Fatalf("mirror calls = %d, want 1", mirror.getCalls)
+		}
+		if details.ReferenceType == nil || *details.ReferenceType != domain.ReferenceTypeDeployment {
+			t.Fatalf("ReferenceType = %v, want deployment", details.ReferenceType)
+		}
+	})
+
+	t.Run("plain postgres has no mirror to fall back to", func(t *testing.T) {
+		mirror.getCalls = 0
+		svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+		_, err := svc.GetAttachmentByID(context.Background(), testAttachmentID)
+		var nfe *apierror.NotFoundError
+		if !errorsAsNotFound(err, &nfe) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+		if mirror.getCalls != 0 {
+			t.Fatalf("mirror must not be called without snMirror configured, got %d calls", mirror.getCalls)
+		}
+	})
 }
 
 // TestCaseService_GetCaseAttachmentContent_ReturnsTypedError proves this data
@@ -537,6 +614,55 @@ func TestCaseService_DeleteCaseAttachment_RemovesRow(t *testing.T) {
 	if resp.Message == "" {
 		t.Fatal("expected a non-empty confirmation message")
 	}
+}
+
+// TestCaseService_DeleteCaseAttachment_FallsBackToServiceNowForDeploymentAttachment
+// mirrors TestCaseService_GetAttachmentByID_FallsBackToServiceNowForDeploymentAttachment
+// for the delete path -- the exact regression reported live: a deployment-tab
+// attachment's own uploader could not delete it because the Postgres
+// case_attachment row never existed to delete in the first place.
+func TestCaseService_DeleteCaseAttachment_FallsBackToServiceNowForDeploymentAttachment(t *testing.T) {
+	repo := &stubCaseRepo{
+		deleteCaseAttachment: func(context.Context, string) error {
+			return &apierror.NotFoundError{Msg: "attachment not found"}
+		},
+	}
+	mirror := &stubAttachmentByIDMirror{
+		deleteCall: func(_ context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
+			if req.AttachmentID != testAttachmentID {
+				t.Fatalf("mirror got id %q, want %q", req.AttachmentID, testAttachmentID)
+			}
+			return domain.DeleteAttachmentResponse{Message: "deleted via ServiceNow"}, nil
+		},
+	}
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	t.Run("dual-write falls back to ServiceNow", func(t *testing.T) {
+		svc := NewCaseServiceWithSNWriteback(repo, actorUserRepo(t), nil, alwaysUnrestrictedAccess{}, nil, nil, mirror, nil, "")
+		resp, err := svc.DeleteCaseAttachment(ctx, domain.DeleteAttachmentRequest{AttachmentID: testAttachmentID})
+		if err != nil {
+			t.Fatalf("DeleteCaseAttachment returned error: %v", err)
+		}
+		if mirror.delCalls != 1 {
+			t.Fatalf("mirror calls = %d, want 1", mirror.delCalls)
+		}
+		if resp.Message == "" {
+			t.Fatal("expected a non-empty confirmation message")
+		}
+	})
+
+	t.Run("plain postgres has no mirror to fall back to", func(t *testing.T) {
+		mirror.delCalls = 0
+		svc := NewCaseService(repo, actorUserRepo(t), nil, alwaysUnrestrictedAccess{}, nil)
+		_, err := svc.DeleteCaseAttachment(ctx, domain.DeleteAttachmentRequest{AttachmentID: testAttachmentID})
+		var nfe *apierror.NotFoundError
+		if !errorsAsNotFound(err, &nfe) {
+			t.Fatalf("expected *apierror.NotFoundError, got %T: %v", err, err)
+		}
+		if mirror.delCalls != 0 {
+			t.Fatalf("mirror must not be called without snMirror configured, got %d calls", mirror.delCalls)
+		}
+	})
 }
 
 // TestCaseService_DeleteCaseAttachment_RejectsUnauthenticatedCaller proves

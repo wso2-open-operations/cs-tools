@@ -21,7 +21,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -505,7 +504,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
 			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
 			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
-		})
+		}, cfg.UpstreamClientTimeout)
 	}
 
 	var snAccountHandler *handler.SNAccountHandler
@@ -1845,8 +1844,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						// Timeout wraps the identity lookup too: for an external caller
 						// with no cached identity, ResolveScope runs two database
 						// queries on the request context, and they must share the
-						// same 30s deadline as the handler instead of running unbounded.
-						middleware.Timeout(30 * time.Second)(
+						// same deadline as the handler instead of running unbounded.
+						middleware.Timeout(cfg.RequestTimeout)(
 							callerIdentityMiddleware(accessSvc)(mux),
 						),
 					),

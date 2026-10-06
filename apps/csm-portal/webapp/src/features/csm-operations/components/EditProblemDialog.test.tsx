@@ -61,13 +61,11 @@ describe("EditProblemDialog", () => {
     expect(onSave).toHaveBeenCalledWith({ workaround: "Restart the pod, then clear the cache." });
   });
 
-  it("does not pre-fill assignmentGroupId or targetResolutionDate (not returned by GET)", () => {
+  // targetResolutionDate is still not returned by GET, so it starts blank
+  // and says so; the assignment group is read back (see the test below).
+  it("does not pre-fill targetResolutionDate (not returned by GET)", () => {
     render(<EditProblemDialog problem={BASE_PROBLEM} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
-    expect(
-      screen.getByText(
-        "Not shown pre-filled — the portal can't yet read a problem's current assignment group back.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Not shown pre-filled — the portal can't read it back yet\./)).toBeInTheDocument();
   });
 
   it("shows the passed-in save error", () => {
@@ -95,4 +93,23 @@ describe("EditProblemDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  // The current group is read back now: shown in the picker, and not
+  // re-sent when the user changes something else.
+  it("starts from the problem's assignment group and does not resend it unchanged", () => {
+    const onSave = vi.fn();
+    render(
+      <EditProblemDialog
+        problem={{ ...BASE_PROBLEM, assignmentGroup: { id: "grp-1", name: "Choreo Special Ops" } }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    expect(screen.getByLabelText("Assignment group")).toHaveValue("Choreo Special Ops");
+    fireEvent.change(screen.getByLabelText("Workaround"), { target: { value: "Drain the node." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).toHaveBeenCalledWith({ workaround: "Drain the node." });
+  });
 });
+

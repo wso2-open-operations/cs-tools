@@ -196,6 +196,32 @@ func TestDeploymentRLSIntegration_ProjectFilterCannotReachAForeignProject(t *tes
 	}
 }
 
+// The ids filter is the one way to resolve a single deployment with no
+// project context at all (e.g. backend-v2's attachment authorization check
+// for a deployment-referenced attachment) -- it must still only return rows
+// RLS already lets this caller see, never bypass the scope.
+func TestDeploymentRLSIntegration_IDsFilterStaysWithinScope(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedDeploymentRLSFixture(t, pool)
+	repo := repository.NewDeploymentRepository(repository.NewScoped(pool))
+	req := domain.SearchDeploymentsRequest{Pagination: domain.Pagination{Limit: 50}, IDs: []string{depDeployOne, depDeployTwo}}
+
+	views, total, err := repo.SearchDeployments(depCtx(repository.SearchScope{ViewerEmail: depMemberOne}), req)
+	if err != nil {
+		t.Fatalf("SearchDeployments: %v", err)
+	}
+	got := depIDs(views)
+	if !got[depDeployOne] {
+		t.Errorf("want own deployment %s visible, got %v", depDeployOne, got)
+	}
+	if got[depDeployTwo] {
+		t.Errorf("deployment %s belongs to a project this caller is not a member of; must NOT be visible via ids alone", depDeployTwo)
+	}
+	if total != len(views) {
+		t.Errorf("total = %d but %d rows returned", total, len(views))
+	}
+}
+
 func TestDeploymentRLSIntegration_DeployedProductsFollowTheirDeploymentsProject(t *testing.T) {
 	pool := caseStatsPool(t)
 	seedDeploymentRLSFixture(t, pool)

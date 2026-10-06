@@ -35,22 +35,25 @@ import (
 // (DeleteAttachment's own equivalent coverage lives in
 // closed_case_attachments_test.go, TestDeleteAttachment_ClosedCase).
 
-// fakeAttachmentAuthzClient serves GetAttachment/GetAttachmentContent/GetCase
-// from canned values and records whether the guarded upstream call (content
-// fetch, or the metadata response itself) was reached.
+// fakeAttachmentAuthzClient serves GetAttachment/GetAttachmentContent/GetCase/
+// SearchDeployments from canned values and records whether the guarded
+// upstream call (content fetch, or the metadata response itself) was reached.
 type fakeAttachmentAuthzClient struct {
 	entityAttachmentClient
-	referenceID      string
-	getAttachmentErr error
-	getCaseErr       error
-	contentReached   bool
+	referenceID       string
+	referenceType     *entity.ReferenceType
+	getAttachmentErr  error
+	getCaseErr        error
+	searchDeploysErr  error
+	deploymentVisible bool
+	contentReached    bool
 }
 
 func (f *fakeAttachmentAuthzClient) GetAttachment(ctx context.Context, id string) (entity.AttachmentDetails, error) {
 	if f.getAttachmentErr != nil {
 		return entity.AttachmentDetails{}, f.getAttachmentErr
 	}
-	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID, Name: "logs.txt"}, nil
+	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID, ReferenceType: f.referenceType, Name: "logs.txt"}, nil
 }
 
 func (f *fakeAttachmentAuthzClient) GetCase(ctx context.Context, id string) (entity.CaseView, error) {
@@ -58,6 +61,16 @@ func (f *fakeAttachmentAuthzClient) GetCase(ctx context.Context, id string) (ent
 		return entity.CaseView{}, f.getCaseErr
 	}
 	return entity.CaseView{ID: id, State: "open"}, nil
+}
+
+func (f *fakeAttachmentAuthzClient) SearchDeployments(ctx context.Context, req entity.SearchDeploymentsRequest) (entity.SearchDeploymentsResponse, error) {
+	if f.searchDeploysErr != nil {
+		return entity.SearchDeploymentsResponse{}, f.searchDeploysErr
+	}
+	if !f.deploymentVisible {
+		return entity.SearchDeploymentsResponse{}, nil
+	}
+	return entity.SearchDeploymentsResponse{Deployments: []entity.DeploymentView{{ID: req.IDs[0]}}, Total: 1}, nil
 }
 
 func (f *fakeAttachmentAuthzClient) GetAttachmentContent(ctx context.Context, id string) ([]byte, string, error) {
@@ -92,8 +105,23 @@ func attachmentAuthzTestCases() map[string]struct {
 			client:     fakeAttachmentAuthzClient{getAttachmentErr: &apierror.Error{StatusCode: http.StatusNotFound}},
 			wantStatus: http.StatusNotFound,
 		},
+		"deployment-referenced attachment visible to the caller: allowed": {
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: true},
+			wantStatus: http.StatusOK,
+			wantAllow:  true,
+		},
+		"deployment-referenced attachment outside the caller's scope: denied": {
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: false},
+			wantStatus: http.StatusNotFound,
+		},
+		"deployment lookup itself fails: denied": {
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), searchDeploysErr: &apierror.Error{StatusCode: http.StatusServiceUnavailable}},
+			wantStatus: http.StatusServiceUnavailable,
+		},
 	}
 }
+
+func refType(t entity.ReferenceType) *entity.ReferenceType { return &t }
 
 // TestGetAttachment_Authorization covers GET /attachments/{id}.
 func TestGetAttachment_Authorization(t *testing.T) {

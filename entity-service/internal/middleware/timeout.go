@@ -23,9 +23,9 @@ import (
 )
 
 // Timeout returns an HTTP middleware that cancels the request context after
-// duration d. The value of d should be shorter than the server's WriteTimeout
-// so the handler has a chance to write a clean error response before the
-// connection is forcibly closed.
+// duration d. Ideally d is shorter than the server's WriteTimeout so the
+// handler has a chance to write a clean error response before the connection
+// is forcibly closed; this is advice only and is not enforced.
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

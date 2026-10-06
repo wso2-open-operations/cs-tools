@@ -13734,6 +13734,12 @@ components:
               - uat
               - development
           description: Filter by deployment types.
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Filter by the deployment's own UUID. Postgres data source only.
 
     DeploymentView:
       type: object
@@ -21054,6 +21060,11 @@ components:
         assignedTo:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
+        assignmentGroup:
+          description: The problem's assignment group (work_item.assignment_group_id); null when it has none.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         resolutionCode:
           type: string
           nullable: true

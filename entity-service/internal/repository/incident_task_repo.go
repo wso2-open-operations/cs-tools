@@ -35,11 +35,11 @@ import (
 // incident flows (IncidentReportTx.CreateIncidentTask); UpdateIncidentTask
 // is the portal's state/close-notes write.
 //
-// incident_task has no assignment-group column anywhere (same gap as
-// change_request's own AssignedTeamID -- see change_request_repo.go's
-// package doc comment), so AssignmentGroup is always nil and a caller's
-// "assignmentGroupId" filter is silently not applied, matching
-// changeRequestWhereClause's own precedent for the identical gap.
+// A task's assignment group is work_item.assignment_group_id, which the
+// incident flows set on create (the incident's group for the report task,
+// WSO2 SRE Team for the alert tasks). It is read back as AssignmentGroup and
+// filtered by "assignmentGroupId"; grouping by it is not supported here, as
+// for problems and incidents.
 //
 // "state" is deliberately NOT translated through the SN-specific
 // parsedIncidentTaskFilters.StateKeys (raw ServiceNow integers -- see that
@@ -54,11 +54,11 @@ type IncidentTaskRepository interface {
 	// SearchIncidentTasks returns a filtered, paginated slice of incident
 	// tasks together with the total count of matching rows before
 	// pagination.
-	SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states []string, incidentIDs []string) ([]domain.IncidentTask, int, error)
+	SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs, assignmentGroupIDs []string) ([]domain.IncidentTask, int, error)
 	// AggregateIncidentTasks returns server-side aggregated counts of
 	// incident tasks per value of groupBy, capped to the top maxGroups
 	// buckets with the remainder folded into the returned OthersCount.
-	AggregateIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs []string, groupBy string, maxGroups int) (domain.AggregateResponse, error)
+	AggregateIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs, assignmentGroupIDs []string, groupBy string, maxGroups int) (domain.AggregateResponse, error)
 	// GetIncidentTask returns the full detail of a single incident task by
 	// its UUID, or a NotFoundError if no matching row exists.
 	GetIncidentTask(ctx context.Context, id string) (domain.IncidentTaskDetail, error)
@@ -102,9 +102,10 @@ const incidentTaskFromJoins = `
 	JOIN incident_task it ON it.id = wi.id
 	LEFT JOIN incident inc ON inc.id = it.incident_id
 	LEFT JOIN work_item inc_wi ON inc_wi.id = inc.id
-	LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id`
+	LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+	LEFT JOIN "group" ag ON ag.id = wi.assignment_group_id`
 
-func incidentTaskWhereClause(f domain.SearchIncidentTasksFilters, states, incidentIDs []string) (string, []any) {
+func incidentTaskWhereClause(f domain.SearchIncidentTasksFilters, states, incidentIDs, assignmentGroupIDs []string) (string, []any) {
 	where := "WHERE 1=1"
 	args := []any{}
 	argIdx := 1
@@ -131,8 +132,9 @@ func incidentTaskWhereClause(f domain.SearchIncidentTasksFilters, states, incide
 	if len(incidentIDs) > 0 {
 		add("it.incident_id = ANY($%d::uuid[])", incidentIDs)
 	}
-	// assignmentGroupId has no backing column -- see this file's own package
-	// doc comment; deliberately not applied here.
+	if len(assignmentGroupIDs) > 0 {
+		add("wi.assignment_group_id = ANY($%d::uuid[])", assignmentGroupIDs)
+	}
 
 	return where, args
 }
@@ -143,8 +145,9 @@ func scanIncidentTask(row interface{ Scan(...any) error }) (domain.IncidentTask,
 		state               *string
 		incID, incNumber    *string
 		aeID, aeName        *string
+		agID, agName        *string
 	)
-	if err := row.Scan(&id, &number, &subject, &state, &incID, &incNumber, &aeID, &aeName); err != nil {
+	if err := row.Scan(&id, &number, &subject, &state, &incID, &incNumber, &aeID, &aeName, &agID, &agName); err != nil {
 		return domain.IncidentTask{}, err
 	}
 	t := domain.IncidentTask{ID: &id, Number: &number, Subject: &subject}
@@ -160,17 +163,21 @@ func scanIncidentTask(row interface{ Scan(...any) error }) (domain.IncidentTask,
 	if aeID != nil {
 		t.AssignedTo = &domain.EntityRef{ID: *aeID, Name: stringOrEmpty(aeName)}
 	}
+	if agID != nil {
+		t.AssignmentGroup = &domain.EntityRef{ID: *agID, Name: stringOrEmpty(agName)}
+	}
 	return t, nil
 }
 
 // SearchIncidentTasks implements IncidentTaskRepository.
-func (r *incidentTaskRepo) SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs []string) ([]domain.IncidentTask, int, error) {
-	where, args := incidentTaskWhereClause(req.Filters, states, incidentIDs)
+func (r *incidentTaskRepo) SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs, assignmentGroupIDs []string) ([]domain.IncidentTask, int, error) {
+	where, args := incidentTaskWhereClause(req.Filters, states, incidentIDs, assignmentGroupIDs)
 
 	countQuery := "SELECT COUNT(*) " + incidentTaskFromJoins + " " + where
 	dataQuery := fmt.Sprintf(
 		`SELECT wi.id, wi.number, wi.subject, it.state::TEXT, inc.id, inc_wi.number, ae.id,
-		        COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), ''))
+		        COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')),
+		        ag.id, ag.name
 		 %s %s
 		 ORDER BY wi.created_on DESC, wi.id
 		 LIMIT $%d OFFSET $%d`,
@@ -220,20 +227,20 @@ func (r *incidentTaskRepo) SearchIncidentTasks(ctx context.Context, req domain.S
 }
 
 // incidentTaskAggregateColumns maps a groupBy value to the real column/cast
-// used to group by it. "assignmentGroup" is deliberately absent -- no
-// backing column, see this file's own package doc comment.
+// used to group by it. "assignmentGroup" is not supported -- see this file's
+// own package doc comment.
 var incidentTaskAggregateColumns = map[string]string{
 	"state": "it.state::TEXT",
 }
 
 // AggregateIncidentTasks implements IncidentTaskRepository.
-func (r *incidentTaskRepo) AggregateIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs []string, groupBy string, maxGroups int) (domain.AggregateResponse, error) {
+func (r *incidentTaskRepo) AggregateIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest, states, incidentIDs, assignmentGroupIDs []string, groupBy string, maxGroups int) (domain.AggregateResponse, error) {
 	col, ok := incidentTaskAggregateColumns[groupBy]
 	if !ok {
-		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy=" + groupBy + " is not supported on the PostgreSQL data source: incident_task has no assignment-group column"}
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy=" + groupBy + " is not supported on the PostgreSQL data source"}
 	}
 
-	where, args := incidentTaskWhereClause(req.Filters, states, incidentIDs)
+	where, args := incidentTaskWhereClause(req.Filters, states, incidentIDs, assignmentGroupIDs)
 
 	query := fmt.Sprintf(`
 		SELECT %s AS bucket, COUNT(*) AS bucket_count
@@ -283,7 +290,8 @@ func (r *incidentTaskRepo) GetIncidentTask(ctx context.Context, id string) (doma
 	query := `
 		SELECT wi.id, wi.number, wi.subject, it.state::TEXT, inc.id, inc_wi.number, ae.id,
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')),
-		       wi.description, it.priority::TEXT, it.opened_on, it.closed_on, it.close_notes
+		       wi.description, it.priority::TEXT, it.opened_on, it.closed_on, it.close_notes,
+		       ag.id, ag.name
 		` + incidentTaskFromJoins + `
 		WHERE wi.id = $1 AND wi.type = 'INCIDENT_TASK'`
 
@@ -296,10 +304,11 @@ func (r *incidentTaskRepo) GetIncidentTask(ctx context.Context, id string) (doma
 		priority             *string
 		openedOn, closedOn   *time.Time
 		closeNotes           *string
+		agID, agName         *string
 	)
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&id2, &number, &subject, &state, &incID, &incNumber, &aeID, &aeName,
-		&description, &priority, &openedOn, &closedOn, &closeNotes,
+		&description, &priority, &openedOn, &closedOn, &closeNotes, &agID, &agName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.IncidentTaskDetail{}, &apierror.NotFoundError{Msg: "incident task not found"}
@@ -331,6 +340,9 @@ func (r *incidentTaskRepo) GetIncidentTask(ctx context.Context, id string) (doma
 	}
 	if aeID != nil {
 		d.AssignedTo = &domain.EntityRef{ID: *aeID, Name: stringOrEmpty(aeName)}
+	}
+	if agID != nil {
+		d.AssignmentGroup = &domain.EntityRef{ID: *agID, Name: stringOrEmpty(agName)}
 	}
 	return d, nil
 }

@@ -1875,12 +1875,18 @@ type DeploymentView struct {
 // SearchDeploymentsRequest is the input for a deployment search operation.
 // All filter fields are optional. ProjectIDs scopes results to specific projects;
 // DeploymentTypes filters by deployment type; SearchQuery is matched
-// case-insensitively against name.
+// case-insensitively against name. IDs matches the deployment's own id
+// directly -- added so a caller holding only a deployment id (no project
+// context) can still resolve it, e.g. backend-v2's attachment authorization
+// check for a deployment-referenced attachment. Only applied on the
+// Postgres data source today (deploymentRepo.SearchDeployments); the
+// ServiceNow-backed search (snDeploymentService) does not support it.
 type SearchDeploymentsRequest struct {
 	Pagination      Pagination       `json:"pagination"`
 	SearchQuery     string           `json:"searchQuery"`
 	ProjectIDs      []string         `json:"projectIds"`
 	DeploymentTypes []DeploymentType `json:"deploymentTypes"`
+	IDs             []string         `json:"ids"`
 }
 
 // SearchDeploymentsResponse is the paginated result of a deployment search.
@@ -6165,6 +6171,7 @@ type ProblemDetail struct {
 	LinkedIncidents     []CaseNumberRef `json:"linkedIncidents"`
 	LinkedChangeRequest *CaseNumberRef  `json:"linkedChangeRequest"`
 	AssignedTo          *EntityRef      `json:"assignedTo"`
+	AssignmentGroup     *EntityRef      `json:"assignmentGroup"`
 	ResolutionCode      *string         `json:"resolutionCode"`
 	CauseNotes          *string         `json:"causeNotes"`
 	FixNotes            *string         `json:"fixNotes"`

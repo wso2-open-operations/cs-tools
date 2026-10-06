@@ -19,10 +19,10 @@ cp .env.example .env   # fill in real values
 go run ./cmd/acp-closure
 ```
 
-`DRY_RUN` defaults to `true` — a run will fetch, decide, resolve recipients,
-and log what it *would* send/write, without ever calling a real send
-mechanism (none exists yet — see "Open dependencies" below) or writing to
-`csm-integration-service`. Set `DRY_RUN=false` only for a deliberate,
+`DRY_RUN` defaults to `true` — a run will fetch, decide and resolve
+recipients without writing to `csm-integration-service`. Sending is a
+separate switch, `IS_EMAIL_SEND_ENABLED` (see CLAUDE.md, "Real email
+sending"). Set `DRY_RUN=false` only for a deliberate,
 reviewed cutover.
 
 ## Overview
@@ -125,16 +125,12 @@ knowing before trusting a sibling service's source or docs at face value:
 
 ## Open dependencies
 
-Two of the five original open dependencies from this component's design
-remain unresolved (the other three — `endDate`, M2M auth, AM owner-email
-resolution — are confirmed and implemented):
+None of the original open dependencies remain:
 
-- **Business-contact role string** (`internal/recipients`'s
-  `businessContactRole` constant) — the exact ServiceNow-side literal is
-  still unconfirmed. Broad-sweep testing against real data shows this role
-  is rarely configured in practice regardless (most real resolutions land
-  on `primary_contact` or `am_nudge`).
-- **Real email-sending mechanism** — deferred pending message-queue design
-  on the entity-service side, not blocked on this component.
-  `internal/notify`'s `LoggingNotifier` is not a temporary stand-in; it is
-  genuinely the only option available today.
+- **Business-contact role**: `BUSINESS_CONTACT`, returned in a project
+  contact's `roles` by csm-integration-service v1.1 (CSM Postgres). v1.0
+  (ServiceNow) doesn't return project roles, so on v1.0 customer notices go
+  to Primary Contacts. See CLAUDE.md, "Business Contacts come only from the
+  CSM database (v1.1)".
+- **Real email sending**: implemented (`notify.EmailNotifier`, WSO2's email
+  service), behind `IS_EMAIL_SEND_ENABLED`.

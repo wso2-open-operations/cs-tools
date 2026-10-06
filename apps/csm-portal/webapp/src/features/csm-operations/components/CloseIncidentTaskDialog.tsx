@@ -30,7 +30,7 @@ import {
 import { useState, type JSX } from "react";
 import type { BeIncidentTaskState } from "@api/backend/types";
 
-type ClosedTaskState = Extract<
+export type ClosedTaskState = Extract<
   BeIncidentTaskState,
   "CLOSED_COMPLETE" | "CLOSED_INCOMPLETE" | "CLOSED_SKIPPED"
 >;
@@ -46,6 +46,8 @@ interface CloseIncidentTaskDialogProps {
   isSubmitting: boolean;
   /** User-facing message for the most recent failed attempt, if any. */
   error?: string | null;
+  /** The outcome pre-selected when the dialog opens (Closed Complete if not given). */
+  initialState?: ClosedTaskState;
   onClose: () => void;
   onConfirm: (fields: { state: ClosedTaskState; closeNotes: string }) => void;
 }
@@ -59,10 +61,11 @@ export default function CloseIncidentTaskDialog({
   taskNumber,
   isSubmitting,
   error,
+  initialState,
   onClose,
   onConfirm,
 }: CloseIncidentTaskDialogProps): JSX.Element {
-  const [state, setState] = useState<ClosedTaskState>("CLOSED_COMPLETE");
+  const [state, setState] = useState<ClosedTaskState>(initialState ?? "CLOSED_COMPLETE");
   const [closeNotes, setCloseNotes] = useState("");
 
   return (

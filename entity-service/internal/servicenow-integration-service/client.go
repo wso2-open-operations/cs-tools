@@ -87,13 +87,16 @@ type Client struct {
 	tokenExpiry time.Time
 }
 
-// New constructs a Client with a default 15-second timeout.
-func New(baseURL string, creds ClientCredentialsConfig) *Client {
+// New constructs a Client whose HTTP calls time out after timeout. Create-case
+// carries inline base64 attachments (up to 15 MiB), which the upstream call
+// must be allowed to finish; keep it below the server write timeout so the
+// handler can still return a clean error.
+func New(baseURL string, creds ClientCredentialsConfig, timeout time.Duration) *Client {
 	return &Client{
 		baseURL: baseURL,
 		creds:   creds,
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }

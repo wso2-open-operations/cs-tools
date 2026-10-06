@@ -221,4 +221,65 @@ describe("operations API hooks", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  describe("usePostCase payload size checks", () => {
+    const MB = 1024 * 1024;
+    const b64 = (rawBytes: number) => "A".repeat((rawBytes / 3) * 4);
+    const base = {
+      projectId: "proj-1",
+      deploymentId: "dep-1",
+      deployedProductId: "dp-1",
+    };
+    const run = (payload: Record<string, unknown>) => {
+      const { result } = renderHook(() => usePostCase(), {
+        wrapper: createWrapper(),
+      });
+      return result.current.mutateAsync({ ...base, ...payload } as never);
+    };
+
+    it("sends a case with an 8 MB attachment", async () => {
+      mockAuthFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "case-1", number: "CS001" }),
+      });
+      await run({
+        description: "d",
+        attachments: [{ name: "a.zip", file: b64(8 * MB) }],
+      });
+      expect(mockAuthFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a file just over 10 MB raw with a per-file message", async () => {
+      mockAuthFetch.mockClear();
+      await expect(
+        run({
+          description: "d",
+          attachments: [{ name: "big.zip", file: b64(10 * MB + 3) }],
+        }),
+      ).rejects.toThrow('"big.zip" exceeds the 10.00 MB per-file limit');
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+    });
+
+    it("blames attachments when they make the request too large", async () => {
+      mockAuthFetch.mockClear();
+      await expect(
+        run({
+          description: "d",
+          attachments: [
+            { name: "a.bin", file: b64(9 * MB) },
+            { name: "b.bin", file: b64(9 * MB) },
+          ],
+        }),
+      ).rejects.toThrow("attachments are too large");
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+    });
+
+    it("blames the description when it makes the request too large", async () => {
+      mockAuthFetch.mockClear();
+      await expect(
+        run({ description: "x".repeat(15 * MB) }),
+      ).rejects.toThrow("The case description exceeds the");
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+    });
+  });
 });

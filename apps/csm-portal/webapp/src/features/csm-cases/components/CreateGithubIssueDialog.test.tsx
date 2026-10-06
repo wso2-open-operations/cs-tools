@@ -112,7 +112,7 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
     expect(screen.getByRole("option", { name: "Discussion" })).toBeInTheDocument();
   });
 
-  it("Discussion requires Severity and hides Hotfix Required", () => {
+  it("Discussion requires Severity and hides Hotfix Required and Regression", () => {
     render(
       <CreateGithubIssueDialog
         open
@@ -131,6 +131,7 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
       target: { value: "Latency spiked after the last deploy." },
     });
     expect(screen.queryByText("Hotfix Required")).not.toBeInTheDocument();
+    expect(screen.queryByText("Regression")).not.toBeInTheDocument();
     // Severity is required for Incident — Create issue stays disabled without it.
     expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
@@ -138,7 +139,7 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
     expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
   });
 
-  it("Patch hides Severity and requires Update Level + Public Git Issue", () => {
+  it("Patch hides Severity, shows Regression, and requires Update Level + Public Git Issue", () => {
     render(
       <CreateGithubIssueDialog
         open
@@ -158,6 +159,7 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
     });
     expect(screen.queryByRole("combobox", { name: /severity/i })).not.toBeInTheDocument();
     expect(screen.getByText("Hotfix Required")).toBeInTheDocument();
+    expect(screen.getByText("Regression")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/update level/i), {
@@ -202,6 +204,38 @@ describe("CreateGithubIssueDialog — stale per-type fields don't leak into the 
     fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
     expect(onSubmit).toHaveBeenCalledWith(
       expect.not.objectContaining({ hotFixRequired: true }),
+    );
+  });
+
+  it("drops regression once Type is switched away from Patch after toggling it on", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CreateGithubIssueDialog
+        open
+        productName="Alpha"
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    selectType("Patch");
+    fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
+    // Switching away from Patch hides the control, but the toggled-on state
+    // must not still ride along in the submitted payload.
+    selectType("Discussion");
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
+    fireEvent.click(screen.getByRole("option", { name: /P1 - Critical/i }));
+    fireEvent.change(screen.getByLabelText(/subject/i), {
+      target: { value: "Token issuance is slow" },
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Latency spiked after the last deploy." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.not.objectContaining({ regression: true }),
     );
   });
 });

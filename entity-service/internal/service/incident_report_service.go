@@ -466,26 +466,42 @@ func alertTasksFor(src repository.IncidentReportSource, code string) []repositor
 	}}
 }
 
-// problemFor is blocks 9 and 11-14: service, impact, urgency and priority
-// copied from the incident, the incident linked, and the group chosen by
-// which of the two services the incident is on. The flow's If compares a
-// transform of the incident to CHOREO / ASGARDEO; the trigger admits only
-// those two services, so the service decides it.
+// problemFor is blocks 9 and 11-14: service, impact and urgency copied from
+// the incident, the incident linked, and the group chosen by which of the two
+// services the incident is on. The flow's If compares a transform of the
+// incident to CHOREO / ASGARDEO; the trigger admits only those two services,
+// so the service decides it.
+//
+// The flow also copies the incident's priority, but ServiceNow's "Priority
+// Problem Lookup" runs on the insert and overwrites it from impact x urgency
+// (always_replace; discovery script 64) -- so the priority is derived here
+// too, which also covers an incident whose own priority is missing. An
+// absent impact or urgency is ServiceNow's problem default, 3 - Low.
 func problemFor(src repository.IncidentReportSource) repository.NewIncidentProblem {
 	group := groupAsgardeoOperationsTeam
 	if strOrEmpty(src.ServiceID) == postResolutionServiceChoreo {
 		group = groupChoreoSpecialOps
 	}
+	impact, urgency := strOrDefault(src.Impact, "LOW"), strOrDefault(src.Urgency, "LOW")
+	priority := priorityFromImpactUrgency(impact, urgency)
 	return repository.NewIncidentProblem{
 		IncidentID:        src.IncidentID,
 		Subject:           "Fix the root cause of " + src.Number,
 		ServiceID:         src.ServiceID,
-		Priority:          src.Priority,
-		Impact:            src.Impact,
-		Urgency:           src.Urgency,
+		Priority:          &priority,
+		Impact:            &impact,
+		Urgency:           &urgency,
 		AssignmentGroupID: &group,
 		CreatedBy:         incidentReportActor,
 	}
+}
+
+// strOrDefault is *s, or def for nil or "".
+func strOrDefault(s *string, def string) string {
+	if s == nil || *s == "" {
+		return def
+	}
+	return *s
 }
 
 // strOrEmpty is *s, or "" for nil.

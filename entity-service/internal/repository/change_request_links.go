@@ -433,8 +433,31 @@ func writeChangeRequestLinkRows(ctx context.Context, tx pgx.Tx, table, column, c
 	return nil
 }
 
+// writeChangeRequestDeployments does not use the generic writeChangeRequestLinkRows
+// helper: change_request_deployment is also defined by csm-sync-service's own
+// 0136_change_request_deployment_table.sql, mirrored verbatim into this repo's
+// migrations and numbered to run before this table's own 0191, so that
+// surrogate-id schema (id UUID PRIMARY KEY, no default, plus a UNIQUE
+// (change_request_id, deployment_id) this ON CONFLICT relies on) is the one
+// that actually exists -- 0191's own CREATE TABLE IF NOT EXISTS for the same
+// name is a no-op by the time it runs. An id-less INSERT here fails NOT NULL
+// on id; change_request_deployed_product has no such collision (0137, this
+// table's csm-sync-service namesake, never defines deployed_product), so it
+// keeps using the generic helper unchanged.
 func writeChangeRequestDeployments(ctx context.Context, tx pgx.Tx, crID string, ids []string) error {
-	return writeChangeRequestLinkRows(ctx, tx, "change_request_deployment", "deployment_id", crID, ids)
+	if _, err := tx.Exec(ctx, `DELETE FROM change_request_deployment WHERE change_request_id = $1::uuid`, crID); err != nil {
+		return fmt.Errorf("clear change_request_deployment: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO change_request_deployment (id, change_request_id, deployment_id)
+		 SELECT gen_random_uuid(), $1::uuid, unnest($2::text[]::uuid[]) ON CONFLICT DO NOTHING`,
+		crID, ids); err != nil {
+		return fmt.Errorf("write change_request_deployment: %w", err)
+	}
+	return nil
 }
 
 func writeChangeRequestProducts(ctx context.Context, tx pgx.Tx, crID string, ids []string) error {

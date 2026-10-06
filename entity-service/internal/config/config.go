@@ -30,6 +30,16 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
 
+// Defaults for the timeout settings. Create-case carries inline base64
+// attachments (up to 15 MiB), so the deadlines must be long enough for it to
+// finish. Operators may set any positive values.
+const (
+	DefaultServerReadTimeout     = 60 * time.Second
+	DefaultServerWriteTimeout    = 60 * time.Second
+	DefaultRequestTimeout        = 60 * time.Second
+	DefaultUpstreamClientTimeout = 60 * time.Second
+)
+
 // DataSource identifies which backend the service reads from.
 type DataSource string
 
@@ -75,8 +85,25 @@ type Config struct {
 	// "public" half of that fallback matters: entity-service's migrations
 	// create every table unqualified, so every deployment's real tables
 	// live there today.
-	DBSchema   string
-	ServerPort string
+	DBSchema string
+	// DBPoolMaxConns/DBPoolMinConns/DBPoolMaxConnLifetime/DBPoolMaxConnIdleTime
+	// tune internal/db.NewPool's pgxpool (DB_POOL_MAX_CONNS/DB_POOL_MIN_CONNS/
+	// DB_POOL_MAX_CONN_LIFETIME/DB_POOL_MAX_CONN_IDLE_TIME). Defaults (20/2/
+	// 30m/5m) are the values this file previously hardcoded in
+	// internal/db/postgres.go — an unset deployment behaves exactly as
+	// before these existed. DBPoolMaxConns falls back to its default on an
+	// unset, non-numeric, or non-positive value (a pool that may open no
+	// connections at all can never serve a single query). DBPoolMinConns
+	// falls back the same way EXCEPT zero is accepted — pgxpool genuinely
+	// permits a minimum of 0 (a deployment that doesn't want to retain any
+	// idle connections). DBPoolMaxConnLifetime/DBPoolMaxConnIdleTime fall
+	// back to theirs the same way every other duration here does
+	// (getDurationOrDefault), via loadErr.
+	DBPoolMaxConns        int32
+	DBPoolMinConns        int32
+	DBPoolMaxConnLifetime time.Duration
+	DBPoolMaxConnIdleTime time.Duration
+	ServerPort            string
 	// HealthPort is the listen port for the separate, minimal health
 	// server (internal/server.NewHealthServer). It is deliberately NOT
 	// ServerPort: that mux carries every business route and is exposed at
@@ -507,12 +534,43 @@ type Config struct {
 	// this is the backstop for a missed invalidation, not the main freshness
 	// mechanism.
 	UserCacheTTL time.Duration
+	// ServerReadTimeout and ServerWriteTimeout are the main API server's
+	// http.Server ReadTimeout/WriteTimeout (SERVER_READ_TIMEOUT,
+	// SERVER_WRITE_TIMEOUT). The health server keeps its own fixed timeouts.
+	ServerReadTimeout  time.Duration
+	ServerWriteTimeout time.Duration
+	// RequestTimeout cancels each request's context (REQUEST_TIMEOUT).
+	// Keeping it shorter than ServerWriteTimeout lets the handler write a
+	// clean error, but this is not enforced.
+	RequestTimeout time.Duration
+	// UpstreamClientTimeout is the data-source HTTP client timeout
+	// (UPSTREAM_CLIENT_TIMEOUT).
+	UpstreamClientTimeout time.Duration
+
+	// loadErr records the first unparsable environment value seen by Load,
+	// which has no error return. Validate reports it.
+	loadErr error
 }
 
 // Load reads configuration from environment variables and returns a populated
 // Config. Missing variables fall back to sensible defaults; callers should
 // validate required fields (e.g. DBUser, DBPassword, DBName) before use.
 func Load() *Config {
+	var loadErr error
+	duration := func(key string, def time.Duration) time.Duration {
+		d, err := getDurationOrDefault(key, def)
+		if err != nil && loadErr == nil {
+			loadErr = err
+		}
+		return d
+	}
+	intVal := func(key string, def int32, allowZero bool) int32 {
+		n, err := getInt32OrDefault(key, def, allowZero)
+		if err != nil && loadErr == nil {
+			loadErr = err
+		}
+		return n
+	}
 	cfg := &Config{
 		DBHost:                                   getEnvOrDefault("DB_HOST", "localhost"),
 		DBPort:                                   getEnvOrDefault("DB_PORT", "5432"),
@@ -522,6 +580,10 @@ func Load() *Config {
 		DBName:                                   os.Getenv("DB_NAME"),
 		DBSSLMode:                                os.Getenv("DB_SSLMODE"),
 		DBSchema:                                 os.Getenv("DB_SCHEMA"),
+		DBPoolMaxConns:                           intVal("DB_POOL_MAX_CONNS", 20, false),
+		DBPoolMinConns:                           intVal("DB_POOL_MIN_CONNS", 2, true),
+		DBPoolMaxConnLifetime:                    duration("DB_POOL_MAX_CONN_LIFETIME", 30*time.Minute),
+		DBPoolMaxConnIdleTime:                    duration("DB_POOL_MAX_CONN_IDLE_TIME", 5*time.Minute),
 		ServerPort:                               getEnvOrDefault("SERVER_PORT", "8080"),
 		HealthPort:                               getEnvOrDefault("HEALTH_PORT", "8081"),
 		DataSource:                               DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
@@ -587,6 +649,11 @@ func Load() *Config {
 		EscalationEL4CCOGroupID:                       os.Getenv("ESCALATION_EL4_CCO_GROUP_ID"),
 		EscalationEL4CROGroupID:                       os.Getenv("ESCALATION_EL4_CRO_GROUP_ID"),
 		EscalationEL5CEOGroupID:                       os.Getenv("ESCALATION_EL5_CEO_GROUP_ID"),
+		ServerReadTimeout:                             duration("SERVER_READ_TIMEOUT", DefaultServerReadTimeout),
+		ServerWriteTimeout:                            duration("SERVER_WRITE_TIMEOUT", DefaultServerWriteTimeout),
+		RequestTimeout:                                duration("REQUEST_TIMEOUT", DefaultRequestTimeout),
+		UpstreamClientTimeout:                         duration("UPSTREAM_CLIENT_TIMEOUT", DefaultUpstreamClientTimeout),
+		loadErr:                                       loadErr,
 	}
 	cfg.M2MClientIDs = ParseInternalClientIDs(cfg.M2MClientIDsRaw)
 	if cfg.CustomerPortalBackendClientID != "" && cfg.M2MClientIDs[cfg.CustomerPortalBackendClientID] {
@@ -628,6 +695,48 @@ func ParseInternalClientIDs(raw string) map[string]bool {
 		out[id] = true
 	}
 	return out
+}
+
+// getDurationOrDefault parses key as a Go duration string (e.g. "60s"). An
+// unset or empty value yields defaultVal; an unparsable one is an error.
+func getDurationOrDefault(key string, defaultVal time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return defaultVal, fmt.Errorf("invalid %s %q: %w", key, v, err)
+	}
+	return d, nil
+}
+
+// getInt32OrDefault parses key as a base-10 integer. An unset/empty value
+// yields defaultVal; a non-numeric one is an error (and also falls back to
+// defaultVal) -- same fail-safe-to-default posture as an unparseable
+// duration (see getDurationOrDefault) rather than passing a bad value
+// through. allowZero distinguishes DB_POOL_MIN_CONNS (pgxpool genuinely
+// accepts 0 -- a deployment that doesn't want to retain any idle
+// connections at all) from DB_POOL_MAX_CONNS (0 or negative would
+// misconfigure pgxpool outright, since a pool that may open no connections
+// at all can never serve a single query).
+func getInt32OrDefault(key string, defaultVal int32, allowZero bool) (int32, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return defaultVal, fmt.Errorf("invalid %s %q: %w", key, v, err)
+	}
+	if n < 0 || (n == 0 && !allowZero) {
+		want := "a positive integer"
+		if allowZero {
+			want = "a non-negative integer"
+		}
+		return defaultVal, fmt.Errorf("invalid %s %q: must be %s", key, v, want)
+	}
+	return int32(n), nil
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
@@ -696,9 +805,26 @@ func (c *Config) HasDatabase() bool {
 // partially set in either mode, if
 // SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing when
 // DATA_SOURCE=servicenow, if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
-// EVENT_HUB_TOPIC are only partially set, or if the SALES_ENTITY_* vars are
-// only partially set.
+// EVENT_HUB_TOPIC are only partially set, if the SALES_ENTITY_* vars are
+// only partially set, or if SERVER_READ_TIMEOUT/SERVER_WRITE_TIMEOUT/
+// REQUEST_TIMEOUT/UPSTREAM_CLIENT_TIMEOUT are unparsable or not positive.
 func (c *Config) Validate() error {
+	if c.loadErr != nil {
+		return c.loadErr
+	}
+	for _, t := range []struct {
+		name string
+		val  time.Duration
+	}{
+		{"SERVER_READ_TIMEOUT", c.ServerReadTimeout},
+		{"SERVER_WRITE_TIMEOUT", c.ServerWriteTimeout},
+		{"REQUEST_TIMEOUT", c.RequestTimeout},
+		{"UPSTREAM_CLIENT_TIMEOUT", c.UpstreamClientTimeout},
+	} {
+		if t.val <= 0 {
+			return fmt.Errorf("%s must be greater than 0, got %s", t.name, t.val)
+		}
+	}
 	// The health server is a separate listener precisely so that only its
 	// own routes are reachable at public visibility (see HealthPort). Two
 	// listeners cannot share a port: the second ListenAndServe would fail

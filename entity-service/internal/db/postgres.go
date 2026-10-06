@@ -26,17 +26,19 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
 
-const (
-	poolMaxConns        int32         = 20               // maximum open connections in the pool
-	poolMinConns        int32         = 2                // connections kept warm when idle
-	poolMaxConnLifetime time.Duration = 30 * time.Minute // rotate connections to avoid stale server-side state
-	poolMaxConnIdleTime time.Duration = 5 * time.Minute  // release unused connections back to the OS
-)
-
 // NewPool creates a pgxpool connection pool for the given DSN, pings the
 // database to confirm connectivity, and returns the pool ready for use.
 // The caller is responsible for calling pool.Close on shutdown.
-func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+//
+// maxConns/minConns/maxConnLifetime/maxConnIdleTime were fixed constants
+// here (20/2/30m/5m) until they became env-configurable
+// (DB_POOL_MAX_CONNS/DB_POOL_MIN_CONNS/DB_POOL_MAX_CONN_LIFETIME/
+// DB_POOL_MAX_CONN_IDLE_TIME, see config.Config's own doc comments for
+// those fields) — config.Load() already applies those same four values as
+// its defaults when the corresponding env var is unset, so this function
+// itself carries no defaults of its own any more and always receives a
+// real, non-zero value from every caller.
+func NewPool(ctx context.Context, dsn string, maxConns, minConns int32, maxConnLifetime, maxConnIdleTime time.Duration) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse pool config: %w", err)
@@ -53,10 +55,10 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 	cfg.ConnConfig.RuntimeParams["jit"] = "off"
 
-	cfg.MaxConns = poolMaxConns
-	cfg.MinConns = poolMinConns
-	cfg.MaxConnLifetime = poolMaxConnLifetime
-	cfg.MaxConnIdleTime = poolMaxConnIdleTime
+	cfg.MaxConns = maxConns
+	cfg.MinConns = minConns
+	cfg.MaxConnLifetime = maxConnLifetime
+	cfg.MaxConnIdleTime = maxConnIdleTime
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -97,5 +99,5 @@ func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return NewPool(ctx, cfg.DSN())
+	return NewPool(ctx, cfg.DSN(), cfg.DBPoolMaxConns, cfg.DBPoolMinConns, cfg.DBPoolMaxConnLifetime, cfg.DBPoolMaxConnIdleTime)
 }

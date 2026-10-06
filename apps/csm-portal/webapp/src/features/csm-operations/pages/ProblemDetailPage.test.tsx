@@ -347,4 +347,12 @@ describe("ProblemDetailPage", () => {
     render(<ProblemDetailPage />);
     expect(screen.getByText(/line one\s+line two/)).toBeInTheDocument();
   });
+
+  it("shows the problem's assignment group", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, assignmentGroup: { id: "grp-1", name: "Choreo Special Ops" } } });
+    render(<ProblemDetailPage />);
+    expect(screen.getByText("Assignment group")).toBeInTheDocument();
+    expect(screen.getByText("Choreo Special Ops")).toBeInTheDocument();
+  });
 });
+

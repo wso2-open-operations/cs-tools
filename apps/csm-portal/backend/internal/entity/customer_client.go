@@ -68,7 +68,17 @@ type CustomerEntityConfig struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	// Timeout is the per-request timeout for calls to the entity service.
+	// Zero selects defaultCustomerEntityTimeout.
+	Timeout time.Duration
 }
+
+// defaultCustomerEntityTimeout is the entity-service call timeout used when
+// CustomerEntityConfig.Timeout is unset. Raised from 25s to 60s so large
+// inline-attachment uploads are not cut off; matches the customer-portal
+// backend. Keeping it shorter than the REST server write timeout is advisable
+// so a clean error can be returned, but is not enforced.
+const defaultCustomerEntityTimeout = 60 * time.Second
 
 // CustomerEntityClient is an HTTP client for the customer entity service (this
 // repo's entity-service, covering cases/accounts/projects/products/etc.),
@@ -97,7 +107,10 @@ func NewCustomerEntityClient(cfg CustomerEntityConfig) *CustomerEntityClient {
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
 		&http.Client{Timeout: tokenFetchTimeout})
 	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
+	httpClient.Timeout = cfg.Timeout
+	if httpClient.Timeout <= 0 {
+		httpClient.Timeout = defaultCustomerEntityTimeout
+	}
 
 	return &CustomerEntityClient{
 		http:    httpClient,

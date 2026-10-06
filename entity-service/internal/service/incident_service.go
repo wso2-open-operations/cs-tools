@@ -553,16 +553,25 @@ func (s *incidentService) createIncidentPortal(ctx context.Context, req domain.C
 	return resp, nil
 }
 
-// incidentPriorityFor is ServiceNow's stock priority lookup (dl_u_priority):
-// impact x urgency to priority, as an incident_priority_enum label. The
-// create form's preview (webapp utils/incidentPriorityMatrix.ts) shows the
-// same matrix.
+// incidentPriorityFor is ServiceNow's incident priority lookup (dl_u_priority)
+// -- see priorityFromImpactUrgency. The create form's preview (webapp
+// utils/incidentPriorityMatrix.ts) shows the same matrix.
+func incidentPriorityFor(impact domain.IncidentImpact, urgency domain.IncidentUrgency) string {
+	return priorityFromImpactUrgency(string(impact), string(urgency))
+}
+
+// priorityFromImpactUrgency is ServiceNow's impact x urgency -> priority
+// lookup. Incidents use dl_u_priority ("Priority Lookup"), problems
+// dl_problem_priority ("Priority Problem Lookup"); both run on insert and
+// update, overwrite whatever priority was set, and hold the same nine rows
+// (discovery scripts 64 and 65), so one table serves both. Labels are the
+// shared HIGH/MEDIUM/LOW and CRITICAL..PLANNING enum spellings.
 //
 //	impact \ urgency   HIGH       MEDIUM     LOW
 //	HIGH              CRITICAL   HIGH       MODERATE
 //	MEDIUM            HIGH       MODERATE   LOW
 //	LOW               MODERATE   LOW        PLANNING
-func incidentPriorityFor(impact domain.IncidentImpact, urgency domain.IncidentUrgency) string {
+func priorityFromImpactUrgency(impact, urgency string) string {
 	rank := func(v string) int {
 		switch v {
 		case "HIGH":
@@ -573,7 +582,7 @@ func incidentPriorityFor(impact domain.IncidentImpact, urgency domain.IncidentUr
 			return 2
 		}
 	}
-	return [...]string{"CRITICAL", "HIGH", "MODERATE", "LOW", "PLANNING"}[rank(string(impact))+rank(string(urgency))]
+	return [...]string{"CRITICAL", "HIGH", "MODERATE", "LOW", "PLANNING"}[rank(impact)+rank(urgency)]
 }
 
 // createIncidentSNFirst implements CreateIncident's

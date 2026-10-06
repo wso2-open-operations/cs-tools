@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
@@ -49,5 +50,5 @@ func newTestSNClient(t *testing.T, apiHandler http.Handler) *integrationservice.
 		TokenURL:     srv.URL + "/oauth2/token",
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
-	})
+	}, 45*time.Second)
 }

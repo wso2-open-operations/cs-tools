@@ -14,23 +14,39 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Link, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, CheckCircle, RotateCcw } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, Card, Chip, Link, MenuItem, Skeleton, TextField, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useGetIncidentTask } from "@features/csm-operations/api/useGetIncidentTask";
 import { usePatchIncidentTask } from "@features/csm-operations/api/usePatchIncidentTask";
-import CloseIncidentTaskDialog from "@features/csm-operations/components/CloseIncidentTaskDialog";
+import CloseIncidentTaskDialog, {
+  type ClosedTaskState,
+} from "@features/csm-operations/components/CloseIncidentTaskDialog";
 import {
+  CLOSED_INCIDENT_TASK_STATES,
   incidentRelatedTabPath,
-  isIncidentTaskOpen,
 } from "@features/csm-operations/utils/incidents";
-import type { BeEntityRef } from "@api/backend/types";
+import type { BeEntityRef, BeIncidentTaskState } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 
 const OPERATIONS_PATH = "/operations";
+
+/**
+ * Every incident task state, as ServiceNow's State dropdown offers them:
+ * any state can be picked from any other -- incident_task has no state
+ * model, buttons or rules of its own (discovery script 70).
+ */
+const TASK_STATES: { value: BeIncidentTaskState; label: string }[] = [
+  { value: "PENDING", label: "Pending" },
+  { value: "OPEN", label: "Open" },
+  { value: "WORK_IN_PROGRESS", label: "Work in Progress" },
+  { value: "CLOSED_COMPLETE", label: "Closed Complete" },
+  { value: "CLOSED_INCOMPLETE", label: "Closed Incomplete" },
+  { value: "CLOSED_SKIPPED", label: "Closed Skipped" },
+];
 
 function formatDateTime(value?: string | null): string {
   return (
@@ -76,7 +92,10 @@ export default function IncidentTaskDetailPage(): JSX.Element {
   const navigate = useNavTransition();
   const { data, isLoading, isError } = useGetIncidentTask(id);
   const patchTask = usePatchIncidentTask();
-  const [closeOpen, setCloseOpen] = useState(false);
+  // Set while the close dialog is open: the closed state picked from the
+  // State dropdown, pre-selected in the dialog so close notes can go with it.
+  const [closeAs, setCloseAs] = useState<ClosedTaskState | null>(null);
+  const closeOpen = closeAs !== null;
   // Prefer the page the row link captured; else the parent incident's
   // Related tab once the task is loaded; else Operations.
   const backState = useLocation().state as { from?: string } | undefined;
@@ -131,7 +150,18 @@ export default function IncidentTaskDetailPage(): JSX.Element {
   }
 
   const task = data;
-  const taskOpen = isIncidentTaskOpen(task.state);
+
+  // ServiceNow's State dropdown: an open state saves at once; a closed one
+  // goes through the close dialog for its optional close notes.
+  const onStateChange = (next: BeIncidentTaskState): void => {
+    if (next === task.state) return;
+    patchTask.reset();
+    if (CLOSED_INCIDENT_TASK_STATES.includes(next)) {
+      setCloseAs(next as ClosedTaskState);
+      return;
+    }
+    patchTask.mutate({ id: task.id as string, patch: { state: next } });
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -161,30 +191,21 @@ export default function IncidentTaskDetailPage(): JSX.Element {
           <Typography variant="h5">{task.subject || "Incident task"}</Typography>
         </Box>
         <Box className="csm-print-hide" sx={{ flexShrink: 0 }}>
-          {taskOpen ? (
-            <Button
-              size="small"
-              variant="contained"
-              color="success"
-              startIcon={<CheckCircle size={16} />}
-              onClick={() => {
-                patchTask.reset();
-                setCloseOpen(true);
-              }}
-            >
-              Close task
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<RotateCcw size={16} />}
-              disabled={patchTask.isPending}
-              onClick={() => patchTask.mutate({ id: task.id as string, patch: { state: "OPEN" } })}
-            >
-              Reopen
-            </Button>
-          )}
+          <TextField
+            select
+            size="small"
+            label="State"
+            value={task.state ?? ""}
+            onChange={(e) => onStateChange(e.target.value as BeIncidentTaskState)}
+            disabled={patchTask.isPending}
+            sx={{ minWidth: 200 }}
+          >
+            {TASK_STATES.map((s) => (
+              <MenuItem key={s.value} value={s.value}>
+                {s.label}
+              </MenuItem>
+            ))}
+          </TextField>
         </Box>
       </Box>
       {!closeOpen && patchTask.isError && (
@@ -258,11 +279,12 @@ export default function IncidentTaskDetailPage(): JSX.Element {
           taskNumber={task.number || "task"}
           isSubmitting={patchTask.isPending}
           error={patchTask.isError ? patchTask.error.message : null}
-          onClose={() => setCloseOpen(false)}
+          initialState={closeAs ?? undefined}
+          onClose={() => setCloseAs(null)}
           onConfirm={({ state, closeNotes }) =>
             patchTask.mutate(
               { id: task.id as string, patch: closeNotes ? { state, closeNotes } : { state } },
-              { onSuccess: () => setCloseOpen(false) },
+              { onSuccess: () => setCloseAs(null) },
             )
           }
         />

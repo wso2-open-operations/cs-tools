@@ -580,8 +580,10 @@ func contactFromPersonRef(p *personRefDTO) recipients.Contact {
 	return recipients.Contact{Name: p.Name, Email: recipients.AccountManagerEmail(&ref)}
 }
 
-// fetchContacts reads every page of the project's contacts and the
-// account's contacts. Both searches return one page at a time (20 rows
+// fetchContacts reads every page of the project's contacts and, unless the
+// project already has business contacts (account contacts only feed the
+// Primary Contact fallback), every page of the account's contacts. Both
+// searches return one page at a time (20 rows
 // unless a limit is sent, 50 at most, confirmed against staging) and report
 // total but no hasMore, so each is paged until a page comes back empty or
 // offset reaches total. Without this, a contact past the first page would
@@ -606,7 +608,9 @@ func fetchContacts(ctx context.Context, reader entityReader, proj project) ([]re
 		return nil, nil, err
 	}
 
-	if proj.accountID() == "" {
+	// Account contacts only feed the Primary Contact fallback, so skip them
+	// when the project already has business contacts (CodeRabbit, PR #2134).
+	if proj.accountID() == "" || recipients.HasBusinessContacts(projectContacts) {
 		return projectContacts, nil, nil
 	}
 
