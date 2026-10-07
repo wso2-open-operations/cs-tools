@@ -14,7 +14,11 @@ paths:
   /health:
     get:
       summary: Health check.
-      description: Returns 200 OK if the service is running. No auth required.
+      description: >
+        Returns 200 OK if the service is running. When the event consumer
+        is configured, returns 503 while it is not running (not yet
+        started, restarting after an unexpected exit, or stopped), since
+        the replica cannot deliver live updates then. No auth required.
       operationId: getHealth
       responses:
         "200":
@@ -27,3 +31,13 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+        "503":
+          description: ServiceUnavailable (event consumer not running)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [unavailable]

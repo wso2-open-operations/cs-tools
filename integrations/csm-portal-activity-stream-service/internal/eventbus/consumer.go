@@ -20,8 +20,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	kafka "github.com/segmentio/kafka-go"
 )
@@ -36,12 +38,23 @@ type Record struct {
 	Offset    int64
 	Key       []byte
 	Value     []byte
+	// Time is the record's timestamp on the topic (zero if the broker
+	// supplied none).
+	Time time.Time
 }
 
 // Handle processes a single record. Unlike csm-notification-service's own
 // eventbus.Handle, a non-nil return here does not trigger a retry — see
 // Consumer.Run's doc comment for why.
 type Handle func(context.Context, Record) error
+
+// messageReader is the subset of *kafka.Reader that Consumer uses — an
+// interface so tests can drive Run's exit and commit paths without a broker.
+type messageReader interface {
+	FetchMessage(ctx context.Context) (kafka.Message, error)
+	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
+}
 
 // Consumer reads records from a topic as a member of a named consumer
 // group, so multiple running instances of a caller split the topic's
@@ -52,7 +65,7 @@ type Handle func(context.Context, Record) error
 // this package's first caller) without touching the producer or anything
 // already consuming the topic.
 type Consumer struct {
-	reader *kafka.Reader
+	reader messageReader
 }
 
 // StartOffset controls where a brand new (never-before-committed) consumer
@@ -87,11 +100,19 @@ func (s StartOffset) kafkaOffset() int64 {
 	return kafka.FirstOffset
 }
 
+// commitInterval batches offset commits: Run still marks each record
+// committed only after handling it, but the reader flushes those marks to
+// the broker on this interval (and on Close) instead of one synchronous
+// round-trip per record, which would otherwise delay the fan-out of the
+// next record. A crash can therefore redeliver up to one interval's worth of
+// records — harmless for this live-only, idempotent cache-invalidation ping.
+const commitInterval = time.Second
+
 // NewConsumer constructs a Consumer that joins groupID and consumes
-// cfg.Topic. Auto-commit is not used: offsets are committed explicitly by
-// Run, only after a record has been handled — never before — so a crash
-// mid-processing redelivers the record on restart instead of silently
-// skipping it.
+// cfg.Topic. Offsets are marked for commit by Run only after a record has
+// been handled — never before — and flushed in batches (see commitInterval),
+// so a crash mid-processing redelivers the record on restart instead of
+// silently skipping it.
 func NewConsumer(cfg Config, groupID string, startOffset StartOffset) *Consumer {
 	return &Consumer{
 		reader: kafka.NewReader(kafka.ReaderConfig{
@@ -104,16 +125,26 @@ func NewConsumer(cfg Config, groupID string, startOffset StartOffset) *Consumer 
 			},
 			// Only applies to a partition with no committed offset yet (this
 			// consumer group's first run) — see StartOffset.
-			StartOffset: startOffset.kafkaOffset(),
-			Logger:      kafka.LoggerFunc(logDebug),
-			ErrorLogger: kafka.LoggerFunc(logError),
+			StartOffset:    startOffset.kafkaOffset(),
+			CommitInterval: commitInterval,
+			Logger:         kafka.LoggerFunc(logDebug),
+			ErrorLogger:    kafka.LoggerFunc(logError),
 		}),
 	}
 }
 
+// ErrReaderClosed is wrapped by the error Run returns when the underlying
+// reader reports io.EOF while ctx is still live — the reader is closed and
+// will never yield another record, so the consumer must be replaced (see
+// Supervisor).
+var ErrReaderClosed = errors.New("eventbus: reader closed")
+
 // Run polls for records and calls handle for each one, committing its
 // offset once handle returns — regardless of outcome. Run blocks until ctx
-// is canceled or the Consumer is closed; call it from its own goroutine.
+// is canceled (then it returns nil) or the reader stops for good (then it
+// returns a non-nil error wrapping ErrReaderClosed, already logged at Error);
+// call it from its own goroutine, normally via Supervisor, which restarts a
+// consumer that exits unexpectedly. Run does not close the reader.
 //
 // Deliberately simpler than csm-notification-service's own Consumer: no
 // retry-then-dead-letter policy, since handle's only implementation so far
@@ -121,7 +152,7 @@ func NewConsumer(cfg Config, groupID string, startOffset StartOffset) *Consumer 
 // way a retry would fix. A handle error is logged here and the record is
 // committed anyway — revisit this (retries, a dead-letter topic) once a
 // handle exists whose failure modes are actually worth retrying.
-func (c *Consumer) Run(ctx context.Context, handle Handle) {
+func (c *Consumer) Run(ctx context.Context, handle Handle) error {
 	// lastFetchErr de-duplicates consecutive identical fetch errors: kafka-go's
 	// Reader already retries internally with its own bounded backoff before
 	// FetchMessage returns an error here, but a sustained outage would still
@@ -132,8 +163,13 @@ func (c *Consumer) Run(ctx context.Context, handle Handle) {
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, io.EOF) {
-				return
+			if ctx.Err() != nil {
+				return nil
+			}
+			if errors.Is(err, io.EOF) {
+				exitErr := fmt.Errorf("%w: %w", ErrReaderClosed, err)
+				slog.ErrorContext(ctx, "eventbus: consumer stopped unexpectedly", "err", exitErr)
+				return exitErr
 			}
 			if errMsg := err.Error(); errMsg != lastFetchErr {
 				slog.ErrorContext(ctx, "eventbus: fetch error", "err", err)
@@ -149,6 +185,7 @@ func (c *Consumer) Run(ctx context.Context, handle Handle) {
 			Offset:    msg.Offset,
 			Key:       msg.Key,
 			Value:     msg.Value,
+			Time:      msg.Time,
 		}
 		if err := handle(ctx, record); err != nil {
 			slog.ErrorContext(ctx, "eventbus: handler failed", "topic", record.Topic, "partition", record.Partition, "offset", record.Offset, "err", err)

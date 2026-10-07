@@ -1,0 +1,17 @@
+# Keeps the local-dev image build context (docker/local/csm-portal-activity-stream-service.Dockerfile)
+# to what `go build` needs; everything else stays on the host.
+.git
+.env
+.env.*
+*_test.go
+**/testdata/
+.choreo/
+docs/
+*.md
+*.yaml
+Makefile
+bin/
+server
+*.out
+*.test
+coverage*

@@ -53,6 +53,11 @@ type UserInfo struct {
 	Email  string
 	UserID string
 	Groups []string
+	// ExpiresAt is the token's exp claim. Zero when the token carries none
+	// (only possible with TokenValidatorEnabled=false, since validation
+	// requires exp). Long-lived handlers use it to bound their own lifetime
+	// to the credential that opened them — see handler.StreamCaseActivities.
+	ExpiresAt time.Time
 }
 
 // Config holds JWT validation configuration.
@@ -64,8 +69,8 @@ type Config struct {
 	TokenValidatorEnabled bool
 }
 
-// jwtClaims defines the expected JWT payload fields, mirroring the Ballerina
-// CustomJwtPayload in the authorization module.
+// jwtClaims defines the expected JWT payload fields — the custom claims the
+// upstream gateway's JWT carries alongside the registered ones.
 type jwtClaims struct {
 	Email  string   `json:"email"`
 	UserID string   `json:"userid"`
@@ -91,8 +96,6 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			addSecurityHeaders(w)
-
 			// Skip auth for the health check endpoint.
 			if r.Method == http.MethodGet && r.URL.Path == "/health" {
 				next.ServeHTTP(w, r)
@@ -126,7 +129,7 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 // x5cStrippingTransport removes the "x5c" certificate chain from every key in
 // a JWKS response before it reaches the jwkset parser. Verification only
 // needs "n"/"e" (or the EC/OKP equivalents); jwkset unconditionally parses
-// "x5c" as X.509 certificates, and some IdPs (e.g. Asgardeo) publish certs
+// "x5c" as X.509 certificates, and some identity providers publish certs
 // with a negative serial number that Go's x509 parser rejects since Go 1.23,
 // which would otherwise make the whole JWK Set fail to load.
 type x5cStrippingTransport struct {
@@ -244,11 +247,15 @@ func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInf
 		return nil, fmt.Errorf("token missing userid claim")
 	}
 
-	return &UserInfo{
+	info := &UserInfo{
 		Email:  c.Email,
 		UserID: c.UserID,
 		Groups: c.Groups,
-	}, nil
+	}
+	if c.ExpiresAt != nil {
+		info.ExpiresAt = c.ExpiresAt.Time
+	}
+	return info, nil
 }
 
 func hasAnyAudience(tokenAuds jwt.ClaimStrings, expected []string) bool {
@@ -260,11 +267,4 @@ func hasAnyAudience(tokenAuds jwt.ClaimStrings, expected []string) bool {
 		}
 	}
 	return false
-}
-
-// addSecurityHeaders mirrors the Ballerina ResponseInterceptor security headers.
-func addSecurityHeaders(w http.ResponseWriter) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "upgrade-insecure-requests")
-	w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 }
