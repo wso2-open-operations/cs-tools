@@ -17,15 +17,37 @@
 #
 # Renders public/config.js from environment variables at container start.
 # All values here are local-dev placeholders, never real secrets.
+#
+# Every environment value is escaped before it is placed inside a JavaScript
+# string literal, and the static part of the file is a quoted heredoc, so a
+# value containing a double quote, a backslash or a newline cannot break the
+# rendered file (which would leave the SPA with no window.config at all).
 set -eu
 
-cat > /usr/share/nginx/html/config.js <<EOF
-window.config = {
-  CUSTOMER_PORTAL_AUTH_BASE_URL: "${CUSTOMER_PORTAL_AUTH_BASE_URL}",
-  CUSTOMER_PORTAL_AUTH_CLIENT_ID: "${CUSTOMER_PORTAL_AUTH_CLIENT_ID}",
-  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "${CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL}",
-  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "${CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL}",
-  CUSTOMER_PORTAL_BACKEND_BASE_URL: "${CUSTOMER_PORTAL_BACKEND_BASE_URL}",
+# Fail fast with a named variable rather than serving a page that boots
+# without the setting.
+: "${CUSTOMER_PORTAL_AUTH_BASE_URL:?must be set}"
+: "${CUSTOMER_PORTAL_AUTH_CLIENT_ID:?must be set}"
+: "${CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL:?must be set}"
+: "${CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL:?must be set}"
+: "${CUSTOMER_PORTAL_BACKEND_BASE_URL:?must be set}"
+
+# json_escape prints $1 escaped for use inside a double-quoted JS/JSON string:
+# backslash and double quote are backslash-escaped, newlines become \n.
+json_escape() {
+  printf '%s' "$1" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+    | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g'
+}
+
+{
+  printf 'window.config = {\n'
+  printf '  CUSTOMER_PORTAL_AUTH_BASE_URL: "%s",\n' "$(json_escape "$CUSTOMER_PORTAL_AUTH_BASE_URL")"
+  printf '  CUSTOMER_PORTAL_AUTH_CLIENT_ID: "%s",\n' "$(json_escape "$CUSTOMER_PORTAL_AUTH_CLIENT_ID")"
+  printf '  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "%s",\n' "$(json_escape "$CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL")"
+  printf '  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "%s",\n' "$(json_escape "$CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL")"
+  printf '  CUSTOMER_PORTAL_BACKEND_BASE_URL: "%s",\n' "$(json_escape "$CUSTOMER_PORTAL_BACKEND_BASE_URL")"
+  cat <<'EOF'
   CUSTOMER_PORTAL_THEME: "acrylicOrange",
   CUSTOMER_PORTAL_LOG_LEVEL: "DEBUG",
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: false,
@@ -37,5 +59,6 @@ window.config = {
   CUSTOMER_PORTAL_MOBILE_APP_PROMPT_ENABLED: false,
 };
 EOF
+} > "${CONFIG_JS_PATH:-/usr/share/nginx/html/config.js}"
 
-echo "[customer-portal webapp] rendered /usr/share/nginx/html/config.js"
+echo "[customer-portal webapp] rendered ${CONFIG_JS_PATH:-/usr/share/nginx/html/config.js}"

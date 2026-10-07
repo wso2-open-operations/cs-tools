@@ -68,14 +68,28 @@ ensure_migrations_table() {
 apply_pending_migrations() {
   db="$1"; dir="$2"
   ensure_migrations_table "$db"
-  # Ordering: the 4-digit NNNN_*.sql files (the convention, see above) in
-  # numeric order, THEN any legacy 6-digit 000NNN_*.up.sql stragglers. Those
-  # predate the renumbering but depend on tables the 4-digit files create (e.g.
-  # 000087 triggers on `outage`, from 0083), yet `sort -V` would run them
-  # first: leading zeros make 000086 sort below 0001. *.down.sql files are
-  # rollbacks and must never be applied on the way up.
-  files="$( { ls "${dir}"/[0-9][0-9][0-9][0-9]_*.sql 2>/dev/null | sort -t_ -k1 -V;
-              ls "${dir}"/[0-9][0-9][0-9][0-9][0-9][0-9]_*.up.sql 2>/dev/null | sort -t_ -k1 -V; } )"
+  # Ordering -- must match entity-service/scripts/migration_order.sh, the
+  # canonical order `make migrate` and the schema bootstrap use; it is
+  # duplicated here, not called, because this container only mounts
+  # entity-service/migrations. Change both together.
+  #
+  # The legacy 6-digit 000NNN_*.up.sql stragglers depend on objects the
+  # 4-digit files create (000085 needs announcement_type_enum from 0088;
+  # 000087 triggers on outage from 0083), so they cannot run first -- and
+  # leading zeros would sort them first. They cannot run last either: 0149
+  # replaces 000085's announcement_visibility policy, so 000085 run after it
+  # fails with "policy already exists". So: 4-digit files below
+  # STRAGGLERS_BEFORE, then the 6-digit *.up.sql files, then the remaining
+  # 4-digit files, each group in version order. *.down.sql files are
+  # rollbacks and are never applied on the way up.
+  STRAGGLERS_BEFORE=149
+  four_digit="$(ls "${dir}"/[0-9][0-9][0-9][0-9]_*.sql 2>/dev/null | LC_ALL=C sort -V)"
+  files="$(
+    for f in $four_digit; do n="$(basename "$f")"; n="${n%%_*}"; [ "$n" -lt "$STRAGGLERS_BEFORE" ] && echo "$f"; done
+    ls "${dir}"/[0-9][0-9][0-9][0-9][0-9][0-9]_*.up.sql 2>/dev/null | LC_ALL=C sort -V
+    for f in $four_digit; do n="$(basename "$f")"; n="${n%%_*}"; [ "$n" -ge "$STRAGGLERS_BEFORE" ] && echo "$f"; done
+    true
+  )"
   for f in $files; do
     version="$(basename "$f" .sql)"
     already="$($PSQL -d "$db" -tAc "SELECT 1 FROM schema_migrations WHERE version = '${version}'")"

@@ -20,16 +20,22 @@
 # Postgres database and is never built or deployed anywhere other than this
 # docker-compose stack.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to the patch level the go.mod directive asks for, with toolchain
+# downloads disabled, so the build is hermetic.
+FROM golang:1.26.6-alpine AS builder
+
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o /out/seed-generator .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags="-s -w" -o /out/seed-generator .
 
 FROM alpine:3.20
 
@@ -43,9 +49,9 @@ RUN adduser \
     --home "/nonexistent" \
     --shell "/sbin/nologin" \
     --no-create-home \
-    --uid 10110 \
+    --uid 10112 \
     "csmdev"
 
-USER 10110
+USER 10112
 
 ENTRYPOINT ["./seed-generator"]

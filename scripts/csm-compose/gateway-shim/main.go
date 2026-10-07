@@ -29,12 +29,9 @@
 //
 // In production, Choreo validates the Authorization bearer and then
 // SYNTHESIZES its own x-jwt-assertion from claims Choreo's directory holds,
-// rather than forwarding the access token verbatim -- see
-// scripts/csm-debug/gateway-shim.py in the planning repo for that fuller
-// version, built for a topology where the access token and the claims the
-// BFF needs come from two different places. This compose stack's mock OIDC
-// provider (scripts/csm-compose/mock-oidc) is simpler than that: it signs
-// the access_token and id_token from the identical claims map (email,
+// rather than forwarding the access token verbatim. This compose stack's
+// mock OIDC provider (scripts/csm-compose/mock-oidc) makes that unnecessary:
+// it signs the access_token and id_token from the identical claims map (email,
 // userid, groups, roles), and the access token's `aud` is already the
 // OAuth client_id used at login, which is exactly the AUTH_AUDIENCE each
 // BFF is configured with in docker-compose.yml. That was verified
@@ -116,14 +113,13 @@ func main() {
 
 // addJWTAssertion is this shim's one job: turn the browser's
 // `Authorization: Bearer <token>` into the `x-jwt-assertion` header the BFF
-// requires, mirroring what Choreo's gateway does in production. If the
-// caller already set x-jwt-assertion itself (e.g. a curl example from
-// apps/csm-portal/README.md that sets it by hand), that is left untouched
-// -- this only fills it in when missing.
+// requires, mirroring what Choreo's gateway does in production. Like the
+// real gateway it REPLACES any x-jwt-assertion the caller sent rather than
+// passing it through: the only token that reaches the BFF is the bearer
+// the shim saw. To call the BFF through the shim by hand, send
+// `Authorization: Bearer <token>`.
 func addJWTAssertion(r *http.Request) {
-	if r.Header.Get(jwtAssertionHeader) != "" {
-		return
-	}
+	r.Header.Del(jwtAssertionHeader)
 	auth := r.Header.Get("Authorization")
 	token, ok := strings.CutPrefix(auth, "Bearer ")
 	if !ok || token == "" {
