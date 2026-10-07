@@ -24,8 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -83,11 +83,11 @@ type KBArticleRepository interface {
 }
 
 type kbArticleRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewKBArticleRepository constructs a KBArticleRepository backed by the given connection pool.
-func NewKBArticleRepository(db *pgxpool.Pool) KBArticleRepository {
+func NewKBArticleRepository(db db.Pool) KBArticleRepository {
 	return &kbArticleRepo{db: db}
 }
 

@@ -22,8 +22,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -39,11 +39,11 @@ type SalesforceReadRepository interface {
 }
 
 type sfReadRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceReadRepository constructs a SalesforceReadRepository backed by the given pool.
-func NewSalesforceReadRepository(db *pgxpool.Pool) SalesforceReadRepository {
+func NewSalesforceReadRepository(db db.Pool) SalesforceReadRepository {
 	return &sfReadRepo{db: db}
 }
 
@@ -125,7 +125,7 @@ func scanLink(row pgx.Row) (domain.ProjectOpportunityLink, error) {
 }
 
 // searchSF runs the count and the page query concurrently, like the other search repos.
-func searchSF[T any](ctx context.Context, db *pgxpool.Pool, selectSQL, fromSQL, alias string, filters []sfFilter, p domain.Pagination, scan func(pgx.Row) (T, error)) ([]T, int, error) {
+func searchSF[T any](ctx context.Context, db db.Pool, selectSQL, fromSQL, alias string, filters []sfFilter, p domain.Pagination, scan func(pgx.Row) (T, error)) ([]T, int, error) {
 	where, args := buildSFWhere(filters...)
 	countQuery := "SELECT COUNT(*) " + fromSQL + where
 	dataQuery := fmt.Sprintf("%s%s ORDER BY %s.created_on DESC, %s.id LIMIT $%d OFFSET $%d",
@@ -159,7 +159,7 @@ func searchSF[T any](ctx context.Context, db *pgxpool.Pool, selectSQL, fromSQL, 
 	return out, total, nil
 }
 
-func getSF[T any](ctx context.Context, db *pgxpool.Pool, selectSQL, idColumn, id, what string, scan func(pgx.Row) (T, error)) (T, error) {
+func getSF[T any](ctx context.Context, db db.Pool, selectSQL, idColumn, id, what string, scan func(pgx.Row) (T, error)) (T, error) {
 	v, err := scan(db.QueryRow(ctx, selectSQL+" WHERE "+idColumn+" = $1", id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		var zero T

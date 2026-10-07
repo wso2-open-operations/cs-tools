@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -97,12 +97,12 @@ type AnnouncementRequestRepository interface {
 }
 
 type announcementRequestRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAnnouncementRequestRepository constructs an AnnouncementRequestRepository
 // backed by the given connection pool.
-func NewAnnouncementRequestRepository(db *pgxpool.Pool) AnnouncementRequestRepository {
+func NewAnnouncementRequestRepository(db db.Pool) AnnouncementRequestRepository {
 	return &announcementRequestRepo{db: db}
 }
 

@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -105,12 +105,12 @@ type ScheduledTaskRunRepository interface {
 }
 
 type scheduledTaskRunRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewScheduledTaskRunRepository constructs a ScheduledTaskRunRepository
 // backed by the given connection pool.
-func NewScheduledTaskRunRepository(db *pgxpool.Pool) ScheduledTaskRunRepository {
+func NewScheduledTaskRunRepository(db db.Pool) ScheduledTaskRunRepository {
 	return &scheduledTaskRunRepo{db: db}
 }
 

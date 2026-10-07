@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // AccountPartnerRepository answers which accounts are partners of an account,
@@ -33,11 +33,11 @@ type AccountPartnerRepository interface {
 }
 
 type accountPartnerRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAccountPartnerRepository constructs an AccountPartnerRepository.
-func NewAccountPartnerRepository(db *pgxpool.Pool) AccountPartnerRepository {
+func NewAccountPartnerRepository(db db.Pool) AccountPartnerRepository {
 	return &accountPartnerRepo{db: db}
 }
 

@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // ProjectTypeRow is one row of the project_type table (migration
@@ -142,11 +142,11 @@ type TimeZoneRow struct {
 }
 
 type referenceDataRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewReferenceDataRepository constructs a ReferenceDataRepository backed by the given connection pool.
-func NewReferenceDataRepository(db *pgxpool.Pool) ReferenceDataRepository {
+func NewReferenceDataRepository(db db.Pool) ReferenceDataRepository {
 	return &referenceDataRepo{db: db}
 }
 

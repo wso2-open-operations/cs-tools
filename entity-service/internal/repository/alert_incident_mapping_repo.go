@@ -24,8 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -43,12 +43,12 @@ type AlertIncidentMappingRepository interface {
 }
 
 type alertIncidentMappingRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAlertIncidentMappingRepository constructs an AlertIncidentMappingRepository
 // backed by the given connection pool.
-func NewAlertIncidentMappingRepository(db *pgxpool.Pool) AlertIncidentMappingRepository {
+func NewAlertIncidentMappingRepository(db db.Pool) AlertIncidentMappingRepository {
 	return &alertIncidentMappingRepo{db: db}
 }
 

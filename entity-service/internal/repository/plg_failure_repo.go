@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // FailureRepository records events consumed from the queue that could not be
@@ -28,10 +28,10 @@ type IngestFailure struct {
 	Failure    string
 }
 
-type failureRepository struct{ db *pgxpool.Pool }
+type failureRepository struct{ db db.Pool }
 
 // NewFailureRepository builds a FailureRepository over the given pool.
-func NewFailureRepository(db *pgxpool.Pool) FailureRepository {
+func NewFailureRepository(db db.Pool) FailureRepository {
 	return &failureRepository{db: db}
 }
 

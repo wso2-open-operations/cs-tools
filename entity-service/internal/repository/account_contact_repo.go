@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -56,11 +56,11 @@ type AccountContactRepository interface {
 }
 
 type accountContactRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAccountContactRepository constructs an AccountContactRepository backed by the given connection pool.
-func NewAccountContactRepository(db *pgxpool.Pool) AccountContactRepository {
+func NewAccountContactRepository(db db.Pool) AccountContactRepository {
 	return &accountContactRepo{db: db}
 }
 

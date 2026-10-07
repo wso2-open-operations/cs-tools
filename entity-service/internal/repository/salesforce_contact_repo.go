@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -56,11 +56,11 @@ type SalesforceContactRepository interface {
 }
 
 type salesforceContactRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceContactRepository constructs a SalesforceContactRepository backed by the pool.
-func NewSalesforceContactRepository(db *pgxpool.Pool) SalesforceContactRepository {
+func NewSalesforceContactRepository(db db.Pool) SalesforceContactRepository {
 	return &salesforceContactRepo{db: db}
 }
 

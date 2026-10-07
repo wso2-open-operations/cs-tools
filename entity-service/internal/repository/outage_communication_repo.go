@@ -23,7 +23,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -39,11 +39,11 @@ type OutageCommunicationRepository interface {
 }
 
 type outageCommunicationRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewOutageCommunicationRepository wires the repository to a pool.
-func NewOutageCommunicationRepository(db *pgxpool.Pool) OutageCommunicationRepository {
+func NewOutageCommunicationRepository(db db.Pool) OutageCommunicationRepository {
 	return &outageCommunicationRepo{db: db}
 }
 

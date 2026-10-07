@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -93,7 +93,7 @@ type ScheduleRepository interface {
 	ApplyAbsence(ctx context.Context, req domain.ApplyScheduleAbsenceRequest, actorEmail string) (domain.ApplyScheduleAbsenceResponse, error)
 }
 
-type scheduleRepository struct{ db *pgxpool.Pool }
+type scheduleRepository struct{ db db.Pool }
 
 // nameTheActor tells the database who is making this change, for the audit
 // triggers (migration 0155) to record.
@@ -113,7 +113,7 @@ func nameTheActor(ctx context.Context, tx pgx.Tx, actorEmail string) error {
 }
 
 // NewScheduleRepository constructs a ScheduleRepository over the given pool.
-func NewScheduleRepository(db *pgxpool.Pool) ScheduleRepository {
+func NewScheduleRepository(db db.Pool) ScheduleRepository {
 	return &scheduleRepository{db: db}
 }
 

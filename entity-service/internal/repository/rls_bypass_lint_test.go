@@ -285,7 +285,11 @@ func importsPgxpool(file *ast.File) bool {
 		if err != nil {
 			continue
 		}
-		if path == "github.com/jackc/pgx/v5/pgxpool" {
+		// A repository now holds the db.Pool interface rather than a concrete
+		// *pgxpool.Pool, so importing internal/db is the same raw-pool reach
+		// that importing pgxpool was.
+		if path == "github.com/jackc/pgx/v5/pgxpool" ||
+			path == "github.com/wso2-open-operations/cs-tools/entity-service/internal/db" {
 			return true
 		}
 	}

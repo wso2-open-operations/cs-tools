@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -36,12 +36,12 @@ type SNWritebackFailureRepository interface {
 }
 
 type snWritebackFailureRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSNWritebackFailureRepository constructs an SNWritebackFailureRepository
 // backed by the given connection pool.
-func NewSNWritebackFailureRepository(db *pgxpool.Pool) SNWritebackFailureRepository {
+func NewSNWritebackFailureRepository(db db.Pool) SNWritebackFailureRepository {
 	return &snWritebackFailureRepo{db: db}
 }
 

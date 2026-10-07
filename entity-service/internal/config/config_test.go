@@ -994,3 +994,142 @@ func TestConfig_Validate_Timeouts(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_ReadPoolDefaultsToOffAndWriteValues(t *testing.T) {
+	for _, k := range []string{"DB_READ_POOL_ENABLED", "DB_READ_HOST", "DB_READ_PORT", "DB_READ_USER", "DB_READ_PASSWORD", "DB_READ_NAME", "DB_READ_SSLMODE",
+		"DB_READ_POOL_MAX_CONNS", "DB_READ_POOL_MIN_CONNS", "DB_READ_POOL_MAX_CONN_LIFETIME", "DB_READ_POOL_MAX_CONN_IDLE_TIME"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("DB_HOST", "primary.invalid")
+	t.Setenv("DB_PORT", "6543")
+	t.Setenv("DB_USER", "u")
+	t.Setenv("DB_PASSWORD", "p")
+	t.Setenv("DB_NAME", "n")
+	t.Setenv("DB_SSLMODE", "require")
+	c := Load()
+	if c.DBReadPoolEnabled {
+		t.Error("read pool enabled by default")
+	}
+	if c.DBReadHost != "primary.invalid" || c.DBReadPort != "6543" || c.DBReadUser != "u" ||
+		c.DBReadPassword != "p" || c.DBReadName != "n" || c.DBReadSSLMode != "require" {
+		t.Errorf("read connection fields did not default to the write values: %+v", c)
+	}
+	if c.DBReadPoolMaxConns != 10 || c.DBReadPoolMinConns != 2 ||
+		c.DBReadPoolMaxConnLifetime != 30*time.Minute || c.DBReadPoolMaxConnIdleTime != 5*time.Minute {
+		t.Errorf("read pool sizing defaults = %d/%d/%s/%s", c.DBReadPoolMaxConns, c.DBReadPoolMinConns,
+			c.DBReadPoolMaxConnLifetime, c.DBReadPoolMaxConnIdleTime)
+	}
+	if c.ReadDSN() != c.DSN() {
+		t.Error("ReadDSN with no overrides differs from DSN")
+	}
+}
+
+func TestLoad_ReadPoolOverrides(t *testing.T) {
+	t.Setenv("DB_HOST", "primary.invalid")
+	t.Setenv("DB_USER", "u")
+	t.Setenv("DB_PASSWORD", "p")
+	t.Setenv("DB_NAME", "n")
+	t.Setenv("DB_READ_POOL_ENABLED", "true")
+	t.Setenv("DB_READ_HOST", "replica.invalid")
+	t.Setenv("DB_READ_PORT", "7000")
+	t.Setenv("DB_READ_USER", "ru")
+	t.Setenv("DB_READ_PASSWORD", "rp")
+	t.Setenv("DB_READ_NAME", "rn")
+	t.Setenv("DB_READ_SSLMODE", "disable")
+	t.Setenv("DB_READ_POOL_MAX_CONNS", "33")
+	t.Setenv("DB_READ_POOL_MIN_CONNS", "0")
+	t.Setenv("DB_READ_POOL_MAX_CONN_LIFETIME", "7m")
+	t.Setenv("DB_READ_POOL_MAX_CONN_IDLE_TIME", "1m")
+	c := Load()
+	if !c.DBReadPoolEnabled || c.DBReadHost != "replica.invalid" || c.DBReadPort != "7000" ||
+		c.DBReadUser != "ru" || c.DBReadPassword != "rp" || c.DBReadName != "rn" || c.DBReadSSLMode != "disable" {
+		t.Errorf("overrides not applied: %+v", c)
+	}
+	if c.DBReadPoolMaxConns != 33 || c.DBReadPoolMinConns != 0 ||
+		c.DBReadPoolMaxConnLifetime != 7*time.Minute || c.DBReadPoolMaxConnIdleTime != time.Minute {
+		t.Errorf("sizing overrides = %d/%d/%s/%s", c.DBReadPoolMaxConns, c.DBReadPoolMinConns,
+			c.DBReadPoolMaxConnLifetime, c.DBReadPoolMaxConnIdleTime)
+	}
+	u, err := url.Parse(c.ReadDSN())
+	if err != nil {
+		t.Fatalf("parse ReadDSN: %v", err)
+	}
+	pw, _ := u.User.Password()
+	if u.Host != "replica.invalid:7000" || u.User.Username() != "ru" || pw != "rp" || u.Path != "/rn" {
+		t.Errorf("ReadDSN = host %q user %q path %q", u.Host, u.User.Username(), u.Path)
+	}
+	// The write DSN is untouched by the read overrides.
+	if w, _ := url.Parse(c.DSN()); w.Host != "primary.invalid:5432" || w.User.Username() != "u" {
+		t.Errorf("DSN changed by read overrides: %q", w.Host)
+	}
+}
+
+// The repo convention: a feature flag is on only when exactly "true".
+func TestLoad_ReadPoolEnabledOnlyWhenExactlyTrue(t *testing.T) {
+	for v, want := range map[string]bool{"true": true, "TRUE": false, "1": false, "yes": false, "false": false, "": false} {
+		t.Setenv("DB_READ_POOL_ENABLED", v)
+		if got := Load().DBReadPoolEnabled; got != want {
+			t.Errorf("DB_READ_POOL_ENABLED=%q -> %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestLoad_ReadPoolInvalidSizing(t *testing.T) {
+	for _, tc := range []struct{ key, val string }{
+		{"DB_READ_POOL_MAX_CONNS", "0"},
+		{"DB_READ_POOL_MAX_CONNS", "abc"},
+		{"DB_READ_POOL_MIN_CONNS", "-1"},
+		{"DB_READ_POOL_MAX_CONN_LIFETIME", "soon"},
+	} {
+		t.Run(tc.key+"="+tc.val, func(t *testing.T) {
+			t.Setenv(tc.key, tc.val)
+			if err := Load().Validate(); err == nil {
+				t.Errorf("Validate accepted %s=%q", tc.key, tc.val)
+			}
+		})
+	}
+}
+
+func TestValidate_ReadPool(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"disabled needs nothing", func(c *Config) { c.DBReadPoolEnabled = false }, ""},
+		{"enabled with database", func(c *Config) { c.DBReadPoolEnabled, c.DBReadPoolMaxConns = true, 10 }, ""},
+		{"enabled without a database", func(c *Config) {
+			c.DataSource = DataSourceServiceNow
+			c.ServiceNowIntegrationServiceBaseURL = "https://example.invalid"
+			c.DBUser, c.DBPassword, c.DBName = "", "", ""
+			c.DBReadPoolEnabled, c.DBReadPoolMaxConns = true, 10
+		}, "DB_READ_POOL_ENABLED"},
+		{"enabled with zero max conns", func(c *Config) { c.DBReadPoolEnabled, c.DBReadPoolMaxConns = true, 0 }, "DB_READ_POOL_MAX_CONNS"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseValidConfig()
+			tc.mutate(&c)
+			err := c.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Errorf("Validate() = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestReadDSN_FallsBackFieldByFieldAndKeepsSearchPath(t *testing.T) {
+	c := Config{DBHost: "h", DBPort: "1", DBUser: "u", DBPassword: "p", DBName: "n", DBSSLMode: "disable", DBReadHost: "rh"}
+	u, err := url.Parse(c.ReadDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "rh:1" || u.User.Username() != "u" {
+		t.Errorf("ReadDSN host/user = %q/%q, want rh:1/u", u.Host, u.User.Username())
+	}
+	if !strings.Contains(c.ReadDSN(), "search_path") {
+		t.Error("ReadDSN lost the search_path option")
+	}
+}

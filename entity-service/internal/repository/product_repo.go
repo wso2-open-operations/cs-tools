@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -41,11 +41,11 @@ type ProductRepository interface {
 }
 
 type productRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewProductRepository constructs a ProductRepository backed by the given connection pool.
-func NewProductRepository(db *pgxpool.Pool) ProductRepository {
+func NewProductRepository(db db.Pool) ProductRepository {
 	return &productRepo{db: db}
 }
 

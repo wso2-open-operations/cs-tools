@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 const serverIdleTimeout = 60 * time.Second
@@ -32,7 +32,7 @@ const serverIdleTimeout = 60 * time.Second
 // NewRouter's shutdown function, which closes every Kafka producer it built
 // (the shared-topic publisher and the onboarding-topic one), so
 // cmd/api/main.go can release them gracefully on shutdown. Never nil.
-func New(addr string, db *pgxpool.Pool, cfg *config.Config) (*http.Server, func()) {
+func New(addr string, db db.Pool, cfg *config.Config) (*http.Server, func()) {
 	handler, closePublishers := NewRouter(db, cfg)
 	return &http.Server{
 		Addr:         addr,

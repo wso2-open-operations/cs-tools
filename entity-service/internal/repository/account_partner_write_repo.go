@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -40,11 +40,11 @@ type AccountPartnerWriteRepository interface {
 }
 
 type accountPartnerWriteRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAccountPartnerWriteRepository constructs an AccountPartnerWriteRepository.
-func NewAccountPartnerWriteRepository(db *pgxpool.Pool) AccountPartnerWriteRepository {
+func NewAccountPartnerWriteRepository(db db.Pool) AccountPartnerWriteRepository {
 	return &accountPartnerWriteRepo{db: db}
 }
 

@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -59,11 +59,11 @@ type CloudStatusRepository interface {
 }
 
 type cloudStatusRepository struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewCloudStatusRepository constructs the cloud status webhook store.
-func NewCloudStatusRepository(db *pgxpool.Pool) CloudStatusRepository {
+func NewCloudStatusRepository(db db.Pool) CloudStatusRepository {
 	return &cloudStatusRepository{db: db}
 }
 

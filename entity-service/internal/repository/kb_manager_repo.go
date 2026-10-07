@@ -30,8 +30,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -50,11 +50,11 @@ type KBManagerUserRepository interface {
 }
 
 type kbManagerUserRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewKBManagerUserRepository constructs a KBManagerUserRepository backed by the given connection pool.
-func NewKBManagerUserRepository(db *pgxpool.Pool) KBManagerUserRepository {
+func NewKBManagerUserRepository(db db.Pool) KBManagerUserRepository {
 	return &kbManagerUserRepo{db: db}
 }
 
@@ -157,11 +157,11 @@ type KBManagerGroupRepository interface {
 }
 
 type kbManagerGroupRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewKBManagerGroupRepository constructs a KBManagerGroupRepository backed by the given connection pool.
-func NewKBManagerGroupRepository(db *pgxpool.Pool) KBManagerGroupRepository {
+func NewKBManagerGroupRepository(db db.Pool) KBManagerGroupRepository {
 	return &kbManagerGroupRepo{db: db}
 }
 

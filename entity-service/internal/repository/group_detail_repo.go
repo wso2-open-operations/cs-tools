@@ -22,8 +22,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -44,12 +44,12 @@ type GroupDetailRepository interface {
 }
 
 type groupDetailRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewGroupDetailRepository constructs a GroupDetailRepository backed by the
 // given connection pool.
-func NewGroupDetailRepository(db *pgxpool.Pool) GroupDetailRepository {
+func NewGroupDetailRepository(db db.Pool) GroupDetailRepository {
 	return &groupDetailRepo{db: db}
 }
 

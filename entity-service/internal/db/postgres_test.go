@@ -18,6 +18,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 )
@@ -55,5 +56,44 @@ func TestNewPoolIfNeeded_ServiceNowWithDBUserAttemptsPool(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("NewPoolIfNeeded() = nil error, want a dial failure — pool creation was not attempted")
+	}
+}
+
+// The read pool's session parameters are what turn a mis-routed write into a
+// loud SQLSTATE 25006 failure, so they are asserted on the built config
+// without a database.
+func TestPoolConfig_RuntimeParams(t *testing.T) {
+	const dsn = "postgres://user:pw@db.invalid:5432/db?sslmode=disable"
+	for _, tc := range []struct {
+		name         string
+		readOnly     bool
+		wantReadOnly string
+	}{
+		{"write pool", false, ""},
+		{"read pool", true, "on"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := poolConfig(dsn, 7, 3, time.Minute, 2*time.Minute, tc.readOnly)
+			if err != nil {
+				t.Fatalf("poolConfig: %v", err)
+			}
+			rp := cfg.ConnConfig.RuntimeParams
+			if rp["jit"] != "off" {
+				t.Errorf("jit = %q, want off", rp["jit"])
+			}
+			got, ok := rp["default_transaction_read_only"]
+			if got != tc.wantReadOnly || ok != tc.readOnly {
+				t.Errorf("default_transaction_read_only = %q (set=%v), want %q (set=%v)", got, ok, tc.wantReadOnly, tc.readOnly)
+			}
+			if cfg.MaxConns != 7 || cfg.MinConns != 3 || cfg.MaxConnLifetime != time.Minute || cfg.MaxConnIdleTime != 2*time.Minute {
+				t.Errorf("sizing not applied: %d/%d/%s/%s", cfg.MaxConns, cfg.MinConns, cfg.MaxConnLifetime, cfg.MaxConnIdleTime)
+			}
+		})
+	}
+}
+
+func TestPoolConfig_BadDSN(t *testing.T) {
+	if _, err := poolConfig("://not a dsn", 1, 0, time.Minute, time.Minute, true); err == nil {
+		t.Error("poolConfig accepted an unparseable DSN")
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -16,10 +16,10 @@ type AnalyticsRepository interface {
 	WorkQueue(ctx context.Context, f domain.WorkQueueFilters) (*domain.WorkQueueResponse, error)
 }
 
-type analyticsRepository struct{ db *pgxpool.Pool }
+type analyticsRepository struct{ db db.Pool }
 
 // NewAnalyticsRepository builds an AnalyticsRepository over the given pool.
-func NewAnalyticsRepository(db *pgxpool.Pool) AnalyticsRepository {
+func NewAnalyticsRepository(db db.Pool) AnalyticsRepository {
 	return &analyticsRepository{db: db}
 }
 

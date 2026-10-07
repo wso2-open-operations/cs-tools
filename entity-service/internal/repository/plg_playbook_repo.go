@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -31,10 +31,10 @@ type PlaybookRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type playbookRepository struct{ db *pgxpool.Pool }
+type playbookRepository struct{ db db.Pool }
 
 // NewPlaybookRepository builds a PlaybookRepository over the given pool.
-func NewPlaybookRepository(db *pgxpool.Pool) PlaybookRepository { return &playbookRepository{db: db} }
+func NewPlaybookRepository(db db.Pool) PlaybookRepository { return &playbookRepository{db: db} }
 
 const playbookSelect = `
 	SELECT pb.id::TEXT, p.id::TEXT, p.code, p.name,

@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -50,11 +50,11 @@ type MembershipRegistrationRepository interface {
 }
 
 type registrationRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewMembershipRegistrationRepository constructs a MembershipRegistrationRepository backed by the pool.
-func NewMembershipRegistrationRepository(db *pgxpool.Pool) MembershipRegistrationRepository {
+func NewMembershipRegistrationRepository(db db.Pool) MembershipRegistrationRepository {
 	return &registrationRepo{db: db}
 }
 

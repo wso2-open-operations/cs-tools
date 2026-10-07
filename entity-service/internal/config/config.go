@@ -103,7 +103,26 @@ type Config struct {
 	DBPoolMinConns        int32
 	DBPoolMaxConnLifetime time.Duration
 	DBPoolMaxConnIdleTime time.Duration
-	ServerPort            string
+	// DBReadPoolEnabled (DB_READ_POOL_ENABLED, on only when exactly "true")
+	// adds a second pool for requests marked read-only (db.WithReadOnly); see
+	// internal/db.Router. Off by default: the single write pool then serves
+	// everything, exactly as before. The DBRead* connection fields each default
+	// to the corresponding DB* value, so an enabled read pool points at the
+	// same primary until DB_READ_HOST is set to a replica. The DBReadPool*
+	// sizing fields follow the DBPool* rules (defaults 10/2/30m/5m; the read
+	// pool is smaller because it only carries opted-in read routes).
+	DBReadPoolEnabled         bool
+	DBReadHost                string
+	DBReadPort                string
+	DBReadUser                string
+	DBReadPassword            string
+	DBReadName                string
+	DBReadSSLMode             string
+	DBReadPoolMaxConns        int32
+	DBReadPoolMinConns        int32
+	DBReadPoolMaxConnLifetime time.Duration
+	DBReadPoolMaxConnIdleTime time.Duration
+	ServerPort                string
 	// HealthPort is the listen port for the separate, minimal health
 	// server (internal/server.NewHealthServer). It is deliberately NOT
 	// ServerPort: that mux carries every business route and is exposed at
@@ -612,6 +631,11 @@ func Load() *Config {
 		DBPoolMinConns:                           intVal("DB_POOL_MIN_CONNS", 2, true),
 		DBPoolMaxConnLifetime:                    duration("DB_POOL_MAX_CONN_LIFETIME", 30*time.Minute),
 		DBPoolMaxConnIdleTime:                    duration("DB_POOL_MAX_CONN_IDLE_TIME", 5*time.Minute),
+		DBReadPoolEnabled:                        os.Getenv("DB_READ_POOL_ENABLED") == "true",
+		DBReadPoolMaxConns:                       intVal("DB_READ_POOL_MAX_CONNS", 10, false),
+		DBReadPoolMinConns:                       intVal("DB_READ_POOL_MIN_CONNS", 2, true),
+		DBReadPoolMaxConnLifetime:                duration("DB_READ_POOL_MAX_CONN_LIFETIME", 30*time.Minute),
+		DBReadPoolMaxConnIdleTime:                duration("DB_READ_POOL_MAX_CONN_IDLE_TIME", 5*time.Minute),
 		ServerPort:                               getEnvOrDefault("SERVER_PORT", "8080"),
 		HealthPort:                               getEnvOrDefault("HEALTH_PORT", "8081"),
 		DataSource:                               DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
@@ -707,6 +731,14 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.applySREEventHubTopic()
+	// Read-pool connection fields fall back to the write pool's so the read
+	// pool targets the same primary until a replica host is configured.
+	cfg.DBReadHost = getEnvOrDefault("DB_READ_HOST", cfg.DBHost)
+	cfg.DBReadPort = getEnvOrDefault("DB_READ_PORT", cfg.DBPort)
+	cfg.DBReadUser = getEnvOrDefault("DB_READ_USER", cfg.DBUser)
+	cfg.DBReadPassword = getEnvOrDefault("DB_READ_PASSWORD", cfg.DBPassword)
+	cfg.DBReadName = getEnvOrDefault("DB_READ_NAME", cfg.DBName)
+	cfg.DBReadSSLMode = getEnvOrDefault("DB_READ_SSLMODE", cfg.DBSSLMode)
 	return cfg
 }
 
@@ -932,6 +964,17 @@ func (c *Config) Validate() error {
 	if dbSet && !dbComplete {
 		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME must be set together or not at all")
 	}
+	// The read pool is an addition to the write pool, never a substitute: with
+	// no database configured there is nothing for it to read from. Fail at
+	// startup rather than run with a flag that silently does nothing.
+	if c.DBReadPoolEnabled {
+		if !c.HasDatabase() {
+			return fmt.Errorf("DB_READ_POOL_ENABLED=true requires a configured database (DB_USER, DB_PASSWORD, DB_NAME)")
+		}
+		if c.DBReadPoolMaxConns <= 0 {
+			return fmt.Errorf("DB_READ_POOL_MAX_CONNS must be greater than 0, got %d", c.DBReadPoolMaxConns)
+		}
+	}
 	// ServiceNow integration service credentials are required for
 	// DATA_SOURCE=servicenow (reads go there) and also for
 	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
@@ -1128,6 +1171,37 @@ func (c *Config) DSN() string {
 	opts := strings.ReplaceAll(url.QueryEscape("-c search_path="+schema), "+", "%20")
 	u.RawQuery += "&options=" + opts
 	return u.String()
+}
+
+// ReadDSN is DSN for the read pool: the DBRead* connection fields, with the
+// same search_path handling. Everything else about the connection is shared
+// with the write pool, so a replica sees the same schema resolution.
+func (c *Config) ReadDSN() string {
+	rc := *c
+	rc.DBHost, rc.DBPort = c.DBReadHost, c.DBReadPort
+	rc.DBUser, rc.DBPassword = c.DBReadUser, c.DBReadPassword
+	rc.DBName, rc.DBSSLMode = c.DBReadName, c.DBReadSSLMode
+	// A hand-built Config (tests) may leave the read fields empty; behave as
+	// Load does and fall back to the write values.
+	if rc.DBHost == "" {
+		rc.DBHost = c.DBHost
+	}
+	if rc.DBPort == "" {
+		rc.DBPort = c.DBPort
+	}
+	if rc.DBUser == "" {
+		rc.DBUser = c.DBUser
+	}
+	if rc.DBPassword == "" {
+		rc.DBPassword = c.DBPassword
+	}
+	if rc.DBName == "" {
+		rc.DBName = c.DBName
+	}
+	if rc.DBSSLMode == "" {
+		rc.DBSSLMode = c.DBSSLMode
+	}
+	return rc.DSN()
 }
 
 // HasGithubIntegration reports whether the GitHub sync is both switched on and

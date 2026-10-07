@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -24,10 +24,10 @@ type IngestRepository interface {
 	Register(ctx context.Context, in domain.Registration, attrs []domain.OrganizationAttribute) (*domain.IngestResult, error)
 }
 
-type ingestRepository struct{ db *pgxpool.Pool }
+type ingestRepository struct{ db db.Pool }
 
 // NewIngestRepository builds an IngestRepository over the given pool.
-func NewIngestRepository(db *pgxpool.Pool) IngestRepository {
+func NewIngestRepository(db db.Pool) IngestRepository {
 	return &ingestRepository{db: db}
 }
 

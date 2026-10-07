@@ -29,8 +29,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -80,11 +80,11 @@ type UserRepository interface {
 }
 
 type userRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewUserRepository constructs a UserRepository backed by the given connection pool.
-func NewUserRepository(db *pgxpool.Pool) UserRepository {
+func NewUserRepository(db db.Pool) UserRepository {
 	return &userRepo{db: db}
 }
 
@@ -413,7 +413,6 @@ func assignRoles(users []domain.User, byUser map[string][]string) {
 		users[i].Roles = []string{}
 	}
 }
-
 
 // GetUserRoles implements UserRepository.
 func (r *userRepo) GetUserRoles(ctx context.Context, userID string) ([]string, error) {

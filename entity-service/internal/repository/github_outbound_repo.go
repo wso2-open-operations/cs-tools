@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // OutboundItem is one push waiting to go to GitHub.
@@ -58,11 +58,11 @@ type GithubOutboundRepository interface {
 }
 
 type githubOutboundRepository struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewGithubOutboundRepository constructs the queue reader.
-func NewGithubOutboundRepository(db *pgxpool.Pool) GithubOutboundRepository {
+func NewGithubOutboundRepository(db db.Pool) GithubOutboundRepository {
 	return &githubOutboundRepository{db: db}
 }
 

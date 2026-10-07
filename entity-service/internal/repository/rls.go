@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // setViewerProjectIDsSQL caches the external caller's registered project ids
@@ -94,7 +94,7 @@ func setCallerIdentity(ctx context.Context, tx pgx.Tx, scope SearchScope) error 
 // fn must not call tx.Commit/tx.Rollback itself -- this function owns the
 // transaction's lifecycle so the identity-setting and commit steps can never
 // drift apart across call sites.
-func runWithCallerIdentity(ctx context.Context, pool *pgxpool.Pool, scope SearchScope, fn func(tx pgx.Tx) error) error {
+func runWithCallerIdentity(ctx context.Context, pool db.Pool, scope SearchScope, fn func(tx pgx.Tx) error) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("run with caller identity: begin tx: %w", err)

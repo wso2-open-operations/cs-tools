@@ -19,7 +19,7 @@ package repository
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // SalesforceOpportunityLookup resolves an sf_opportunity row by Salesforce
@@ -32,11 +32,11 @@ type SalesforceOpportunityLookup interface {
 }
 
 type sfOpportunityLookupRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceOpportunityLookup constructs a SalesforceOpportunityLookup.
-func NewSalesforceOpportunityLookup(db *pgxpool.Pool) SalesforceOpportunityLookup {
+func NewSalesforceOpportunityLookup(db db.Pool) SalesforceOpportunityLookup {
 	return &sfOpportunityLookupRepo{db: db}
 }
 

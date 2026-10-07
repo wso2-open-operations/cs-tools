@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -21,10 +21,10 @@ type ReferenceRepository interface {
 	LifecycleCatalogue(ctx context.Context) (*domain.LifecycleCatalogue, error)
 }
 
-type referenceRepository struct{ db *pgxpool.Pool }
+type referenceRepository struct{ db db.Pool }
 
 // NewReferenceRepository builds a ReferenceRepository over the given pool.
-func NewReferenceRepository(db *pgxpool.Pool) ReferenceRepository {
+func NewReferenceRepository(db db.Pool) ReferenceRepository {
 	return &referenceRepository{db: db}
 }
 

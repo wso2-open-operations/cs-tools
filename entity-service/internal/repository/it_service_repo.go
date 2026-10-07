@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -38,11 +38,11 @@ type ITServiceRepository interface {
 }
 
 type itServiceRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewITServiceRepository constructs an ITServiceRepository backed by the given connection pool.
-func NewITServiceRepository(db *pgxpool.Pool) ITServiceRepository {
+func NewITServiceRepository(db db.Pool) ITServiceRepository {
 	return &itServiceRepo{db: db}
 }
 

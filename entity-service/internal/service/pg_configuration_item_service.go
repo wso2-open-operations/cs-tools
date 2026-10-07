@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -37,11 +37,11 @@ import (
 // and the create would then fail at write time instead of never being
 // offered.
 type pgConfigurationItemService struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewConfigurationItemService constructs the Postgres-backed service.
-func NewConfigurationItemService(db *pgxpool.Pool) ConfigurationItemService {
+func NewConfigurationItemService(db db.Pool) ConfigurationItemService {
 	return &pgConfigurationItemService{db: db}
 }
 

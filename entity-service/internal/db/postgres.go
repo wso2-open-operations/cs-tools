@@ -39,6 +39,24 @@ import (
 // itself carries no defaults of its own any more and always receives a
 // real, non-zero value from every caller.
 func NewPool(ctx context.Context, dsn string, maxConns, minConns int32, maxConnLifetime, maxConnIdleTime time.Duration) (*pgxpool.Pool, error) {
+	return connect(ctx, dsn, maxConns, minConns, maxConnLifetime, maxConnIdleTime, false)
+}
+
+// NewReadPool is NewPool for the read pool: every connection also starts with
+// default_transaction_read_only=on.
+func NewReadPool(ctx context.Context, dsn string, maxConns, minConns int32, maxConnLifetime, maxConnIdleTime time.Duration) (*pgxpool.Pool, error) {
+	return connect(ctx, dsn, maxConns, minConns, maxConnLifetime, maxConnIdleTime, true)
+}
+
+// poolConfig builds the pgxpool config without connecting, so tests can assert
+// the session parameters without a database.
+//
+// readOnly sets default_transaction_read_only=on for every connection in the
+// pool. The router picks a pool by request context, so a write that reaches
+// the read pool by mistake (a route wrongly marked read-only) must fail
+// loudly with SQLSTATE 25006 rather than succeed against the same primary
+// today and break the day the read pool points at a replica.
+func poolConfig(dsn string, maxConns, minConns int32, maxConnLifetime, maxConnIdleTime time.Duration, readOnly bool) (*pgxpool.Config, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse pool config: %w", err)
@@ -54,11 +72,22 @@ func NewPool(ctx context.Context, dsn string, maxConns, minConns int32, maxConnL
 		cfg.ConnConfig.RuntimeParams = map[string]string{}
 	}
 	cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	if readOnly {
+		cfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	}
 
 	cfg.MaxConns = maxConns
 	cfg.MinConns = minConns
 	cfg.MaxConnLifetime = maxConnLifetime
 	cfg.MaxConnIdleTime = maxConnIdleTime
+	return cfg, nil
+}
+
+func connect(ctx context.Context, dsn string, maxConns, minConns int32, maxConnLifetime, maxConnIdleTime time.Duration, readOnly bool) (*pgxpool.Pool, error) {
+	cfg, err := poolConfig(dsn, maxConns, minConns, maxConnLifetime, maxConnIdleTime, readOnly)
+	if err != nil {
+		return nil, err
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -100,4 +129,31 @@ func NewPoolIfNeeded(cfg *config.Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return NewPool(ctx, cfg.DSN(), cfg.DBPoolMaxConns, cfg.DBPoolMinConns, cfg.DBPoolMaxConnLifetime, cfg.DBPoolMaxConnIdleTime)
+}
+
+// NewRouterIfNeeded builds the Router the process serves from: the write pool
+// (NewPoolIfNeeded's gate) plus, when DB_READ_POOL_ENABLED=true, a read pool.
+// It returns (nil, nil) with no database configured; use Router.Pool to hand
+// it on as a Pool without wrapping a nil pointer in a non-nil interface.
+func NewRouterIfNeeded(cfg *config.Config) (*Router, error) {
+	write, err := NewPoolIfNeeded(cfg)
+	if err != nil || write == nil {
+		return nil, err
+	}
+	if !cfg.DBReadPoolEnabled {
+		r := NewRouter(write, nil)
+		r.desc = fmt.Sprintf("db pools: write max=%d min=%d; read pool disabled", cfg.DBPoolMaxConns, cfg.DBPoolMinConns)
+		return r, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	read, err := NewReadPool(ctx, cfg.ReadDSN(), cfg.DBReadPoolMaxConns, cfg.DBReadPoolMinConns, cfg.DBReadPoolMaxConnLifetime, cfg.DBReadPoolMaxConnIdleTime)
+	if err != nil {
+		write.Close()
+		return nil, fmt.Errorf("read pool: %w", err)
+	}
+	r := NewRouter(write, read)
+	r.desc = fmt.Sprintf("db pools: write max=%d min=%d; read pool enabled max=%d min=%d (read-only sessions)",
+		cfg.DBPoolMaxConns, cfg.DBPoolMinConns, cfg.DBReadPoolMaxConns, cfg.DBReadPoolMinConns)
+	return r, nil
 }

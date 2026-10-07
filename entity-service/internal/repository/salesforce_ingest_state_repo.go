@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -67,11 +67,11 @@ type SalesforceIngestStateRepository interface {
 }
 
 type salesforceIngestStateRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceIngestStateRepository constructs a SalesforceIngestStateRepository backed by the pool.
-func NewSalesforceIngestStateRepository(db *pgxpool.Pool) SalesforceIngestStateRepository {
+func NewSalesforceIngestStateRepository(db db.Pool) SalesforceIngestStateRepository {
 	return &salesforceIngestStateRepo{db: db}
 }
 

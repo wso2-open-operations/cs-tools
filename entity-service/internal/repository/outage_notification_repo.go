@@ -24,8 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -48,11 +48,11 @@ type OutageNotificationRepository interface {
 }
 
 type outageNotificationRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewOutageNotificationRepository constructs the repository over the pool.
-func NewOutageNotificationRepository(db *pgxpool.Pool) OutageNotificationRepository {
+func NewOutageNotificationRepository(db db.Pool) OutageNotificationRepository {
 	return &outageNotificationRepo{db: db}
 }
 

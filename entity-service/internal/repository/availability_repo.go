@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // Reads and writes for the availability calculation.
@@ -118,10 +118,10 @@ type ScheduleSpanRow struct {
 	ShowAs     string
 }
 
-type availabilityRepository struct{ db *pgxpool.Pool }
+type availabilityRepository struct{ db db.Pool }
 
 // NewAvailabilityRepository constructs the repository.
-func NewAvailabilityRepository(db *pgxpool.Pool) AvailabilityRepository {
+func NewAvailabilityRepository(db db.Pool) AvailabilityRepository {
 	return &availabilityRepository{db: db}
 }
 

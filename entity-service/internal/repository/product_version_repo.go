@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -36,11 +36,11 @@ type ProductVersionRepository interface {
 }
 
 type productVersionRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewProductVersionRepository constructs a ProductVersionRepository backed by the given connection pool.
-func NewProductVersionRepository(db *pgxpool.Pool) ProductVersionRepository {
+func NewProductVersionRepository(db db.Pool) ProductVersionRepository {
 	return &productVersionRepo{db: db}
 }
 

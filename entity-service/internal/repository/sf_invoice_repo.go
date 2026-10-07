@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -37,11 +37,11 @@ type SalesforceInvoiceRepository interface {
 }
 
 type sfInvoiceRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceInvoiceRepository constructs a SalesforceInvoiceRepository backed by the pool.
-func NewSalesforceInvoiceRepository(db *pgxpool.Pool) SalesforceInvoiceRepository {
+func NewSalesforceInvoiceRepository(db db.Pool) SalesforceInvoiceRepository {
 	return &sfInvoiceRepo{db: db}
 }
 

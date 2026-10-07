@@ -24,7 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -60,11 +60,11 @@ type OnboardingStepRepository interface {
 }
 
 type onboardingStepRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewOnboardingStepRepository constructs an OnboardingStepRepository backed by the pool.
-func NewOnboardingStepRepository(db *pgxpool.Pool) OnboardingStepRepository {
+func NewOnboardingStepRepository(db db.Pool) OnboardingStepRepository {
 	return &onboardingStepRepo{db: db}
 }
 

@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
@@ -52,14 +52,14 @@ type AccessRepository interface {
 }
 
 type accessRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewAccessRepository constructs an AccessRepository backed by the given connection pool.
 // db may be nil: a deployment with no DB_* configured gets no pool, and the
 // deployment-licence route is registered without one (see server.NewRouter).
 // Scoping a caller then fails closed rather than dereferencing the nil pool.
-func NewAccessRepository(db *pgxpool.Pool) AccessRepository {
+func NewAccessRepository(db db.Pool) AccessRepository {
 	return &accessRepo{db: db}
 }
 
@@ -131,7 +131,7 @@ type AccountAdminRepository interface {
 }
 
 // NewAccountAdminRepository constructs an AccountAdminRepository.
-func NewAccountAdminRepository(db *pgxpool.Pool) AccountAdminRepository {
+func NewAccountAdminRepository(db db.Pool) AccountAdminRepository {
 	return &accessRepo{db: db}
 }
 

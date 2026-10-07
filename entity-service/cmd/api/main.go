@@ -52,12 +52,19 @@ func main() {
 	// (event_publish_failures, sla_clocks, scheduled_task_run) are left
 	// unregistered rather than failing startup — see db.NewPoolIfNeeded and
 	// server.NewRouter.
-	pool, err := db.NewPoolIfNeeded(cfg)
+	//
+	// The router is the only owner of the pools. Everything downstream gets
+	// pool, a Pool that is a true nil (not a nil pointer in an interface) when
+	// there is no database. With DB_READ_POOL_ENABLED unset it is a thin
+	// wrapper over the one write pool.
+	dbRouter, err := db.NewRouterIfNeeded(cfg)
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
+	pool := dbRouter.Pool()
 	if pool != nil {
-		defer pool.Close()
+		defer dbRouter.Close()
+		log.Print(dbRouter.Describe())
 	} else {
 		log.Printf("no database pool (DATA_SOURCE=%s): event-publish-failures, sla-clocks, and scheduled-task-run endpoints are disabled", cfg.DataSource)
 	}

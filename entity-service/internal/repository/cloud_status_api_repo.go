@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // The reads behind the public cloud status dashboard.
@@ -96,11 +96,11 @@ type CloudStatusDashboardRepository interface {
 }
 
 type cloudStatusDashboardRepository struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewCloudStatusDashboardRepository constructs the dashboard reader.
-func NewCloudStatusDashboardRepository(db *pgxpool.Pool) CloudStatusDashboardRepository {
+func NewCloudStatusDashboardRepository(db db.Pool) CloudStatusDashboardRepository {
 	return &cloudStatusDashboardRepository{db: db}
 }
 

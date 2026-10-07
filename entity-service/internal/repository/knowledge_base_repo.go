@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -57,11 +57,11 @@ type KnowledgeBaseRepository interface {
 }
 
 type knowledgeBaseRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewKnowledgeBaseRepository constructs a KnowledgeBaseRepository backed by the given connection pool.
-func NewKnowledgeBaseRepository(db *pgxpool.Pool) KnowledgeBaseRepository {
+func NewKnowledgeBaseRepository(db db.Pool) KnowledgeBaseRepository {
 	return &knowledgeBaseRepo{db: db}
 }
 

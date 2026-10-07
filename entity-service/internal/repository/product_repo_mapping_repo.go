@@ -19,17 +19,17 @@ package repository
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // ProductRepoMappingRepository reads product_repo_mapping.
 type ProductRepoMappingRepository struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewProductRepoMappingRepository returns a repository bound to db.
-func NewProductRepoMappingRepository(db *pgxpool.Pool) *ProductRepoMappingRepository {
+func NewProductRepoMappingRepository(db db.Pool) *ProductRepoMappingRepository {
 	return &ProductRepoMappingRepository{db: db}
 }
 

@@ -23,8 +23,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -86,11 +86,11 @@ type ProjectContactRepository interface {
 }
 
 type projectContactRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewProjectContactRepository constructs a ProjectContactRepository backed by the given connection pool.
-func NewProjectContactRepository(db *pgxpool.Pool) ProjectContactRepository {
+func NewProjectContactRepository(db db.Pool) ProjectContactRepository {
 	return &projectContactRepo{db: db}
 }
 

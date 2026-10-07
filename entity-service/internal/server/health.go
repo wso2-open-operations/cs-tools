@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 )
@@ -50,7 +50,7 @@ const (
 //
 // Pass a nil pool for a deployment with no database (DATA_SOURCE=servicenow);
 // the database probe then reports it as not configured instead of down.
-func NewHealthServer(addr string, db *pgxpool.Pool) *http.Server {
+func NewHealthServer(addr string, db db.Pool) *http.Server {
 	// Converted explicitly rather than passed straight through: a nil
 	// *pgxpool.Pool assigned to the handler.DBPinger interface would make
 	// that interface non-nil (it would hold a nil pointer with a concrete

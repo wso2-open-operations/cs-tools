@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -37,11 +37,11 @@ type SavedFilterViewRepository interface {
 }
 
 type savedFilterViewRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSavedFilterViewRepository constructs a Postgres-backed repository.
-func NewSavedFilterViewRepository(db *pgxpool.Pool) SavedFilterViewRepository {
+func NewSavedFilterViewRepository(db db.Pool) SavedFilterViewRepository {
 	return &savedFilterViewRepo{db: db}
 }
 

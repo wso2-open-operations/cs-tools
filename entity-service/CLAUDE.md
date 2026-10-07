@@ -49,6 +49,12 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `DB_POOL_MIN_CONNS` | no | `2` | pgxpool connections kept warm when idle; `0` is a valid, accepted value |
 | `DB_POOL_MAX_CONN_LIFETIME` | no | `30m` | pgxpool connection rotation interval |
 | `DB_POOL_MAX_CONN_IDLE_TIME` | no | `5m` | pgxpool idle-connection release interval |
+| `DB_READ_POOL_ENABLED` | no | off | Adds a second, read-only pool; on only when exactly `true`. Requires a configured database (startup error otherwise). See "Connection pool settings" |
+| `DB_READ_HOST` / `DB_READ_PORT` / `DB_READ_USER` / `DB_READ_PASSWORD` / `DB_READ_NAME` / `DB_READ_SSLMODE` | no | the `DB_*` value | Read pool connection; each falls back to its write counterpart, so the read pool targets the same primary until `DB_READ_HOST` points at a replica |
+| `DB_READ_POOL_MAX_CONNS` | no | `10` | Read pool max connections (same fallback rule as `DB_POOL_MAX_CONNS`) |
+| `DB_READ_POOL_MIN_CONNS` | no | `2` | Read pool warm connections; `0` accepted |
+| `DB_READ_POOL_MAX_CONN_LIFETIME` | no | `30m` | Read pool connection rotation interval |
+| `DB_READ_POOL_MAX_CONN_IDLE_TIME` | no | `5m` | Read pool idle-connection release interval |
 | `SERVER_PORT` | no       | `8080`  | Main API listen port       |
 | `HEALTH_PORT` | no       | `8081`  | Health probe listen port; `Validate` rejects it being equal to `SERVER_PORT` (see "Health probes" below) |
 | `SERVER_READ_TIMEOUT` | no | `60s` | Main API server read timeout (Go duration, e.g. `60s`); must be > 0 |
@@ -6669,6 +6675,36 @@ Tuned via `config.Config`, applied by `internal/db.NewPool`. Each is env-configu
 | Max idle time       | `DB_POOL_MAX_CONN_IDLE_TIME`   | 5 min   |
 
 `DB_POOL_MAX_CONNS` falls back to its default on an unset, non-numeric, or non-positive value (a pool that may open no connections at all can never serve a single query). `DB_POOL_MIN_CONNS` falls back the same way **except zero is accepted** — pgxpool genuinely permits a minimum of 0 (a deployment that doesn't want to retain any idle connections) — same fail-safe-to-default posture `getDurationOrDefault` already uses for every duration-shaped env var here, now shared by `getInt32OrDefault`. An invalid value for any of the four surfaces through `Config.Validate()` at startup (`loadErr`), the same mechanism `SERVER_READ_TIMEOUT`/etc. already use.
+
+### Optional read pool
+
+`DB_READ_POOL_ENABLED=true` adds a second pool (`internal/db.NewReadPool`) behind a `db.Router` that implements `db.Pool`. `cmd/api/main.go` builds one Router (`db.NewRouterIfNeeded`), logs one secret-free line with each pool's max/min conns, and closes both pools on exit. With the flag unset the Router is a thin wrapper over the single write pool and behaviour is unchanged. Sizing defaults are 10/2/30m/5m (`DB_READ_POOL_*`), and the connection fields default to the write pool's, so today it points at the same primary.
+
+**Routing rule: the default is the write pool.** A route opts in by wrapping its handler with `middleware.ReadOnly` (or `middleware.ReadOnlyFunc` for `mux.HandleFunc`), which sets `db.WithReadOnly` on the request context. Unmarked contexts and all background work (drainers, workers, listeners) use the write pool. The Router cannot infer read from write by method: `repository.Scoped` sends every statement through `SendBatch`, and many writes are `INSERT ... RETURNING` via `Query`, so only the context marker decides. Never wrap a handler that writes.
+
+**Enforcement.** Every read-pool connection starts with `default_transaction_read_only=on` (plus `jit=off`), so a write routed there fails with SQLSTATE `25006` instead of quietly succeeding on the primary and breaking the day the read pool points at a replica. There is no fallback to the write pool on a read-pool error. `Ping` checks both pools, so the health probe fails if either is down.
+
+#### Read-pool route opt-in
+
+The marked set lives in one place: `readOnlyRoutes` in `internal/server/routes.go`. `NewRouter` registers on a `readPoolMux` (a `*http.ServeMux` that wraps a listed pattern's handler with `middleware.ReadOnly`), so the `mux.HandleFunc` lines stay as they are and the pattern string must match the registration exactly. Today that is the pure-read `POST .../search`, `POST .../aggregate`, and `GET` by-id/list routes. Nothing changes until `DB_READ_POOL_ENABLED=true`.
+
+**Rule for adding a route:** read its whole call chain and prove nothing on it writes, for every data source it can run under (Postgres-first, external-source-first, dual-write mirror, Postgres fallback): handler, then service (every implementation wired in `routes.go`, plus the `internalOnly` / `projectMemberOnly` wrappers and `AccessService`), then every repository method. When in doubt, leave it out; a wrongly marked route returns a 500 (SQLSTATE `25006`) the moment the read pool is on.
+
+**Exclude a route if anything on its path does any of these:**
+
+- `INSERT` / `UPDATE` / `DELETE` / `MERGE` / `TRUNCATE`, including DML inside a `WITH` CTE, `INSERT ... ON CONFLICT`, or `... RETURNING`.
+- `Exec`, `CopyFrom`, or `Begin` / `BeginTx` / `InTx` whose body then writes. A transaction that only runs `SELECT` is fine; `Scoped` identity-setting uses `set_config(..., true)` (transaction-local), which a read-only transaction allows.
+- `SELECT ... FOR UPDATE` / `FOR SHARE`, advisory locks, `set_config(..., false)`, `LOCK TABLE`, or `pg_notify`.
+- A `SELECT` that calls a function with side effects: `next_*_number()` and anything else that calls `nextval` (read-only transactions reject it), or `recompute_user_type`.
+- Lazy-create or upsert on read: auto-provisioning a user, "last seen" / activity / audit inserts, recomputing or refreshing derived rows, SLA clock or onboarding-ledger writes.
+- Publishing an event that records a failure to `event_publish_failures`, or dispatching an external mirror/writeback (which records its own failures to a table).
+- A read that a poller or dispatcher uses to decide what to do next, right after its own write (for example `GET /internal/cloud-status/pending` after `POST /internal/cloud-status/sweep`). A lagging replica would miss the rows just written, or return rows whose delivery was already recorded on the primary, which delays or duplicates work. Keep these on the write pool.
+
+Never mark `/health`, anything under `/salesforce`, or a `POST` / `PATCH` / `PUT` / `DELETE` that is not a search or aggregate. If a route would need a code change to become read-only-safe, change that first, in its own commit; do not mark it and hope.
+
+**Check before pointing `DB_READ_HOST` at a replica.** The allowlist is proven free of writes, not free of read-after-write assumptions. A `GET` by id, or a search, that a caller issues straight after its own write can return the pre-write row once reads come from a lagging replica. Review the allowlist for that before the read pool leaves the primary.
+
+**The allowlist test** is `internal/server/read_only_routes_test.go`. `TestReadOnlyRoutesAllowlist` pins `readOnlyRoutes` to an explicit list in the test, so adding or removing a mark is a deliberate two-place diff; `TestReadOnlyRoutesShape` rejects write-method routes and health/Salesforce routes; `TestReadOnlyRoutesAreRegistered` rejects a mark that wraps no registered route; `TestReadPoolMuxMarksOnlyListedRoutes` drives the real mux and asserts a listed route's handler sees `db.IsReadOnly(ctx)` while an unlisted one does not. `internal/repository/read_pool_routes_integration_test.go` (skipped without `ENTITY_TEST_DATABASE_URL`) runs the case search, case aggregate, project search and an `InTx` read through a Router with a real read-only pool and asserts no `25006`.
 
 ## Pagination response conventions
 

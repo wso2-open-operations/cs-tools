@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // TeamMemberRow is one row of a team's roster, joined to "user".
@@ -45,11 +45,11 @@ type TeamRepository interface {
 }
 
 type teamRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewTeamRepository constructs a TeamRepository backed by the given connection pool.
-func NewTeamRepository(db *pgxpool.Pool) TeamRepository {
+func NewTeamRepository(db db.Pool) TeamRepository {
 	return &teamRepo{db: db}
 }
 

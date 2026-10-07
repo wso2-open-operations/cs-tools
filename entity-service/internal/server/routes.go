@@ -23,10 +23,10 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/cache"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
@@ -37,6 +37,191 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
+
+// readOnlyRoutes is the set of route patterns served from the read pool: each
+// pattern is registered exactly as written in a mux.HandleFunc call below, and
+// readPoolMux wraps its handler with middleware.ReadOnly. A route belongs here
+// only if NOTHING on its handler -> service -> repository path writes, for any
+// data source it can be wired to (the read pool's sessions are read-only, so a
+// write under a marked context fails with SQLSTATE 25006). Adding a pattern is
+// a deliberate change: TestReadOnlyRoutesAllowlist pins this set, and
+// entity-service/CLAUDE.md lists the criteria and exclusions.
+var readOnlyRoutes = routeSet(
+	// Searches and aggregates.
+	"POST /accounts/search",
+	"POST /accounts/{id}/contacts/search",
+	"POST /announcement-requests/search",
+	"POST /attachments/search",
+	"POST /call-requests/search",
+	"POST /call-requests/search-all",
+	"POST /cases/aggregate",
+	"POST /cases/feedback/aggregate",
+	"POST /cases/feedback/search",
+	"POST /cases/search",
+	"POST /cases/time-cards/search",
+	"POST /cases/{id}/activities/search",
+	"POST /cases/{id}/comments/search",
+	"POST /cases/{id}/tasks/search",
+	"POST /catalogs/search",
+	"POST /change-requests/aggregate",
+	"POST /change-requests/search",
+	"POST /comments/search",
+	"POST /configuration-items/search",
+	"POST /conversations/search",
+	"POST /deployed-products/projects/search",
+	"POST /deployed-products/search",
+	"POST /deployed-products/{id}/metrics/search",
+	"POST /deployed-products/{id}/metrics/usage-counts/search",
+	"POST /deployments/search",
+	"POST /escalations/search",
+	"POST /event-publish-failures/search",
+	"POST /groups/search",
+	"POST /incident-tasks/aggregate",
+	"POST /incident-tasks/search",
+	"POST /incidents/aggregate",
+	"POST /incidents/search",
+	"POST /incidents/{id}/activities/search",
+	"POST /instances/metrics/search",
+	"POST /instances/metrics/stats/search",
+	"POST /instances/search",
+	"POST /instances/usages/search",
+	"POST /instances/usages/stats/search",
+	"POST /invoices/search",
+	"POST /kb-articles/search",
+	"POST /kb-manager-groups/search",
+	"POST /kb-manager-users/search",
+	"POST /onboarding-steps/search",
+	"POST /opportunities/search",
+	"POST /outages/search",
+	"POST /outages/{id}/communications/search",
+	"POST /plg/organizations/search",
+	"POST /plg/registrations/search",
+	"POST /plg/users/search",
+	"POST /plg/work-queue/search",
+	"POST /problems/aggregate",
+	"POST /problems/search",
+	"POST /products/search",
+	"POST /products/vulnerabilities/search",
+	"POST /products/{id}/versions/search",
+	"POST /project-opportunity-links/search",
+	"POST /projects/search",
+	"POST /projects/{id}/contacts/search",
+	"POST /search",
+	"POST /service-offerings/search",
+	"POST /services/search",
+	"POST /slas/search",
+	"POST /tags/search",
+	"POST /tasks/search",
+	"POST /team-schedule/absences/search",
+	"POST /team-schedule/assignments/search",
+	"POST /time-cards/search",
+	"POST /users/search",
+	// By-id reads and lists.
+	"GET /accounts/{id}",
+	"GET /alerts/{id}",
+	"GET /announcement-requests/{id}",
+	"GET /announcement-requests/{id}/deliveries",
+	"GET /announcement-requests/{id}/updates",
+	"GET /attachments/{id}",
+	"GET /attachments/{id}/content",
+	"GET /cases/{id}",
+	"GET /cases/{id}/escalations",
+	"GET /cases/{id}/feedback",
+	"GET /catalogs/{catalogId}/items/{catalogItemId}/variables",
+	"GET /change-requests/{id}",
+	"GET /change-requests/{id}/approvals",
+	"GET /cloud-status/availabilities",
+	"GET /cloud-status/availability-history",
+	"GET /cloud-status/incidents",
+	"GET /cloud-status/incidents/{id}",
+	"GET /cloud-status/monitors",
+	"GET /comments/{id}/history",
+	"GET /conversations/{id}",
+	"GET /groups/{id}",
+	"GET /incident-tasks/{id}",
+	"GET /incidents/{id}",
+	"GET /invoices/{id}",
+	"GET /kb-articles/{id}",
+	"GET /kb-articles/{id}/history",
+	"GET /knowledge-bases",
+	"GET /metadata",
+	"GET /onboarding-steps/{membershipSfId}",
+	"GET /opportunities/{id}",
+	"GET /outages/metadata",
+	"GET /outages/{id}",
+	"GET /outages/{id}/notification-state",
+	"GET /outages/{number}/communication-log",
+	"GET /plg/analytics/dashboard",
+	"GET /plg/lifecycle",
+	"GET /plg/organizations/{organizationId}",
+	"GET /plg/organizations/{organizationId}/products/{productCode}",
+	"GET /plg/pairings/{orgPlatformId}/location",
+	"GET /plg/playbook-run-tasks/{taskId}/shape",
+	"GET /plg/playbooks",
+	"GET /plg/playbooks/{playbookId}",
+	"GET /plg/products",
+	"GET /problems/{id}",
+	"GET /products/github-repo",
+	"GET /products/vulnerabilities/meta",
+	"GET /products/vulnerabilities/{id}",
+	"GET /projects/{id}",
+	"GET /projects/{id}/cases/stats",
+	"GET /projects/{id}/change-requests/stats",
+	"GET /projects/{id}/contacts/{contactId}",
+	"GET /projects/{id}/conversations/stats",
+	"GET /projects/{id}/deployments/stats",
+	"GET /projects/{id}/metadata",
+	"GET /projects/{id}/stats",
+	"GET /projects/{id}/time-cards/stats",
+	"GET /scheduled-tasks/attempts",
+	"GET /sla-duration-policy",
+	"GET /sla-status",
+	"GET /slas/{id}",
+	"GET /smart-alerts/{id}",
+	"GET /tags/search",
+	"GET /tasks/{id}",
+	"GET /team-schedule/activity",
+	"GET /team-schedule/catalogue",
+	"GET /team-schedule/edit-markers",
+	"GET /team-schedule/members",
+	"GET /team-schedule/my-lead-teams",
+	"GET /team-schedule/on-duty",
+	"GET /teams/{id}/members",
+	"GET /users/me",
+	"GET /users/me/saved-filter-views",
+	"GET /users/{id}",
+)
+
+func routeSet(patterns ...string) map[string]struct{} {
+	set := make(map[string]struct{}, len(patterns))
+	for _, p := range patterns {
+		set[p] = struct{}{}
+	}
+	return set
+}
+
+// readPoolMux is the ServeMux NewRouter registers on. It is a plain
+// http.ServeMux except that a pattern listed in readOnlyRoutes gets its handler
+// wrapped with middleware.ReadOnly, so the opt-in is decided in one place and
+// the registration lines below stay unchanged.
+type readPoolMux struct {
+	*http.ServeMux
+}
+
+func newReadPoolMux() *readPoolMux {
+	return &readPoolMux{ServeMux: http.NewServeMux()}
+}
+
+func (m *readPoolMux) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	m.Handle(pattern, http.HandlerFunc(h))
+}
+
+func (m *readPoolMux) Handle(pattern string, h http.Handler) {
+	if _, ok := readOnlyRoutes[pattern]; ok {
+		h = middleware.ReadOnly(h)
+	}
+	m.ServeMux.Handle(pattern, h)
+}
 
 // NewRouter builds the dependency graph (repository → service → handler),
 // registers all routes, and wraps the mux with the middleware chain:
@@ -50,7 +235,11 @@ import (
 // The function is never nil; with publishing unconfigured it simply has
 // nothing to close. It also closes the user cache's Redis client, when one
 // was built.
-func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
+func NewRouter(dbPool db.Pool, cfg *config.Config) (http.Handler, func()) {
+	// dbPool must be a true nil interface for "no database configured" (never
+	// a nil *pgxpool.Pool stored in it), so every `db != nil` gate below keeps
+	// meaning that. db.Router.Pool and db.FromPgx produce one.
+	db := dbPool
 	userRepo := repository.NewUserRepository(db)
 	userSvc := service.NewUserService(userRepo)
 
@@ -1407,7 +1596,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	taskHandler := handler.NewTaskHandler(activeTaskSvc)
 
-	mux := http.NewServeMux()
+	mux := newReadPoolMux()
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
@@ -1524,8 +1713,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me", userHandler.GetMe)
 		mux.HandleFunc("PATCH /users/me", userHandler.PatchMe)
 		mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
-	mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
-	mux.HandleFunc("POST /users", userHandler.CreateUser)
+		mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
+		mux.HandleFunc("POST /users", userHandler.CreateUser)
 	}
 	if snAccountHandler != nil {
 		mux.HandleFunc("GET /accounts/{id}", internalOnly(accessSvc, snAccountHandler.GetAccount))

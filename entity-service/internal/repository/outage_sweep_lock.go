@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // Session advisory-lock keys for the two outage email sweeps, one per flow so
@@ -44,7 +44,7 @@ const (
 //
 // ok is false when another session holds it. release must be called exactly
 // once when ok is true.
-func tryAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, key int64) (release func(), ok bool, err error) {
+func tryAdvisoryLock(ctx context.Context, pool db.Pool, key int64) (release func(), ok bool, err error) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquire connection for sweep lock: %w", err)

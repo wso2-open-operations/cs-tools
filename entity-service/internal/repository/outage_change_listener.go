@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // outageNoticeChannel is the NOTIFY channel migration 0186's trigger signals
@@ -32,12 +33,12 @@ const outageNoticeChannel = "outage_notice"
 // OutageChangeListener holds one pooled connection LISTENing on the outage
 // change channel. Not safe for concurrent use: one drainer owns one listener.
 type OutageChangeListener struct {
-	db   *pgxpool.Pool
+	db   db.Pool
 	conn *pgxpool.Conn
 }
 
 // NewOutageChangeListener returns a listener that is not yet listening.
-func NewOutageChangeListener(db *pgxpool.Pool) *OutageChangeListener {
+func NewOutageChangeListener(db db.Pool) *OutageChangeListener {
 	return &OutageChangeListener{db: db}
 }
 

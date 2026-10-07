@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -33,14 +33,14 @@ type OrgPlatformRepository interface {
 }
 
 type orgPlatformRepository struct {
-	db        *pgxpool.Pool
+	db        db.Pool
 	playbooks PlaybookRepository
 }
 
 // NewOrgPlatformRepository builds an OrgPlatformRepository. It composes the
 // playbook repository rather than duplicating its queries, so the product tab's
 // "playbooks you can add here" list is the same code the manager uses.
-func NewOrgPlatformRepository(db *pgxpool.Pool, playbooks PlaybookRepository) OrgPlatformRepository {
+func NewOrgPlatformRepository(db db.Pool, playbooks PlaybookRepository) OrgPlatformRepository {
 	return &orgPlatformRepository{db: db, playbooks: playbooks}
 }
 

@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -39,9 +39,9 @@ type TeamMemberRepository interface {
 	MembersByTeamKeys(ctx context.Context, teamKeys, roles, alertTiers, teamTypes []string) ([]domain.TeamMemberEntry, error)
 }
 
-type teamMemberRepository struct{ db *pgxpool.Pool }
+type teamMemberRepository struct{ db db.Pool }
 
-func NewTeamMemberRepository(db *pgxpool.Pool) TeamMemberRepository {
+func NewTeamMemberRepository(db db.Pool) TeamMemberRepository {
 	return &teamMemberRepository{db: db}
 }
 

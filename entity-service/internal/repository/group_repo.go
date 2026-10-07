@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
@@ -38,11 +38,11 @@ type GroupRepository interface {
 }
 
 type groupRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewGroupRepository constructs a GroupRepository backed by the given connection pool.
-func NewGroupRepository(db *pgxpool.Pool) GroupRepository {
+func NewGroupRepository(db db.Pool) GroupRepository {
 	return &groupRepo{db: db}
 }
 

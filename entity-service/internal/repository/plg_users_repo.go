@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -24,10 +24,10 @@ type PlgUserRepository interface {
 	SearchUsers(ctx context.Context, req domain.PlgSearchUsersRequest) ([]domain.UserRef, int, error)
 }
 
-type userRepository struct{ db *pgxpool.Pool }
+type userRepository struct{ db db.Pool }
 
 // NewPlgUserRepository builds a PlgUserRepository over the given pool.
-func NewPlgUserRepository(db *pgxpool.Pool) PlgUserRepository {
+func NewPlgUserRepository(db db.Pool) PlgUserRepository {
 	return &userRepository{db: db}
 }
 

@@ -24,7 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 )
 
 // IsRLSPolicyViolation reports whether err is Postgres rejecting a write
@@ -91,7 +91,7 @@ func WithSystemIdentity(ctx context.Context) context.Context {
 	return WithCallerIdentity(ctx, SearchScope{Unrestricted: true})
 }
 
-// Scoped wraps a *pgxpool.Pool so every statement it runs against a
+// Scoped wraps a db.Pool so every statement it runs against a
 // caller-scoped, row-level-security-protected table carries the caller's
 // identity as the same two session-local GUCs setCallerIdentity already
 // established (app.is_internal / app.viewer_email) -- in the SAME
@@ -99,7 +99,7 @@ func WithSystemIdentity(ctx context.Context) context.Context {
 // proven necessary (see setCallerIdentity's own doc comment).
 //
 // This is the ONLY way protected repositories reach Postgres: they hold a
-// *Scoped, never a raw *pgxpool.Pool, so there is no call a repository
+// *Scoped, never a raw db.Pool, so there is no call a repository
 // method can make that skips identity-setting by omission -- the earlier,
 // per-call-site runWithCallerIdentity wrapper this replaces was proven not
 // to hold that property (6 of 7 call sites missed it in review).
@@ -116,7 +116,7 @@ func WithSystemIdentity(ctx context.Context) context.Context {
 // pool is deliberately unexported: nothing outside this package can obtain
 // it directly, so the only way any code in this repository package reaches
 // Postgres for a protected table without going through the methods below is
-// by holding a SEPARATE reference to the same *pgxpool.Pool passed in
+// by holding a SEPARATE reference to the same db.Pool passed in
 // alongside Scoped (exactly the shape unprotected-table repos legitimately
 // use, and exactly what TestRLSBypassLint_NoRawPoolAgainstAProtectedTable
 // scans every non-test file in this package for). An earlier version of
@@ -125,7 +125,7 @@ func WithSystemIdentity(ctx context.Context) context.Context {
 // connection acquire whose context lacks a marker Scoped sets. That was
 // deliberately NOT built: this package's protected and unprotected repos
 // share ONE pool (NewScoped(db) and e.g. NewProjectRepository(db) both
-// close over the same *pgxpool.Pool from cmd/api/main.go), so a PrepareConn
+// close over the same pool from cmd/api/main.go), so a PrepareConn
 // hook on it would reject every unprotected-table query too, not just a
 // bypass. Doing this safely would need a SECOND, dedicated pool for Scoped
 // alone -- and since most real customer traffic (cases, escalations, time
@@ -135,12 +135,12 @@ func WithSystemIdentity(ctx context.Context) context.Context {
 // Revisit only alongside a deliberate connection-budget re-tuning exercise,
 // not as a quick addition.
 type Scoped struct {
-	pool *pgxpool.Pool
+	pool db.Pool
 }
 
 // NewScoped constructs a Scoped wrapping pool. Protected repository
-// constructors take a *Scoped instead of a *pgxpool.Pool.
-func NewScoped(pool *pgxpool.Pool) *Scoped {
+// constructors take a *Scoped instead of a raw db.Pool.
+func NewScoped(pool db.Pool) *Scoped {
 	return &Scoped{pool: pool}
 }
 

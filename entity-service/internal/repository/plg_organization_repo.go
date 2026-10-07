@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -20,10 +20,10 @@ type OrganizationRepository interface {
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest) error
 }
 
-type organizationRepository struct{ db *pgxpool.Pool }
+type organizationRepository struct{ db db.Pool }
 
 // NewOrganizationRepository builds an OrganizationRepository over the given pool.
-func NewOrganizationRepository(db *pgxpool.Pool) OrganizationRepository {
+func NewOrganizationRepository(db db.Pool) OrganizationRepository {
 	return &organizationRepository{db: db}
 }
 

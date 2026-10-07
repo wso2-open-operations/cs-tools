@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/db"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -40,11 +40,11 @@ type SalesforceOpportunityRepository interface {
 }
 
 type sfOpportunityRepo struct {
-	db *pgxpool.Pool
+	db db.Pool
 }
 
 // NewSalesforceOpportunityRepository constructs a SalesforceOpportunityRepository backed by the pool.
-func NewSalesforceOpportunityRepository(db *pgxpool.Pool) SalesforceOpportunityRepository {
+func NewSalesforceOpportunityRepository(db db.Pool) SalesforceOpportunityRepository {
 	return &sfOpportunityRepo{db: db}
 }
 
