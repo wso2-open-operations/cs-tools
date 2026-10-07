@@ -21,12 +21,14 @@ import { clearUserPreferredTimeZone, setUserPreferredTimeZone } from "@utils/dat
 import type {
   CloneChangeRequestNavState,
   CreateChangeRequestFromIncidentNavState,
+  CreateChangeRequestFromProblemNavState,
 } from "@features/csm-operations/utils/changeRequests";
 import type { CreateChangeRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
 
 const navigateMock = vi.fn();
 const postChangeRequestMutateMock = vi.fn();
 const patchChangeRequestMutateMock = vi.fn();
+const patchProblemMutateMock = vi.fn();
 const showErrorMock = vi.fn();
 const postIsPending = false;
 const patchIsPending = false;
@@ -34,6 +36,7 @@ let locationState:
   | CloneChangeRequestNavState
   | CreateChangeRequestFromCaseNavState
   | CreateChangeRequestFromIncidentNavState
+  | CreateChangeRequestFromProblemNavState
   | { from?: string }
   | undefined;
 
@@ -59,6 +62,9 @@ vi.mock("@features/csm-operations/api/usePatchChangeRequest", () => ({
       return patchIsPending;
     },
   }),
+}));
+vi.mock("@features/csm-operations/api/usePatchProblem", () => ({
+  usePatchProblem: () => ({ mutate: patchProblemMutateMock, isPending: false }),
 }));
 vi.mock("@features/settings/api/useGetUsersMe", () => ({
   useGetUsersMe: () => ({ data: undefined }),
@@ -1627,5 +1633,61 @@ describe("CreateChangeRequestPage — scope fields in the in-progress draft and 
     expect(screen.getByText(/customer project, category/i)).toBeInTheDocument();
     expect(screen.getByText(/Deployments, deployment products, schedule/i)).toBeInTheDocument();
     expect(screen.getByText(/The Customer Group follows the customer project/i)).toBeInTheDocument();
+  });
+});
+
+// A problem's "Create change request" (ServiceNow's "Create Normal Change"):
+// the form starts from the problem, and the new change request becomes the
+// problem's "Change request".
+describe("CreateChangeRequestPage — from a problem", () => {
+  const FROM_PROBLEM: CreateChangeRequestFromProblemNavState = {
+    problemId: "prb-1",
+    problemNumber: "PRB0040213",
+    problemSubject: "Gateway 502s",
+    problemDescription: "<p>Gateway returns 502s under load.</p>",
+    problemPriority: "PLANNING",
+    from: "/operations/problems/prb-1",
+  };
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    locationState = FROM_PROBLEM;
+    navigateMock.mockReset();
+    postChangeRequestMutateMock.mockReset();
+    patchChangeRequestMutateMock.mockReset();
+    patchProblemMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
+  it("starts from the problem's subject", () => {
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByLabelText(/subject/i)).toHaveValue("Gateway 502s");
+  });
+
+  it("links the new change request back to the problem, then opens it", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Normal");
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const [, options] = postChangeRequestMutateMock.mock.calls[0];
+    options.onSuccess({ changeRequest: { id: "chg-9", number: "CHG0000009" } });
+
+    expect(patchChangeRequestMutateMock).not.toHaveBeenCalled();
+    const [input, patchOptions] = patchProblemMutateMock.mock.calls[0];
+    expect(input).toEqual({ id: "prb-1", patch: { changeRequestId: "chg-9" } });
+    patchOptions.onSettled(undefined, null);
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/chg-9", {
+      state: { from: "/operations/problems/prb-1" },
+    });
+  });
+
+  it("still opens the created change request when the link fails, and says so", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Normal");
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    postChangeRequestMutateMock.mock.calls[0][1].onSuccess({ changeRequest: { id: "chg-9" } });
+    patchProblemMutateMock.mock.calls[0][1].onSettled(undefined, new Error("boom"));
+    expect(showErrorMock).toHaveBeenCalled();
+    expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/chg-9", expect.anything());
   });
 });

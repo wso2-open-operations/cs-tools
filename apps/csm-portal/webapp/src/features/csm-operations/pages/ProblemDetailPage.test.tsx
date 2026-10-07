@@ -354,5 +354,28 @@ describe("ProblemDetailPage", () => {
     expect(screen.getByText("Assignment group")).toBeInTheDocument();
     expect(screen.getByText("Choreo Special Ops")).toBeInTheDocument();
   });
+
+  // ServiceNow's "Create Normal Change": only while the problem has no change
+  // request, and it carries the problem into the create form.
+  it("offers Create change request only while the problem has no change request", () => {
+    mockQueryResult({ data: BASE_PROBLEM });
+    const { unmount } = render(<ProblemDetailPage />);
+    expect(screen.queryByRole("button", { name: /create change request/i })).not.toBeInTheDocument();
+    unmount();
+
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "FIX_IN_PROGRESS", linkedChangeRequest: null, priority: "HIGH" } });
+    render(<ProblemDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/new", {
+      state: {
+        problemId: "prb-1",
+        problemNumber: "PRB0040157",
+        problemSubject: "Intermittent 502s on the gateway",
+        problemDescription: BASE_PROBLEM.description,
+        problemPriority: "HIGH",
+        from: "/operations/problems/prb-1",
+      },
+    });
+  });
 });
 

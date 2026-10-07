@@ -46,6 +46,7 @@ import { isBlankHtml } from "@utils/sanitizeHtml";
 import { isPastZonedInput, zonedInputToBackendUtc } from "@utils/dateTime";
 import { usePostChangeRequest } from "@features/csm-operations/api/usePostChangeRequest";
 import { usePatchChangeRequest } from "@features/csm-operations/api/usePatchChangeRequest";
+import { usePatchProblem } from "@features/csm-operations/api/usePatchProblem";
 import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useSearchGroups } from "@api/useSearchGroups";
@@ -74,6 +75,7 @@ import {
   type ChangeRequestDraftContext,
   type CloneChangeRequestNavState,
   type CreateChangeRequestFromIncidentNavState,
+  type CreateChangeRequestFromProblemNavState,
   type ParentRecordOption,
 } from "@features/csm-operations/utils/changeRequests";
 import type { CreateChangeRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
@@ -104,6 +106,16 @@ const IMPACT_OPTIONS: Array<{ value: BeChangeRequestImpact; label: string }> = [
   { value: "medium", label: "Medium" },
   { value: "low", label: "Low" },
 ];
+
+/**
+ * A problem's priority as a change priority, the way ServiceNow's "Create
+ * Normal Change" copies it: only when it is a valid change choice (a problem
+ * can be Planning; a change cannot), otherwise none.
+ */
+function problemPriorityForChange(p?: string | null): BeChangeRequestPriority | undefined {
+  const v = (p ?? "").toLowerCase();
+  return v === "critical" || v === "high" || v === "moderate" || v === "low" ? v : undefined;
+}
 
 const PRIORITY_OPTIONS: Array<{ value: BeChangeRequestPriority; label: string }> = [
   { value: "critical", label: "Critical" },
@@ -152,6 +164,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const postChangeRequest = usePostChangeRequest();
   const patchChangeRequest = usePatchChangeRequest();
+  const patchProblem = usePatchProblem();
 
   // This form can be opened three ways, each carrying its own router state
   // (not query params) — read once: this form's state is what the user edits
@@ -179,11 +192,20 @@ export default function CreateChangeRequestPage(): JSX.Element {
     | CloneChangeRequestNavState
     | CreateChangeRequestFromCaseNavState
     | CreateChangeRequestFromIncidentNavState
+    | CreateChangeRequestFromProblemNavState
     | undefined;
   const cloneState =
-    locationState && !("caseId" in locationState) && !("incidentId" in locationState)
+    locationState &&
+    !("caseId" in locationState) &&
+    !("incidentId" in locationState) &&
+    !("problemId" in locationState)
       ? locationState
       : undefined;
+  // Opened from a problem's "Create change request": seeds subject,
+  // description and priority from it, and links the new change request back
+  // as the problem's "Change request" once it exists (see onSuccess below).
+  const fromProblemState =
+    locationState && "problemId" in locationState ? locationState : undefined;
   const fromCaseState =
     locationState && "caseId" in locationState ? locationState : undefined;
   const fromIncidentState =
@@ -211,7 +233,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
       ? { kind: "case", caseId: fromCaseState.caseId }
       : fromIncidentState
         ? { kind: "incident", incidentId: fromIncidentState.incidentId }
-        : { kind: "new" };
+        : fromProblemState
+          ? { kind: "problem", problemId: fromProblemState.problemId }
+          : { kind: "new" };
   const draftKey = changeRequestDraftKey(draftContext);
   const [draft] = useState(() => loadChangeRequestDraft(draftKey));
 
@@ -219,7 +243,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // would otherwise load untrimmed, show a negative characters-left count, and
   // submit over-length if the user never edits the field.
   const [subject, setSubject] = useState(
-    draft?.subject ?? (cloneState?.subject ?? "").slice(0, SUBJECT_MAX),
+    draft?.subject ??
+      (cloneState?.subject ?? fromProblemState?.problemSubject ?? "").slice(0, SUBJECT_MAX),
   );
   // Pre-selected to match the legacy ServiceNow form's own defaults, rather
   // than leaving every dropdown blank — most change requests are Normal
@@ -238,10 +263,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const initialType = draft?.type ?? cloneState?.type ?? "";
   const [type, setType] = useState<string>(isCreatableChangeRequestType(initialType) ? initialType : "");
   const [impact, setImpact] = useState<string>(draft?.impact ?? cloneState?.impact ?? "low");
-  const [priority, setPriority] = useState<string>(draft?.priority ?? UNSET);
+  const [priority, setPriority] = useState<string>(
+    draft?.priority ?? problemPriorityForChange(fromProblemState?.problemPriority) ?? UNSET,
+  );
   const [plannedStartDate, setPlannedStartDate] = useState(draft?.plannedStartDate ?? "");
   const [plannedEndDate, setPlannedEndDate] = useState(draft?.plannedEndDate ?? "");
-  const [description, setDescription] = useState(draft?.description ?? cloneState?.description ?? "");
+  const [description, setDescription] = useState(
+    draft?.description ?? cloneState?.description ?? fromProblemState?.problemDescription ?? "",
+  );
   const [justification, setJustification] = useState(
     draft?.justification ?? cloneState?.justification ?? "",
   );
@@ -511,6 +540,25 @@ export default function CreateChangeRequestPage(): JSX.Element {
         // `canSubmit` already blocks this branch from ever running with an
         // incident selected, so `parentSelection` here is either unset or a
         // service request.
+        if (fromProblemState) {
+          // ServiceNow's "Create Normal Change" sets the problem's rfc to the
+          // new change request; do the same. A failed link still leaves a
+          // valid change request -- say so rather than hide it.
+          patchProblem.mutate(
+            { id: fromProblemState.problemId, patch: { changeRequestId: createdId } },
+            {
+              onSettled: (_data, err) => {
+                if (err) {
+                  showError(
+                    "The change request was created, but linking it to the problem failed. Link it from the problem's Edit dialog.",
+                  );
+                }
+                navigate(`/operations/change-requests/${createdId}`, { state: { from: backTarget } });
+              },
+            },
+          );
+          return;
+        }
         const resolvedCaseId =
           parentSelection?.kind === "service_request" ? parentSelection.id : undefined;
         if (!resolvedCaseId) {

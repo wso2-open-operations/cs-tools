@@ -20951,6 +20951,12 @@ components:
             Format: YYYY-MM-DD HH:mm:ss, in UTC (RFC3339 is also accepted). Not surfaced on
             the native Problem form in the backing data source.
 
+        changeRequestId:
+          type: string
+          description: >-
+            Links the problem to a change request (ServiceNow's problem "Change request",
+            rfc), by the change request's id; an empty string unlinks it. 400 if no such
+            change request.
     UpdateProblemResponse:
       type: object
       properties:

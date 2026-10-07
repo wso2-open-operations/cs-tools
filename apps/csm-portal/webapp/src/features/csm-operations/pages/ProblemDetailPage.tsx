@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft, Link as LinkIcon, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, GitPullRequestCreate, Link as LinkIcon, Pencil } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode, useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
@@ -30,6 +30,7 @@ import ProblemTransitionRequirementDialog, {
   type ProblemRequirementTransition,
 } from "@features/csm-operations/components/ProblemTransitionRequirementDialog";
 import { problemStateColor, problemStateLabel } from "@features/csm-operations/utils/problems";
+import type { CreateChangeRequestFromProblemNavState } from "@features/csm-operations/utils/changeRequests";
 import { sanitizeDescriptionHtml } from "@utils/sanitizeHtml";
 import type { BeEntityRef, BeProblemRef, BeUpdateProblemPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -381,6 +382,29 @@ export default function ProblemDetailPage(): JSX.Element {
               isPending={patchProblem.isPending}
               onAction={onProblemAction}
             />
+            {/* ServiceNow's "Create Normal Change": offered only while the
+                problem has no change request (its condition is rfc.nil()). */}
+            {!problem.linkedChangeRequest && problem.id && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<GitPullRequestCreate size={14} />}
+                onClick={() =>
+                  navigate("/operations/change-requests/new", {
+                    state: {
+                      problemId: problem.id as string,
+                      problemNumber: problem.number ?? undefined,
+                      problemSubject: problem.subject ?? undefined,
+                      problemDescription: problem.description,
+                      problemPriority: problem.priority,
+                      from: `/operations/problems/${problem.id}`,
+                    } satisfies CreateChangeRequestFromProblemNavState,
+                  })
+                }
+              >
+                Create change request
+              </Button>
+            )}
             <Button
               variant="outlined"
               size="small"

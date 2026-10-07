@@ -38,7 +38,14 @@ import {
   parseDateTimeLocal,
   zonedInputToBackendUtc,
 } from "@utils/dateTime";
-import type { BeGroup, BeProblemDetail, BeUpdateProblemPayload, BeUser } from "@api/backend/types";
+import type {
+  BeChangeRequestSearchView,
+  BeGroup,
+  BeProblemDetail,
+  BeUpdateProblemPayload,
+  BeUser,
+} from "@api/backend/types";
+import { useSearchChangeRequestsForSelect } from "@features/csm-operations/api/useSearchChangeRequestsForSelect";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
 
@@ -67,6 +74,10 @@ interface EditProblemDialogProps {
  * `GET /problems/{id}` doesn't return it — so a value left in place would
  * claim an "already set to X" the portal can't verify.
  */
+function changeRequestLinkLabel(cr: BeChangeRequestSearchView): string {
+  return [cr.number, cr.subject].filter(Boolean).join(" — ") || cr.id;
+}
+
 export default function EditProblemDialog({
   problem,
   isSaving,
@@ -78,10 +89,12 @@ export default function EditProblemDialog({
   const [assignmentGroupId, setAssignmentGroupId] = useState(problem.assignmentGroup?.id ?? "");
   const [workaround, setWorkaround] = useState(problem.workaround ?? "");
   const [targetResolutionDate, setTargetResolutionDate] = useState("");
+  const [changeRequestId, setChangeRequestId] = useState(problem.linkedChangeRequest?.id ?? "");
 
   const initialAssignedToId = problem.assignedTo?.id ?? "";
   const initialAssignmentGroupId = problem.assignmentGroup?.id ?? "";
   const initialWorkaround = problem.workaround ?? "";
+  const initialChangeRequestId = problem.linkedChangeRequest?.id ?? "";
 
   const dateValue = useMemo(() => parseDateTimeLocal(backendUtcToZonedInput(targetResolutionDate)), [
     targetResolutionDate,
@@ -93,6 +106,8 @@ export default function EditProblemDialog({
     if (assignmentGroupId && assignmentGroupId !== initialAssignmentGroupId) next.assignmentGroupId = assignmentGroupId;
     if (workaround !== initialWorkaround) next.workaround = workaround;
     if (targetResolutionDate) next.targetResolutionDate = targetResolutionDate;
+    // "" unlinks: the backend reads an empty string as "clear the link".
+    if (changeRequestId !== initialChangeRequestId) next.changeRequestId = changeRequestId;
     return next;
   }, [
     assignedToId,
@@ -102,6 +117,8 @@ export default function EditProblemDialog({
     workaround,
     initialWorkaround,
     targetResolutionDate,
+    changeRequestId,
+    initialChangeRequestId,
   ]);
 
   const hasChanges = Object.keys(patch).length > 0;
@@ -145,6 +162,21 @@ export default function EditProblemDialog({
               />
             </Box>
           </Box>
+
+          <Typography variant="subtitle2">Linked records</Typography>
+          <AsyncEntitySelect<BeChangeRequestSearchView>
+            id="edit-problem-change-request"
+            label="Change request"
+            placeholder="Search change requests…"
+            value={changeRequestId}
+            onChange={setChangeRequestId}
+            disabled={isSaving}
+            useSearch={useSearchChangeRequestsForSelect}
+            getId={(cr) => cr.id}
+            getLabel={changeRequestLinkLabel}
+            knownLabel={problem.linkedChangeRequest?.number}
+            helperText="ServiceNow's problem “Change request”. Clear it to unlink."
+          />
 
           <Typography variant="subtitle2">Tracking</Typography>
           <TextField

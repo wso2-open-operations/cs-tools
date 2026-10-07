@@ -816,6 +816,23 @@ export interface CreateChangeRequestFromIncidentNavState {
   incidentSubject?: string;
 }
 
+/**
+ * Route state for opening the create form from a problem's "Create change
+ * request" action — ServiceNow's "Create Normal Change" on a problem: the new
+ * change request takes the problem's subject, description and (when it is a
+ * valid change priority) priority, and once created becomes the problem's
+ * "Change request" (`rfc`). `from` is the problem's own page, as on every
+ * other create page.
+ */
+export interface CreateChangeRequestFromProblemNavState {
+  problemId: string;
+  problemNumber?: string;
+  problemSubject?: string;
+  problemDescription?: string | null;
+  problemPriority?: string | null;
+  from?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Create-form in-progress draft persistence
 //
@@ -874,6 +891,7 @@ export type ChangeRequestDraftContext =
   | { kind: "clone"; sourceNumber?: string }
   | { kind: "case"; caseId: string }
   | { kind: "incident"; incidentId: string }
+  | { kind: "problem"; problemId: string }
   | { kind: "new" };
 
 const DRAFT_STORAGE_PREFIX = "csm.createChangeRequest.draft.";
@@ -899,6 +917,8 @@ export function changeRequestDraftKey(context: ChangeRequestDraftContext): strin
       return `${DRAFT_STORAGE_PREFIX}case:${context.caseId}`;
     case "incident":
       return `${DRAFT_STORAGE_PREFIX}incident:${context.incidentId}`;
+    case "problem":
+      return `${DRAFT_STORAGE_PREFIX}problem:${context.problemId}`;
     case "new":
       return `${DRAFT_STORAGE_PREFIX}new`;
   }

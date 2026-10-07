@@ -28,6 +28,9 @@ const useSearchGroupsMock = vi.fn(() => ({ data: [], isFetching: false, isError:
 vi.mock("@api/useSearchUsersByName", () => ({
   useSearchInternalUsersByName: (...args: unknown[]) => useSearchUsersByNameMock(...(args as [])),
 }));
+vi.mock("@features/csm-operations/api/useSearchChangeRequestsForSelect", () => ({
+  useSearchChangeRequestsForSelect: () => ({ data: [], isFetching: false, isError: false }),
+}));
 vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: (...args: unknown[]) => useSearchGroupsMock(...(args as [])),
 }));
@@ -110,6 +113,18 @@ describe("EditProblemDialog", () => {
     fireEvent.change(screen.getByLabelText("Workaround"), { target: { value: "Drain the node." } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledWith({ workaround: "Drain the node." });
+  });
+
+  it("shows the problem's linked change request in the Change request picker", () => {
+    render(
+      <EditProblemDialog
+        problem={{ ...BASE_PROBLEM, linkedChangeRequest: { id: "chg-1", number: "CHG0009988" } }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Change request")).toHaveValue("CHG0009988");
   });
 });
 

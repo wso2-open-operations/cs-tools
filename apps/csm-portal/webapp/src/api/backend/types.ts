@@ -3820,6 +3820,11 @@ export interface BeUpdateProblemPayload {
    * looking at the record in ServiceNow directly.
    */
   targetResolutionDate?: string;
+  /**
+   * Links the problem to a change request (ServiceNow's problem "Change
+   * request", `rfc`), by the change request's id; `""` unlinks it.
+   */
+  changeRequestId?: string;
 }
 
 /**

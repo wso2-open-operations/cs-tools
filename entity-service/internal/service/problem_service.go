@@ -388,8 +388,14 @@ func (s *problemService) UpdateProblem(ctx context.Context, req domain.UpdatePro
 		transition = &t
 	}
 	if transition == nil && req.AssignedToID == nil && req.AssignmentGroupID == nil && req.CauseNotes == nil &&
-		req.FixNotes == nil && req.Workaround == nil && req.TargetResolutionDate == nil {
-		return domain.UpdateProblemResponse{}, &apierror.ValidationError{Msg: "at least one of transition, assignedToId, assignmentGroupId, causeNotes, fixNotes, workaround, or targetResolutionDate must be provided"}
+		req.FixNotes == nil && req.Workaround == nil && req.TargetResolutionDate == nil && req.ChangeRequestID == nil {
+		return domain.UpdateProblemResponse{}, &apierror.ValidationError{Msg: "at least one of transition, assignedToId, assignmentGroupId, causeNotes, fixNotes, workaround, targetResolutionDate, or changeRequestId must be provided"}
+	}
+	// changeRequestId "" unlinks; anything else must be a change request's id.
+	if req.ChangeRequestID != nil && *req.ChangeRequestID != "" {
+		if err := validateUUIDs("changeRequestId", []string{*req.ChangeRequestID}); err != nil {
+			return domain.UpdateProblemResponse{}, err
+		}
 	}
 	for field, val := range map[string]*string{"assignedToId": req.AssignedToID, "assignmentGroupId": req.AssignmentGroupID} {
 		if val != nil {
@@ -500,12 +506,14 @@ func (s *problemService) mirrorProblemFields(ctx context.Context, req domain.Upd
 		FixNotes:             req.FixNotes,
 		Workaround:           req.Workaround,
 		TargetResolutionDate: snTargetDate,
+		ChangeRequestID:      req.ChangeRequestID,
 	}
 	payload := map[string]any{"id": req.ID}
 	for key, val := range map[string]*string{
 		"assignedToId": req.AssignedToID, "assignmentGroupId": req.AssignmentGroupID,
 		"causeNotes": req.CauseNotes, "fixNotes": req.FixNotes, "workaround": req.Workaround,
 		"targetResolutionDate": snTargetDate,
+		"changeRequestId":      req.ChangeRequestID,
 	} {
 		if val != nil {
 			payload[key] = *val

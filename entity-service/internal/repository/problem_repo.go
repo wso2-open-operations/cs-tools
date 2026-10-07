@@ -772,9 +772,18 @@ func updateProblemFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateProb
 		problemArgs = append(problemArgs, t)
 		idx++
 	}
+	if req.ChangeRequestID != nil {
+		// "" unlinks; NULLIF keeps that to one statement.
+		problemSets = append(problemSets, fmt.Sprintf("change_request_id = NULLIF($%d, '')::uuid", idx))
+		problemArgs = append(problemArgs, *req.ChangeRequestID)
+		idx++
+	}
 	if len(problemSets) > 0 {
 		tag, err := tx.Exec(ctx, `UPDATE problem SET `+strings.Join(problemSets, ", ")+` WHERE id = $1`, problemArgs...)
 		if err != nil {
+			if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return time.Time{}, &apierror.ValidationError{Msg: "changeRequestId does not exist: " + pgErr.Detail}
+			}
 			return time.Time{}, fmt.Errorf("update problem fields: problem: %w", err)
 		}
 		if tag.RowsAffected() == 0 {

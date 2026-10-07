@@ -457,6 +457,9 @@ type snUpdateProblemPayload struct {
 	FixNotes             *string `json:"fixNotes,omitempty"`
 	Workaround           *string `json:"workaround,omitempty"`
 	TargetResolutionDate *string `json:"targetResolutionDate,omitempty"`
+	// ChangeRequestID is problem.rfc as a sys_id ("" unlinks). ProblemUtils
+	// does not apply it yet -- see integrations/csm-flow-service/docs/servicenow-problem-change-request-link.md.
+	ChangeRequestID *string `json:"changeRequestId,omitempty"`
 }
 
 // snUpdateProblemResult mirrors the Choreo PATCH /problems/{id} response's "problem" object --
@@ -487,7 +490,8 @@ func (s *snProblemService) UpdateProblem(ctx context.Context, req domain.UpdateP
 	}
 
 	hasUpdate := req.Transition != nil || req.AssignedToID != nil || req.AssignmentGroupID != nil ||
-		req.CauseNotes != nil || req.FixNotes != nil || req.Workaround != nil || req.TargetResolutionDate != nil
+		req.CauseNotes != nil || req.FixNotes != nil || req.Workaround != nil || req.TargetResolutionDate != nil ||
+		req.ChangeRequestID != nil
 	if !hasUpdate {
 		return domain.UpdateProblemResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
 	}
@@ -520,6 +524,16 @@ func (s *snProblemService) UpdateProblem(ctx context.Context, req domain.UpdateP
 	if req.AssignmentGroupID != nil {
 		v := uuidToSysid(*req.AssignmentGroupID)
 		payload.AssignmentGroupID = &v
+	}
+	if req.ChangeRequestID != nil {
+		v := ""
+		if *req.ChangeRequestID != "" {
+			if err := validateUUIDs("changeRequestId", []string{*req.ChangeRequestID}); err != nil {
+				return domain.UpdateProblemResponse{}, err
+			}
+			v = uuidToSysid(*req.ChangeRequestID)
+		}
+		payload.ChangeRequestID = &v
 	}
 
 	raw, err := s.client.Patch(ctx, "/problems/"+uuidToSysid(req.ID), token, payload)

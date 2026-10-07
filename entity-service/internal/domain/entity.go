@@ -6243,6 +6243,9 @@ type UpdateProblemRequest struct {
 	FixNotes             *string `json:"fixNotes,omitempty"`
 	Workaround           *string `json:"workaround,omitempty"`
 	TargetResolutionDate *string `json:"targetResolutionDate,omitempty"`
+	// ChangeRequestID links the problem to a change request (ServiceNow's
+	// problem.rfc, its "Change request" field); "" unlinks it.
+	ChangeRequestID *string `json:"changeRequestId,omitempty"`
 }
 
 // UpdateProblemResponse is the output for PATCH /problems/{id}.
