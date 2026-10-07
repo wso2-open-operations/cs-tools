@@ -52,12 +52,26 @@ type ladderStore interface {
 	// MarkCalled records who was reached, for the evening pairing's
 	// round-robin. Best-effort at every call site.
 	MarkCalled(ctx context.Context, email string, at time.Time) error
+	// CaseAssignee and SetCaseAssignee hold a customer case's current
+	// assignee, which the case events that start a chain do not carry.
+	CaseAssignee(ctx context.Context, caseID string) (string, error)
+	SetCaseAssignee(ctx context.Context, caseID, email string) error
+	// ClaimCall takes one due call for this replica for ttl, so two replicas
+	// ticking together cannot both dial it; ReleaseCall gives it back.
+	ClaimCall(ctx context.Context, member string, ttl time.Duration) (bool, error)
+	ReleaseCall(ctx context.Context, member string) error
 }
+
+// callClaimTTL bounds a claim on one due call. Long enough to cover placing
+// the call; short enough that a replica dying mid-call delays it by at most
+// this, and never loses it -- the wake entry is still there.
+const callClaimTTL = time.Minute
 
 // incidentNotes abstracts the entity-service client that writes the execution
 // summary back onto the incident (section 11.0).
 type incidentNotes interface {
 	AppendWorkNote(ctx context.Context, incidentID, note string) error
+	AppendCaseWorkNote(ctx context.Context, caseID, note string) error
 }
 
 // EngineConfig holds the engine's operational switches.
@@ -217,7 +231,9 @@ func (e *Engine) Handle(ctx context.Context, record eventbus.Record) error {
 	switch env.Type {
 	case events.TypeIncidentCreated, events.TypeIncidentPriorityElevated,
 		events.TypeIncidentAcknowledged, events.TypeIncidentCommentAdded,
-		events.TypeIncidentAssigned:
+		events.TypeIncidentAssigned,
+		events.TypeCaseCreated, events.TypeSeverityChanged, events.TypeCaseAssigned,
+		events.TypeCommentAdded, events.TypeStatusChanged:
 	default:
 		return nil
 	}
@@ -226,6 +242,10 @@ func (e *Engine) Handle(ctx context.Context, record eventbus.Record) error {
 	}
 
 	switch env.Type {
+	case events.TypeCaseCreated, events.TypeSeverityChanged, events.TypeCaseAssigned,
+		events.TypeCommentAdded, events.TypeStatusChanged:
+		// Customer cases: see cases.go.
+		return e.handleCase(ctx, env)
 	case events.TypeIncidentCreated:
 		var p events.IncidentCreatedPayload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
@@ -304,16 +324,27 @@ const (
 // deliberately replaces whatever is running, retiring the old ladder's
 // outstanding calls first.
 func (e *Engine) start(ctx context.Context, t Trigger, replace bool) error {
-	if !e.claims(ctx, &t) {
+	if !e.admit(ctx, &t) {
 		return nil
 	}
-	if _, ok := PolicyFor(e.policies, t); !ok {
+	return e.schedule(ctx, t, replace)
+}
+
+// admit reports whether this engine runs a ladder for t at all: routing claims
+// it, its priority has a clock, and the configuration's trigger gate allows it.
+// A case's severity change needs the answer on its own -- a severity this
+// ladder does not page stops the running chain (see handleCase).
+func (e *Engine) admit(ctx context.Context, t *Trigger) bool {
+	if !e.claims(ctx, t) {
+		return false
+	}
+	if _, ok := PolicyFor(e.policies, *t); !ok {
 		// Not an error: section 7.0 has no row below P4, so a
 		// planning-priority incident legitimately has no ladder. Erroring
 		// would dead-letter a valid event.
 		slog.InfoContext(ctx, "escalation: no ladder for this priority; skipping",
 			"incidentId", t.IncidentID, "priority", t.Priority)
-		return nil
+		return false
 	}
 
 	// The configuration file's own gate, checked before anything is planned or
@@ -332,9 +363,13 @@ func (e *Engine) start(ctx context.Context, t Trigger, replace bool) error {
 			"incidentId", t.IncidentID, "priority", t.Priority,
 			"team", t.Routing.AssignedCRETeam, "shift", string(t.Routing.Shift),
 			"reason", why)
-		return nil
+		return false
 	}
+	return true
+}
 
+// schedule builds an admitted trigger's plan and stores it; see start.
+func (e *Engine) schedule(ctx context.Context, t Trigger, replace bool) error {
 	// USA_WEEKEND is the one shift whose LEVEL_0 depends on ABT eligibility
 	// (R10 has none, R12/R14 do — see RoutingContext.HasNotificationLevel).
 	// No publisher populates ABTEligible today: entity-service has no
@@ -414,6 +449,13 @@ func (e *Engine) start(ctx context.Context, t Trigger, replace bool) error {
 		if err != nil {
 			return fmt.Errorf("escalation: read running ladder for %s: %w", t.IncidentID, err)
 		}
+		if found && running.Cancelled == nil && sameSeverity(running.Plan.Trigger, t) {
+			// A case's severity change carries no timestamp, so a replay is
+			// recognised by the chain already running at that severity.
+			slog.InfoContext(ctx, "escalation: chain already runs at this severity; ignoring the replay",
+				"incidentId", t.IncidentID, "priority", t.Priority)
+			return nil
+		}
 		if found && sameElevation(running.Plan.Trigger, t) {
 			slog.InfoContext(ctx, "escalation: elevation already applied to the running ladder; ignoring the replay",
 				"incidentId", t.IncidentID, "priority", t.Priority, "elevatedAt", t.At.Format(time.RFC3339))
@@ -431,14 +473,22 @@ func (e *Engine) start(ctx context.Context, t Trigger, replace bool) error {
 		// happen twice, so the second gesture would never complete the pair
 		// and the replacement ladder would keep climbing past an incident
 		// somebody had already picked up.
-		if hadOne {
+		if hadOne && !t.isCase() {
 			st.SawStateChange = previous.SawStateChange
 			st.SawPublicComment = previous.SawPublicComment
+		}
+		// A case's new chain starts fresh -- only gestures after the change
+		// count -- except that an assignee already on the case stays assigned.
+		if err := e.seedCaseAssignment(ctx, &st); err != nil {
+			return err
 		}
 		if err := e.store.Save(ctx, t.IncidentID, st); err != nil {
 			return fmt.Errorf("escalation: replace ladder for %s: %w", t.IncidentID, err)
 		}
 	} else {
+		if err := e.seedCaseAssignment(ctx, &st); err != nil {
+			return err
+		}
 		created, err := e.store.Create(ctx, t.IncidentID, st)
 		if err != nil {
 			return fmt.Errorf("escalation: claim ladder for %s: %w", t.IncidentID, err)
@@ -497,12 +547,13 @@ func (e *Engine) claims(ctx context.Context, t *Trigger) bool {
 		key = LadderKeySRE
 	}
 	rule, ok := e.cfg.Routing.Match(RouteInput{
-		Team: family, ContactType: t.Routing.ContactType, Priority: t.Priority,
+		Record: t.recordKind(), Team: family, ContactType: t.Routing.ContactType, Priority: t.Priority,
 	}, key)
 	if !ok {
 		return false
 	}
-	if e.cfg.Kind == LadderSRE && t.Kind == TriggerPriorityElevated && len(rule.When.Priority) == 0 {
+	if e.cfg.Kind == LadderSRE && (t.Kind == TriggerPriorityElevated || t.Kind == TriggerSeverityChanged) &&
+		len(rule.When.Priority) == 0 {
 		return false
 	}
 	t.Routing.Ladder = e.cfg.Kind
@@ -551,6 +602,14 @@ func (e *Engine) classify(ctx context.Context, t Trigger) Ladder {
 		return LadderCRE
 	}
 	return ladder
+}
+
+// sameSeverity reports whether t is a case severity change to the severity the
+// running chain already pages at: a redelivery, since a real change always
+// moves the severity.
+func sameSeverity(running, t Trigger) bool {
+	return t.Kind == TriggerSeverityChanged && running.isCase() &&
+		NormalisePriority(running.Priority) == NormalisePriority(t.Priority)
 }
 
 // sameElevation reports whether running was built from the very elevation t
@@ -706,7 +765,13 @@ func (e *Engine) cancelBy(ctx context.Context, incidentID string, reason cancelR
 		}
 		reason = cancelAcknowledged
 	}
+	return e.stopLadder(ctx, incidentID, st, reason)
+}
 
+// stopLadder ends a running ladder for reason: marks it cancelled, drops its
+// pending calls, writes the summary and deletes the state. Order matters; see
+// cancelBy.
+func (e *Engine) stopLadder(ctx context.Context, incidentID string, st LadderState, reason cancelReason) error {
 	if st.Cancelled == nil {
 		now := time.Now()
 		st.Cancelled = &now
@@ -774,11 +839,32 @@ func (e *Engine) processDue(ctx context.Context, member string) error {
 		return e.store.RemoveWakes(ctx, member)
 	}
 
+	// Two replicas tick independently (a rolling restart always has two for
+	// a moment), and both see the same due call. Only the one that claims it
+	// dials. The claim expires on its own, so a replica that dies here delays
+	// the call by at most callClaimTTL rather than losing it.
+	// Keyed by the chain as well as the call: a replacement chain (a severity
+	// change, an elevation) reuses the same call slots, and must not wait out
+	// the old chain's claim.
+	claim := fmt.Sprintf("%s@%d", member, st.Plan.Trigger.At.UnixNano())
+	claimed, err := e.store.ClaimCall(ctx, claim, callClaimTTL)
+	if err != nil {
+		return fmt.Errorf("escalation: claim due call for %s: %w", incidentID, err)
+	}
+	if !claimed {
+		return nil
+	}
+
 	call := st.Plan.Calls[index]
 	var failure string
 	if err := e.place(ctx, st.Plan, call); err != nil {
 		if !isPermanent(err) {
-			// Transient — leave the wake entry, the next tick retries.
+			// Transient — leave the wake entry and give the claim back, so the
+			// next tick retries.
+			if rerr := e.store.ReleaseCall(ctx, claim); rerr != nil {
+				slog.WarnContext(ctx, "escalation: could not release a failed call's claim; it retries when the claim expires",
+					"incidentId", incidentID, "err", rerr)
+			}
 			return fmt.Errorf("escalation: place %s call for %s: %w", call.Level, incidentID, err)
 		}
 		// The provider rejected the request itself; trying again with the
@@ -933,7 +1019,11 @@ func (e *Engine) writeNote(ctx context.Context, plan Plan, placed []bool, failed
 			"incidentId", plan.Trigger.IncidentID)
 		return
 	}
-	if err := e.notes.AppendWorkNote(ctx, plan.Trigger.IncidentID, note); err != nil {
+	write := e.notes.AppendWorkNote
+	if plan.Trigger.isCase() {
+		write = e.notes.AppendCaseWorkNote
+	}
+	if err := write(ctx, plan.Trigger.IncidentID, note); err != nil {
 		// Logged, never returned. This used to propagate, and a record whose
 		// summary could not be written was retried three times and then
 		// dead-lettered -- an incident that had genuinely been handled,

@@ -65,7 +65,32 @@ func main() {
 	reportedAt := flag.String("reported-at", "", "RFC3339 report time; decides the shift. Defaults to now")
 	contactType := flag.String("contact-type", "", "how the incident was raised: AZURE, SITE_247, SENTINEL (monitoring) or EMAIL, PHONE ...; routing reads it")
 	event := flag.String("event", "created", "what to publish: created, or a stop gesture for an existing -incident-id: assigned, acknowledged (left NEW), comment (public)")
+	record := flag.String("record", "incident", "incident, or case: a customer case, which is what CRE paging starts from")
+	caseEvent := flag.String("case-event", "created", "with -record case: created, severity (-from/-priority), assigned (-assignee), comment (-author), closed")
+	from := flag.String("from", "HIGH", "with -case-event severity: the old severity")
+	assignee := flag.String("assignee", "local.engineer@wso2.com", "with -case-event assigned: who the case is assigned to")
+	author := flag.String("author", "local.engineer@wso2.com", "with -case-event comment: who wrote it")
+	workNote := flag.Bool("work-note", false, "with -case-event comment: a work note rather than a public comment")
+	engineer := flag.Bool("engineer", true, "with -case-event comment: written by a support engineer (false = the customer)")
+	flag.BoolVar(&dryRun, "dry-run", false, "with -record case: print the envelope instead of publishing it")
 	flag.Parse()
+
+	if *record == "case" {
+		caseID := *id
+		if caseID == "" {
+			if *caseEvent != "created" {
+				fmt.Fprintln(os.Stderr, "-case-event", *caseEvent, "needs the -incident-id of the case")
+				os.Exit(1)
+			}
+			caseID = fmt.Sprintf("local-case-%d", time.Now().Unix())
+		}
+		publishCaseEvent(*broker, *topic, caseID, *caseEvent, caseFields{
+			severity: severityLabel(*priority), from: severityLabel(*from), team: *team, title: *title,
+			account: *account, product: *product, assignee: *assignee, author: *author,
+			workNote: *workNote, engineer: *engineer, at: time.Now().UTC(),
+		})
+		return
+	}
 
 	reported := time.Now().UTC()
 	if *reportedAt != "" {
@@ -168,6 +193,9 @@ func lastN(s string, n int) string {
 	return s[len(s)-n:]
 }
 
+// dryRun prints an envelope instead of publishing it.
+var dryRun bool
+
 // publishOne puts one event about an existing incident on the topic.
 func publishOne(broker, topic, incidentID string, typ events.Type, body any) {
 	payload, err := json.Marshal(body)
@@ -179,6 +207,10 @@ func publishOne(broker, topic, incidentID string, typ events.Type, body any) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "encode envelope:", err)
 		os.Exit(1)
+	}
+	if dryRun {
+		fmt.Println(string(envelope))
+		return
 	}
 	producer := eventbus.NewProducer(eventbus.Config{
 		Broker: broker, Topic: topic, ConnectionString: os.Getenv("EVENT_HUB_CONNECTION_STRING"),
@@ -192,4 +224,82 @@ func publishOne(broker, topic, incidentID string, typ events.Type, body any) {
 	}
 	fmt.Printf("published %s for %s to %s\n", typ, incidentID, topic)
 	fmt.Printf("payload: %s\n", payload)
+}
+
+// caseFields are what the case events carry, from the flags.
+type caseFields struct {
+	severity, from, team, title, account, product, assignee, author string
+	workNote, engineer                                              bool
+	at                                                              time.Time
+}
+
+// localRecipients satisfies the consumer's validation; nobody reads it in a
+// local run.
+var localRecipients = []string{"local.watcher@wso2.com"}
+
+// publishCaseEvent puts one customer case event on the topic, with the fields
+// csm-notification-service's events.Validate requires. Built as plain maps
+// with the wire names, the way entity-service's own publisher spells them.
+func publishCaseEvent(broker, topic, caseID, event string, f caseFields) {
+	number := "CS" + lastN(caseID, 7)
+	var (
+		typ  events.Type
+		body map[string]any
+	)
+	switch event {
+	case "created":
+		typ, body = events.TypeCaseCreated, map[string]any{
+			"reporterName": "Local Customer", "projectName": f.account, "projectId": "local-project",
+			"caseId": caseID, "caseNumber": number, "caseTitle": f.title, "caseType": "CASE",
+			"priority": f.severity, "team": f.team, "createdAt": f.at.Format(time.RFC3339),
+			"description": f.title, "recipients": localRecipients,
+		}
+		if f.product != "" {
+			body["product"] = f.product
+		}
+	case "severity":
+		typ, body = events.TypeSeverityChanged, map[string]any{
+			"projectId": "local-project", "caseId": caseID, "caseNumber": number, "caseTitle": f.title,
+			"oldSeverity": f.from, "newSeverity": f.severity, "team": f.team, "recipients": localRecipients,
+		}
+	case "assigned":
+		typ, body = events.TypeCaseAssigned, map[string]any{
+			"assigneeName": "Local Engineer", "assigneeEmail": f.assignee, "projectId": "local-project",
+			"caseId": caseID, "caseNumber": number, "recipients": localRecipients,
+		}
+	case "comment":
+		typ, body = events.TypeCommentAdded, map[string]any{
+			"name": "Local Author", "projectId": "local-project", "caseId": caseID, "caseNumber": number,
+			"caseTitle": f.title, "caseComment": "looking into it", "commentId": fmt.Sprintf("local-comment-%d", time.Now().UnixNano()),
+			"isInternalNote": f.workNote, "authorEmail": f.author, "isSupportEngineerResponse": f.engineer,
+			"recipients": localRecipients,
+		}
+	case "closed":
+		typ, body = events.TypeStatusChanged, map[string]any{
+			"projectId": "local-project", "caseId": caseID, "caseNumber": number, "newStatus": "Closed",
+			"recipients": localRecipients,
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "-case-event must be created, severity, assigned, comment or closed")
+		os.Exit(1)
+	}
+	publishOne(broker, topic, caseID, typ, body)
+}
+
+// severityLabel accepts S0-S4 or a label and returns the label a case event
+// carries (CATASTROPHIC ... LOW).
+func severityLabel(s string) string {
+	switch s {
+	case "S0", "P0":
+		return "CATASTROPHIC"
+	case "S1", "P1":
+		return "CRITICAL"
+	case "S2", "P2":
+		return "HIGH"
+	case "S3", "P3":
+		return "MEDIUM"
+	case "S4", "P4":
+		return "LOW"
+	}
+	return s
 }

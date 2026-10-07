@@ -18,50 +18,18 @@ enabled: true
 # Which ladders an incident climbs. Both engines read these rules; each asks
 # only about its own ladder, so an incident can climb both.
 #
-# An incident climbs every ladder named by any rule it matches. A rule matches
-# when every condition it states matches; a condition left out matches
-# anything. Change who goes where here, not in code.
+# Which ladders a record climbs is NOT configured here: it is the Case Paging
+# design, kept in code (internal/paging/routing.go, DefaultRouting), so a
+# change to it goes through a code review rather than a file edit on a running
+# deployment. A routing: section in this file is refused at start-up.
 #
-#   team         sre  -- assigned to an SRE team (sre.teams.abts)
-#                cre  -- assigned to any other team the rota knows
-#                none -- no assignment group, or one the rota does not know
-#   contactType  how the incident was raised: AZURE, SITE_247, SENTINEL are
-#                monitoring sources; EMAIL, PHONE, SELF_SERVICE ... are people.
-#                Punctuation is ignored (SITE_247 matches SITE_24_7).
-#   priority     codes or labels: P0 also matches CATASTROPHIC.
+#   customer case S0        -> CRE + SRE
+#   customer case S1-S4     -> CRE only (S4 only if cre.trigger.priorities lists it)
+#   SRE incident            -> SRE only, any priority
+#   incident on a CRE team  -> nobody: CRE work arrives as a case
 #
-# A rule with NO team condition (monitoring) takes incidents with no known team
-# on purpose and overrides that ladder's trigger.requireKnownTeam. A rule that
-# names none among its teams (cre-team) only matches them: that ladder's own
-# requireKnownTeam still decides.
-# Omit this whole section and these same four rules apply.
-routing:
-  rules:
-    # A CRE team's incident, and one assigned to no team -- the CRE rule table
-    # has rows for "assigned to no ABT". cre.trigger.requireKnownTeam below
-    # still refuses the team-less ones locally.
-    - name: cre-team
-      when: { team: [cre, none] }
-      ladders: [cre]
-
-    # The SRE rules sheet's "Is assigned to an SRE ABT team = Yes" rows.
-    - name: sre-abt-team
-      when: { team: [sre] }
-      ladders: [sre]
-
-    # A P0 raised on the CRE side needs both teams at once. An incident's
-    # highest priority is CRITICAL (incidents carry no CATASTROPHIC), so it
-    # counts as the CRE side's P0 here.
-    - name: cre-p0
-      when: { team: [cre], priority: [P0, CRITICAL] }
-      ladders: [sre]
-
-    # The SRE rules sheet's "= No" rows: raised by monitoring, climbs the SRE
-    # ladder by zone with no team preference -- and, on a CRE team, the CRE
-    # ladder as well (through cre-team).
-    - name: monitoring
-      when: { contactType: [AZURE, SITE_247, SENTINEL] }
-      ladders: [sre]
+# What stays here are the small, between-incidents knobs: channels, which
+# severities page, caps, teams, Chat spaces.
 
 cre:
   enabled: true
@@ -76,9 +44,10 @@ cre:
   channel: log
 
   trigger:
-    # Which priorities get a ladder at all. Empty means every priority that
-    # has a policy row. The bluntest cost control there is.
-    priorities: []
+    # Which case severities get a chain at all. Empty means every severity
+    # that has a policy row. S4 Low (Query) is left out on purpose: paging it
+    # is optional (Case Paging Rules); add S4 here to switch it on.
+    priorities: [S0, S1, S2, S3]
 
     # Assignment-group allowlist, and a stronger exclude list that wins over
     # it. Empty means any team.

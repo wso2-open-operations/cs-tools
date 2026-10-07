@@ -73,8 +73,11 @@ type EscalationAlert struct {
 	// Rule is the section 5.0 row that selected these recipients, so the room
 	// can see which path an alert took.
 	Rule string
-	// PortalURL opens the incident.
+	// PortalURL opens the incident, or the customer case a case ladder pages
+	// about.
 	PortalURL string
+	// PortalLabel is the link's text; empty is "View incident".
+	PortalLabel string
 	// Elapsed is how long the incident has been unattended, e.g. "18m".
 	// Empty means the ladder has only just started.
 	Elapsed string
@@ -210,7 +213,11 @@ func buildEscalationCard(a EscalationAlert) chatCardMessage {
 	}
 	if a.PortalURL != "" {
 		body.WriteString("<br>")
-		body.WriteString(fmt.Sprintf(`<a href="%s">View incident</a>`, a.PortalURL))
+		label := strings.TrimSpace(a.PortalLabel)
+		if label == "" {
+			label = "View incident"
+		}
+		body.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`, a.PortalURL, html.EscapeString(label)))
 	}
 
 	sections := []chatCardSection{{

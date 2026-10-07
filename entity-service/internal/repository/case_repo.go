@@ -2998,6 +2998,18 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	// projectOnboardingStatus: the parent project's onboarding_status (p is
 	// the LEFT JOIN below). A case whose project has no status set (NULL)
 	// satisfies notIn -- "not in progress" is true of it -- but never in.
+	//
+	// Deliberately NOT rewritten as a targeted id lookup against "project"
+	// the way caseLikeStateLookupClause rewrites the state filter, despite
+	// the superficial similarity: measured directly against production-
+	// volume data that doing so brings no benefit here and can be slower.
+	// The state lookup wins because a case search's state filter is
+	// typically highly selective (e.g. "open" is a small fraction of all
+	// cases); projectOnboardingStatus filters in practice are usually the
+	// opposite -- a widget excluding only a couple of terminal statuses
+	// matches nearly every project -- so building an array of almost every
+	// project id and checking per-row membership against it costs more than
+	// the simple indexed nested-loop join this already was.
 	if len(req.Parsed.ProjectOnboardingStatuses) > 0 {
 		labels, err := onboardingStatusEnumLabels("projectOnboardingStatus", req.Parsed.ProjectOnboardingStatuses)
 		if err != nil {

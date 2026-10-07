@@ -17,7 +17,6 @@
 package paging
 
 import (
-	"fmt"
 	"strings"
 	"unicode"
 )
@@ -61,6 +60,14 @@ type RouteWhen struct {
 	// Priority accepts codes, labels and S-codes alike, compared in
 	// P-notation: P0, CATASTROPHIC and S0 are one priority.
 	Priority []string `yaml:"priority"`
+	// Record is what the event is about: case (a customer case, S0-S4) or
+	// incident. Empty matches both.
+	Record []string `yaml:"record"`
+	// ExcludeTeam refuses these team families, where Team would admit them.
+	// Unlike a Team list it leaves the rule taking team-less records (see
+	// AdmitsNoTeam), which is how the monitoring rule keeps "no team" while
+	// refusing a CRE team's incident.
+	ExcludeTeam []string `yaml:"excludeTeam"`
 }
 
 // Team families a RouteWhen.Team may name.
@@ -70,25 +77,33 @@ const (
 	TeamFamilyNone = "none"
 )
 
-// DefaultRouting is what a deployment gets with no routing section: the
-// behaviour the two ladders had before routing was configurable.
+// DefaultRouting is what a deployment gets with no routing section: the Case
+// Paging rules (task-call-alert-flow/Case Paging Rules.xlsx, agreed
+// 2026-10-07).
+//
+//	customer case S0        -> CRE + SRE
+//	customer case S1-S4     -> CRE only (S4 only if cre.trigger.priorities lists it)
+//	SRE incident            -> SRE only, any priority
+//	incident on a CRE team  -> nobody: CRE pages from cases only
 var DefaultRouting = Routing{Rules: []RouteRule{
-	// The CRE rule table has rows for incidents assigned to no ABT, so a
-	// team-less incident is CRE's too (cre.trigger.requireKnownTeam can still
-	// refuse it).
-	{Name: "cre-team", When: RouteWhen{Team: []string{TeamFamilyCRE, TeamFamilyNone}}, Ladders: []string{LadderKeyCRE}},
-	// The rules sheet's "Is assigned to an SRE ABT team = Yes" rows.
-	{Name: "sre-abt-team", When: RouteWhen{Team: []string{TeamFamilySRE}}, Ladders: []string{LadderKeySRE}},
-	// A P0 raised on the CRE side needs both teams at once. An incident's
-	// highest priority is CRITICAL (incidents carry no CATASTROPHIC), so that
-	// counts as the CRE side's P0 here; P0 itself still covers case severities.
-	{Name: "cre-p0", When: RouteWhen{Team: []string{TeamFamilyCRE}, Priority: []string{"P0", "CRITICAL"}}, Ladders: []string{LadderKeySRE}},
-	// The rules sheet's "= No" rows: raised by monitoring, whatever the team.
-	{Name: "monitoring", When: RouteWhen{ContactType: []string{"AZURE", "SITE_247", "SENTINEL"}}, Ladders: []string{LadderKeySRE}},
+	// Every customer case pages CRE; cre.trigger.priorities decides which
+	// severities. No team condition, so a case on no ABT still pages: the
+	// rule table has rows for it (R3, R4b).
+	{Name: "cre-case", When: RouteWhen{Record: []string{RecordCase}}, Ladders: []string{LadderKeyCRE}},
+	// Only an S0 (Catastrophic) case needs SRE too; S1 Critical and below page
+	// CRE alone.
+	{Name: "cre-p0", When: RouteWhen{Record: []string{RecordCase}, Priority: []string{"S0"}}, Ladders: []string{LadderKeySRE}},
+	// The SRE rules sheet's "Is assigned to an SRE ABT team = Yes" rows.
+	{Name: "sre-abt-team", When: RouteWhen{Record: []string{RecordIncident}, Team: []string{TeamFamilySRE}}, Ladders: []string{LadderKeySRE}},
+	// The sheet's "= No" rows: raised by monitoring, on an SRE team or none.
+	// A CRE team's incident is excluded: CRE work arrives as a case.
+	{Name: "monitoring", When: RouteWhen{Record: []string{RecordIncident}, ContactType: []string{"AZURE", "SITE_247", "SENTINEL"},
+		ExcludeTeam: []string{TeamFamilyCRE}}, Ladders: []string{LadderKeySRE}},
 }}
 
 // RouteInput is what routing decides on.
 type RouteInput struct {
+	Record      string // case or incident
 	Team        string // sre, cre or none
 	ContactType string
 	Priority    string
@@ -116,7 +131,13 @@ func (r Routing) Match(in RouteInput, ladder string) (RouteRule, bool) {
 }
 
 func (w RouteWhen) matches(in RouteInput) bool {
+	if len(w.Record) > 0 && !contains(w.Record, in.Record) {
+		return false
+	}
 	if len(w.Team) > 0 && !contains(w.Team, in.Team) {
+		return false
+	}
+	if contains(w.ExcludeTeam, in.Team) {
 		return false
 	}
 	if len(w.ContactType) > 0 && !containsContact(w.ContactType, in.ContactType) {
@@ -180,36 +201,4 @@ func normalizeContact(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// validate checks a routing section before it is used. Only a section that
-// was actually supplied is checked; an absent one means DefaultRouting.
-func (r Routing) validate() error {
-	if r.Rules == nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	for i, rule := range r.Rules {
-		if strings.TrimSpace(rule.Name) == "" {
-			return fmt.Errorf("routing: rule %d has no name", i+1)
-		}
-		if seen[rule.Name] {
-			return fmt.Errorf("routing: rule %q is defined twice", rule.Name)
-		}
-		seen[rule.Name] = true
-		if len(rule.Ladders) == 0 {
-			return fmt.Errorf("routing: rule %q names no ladders", rule.Name)
-		}
-		for _, l := range rule.Ladders {
-			if !contains([]string{LadderKeyCRE, LadderKeySRE}, l) {
-				return fmt.Errorf("routing: rule %q names ladder %q; use cre or sre", rule.Name, l)
-			}
-		}
-		for _, t := range rule.When.Team {
-			if !contains([]string{TeamFamilySRE, TeamFamilyCRE, TeamFamilyNone}, t) {
-				return fmt.Errorf("routing: rule %q has team %q; use sre, cre or none", rule.Name, t)
-			}
-		}
-	}
-	return nil
 }

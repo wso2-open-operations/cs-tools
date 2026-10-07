@@ -49,6 +49,30 @@ type Trigger struct {
 	At time.Time
 	// Routing selects recipients per level.
 	Routing RoutingContext
+	// Record is what the ladder pages about: a customer case (RecordCase) or
+	// an incident. Empty is an incident, which is what every ladder stored
+	// before cases were paged is about. IncidentID holds the case id for a
+	// case: it is the ladder's key, not a claim about the entity.
+	Record string `json:",omitempty"`
+}
+
+// What a ladder pages about. CRE paging starts from customer cases (S0-S4),
+// SRE paging from SRE incidents and from a case at S0.
+const (
+	RecordCase     = "case"
+	RecordIncident = "incident"
+)
+
+// isCase reports whether the ladder pages about a customer case.
+func (t Trigger) isCase() bool { return t.Record == RecordCase }
+
+// recordKind is the routing input for the record: an empty Record is an
+// incident.
+func (t Trigger) recordKind() string {
+	if t.isCase() {
+		return RecordCase
+	}
+	return RecordIncident
 }
 
 // TriggerKind is which of the two events started the ladder.
@@ -57,6 +81,10 @@ type TriggerKind string
 const (
 	TriggerNewIncident      TriggerKind = "New Case"
 	TriggerPriorityElevated TriggerKind = "Priority Elevation"
+	// TriggerSeverityChanged is a customer case's severity changing, up or
+	// down: the running chain stops and a new one starts for the new
+	// severity, from the first tier.
+	TriggerSeverityChanged TriggerKind = "Severity Change"
 )
 
 // PlannedCall is one concrete call: who, when, at which level.
@@ -352,6 +380,12 @@ func (t Trigger) caseRef() string {
 // differ by exactly these two characters, which is why this takes a flag
 // rather than the callers sharing one string.
 func (t Trigger) instruction(quoted bool) string {
+	// A customer case stops on the assigned engineer's public comment (the
+	// SRE chain on an S0 case also stops on the assignment itself), so both
+	// ladders ask for the same two things.
+	if t.isCase() {
+		return "Assign the case to yourself and add a public comment to stop further calls."
+	}
 	// The SRE ladder stops when an engineer takes the incident, whichever
 	// trigger started it.
 	if t.Routing.Ladder == LadderSRE {
@@ -574,8 +608,11 @@ func (p Plan) WorkNote(placed []bool, failed []string, cancelledAt *time.Time, r
 	const stamp = "2006-01-02 15:04:05"
 	var b strings.Builder
 	b.WriteString("Execution Summary Of the Escalation Flow\n\n")
-	b.WriteString(fmt.Sprintf("Incident Created/Priority Updated time: %s\n",
-		p.Trigger.At.Format(stamp)))
+	heading := "Incident Created/Priority Updated time"
+	if p.Trigger.isCase() {
+		heading = "Case Created/Severity Updated time"
+	}
+	b.WriteString(fmt.Sprintf("%s: %s\n", heading, p.Trigger.At.Format(stamp)))
 	// Which section 5.0 row selected these recipients, in the permanent
 	// record rather than only in a log line that ages out. "Why did this page
 	// the Americas leads and not ours" is answerable from the incident itself.

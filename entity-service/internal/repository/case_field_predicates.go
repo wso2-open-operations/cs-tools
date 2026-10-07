@@ -118,20 +118,32 @@ var caseLikeStateLookupTables = map[string]string{
 // caseLikeStateColumn's COALESCE always implicitly covers (any of the five).
 var caseLikeStateLookupAllTypes = []string{"case", "engagement", "service_request", "security_report_analysis", "announcement"}
 
-// caseLikeStateLookupClause renders a "wi.id [NOT ]IN (...)" predicate
-// equivalent to filtering caseLikeStateColumn against the bound parameter at
-// placeholder (e.g. "$3::text[]"), as a UNION ALL of per-type id lookups
-// scoped to types -- every case-like type when types is empty (the
-// DefaultTypes case, or an anyOf branch that names no type of its own, same
-// as the COALESCE it replaces). A type not in caseLikeStateLookupTables
-// (reachable only from an anyOf branch naming a non-case-like type, e.g.
-// "incident") contributes no branch: such a row can never have a case-like
-// state at all, exactly how the COALESCE already treats it (every one of
-// the five joins is NULL for it). If no requested type is case-like, the
-// predicate degrades to the same answer the COALESCE already gives in that
-// situation -- FALSE for "in" (can never match), TRUE for "not in" (always
-// satisfies an exclusion it has no state to violate) -- rather than emitting
-// invalid empty SQL.
+// caseLikeStateLookupClause renders a "wi.id = ANY(ARRAY(...))" (or
+// "wi.id <> ALL(ARRAY(...))" when negate) predicate equivalent to filtering
+// caseLikeStateColumn against the bound parameter at placeholder (e.g.
+// "$3::text[]"), as a UNION ALL of per-type id lookups scoped to types --
+// every case-like type when types is empty (the DefaultTypes case, or an
+// anyOf branch that names no type of its own, same as the COALESCE it
+// replaces). A type not in caseLikeStateLookupTables (reachable only from an
+// anyOf branch naming a non-case-like type, e.g. "incident") contributes no
+// branch: such a row can never have a case-like state at all, exactly how
+// the COALESCE already treats it (every one of the five joins is NULL for
+// it). If no requested type is case-like, the predicate degrades to the same
+// answer the COALESCE already gives in that situation -- FALSE for "in" (can
+// never match), TRUE for "not in" (always satisfies an exclusion it has no
+// state to violate) -- rather than emitting invalid empty SQL.
+//
+// Wrapped in ARRAY(...) rather than used as a bare "wi.id [NOT ]IN (...)"
+// subquery: confirmed against real production-volume data that the ARRAY
+// form evaluates the UNION ALL exactly once (an upfront, independent
+// computation) and then probes work_item's own primary key per element,
+// while a bare IN/NOT IN subquery here is prone to being planned as a join
+// against the subquery's result set instead -- which, combined with this
+// schema's row-level-security predicates layered onto every table, measured
+// meaningfully slower than the ARRAY form for the same result. ids are
+// always non-NULL (each branch selects a primary key), so "<> ALL" is an
+// exact negation of "= ANY" here, with no three-valued-logic subtlety to
+// account for.
 func caseLikeStateLookupClause(types []string, placeholder string, negate bool) string {
 	scope := types
 	if len(scope) == 0 {
@@ -151,11 +163,11 @@ func caseLikeStateLookupClause(types []string, placeholder string, negate bool) 
 		}
 		return "FALSE"
 	}
-	op := "IN"
+	union := strings.Join(branches, " UNION ALL ")
 	if negate {
-		op = "NOT IN"
+		return fmt.Sprintf("wi.id <> ALL(ARRAY(%s))", union)
 	}
-	return fmt.Sprintf("wi.id %s (%s)", op, strings.Join(branches, " UNION ALL "))
+	return fmt.Sprintf("wi.id = ANY(ARRAY(%s))", union)
 }
 
 // caseFieldPredicates returns the SQL conditions (no leading AND) and bound

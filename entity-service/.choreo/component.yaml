@@ -9,15 +9,15 @@ endpoints:
     type: REST
     networkVisibilities:
       - Organization
-      - Public
     schemaFilePath: openapi.yaml
 
   # Published separately from the API above, and publicly, so external
   # alerting can poll it without credentials. It is backed by its own
   # listener on its own port (internal/server/health.go), not by another
   # basePath on port 8080 — that listener's mux carries only the two health
-  # routes, which need no credentials. Do not point this endpoint at port
-  # 8080.
+  # routes, so nothing else in this service is reachable at public
+  # visibility even if this file is later edited wrongly. Do not point this
+  # endpoint at port 8080.
   #
   # The port below must match HEALTH_PORT (internal/config), exactly as the
   # endpoint above must match SERVER_PORT. Nothing reconciles the two at

@@ -52,6 +52,10 @@ func (fakeLinks) IncidentLink(id string) string {
 	return "https://csm.example/operations/incidents/" + id
 }
 
+func (fakeLinks) CaseLink(id string) string {
+	return "https://csm.example/cases/" + id
+}
+
 func chatEngine(t *testing.T, chat chatSender, store ladderStore, notes incidentNotes) *Engine {
 	t.Helper()
 	return &Engine{
@@ -60,7 +64,7 @@ func chatEngine(t *testing.T, chat chatSender, store ladderStore, notes incident
 		notifiers: []notifier{chatNotifier{chat: chat, links: fakeLinks{}, audience: "WSO2 API Manager"}},
 		store:     store,
 		notes:     notes,
-		cfg:       EngineConfig{CallSendingEnabled: true, Channel: ChannelChat},
+		cfg:       EngineConfig{CallSendingEnabled: true, Channel: ChannelChat, Routing: incidentRouting},
 		clock:     func() time.Time { return testClock },
 	}
 }
@@ -232,7 +236,7 @@ func TestBothChannels_EachIsAttemptedIndependently(t *testing.T) {
 		},
 		store: store,
 		notes: &fakeNotes{},
-		cfg:   EngineConfig{CallSendingEnabled: true, Channel: ChannelBoth},
+		cfg:   EngineConfig{CallSendingEnabled: true, Channel: ChannelBoth, Routing: incidentRouting},
 		clock: func() time.Time { return testClock },
 	}
 
@@ -275,7 +279,7 @@ func TestEngine_NoNotifierConfigured(t *testing.T) {
 		resolver: fullResolver(),
 		store:    store,
 		notes:    &fakeNotes{},
-		cfg:      EngineConfig{CallSendingEnabled: true, Channel: ChannelChat},
+		cfg:      EngineConfig{CallSendingEnabled: true, Channel: ChannelChat, Routing: incidentRouting},
 		clock:    func() time.Time { return testClock },
 	}
 	at := ist(2026, 9, 9, 10, 0)
@@ -318,7 +322,7 @@ func TestChatNotifier_NilLinkResolverDoesNotPanic(t *testing.T) {
 	chat := &fakeChat{}
 	e := NewEngine(DefaultPolicy, fullResolver(), nil, &notifications.GoogleChatClient{}, PortalLinks{},
 		nil, nil, "WSO2 API Manager",
-		EngineConfig{CallSendingEnabled: true, Channel: ChannelChat})
+		EngineConfig{CallSendingEnabled: true, Channel: ChannelChat, Routing: incidentRouting})
 
 	// The constructor is what has to be safe; swap in the fake to deliver.
 	e.notifiers = []notifier{chatNotifier{chat: chat, audience: "WSO2 API Manager"}}

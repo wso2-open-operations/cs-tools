@@ -205,6 +205,7 @@ type chatSender interface {
 // incidentLinker builds the portal link a card points at.
 type incidentLinker interface {
 	IncidentLink(incidentID string) string
+	CaseLink(caseID string) string
 }
 
 // chatNotifier posts a rung to the incident's space.
@@ -257,9 +258,16 @@ func (n chatNotifier) Deliver(ctx context.Context, plan Plan, call PlannedCall) 
 
 	t := plan.Trigger
 	nextRung, nextIn := plan.NextRungAfter(call)
-	portal := ""
+	portal, portalLabel := "", "View incident"
+	if t.isCase() {
+		portalLabel = "View case"
+	}
 	if n.links != nil {
-		portal = n.links.IncidentLink(t.IncidentID)
+		if t.isCase() {
+			portal = n.links.CaseLink(t.IncidentID)
+		} else {
+			portal = n.links.IncidentLink(t.IncidentID)
+		}
 	}
 
 	alert := notifications.EscalationAlert{
@@ -277,6 +285,7 @@ func (n chatNotifier) Deliver(ctx context.Context, plan Plan, call PlannedCall) 
 		VoiceScript: t.VoiceMessagePlain(),
 		Rule:        t.Routing.Rule(),
 		PortalURL:   portal,
+		PortalLabel: portalLabel,
 		Elapsed:     elapsedSince(t.At, call.At),
 		NextRung:    nextRung,
 		NextIn:      nextIn,

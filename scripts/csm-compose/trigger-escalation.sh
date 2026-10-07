@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 #
-# Put one incident.created on the event topic and watch the escalation ladder
+# Put one customer case (case.created) on the event topic -- CRE paging starts
+# from cases, not incidents -- and watch the escalation ladder
 # react, against the running local stack.
 #
 # WHY THIS EXISTS, AND WHAT IT IS NOT
@@ -277,7 +278,7 @@ echo "==> building the publisher (entity-service's own event struct)"
 docker compose cp /tmp/publish-incident entity-service:/tmp/publish-incident >/dev/null
 
 echo "==> publishing"
-ARGS=(-broker kafka:9094 -topic case-events -priority "$PRIORITY" -team "$TEAM")
+ARGS=(-broker kafka:9094 -topic case-events -record case -priority "$PRIORITY" -team "$TEAM")
 [[ -n "$PRODUCT" ]] && ARGS+=(-product "$PRODUCT")
 [[ -n "$REPORTED" ]] && ARGS+=(-reported-at "$REPORTED")
 [[ -n "$ACCOUNT" ]] && ARGS+=(-account "$ACCOUNT")
@@ -286,8 +287,8 @@ ARGS=(-broker kafka:9094 -topic case-events -priority "$PRIORITY" -team "$TEAM")
 
 PUBLISHED="$(docker compose exec -T entity-service /tmp/publish-incident "${ARGS[@]}")"
 echo "$PUBLISHED"
-INCIDENT="$(printf '%s' "$PUBLISHED" | sed -n 's/^published incident.created for \([^ ]*\) .*/\1/p')"
-[[ -n "$INCIDENT" ]] || { echo "could not tell which incident was published" >&2; exit 1; }
+INCIDENT="$(printf '%s' "$PUBLISHED" | sed -n 's/^published case.created for \([^ ]*\) .*/\1/p')"
+[[ -n "$INCIDENT" ]] || { echo "could not tell which case was published" >&2; exit 1; }
 
 cat <<BANNER
 

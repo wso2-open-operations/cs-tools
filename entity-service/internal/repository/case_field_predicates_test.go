@@ -86,7 +86,7 @@ func TestCaseLikeStateLookupClause(t *testing.T) {
 	// matching the shape every dashboard widget's search sends (a {type}
 	// filter alongside a {state} filter).
 	got := caseLikeStateLookupClause([]string{"case"}, "$3::text[]", false)
-	want := `wi.id IN (SELECT id FROM "case" WHERE state::TEXT = ANY($3::text[]))`
+	want := `wi.id = ANY(ARRAY(SELECT id FROM "case" WHERE state::TEXT = ANY($3::text[])))`
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -119,10 +119,10 @@ func TestCaseLikeStateLookupClause(t *testing.T) {
 		t.Errorf("announcement branch missing CLOSE normalization: %s", got)
 	}
 
-	// negate=true renders NOT IN, for the ExcludeStates (notIn) filter.
+	// negate=true renders <> ALL(ARRAY(...)), for the ExcludeStates (notIn) filter.
 	got = caseLikeStateLookupClause([]string{"case"}, "$1::text[]", true)
-	if !strings.Contains(got, "wi.id NOT IN") {
-		t.Errorf("negate=true should render NOT IN: %s", got)
+	if !strings.Contains(got, "wi.id <> ALL(ARRAY(") {
+		t.Errorf("negate=true should render <> ALL(ARRAY(...)): %s", got)
 	}
 
 	// A type with no case-like state branch (reachable only from an anyOf

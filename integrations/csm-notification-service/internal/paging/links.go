@@ -44,3 +44,13 @@ func (l PortalLinks) IncidentLink(incidentID string) string {
 	}
 	return base + "/operations/incidents/" + incidentID
 }
+
+// CaseLink is the CSM portal's page for a customer case -- the same
+// "/cases/<id>" the case.* Chat cards open (recipientlinks.Resolver.CSMLink).
+func (l PortalLinks) CaseLink(caseID string) string {
+	base := strings.TrimRight(strings.TrimSpace(l.CSMBaseURL), "/")
+	if base == "" || caseID == "" {
+		return ""
+	}
+	return base + "/cases/" + caseID
+}

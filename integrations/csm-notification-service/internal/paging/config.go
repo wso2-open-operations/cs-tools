@@ -53,10 +53,12 @@ type Config struct {
 	CRE LadderConfig `yaml:"cre"`
 	SRE LadderConfig `yaml:"sre"`
 
-	// Routing decides which ladders an incident climbs: an SRE team's, a CRE
-	// team's, a CRE P0, a monitoring-raised incident. Absent means
-	// DefaultRouting, which is the behaviour before this was configurable.
-	Routing Routing `yaml:"routing"`
+	// Which ladders a case or an incident climbs is deliberately NOT here:
+	// it is DefaultRouting, in code. Those rules (case S0 -> CRE + SRE, S1-S4
+	// -> CRE, SRE incident -> SRE) are the Case Paging design, and changing
+	// them is a code change with a review, not a file edit on a running
+	// deployment (decided 2026-10-07). A file that still carries a routing
+	// section is refused: an unknown key.
 }
 
 // LadderConfig is one ladder's behaviour.
@@ -396,9 +398,6 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := c.SRE.validate("sre"); err != nil {
-		return err
-	}
-	if err := c.Routing.validate(); err != nil {
 		return err
 	}
 	// A team is an ABT or an SRE team, never both. Listed as both, its

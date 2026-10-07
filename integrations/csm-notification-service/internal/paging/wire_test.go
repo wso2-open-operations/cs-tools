@@ -103,6 +103,9 @@ func wiredEngine(t *testing.T, spy *twilioSpy, cfg EngineConfig, ringSeconds int
 	if cfg.Channel == "" {
 		cfg.Channel = ChannelCall
 	}
+	if cfg.Routing.Rules == nil {
+		cfg.Routing = incidentRouting
+	}
 	e := &Engine{
 		policies:  DefaultPolicy,
 		resolver:  perRungResolver(),

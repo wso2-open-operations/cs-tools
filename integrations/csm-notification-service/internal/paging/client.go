@@ -47,7 +47,16 @@ type EntityConfig struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	// NoteActorEmail is who a case's execution summary is written as. A
+	// machine caller adding a case comment must name one (entity-service's
+	// POST /cases/{id}/comments actorEmail), and this client's id must be in
+	// entity-service's M2M_CLIENT_IDS. Empty uses DefaultNoteActorEmail.
+	NoteActorEmail string
 }
+
+// DefaultNoteActorEmail is the system identity entity-service already uses for
+// machine-created records.
+const DefaultNoteActorEmail = "system-m2m@wso2.com"
 
 // EntityClient is a narrow entity-service client with exactly one job:
 // appending the execution summary to an incident as a work note (section
@@ -62,6 +71,8 @@ type EntityClient struct {
 	// well as in Authorization -- see do() for why that header is the one that
 	// decides whether this caller counts as internal.
 	tokens oauth2.TokenSource
+	// noteActor is who a case work note is written as; see EntityConfig.
+	noteActor string
 }
 
 // NewEntityClient constructs an EntityClient authenticated via the OAuth2
@@ -85,6 +96,12 @@ func NewEntityClient(cfg EntityConfig) *EntityClient {
 		tokens:  cc.TokenSource(tokenCtx),
 		http:    httpClient,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
+		noteActor: func() string {
+			if a := strings.TrimSpace(cfg.NoteActorEmail); a != "" {
+				return a
+			}
+			return DefaultNoteActorEmail
+		}(),
 	}
 }
 
@@ -117,6 +134,31 @@ func (c *EntityClient) AppendWorkNote(ctx context.Context, incidentID, note stri
 		return fmt.Errorf("escalation: encode work note: %w", err)
 	}
 	_, err = c.do(ctx, http.MethodPatch, "/incidents/"+url.PathEscape(incidentID), body)
+	return err
+}
+
+// caseCommentRequest is entity-service's POST /cases/{id}/comments body for a
+// machine caller.
+type caseCommentRequest struct {
+	Type       string `json:"type"`
+	Content    string `json:"content"`
+	ActorEmail string `json:"actorEmail"`
+}
+
+// AppendCaseWorkNote writes note onto a customer case as a work note.
+//
+// Loop-safe like AppendWorkNote: the comment is a work note, published as a
+// case.comment_added with isInternalNote set, and the engine never counts a
+// work note as an acknowledgement.
+func (c *EntityClient) AppendCaseWorkNote(ctx context.Context, caseID, note string) error {
+	if strings.TrimSpace(caseID) == "" {
+		return fmt.Errorf("escalation: caseId is required")
+	}
+	body, err := json.Marshal(caseCommentRequest{Type: "work_note", Content: note, ActorEmail: c.noteActor})
+	if err != nil {
+		return fmt.Errorf("escalation: encode case work note: %w", err)
+	}
+	_, err = c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(caseID)+"/comments", body)
 	return err
 }
 

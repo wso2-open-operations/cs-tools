@@ -43,6 +43,15 @@ const (
 	// ladder — P4's is under two hours (see TimeToFinalLevel) — so it never
 	// expires one that is still live.
 	stateTTL = 7 * 24 * time.Hour
+	// caseAssigneePrefix holds a customer case's current assignee, one key per
+	// case, shared by both ladders. The case events that start a chain carry
+	// no assignee, and a chain needs it twice: a case already assigned when
+	// it is raised stops on that engineer's public comment, and only the
+	// assignee's comment counts. Written on every case.assigned.
+	caseAssigneePrefix = "incident:escalation:case:assignee:"
+	// caseAssigneeTTL outlives any case worth paging about; an expired key
+	// only means the next chain waits for an assignment it already had.
+	caseAssigneeTTL = 180 * 24 * time.Hour
 )
 
 // LadderState is everything needed to resume a running ladder after a restart:
@@ -78,6 +87,15 @@ type LadderState struct {
 	// keep climbing past a responder who had already answered.
 	SawStateChange   bool `json:"sawStateChange,omitempty"`
 	SawPublicComment bool `json:"sawPublicComment,omitempty"`
+	// SawAssigned and SawAssigneeComment are a customer case's two gestures:
+	// an engineer assigned (or already assigned when the chain started) and a
+	// public comment by that engineer after the chain started.
+	SawAssigned        bool `json:"sawAssigned,omitempty"`
+	SawAssigneeComment bool `json:"sawAssigneeComment,omitempty"`
+	// CommentAuthors are support engineers who posted a public comment on the
+	// case since the chain started, kept so a comment written just before the
+	// author was assigned still counts once they are.
+	CommentAuthors []string `json:"commentAuthors,omitempty"`
 	// CancelReason names which of section 3.0's two acknowledgement gestures
 	// stopped the ladder, stored alongside Cancelled so a retried cancellation
 	// writes the same summary the first attempt would have.
@@ -168,6 +186,31 @@ func (s *Store) ForLadder(l Ladder) *Store {
 }
 
 func (s *Store) stateKey(incidentID string) string { return s.state + incidentID }
+
+// CaseAssignee returns the case's current assignee email, or "" when none is
+// known.
+func (s *Store) CaseAssignee(ctx context.Context, caseID string) (string, error) {
+	v, err := s.rdb.Get(ctx, caseAssigneePrefix+caseID).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	return v, err
+}
+
+// ClaimCall takes one due call for this replica; see ladderStore.
+func (s *Store) ClaimCall(ctx context.Context, member string, ttl time.Duration) (bool, error) {
+	return s.rdb.SetNX(ctx, s.wake+":claim:"+member, "1", ttl).Result()
+}
+
+// ReleaseCall gives a claimed call back.
+func (s *Store) ReleaseCall(ctx context.Context, member string) error {
+	return s.rdb.Del(ctx, s.wake+":claim:"+member).Err()
+}
+
+// SetCaseAssignee records the case's current assignee.
+func (s *Store) SetCaseAssignee(ctx context.Context, caseID, email string) error {
+	return s.rdb.Set(ctx, caseAssigneePrefix+caseID, email, caseAssigneeTTL).Err()
+}
 
 // Create stores a new ladder only if none is running for this incident, and
 // reports whether it actually created one.

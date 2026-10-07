@@ -165,9 +165,10 @@ A **case** is entity-service's `POST /cases` and `domain.CaseView`, carried by
 the `case.*` events. An **incident** is `POST /incidents` and
 `domain.IncidentView`, carried by the `incident.*` events. Both families exist
 here and they are not interchangeable: `case.comment_added` and
-`incident.comment_added` are different payloads about different entities, and
-`dispatch` reacts to the first while `internal/paging` reacts to the
-second.
+`incident.comment_added` are different payloads about different entities.
+`dispatch` reacts to the case events; `internal/paging` reacts to both: CRE
+paging starts from customer cases, SRE paging from SRE incidents and from a
+case at S0 (see "Case Paging from customer cases" below).
 
 **"SRE incident" is not a third thing.** `integrations/sre-alert-ingestion-service`
 turns a vendor alert (Azure, Grafana, Site24x7, OpenSearch) into a platform
@@ -250,6 +251,11 @@ ticker, with Redis as its only durable state — the same `REDIS_URL`/
   apart) scans the wake ZSET, and for each due call: **place, then record,
   then drop the wake entry** — a crash between the first two repeats the call
   next tick, which is the direction to fail in for a paging system.
+  Before dialling, the replica **claims** the call (`Store.ClaimCall`, a SETNX
+  keyed by call and chain, one-minute TTL): two replicas -- a rolling restart
+  always has two for a moment -- cannot both dial it, and a replica that dies
+  mid-call delays it by at most the TTL instead of losing it. A transient
+  failure releases the claim so the next tick retries.
   **A trigger whose last call is already in the past is dropped**: this
   group reads the topic from its first offset the first time it exists, so
   the first deployment replays retention, and without that guard the next
@@ -333,21 +339,28 @@ incident climbs both at once**: sharing one namespace would make the second
 SETNX look like a redelivery, and sharing one wake index would let each tick
 place the other ladder's calls over its own channel.
 
-**Which ladders an incident climbs is configuration, not code**: the file's
-top-level `routing:` section (`routing.go`). `Engine.claims` matches the
-incident's team family (`sre` / `cre` / `none`, from
+**Which ladders a record climbs is code, not configuration**: `DefaultRouting`
+in `routing.go`. It used to be the file's `routing:` section; on 2026-10-07 it
+was taken out of the file on purpose -- these rules are the Case Paging design,
+and changing them should be a reviewed code change, not a file edit on a running
+deployment. A file that still has a `routing:` section is refused (unknown key).
+`EngineConfig.Routing` remains for tests only. `Engine.claims` matches the
+record kind (`case`/`incident`), the team family (`sre` / `cre` / `none`, from
 `TeamScheduleResolver.TeamFamily`), `contactType` and priority against the
-rules, and an engine claims the incident when a matching rule names its ladder
--- so one incident can climb both. A rule with **no** `team` condition
-(`monitoring`) deliberately takes team-less incidents and overrides that
-ladder's `trigger.requireKnownTeam`; a rule that merely lists `none` among its
-teams (`cre-team`) matches them but leaves the decision to that ladder's own
-`requireKnownTeam`, so the CRE side keeps control of CRE. Absent, `DefaultRouting` applies:
+rules, and an engine claims the record when a matching rule names its ladder --
+so one record can climb both. A rule with **no** `team` condition takes
+team-less records and overrides that ladder's `trigger.requireKnownTeam`
+(`excludeTeam` does not count as a team condition). The rules:
 
-    cre-team      team [cre, none]                       -> cre
-    sre-abt-team  team [sre]                             -> sre   (sheet "Yes" rows)
-    cre-p0        team [cre], priority [P0, CRITICAL]    -> sre
-    monitoring    contactType [AZURE, SITE_247, SENTINEL]-> sre   (sheet "No" rows)
+    cre-case      record [case]                                        -> cre
+    cre-p0        record [case], priority [S0]                         -> sre   (S1 Critical: CRE only)
+    sre-abt-team  record [incident], team [sre]                        -> sre   (sheet "Yes" rows)
+    monitoring    record [incident], contactType [AZURE, SITE_247,
+                  SENTINEL], excludeTeam [cre]                         -> sre   (sheet "No" rows)
+
+An incident on a CRE team matches nothing: CRE work arrives as a case. The
+ladder-mechanics tests drive the CRE ladder with incidents through an explicit
+`incidentRouting` (engine_test.go), not the default.
 
 `contactType` comes from entity-service's `incident.created`
 (`IncidentCreatedPayload.ContactType`, the incident view's label, falling back
@@ -384,16 +397,52 @@ team confirmed only one person is called; then `sre.teams.abts` order; then
 email. The rota has no L4 tier, so L4 is the lead of the answering team -- the
 incident's own, or for a CRE P0 the team of whoever took L1. An assumption.
 
-**Stops on**: `incident.assigned` (an engineer set as the assignee, published
-by entity-service) or `incident.acknowledged` (leaving NEW). A public comment
+**Stops on** (an SRE incident): `incident.assigned` (an engineer set as the
+assignee, published by entity-service) or `incident.acknowledged` (leaving NEW,
+whatever the new state -- confirmed 2026-10-07). A public comment
 does **not** stop an SRE ladder -- it may be a third party triaging -- and an
 assignee does not stop a CRE one (the engine's `Kind` decides; there is no
 per-plan check). An elevation never restarts an SRE team's ladder: its clock
 does not depend on priority. The voice message and card say "assign the
 incident to yourself", and the rule is reported as `SRE_TIERS`.
 
+### Case Paging from customer cases (`cases.go`)
+
+The rules are `task-call-alert-flow/Case Paging Rules.xlsx` (agreed 2026-10-07),
+which is the source of truth; change a rule there first. Both engines read the
+case events from the shared topic (`case.created`, `case.severity_changed`,
+`case.assigned`, `case.comment_added`, `case.status_changed`); the ladder state
+is keyed by the case id, and `Trigger.Record` is `case`.
+
+- **Start**: `case.created` for a support case (`caseType` CASE; other types are
+  never paged). S0 pages CRE and SRE, S1-S4 CRE only; which severities CRE pages
+  is `cre.trigger.priorities` (the local file leaves S4 out: paging S4 is
+  optional).
+- **Severity change**: any change stops the running chain and starts a new one
+  for the new severity, from the first tier, even after acknowledgement. A
+  severity a ladder does not page stops its chain (SRE below S0; S4 while it is
+  off). The event has no timestamp, so the chain runs from now, and a
+  redelivery is recognised by the chain already running at that severity.
+- **Stop**: CRE needs an engineer assigned AND that engineer's public comment
+  (`acknowledgement.requireBoth`). SRE on an S0 case stops when any engineer is
+  assigned, or -- on a case already assigned when it became S0 -- on the
+  assignee's public comment. Only gestures after the chain started count. A
+  customer's comment and a work note never stop paging. A support engineer's
+  comment before they are assigned is remembered and counts once they are. A
+  closed case (`case.status_changed` "Closed", or a resolved/cancelled label)
+  stops both.
+- **Assignee**: the starting events carry none, so the current assignee is kept
+  in Redis from `case.assigned` (`incident:escalation:case:assignee:<caseId>`,
+  shared by both ladders).
+- **Summary**: written onto the case as a work note, `POST /cases/{id}/comments`
+  `{type: work_note, actorEmail}`. The actor is `INCIDENT_ESCALATION_NOTE_ACTOR`
+  (default `system-m2m@wso2.com`), and this service's client id must be in
+  entity-service's `M2M_CLIENT_IDS`. A failure is logged, never retried.
+- The voice message and card say "Assign the case to yourself and add a public
+  comment to stop further calls"; the card links to `/cases/<id>`.
+
 **Configuration** is the file's `sre:` section, the same shape as `cre:` plus
-`timing` and `teams.abts`/`teams.aliases`; who climbs it is `routing:`. Each
+`timing` and `teams.abts`/`teams.aliases`; who climbs it is `DefaultRouting`, in code. Each
 ladder's own keys are refused on the other (a `timing:` under `cre:` is an
 error, not ignored), and a team in both `cre.teams.abts` and `sre.teams.abts` is
 an error -- its lead would still be called on every CRE ladder's

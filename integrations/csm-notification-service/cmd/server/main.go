@@ -742,6 +742,10 @@ func main() {
 					ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
 					ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
 					Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+					// Who a customer case's execution summary is written as;
+					// empty is paging.DefaultNoteActorEmail. Writing it needs this
+					// service's client id in entity-service's M2M_CLIENT_IDS.
+					NoteActorEmail: os.Getenv("INCIDENT_ESCALATION_NOTE_ACTOR"),
 				})
 			} else {
 				slog.Warn("CUSTOMER_ENTITY_BASE_URL is not set; incident escalation will log its " +
@@ -872,9 +876,8 @@ func main() {
 						// Which incidents get a ladder, and what one may spend.
 						Ladder: l.cfg,
 						Kind:   l.kind,
-						// Which ladders an incident climbs: the file's
-						// routing section, shared by both engines.
-						Routing: escalationCfg.Routing,
+						// Which ladders a record climbs is DefaultRouting, in
+						// code -- not configurable (see paging.Config).
 					},
 				)
 

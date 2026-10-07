@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,38 @@ type memStore struct {
 	wakesWritten     int
 	// called records the round-robin history the evening pairing reads.
 	called map[string]time.Time
+	// assignees is each case's current assignee.
+	assignees map[string]string
+	// claims are due calls a replica has taken.
+	claims map[string]bool
+}
+
+func (m *memStore) ClaimCall(_ context.Context, member string, _ time.Duration) (bool, error) {
+	if m.claims == nil {
+		m.claims = map[string]bool{}
+	}
+	if m.claims[member] {
+		return false, nil
+	}
+	m.claims[member] = true
+	return true, nil
+}
+
+func (m *memStore) ReleaseCall(_ context.Context, member string) error {
+	delete(m.claims, member)
+	return nil
+}
+
+func (m *memStore) CaseAssignee(_ context.Context, caseID string) (string, error) {
+	return m.assignees[caseID], nil
+}
+
+func (m *memStore) SetCaseAssignee(_ context.Context, caseID, email string) error {
+	if m.assignees == nil {
+		m.assignees = map[string]string{}
+	}
+	m.assignees[caseID] = email
+	return nil
 }
 
 func (m *memStore) MarkCalled(_ context.Context, email string, at time.Time) error {
@@ -158,6 +191,16 @@ func (f *fakeCaller) MakeCall(_ context.Context, to, _ string) (notifications.Ca
 type fakeNotes struct {
 	notes []string
 	err   error
+	// caseNotes are the summaries written onto customer cases.
+	caseNotes []string
+}
+
+func (f *fakeNotes) AppendCaseWorkNote(_ context.Context, _, note string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.caseNotes = append(f.caseNotes, note)
+	return nil
 }
 
 func (f *fakeNotes) AppendWorkNote(_ context.Context, _, note string) error {
@@ -175,9 +218,20 @@ func (f *fakeNotes) AppendWorkNote(_ context.Context, _, note string) error {
 // guard. Tests of that guard set their own clock.
 var testClock = ist(2026, 9, 9, 10, 0)
 
+// incidentRouting puts every incident on the CRE ladder. The production
+// default pages CRE from customer cases only; the ladder-mechanics tests
+// (timing, gestures, channels, the wire) drive it with incidents, so their
+// engines route incidents to it explicitly.
+var incidentRouting = Routing{Rules: []RouteRule{
+	{Name: "cre-incident", When: RouteWhen{Record: []string{RecordIncident}}, Ladders: []string{LadderKeyCRE}},
+}}
+
 func testEngine(store ladderStore, caller callPlacer, notes incidentNotes, cfg EngineConfig) *Engine {
 	if cfg.Channel == "" {
 		cfg.Channel = ChannelCall
+	}
+	if cfg.Routing.Rules == nil {
+		cfg.Routing = incidentRouting
 	}
 	return &Engine{
 		policies:  DefaultPolicy,
@@ -695,7 +749,7 @@ func TestEngine_CreatedWithoutEscalationFieldsIsSkipped(t *testing.T) {
 func TestEngine_IgnoresEventsItDoesNotOwn(t *testing.T) {
 	e := testEngine(newMemStore(), &fakeCaller{}, &fakeNotes{}, enabled())
 	for _, r := range []eventbus.Record{
-		record(t, events.TypeCaseCreated, map[string]string{"anything": "at all"}),
+		record(t, events.TypeCaseAcknowledged, map[string]string{"anything": "at all"}),
 		record(t, events.TypeSLATierReached, map[string]string{"anything": "at all"}),
 	} {
 		if err := e.Handle(context.Background(), r); err != nil {
@@ -1156,5 +1210,39 @@ func TestEngine_ReplayedElevationDoesNotRestartTheLadder(t *testing.T) {
 	}
 	if len(store.wakes) != wakes {
 		t.Errorf("%d wake entries after the replay, want %d unchanged", len(store.wakes), wakes)
+	}
+}
+
+// A due call claimed by another replica is left to it: this one places
+// nothing. Once the claim is released (that replica failed transiently) the
+// next tick places it.
+func TestEngine_ClaimedCallIsNotPlacedTwice(t *testing.T) {
+	ctx := context.Background()
+	store, caller := newMemStore(), &fakeCaller{}
+	e := testEngine(store, caller, &fakeNotes{}, enabled())
+	if err := e.Handle(ctx, createdEvent(t, "CRITICAL", testClock)); err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ := store.Get(ctx, testIncidentID)
+	first := wakeMember(testIncidentID, 0)
+	claim := fmt.Sprintf("%s@%d", first, st.Plan.Trigger.At.UnixNano())
+	if ok, _ := store.ClaimCall(ctx, claim, time.Minute); !ok {
+		t.Fatal("could not take the claim the other replica would hold")
+	}
+	due := st.Plan.Calls[0].At
+	if err := e.Tick(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.placed) != 0 {
+		t.Fatalf("placed %d calls for a call another replica had claimed", len(caller.placed))
+	}
+	if err := store.ReleaseCall(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Tick(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.placed) != 1 {
+		t.Fatalf("placed %d calls after the claim was released; want 1", len(caller.placed))
 	}
 }
