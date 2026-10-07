@@ -382,11 +382,20 @@ func (s stubUserRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	}
 	panic("not implemented")
 }
+
+// GetUserByEmail defaults to a NotFoundError rather than panicking:
+// createCaseCommentAs now calls it unconditionally (subscribeCommenterToWatchList,
+// and isSupportEngineerAuthor when a csEngineerRole is configured) after every
+// comment write, and a comment-creation test case that doesn't care about
+// either side effect shouldn't have to configure it -- the unresolvable-actor
+// answer is exactly what both treat as "skip", same as the M2M
+// CreateCaseCommentAs path. A panic here is worse than a failed test: it
+// aborts the whole package run and hides every test that sorts after it.
 func (s stubUserRepo) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
 	if s.getUserByEmail != nil {
 		return s.getUserByEmail(ctx, email)
 	}
-	panic("not implemented")
+	return domain.User{}, &apierror.NotFoundError{Msg: "user not found"}
 }
 
 // GetUserRoles/GetUserGroups return empty rather than panicking: GetMe calls
