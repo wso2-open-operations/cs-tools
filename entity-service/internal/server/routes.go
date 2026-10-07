@@ -489,8 +489,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if db != nil && cfg.HasCustomerEngagementIngest() {
 		customerEngagementAllocationHandler = handler.NewCustomerEngagementAllocationHandler(
 			service.NewCustomerEngagementAllocationService(
-				repository.NewCustomerEngagementAllocationRepository(repository.NewScoped(db)),
-				cfg.CustomerEngagementFirefightingTypeID),
+				repository.NewCustomerEngagementAllocationRepository(repository.NewScoped(db))),
 			cfg.M2MClientIDs)
 	}
 
@@ -1524,8 +1523,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me", userHandler.GetMe)
 		mux.HandleFunc("PATCH /users/me", userHandler.PatchMe)
 		mux.HandleFunc("POST /users/search", userHandler.SearchUsers)
-	mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
-	mux.HandleFunc("POST /users", userHandler.CreateUser)
+		mux.HandleFunc("POST /users/by-ids", userHandler.GetUsersByIDs)
+		mux.HandleFunc("POST /users", userHandler.CreateUser)
 	}
 	if snAccountHandler != nil {
 		mux.HandleFunc("GET /accounts/{id}", internalOnly(accessSvc, snAccountHandler.GetAccount))

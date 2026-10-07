@@ -28,8 +28,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-const testFirefightingTypeID = "fc7f2d171b81f910d64e64a2604bcb9b"
-
 // fakeAllocationStore is an in-memory customer_engagement / allocation_resource pair.
 type fakeAllocationStore struct {
 	engagementsByEngID map[string]string // engagement_id -> id
@@ -137,7 +135,7 @@ func allocLineItemEvent() domain.AllocationEvent {
 }
 
 func newAllocationSvc(f *fakeAllocationStore) CustomerEngagementAllocationService {
-	return NewCustomerEngagementAllocationService(f, testFirefightingTypeID)
+	return NewCustomerEngagementAllocationService(f)
 }
 
 func TestAllocationEvent_FirefightingCreatesEngagement(t *testing.T) {
@@ -253,22 +251,6 @@ func TestAllocationEvent_FirefightingByTypeIDNotName(t *testing.T) {
 	res, err = newAllocationSvc(f).ProcessAllocationEvent(context.Background(), other)
 	if err != nil || res.Reason != AllocationSkipNoLineItem || len(f.inserted) != 1 {
 		t.Fatalf("type 12: result = %+v, err %v", res, err)
-	}
-}
-
-func TestAllocationEvent_FirefightingTypeUnsetSkips(t *testing.T) {
-	f := newFakeAllocationStore()
-	f.accountsBySfID["001000000000001AAA"] = "acct-1"
-	res, err := NewCustomerEngagementAllocationService(f, "").ProcessAllocationEvent(context.Background(), allocFirefightingEvent())
-	if err != nil || res.Result != domain.AllocationEventSkipped || res.Reason != AllocationSkipNoFirefightingType || len(f.inserted) != 0 {
-		t.Fatalf("result = %+v, err %v", res, err)
-	}
-	// An existing engagement is still found without the type id.
-	f.engagementsByEngID["E1001"] = "eng-existing"
-	f.usersByEmail["consultant@wso2.com"] = "user-1"
-	res, err = NewCustomerEngagementAllocationService(f, "").ProcessAllocationEvent(context.Background(), allocFirefightingEvent())
-	if err != nil || *res.EngagementID != "eng-existing" {
-		t.Fatalf("result = %+v, err %v", res, err)
 	}
 }
 

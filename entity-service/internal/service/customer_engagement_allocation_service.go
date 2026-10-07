@@ -35,7 +35,6 @@ const (
 	AllocationSkipAmbiguousAccount    = "ambiguous account name"
 	AllocationSkipUserNotFound        = "user not found"
 	AllocationSkipNoLineItem          = "no engagement for line item"
-	AllocationSkipNoFirefightingType  = "firefighting engagement type id not configured"
 )
 
 // firefightingAllocationTypes are the allocation type ids ServiceNow's processAllocationEvent
@@ -64,17 +63,12 @@ type CustomerEngagementAllocationService interface {
 }
 
 type customerEngagementAllocationService struct {
-	repo               repository.CustomerEngagementAllocationRepository
-	firefightingTypeID string
+	repo repository.CustomerEngagementAllocationRepository
 }
 
-// NewCustomerEngagementAllocationService constructs the service; firefightingTypeID is the
-// Firefighting type's ServiceNow sys_id, used only to gate whether firefighting engagements
-// are created at all ("" skips creating them) -- the engagement_type column this service
-// writes is a Postgres enum (customer_engagement_type_enum) whose label this path always
-// sets to "FIREFIGHTING", never this sys_id.
-func NewCustomerEngagementAllocationService(repo repository.CustomerEngagementAllocationRepository, firefightingTypeID string) CustomerEngagementAllocationService {
-	return &customerEngagementAllocationService{repo: repo, firefightingTypeID: firefightingTypeID}
+// NewCustomerEngagementAllocationService constructs the service.
+func NewCustomerEngagementAllocationService(repo repository.CustomerEngagementAllocationRepository) CustomerEngagementAllocationService {
+	return &customerEngagementAllocationService{repo: repo}
 }
 
 // ProcessAllocationEvent implements CustomerEngagementAllocationService.
@@ -201,13 +195,11 @@ func (s *customerEngagementAllocationService) findOrCreateEngagement(ctx context
 	if err != nil || found != nil {
 		return allocDeref(found), false, "", err
 	}
-	if s.firefightingTypeID == "" {
-		return "", false, AllocationSkipNoFirefightingType, nil
-	}
 	accountID, reason, err := resolveAllocationAccount(ctx, store, in)
 	if err != nil || accountID == "" {
 		return "", false, reason, err
 	}
+	// Like ServiceNow, a firefighting engagement gets no sf_id, line item or opportunity.
 	id, created, err := store.InsertEngagement(ctx, domain.NewCustomerEngagement{
 		EngagementID:     in.engagementID,
 		EngagementCode:   in.engagementCode,
@@ -215,9 +207,6 @@ func (s *customerEngagementAllocationService) findOrCreateEngagement(ctx context
 		AccountID:        accountID,
 		IsPaid:           strings.TrimSpace(in.engagement.EngagementTypeName) == "Paid",
 		DeliveryMode:     deliveryModeFromNature(in.engagement.EngagementNature),
-		// This path only ever creates a Firefighting engagement (gated above on
-		// s.firefightingTypeID, the feature's on/off switch -- a configured
-		// ServiceNow sys_id, never the value written here); the label is fixed.
 		EngagementType:   "FIREFIGHTING",
 		PlannedStartDate: in.startDate,
 		PlannedEndDate:   in.endDate,

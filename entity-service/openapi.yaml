@@ -12088,8 +12088,7 @@ components:
           type: string
           description: >-
             Present when skipped: no engagement details, no engagement id, no engagement for
-            line item, account not found, ambiguous account name, user not found, or
-            firefighting engagement type id not configured.
+            line item, account not found, ambiguous account name, or user not found.
         engagementId: {type: string, format: uuid, nullable: true}
         allocationResourceId: {type: string, format: uuid, nullable: true}
         engagementCreated: {type: boolean}

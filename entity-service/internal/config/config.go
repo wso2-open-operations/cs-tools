@@ -205,9 +205,6 @@ type Config struct {
 	// CSMMigrationCustomerEngagementIngestEnabled registers POST /customer-engagements/allocation-events
 	// (CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED); off, the route is not registered.
 	CSMMigrationCustomerEngagementIngestEnabled bool
-	// CustomerEngagementFirefightingTypeID is the Firefighting type's ServiceNow sys_id
-	// (CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID); unset skips creating firefighting engagements.
-	CustomerEngagementFirefightingTypeID string
 	// GithubIntegrationEnabled gates the GitHub change-request sync: the
 	// webhook endpoint and the client that answers it.
 	//
@@ -701,7 +698,6 @@ func Load() *Config {
 	cfg.CSMMigrationSalesforceProjectInsertEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED") == "true"
 	cfg.CSMMigrationSalesforcePartnerIngestEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED") == "true"
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = os.Getenv("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED") == "true"
-	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
 	cfg.RedisAddr = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
@@ -1010,9 +1006,6 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("%s %q is not a valid UUID", envVar, value)
 		}
 	}
-	if v := c.CustomerEngagementFirefightingTypeID; v != "" && !isSysID(v) {
-		return fmt.Errorf("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID must be a 32-character hex sys_id")
-	}
 	// The URL carries the Redis password, so neither it nor url.Parse's own
 	// error (which quotes its input) may appear in this message.
 	if c.RedisURL != "" {
@@ -1022,19 +1015,6 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-// isSysID reports whether v is a 32-character lowercase hex ServiceNow sys_id.
-func isSysID(v string) bool {
-	if len(v) != 32 {
-		return false
-	}
-	for _, r := range v {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // PostgresAuthoritative reports whether PostgreSQL is the system of record:
