@@ -61,25 +61,48 @@ func mapReferenceTableItems(items []entity.ReferenceTableItem) []ReferenceItem {
 }
 
 // restrictedChangeRequestStateIDs are excluded from ProjectFilterOptions'
-// changeRequestStates — ServiceNow's own numeric ids for the three internal
-// pre-approval workflow states (New, Assess, Authorize).
-var restrictedChangeRequestStateIDs = map[string]bool{"-3": true, "-4": true, "-5": true}
+// changeRequestStates and the change-request stats' state counts: ServiceNow's own
+// numeric ids for the three pre-approval workflow states a customer is never shown
+// on that data source (New, Assess, Authorize).
+//
+// A ServiceNow-sourced id is the one thing that tells the two data sources apart
+// here, and it decides what Authorize ("-3") means:
+//
+//   - On the ServiceNow data source nothing is designated to a customer: every
+//     change request is "legacy" and is visible in every state except these
+//     three, and ServiceNow's own search does not hide them (entity-service
+//     narrows a customer's search to the visible states and leaves these out of
+//     the vocabulary it serves, and this list is the second line). So "-3" is
+//     dropped, exactly like "-5" and "-4".
+//   - On the Postgres data source a change request is visible once it was
+//     designated to the customer, in whatever state it is in, and one the
+//     customer proposed a new time for waits in Authorize and stays on their
+//     list, so the state filter has to offer it. Its id there is the raw enum
+//     label ("AUTHORIZE", see restrictedChangeRequestStateLabels), never "-3",
+//     so it passes this check and is kept.
+var restrictedChangeRequestStateIDs = map[string]bool{"-5": true, "-4": true, "-3": true}
 
 // restrictedChangeRequestStateLabels is the Postgres-mode equivalent: on
 // that data source ReferenceDataRepository.EnumLabels (entity-service)
 // returns the raw enum label as id, e.g. {"id":"NEW"}, never a ServiceNow
-// number, so the id check above never matches there and these three would
+// number, so the id check above never matches there and these two would
 // leak into the response unfiltered without this. crStateIDs (see
 // change_request_enum_mapping.go) also has no entries for them, by the same
-// "internal, never customer-facing" design, so they pass normalizeChoices
-// unchanged and keep their raw label -- matched here before that happens.
+// "no visible change request is ever in them" design (a designated change
+// request left New when approval was requested and never returns to Assess), so
+// they pass normalizeChoices unchanged and keep their raw label -- matched here
+// before that happens.
+//
+// Authorize is not in this list: on the Postgres data source it is a state a
+// designated customer's change request waits in. Its ServiceNow-sourced id is
+// dropped by the id check above.
 //
 // Checked case-insensitively and kept alongside the id check above, not in
 // place of it: a Postgres-mode label is reliably UPPER_SNAKE, but this
 // endpoint also serves the ServiceNow data source, whose own raw label
 // casing isn't guaranteed to match — dropping the id check here would trade
 // one data source's gap for the other's.
-var restrictedChangeRequestStateLabels = map[string]bool{"NEW": true, "ASSESS": true, "AUTHORIZE": true}
+var restrictedChangeRequestStateLabels = map[string]bool{"NEW": true, "ASSESS": true}
 
 func isRestrictedChangeRequestState(s ReferenceItem) bool {
 	return restrictedChangeRequestStateIDs[s.ID] || restrictedChangeRequestStateLabels[strings.ToUpper(s.Label)]
@@ -130,7 +153,7 @@ func MapProjectFilterOptions(m entity.ProjectMetadataResponse) ProjectFilterOpti
 		CallRequestStates:           mapChoiceListItems(m.CallRequestStates),
 		ChangeRequestStates:         normalizeChangeRequestStateChoices(changeRequestStates),
 		ChangeRequestImpacts:        normalizeChangeRequestImpactChoices(mapChoiceListItems(m.ChangeRequestImpacts)),
-		ConversationStates:          mapChoiceListItems(m.ConversationStates),
+		ConversationStates:          normalizeConversationStateChoices(mapChoiceListItems(m.ConversationStates)),
 		CaseTypes:                   mapReferenceTableItems(m.CaseTypes),
 		TimeCardStates:              mapChoiceListItems(m.TimeCardStates),
 		EngagementTypes:             normalizeCaseEngagementTypeChoices(mapChoiceListItems(m.EngagementTypes)),
@@ -448,13 +471,29 @@ type ProjectChangeRequestStats struct {
 // display label, so an un-normalized "SCHEDULED" never matched and the
 // Upcoming Changes card fell back to "--" while the list beside it showed
 // Scheduled changes.
+//
+// New and Assess are left out of StateCount, as they are out of the filter
+// options: entity-service lists every state with a count, but a customer is only
+// counted the change requests designated to them and none of those is ever in
+// either, so they would be two rows of 0 under raw ids ("NEW", "ASSESS") no
+// screen has a name for. Authorize is kept on the Postgres data source, as
+// {id: "-3", label: "Authorize"}: a change request the customer proposed a new
+// time for waits there. On the ServiceNow data source (ids "-5", "-4", "-3") all
+// three are left out, as they are of the filter options: see
+// restrictedChangeRequestStateIDs.
 func MapProjectChangeRequestStats(r entity.ProjectChangeRequestStatsResponse) ProjectChangeRequestStats {
+	stateCount := make([]ReferenceItem, 0, len(r.StateCount))
+	for _, s := range mapChoiceListItems(r.StateCount) {
+		if !isRestrictedChangeRequestState(s) {
+			stateCount = append(stateCount, s)
+		}
+	}
 	return ProjectChangeRequestStats{
 		TotalCount:          r.TotalCount,
 		ActiveCount:         r.ActiveCount,
 		OutstandingCount:    r.OutstandingCount,
 		ActionRequiredCount: r.ActionRequiredCount,
-		StateCount:          normalizeChangeRequestStateChoices(mapChoiceListItems(r.StateCount)),
+		StateCount:          normalizeChangeRequestStateChoices(stateCount),
 		ResolvedCount:       mapResolvedCountBreakdown(r.ResolvedCount),
 	}
 }

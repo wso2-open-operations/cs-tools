@@ -285,10 +285,25 @@ func (s *snProjectStatsService) GetProjectMetadata(ctx context.Context, projectI
 		return domain.ProjectMetadataResponse{}, fmt.Errorf("sn project metadata: parse response: %w", err)
 	}
 
+	// The states a customer may filter change requests by are the ones they may
+	// see: New, Assess and Authorize are left out of the vocabulary they are
+	// offered (see sn_change_request_customer_view.go), so a caller that builds
+	// its state filter from this list never names them.
+	changeRequestStates := toDomainChoiceListItems(snResp.ChangeRequestStates)
+	if customerViewApplies(ctx) {
+		visible := make([]domain.ChoiceListItem, 0, len(changeRequestStates))
+		for _, st := range changeRequestStates {
+			if !isCustomerHiddenChangeRequestStateItem(st) {
+				visible = append(visible, st)
+			}
+		}
+		changeRequestStates = visible
+	}
+
 	return domain.ProjectMetadataResponse{
 		CaseStates:                  toDomainChoiceListItems(snResp.CaseStates),
 		CallRequestStates:           toDomainChoiceListItems(snResp.CallRequestStates),
-		ChangeRequestStates:         toDomainChoiceListItems(snResp.ChangeRequestStates),
+		ChangeRequestStates:         changeRequestStates,
 		ConversationStates:          toDomainChoiceListItems(snResp.ConversationStates),
 		TimeCardStates:              toDomainChoiceListItems(snResp.TimeCardStates),
 		ChangeRequestImpacts:        toDomainChoiceListItems(snResp.ChangeRequestImpacts),
@@ -520,12 +535,26 @@ func (s *snProjectStatsService) GetProjectChangeRequestStats(ctx context.Context
 		return domain.ProjectChangeRequestStatsResponse{}, fmt.Errorf("sn project change request stats: parse response: %w", err)
 	}
 
+	// A customer is not told how many change requests the project has in the states
+	// they are never shown (see sn_change_request_customer_view.go). The totals are
+	// ServiceNow's own, over every state, and are passed through as they are.
+	stateCount := toDomainChoiceListItems(snResp.StateCount)
+	if customerViewApplies(ctx) {
+		visible := make([]domain.ChoiceListItem, 0, len(stateCount))
+		for _, st := range stateCount {
+			if !isCustomerHiddenChangeRequestStateItem(st) {
+				visible = append(visible, st)
+			}
+		}
+		stateCount = visible
+	}
+
 	return domain.ProjectChangeRequestStatsResponse{
 		TotalCount:          snResp.TotalCount,
 		ActiveCount:         snResp.ActiveCount,
 		OutstandingCount:    snResp.OutstandingCount,
 		ActionRequiredCount: snResp.ActionRequiredCount,
-		StateCount:          toDomainChoiceListItems(snResp.StateCount),
+		StateCount:          stateCount,
 		ResolvedCount:       snResp.ResolvedCount.toDomain(),
 	}, nil
 }

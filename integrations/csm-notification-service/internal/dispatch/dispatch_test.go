@@ -118,6 +118,12 @@ type mockGoogleChatSender struct {
 	severityChangedCalls        []sentSeverityChangedAlert
 	securityReportAnalysisCalls []sentSecurityReportAnalysisAlert
 	frustrationCalls            []sentFrustrationAlert
+	srCalls                     []sentSRAlert
+	// srBlock, when non-nil, holds every SR send open until it is closed,
+	// so a test can have a second Handle call arrive mid-send; srStarted
+	// counts SR sends that have begun.
+	srBlock   chan struct{}
+	srStarted atomic.Int32
 	// hasAudienceSpace, when set, backs HasAudienceSpace; nil means every
 	// audience is "unconfigured" (false) — same convention as
 	// internal/slaengine's own fakeChatSender.
@@ -164,6 +170,39 @@ func (m *mockGoogleChatSender) SendFrustrationAlert(ctx context.Context, audienc
 	defer m.mu.Unlock()
 	m.frustrationCalls = append(m.frustrationCalls, sentFrustrationAlert{audience, caseNumber, wso2CaseID, productName, reason, frustrationLevel, caseLink})
 	return m.err
+}
+
+// sentSRAlert records one sr.* card send: which method (kind), the audience,
+// and the card content (exactly one of the three alerts is set).
+type sentSRAlert struct {
+	kind     string
+	audience string
+	created  notifications.SRCreatedAlert
+	acked    notifications.SRAcknowledgedAlert
+	comment  notifications.SRCustomerCommentAlert
+}
+
+func (m *mockGoogleChatSender) recordSR(a sentSRAlert) error {
+	m.srStarted.Add(1)
+	if m.srBlock != nil {
+		<-m.srBlock
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.srCalls = append(m.srCalls, a)
+	return m.err
+}
+
+func (m *mockGoogleChatSender) SendSRCreatedAlert(ctx context.Context, audience string, a notifications.SRCreatedAlert) error {
+	return m.recordSR(sentSRAlert{kind: "created", audience: audience, created: a})
+}
+
+func (m *mockGoogleChatSender) SendSRAcknowledgedAlert(ctx context.Context, audience string, a notifications.SRAcknowledgedAlert) error {
+	return m.recordSR(sentSRAlert{kind: "acknowledged", audience: audience, acked: a})
+}
+
+func (m *mockGoogleChatSender) SendSRCustomerCommentAlert(ctx context.Context, audience string, a notifications.SRCustomerCommentAlert) error {
+	return m.recordSR(sentSRAlert{kind: "comment", audience: audience, comment: a})
 }
 
 type sentCall struct {
@@ -226,6 +265,10 @@ func (m *mockLinkResolver) CSMLink(caseID string) string {
 // links into the CSM portal.
 func (m *mockLinkResolver) OutageLink(outageID string) string {
 	return "https://csm.example/operations/outages/" + outageID
+}
+
+func (m *mockLinkResolver) ServiceRequestLink(caseID string) string {
+	return "https://csm.example/operations/service-requests/" + caseID
 }
 
 func (m *mockLinkResolver) ChangeRequestLink(audience, changeRequestID, projectID string) string {
@@ -1753,6 +1796,18 @@ func (s *blockingCaseAcknowledgedChatSender) SendSeverityChangedAlert(ctx contex
 }
 
 func (s *blockingCaseAcknowledgedChatSender) SendFrustrationAlert(ctx context.Context, audience, caseNumber, wso2CaseID, productName, reason string, frustrationLevel float64, caseLink string) error {
+	return nil
+}
+
+func (s *blockingCaseAcknowledgedChatSender) SendSRCreatedAlert(ctx context.Context, audience string, a notifications.SRCreatedAlert) error {
+	return nil
+}
+
+func (s *blockingCaseAcknowledgedChatSender) SendSRAcknowledgedAlert(ctx context.Context, audience string, a notifications.SRAcknowledgedAlert) error {
+	return nil
+}
+
+func (s *blockingCaseAcknowledgedChatSender) SendSRCustomerCommentAlert(ctx context.Context, audience string, a notifications.SRCustomerCommentAlert) error {
 	return nil
 }
 

@@ -176,7 +176,7 @@ import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTa
 import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTabMeta";
 import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
 import { replaceUuids } from "@utils/redactIds";
-import { formatAbsoluteForUser } from "@utils/dateTime";
+import { formatUtcDateForDisplay } from "@utils/dateTime";
 import {
   isBlankHtml,
   isDescriptionEchoedInComment,
@@ -2394,9 +2394,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 are singular facts (never more than one each), so a compact
                 "Cell" fits better than a chip crowding this row, especially
                 once both are present on the same case at once. */}
+            {/* Only ON_HOLD is a hold. FIRST_COMMENT / SECOND_COMMENT are the
+                other stages of the same auto-closure sequence (the case is
+                counting down to closure, not paused), and their state time is
+                when the next stage fires, so "On hold until" would be wrong. */}
             {!isAnnouncement &&
-              c.autoclosureStep &&
-              c.autoclosureStep !== "DEFAULT" && (
+              c.autoclosureStep === "ON_HOLD" && (
                 <Chip
                   size="small"
                   variant="outlined"
@@ -2404,7 +2407,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   icon={<PauseCircle size={14} />}
                   label={
                     c.autoclosureStateTime
-                      ? `On hold until ${formatAbsoluteForUser(c.autoclosureStateTime) ?? "—"}`
+                      ? `On hold until ${formatUtcDateForDisplay(c.autoclosureStateTime) ?? "—"}`
                       : "On auto-closure hold"
                   }
                   sx={{ fontWeight: 600 }}
@@ -3193,7 +3196,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {autocloseHoldOpen && (
         <SetAutocloseHoldDialog
-          currentHoldUntil={c.autoclosureStateTime}
+          currentHoldUntil={
+            c.autoclosureStep === "ON_HOLD" ? c.autoclosureStateTime : undefined
+          }
           isSaving={patchCase.isPending}
           onClose={() => setAutocloseHoldOpen(false)}
           onSave={onSetAutocloseHold}

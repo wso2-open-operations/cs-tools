@@ -68,8 +68,7 @@ Env vars (all optional):
   staging backend, which a plain local-stack run of this script would
   otherwise silently overwrite with a token that only works locally). Not
   restricted to the roles `fixtures/test.ts`'s `withRole` currently knows
-  about (`"approver" | "engineer" | "crApprover" | "crInternalApprover" |
-  "crCustomerContact" | "crCustomerContact2"`) — generating a new name
+  about (`"approver" | "engineer" | "crApprover" | "crInternalApprover"`) — generating a new name
   here is fine, but a spec can't call `withRole(test, "<newRole>")` until
   that union type is widened to include it.
 
@@ -80,9 +79,9 @@ state to clean up first; a fresh run always overwrites the file.
 ### Sessions for the Change Request seed personas
 
 The Change Request lifecycle spec (`specs/operations/change-request-lifecycle.spec.ts`)
-signs in as the seed's *personas* (`scripts/csm-compose/seed-entity-service.sql`; the
+signs in as the seed's *internal* personas (`scripts/csm-compose/seed-entity-service.sql`; the
 table is under "Local seed personas" in `entity-service/CLAUDE.md`), one captured
-session per role. Mint all four against the running local stack (webapp on
+session per role. Mint both against the running local stack (webapp on
 `http://localhost:3001`, mock-oidc, entity-service + BFF up and seeded) from
 `apps/csm-portal/webapp`:
 
@@ -90,8 +89,6 @@ session per role. Mint all four against the running local stack (webapp on
 |---|---|---|
 | `crApprover` | `jane.doe@example.com` | internal; the requester persona (in no approval group) |
 | `crInternalApprover` | `alice.perera@example.com` | internal; peer / CAB / ECAB approver (Bob Fernando and Carol Silva hold the same seats) |
-| `crCustomerContact` | `dave.mendis@example.com` | external; registered contact of project 401 — answers Customer Approval / Customer Review |
-| `crCustomerContact2` | `erin.jayawardena@example.com` | external; the other contact of project 401 |
 
 ```bash
 mint() { # mint <role> <email local part>
@@ -100,20 +97,60 @@ mint() { # mint <role> <email local part>
 }
 mint crApprover jane.doe
 mint crInternalApprover alice.perera
-mint crCustomerContact dave.mendis
-mint crCustomerContact2 erin.jayawardena
 ```
 
 (Add `E2E_BASE_URL=http://localhost:<port>` when the webapp is not on `:3001`.)
 
-The same group (`cs_engineer`) is used for the customers on purpose: the local mock-oidc
-signs in any email, and the BFF takes its permission from the JWT group; what the
-entity-service then lets the person *see and do* comes from the user's stored type
-(`internal` -> INTERNAL sees everything, `customer` -> EXTERNAL sees only the
-projects they are a registered contact of). Each email must exist in the entity-service
-seed or `GET /users/me` 404s and the mint fails. Tokens last an hour: re-run the four
-`mint` lines if the spec starts failing on auth. A test whose role has no session is *skipped*, not
-failed.
+Each email must exist in the entity-service seed or `GET /users/me` 404s and the mint
+fails. Tokens last an hour: re-run the two `mint` lines if the spec starts failing on
+auth. A test whose role has no session is *skipped*, not failed.
+
+**There is no session for the seed's customers** (`dave.mendis`, `erin.jayawardena`,
+`mira.santos`, `noel.prasad`): customers do not sign in to the CSM portal. They answer a
+change request's Customer Approval / Customer Review in the **customer portal**
+(`apps/customer-portal`), so a customer session belongs to that portal's own test setup,
+not here. A CSM spec that needs the customer's answer — to assert what the Approvals tab then
+*shows* (the deciding contact's row Approved / Rejected, the others' Cancelled, the change
+Scheduled / Closed / Canceled / Rollback) — applies the answer server-side and then reloads the
+CSM page as an internal user:
+
+- on the real stack, `utils/customerPortalDecision.ts` signs the contact in at the local
+  mock-oidc (no browser) and sends the decision to entity-service with that contact's own ID
+  token, which is what the customer portal's backend forwards (`E2E_OIDC_URL`,
+  `E2E_ENTITY_SERVICE_URL` and `E2E_CUSTOMER_PORTAL_URL` override its `http://localhost:9100`
+  / `:8081` / `:3000` defaults);
+- against the fake API, it is `api.customerDecides(contact, decision)`.
+
+Staff never record a customer's approval or review, so there is nothing for a spec to drive on the CSM side
+either: no "Bypass customer approval" / "Bypass customer review" entry exists in the "Change state" menu, enabled or
+disabled, and the specs assert it is absent (with the customer asked and with nobody asked). The seeded-fixture
+describe only LOOKS at CHG-FIXED-007 / -008 (Dave and Erin still requested) and sends the manual PATCH the backend
+refuses (`state "scheduled" cannot be set manually from customer_approval: the customer's approval can only be given by
+the customer in the Customer Portal; ...`), so nothing changes.
+
+**The real-stack lock tests** ("the customer requirements lock (real stack)" in the same spec) RAISE change
+requests through the CSM portal's backend as the seed's staff (`utils/realStackApi.ts`: jane raises, alice and bob
+approve; the mock identity provider signs any email in) and drive the Edit dialog as jane. They write, so they need the
+stack under test named explicitly (the backend, the identity provider and entity-service: all three) and SKIP without it -- there is no default, the stock `:8082` could be somebody's running stack:
+
+One of them ("Request Approval is refused when a customer box is ticked and nobody on the project can be asked") needs a project whose
+contacts cannot be asked: it takes the first active project for which the backend itself reports no `customerContacts` (the generated
+projects hold no registered portal-user contact; the seeded Example Corp and Other Corp do) and skips when every project has one.
+
+| Variable | Meaning |
+|---|---|
+| `E2E_CSM_BFF_URL` | The CSM portal's backend as the host reaches it (isolated stack: `http://localhost:18082`) |
+| `E2E_POSTGRES_CONTAINER` | Its Postgres (isolated stack: `csmenv-postgres-1`); the tests delete what they raised (`E2E lock: ...`) before and after |
+| `E2E_OIDC_URL` | The mock identity provider (isolated stack: `http://localhost:19100`) |
+| `E2E_ENTITY_SERVICE_URL`, `E2E_CUSTOMER_PORTAL_URL` | Where a customer's answer is applied and the customer webapp's origin (isolated stack: `http://localhost:18081`, `http://localhost:13000`) |
+| `E2E_SHOT_DIR` | Optional: save pictures of the key screens there |
+
+```bash
+E2E_BASE_URL=http://localhost:13001 E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csmenv-postgres-1 \
+E2E_CSM_BFF_URL=http://localhost:18082 E2E_OIDC_URL=http://localhost:19100 \
+E2E_ENTITY_SERVICE_URL=http://localhost:18081 E2E_CUSTOMER_PORTAL_URL=http://localhost:13000 \
+  node_modules/.bin/playwright test tests/e2e/specs/operations/change-request-lifecycle.spec.ts --project=chromium
+```
 
 The seeded-fixture describes of the spec also reset the fixtures first, by piping
 `seed-entity-service.sql` into the compose Postgres with `docker exec -i`

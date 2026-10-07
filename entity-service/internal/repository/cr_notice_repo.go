@@ -61,15 +61,22 @@ type CRNoticeRepository interface {
 	Details(ctx context.Context, id string) (CRNoticeDetails, error)
 	GroupMemberEmails(ctx context.Context, teamName string) ([]string, error)
 	ProjectContactEmails(ctx context.Context, projectID string) ([]string, error)
+	// CustomerNoticeEmails is the customer audience of one change request's
+	// notices: the contacts the change request is visible to (see
+	// change_request_visibility.go), not every contact of the project.
+	CustomerNoticeEmails(ctx context.Context, changeRequestID, projectID string) ([]string, error)
 }
 
 type crNoticeRepository struct {
-	db *Scoped
+	db  *Scoped
+	vis CRVisibility
 }
 
-// NewCRNoticeRepository constructs the change-request notice reader.
-func NewCRNoticeRepository(db *Scoped) CRNoticeRepository {
-	return &crNoticeRepository{db: db}
+// NewCRNoticeRepository constructs the change-request notice reader. The
+// optional CRVisibility is the change request customer-visibility policy, which
+// decides who of a project's contacts a change request's customer notices go to.
+func NewCRNoticeRepository(db *Scoped, vis ...CRVisibility) CRNoticeRepository {
+	return &crNoticeRepository{db: db, vis: firstCRVisibility(vis)}
 }
 
 // ClaimChanges takes up to limit unpublished outbox rows for the given entity
@@ -85,6 +92,8 @@ func NewCRNoticeRepository(db *Scoped) CRNoticeRepository {
 // acknowledges — costs a second commit on the hot path and risks re-sending
 // the same mail after a restart, which is the worse failure for a human
 // recipient.
+//
+// crvis: background notice drainer under the system identity; reads the outbox, no customer reads through it
 func (r *crNoticeRepository) ClaimChanges(ctx context.Context, entityTypes []string, limit int) ([]OutboxChange, error) {
 	// WithSystemIdentity: every Scoped call requires SOME identity on ctx
 	// regardless of whether the target table has RLS (event_outbox does
@@ -142,6 +151,8 @@ func (r *crNoticeRepository) ClaimChanges(ctx context.Context, entityTypes []str
 // A change request that does not exist yields a zero value and no error: the
 // row can be deleted between the outbox row being written and this running,
 // and a notice about a deleted record is a silent no-op, not a fault to retry.
+//
+// crvis: background notice drainer under the system identity; no customer reads through it
 func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDetails, error) {
 	// WithSystemIdentity: change_request's RLS policies (migration 0145)
 	// would otherwise silently filter this read to zero rows -- this
@@ -210,6 +221,8 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 // By NAME, not id: the ServiceNow subflow hardcoded three group sys_ids, which
 // mean nothing after the migration. The name survives and is also what a
 // reader of the ported logic recognises.
+//
+// crvis: background notice drainer under the system identity; reads team membership, not a change request
 func (r *crNoticeRepository) GroupMemberEmails(ctx context.Context, teamName string) ([]string, error) {
 	const query = `
 		SELECT u.email
@@ -223,6 +236,8 @@ func (r *crNoticeRepository) GroupMemberEmails(ctx context.Context, teamName str
 }
 
 // ProjectContactEmails returns a customer project's contact addresses.
+//
+// crvis: background notice drainer under the system identity; the building block of CustomerNoticeEmails's legacy audience
 func (r *crNoticeRepository) ProjectContactEmails(ctx context.Context, projectID string) ([]string, error) {
 	if projectID == "" {
 		// No project on the record means no customer audience. An empty list,
@@ -230,6 +245,73 @@ func (r *crNoticeRepository) ProjectContactEmails(ctx context.Context, projectID
 		return nil, nil
 	}
 	return r.emails(ctx, projectContactEmailsQuery, projectID)
+}
+
+// CustomerNoticeEmails returns who a change request's customer notices (the
+// request for the customer's approval or review, the answer to a proposed time)
+// are addressed to: the contacts the change request was DESIGNATED to, i.e. the
+// registered contacts of its project who hold an approver row on one of its
+// customer stages, in any state. A change request nobody has been asked about
+// has no audience, EXCEPT a legacy one (created before the strict-visibility
+// cutover, see CRVisibility): such a change request is visible to its whole
+// project and, with no customer rows, keeps going to every contact of the
+// project as before.
+//
+// Mail is a disclosure too: telling a contact who was never asked that a change
+// request exists (its number and subject are in the notice) would defeat the
+// visibility rule the portal enforces.
+//
+// crvis: background notice drainer under the system identity: it DECIDES who is mailed, and the audience it returns is the designated contacts (the visibility rule applied to mail)
+func (r *crNoticeRepository) CustomerNoticeEmails(ctx context.Context, changeRequestID, projectID string) ([]string, error) {
+	if projectID == "" || changeRequestID == "" {
+		return nil, nil
+	}
+	sys := WithSystemIdentity(ctx)
+	var anyDesignated, legacy bool
+	err := r.db.QueryRow(sys, `
+		SELECT EXISTS (SELECT 1 FROM approval_stage_approver asa JOIN approval_stage ast ON ast.id = asa.stage_id
+		                WHERE ast.work_item_id = $1::uuid AND ast.checkpoint_label IN (`+sqlStringList(crVisibilityCustomerStageLabels)+`)
+		                  AND asa.state IN (`+sqlStringList(crDesignationApproverStates)+`)),
+		       COALESCE((SELECT $2::timestamptz IS NULL OR wi.created_on < $2::timestamptz FROM work_item wi WHERE wi.id = $1::uuid), false)`,
+		changeRequestID, r.vis.StrictFrom).Scan(&anyDesignated, &legacy)
+	if err != nil {
+		return nil, fmt.Errorf("crnotice: read the audience of change request %s: %w", changeRequestID, err)
+	}
+	if !anyDesignated {
+		if legacy {
+			return r.ProjectContactEmails(ctx, projectID)
+		}
+		return nil, nil
+	}
+	rows, err := r.db.Query(sys, `
+		SELECT pc.email
+		FROM project_contact pc
+		WHERE pc.project_id = $2::uuid
+		  AND pc.state = 'REGISTERED'
+		  AND COALESCE(pc.email, '') <> ''
+		  AND LOWER(pc.email) IN (
+		      SELECT LOWER(u.email)
+		        FROM approval_stage_approver asa
+		        JOIN approval_stage ast ON ast.id = asa.stage_id
+		        JOIN "user" u ON u.id = asa.approver_user_id
+		       WHERE ast.work_item_id = $1::uuid
+		         AND ast.checkpoint_label IN (`+sqlStringList(crVisibilityCustomerStageLabels)+`)
+		         AND asa.state IN (`+sqlStringList(crDesignationApproverStates)+`)
+		         AND COALESCE(u.email, '') <> '')
+		ORDER BY pc.email`, changeRequestID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("crnotice: query designated contacts: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, fmt.Errorf("crnotice: scan designated contact: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // projectContactEmailsQuery reads a project's contact addresses, leaving out

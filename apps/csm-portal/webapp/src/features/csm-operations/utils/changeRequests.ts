@@ -73,18 +73,12 @@ const IMPACT_COLOR: Record<BeChangeRequestImpact, ChipColor> = {
 export const CHANGE_REQUEST_STATES = Object.keys(STATE_LABEL) as BeChangeRequestState[];
 
 /**
- * The 9 states that make up the CR's linear forward path, in order —
- * `CHANGE_REQUEST_STATES` minus `rollback`/`canceled`. Those two are
- * destructive off-ramps reachable from several points in the path (see
- * `DESTRUCTIVE_TRANSITIONS` below), not sequential steps in it, so a lifecycle
- * step indicator built from this array should render them separately rather
- * than forcing them into the same line.
+ * True for `rollback`/`canceled`: the two exits off the forward path (they are
+ * reachable from several points in it, see `DESTRUCTIVE_TRANSITIONS` below).
+ * The lifecycle stepper plots them in the customer portal's place for them,
+ * after the forward stages (`CHANGE_REQUEST_LIFECYCLE_ORDER` in
+ * `changeRequestStages.ts`), and styles them as exceptions.
  */
-export const CHANGE_REQUEST_FORWARD_STATES = CHANGE_REQUEST_STATES.filter(
-  (s) => s !== "rollback" && s !== "canceled",
-);
-
-/** True for `rollback`/`canceled`: an off-ramp from the linear forward path, not a step in it. */
 export function isChangeRequestOffRampState(state?: string | null): boolean {
   return state === "rollback" || state === "canceled";
 }
@@ -338,9 +332,9 @@ export function changeRequestBlockingReason(
   state?: string | null,
 ): string | null {
   // The customer gates are named from the state: the CR is waiting on the
-  // customer whether the backend provisioned a "Customer Approval" /
-  // "Customer Review" stage for the customer group or (no group) the step is
-  // recorded manually. Same wording the stage label gives, never doubled.
+  // customer's own answer (given in the Customer Portal) whether or not the
+  // backend provisioned a "Customer Approval" / "Customer Review" stage for
+  // the customer group. Same wording the stage label gives, never doubled.
   if (state === "customer_approval") return "Awaiting Customer Approval";
   if (state === "customer_review") return "Awaiting Customer Review";
   // A stage whose every approver was cancelled or marked not required (a
@@ -367,32 +361,169 @@ export function changeRequestBlockingReason(
 }
 
 /**
- * Helper shown in the Approval tab when a CR sits at a customer gate but its
- * Customer Project has no registered contacts, so the backend had nobody to
- * ask. `null` when the state is not a customer gate or contacts exist.
- * `customerContacts` being `undefined` (field absent from the payload, e.g.
- * another data source) is treated as "unknown" -> `null`; only an explicit
- * empty list counts as "none".
+ * Why nobody is being asked, for a project with no registered contacts at all:
+ * what the Customer Project holds, and that it cannot be changed to route the
+ * step (it is fixed once approval is requested).
  */
 export const NO_CUSTOMER_CONTACTS_HELPER =
   "No registered customer contacts are assigned to this change request's project, so no customer approvers were assigned. " +
-  "Once a contact registers on the project, changing the Customer Project and saving the change request routes the step to them; until then the customer's response is recorded manually.";
+  "The Customer Project is fixed once approval is requested, so it cannot be changed to route the step.";
 
-export function noCustomerContactsHelper(
-  state: string | null | undefined,
-  customerContacts: readonly unknown[] | null | undefined,
-): string | null {
-  if (state !== "customer_approval" && state !== "customer_review") return null;
-  if (customerContacts === undefined) return null;
-  return customerContacts && customerContacts.length > 0 ? null : NO_CUSTOMER_CONTACTS_HELPER;
+/**
+ * Why nobody is being asked when the project does have registered contacts but
+ * none of them has a request waiting. The web cannot tell which of the causes
+ * applies, so it names them rather than one: the request goes to the project's
+ * registered contacts leaving out whoever raised the change and anyone no longer
+ * active (so a project whose only contact is the requester, or whose contacts
+ * were all deactivated, asks nobody), and a change migrated from the previous system
+ * sitting at the step can have had no request at all.
+ */
+export const NOBODY_ASKED_HELPER =
+  "Nobody is being asked to answer at this step. The request goes to the Customer Project's registered contacts, " +
+  "leaving out whoever raised the change and anyone no longer active, and none of them has one waiting; " +
+  "a change migrated from the previous system may also have no request at all.";
+
+/**
+ * What staff are left with, per customer gate, when nobody is being asked.
+ * Staff never record a customer's approval or review, so the only exits are the
+ * ones staff always have there. Out of Customer Approval that is Cancel change:
+ * Re-schedule only sends the change back through approval, to ask the same group
+ * again, so it ends no wait. Out of Customer Review it is Roll back or Cancel
+ * change.
+ */
+export const NOBODY_ASKED_WAY_OUT: Readonly<Record<"customer_approval" | "customer_review", string>> = {
+  customer_approval:
+    "Staff never record a customer's approval, so there is nobody to answer here: Cancel change is the only way out. " +
+    "Re-schedule only sends the change back through approval, to ask the same group again.",
+  customer_review:
+    "Staff never record a customer's review, so there is nobody to answer here: Roll back or Cancel change are the only ways out.",
+};
+
+/**
+ * The same for Customer Approval when the project DOES have registered contacts
+ * and none has a request waiting. The web cannot tell whether anybody can be
+ * asked this time (the requester alone and deactivated contacts leave nobody; a
+ * legacy change that reached the gate with no request, on a project with
+ * eligible contacts, does get its question put by a Re-schedule), so it says what
+ * Re-schedule does and when Cancel change is the only way out, rather than
+ * claiming either.
+ */
+export const NOBODY_ASKED_WAY_OUT_RESCHEDULE_MAY_HELP =
+  "Staff never record a customer's approval, so there is nobody to answer here. " +
+  "Re-schedule sends the change back through approval and then asks the project's registered contacts again, " +
+  "which helps only if someone can be asked this time; if nobody can, Cancel change is the only way out.";
+
+/**
+ * Whether any approver of any stage is still being asked: an approver row in
+ * the `REQUESTED` state, the same test the backend and `pendingCustomerReview`
+ * use (never the stage's own status, which stays `PENDING` after every approver
+ * was cancelled). `null` while the approvals are not known (not loaded, or being
+ * reloaded).
+ *
+ * Any stage counts, not only one labelled as a customer stage: a stage the
+ * sync brought over is labelled by its position, so the customer's request on a
+ * migrated change can carry any label, and a note that says nobody is asked
+ * must never be wrong about a change somebody is asked about. At a customer
+ * gate every internal stage is settled (leaving a state cancels what was left
+ * waiting in it), so a row still waiting there is the customer's.
+ */
+export function anyApproverBeingAsked(approvals: readonly BeChangeRequestApproval[] | null | undefined): boolean | null {
+  if (!approvals) return null;
+  return approvals.some((stage) => stage.approvers.some((a) => a.status.trim().toUpperCase() === "REQUESTED"));
 }
 
 /**
- * States from which the "Customer Approval" checkbox can no longer be changed:
+ * The note shown in the Approval tab when a change sits at a customer gate
+ * (Customer Approval / Customer Review) and nobody is being asked to answer, so
+ * nobody can: staff never record a customer's approval or review, and the
+ * customer's own answer has no one to come from. `null` in every other case.
+ *
+ * Nobody is asked when:
+ *  - the project has no registered contacts (`customerContacts` empty): the
+ *    project-specific reason, shown even before the approvals load, since the
+ *    contacts alone prove it unless an old request is still waiting;
+ *  - the project has contacts, but the approvals (loaded) show no approver
+ *    waiting: only the requester is registered, the contacts are deactivated,
+ *    or the change reached the gate with no request at all (a legacy change
+ *    with no stage).
+ * It is `null`, never a guess, while the approvals are unknown (`undefined`),
+ * when somebody IS waiting (an old request still stands: only the approvers
+ * already asked may answer it), and when `customerContacts` is `undefined`
+ * (absent from the payload: another data source, nothing is claimed).
+ */
+export function noCustomerAskedHelper(
+  state: string | null | undefined,
+  customerContacts: readonly unknown[] | null | undefined,
+  approvals?: readonly BeChangeRequestApproval[] | null,
+): string | null {
+  if (state !== "customer_approval" && state !== "customer_review") return null;
+  if (customerContacts === undefined) return null;
+  const asked = anyApproverBeingAsked(approvals);
+  if (asked === true) return null;
+  if (!customerContacts || customerContacts.length === 0) return `${NO_CUSTOMER_CONTACTS_HELPER} ${NOBODY_ASKED_WAY_OUT[state]}`;
+  if (asked !== false) return null;
+  return `${NOBODY_ASKED_HELPER} ${state === "customer_approval" ? NOBODY_ASKED_WAY_OUT_RESCHEDULE_MAY_HELP : NOBODY_ASKED_WAY_OUT.customer_review}`;
+}
+
+// ---------------------------------------------------------------------------
+// What can still be edited about the customer's part of a change request
+//
+// The rule is a pure function of (state, the stored value, whether the change
+// request has a Customer Project), so this mirrors the backend EXACTLY, up front,
+// instead of waiting for its 400 (the backend stays the authority and still
+// answers one; its own table test and the table in `__tests__/changeRequests.test.ts`
+// here carry the same rows, under the same ids):
+//
+//   - CREATION PHASE is the state New (before Request Approval). The Customer
+//     Project (which fixes the Customer Group, derived read-only from that
+//     project's registered contacts) and both tick boxes are fully editable in it.
+//   - The moment the change request leaves New the Customer Project is FROZEN in
+//     every later state, for everyone. A correction is Cancel + Clone.
+//   - After New a tick box is ADD-ONLY: an unticked one may be ticked until the
+//     gate it controls is passed (Customer Approval: while the change request is
+//     New / Assess / Authorize, i.e. before it can reach Customer Approval;
+//     Customer Review: until it reaches Customer Review), and needs a Customer
+//     Project to already be set (it can no longer be set then); a ticked one can
+//     never be unticked.
+//   - Deployments and deployment products keep their own rule: editable until
+//     Implement, and always within the frozen project.
+//
+// A change request cannot return to New, so none of this needs a record of what
+// it reached. It is also what closes the Re-schedule hole: a ticked box stays
+// ticked, so a change sent back to Authorize asks the same contacts again.
+// ---------------------------------------------------------------------------
+
+/** True while a change request is being created: state New, or none recorded yet. */
+export function isChangeRequestCreationPhase(state?: string | null): boolean {
+  return !state || state === "new";
+}
+
+/** Why the Customer Project cannot be changed once approval was requested. */
+export const CUSTOMER_PROJECT_FROZEN_REASON =
+  "Fixed when approval was requested. Cancel and clone to change it.";
+
+/** Why a ticked customer requirement is read-only after New. */
+export const CUSTOMER_REQUIREMENT_ADD_ONLY_REASON =
+  "Once approval has been requested a customer requirement can be added but never removed.";
+
+/** Why an unticked customer requirement cannot be added after New: no project, and none can be set. */
+export const CUSTOMER_REQUIREMENT_NEEDS_PROJECT_REASON =
+  "Needs a Customer Project, which can no longer be set. Cancel and clone.";
+
+/** The helper under a customer requirement that may still be added, but not removed. */
+export const CUSTOMER_REQUIREMENT_ONCE_SAVED_HELPER = "Once saved this can't be removed.";
+
+/** Why the Customer Project is read-only in `state`, or `null` while it is editable (state New). */
+export function customerProjectLockedReason(state?: string | null): string | null {
+  return isChangeRequestCreationPhase(state) ? null : CUSTOMER_PROJECT_FROZEN_REASON;
+}
+
+/**
+ * States from which the "Customer Approval" checkbox can no longer be turned ON:
  * the gate it controls (between internal approval and scheduling) is either
  * being worked (`customer_approval`) or already behind the CR (`scheduled` and
- * everything after it, including the off-ramps). Mirrors the backend, which
- * refuses a late edit with a 400; this only lets the UI say so up front.
+ * everything after it, including the off-ramps). Mirrors the backend's
+ * `approvalRequirementEditable`.
  */
 const CUSTOMER_APPROVAL_LOCKED_STATES: readonly string[] = [
   "customer_approval",
@@ -405,7 +536,7 @@ const CUSTOMER_APPROVAL_LOCKED_STATES: readonly string[] = [
   "canceled",
 ];
 
-/** States from which the "Customer Review" checkbox can no longer be changed. */
+/** States from which the "Customer Review" checkbox can no longer be turned ON (`reviewRequirementEditable`). */
 const CUSTOMER_REVIEW_LOCKED_STATES: readonly string[] = [
   "customer_review",
   "closed",
@@ -413,24 +544,123 @@ const CUSTOMER_REVIEW_LOCKED_STATES: readonly string[] = [
   "canceled",
 ];
 
-/** Why the Customer Approval checkbox is locked in `state`, or `null` when it is editable. */
-export function customerApprovalLockedReason(state?: string | null): string | null {
-  return state && CUSTOMER_APPROVAL_LOCKED_STATES.includes(state)
-    ? "Locked: the change request has already reached the customer approval step or later."
-    : null;
+/** What a customer requirement's rule depends on besides the state. */
+export interface CustomerRequirementContext {
+  /** The tick box as stored (`customerApprovalRequired` / `customerReviewRequired`). */
+  stored: boolean;
+  /** Whether the change request has a Customer Project. */
+  hasProject: boolean;
 }
 
-/** Why the Customer Review checkbox is locked in `state`, or `null` when it is editable. */
-export function customerReviewLockedReason(state?: string | null): string | null {
-  return state && CUSTOMER_REVIEW_LOCKED_STATES.includes(state)
-    ? "Locked: the change request has already reached the customer review step or later."
+function customerRequirementLockedReason(
+  gateLockedStates: readonly string[],
+  gateWord: "approval" | "review",
+  state: string | null | undefined,
+  { stored, hasProject }: CustomerRequirementContext,
+): string | null {
+  if (isChangeRequestCreationPhase(state)) return null;
+  // Add-only: a requirement that was added stays, in every state after New.
+  if (stored) return CUSTOMER_REQUIREMENT_ADD_ONLY_REASON;
+  // Adding one is possible only until its gate is passed...
+  if (state && gateLockedStates.includes(state)) {
+    return `Locked: the change request has already reached the customer ${gateWord} step or later.`;
+  }
+  // ...and only with a Customer Project to ask (it can no longer be set).
+  if (!hasProject) return CUSTOMER_REQUIREMENT_NEEDS_PROJECT_REASON;
+  return null;
+}
+
+/**
+ * Why the Customer Approval checkbox cannot be changed in `state`, or `null` when
+ * it can (in New either way; after New only to tick an unticked one).
+ */
+export function customerApprovalLockedReason(
+  state: string | null | undefined,
+  context: CustomerRequirementContext,
+): string | null {
+  return customerRequirementLockedReason(CUSTOMER_APPROVAL_LOCKED_STATES, "approval", state, context);
+}
+
+/** Why the Customer Review checkbox cannot be changed in `state`, or `null` when it can. */
+export function customerReviewLockedReason(
+  state: string | null | undefined,
+  context: CustomerRequirementContext,
+): string | null {
+  return customerRequirementLockedReason(CUSTOMER_REVIEW_LOCKED_STATES, "review", state, context);
+}
+
+/**
+ * The warning shown under a customer requirement that can still be ticked after
+ * New (it can be added but never removed), or `null` where nothing is final yet:
+ * in New, or when the box is ticked already (it then has its own reason).
+ */
+export function customerRequirementOnceSavedHelper(
+  state: string | null | undefined,
+  stored: boolean,
+): string | null {
+  return isChangeRequestCreationPhase(state) || stored ? null : CUSTOMER_REQUIREMENT_ONCE_SAVED_HELPER;
+}
+
+/** Why Request Approval is blocked for want of a Customer Project, or `null`. */
+export const REQUEST_APPROVAL_NEEDS_PROJECT_REASON = "Select a Customer Project before requesting approval";
+
+/**
+ * Request Approval (New -> Assess) is refused by the backend when the customer's
+ * approval and/or review is required but the change request has no Customer
+ * Project: it would reach a customer stage with nobody to ask, and the project can
+ * no longer be set once it has left New. Offered up front as the reason the action
+ * is disabled.
+ */
+export function requestApprovalNeedsProjectReason(
+  cr: Pick<BeChangeRequestDetail, "state" | "project" | "customerApprovalRequired" | "customerReviewRequired">,
+): string | null {
+  // Only the move out of New: a resent {state: "assess"} on a change request that
+  // is already past it is the backend's idempotent no-op, not a request.
+  if (!isChangeRequestCreationPhase(cr.state)) return null;
+  const needsCustomer = cr.customerApprovalRequired === true || cr.customerReviewRequired === true;
+  return needsCustomer && !cr.project?.id ? REQUEST_APPROVAL_NEEDS_PROJECT_REASON : null;
+}
+
+/** Why Request Approval is blocked for want of anybody to ask on the Customer Project, or `null`. */
+export const REQUEST_APPROVAL_NEEDS_CONTACT_REASON = "Register a contact for the Customer Project before requesting approval";
+
+/**
+ * Request Approval (New -> Assess) is refused by the backend when the customer's
+ * approval and/or review is required and nobody on the Customer Project can be
+ * asked: the change would reach Customer Approval / Customer Review with nobody to
+ * answer, and with no way for staff to answer for the customer it could only be
+ * cancelled (or rolled back from Review). The backend asks the project's
+ * registered contacts leaving out whoever raised the change and anyone no longer
+ * active, and it answers that refusal in words.
+ *
+ * The page knows part of that: when the change's own `customerContacts` is an
+ * EMPTY list (the project has no registered contact at all, or none still active)
+ * the refusal is certain, so the action is offered disabled with the reason, like
+ * the missing-project one. It does not guess the rest (a project whose only
+ * contact is the requester, or a contact with no sign-in yet): there the request
+ * goes out and the backend's own message shows in the page's error banner, as for
+ * any other refusal. It never claims anything while `customerContacts` is
+ * `undefined` (not in the payload: another data source). With no project the
+ * missing-project reason (`requestApprovalNeedsProjectReason`) applies instead.
+ */
+export function requestApprovalNeedsContactReason(
+  cr: Pick<
+    BeChangeRequestDetail,
+    "state" | "project" | "customerApprovalRequired" | "customerReviewRequired" | "customerContacts"
+  >,
+): string | null {
+  if (!isChangeRequestCreationPhase(cr.state)) return null;
+  const needsCustomer = cr.customerApprovalRequired === true || cr.customerReviewRequired === true;
+  if (!needsCustomer || !cr.project?.id) return null;
+  return cr.customerContacts !== undefined && cr.customerContacts !== null && cr.customerContacts.length === 0
+    ? REQUEST_APPROVAL_NEEDS_CONTACT_REASON
     : null;
 }
 
 /**
- * States from which Customer Project / Deployments / Deployment
- * products can no longer be changed (the backend refuses with a 400 from
- * `implement` onward).
+ * States from which the deployments / deployment products can no longer be
+ * changed (the backend refuses with a 400 from `implement` onward). The Customer
+ * Project is frozen far earlier (see `customerProjectLockedReason`).
  */
 const SCOPE_LOCKED_STATES: readonly string[] = [
   "implement",
@@ -441,10 +671,10 @@ const SCOPE_LOCKED_STATES: readonly string[] = [
   "canceled",
 ];
 
-/** Why the project / deployments are locked in `state`, or `null` when editable. */
+/** Why the deployments (and their products) are locked in `state`, or `null` when editable. */
 export function changeRequestScopeLockedReason(state?: string | null): string | null {
   return state && SCOPE_LOCKED_STATES.includes(state)
-    ? "Locked: the customer project and deployments can't be changed once implementation has started."
+    ? "Locked: the deployments can't be changed once implementation has started."
     : null;
 }
 
@@ -474,15 +704,15 @@ const TRANSITION_LABEL: Record<string, string> = {
   // approval flow (Peer -> CAB for Normal, ECAB for Emergency, straight to
   // Scheduled for Standard -- all the backend's call).
   assess: "Request Approval",
-  // There is deliberately no generic entry for `scheduled`: a CR is moved to
-  // Scheduled automatically when its approval is granted, never by a manual
-  // "Schedule" action. The one exception is leaving `customer_approval`,
-  // where the move *is* recording the customer's approval -- see
-  // `changeRequestTransitionLabel`'s `fromState` and `NEVER_OFFERED_TARGETS`
-  // in ChangeRequestActionBar.
+  // There is deliberately no entry for `scheduled`: a CR is moved to
+  // Scheduled automatically when its approval is granted (the customer's own
+  // answer, for a change that needs one), never by a manual "Schedule" action.
   implement: "Start implementation",
   review: "Mark implemented",
   customer_review: "Send for customer review",
+  // Plain "Close" is the move out of Review when no customer review is
+  // required. Out of `customer_review` there is none: that Close is the
+  // customer's own answer.
   closed: "Close",
   rollback: "Roll back",
   canceled: "Cancel change",
@@ -504,12 +734,7 @@ function sentenceCase(raw: string): string {
 
 /** The action-phrased label for a transition target, curated or generic. */
 export function changeRequestTransitionLabel(target: string, fromState?: string | null): string {
-  // Leaving `customer_approval` for `scheduled` is how the customer's approval
-  // is recorded; it is the only place `scheduled` is ever an action.
-  if (target === "scheduled" && fromState === "customer_approval") {
-    return "Record customer approval";
-  }
-  // Likewise `authorize` is only ever an action from `customer_approval`: the
+  // `authorize` is only ever an action from `customer_approval`: the
   // planned time changed, so the change goes back through internal approval.
   if (target === "authorize" && fromState === "customer_approval") {
     return "Re-schedule";
@@ -523,13 +748,98 @@ export function isDestructiveChangeRequestTransition(target: string): boolean {
 }
 
 /**
- * True when moving to `target` must not happen without a stated reason. The
- * reason is recorded as an ordinary comment on the change request *before*
- * the state is patched — the PATCH contract has no reason or comment field of
- * its own. See `ChangeRequestTransitionReasonDialog`.
+ * True when moving to `target` must not happen without a stated reason: the
+ * destructive off-ramps (Roll back, Cancel change). The reason is recorded as
+ * an ordinary internal work note on the change request *before* the state is
+ * patched -- the PATCH contract has no reason or comment field of its own. See
+ * `ChangeRequestTransitionReasonDialog`.
  */
 export function changeRequestTransitionRequiresReason(target: string): boolean {
   return isDestructiveChangeRequestTransition(target);
+}
+
+/**
+ * The customer's review of a change sitting in Customer Review, while it is
+ * still waiting for an answer: the "Customer Review" stage the change's
+ * customer gate provisioned, with at least one customer contact still being
+ * asked. `contactNames` are those contacts' names (non-empty ones,
+ * de-duplicated, in stage order).
+ */
+export interface PendingCustomerReview {
+  contactNames: string[];
+  /**
+   * How many contacts are being asked: every approver still `REQUESTED`, the
+   * nameless ones and the ones that share a name with another included, so it
+   * can exceed `contactNames.length` (the backend sends an empty name for a
+   * user without one). Absent reads as `contactNames.length`.
+   */
+  askedCount?: number;
+}
+
+/**
+ * The customer review currently pending for a change in Customer Review,
+ * derived from its approval stages (`GET /change-requests/{id}/approvals`), or
+ * `null` when `state` is not Customer Review, the approvals have not loaded, or
+ * nobody is being asked (no registered contacts, or the request was
+ * superseded). "Being asked" is the approver-level `REQUESTED` status -- the
+ * same test the backend's refusal uses -- never the stage's own status, which
+ * stays `PENDING` after every approver was cancelled.
+ *
+ * Only the review is read: it is what the action bar needs, to hold Roll back
+ * (a failed review is the customer's rejection, which they give in the
+ * Customer Portal). There is nothing to read for Customer Approval, where no
+ * staff action waits on the customer's answer.
+ */
+export function pendingCustomerReview(
+  approvals: BeChangeRequestApproval[] | null | undefined,
+  state?: string | null,
+): PendingCustomerReview | null {
+  if (state !== "customer_review" || !approvals) return null;
+  const names: string[] = [];
+  let askedCount = 0;
+  for (const stage of approvals) {
+    if (knownApprovalStageLabel(stage.stage) !== "Customer Review") continue;
+    for (const approver of stage.approvers) {
+      if (approver.status.trim().toUpperCase() !== "REQUESTED") continue;
+      askedCount += 1;
+      const name = approver.name?.trim();
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+  return askedCount > 0 ? { contactNames: names, askedCount } : null;
+}
+
+/** Most contact names spelled out in the pending-review reason before "and N more". */
+const MAX_PENDING_CONTACT_NAMES = 3;
+
+/**
+ * The targets the backend leaves out of `legalNextStates` while the customer's
+ * review is live in `state`: `rollback`, because a failed review is the
+ * customer's rejection, which they give in the Customer Portal. Cancel stays.
+ * Empty for any other state, Customer Approval included: Re-schedule and Cancel
+ * change are both always on offer there.
+ */
+export function customerGateWithheldTargets(state?: string | null): string[] {
+  return state === "customer_review" ? ["rollback"] : [];
+}
+
+/**
+ * Why Roll back is unavailable while `pending` is waiting for the customer's
+ * review, or `null` when nothing is pending. The backend refuses a manual
+ * `rollback` out of Customer Review while the customer group's review is live;
+ * the customer gives a failed review in the Customer Portal.
+ */
+export function rollbackPendingReviewReason(pending: PendingCustomerReview | null | undefined): string | null {
+  if (!pending) return null;
+  const shown = pending.contactNames.slice(0, MAX_PENDING_CONTACT_NAMES);
+  if (shown.length === 0) {
+    return "Customer review is pending. A failed review is the customer's to give in the Customer Portal, so the change can't be rolled back from here.";
+  }
+  // Everyone asked counts, named or not: "A and 2 more" when two more people
+  // (nameless, or sharing a name already shown) are being asked too.
+  const more = Math.max(pending.askedCount ?? 0, pending.contactNames.length) - shown.length;
+  const who = more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
+  return `Customer review is pending from ${who}. A failed review is theirs to give in the Customer Portal, so the change can't be rolled back from here.`;
 }
 
 export interface ChangeRequestFilters {

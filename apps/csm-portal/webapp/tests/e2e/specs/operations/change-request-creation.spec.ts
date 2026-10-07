@@ -327,6 +327,26 @@ test.describe("change request creation — Customer Group: the project's registe
     await expect(page.getByText("Select a Customer Project first.").first()).toBeVisible();
   });
 
+  test("a customer box ticked on a project with no registered contact is accepted at create (the change is New, nobody is asked yet); the detail page then says Request Approval needs a contact, with the reason", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR);
+    const cr = new ChangeRequestCreatePage(page);
+    await cr.goto();
+    await cr.selectType("Normal");
+    await cr.subjectField().fill(e2eChangeRequestSubject("nobody to ask"));
+    await cr.selectProject(GAMMA.name);
+    await expect(page.getByText(/No registered contacts on this project/)).toBeVisible();
+    await cr.customerApprovalCheckbox().check();
+    await cr.createButton().click();
+    await expect(page).toHaveURL(new RegExp(`/operations/change-requests/${FAKE_CR_ID}$`));
+    expect(api.state()).toBe("new");
+    expect(api.flags()).toEqual({ customerApprovalRequired: true, customerReviewRequired: false });
+
+    // The refusal comes at Request Approval, not here: the page says so up front (the project's own contact list is empty).
+    const blocked = page.getByLabel("Request Approval: Register a contact for the Customer Project before requesting approval");
+    await expect(blocked).toBeVisible();
+    await expect(blocked.getByRole("button", { name: "Request Approval" })).toBeDisabled();
+  });
+
   test("is never sent: the create carries no customerGroupId (nor environmentIds), whatever the project's contacts", async ({ page }) => {
     const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR);
     const cr = new ChangeRequestCreatePage(page);

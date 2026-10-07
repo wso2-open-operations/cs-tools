@@ -21,12 +21,19 @@ package apierror
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 )
 
 // Error wraps a non-2xx response from an upstream service call.
 type Error struct {
 	StatusCode int
 	Body       string
+	// Code is the upstream's machine-readable name for the refusal (its error
+	// body's "errorCode", see entity-service's apierror/codes.go), kept only when
+	// it is a plain lower-case snake_case name; empty when the upstream sent none
+	// (an older entity-service, or a refusal that has no name). It is what a
+	// client may branch on, where Body is wording for people.
+	Code string
 }
 
 func (e *Error) Error() string {
@@ -38,11 +45,26 @@ func (e *Error) Error() string {
 // superset, {"code":...,"message":"..."}, which unmarshals the same way).
 type upstreamErrorBody struct {
 	Message string `json:"message"`
+	// ErrorCode is read as any so a value of the wrong type (not a string) is
+	// merely not a code, instead of failing the whole body and losing Message.
+	ErrorCode any `json:"errorCode"`
+}
+
+// errorCodeRe is the shape of a machine-readable error code: lower-case words
+// joined by underscores, at most 64 characters. A value of any other shape is
+// not passed on, so nothing but a plain name can reach a client through it.
+var errorCodeRe = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
+
+// ValidErrorCode reports whether code is a well-formed machine-readable error
+// code (see Error.Code).
+func ValidErrorCode(code string) bool {
+	return len(code) <= 64 && errorCodeRe.MatchString(code)
 }
 
 // NewUpstreamError builds an *Error from a non-2xx upstream HTTP response.
 // Body is set to the upstream's own "message" field when the response is the
-// expected {"message": "..."} shape, and left empty otherwise. Every upstream
+// expected {"message": "..."} shape, and left empty otherwise; Code is set to its
+// "errorCode" when that is a well-formed code. Every upstream
 // client in this backend must construct its errors through this function
 // rather than falling back to a raw response excerpt: callers already treat
 // an empty Body as "no specific message available" (both mapUpstreamError's
@@ -52,10 +74,14 @@ type upstreamErrorBody struct {
 // error page).
 func NewUpstreamError(statusCode int, rawBody []byte) *Error {
 	var body upstreamErrorBody
-	if err := json.Unmarshal(rawBody, &body); err == nil && body.Message != "" {
-		return &Error{StatusCode: statusCode, Body: body.Message}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		return &Error{StatusCode: statusCode}
 	}
-	return &Error{StatusCode: statusCode}
+	e := &Error{StatusCode: statusCode, Body: body.Message}
+	if code, ok := body.ErrorCode.(string); ok && ValidErrorCode(code) {
+		e.Code = code
+	}
+	return e
 }
 
 // DataError is a failure where the upstream call SUCCEEDED but returned

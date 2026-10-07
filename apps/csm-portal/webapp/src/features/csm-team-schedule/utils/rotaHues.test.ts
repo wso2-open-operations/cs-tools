@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from "vitest";
 import { initialsOf } from "./rota";
-import { TEAM_PALETTE, accentOf, teamColour } from "./rotaHues";
+import { TEAM_PALETTE, accentOf, teamColour, zoneColour } from "./rotaHues";
 
 describe("initialsOf", () => {
   it("takes the first and last word", () => {
@@ -62,5 +62,27 @@ describe("teamColour", () => {
 
   it("falls back for a team with no position", () => {
     expect(teamColour(undefined)).toBe(teamColour(-1));
+  });
+});
+
+describe("zoneColour", () => {
+  it("keeps the time zones their own colours", () => {
+    expect(zoneColour("TZ1")).toBe("#e8962a");
+    expect(zoneColour("tz3")).toBe("#8a63d2");
+  });
+  it("gives every rotation's Day and Night the same two colours, never the fallback grey", () => {
+    expect(zoneColour("MOE_D")).toBe(zoneColour("ASG_D"));
+    expect(zoneColour("MOE_N")).toBe(zoneColour("IAAS_N"));
+    expect(zoneColour("MOE_D")).not.toBe(zoneColour("MOE_N"));
+    expect(zoneColour("MOE_D")).not.toBe("#6b7280");
+    expect(zoneColour("SOMETHING")).toBe("#6b7280");
+  });
+});
+
+describe("teamColour past the palette", () => {
+  it("never repeats a colour for the next teams", () => {
+    const n = TEAM_PALETTE.length + 10;
+    const seen = Array.from({ length: n }, (_, i) => teamColour(i));
+    expect(new Set(seen).size).toBe(n);
   });
 });

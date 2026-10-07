@@ -1,0 +1,27 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+-- Team Schedule: a source for the shifts a move creates.
+--
+-- Someone on the Brazil rotation works the Americas team's normal hours, so
+-- the span that moves them there now writes those hours as real shifts --
+-- Americas cover on each weekday of the span -- instead of only drawing them
+-- on the roster. Those rows are the span's, kept in step with it: created when
+-- the span is marked, removed when it is cut short or removed. MOVE marks them
+-- so that bookkeeping touches no shift a lead placed by hand.
+--
+-- Alone in its file: ALTER TYPE ... ADD VALUE cannot share a transaction with
+-- a statement that uses the new value (0205 does).
+ALTER TYPE team_schedule_source_enum ADD VALUE IF NOT EXISTS 'MOVE';

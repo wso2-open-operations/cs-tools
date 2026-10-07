@@ -38,11 +38,13 @@ func NewSLAStatusHandler(svc service.SLAStatusService) *SLAStatusHandler {
 }
 
 // SearchActiveSLAStatuses handles GET /sla-status. A plain GET with
-// limit/offset query params, not a POST /search: there are no filters today,
-// only pagination, so a request body would carry nothing a query string
-// can't — same reasoning as the deprecated GET /tags form (see
+// limit/offset/source query params, not a POST /search: filtering is a
+// single optional value (source), so a request body would carry nothing a
+// query string can't — same reasoning as the deprecated GET /tags form (see
 // CaseHandler.SearchTagsQuery's own doc comment) minus that one's
-// backward-compatibility concern, since this is a new endpoint.
+// backward-compatibility concern, since this is a new endpoint. source is
+// optional; see SLAStatusService.SearchActiveSLAStatuses's own doc comment
+// for its accepted values.
 func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *http.Request) {
 	pagination := domain.Pagination{}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -62,7 +64,7 @@ func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *htt
 		pagination.Offset = parsed
 	}
 
-	resp, err := h.svc.SearchActiveSLAStatuses(r.Context(), pagination)
+	resp, err := h.svc.SearchActiveSLAStatuses(r.Context(), pagination, r.URL.Query().Get("source"))
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

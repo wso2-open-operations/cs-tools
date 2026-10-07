@@ -17,13 +17,13 @@
  */
 
 import { useEffect, useMemo, useState, type JSX } from "react";
+import RotaPicker, { type RotaOption } from "./RotaPicker";
 import type {
   ScheduleAbsence,
   ScheduleAbsenceKind,
   ScheduleAssignment,
   ScheduleShift,
-  ScheduleTier,
-} from "../types";
+  ScheduleTier, RotaFamily } from "../types";
 import {
   addDays,
   escalationGrid,
@@ -33,8 +33,7 @@ import {
   isTierlessEscalation,
   shortDayName,
   standingWindowKey,
-  toIsoDate,
-} from "../utils/rota";
+  toIsoDate, rotaZoneName } from "../utils/rota";
 import { accentOf } from "../utils/rotaHues";
 import { useTeamColour, useTeamName } from "../utils/teamColourContext";
 
@@ -45,14 +44,19 @@ interface WeekTableProps {
   /** The page's own group and team state, rendered here as well as in the
    *  toolbar -- one control in two places, the way the prototype does it, not
    *  a second copy with its own mind. See MonthRoster for the same pair. */
-  family: "CRE" | "SRE";
-  onFamilyChange: (family: "CRE" | "SRE") => void;
+  family: RotaFamily;
+  onFamilyChange: (family: RotaFamily) => void;
   teamKey: string;
   onTeamKeyChange: (teamKey: string) => void;
   teams: string[];
   /** CRE and SRE in the order they should read -- the reader's own group
    *  first, because the first of a pair reads as the default. */
-  families: readonly ("CRE" | "SRE")[];
+  families: readonly RotaFamily[];
+  /** The rotas of the family on screen, the one shown, and the change; the
+   *  picker appears only when there is more than one. */
+  rotas?: readonly RotaOption[];
+  rotaCode?: string;
+  onRotaChange?: (code: string) => void;
   /** Absences over the week, for the leave row at the foot of the table. */
   absences?: ScheduleAbsence[];
   absenceKinds?: ScheduleAbsenceKind[];
@@ -175,6 +179,9 @@ export default function WeekTable({
   onTeamKeyChange,
   teams,
   families,
+  rotas,
+  rotaCode,
+  onRotaChange,
   absences = [],
   absenceKinds = [],
 }: WeekTableProps): JSX.Element {
@@ -220,7 +227,7 @@ export default function WeekTable({
               code: `esc:${key}`,
               shift,
               list: [],
-              label: `${row.zoneCode} ${tier} support`,
+              label: `${row.label} ${tier} support`,
               token: tier,
               sort: 110 + zi * 10 + ti,
               tiered: true,
@@ -266,7 +273,7 @@ export default function WeekTable({
           label:
             scope === "we"
               ? `${windowFor.get(key)?.label ?? `Weekend ${zone}`} ${tier} support`
-              : `${zone} ${tier} support`,
+              : `${rotaZoneName(familyShifts, zone)} ${tier} support`,
           token: tier,
           sort: (scope === "we" ? 200 : 110) + TIERS.indexOf(tier as ScheduleTier),
           tiered: true,
@@ -352,7 +359,7 @@ export default function WeekTable({
       {/* One group means nothing to switch to: only Today, or a manager,
           can look at the other group. */}
       {families.length > 1 ? (
-        <div className="seg teamseg" role="tablist" aria-label="Show CRE or SRE">
+        <div className="seg teamseg" role="tablist" aria-label={`Show ${families.join(" or ")}`}>
           {families.map((f) => (
             <button
               key={f}
@@ -366,6 +373,8 @@ export default function WeekTable({
           ))}
         </div>
       ) : null}
+
+      <RotaPicker rotas={rotas} rotaCode={rotaCode} onRotaChange={onRotaChange} />
 
       <h2>
         This week <span className="count">{headcount}</span>
@@ -385,7 +394,7 @@ export default function WeekTable({
           <option value="">All teams</option>
           {teams.map((t) => (
             <option key={t} value={t}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
+              {teamNameOf(t)}
             </option>
           ))}
         </select>

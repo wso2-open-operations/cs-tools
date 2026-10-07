@@ -100,8 +100,8 @@ export interface ChangeRequestSearchResponseDto {
 export interface PatchChangeRequestPayloadDto {
   /** "YYYY-MM-DD HH:MM:SS", or null to clear a previously-set planned start. */
   plannedStartOn?: string | null;
-  isCustomerApproved?: boolean;
-  isCustomerReviewed?: boolean;
+  // isCustomerApproved / isCustomerReviewed are deliberately not modeled: they are the CUSTOMER's own answer (given in the
+  // Customer Portal) and the backend refuses them from staff with a 400.
 }
 
 export interface PatchChangeRequestResponseDto {

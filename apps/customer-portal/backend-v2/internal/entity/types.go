@@ -1945,6 +1945,10 @@ type SearchChangeRequestView struct {
 	CreatedOn        string     `json:"createdOn"`
 	UpdatedOn        string     `json:"updatedOn"`
 	UpdatedBy        string     `json:"updatedBy,omitempty"`
+	// OnHold is entity-service's change_request.is_on_hold: nil when it did not
+	// say (the ServiceNow data source, a row that was never held). The reason
+	// (onHoldReason) is deliberately not read: it is WSO2's note, not the customer's.
+	OnHold *bool `json:"onHold"`
 }
 
 // SearchChangeRequestsResponse is entity-service's response for POST /change-requests/search.
@@ -1972,6 +1976,14 @@ type ChangeRequest struct {
 	ApprovedBy          *EntityRef `json:"approvedBy"`
 	ApprovedOn          *string    `json:"approvedOn"`
 	LegalNextStates     []string   `json:"legalNextStates"`
+
+	// CustomerCanAnswer is entity-service's per-viewer answer to "may the caller
+	// answer this change request now" (approve / reject in Customer Approval,
+	// confirm / fail in Customer Review): true or false for a customer read on
+	// the PostgreSQL data source, absent (nil) when entity-service did not
+	// compute it (the ServiceNow data source, a staff caller, a failed check).
+	// Passed through unchanged -- see dto.ChangeRequestDetails.
+	CustomerCanAnswer *bool `json:"customerCanAnswer,omitempty"`
 }
 
 // PatchChangeRequestRequest is the full field set entity-service accepts for
@@ -2001,6 +2013,11 @@ type PatchChangeRequestRequest struct {
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
 	RequestApproval    *bool   `json:"requestApproval,omitempty"`
+	// ExpectedPlannedStartOn / ExpectedPlannedEndOn go with a customer's answer
+	// only: the planned window the customer was shown. entity-service records the
+	// answer only while that is still the change's window (409 otherwise).
+	ExpectedPlannedStartOn *string `json:"expectedPlannedStartOn,omitempty"`
+	ExpectedPlannedEndOn   *string `json:"expectedPlannedEndOn,omitempty"`
 }
 
 // PatchChangeRequestResponse is entity-service's response for PATCH /change-requests/{id}.

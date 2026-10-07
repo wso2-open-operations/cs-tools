@@ -28,6 +28,7 @@ import {
   expect,
   type Browser,
   type BrowserContext,
+  type BrowserContextOptions,
 } from "@playwright/test";
 import fs from "node:fs";
 import { loginIdentity } from "../auth/credentials";
@@ -137,12 +138,17 @@ async function applySession(
  * need two identities in the same test (e.g. an admin edits another user's
  * roles). Pass the name of another captured bundle. Caller must close the
  * returned context.
+ *
+ * A context made by hand does not inherit the run's `use` options (the built-in
+ * `context` fixture does), so a spec that navigates by relative path passes
+ * `{ baseURL }` — and, if it pins one, the same `timezoneId` — in `options`.
  */
 export async function openContextAs(
   browser: Browser,
   name: string,
+  options?: BrowserContextOptions,
 ): Promise<BrowserContext> {
-  const context = await browser.newContext();
+  const context = await browser.newContext(options);
   await applySession(context, name);
   return context;
 }

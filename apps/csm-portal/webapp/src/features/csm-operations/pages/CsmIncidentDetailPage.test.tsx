@@ -609,6 +609,31 @@ describe("CsmIncidentDetailPage — state-transition action bar", () => {
   });
 });
 
+describe("CsmIncidentDetailPage — Escalate to specialist team", () => {
+  // Mirrors ServiceNow, which shows "Escalate to Special Ops" only while
+  // canEscalateToSpecialOps holds; the backend sends that as the flag.
+  const button = (): HTMLElement | null =>
+    screen.queryByRole("button", { name: /escalate to specialist team/i });
+
+  it("is offered when the backend says the incident can be handed off", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, canHandOffToSpecialist: true } });
+    renderPage();
+    expect(button()).toBeInTheDocument();
+  });
+
+  it("is hidden when the backend says it cannot (not In Progress, unrouted service, or already with Special Ops)", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, canHandOffToSpecialist: false } });
+    renderPage();
+    expect(button()).not.toBeInTheDocument();
+  });
+
+  it("stays offered when the backend does not say (ServiceNow data source)", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+    expect(button()).toBeInTheDocument();
+  });
+});
+
 describe("CsmIncidentDetailPage — Create change request entry point", () => {
   // Regression/new-feature test: this action used to not exist at all on the
   // incident detail page (unlike the service request's own "Create change

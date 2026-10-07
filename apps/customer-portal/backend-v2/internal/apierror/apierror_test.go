@@ -17,7 +17,9 @@
 package apierror
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +58,60 @@ func TestNewUpstreamError_LeavesBodyEmptyWhenMessageFieldMissing(t *testing.T) {
 
 	if err.Body != "" {
 		t.Fatalf("expected empty Body when message field is absent, got %q", err.Body)
+	}
+}
+
+// An upstream refusal that names itself (entity-service's errorCode) keeps the
+// name beside the message; the name is data a client branches on, so only a
+// plain lower-case name is kept.
+func TestNewUpstreamError_KeepsAWellFormedErrorCode(t *testing.T) {
+	raw := []byte(`{"code":409,"message":"this change request is on hold","errorCode":"change_request_on_hold"}`)
+
+	err := NewUpstreamError(http.StatusConflict, raw)
+
+	if err.StatusCode != http.StatusConflict || err.Body != "this change request is on hold" {
+		t.Fatalf("status/body = %d / %q", err.StatusCode, err.Body)
+	}
+	if err.Code != "change_request_on_hold" {
+		t.Fatalf("Code = %q, want change_request_on_hold", err.Code)
+	}
+}
+
+func TestNewUpstreamError_HasNoCodeWhenTheUpstreamSentNone(t *testing.T) {
+	err := NewUpstreamError(http.StatusConflict, []byte(`{"code":409,"message":"stale"}`))
+	if err.Code != "" || err.Body != "stale" {
+		t.Fatalf("Code/Body = %q / %q, want none / stale", err.Code, err.Body)
+	}
+}
+
+func TestNewUpstreamError_DropsACodeThatIsNotAPlainName(t *testing.T) {
+	for name, code := range map[string]string{
+		"upper case":     "Change_Request_On_Hold",
+		"a space":        "on hold",
+		"markup":         "<script>alert(1)</script>",
+		"a leading dash": "-on_hold",
+		"a double dash":  "on__hold",
+		"empty":          "",
+		"too long":       strings.Repeat("a", 65),
+	} {
+		raw, _ := json.Marshal(map[string]any{"code": 409, "message": "m", "errorCode": code})
+		err := NewUpstreamError(http.StatusConflict, raw)
+		if err.Code != "" {
+			t.Errorf("%s: Code = %q, want it dropped", name, err.Code)
+		}
+		if err.Body != "m" {
+			t.Errorf("%s: Body = %q, want the message kept", name, err.Body)
+		}
+	}
+	// A code that is not even a string is dropped, and the message kept.
+	if err := NewUpstreamError(http.StatusConflict, []byte(`{"message":"m","errorCode":7}`)); err.Code != "" || err.Body != "m" {
+		t.Errorf("a numeric errorCode: Code/Body = %q / %q, want none / m", err.Code, err.Body)
+	}
+}
+
+func TestNewUpstreamError_KeepsTheCodeOfAMessagelessBody(t *testing.T) {
+	err := NewUpstreamError(http.StatusForbidden, []byte(`{"errorCode":"change_request_not_asked"}`))
+	if err.Code != "change_request_not_asked" || err.Body != "" {
+		t.Fatalf("Code/Body = %q / %q", err.Code, err.Body)
 	}
 }

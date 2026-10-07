@@ -23,6 +23,7 @@ import type {
   ProjectDeploymentOption,
 } from "@features/support/types/caseCreationOptions";
 import { ChatSender } from "@features/support/types/conversations";
+import { stripThinkingBlocks } from "@features/support/utils/chat";
 
 export type {
   DeploymentOption,
@@ -376,9 +377,12 @@ export function formatChatHistoryForClassification(
 ): string {
   return messages
     .map((m) => {
-      const text = (m.text || "").trim().slice(-150);
+      const isUser = m.sender === ChatSender.USER;
+      // The classifier should see the answer, not the model's reasoning.
+      const visible = isUser ? m.text || "" : stripThinkingBlocks(m.text || "");
+      const text = visible.trim().slice(-150);
       if (!text) return "";
-      const role = m.sender === ChatSender.USER ? "User" : "Assistant";
+      const role = isUser ? "User" : "Assistant";
       return `${role}: ${text}`;
     })
     .filter((line) => line.length > 0)

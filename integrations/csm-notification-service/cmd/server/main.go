@@ -569,6 +569,27 @@ func main() {
 			slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, durations)
 			dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
+			// One-shot reconciliation: rebuilds every currently-open clock's
+			// Redis state from entity-service's own durable record (see
+			// Engine.Reconcile's own doc comment) — the recovery path Redis
+			// itself has none of. Must run here, before RunTicker starts and
+			// before any consumer does (same ordering reasoning this whole
+			// block's own leading comment already gives for WithSLAEngine):
+			// a tick that runs before reconciliation finishes could find an
+			// empty wake-index and correctly conclude there's nothing due
+			// yet, but a case.created delivered before reconciliation
+			// finishes is harmless either way (RegisterClocks/SetClock are
+			// idempotent against whatever reconciliation later writes for
+			// the same clock). Logged, not fatal: a failure here means this
+			// run starts with whatever Redis already had (empty, if it was
+			// genuinely just wiped) rather than refusing to serve
+			// notifications at all over a recovery step failing.
+			reconcileCtx, reconcileCancel := context.WithTimeout(ctx, 60*time.Second)
+			if err := slaEngine.Reconcile(reconcileCtx, slaEntityClient); err != nil {
+				slog.Error("slaengine: reconciliation failed, starting with whatever redis already has", "err", err)
+			}
+			reconcileCancel()
+
 			// SLA_TICK_INTERVAL defaults far above the old wake-index
 			// design's original 15s: this engine now schedules a wake entry
 			// per tier at registration time (RegisterClocks), so a tick only

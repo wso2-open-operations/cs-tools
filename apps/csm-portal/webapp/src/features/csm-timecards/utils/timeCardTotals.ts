@@ -18,7 +18,10 @@ import {
   ACTIVITY_KEYS,
   type ActivityBreakdown,
 } from "@features/csm-timecards/types/timeCards";
-import { WORK_LOG_MAX } from "@features/csm-timecards/constants/timeCardConstants";
+import {
+  MAX_MINUTES_PER_TICKET_PER_DAY,
+  WORK_LOG_MAX,
+} from "@features/csm-timecards/constants/timeCardConstants";
 import { isBlankHtml } from "@utils/sanitizeHtml";
 
 /** A fresh breakdown with every activity at zero minutes. */
@@ -75,6 +78,8 @@ export function timeCardDraftErrors(draft: TimeCardDraft): TimeCardDraftErrors {
   if (!draft.date) errors.date = "Pick a date.";
   if (!hasLoggedTime(draft.breakdown)) {
     errors.minutes = "Log time against at least one activity.";
+  } else if (totalMinutes(draft.breakdown) > MAX_MINUTES_PER_TICKET_PER_DAY) {
+    errors.minutes = `Total logged time cannot exceed ${MAX_MINUTES_PER_TICKET_PER_DAY / 60} hours (${MAX_MINUTES_PER_TICKET_PER_DAY} minutes) per ticket per day.`;
   }
   // workLogComment is rich-text HTML from Editor, not a plain string — an
   // untouched editor still outputs non-empty-looking HTML (e.g.

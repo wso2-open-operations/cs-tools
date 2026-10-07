@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -94,12 +95,13 @@ func NewProjectRepository(db *Scoped) ProjectRepository {
 }
 
 // projectClosureColumns selects the overall and sub closure states in ServiceNow's
-// Title Case ("Pending Notified"), then the compliance violation date as yyyy-MM-dd.
+// Title Case ("Pending Notified"), the compliance violation date as yyyy-MM-dd, then ACP's suspension state.
 const projectClosureColumns = `INITCAP(REPLACE(p.wso2_closure_state::TEXT, '_', ' ')),
 	INITCAP(REPLACE(p.end_date_closure_state::TEXT, '_', ' ')),
 	INITCAP(REPLACE(p.invoice_due_date_closure_state::TEXT, '_', ' ')),
 	INITCAP(REPLACE(p.compliance_violation_closure_state::TEXT, '_', ' ')),
-	TO_CHAR(p.compliance_violation_date, 'YYYY-MM-DD')`
+	TO_CHAR(p.compliance_violation_date, 'YYYY-MM-DD'),
+	p.suspension_process_state`
 
 // accountIsPartnerColumn is NULL without a linked account (alias a), else the
 // same classification rule the Salesforce membership mapping uses.
@@ -340,7 +342,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 				&p.ID, &p.AccountID, &sfID, &p.Name, &p.Key, &projectTypeName,
 				&p.StartDate, &p.EndDate, &p.CreatedOn, &p.UpdatedOn,
 				&p.ClosureState, &p.EndDateClosureState, &p.InvoiceDueDateClosureState,
-				&p.ComplianceViolationClosureState, &p.ComplianceViolationDate,
+				&p.ComplianceViolationClosureState, &p.ComplianceViolationDate, &p.SuspensionProcessState,
 				&p.OnboardingStatus,
 				&aID, &aName, &acct.Region, &acct.SubRegion, &acct.IsPartner,
 				&p.ActiveCasesCount,
@@ -498,7 +500,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		&supportTier,
 		&projectTypeName, &hasSr,
 		&v.ClosureState, &v.EndDateClosureState, &v.InvoiceDueDateClosureState,
-		&v.ComplianceViolationClosureState, &v.ComplianceViolationDate,
+		&v.ComplianceViolationClosureState, &v.ComplianceViolationDate, &v.SuspensionProcessState,
 		&v.OnboardingStatus, &v.Account.IsPartner,
 		&v.GoLivePlanDate, &v.GoLiveDate, &v.OnboardingExpiryDate,
 		&v.TotalQueryHours, &v.RemainingQueryHours,
@@ -593,12 +595,13 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		SET end_date_closure_state = COALESCE($2::end_date_closure_state_enum, end_date_closure_state),
 		    invoice_due_date_closure_state = COALESCE($3::invoice_due_date_closure_state_enum, invoice_due_date_closure_state),
 		    compliance_violation_closure_state = COALESCE($4::compliance_violation_closure_state_enum, compliance_violation_closure_state),
+		    suspension_process_state = COALESCE($6::jsonb, suspension_process_state),
 		    updated_on = NOW(),
 		    updated_by = $5
 		WHERE id = $1
 		RETURNING id, updated_on, updated_by`,
 		id, closureEnumLabel(req.EndDateClosureState), closureEnumLabel(req.InvoiceDueDateClosureState),
-		closureEnumLabel(req.ComplianceViolationClosureState), updatedBy,
+		closureEnumLabel(req.ComplianceViolationClosureState), updatedBy, suspensionStateArg(req.SuspensionProcessState),
 	).Scan(&res.ID, &res.UpdatedOn, &res.UpdatedBy)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
@@ -619,7 +622,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 	var complianceDate *string
 	err = tx.QueryRow(ctx, `SELECT `+projectClosureColumns+` FROM project p WHERE p.id = $1`, id).Scan(
 		&res.ClosureState, &res.EndDateClosureState, &res.InvoiceDueDateClosureState,
-		&res.ComplianceViolationClosureState, &complianceDate,
+		&res.ComplianceViolationClosureState, &complianceDate, &res.SuspensionProcessState,
 	)
 	if err != nil {
 		return domain.ProjectUpdateResult{}, fmt.Errorf("update project: read closure states: %w", err)
@@ -650,8 +653,16 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		}
 	}
 
-	// SuspensionProcessState has no column, so it stays nil.
 	return res, nil
+}
+
+// suspensionStateArg passes the object as text so pgx sends it as jsonb input; nil keeps the stored value.
+func suspensionStateArg(v json.RawMessage) *string {
+	if v == nil {
+		return nil
+	}
+	s := string(v)
+	return &s
 }
 
 // wso2ClosureStateRule derives project.wso2_closure_state from the three sub-states.

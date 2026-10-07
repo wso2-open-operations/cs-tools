@@ -38,6 +38,11 @@ type entityIncidentClient interface {
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchIncidentActivities(ctx context.Context, id string, body []byte) ([]byte, error)
 	HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error)
+	ListSpecialistHandoffTeams(ctx context.Context, serviceID string) ([]byte, error)
+	// GetUserMe resolves the caller's own platform user record — needed by
+	// the close-ownership guard in PatchIncident; see resolveCurrentUserID
+	// (cases.go), shared with CaseHandler's own identical use.
+	GetUserMe(ctx context.Context) ([]byte, error)
 }
 
 // searchIncidentsRequest mirrors the enum/format-constrained fields of the documented
@@ -89,9 +94,13 @@ var (
 		"NEW": true, "IN_PROGRESS": true, "ON_HOLD": true, "RESOLVED": true, "CLOSED": true, "CANCELLED": true,
 	}
 
-	validHandoffReasonCodes     = map[string]bool{"no-runbook": true, "runbook-not-working": true}
-	validHandoffEscalationTeams = map[string]bool{"choreo-runtime-team": true, "choreo-apim-team": true}
+	validHandoffReasonCodes = map[string]bool{"no-runbook": true, "runbook-not-working": true}
 )
+
+// maxHandoffEscalationTeamLen bounds escalationTeam's shape. Which keys are
+// valid is the entity service's SPECIALIST_HANDOFF_CONFIG, per product, so
+// it -- not a list here -- decides, and answers 400 for an unknown team.
+const maxHandoffEscalationTeamLen = 64
 
 // createIncidentRequest mirrors the enum/format-constrained fields of the documented
 // CreateIncidentPayload schema. It is decoded only to validate those fields at the
@@ -336,7 +345,7 @@ func validateHandOffIncidentBody(body []byte) bool {
 	if !validHandoffReasonCodes[req.ReasonCode] {
 		return false
 	}
-	if req.EscalationTeam != nil && *req.EscalationTeam != "" && !validHandoffEscalationTeams[*req.EscalationTeam] {
+	if req.EscalationTeam != nil && len(*req.EscalationTeam) > maxHandoffEscalationTeamLen {
 		return false
 	}
 	return true
@@ -552,6 +561,56 @@ func (h *IncidentHandler) PatchIncident(w http.ResponseWriter, r *http.Request) 
 	if !validateUpdateIncidentBody(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
+	}
+
+	// Validate the state transition and (for a close) ownership before
+	// forwarding to the entity service — mirrors PatchCase's own shape in
+	// cases.go. One fetch of the current incident serves both checks.
+	var patch struct {
+		State *string `json:"state"`
+	}
+	patchErr := json.Unmarshal(body, &patch)
+	if patchErr == nil && patch.State != nil {
+		current, err := h.entity.GetIncident(r.Context(), id)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "entity GetIncident failed during state validation", "userID", user.UserID, "incidentID", id, "err", err)
+			mapUpstreamErrorGeneric(w, err, "Failed to update incident.")
+			return
+		}
+		var currentIncident struct {
+			State      string `json:"state"`
+			AssignedTo *struct {
+				ID string `json:"id"`
+			} `json:"assignedTo"`
+		}
+		if err := json.Unmarshal(current, &currentIncident); err != nil {
+			slog.ErrorContext(r.Context(), "failed to parse current incident state", "userID", user.UserID, "incidentID", id, "err", err)
+			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+			return
+		}
+
+		// Scenario 3: reject an illegal from→to transition before forwarding —
+		// previously nothing server-side checked this at all (only that the
+		// target value was a legal enum member), so a direct PATCH could jump
+		// straight from NEW to CLOSED.
+		if !isValidIncidentStateTransition(currentIncident.State, *patch.State) {
+			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
+			return
+		}
+
+		// Scenarios 1-2: closing an incident is restricted to its own
+		// assignee, unless the caller is admin (an operational override).
+		if *patch.State == incidentStateClosed && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+			currentUserID := resolveCurrentUserID(r.Context(), h.entity, user)
+			if currentUserID == "" {
+				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+				return
+			}
+			if currentIncident.AssignedTo == nil || currentIncident.AssignedTo.ID != currentUserID {
+				writeError(w, http.StatusForbidden, ErrMsgIncidentCloseNotOwnCase)
+				return
+			}
+		}
 	}
 
 	result, err := h.entity.PatchIncident(r.Context(), id, body)
@@ -786,5 +845,29 @@ func (h *IncidentHandler) HandOffIncidentToSpecialist(w http.ResponseWriter, r *
 			"userID", user.UserID, "incidentID", id, "githubIssueError", *envelope.Handoff.GithubIssueError)
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ListSpecialistHandoffTeams handles GET /specialist-handoff-teams?serviceId=: the Special
+// Ops teams the "Escalate to specialist team" dialog offers for the incident's service,
+// passed through from the entity service. Several teams mean the user must pick one; one
+// team is the handoff's target with nothing to pick.
+func (h *IncidentHandler) ListSpecialistHandoffTeams(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	serviceID := r.URL.Query().Get("serviceId")
+	if serviceID != "" && !uuidRe.MatchString(serviceID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	result, err := h.entity.ListSpecialistHandoffTeams(r.Context(), serviceID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity ListSpecialistHandoffTeams failed", "userID", user.UserID, "err", err)
+		mapUpstreamError(w, err, "Failed to load the specialist teams.")
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }

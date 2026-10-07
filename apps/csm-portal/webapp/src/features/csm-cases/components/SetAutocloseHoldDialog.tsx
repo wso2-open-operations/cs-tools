@@ -30,18 +30,21 @@ import {
   formatDateOnly,
   isPastDateOnly,
   parseDateOnly,
-  zonedInputToUtcIso,
+  utcDateOnlyValue,
 } from "@utils/dateTime";
 
 const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 
 interface SetAutocloseHoldDialogProps {
-  /** Current hold-until date-time, if any (ISO), shown as the picker's initial value. */
+  /**
+   * Current hold-until, if any (ISO). The backing system keeps the hold as a
+   * calendar day at 00:00 UTC, so the picker is seeded with that UTC day.
+   */
   currentHoldUntil?: string;
   /** True while a PATCH is in flight; disables the actions. */
   isSaving: boolean;
   onClose: () => void;
-  /** Apply the new hold-until date (`PATCH { autocloseHoldUntil }`), as a UTC ISO string. */
+  /** Apply the new hold-until day (`PATCH { autocloseHoldUntil }`), as that day at 00:00 UTC (ISO). */
   onSave: (holdUntilIso: string) => void;
 }
 
@@ -59,7 +62,7 @@ export default function SetAutocloseHoldDialog({
   onSave,
 }: SetAutocloseHoldDialogProps): JSX.Element {
   const [dateValue, setDateValue] = useState<string>(
-    currentHoldUntil ? formatDateOnly(new Date(currentHoldUntil)) : "",
+    utcDateOnlyValue(currentHoldUntil) ?? "",
   );
 
   const parsed = parseDateOnly(dateValue);
@@ -68,10 +71,11 @@ export default function SetAutocloseHoldDialog({
 
   const handleSubmit = (): void => {
     if (!canSubmit) return;
-    // Hold until end-of-day local time, converted to UTC for the wire.
-    const iso = zonedInputToUtcIso(`${dateValue}T23:59:00`);
-    if (!iso) return;
-    onSave(iso);
+    // The hold is a calendar day, and the backing systems read the day from
+    // the UTC date of what they are sent. Send that day at 00:00 UTC, so the
+    // day picked is the day held in every timezone (end of the local day,
+    // converted to UTC, lands on the next UTC day for anyone west of UTC).
+    onSave(`${dateValue}T00:00:00.000Z`);
   };
 
   return (

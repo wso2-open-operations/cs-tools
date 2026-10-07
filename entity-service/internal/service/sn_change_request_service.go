@@ -309,6 +309,23 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
+	// A customer is only ever sent the states a customer may see, whatever they
+	// asked for (see sn_change_request_customer_view.go); staff are sent what they
+	// asked for.
+	states := req.Filters.States
+	customerView := customerViewApplies(ctx)
+	if customerView {
+		var none bool
+		if states, none = customerChangeRequestStates(states); none {
+			return domain.SearchChangeRequestsResponse{
+				ChangeRequests: []domain.SearchChangeRequestView{},
+				Total:          0,
+				Limit:          req.Pagination.Limit,
+				Offset:         req.Pagination.Offset,
+			}, nil
+		}
+	}
+
 	var snSortBy *snCRSort
 	if req.SortBy.Field != "" {
 		snField := snCRSortFieldMap[req.SortBy.Field]
@@ -323,7 +340,7 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 		Filters: snChangeRequestFilters{
 			ProjectIDs:         uuidsToSysids(req.Filters.ProjectIDs),
 			SearchQuery:        req.Filters.SearchQuery,
-			StateKeys:          domainCRStatesToSNIDs(req.Filters.States),
+			StateKeys:          domainCRStatesToSNIDs(states),
 			ImpactKeys:         domainCRImpactsToSNIDs(req.Filters.Impacts),
 			ClosedStartDate:    formatSNDateTimeUTC(req.Filters.ClosedStartDate),
 			ClosedEndDate:      formatSNDateTimeUTC(req.Filters.ClosedEndDate),
@@ -394,9 +411,19 @@ func (s *snChangeRequestService) SearchChangeRequests(ctx context.Context, req d
 		views = append(views, view)
 	}
 
+	total := snResp.TotalRecords
+	if customerView {
+		// ServiceNow was asked for the visible states only, so nothing should be
+		// dropped; a change request it returned anyway is not shown (and not counted).
+		var dropped int
+		if views, dropped = dropHiddenChangeRequests(ctx, views); dropped > 0 {
+			total = max(total-dropped, len(views))
+		}
+	}
+
 	return domain.SearchChangeRequestsResponse{
 		ChangeRequests: views,
-		Total:          snResp.TotalRecords,
+		Total:          total,
 		Limit:          req.Pagination.Limit,
 		Offset:         req.Pagination.Offset,
 	}, nil
@@ -465,11 +492,21 @@ func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, re
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
+	// The same customer view as SearchChangeRequests.
+	states := req.Filters.States
+	customerView := customerViewApplies(ctx)
+	if customerView {
+		var none bool
+		if states, none = customerChangeRequestStates(states); none {
+			return domain.AggregateResponse{Groups: []domain.AggregateBucket{}}, nil
+		}
+	}
+
 	payload := snChangeRequestAggregatePayload{
 		Filters: snChangeRequestFilters{
 			ProjectIDs:         uuidsToSysids(req.Filters.ProjectIDs),
 			SearchQuery:        req.Filters.SearchQuery,
-			StateKeys:          domainCRStatesToSNIDs(req.Filters.States),
+			StateKeys:          domainCRStatesToSNIDs(states),
 			ImpactKeys:         domainCRImpactsToSNIDs(req.Filters.Impacts),
 			ClosedStartDate:    formatSNDateTimeUTC(req.Filters.ClosedStartDate),
 			ClosedEndDate:      formatSNDateTimeUTC(req.Filters.ClosedEndDate),
@@ -514,6 +551,9 @@ func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, re
 			}
 			// else: leave the key as-is, mirroring snCRStateLabelToString's
 			// own defensive fallback for an unrecognized label.
+		}
+		if customerView {
+			resp = dropHiddenStateBuckets(ctx, resp)
 		}
 	}
 	return resp, nil
@@ -696,13 +736,42 @@ type snCRStrChoice struct {
 // the adapter converts here rather than leaking the inconsistency upwards.
 const snUTCDateTimeLayout = "2006-01-02T15:04:05Z"
 
-// toDownstreamUTCDateTime parses a platform-format datetime ("YYYY-MM-DD HH:mm:ss",
-// interpreted as UTC) and re-emits it in the layout the downstream create endpoint
-// requires. It returns a ValidationError naming the field when the input does not
-// parse, so bad input is rejected with a specific message instead of an opaque
-// downstream pattern-validation failure.
+// snPlannedTimestamp returns a planned start / end in the one layout ServiceNow's
+// change request API takes, "YYYY-MM-DD HH:mm:ss" in UTC (snCreatedOnLayout).
+//
+// The API this service fronts documents two layouts for the planned window: that
+// one, and RFC 3339 with a zone designator ("2030-03-01T09:00:00Z",
+// "...+05:30"), which the PostgreSQL data source reads as an instant. An RFC 3339
+// value is therefore converted to the zoneless UTC layout here, the same
+// conversion the dual-write mirror makes
+// (repository.PlannedTimestampForServiceNow, so both read an instant the same way
+// and in the years 2000 to 2100 only); a value already in the zoneless layout is
+// forwarded as it was sent. Anything else -- "infinity", "now", "tomorrow", a date
+// alone, a zone name, an RFC 3339 value outside those years -- is a
+// ValidationError naming the field, exactly as before, rather than an opaque
+// downstream pattern failure.
+func snPlannedTimestamp(field, value string) (string, error) {
+	converted := repository.PlannedTimestampForServiceNow(value)
+	if _, err := time.Parse(snCreatedOnLayout, converted); err != nil {
+		return "", &apierror.ValidationError{
+			Msg: fmt.Sprintf("%s must follow the format: YYYY-MM-DD HH:mm:ss", field),
+		}
+	}
+	return converted, nil
+}
+
+// toDownstreamUTCDateTime parses a planned date-time (see snPlannedTimestamp:
+// "YYYY-MM-DD HH:mm:ss" interpreted as UTC, or RFC 3339 with a zone) and re-emits
+// it in the layout the downstream create endpoint requires. It returns a
+// ValidationError naming the field when the input does not parse, so bad input is
+// rejected with a specific message instead of an opaque downstream
+// pattern-validation failure.
 func toDownstreamUTCDateTime(field, value string) (string, error) {
-	t, err := time.Parse(snCreatedOnLayout, value)
+	converted, err := snPlannedTimestamp(field, value)
+	if err != nil {
+		return "", err
+	}
+	t, err := time.Parse(snCreatedOnLayout, converted)
 	if err != nil {
 		return "", &apierror.ValidationError{
 			Msg: fmt.Sprintf("%s must follow the format: YYYY-MM-DD HH:mm:ss", field),
@@ -793,14 +862,17 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 		if req.PlannedStartDate == nil || req.PlannedEndDate == nil {
 			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "durationInput requires both plannedStartDate and plannedEndDate"}
 		}
-		start, err := time.Parse(snCreatedOnLayout, *req.PlannedStartDate)
+		startText, err := snPlannedTimestamp("plannedStartDate", *req.PlannedStartDate)
 		if err != nil {
-			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedStartDate must follow the format: YYYY-MM-DD HH:mm:ss"}
+			return domain.CreateChangeRequestResponse{}, err
 		}
-		end, err := time.Parse(snCreatedOnLayout, *req.PlannedEndDate)
+		endText, err := snPlannedTimestamp("plannedEndDate", *req.PlannedEndDate)
 		if err != nil {
-			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss"}
+			return domain.CreateChangeRequestResponse{}, err
 		}
+		// Both were just validated against this layout.
+		start, _ := time.Parse(snCreatedOnLayout, startText)
+		end, _ := time.Parse(snCreatedOnLayout, endText)
 		if want := int(end.Sub(start).Seconds()); *req.DurationInput != want {
 			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{
 				Msg: fmt.Sprintf("durationInput (%d) must match plannedEndDate - plannedStartDate (%d)", *req.DurationInput, want),
@@ -1048,15 +1120,23 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
 		}
 	}
+	// The planned window goes downstream in the one layout ServiceNow takes: an RFC
+	// 3339 value is converted to it (snPlannedTimestamp), a zoneless one is
+	// forwarded as sent. req is this call's own copy, so re-pointing its fields
+	// does not touch the caller's.
 	if req.PlannedStartOn != nil {
-		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedStartOn); err != nil {
-			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"}
+		v, err := snPlannedTimestamp("plannedStartOn", *req.PlannedStartOn)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, err
 		}
+		req.PlannedStartOn = &v
 	}
 	if req.PlannedEndOn != nil {
-		if _, err := time.Parse(snCreatedOnLayout, *req.PlannedEndOn); err != nil {
-			return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "plannedEndOn must follow the format: YYYY-MM-DD HH:mm:ss"}
+		v, err := snPlannedTimestamp("plannedEndOn", *req.PlannedEndOn)
+		if err != nil {
+			return domain.PatchChangeRequestResponse{}, err
 		}
+		req.PlannedEndOn = &v
 	}
 	if req.Priority != nil && *req.Priority != nil && !validChangeRequestPriority[**req.Priority] {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid priority %q", **req.Priority)}
@@ -1500,7 +1580,7 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 		HasCustomerApproved:     cr.HasCustomerApproved,
 		HasCustomerReviewed:     cr.HasCustomerReviewed,
 		ApprovedOn:              cr.ApprovedOn,
-		LegalNextStates:         withoutManualScheduled(cr.LegalNextStates, view.State),
+		LegalNextStates:         withoutCustomerOutcomeStates(cr.LegalNextStates, view.State),
 
 		// Field-parity additions.
 		ImplementationPlan:           cr.ImplementationPlan,
@@ -1559,23 +1639,31 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 	return result
 }
 
-// withoutManualScheduled drops "scheduled" from the next states ServiceNow
-// offers. There is no manual "Schedule" action in the CSM flow: a change
-// becomes Scheduled when its CAB (or, for Emergency, ECAB) approval is granted,
-// so the portal must never be handed it as something to click -- the same rule
-// the PostgreSQL data source applies (legalChangeRequestNextStates). The one
-// exception is a change sitting in Customer Approval, where "scheduled" is the
-// action that records the customer's approval (also as on PostgreSQL).
-func withoutManualScheduled(states []string, state *string) []string {
+// withoutCustomerOutcomeStates drops the two next states that only the CUSTOMER
+// can reach from the next states ServiceNow offers, so that this data source's
+// legalNextStates answer is the one the PostgreSQL data source gives
+// (repository.changeRequestForwardNextStates): "scheduled" is never offered,
+// from any state -- there is no Schedule action, a change becomes Scheduled when
+// its CAB (or, for Emergency, ECAB) approval is granted or, out of Customer
+// Approval, when the customer approves -- and "closed" is never offered from
+// Customer Review, which only the customer's own review closes. No staff action
+// records the customer's approval or review on their behalf (a compliance rule:
+// ServiceNow's record of it is audited), so the portal must never be handed
+// either as something to click. Rollback (the failed-review off-ramp
+// ServiceNow offers from Review and Customer Review) and Cancel are never
+// stripped; "closed" from Review stays. This filters OUR response only: what
+// ServiceNow itself returns is unchanged.
+func withoutCustomerOutcomeStates(states []string, state *string) []string {
 	if states == nil {
 		return nil
 	}
-	if state != nil && strings.EqualFold(*state, string(domain.ChangeRequestStateCustomerApproval)) {
-		return states
-	}
+	fromCustomerReview := state != nil && strings.EqualFold(*state, string(domain.ChangeRequestStateCustomerReview))
 	out := make([]string, 0, len(states))
 	for _, st := range states {
 		if strings.EqualFold(st, string(domain.ChangeRequestStateScheduled)) {
+			continue
+		}
+		if fromCustomerReview && strings.EqualFold(st, string(domain.ChangeRequestStateClosed)) {
 			continue
 		}
 		out = append(out, st)

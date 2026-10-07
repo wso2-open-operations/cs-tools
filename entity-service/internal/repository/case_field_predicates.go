@@ -65,6 +65,99 @@ func escalationEnumLabels(ids []string) ([]string, error) {
 	return out, nil
 }
 
+// caseLikeStateLookupTables lists, for each of validCaseType's five
+// case-like values, the per-type SQL that selects the ids of that type's
+// rows matching a bound ANY() state list -- announcement's branch applies
+// the same CLOSE->CLOSED normalization caseLikeStateColumn itself applies
+// (see that const's own doc comment), so the two can never disagree on what
+// "closed" means for an announcement row.
+//
+// This exists to avoid evaluating caseLikeStateColumn's five-way COALESCE
+// as a post-join Filter, which real production-volume testing confirmed
+// costs the most database time of any query this service runs, by far: the
+// COALESCE is a runtime expression over five LEFT-joined tables, not a
+// column, so it can never be served by any index, and every row
+// caseSearchJoins admits has to be joined to all five extension tables
+// before it can even be evaluated. Every dashboard widget's case search is,
+// in practice, exactly a {field:"type"} filter alongside a {field:"state"}
+// one -- so looking the matching ids up directly in just the type(s) actually requested lets the planner use
+// that type's own existing state index (e.g. idx_case_state) and skip the
+// other four extension-table joins entirely for the common case, instead of
+// joining everything and filtering after.
+//
+// Known, accepted divergence from the COALESCE it replaces: a work_item row
+// whose own `type` column disagrees with which extension table actually
+// holds its data (a pre-existing, rare sync/data-quality issue -- confirmed
+// live) is found by the old COALESCE regardless of its declared type,
+// because that approach blindly joins and checks all five tables for every
+// row. This lookup trusts wi.type and only checks that type's own table, so
+// it diverges from the COALESCE both ways for such a row: negate=false
+// (the `in` filter) misses it when the caller narrows Types to something
+// other than the table the row's data actually lives in, and negate=true
+// (the `notIn` filter) wrongly keeps it for the mirror-image reason -- its
+// declared type's own table has no row to find, so this lookup can never
+// see the state that should have excluded it. Verified end-to-end against a
+// wide range of real dashboard filter combinations: this was the only
+// source of divergence found, and only for rows already affected by that
+// pre-existing issue. Deliberately not fixed by also checking the other
+// four tables regardless of Types -- that would reproduce the exact cost
+// this function exists to
+// avoid, to compensate for a sync-side bug that belongs in the data, not in
+// every case search query from here on.
+var caseLikeStateLookupTables = map[string]string{
+	"case":                     `SELECT id FROM "case" WHERE state::TEXT = ANY(%[1]s)`,
+	"engagement":               `SELECT id FROM engagement WHERE state::TEXT = ANY(%[1]s)`,
+	"service_request":          `SELECT id FROM service_request WHERE state::TEXT = ANY(%[1]s)`,
+	"security_report_analysis": `SELECT id FROM security_report_analysis WHERE state::TEXT = ANY(%[1]s)`,
+	"announcement":             `SELECT id FROM announcement WHERE (CASE WHEN state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE state::TEXT END) = ANY(%[1]s)`,
+}
+
+// caseLikeStateLookupAllTypes is every type caseLikeStateLookupTables covers,
+// in a fixed order -- the scope used whenever the caller names no type
+// filter of its own, so the lookup still covers exactly what
+// caseLikeStateColumn's COALESCE always implicitly covers (any of the five).
+var caseLikeStateLookupAllTypes = []string{"case", "engagement", "service_request", "security_report_analysis", "announcement"}
+
+// caseLikeStateLookupClause renders a "wi.id [NOT ]IN (...)" predicate
+// equivalent to filtering caseLikeStateColumn against the bound parameter at
+// placeholder (e.g. "$3::text[]"), as a UNION ALL of per-type id lookups
+// scoped to types -- every case-like type when types is empty (the
+// DefaultTypes case, or an anyOf branch that names no type of its own, same
+// as the COALESCE it replaces). A type not in caseLikeStateLookupTables
+// (reachable only from an anyOf branch naming a non-case-like type, e.g.
+// "incident") contributes no branch: such a row can never have a case-like
+// state at all, exactly how the COALESCE already treats it (every one of
+// the five joins is NULL for it). If no requested type is case-like, the
+// predicate degrades to the same answer the COALESCE already gives in that
+// situation -- FALSE for "in" (can never match), TRUE for "not in" (always
+// satisfies an exclusion it has no state to violate) -- rather than emitting
+// invalid empty SQL.
+func caseLikeStateLookupClause(types []string, placeholder string, negate bool) string {
+	scope := types
+	if len(scope) == 0 {
+		scope = caseLikeStateLookupAllTypes
+	}
+	branches := make([]string, 0, len(scope))
+	for _, t := range scope {
+		tmpl, ok := caseLikeStateLookupTables[t]
+		if !ok {
+			continue
+		}
+		branches = append(branches, fmt.Sprintf(tmpl, placeholder))
+	}
+	if len(branches) == 0 {
+		if negate {
+			return "TRUE"
+		}
+		return "FALSE"
+	}
+	op := "IN"
+	if negate {
+		op = "NOT IN"
+	}
+	return fmt.Sprintf("wi.id %s (%s)", op, strings.Join(branches, " UNION ALL "))
+}
+
 // caseFieldPredicates returns the SQL conditions (no leading AND) and bound
 // arguments for f, numbering placeholders from argIdx, and the next free index.
 //
@@ -106,7 +199,12 @@ func caseFieldPredicates(f caseFieldSet, argIdx int) ([]string, []any, int, erro
 		add("wi.deployment_id = ANY($%d::uuid[])", f.DeploymentIDs)
 	}
 	if len(f.States) > 0 {
-		add(caseLikeStateColumn+" = ANY($%d::text[])", upper(len(f.States), func(i int) string { return string(f.States[i]) }))
+		// See caseLikeStateLookupClause's own doc comment for why this is a
+		// targeted id lookup rather than caseLikeStateColumn's COALESCE.
+		placeholder := fmt.Sprintf("$%d::text[]", argIdx)
+		preds = append(preds, caseLikeStateLookupClause(f.Types, placeholder, false))
+		args = append(args, upper(len(f.States), func(i int) string { return string(f.States[i]) }))
+		argIdx++
 	}
 	if len(f.Severities) > 0 {
 		sev := make([]string, len(f.Severities))

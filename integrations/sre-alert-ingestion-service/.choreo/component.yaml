@@ -42,3 +42,11 @@ endpoints:
     type: REST
     networkVisibilities:
       - Project
+  - name: dbz
+    displayName: SRE Alert Ingestion DB Health
+    service:
+      basePath: /dbz
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public

@@ -83,7 +83,8 @@ notifications independently until they're actually delivered.
   `retention.incidents`, in chunks.
 - **Health and liveness endpoints.** `/healthz` checks PostgreSQL connectivity;
   `/livez` doesn't, so a transient DB blip triggers a readiness dip rather than a
-  pod restart.
+  pod restart. `/dbz` reports only database reachability (`200` or `503`) for monitoring; it
+  reuses one ping per second, so frequent checks hold at most one connection.
 
 ## Multi-container support
 

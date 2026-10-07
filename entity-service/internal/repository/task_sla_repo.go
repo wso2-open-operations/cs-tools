@@ -66,16 +66,21 @@ func NewTaskSlaRepository(db *Scoped) TaskSlaRepository {
 	return &taskSlaRepo{db: db}
 }
 
+// taskSlaViewColumns/taskSlaViewJoins read sla_live (migration 0204), not
+// "sla" directly, so business_elapsed_percentage/business_duration/
+// remaining_business_duration/stage reflect this moment, not whatever a
+// since-removed periodic worker last wrote -- see that view's own doc
+// comment. Aliased "sla" so every other column reference here is unchanged.
 const taskSlaViewColumns = `
-	sla.id, sla.stage::TEXT,
+	sla.id, sla.live_stage::TEXT,
 	sla.work_item_id, wi.number, wi.type::TEXT,
 	pol.id, pol.name, pol.target::TEXT,
-	sla.business_elapsed_percentage,
-	EXTRACT(EPOCH FROM sla.business_duration), EXTRACT(EPOCH FROM sla.remaining_business_duration),
+	sla.live_elapsed_percentage,
+	EXTRACT(EPOCH FROM sla.live_business_duration), EXTRACT(EPOCH FROM sla.live_remaining_business_duration),
 	sla.start_on, sla.end_on`
 
 const taskSlaViewJoins = `
-	FROM sla
+	FROM sla_live sla
 	LEFT JOIN work_item wi ON wi.id = sla.work_item_id
 	LEFT JOIN sla_policy pol ON pol.id = sla.sla_policy_id`
 
@@ -253,7 +258,7 @@ func (r *taskSlaRepo) SearchTaskSlas(ctx context.Context, taskIDs []string, limi
 // GetTaskSla implements TaskSlaRepository.
 func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string) (domain.TaskSlaDetail, error) {
 	row := r.db.QueryRow(ctx, `
-		SELECT sla.id, sla.stage::TEXT, sla.is_active,
+		SELECT sla.id, sla.live_stage::TEXT, sla.is_active,
 		       sla.work_item_id, wi.number, wi.type::TEXT,
 		       pol.id, pol.name, pol.target::TEXT,
 		       pol.retroactive, pol.retroactive_pause,
@@ -263,10 +268,10 @@ func (r *taskSlaRepo) GetTaskSla(ctx context.Context, id string) (domain.TaskSla
 		       pol.timezone_source::TEXT, pol.reset_action::TEXT,
 		       EXTRACT(EPOCH FROM pol.duration),
 		       sla.schedule, sla.timezone,
-		       sla.business_elapsed_percentage,
-		       EXTRACT(EPOCH FROM sla.business_duration), EXTRACT(EPOCH FROM sla.remaining_business_duration),
+		       sla.live_elapsed_percentage,
+		       EXTRACT(EPOCH FROM sla.live_business_duration), EXTRACT(EPOCH FROM sla.live_remaining_business_duration),
 		       sla.start_on, sla.end_on
-		FROM sla
+		FROM sla_live sla
 		LEFT JOIN work_item wi ON wi.id = sla.work_item_id
 		LEFT JOIN sla_policy pol ON pol.id = sla.sla_policy_id
 		WHERE sla.id = $1`, id,

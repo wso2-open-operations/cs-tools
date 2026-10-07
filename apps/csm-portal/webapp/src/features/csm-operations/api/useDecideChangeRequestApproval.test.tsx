@@ -98,7 +98,7 @@ describe("useDecideChangeRequestApproval", () => {
     );
   });
 
-  it("also invalidates the approvals, detail, and list queries after an approval (e.g. a customer-group member approving moves the CR on server-side)", async () => {
+  it("also invalidates the approvals, detail, and list queries after an approval (an approval can move the CR on server-side, e.g. the CAB approval that schedules it)", async () => {
     postMock.mockResolvedValue({ id: "approval-1", state: "approved" });
     const { result } = renderHook(() => useDecideChangeRequestApproval(), {
       wrapper,

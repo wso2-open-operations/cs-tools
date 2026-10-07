@@ -83,6 +83,14 @@ export const WORK_LOG_MAX = 4000;
 export const LEAD_COMMENT_MAX = 500;
 
 /**
+ * Maximum minutes an engineer may log against a single ticket in one day (the
+ * old SN Portal's "no more than 8 hours per ticket per day" rule, missing
+ * from this form until now). Mirrors entity-service's maxUserTicketDailyMinutes,
+ * which is the authoritative server-side check across all of a user's cards.
+ */
+export const MAX_MINUTES_PER_TICKET_PER_DAY = 480;
+
+/**
  * Label + semantic colour for each card state (drives the status chip).
  * `recalled` and `processed` appear in the backend's state enum but are
  * unreachable via the portal's API today — kept here for type completeness.

@@ -41,19 +41,23 @@ import (
 type fakeAttachmentAuthzClient struct {
 	entityAttachmentClient
 	referenceID       string
-	referenceType     *entity.ReferenceType
 	getAttachmentErr  error
 	getCaseErr        error
 	searchDeploysErr  error
 	deploymentVisible bool
-	contentReached    bool
+	// unrelatedDeploymentID, when set, makes SearchDeployments return a
+	// deployment with THIS id regardless of what the request's ids filter
+	// asked for -- simulating snDeploymentService (plain
+	// DATA_SOURCE=servicenow), which never forwards the ids filter at all.
+	unrelatedDeploymentID string
+	contentReached        bool
 }
 
 func (f *fakeAttachmentAuthzClient) GetAttachment(ctx context.Context, id string) (entity.AttachmentDetails, error) {
 	if f.getAttachmentErr != nil {
 		return entity.AttachmentDetails{}, f.getAttachmentErr
 	}
-	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID, ReferenceType: f.referenceType, Name: "logs.txt"}, nil
+	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID, Name: "logs.txt"}, nil
 }
 
 func (f *fakeAttachmentAuthzClient) GetCase(ctx context.Context, id string) (entity.CaseView, error) {
@@ -66,6 +70,9 @@ func (f *fakeAttachmentAuthzClient) GetCase(ctx context.Context, id string) (ent
 func (f *fakeAttachmentAuthzClient) SearchDeployments(ctx context.Context, req entity.SearchDeploymentsRequest) (entity.SearchDeploymentsResponse, error) {
 	if f.searchDeploysErr != nil {
 		return entity.SearchDeploymentsResponse{}, f.searchDeploysErr
+	}
+	if f.unrelatedDeploymentID != "" {
+		return entity.SearchDeploymentsResponse{Deployments: []entity.DeploymentView{{ID: f.unrelatedDeploymentID}}, Total: 1}, nil
 	}
 	if !f.deploymentVisible {
 		return entity.SearchDeploymentsResponse{}, nil
@@ -105,23 +112,35 @@ func attachmentAuthzTestCases() map[string]struct {
 			client:     fakeAttachmentAuthzClient{getAttachmentErr: &apierror.Error{StatusCode: http.StatusNotFound}},
 			wantStatus: http.StatusNotFound,
 		},
+		// Deployment-referenced attachments are never resolvable via GetCase
+		// (a deployment id is never a real case), so these all set getCaseErr
+		// to a 404 -- the same 404 entity-service genuinely returns for one
+		// live today (see authorizeAttachmentAccess's own doc comment for why
+		// ReferenceType can't be used to route these directly instead).
 		"deployment-referenced attachment visible to the caller: allowed": {
-			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: true},
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, deploymentVisible: true},
 			wantStatus: http.StatusOK,
 			wantAllow:  true,
 		},
 		"deployment-referenced attachment outside the caller's scope: denied": {
-			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: false},
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, deploymentVisible: false},
 			wantStatus: http.StatusNotFound,
 		},
 		"deployment lookup itself fails: denied": {
-			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), searchDeploysErr: &apierror.Error{StatusCode: http.StatusServiceUnavailable}},
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, searchDeploysErr: &apierror.Error{StatusCode: http.StatusServiceUnavailable}},
 			wantStatus: http.StatusServiceUnavailable,
+		},
+		// CodeRabbit finding on PR #2432: the ServiceNow-backed SearchDeployments
+		// adapter doesn't forward the ids filter at all, so a non-empty result
+		// alone doesn't prove it's THIS deployment -- an unrelated deployment
+		// the caller can see must not authorize access to a different one's
+		// attachment.
+		"deployment lookup returns an unrelated deployment: denied": {
+			client:     fakeAttachmentAuthzClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, unrelatedDeploymentID: "99999999-9999-9999-9999-999999999999"},
+			wantStatus: http.StatusNotFound,
 		},
 	}
 }
-
-func refType(t entity.ReferenceType) *entity.ReferenceType { return &t }
 
 // TestGetAttachment_Authorization covers GET /attachments/{id}.
 func TestGetAttachment_Authorization(t *testing.T) {

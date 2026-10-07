@@ -25,7 +25,16 @@ import "strconv"
 // normalizes State/Impact to these exact domain enum strings (see
 // snCRStateLabelToString/snCRImpactLabelToString), so no label-word-parsing
 // is needed here — just a direct enum lookup, both directions.
+//
+// Authorize ("-3") is in the vocabulary on purpose: a change request a customer
+// was asked about goes back to Authorize when the customer proposes a new
+// implementation time (it is re-approved internally before the customer is asked
+// again), and it stays visible to that customer while it is there. New and
+// Assess are not: no change request that is visible to a customer is ever in
+// either (it left New when approval was requested and a designated one never
+// returns to Assess), so they have no id or label to show.
 var crStateIDs = map[string]string{
+	"authorize":         "-3",
 	"customer_approval": "5",
 	"scheduled":         "-2",
 	"implement":         "-1",
@@ -43,10 +52,28 @@ var crImpactIDs = map[string]string{
 	"low":    "3",
 }
 
+// crStateFilterOnlyIDs are ServiceNow ids a search may NAME although no response
+// ever carries them (see crStateIDs). A search for state New or Assess is a
+// well-formed question whose answer is "none": entity-service decides what the
+// caller may see, so it is asked, rather than the id being dropped here (a
+// dropped id would turn "only New" into "no state filter", every visible change
+// request).
+var crStateFilterOnlyIDs = map[string]string{
+	"-5": "new",
+	"-4": "assess",
+}
+
 var (
-	crStateIDToEnum  = reverseStringMap(crStateIDs)
+	crStateIDToEnum  = withEntries(reverseStringMap(crStateIDs), crStateFilterOnlyIDs)
 	crImpactIDToEnum = reverseStringMap(crImpactIDs)
 )
+
+func withEntries(base, extra map[string]string) map[string]string {
+	for k, v := range extra {
+		base[k] = v
+	}
+	return base
+}
 
 // crStateLabels/crImpactLabels supply portal-facing display text for these
 // enum values — entity-service's change-request search response carries the
@@ -54,6 +81,7 @@ var (
 // search's SN-backed path), so this is this backend's own presentation
 // text, not a mirror of anything entity-service or ServiceNow provides.
 var crStateLabels = map[string]string{
+	"authorize":         "Authorize",
 	"customer_approval": "Customer Approval",
 	"scheduled":         "Scheduled",
 	"implement":         "Implement",

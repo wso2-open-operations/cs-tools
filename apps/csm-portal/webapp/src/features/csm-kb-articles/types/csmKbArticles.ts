@@ -105,9 +105,8 @@ export interface UpdateKBArticleContentRequest {
 
 export interface KnowledgeBase {
   id: string;
-  productId: string | null;
-  name: string;
-  isActive: boolean;
+  title: string;
+  active: boolean;
   createdOn: string;
   updatedOn: string;
 }

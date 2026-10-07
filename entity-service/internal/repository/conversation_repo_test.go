@@ -17,6 +17,7 @@
 package repository
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -49,5 +50,51 @@ func TestConversationStateEnumRoundTrip(t *testing.T) {
 	}
 	if got := conversationStateToEnum(domain.ConversationStateActive); got != "ACTIVE" {
 		t.Errorf("conversationStateToEnum(Active) = %q, want %q", got, "ACTIVE")
+	}
+}
+
+// TestConversationSearchQueries pins the shape of the two search statements:
+// the COUNT touches only work_item and conversation (never the creator, project
+// or linked-case joins, which cannot change a row count and are what made the
+// old query cost grow with the number of matches), and the page query picks its
+// rows first and resolves the creator per page row, once, by LATERAL ... LIMIT 1.
+func TestConversationSearchQueries(t *testing.T) {
+	where := "WHERE wi.type = 'CONVERSATION' AND wi.project_id = ANY($1::uuid[])"
+	count, data := conversationSearchQueries(where, "wi.updated_on", "ASC", 1)
+
+	if strings.Contains(count, `"user"`) || strings.Contains(count, "LEFT JOIN") {
+		t.Errorf("count query must not carry display joins:\n%s", count)
+	}
+	if !strings.Contains(count, where) || !strings.HasPrefix(count, "SELECT COUNT(*)") {
+		t.Errorf("count query lost its WHERE or is not a count:\n%s", count)
+	}
+
+	// The inner query picks the page: the WHERE, the caller's sort with the
+	// wi.id tie-break, and LIMIT/OFFSET as the two placeholders after the
+	// WHERE's own argument.
+	for _, want := range []string{
+		"FROM (SELECT wi.id",
+		where,
+		"ORDER BY wi.updated_on ASC, wi.id\n\t\t       LIMIT $2 OFFSET $3) page",
+		"JOIN work_item wi ON wi.id = page.id",
+		"LEFT JOIN LATERAL (",
+		"ORDER BY u2.id\n\t\t     LIMIT 1",
+	} {
+		if !strings.Contains(data, want) {
+			t.Errorf("page query is missing %q:\n%s", want, data)
+		}
+	}
+	// The same order is applied again to the joined rows, since a join does
+	// not preserve the inner query's order.
+	if got := strings.Count(data, "ORDER BY wi.updated_on ASC, wi.id"); got != 2 {
+		t.Errorf("sort appears %d times in the page query, want 2 (inner page and outer result)", got)
+	}
+	// The creator join must not be a plain join on the non-unique email.
+	if strings.Contains(data, `LEFT JOIN "user" u ON`) {
+		t.Errorf("page query joins \"user\" directly instead of per page row:\n%s", data)
+	}
+	// Placeholders: one for the WHERE's argument, two for the page.
+	if strings.Contains(data, "$4") {
+		t.Errorf("page query uses more placeholders than the WHERE plus LIMIT/OFFSET:\n%s", data)
 	}
 }

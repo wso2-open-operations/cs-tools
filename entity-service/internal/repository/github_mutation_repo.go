@@ -21,9 +21,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
 
 // NewChangeRequestFromIssue is what a GitHub issue contributes to a new
@@ -144,6 +146,7 @@ func nullable(v string) any {
 	return v
 }
 
+// crvis: GitHub inbound sync under the system identity (M2M-only webhook handlers); no customer identity reaches it
 func (r *githubMutationRepository) CreateFromIssue(ctx context.Context, in NewChangeRequestFromIssue) (string, string, error) {
 	ctx = withGithubSystemIdentity(ctx)
 	var id, number string
@@ -185,6 +188,7 @@ func (r *githubMutationRepository) CreateFromIssue(ctx context.Context, in NewCh
 	return id, number, nil
 }
 
+// crvis: GitHub inbound sync under the system identity (M2M-only webhook handlers); no customer identity reaches it
 func (r *githubMutationRepository) UpdateFromIssue(ctx context.Context, id string, in NewChangeRequestFromIssue) error {
 	ctx = withGithubSystemIdentity(ctx)
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
@@ -254,6 +258,7 @@ func (r *githubMutationRepository) UpdateFromIssue(ctx context.Context, id strin
 // (approval_stage_approver.updated_by).
 const githubSyncActor = "github-sync"
 
+// crvis: GitHub inbound sync under the system identity (M2M-only webhook handlers); no customer identity reaches it
 func (r *githubMutationRepository) SetState(ctx context.Context, id, state string) (bool, error) {
 	ctx = withGithubSystemIdentity(ctx)
 	// IS DISTINCT FROM so a move to the state it already holds writes nothing:
@@ -265,6 +270,22 @@ func (r *githubMutationRepository) SetState(ctx context.Context, id, state strin
 		WHERE id = $1::uuid AND state IS DISTINCT FROM $2::change_request_state_enum`
 	changed := false
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		// A change waiting on the customer (Customer Approval / Customer Review)
+		// moves on only through the customer's own answer, never through a label
+		// or an issue event: refused, not skipped, so the sync sees it. Read under
+		// the row lock the UPDATE below would take anyway.
+		var current *string
+		switch err := tx.QueryRow(ctx, `SELECT state::text FROM change_request WHERE id = $1::uuid FOR UPDATE`, id).Scan(&current); {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil // no such change request: the UPDATE below would match nothing as well
+		case err != nil:
+			return err
+		}
+		if current != nil && customerStageSpecForState(strings.ToUpper(*current)) != nil && !strings.EqualFold(*current, state) {
+			return &apierror.ValidationError{Msg: fmt.Sprintf(
+				"state %q cannot be set from the GitHub sync: the change request is in %s, which only the customer's own answer (given in the Customer Portal) can move it out of",
+				state, strings.ToLower(*current))}
+		}
 		tag, err := tx.Exec(ctx, query, id, state)
 		if err != nil {
 			return err

@@ -213,7 +213,7 @@ func TestChangeRequestFlowIntegration_StaleApprovals_ReviewToCustomerReviewToClo
 	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, true)
 
 	f.requestApproval(id)
-	f.expect(id, "in Assess", "ASSESS", "authorize", "canceled")
+	f.expect(id, "in Assess", "ASSESS", "canceled")
 	f.wantLive(id, "in Assess", map[string][]string{"Peer Approval": crStaleAssigned})
 	f.wantCanDecide(id, "in Assess", everyone(crStaleAssigned, "Peer Approval"))
 
@@ -335,14 +335,16 @@ func TestChangeRequestFlowIntegration_StaleApprovals_Rollback(t *testing.T) {
 	}
 	t.Run("customer review->rollback with no customer group", func(t *testing.T) {
 		f := newCustomerGroupFlow(t)
-		// Project C has no registered contact: no Customer Review stage.
+		// Project C has no registered contact at the review: no Customer Review stage
+		// (Request Approval refuses the project, so the contact it had when approval was
+		// requested is gone before the review: the residual edge).
 		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectC), false, true)
-		f.requestApproval(id)
+		f.requestApprovalThenContactsLeave(id)
 		f.approvePeerAndCAB(id, "SCHEDULED", "implement", "canceled")
 		f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 		f.step(id, domain.ChangeRequestStateReview, "REVIEW", "customer_review", "rollback", "canceled")
 		f.wantLive(id, "in Review", map[string][]string{"Review": crStaleAssigned})
-		f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "closed", "rollback", "canceled")
+		f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "rollback", "canceled")
 		f.wantLive(id, "in Customer Review", nil)
 		f.wantCanDecide(id, "in Customer Review", nil)
 		if _, err := f.patchState(id, domain.ChangeRequestStateRollback); err != nil {
@@ -419,8 +421,8 @@ func TestChangeRequestFlowIntegration_StaleApprovals_CancelFromEveryState(t *tes
 			}
 			for key, was := range before {
 				want := was
-				if was == "requested" {
-					want = "cancelled"
+				if was == "REQUESTED" {
+					want = "CANCELLED"
 				}
 				if after[key] != want {
 					t.Fatalf("Cancel: approver row %s = %q, want %q (was %q)", key, after[key], want, was)
@@ -801,25 +803,36 @@ func TestChangeRequestFlowIntegration_StaleApprovals_UnknownStagesAreNotGuarded(
 		f.expect(id, "after deciding the unknown stage", "REVIEW", "closed", "rollback", "canceled")
 	})
 
-	t.Run("an unlabelled stage past the first two positions", func(t *testing.T) {
+	t.Run("unlabelled stages on a change that has moved past them", func(t *testing.T) {
+		// A position is only a guess for a stage with no label (the shape of a
+		// ServiceNow-synced one): positions 0 and 1 read as Peer / CAB by the
+		// historical convention, but only while the change is in the state that
+		// guess implies. This change is in Implement, so none of the three is a
+		// stage of known kind -- nothing is refused as out of state, nothing is
+		// hidden from its approver, and (below) nothing is cancelled by a move
+		// to another state. (Before migrated data was taken into account the first
+		// two were taken for the long-past Assess / Authorize approvals and
+		// refused with a 409.)
 		f := newCRFlow(t)
 		f.seedAssignedGroup()
 		id := f.create(domain.ChangeRequestTypeNormal, crFlowGroupID)
 		f.setState(id, "IMPLEMENT")
-		// Positions 0 and 1 are read as Peer / CAB by the historical convention;
-		// position 2 is not a stage the flow knows.
 		f.seedLooseStage(id, nil, 30, map[string]string{crFlowPeerAID: "REQUESTED"})
 		f.seedLooseStage(id, nil, 20, map[string]string{crFlowPeerBID: "REQUESTED"})
 		f.seedLooseStage(id, nil, 10, map[string]string{crFlowOutsiderID: "REQUESTED"})
-		// Only the third is decidable in Implement (the first two are the legacy
-		// Assess / Authorize approvals of a change that is long past both).
-		f.wantCanDecide(id, "in Implement", map[string][]string{crFlowOutsiderID: {"Customer Approval"}})
-		f.wantConflict("the legacy positional Peer stage", f.decide(id, crFlowPeerAID, "approved"),
-			"this approval is no longer pending: the change request is in Implement, but the Peer Approval stage can only be decided while it is in Assess")
+		// The labels shown are the display ones (positional), unchanged.
+		f.wantCanDecide(id, "in Implement", map[string][]string{
+			crFlowPeerAID: {"Assess"}, crFlowPeerBID: {"Authorize"}, crFlowOutsiderID: {"Customer Approval"}})
+		f.step(id, domain.ChangeRequestStateReview, "REVIEW", "closed", "rollback", "canceled")
+		f.wantCanDecide(id, "in Review", map[string][]string{
+			crFlowPeerAID: {"Assess"}, crFlowPeerBID: {"Authorize"}, crFlowOutsiderID: {"Customer Approval"}})
+		if err := f.decide(id, crFlowPeerAID, "approved"); err != nil {
+			t.Fatalf("deciding the unlabelled position-0 stage of a change that is in Review: %v", err)
+		}
 		if err := f.decide(id, crFlowOutsiderID, "approved"); err != nil {
 			t.Fatalf("deciding the unlabelled third stage: %v", err)
 		}
-		f.expect(id, "after deciding the third stage", "IMPLEMENT", "review", "canceled")
+		f.expect(id, "after deciding the unlabelled stages", "REVIEW", "closed", "rollback", "canceled")
 	})
 
 	t.Run("a change with no state", func(t *testing.T) {

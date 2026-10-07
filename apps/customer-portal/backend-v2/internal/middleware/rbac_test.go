@@ -474,3 +474,198 @@ func TestRequireRolesMiddleware(t *testing.T) {
 		}
 	})
 }
+
+// customerSideRoles are the external roles. They hold ActionDecide on change
+// requests -- the customer's own answer -- and nothing that edits one.
+var customerSideRoles = []CanonicalRole{RoleCustomerAdmin, RoleCustomerUser, RolePartnerAdmin, RolePartnerUser}
+
+// staffRoles are the WSO2-side roles that hold ActionUpdate on change requests.
+var staffRoles = []CanonicalRole{RoleAdmin, RoleAgent, RoleInternal}
+
+// TestChangeRequestDecidePermission pins who may give the customer's answer on a
+// change request (approve / reject a Customer Approval or Customer Review,
+// propose a new implementation time) and, as importantly, what that grant does
+// not carry.
+func TestChangeRequestDecidePermission(t *testing.T) {
+	t.Run("every customer-side role may decide", func(t *testing.T) {
+		for _, role := range customerSideRoles {
+			if !HasPermission([]CanonicalRole{role}, ModuleChangeRequests, ActionDecide) {
+				t.Errorf("%s must hold Decide on ChangeRequests: the customer answers in this portal", role)
+			}
+		}
+	})
+
+	t.Run("deciding does not let a customer-side role edit, create or delete", func(t *testing.T) {
+		for _, role := range customerSideRoles {
+			for _, act := range []Action{ActionCreate, ActionUpdate, ActionDelete} {
+				if HasPermission([]CanonicalRole{role}, ModuleChangeRequests, act) {
+					t.Errorf("%s must NOT hold %s on ChangeRequests", role, act)
+				}
+			}
+			// Read stays: a customer sees the change requests they answer.
+			if !HasPermission([]CanonicalRole{role}, ModuleChangeRequests, ActionRead) {
+				t.Errorf("%s must keep Read on ChangeRequests", role)
+			}
+		}
+	})
+
+	t.Run("staff roles keep Update and also hold Decide", func(t *testing.T) {
+		// The decision route is theirs too (internal stages are decided there),
+		// and it now takes Decide rather than Update.
+		for _, role := range staffRoles {
+			for _, act := range []Action{ActionRead, ActionUpdate, ActionDecide} {
+				if !HasPermission([]CanonicalRole{role}, ModuleChangeRequests, act) {
+					t.Errorf("%s must hold %s on ChangeRequests", role, act)
+				}
+			}
+		}
+		if !HasPermission([]CanonicalRole{RoleAdmin}, ModuleChangeRequests, ActionDelete) {
+			t.Error("Admin must keep Delete on ChangeRequests")
+		}
+	})
+
+	// Stakeholder has no access to change requests and must stay that way. The
+	// role is not emitted by any data source and normalises to itself, so it
+	// matches no entry for any action, Decide included.
+	t.Run("an unrecognised role such as stakeholder holds nothing", func(t *testing.T) {
+		roles := NormalizeRoles([]string{"sn_customerservice.stakeholder", "stakeholder"})
+		for _, act := range []Action{ActionCreate, ActionRead, ActionUpdate, ActionDelete, ActionDecide} {
+			if HasPermission(roles, ModuleChangeRequests, act) {
+				t.Errorf("stakeholder must NOT hold %s on ChangeRequests", act)
+			}
+		}
+	})
+
+	t.Run("a caller with no roles holds nothing", func(t *testing.T) {
+		if HasPermission(nil, ModuleChangeRequests, ActionDecide) {
+			t.Error("a caller with no roles must not hold Decide")
+		}
+	})
+
+	t.Run("ActionDecide exists on change requests only", func(t *testing.T) {
+		everyone := []CanonicalRole{RoleAdmin, RoleAgent, RoleInternal, RoleCustomerAdmin, RoleCustomerUser, RolePartnerAdmin, RolePartnerUser}
+		for _, mod := range []Module{ModuleCases, ModuleTimeCards, ModuleProjects, ModuleDeployments, ModuleDeploymentProducts, ModuleDeploymentResources} {
+			if HasPermission(everyone, mod, ActionDecide) {
+				t.Errorf("Decide must not be defined on %s", mod)
+			}
+		}
+	})
+}
+
+// TestPermissionMatrixOtherModulesUnchanged is a golden copy of the matrix as
+// it was before ActionDecide: adding the grant must not have moved anything for
+// any module's Create / Read / Update / Delete, change requests' included.
+func TestPermissionMatrixOtherModulesUnchanged(t *testing.T) {
+	all := []CanonicalRole{RoleAdmin, RoleAgent, RoleInternal, RoleCustomerAdmin, RoleCustomerUser, RolePartnerAdmin, RolePartnerUser}
+	staff := []CanonicalRole{RoleAdmin, RoleAgent, RoleInternal}
+	admin := []CanonicalRole{RoleAdmin}
+	withCustomerAdmin := append(append([]CanonicalRole{}, staff...), RoleCustomerAdmin)
+
+	want := map[Module]map[Action][]CanonicalRole{
+		ModuleCases:               {ActionCreate: all, ActionRead: all, ActionUpdate: all, ActionDelete: admin},
+		ModuleTimeCards:           {ActionCreate: staff, ActionRead: all, ActionUpdate: staff, ActionDelete: admin},
+		ModuleProjects:            {ActionCreate: admin, ActionRead: all, ActionUpdate: withCustomerAdmin, ActionDelete: admin},
+		ModuleChangeRequests:      {ActionCreate: staff, ActionRead: all, ActionUpdate: staff, ActionDelete: admin},
+		ModuleDeployments:         {ActionCreate: all, ActionRead: all, ActionUpdate: all, ActionDelete: all},
+		ModuleDeploymentProducts:  {ActionCreate: all, ActionRead: all, ActionUpdate: all, ActionDelete: all},
+		ModuleDeploymentResources: {ActionCreate: all, ActionRead: all, ActionUpdate: all, ActionDelete: all},
+	}
+
+	if len(permissionMatrix) != len(want) {
+		t.Fatalf("permissionMatrix has %d modules, want %d", len(permissionMatrix), len(want))
+	}
+	for mod, actions := range want {
+		for _, act := range []Action{ActionCreate, ActionRead, ActionUpdate, ActionDelete} {
+			wantRoles := map[CanonicalRole]bool{}
+			for _, r := range actions[act] {
+				wantRoles[r] = true
+			}
+			for _, role := range all {
+				if got := HasPermission([]CanonicalRole{role}, mod, act); got != wantRoles[role] {
+					t.Errorf("%s on %s for %s = %v, want %v", act, mod, role, got, wantRoles[role])
+				}
+			}
+		}
+	}
+}
+
+func TestRequirePermissionOneOfMiddleware(t *testing.T) {
+	var gotAction Action
+	var gotOK bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAction, gotOK = GrantedActionFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	serve := func(t *testing.T, resolver RoleResolver, authed bool) *httptest.ResponseRecorder {
+		t.Helper()
+		gotAction, gotOK = "", false
+		ts := RequirePermissionOneOf(resolver, ModuleChangeRequests, ActionUpdate, ActionDecide)(handler)
+		req := httptest.NewRequest(http.MethodPatch, "/change-requests/1", nil)
+		if authed {
+			req = req.WithContext(WithUserInfo(req.Context(), &UserInfo{UserID: "usr-1"}))
+		}
+		rr := httptest.NewRecorder()
+		ts.ServeHTTP(rr, req)
+		return rr
+	}
+
+	t.Run("a staff role is served at the Update level", func(t *testing.T) {
+		for _, role := range staffRoles {
+			rr := serve(t, &mockRoleResolver{roles: []CanonicalRole{role}}, true)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s: status %d, want 200", role, rr.Code)
+			}
+			if !gotOK || gotAction != ActionUpdate {
+				t.Errorf("%s: granted action = %q (%v), want %q", role, gotAction, gotOK, ActionUpdate)
+			}
+		}
+	})
+
+	t.Run("a customer-side role is served at the Decide level only", func(t *testing.T) {
+		for _, role := range customerSideRoles {
+			rr := serve(t, &mockRoleResolver{roles: []CanonicalRole{role}}, true)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s: status %d, want 200", role, rr.Code)
+			}
+			if !gotOK || gotAction != ActionDecide {
+				t.Errorf("%s: granted action = %q (%v), want %q", role, gotAction, gotOK, ActionDecide)
+			}
+		}
+	})
+
+	t.Run("the broadest action wins when a caller holds several", func(t *testing.T) {
+		rr := serve(t, &mockRoleResolver{roles: []CanonicalRole{RoleCustomerUser, RoleAgent}}, true)
+		if rr.Code != http.StatusOK || gotAction != ActionUpdate {
+			t.Fatalf("status %d, granted %q; want 200 and %q", rr.Code, gotAction, ActionUpdate)
+		}
+	})
+
+	t.Run("a stakeholder is refused and the handler never runs", func(t *testing.T) {
+		rr := serve(t, &mockRoleResolver{roles: NormalizeRoles([]string{"sn_customerservice.stakeholder"})}, true)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status %d, want 403", rr.Code)
+		}
+		if gotOK {
+			t.Error("handler ran for a caller with no matching action")
+		}
+		var body authErrorBody
+		if err := json.NewDecoder(rr.Body).Decode(&body); err != nil || body.Message != "You do not have permission to perform this action." {
+			t.Errorf("body = %+v (%v), want the standard forbidden message", body, err)
+		}
+	})
+
+	t.Run("unauthenticated is 401 and an unresolvable role is 502", func(t *testing.T) {
+		if rr := serve(t, &mockRoleResolver{roles: staffRoles}, false); rr.Code != http.StatusUnauthorized {
+			t.Errorf("unauthenticated: status %d, want 401", rr.Code)
+		}
+		if rr := serve(t, &mockRoleResolver{err: errors.New("upstream failed")}, true); rr.Code != http.StatusBadGateway {
+			t.Errorf("resolver error: status %d, want 502", rr.Code)
+		}
+	})
+
+	t.Run("a request that skipped the middleware reports no granted action", func(t *testing.T) {
+		if _, ok := GrantedActionFromContext(context.Background()); ok {
+			t.Error("a bare context must not report a granted action")
+		}
+	})
+}

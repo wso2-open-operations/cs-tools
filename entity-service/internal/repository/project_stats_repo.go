@@ -112,15 +112,21 @@ type ProjectStatsRepository interface {
 
 type projectStatsRepo struct {
 	db *Scoped
+	// vis narrows the three change request counts to what a customer may see
+	// (change_request_visibility.go).
+	vis CRVisibility
 }
 
 // NewProjectStatsRepository constructs a ProjectStatsRepository backed by
 // the given Scoped connection -- time_card's project-membership visibility
 // (migration 0144) and announcement's (migration 000085) are both
 // enforced entirely by Postgres RLS now, reading the caller's identity from
-// ctx automatically.
-func NewProjectStatsRepository(db *Scoped) ProjectStatsRepository {
-	return &projectStatsRepo{db: db}
+// ctx automatically. The optional CRVisibility is the change request
+// customer-visibility policy; the three change request counts below carry its
+// SQL fragment, so a customer's stat cards count exactly the change requests
+// their list shows.
+func NewProjectStatsRepository(db *Scoped, vis ...CRVisibility) ProjectStatsRepository {
+	return &projectStatsRepo{db: db, vis: firstCRVisibility(vis)}
 }
 
 // timeCardMinutesExpr sums the five per-activity minute columns. A NULL in
@@ -257,11 +263,12 @@ func (r *projectStatsRepo) OutstandingCounts(ctx context.Context, projectID stri
 	}
 
 	var crCount int
+	visSQL, crArgs := r.vis.andClause(ctx, "wi", "cr", []any{projectID, crStates})
 	err = r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		  FROM work_item wi
 		  JOIN change_request cr ON cr.id = wi.id
-		 WHERE wi.project_id = $1::uuid AND cr.state::TEXT = ANY($2)`, projectID, crStates).Scan(&crCount)
+		 WHERE wi.project_id = $1::uuid AND cr.state::TEXT = ANY($2)`+visSQL, crArgs...).Scan(&crCount)
 	if err != nil {
 		return nil, fmt.Errorf("project stats: outstanding change request count: %w", err)
 	}
@@ -333,12 +340,13 @@ func (r *projectStatsRepo) ConversationStateCounts(ctx context.Context, projectI
 
 // ChangeRequestStateCounts implements ProjectStatsRepository.
 func (r *projectStatsRepo) ChangeRequestStateCounts(ctx context.Context, projectID string) ([]StateCount, error) {
+	visSQL, args := r.vis.andClause(ctx, "wi", "cr", []any{projectID})
 	rows, err := r.db.Query(ctx, `
 		SELECT cr.state::TEXT, COUNT(*)
 		  FROM work_item wi
 		  JOIN change_request cr ON cr.id = wi.id
-		 WHERE wi.project_id = $1::uuid
-		 GROUP BY 1`, projectID)
+		 WHERE wi.project_id = $1::uuid`+visSQL+`
+		 GROUP BY 1`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("project stats: change request state counts: %w", err)
 	}
@@ -351,6 +359,7 @@ func (r *projectStatsRepo) ChangeRequestStateCounts(ctx context.Context, project
 // implementation's closed_at != ” guard.
 func (r *projectStatsRepo) ChangeRequestResolvedBuckets(ctx context.Context, projectID, closedState string) (int, int, error) {
 	var currentMonth, pastThirtyDays int
+	visSQL, args := r.vis.andClause(ctx, "wi", "cr", []any{projectID, closedState})
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE cr.closed_on >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),
 		       COUNT(*) FILTER (WHERE cr.closed_on >= now() - INTERVAL '30 days')
@@ -358,7 +367,7 @@ func (r *projectStatsRepo) ChangeRequestResolvedBuckets(ctx context.Context, pro
 		  JOIN change_request cr ON cr.id = wi.id
 		 WHERE wi.project_id = $1::uuid
 		   AND cr.state::TEXT = $2
-		   AND cr.closed_on IS NOT NULL`, projectID, closedState).
+		   AND cr.closed_on IS NOT NULL`+visSQL, args...).
 		Scan(&currentMonth, &pastThirtyDays)
 	if err != nil {
 		return 0, 0, fmt.Errorf("project stats: change request resolved buckets: %w", err)

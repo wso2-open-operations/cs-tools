@@ -101,6 +101,47 @@ describe("ConversationDetailsPage", () => {
     expect(screen.getByText("Conversation")).toBeInTheDocument();
   });
 
+  it("hides Novera's <thinking> reasoning in a past conversation but not the user's own text", () => {
+    const message = (id: string, createdBy: string, content: string) => ({
+      id,
+      createdBy,
+      content,
+      type: "comments",
+      createdOn: `2026-05-01T00:00:0${id}Z`,
+      isEscalated: false,
+      hasInlineAttachments: false,
+      inlineAttachments: [],
+    });
+    mockUseGetConversationMessages.mockReturnValue({
+      data: {
+        pages: [
+          {
+            comments: [
+              message("1", "dev@wso2.com", "why do I see <thinking> here?"),
+              message(
+                "2",
+                "Novera",
+                "<thinking>The user asks about a product.\nI should ask a follow-up.</thinking>\n\nWhich environment is this?",
+              ),
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: undefined,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    });
+
+    render(<ConversationDetailsPage />);
+
+    expect(screen.getByText(/Which environment is this\?/)).toBeInTheDocument();
+    expect(screen.queryByText(/follow-up/)).not.toBeInTheDocument();
+    expect(screen.getByText(/why do I see <thinking> here\?/)).toBeInTheDocument();
+  });
+
   it("should navigate to returnTo when back clicked", () => {
     render(<ConversationDetailsPage />);
 

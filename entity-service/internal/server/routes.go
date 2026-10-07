@@ -19,8 +19,10 @@ package server
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -50,6 +52,15 @@ import (
 // nothing to close. It also closes the user cache's Redis client, when one
 // was built.
 func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
+	// The customer-visibility policy of change requests (CR_STRICT_VISIBILITY_FROM),
+	// shared by every repository that reads or writes a change request.
+	crVisibility := CRVisibilityFromConfig(cfg)
+	if db != nil {
+		// Nothing reads the policy without a database (the ServiceNow data source
+		// serves change requests itself), so only say which mode this process is in
+		// when it matters.
+		logCRVisibility(cfg)
+	}
 	userRepo := repository.NewUserRepository(db)
 	userSvc := service.NewUserService(userRepo)
 
@@ -634,7 +645,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		projectCaseStatsSvc = service.NewProjectCaseStatsService(
 			repository.NewProjectCaseStatsRepository(repository.NewScoped(db)), referenceDataRepo, accessSvc)
 		projectStatsSvc = service.NewProjectStatsService(
-			repository.NewProjectStatsRepository(repository.NewScoped(db)), referenceDataRepo, accessSvc,
+			repository.NewProjectStatsRepository(repository.NewScoped(db), crVisibility), referenceDataRepo, accessSvc,
 			projectMetadataSvc, projectCaseStatsSvc)
 	}
 	projectMetadataHandler := handler.NewProjectMetadataHandler(projectMetadataSvc)
@@ -735,19 +746,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 
 	// The CSM-native SLA engine (internal/service/sla_engine_service.go)
-	// writes its own source='CSM' rows into the "sla"/"sla_policy" tables
-	// the ServiceNow sync also populates (migration 0134) -- gated on db
-	// the same way slaStatusHandler above is: nowhere to store a clock at
-	// all with no database configured. activeProjectSvc backs its
-	// plan-derivation heuristic (see sla_policy_resolver.go's
-	// resolveCasePlan doc comment) and is already constructed above,
-	// regardless of DataSource.
+	// writes its own source='CSM' rows into the "sla" table (migration 0134),
+	// resolving durations from the deterministic, severity-keyed sla_policy
+	// rows migration 0203 seeds -- gated on db the same way slaStatusHandler
+	// above is: nowhere to store a clock at all with no database configured.
 	var slaEngineSvc service.SLAEngineService
 	if db != nil {
-		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db)), activeProjectSvc)
+		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db)))
 	}
 
-	caseRepo := repository.NewCaseRepository(repository.NewScoped(db))
+	caseRepo := repository.NewCaseRepository(repository.NewScoped(db), crVisibility)
 	var activeCaseSvc service.CaseService
 	// caseAttachmentOverrideSvc, when non-nil, is the CaseService case
 	// attachment routes (registered further below) use INSTEAD of
@@ -869,6 +877,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// NewCaseService has no such parameter, hence this separate step.
 		activeCaseSvc = service.WithCSEngineerRole(activeCaseSvc, cfg.CSEngineerRole)
 	}
+	// Service requests: ServiceNow's "SR New Request - Acknowledge & Chat
+	// Alert" flow and the sr.* events, on the operations topic (sre-events)
+	// with the change-request and outage notices. Postgres-backed case
+	// services only -- WithSRNotices is a no-op on the ServiceNow one -- and
+	// only with a topic to publish to: without the Chat cards the flow's
+	// acknowledgement would be posted with nothing announcing the SR, which
+	// ServiceNow never does. SR_ALERT_SRE_TEAM_IDS then decides which teams'
+	// SRs are assigned and acknowledged.
+	var srEventPublisher service.EventPublisherService
+	if db != nil && cfg.SREEventHubTopic != "" && cfg.EventHubBroker != "" && cfg.EventPublishingEnabled {
+		srEventPublisher = service.NewEventPublisherService(
+			eventbus.NewProducer(eventbus.Config{
+				Broker:           cfg.EventHubBroker,
+				ConnectionString: cfg.EventHubConnectionString,
+				Topic:            cfg.SREEventHubTopic,
+			}),
+			eventPublishFailureSvc,
+		)
+		activeCaseSvc = service.WithSRNotices(activeCaseSvc, service.NewSRNoticeService(
+			repository.NewSRNoticeRepository(repository.NewScoped(db)), srEventPublisher, cfg.SRAlertSRETeamIDs))
+		slog.Info("service request events enabled", "topic", cfg.SREEventHubTopic, "automatedTeams", len(cfg.SRAlertSRETeamIDs))
+	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
 	if db != nil {
 		announcementRequestHandler = handler.NewAnnouncementRequestHandler(
@@ -959,7 +989,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	escalationHandler := handler.NewEscalationHandler(activeEscalationSvc)
 	caseEscalationHandler := handler.NewCaseEscalationHandler(service.NewCaseEscalationService(activeEscalationSvc, activeCaseSvc))
 
-	changeRequestRepo := repository.NewChangeRequestRepository(repository.NewScoped(db))
+	changeRequestRepo := repository.NewChangeRequestRepository(repository.NewScoped(db), crVisibility)
 	var activeChangeRequestSvc service.ChangeRequestService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
@@ -1022,6 +1052,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeCatalogSvc = service.NewCatalogService(catalogRepo)
 	}
 	catalogHandler := handler.NewCatalogHandler(activeCatalogSvc)
+	// After the switch above: a service request raised from the catalog form
+	// takes its subject and description from its answers. activeCaseSvc is the
+	// same *caseService the case handler already holds, so this reaches it.
+	activeCaseSvc = service.WithServiceRequestCatalog(activeCaseSvc, activeCatalogSvc)
 
 	// Case feedback (CSAT submissions): the ServiceNow data source reads it
 	// from the backing system; both Postgres data sources read
@@ -1093,6 +1127,31 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// (what the call-escalation ladders start from) and takes work notes, with no ServiceNow behind it.
 		activeIncidentSvc = service.NewIncidentServiceWithPublisher(incidentRepo, userRepo, eventPublisher)
 	}
+	// Which Special Ops team a handoff goes to, and which GitHub repository
+	// its internal issue goes to, is configuration. A value that does not
+	// parse would silently offer no handoff anywhere; refuse to start instead.
+	handoffConfig, handoffErr := service.ParseSpecialistHandoffConfig(cfg.SpecialistHandoffConfig)
+	if handoffErr != nil {
+		log.Fatalf("invalid specialist handoff configuration: %v", handoffErr)
+	}
+	activeIncidentSvc = service.WithSpecialistHandoffConfig(activeIncidentSvc, handoffConfig)
+	// One GitHub client per credential the products name, independent of the
+	// change-request sync. A credential with no token is logged, not fatal:
+	// its handoffs still go through and report that no issue was filed.
+	handoffToken, tokenErr := service.ParseSpecialistHandoffGithubTokens(cfg.SpecialistHandoffGithubTokens, cfg.GithubToken)
+	if tokenErr != nil {
+		log.Fatalf("invalid specialist handoff GitHub tokens: %v", tokenErr)
+	}
+	handoffIssueClients := service.SpecialistHandoffIssueClients{}
+	for _, credential := range handoffConfig.Credentials() {
+		token := handoffToken(credential)
+		if token == "" {
+			slog.Warn("specialist handoff: no GitHub token for credential; its handoffs will file no issue", "credential", credential)
+			continue
+		}
+		handoffIssueClients[credential] = github.NewClient(github.Config{BaseURL: cfg.GithubBaseURL, Token: token})
+	}
+	activeIncidentSvc = service.WithHandoffIssueCreators(activeIncidentSvc, handoffIssueClients)
 	incidentHandler := handler.NewIncidentHandler(activeIncidentSvc)
 
 	problemRepo := repository.NewProblemRepository(repository.NewScoped(db))
@@ -1114,6 +1173,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// mirror, same as incident's own dual-write branch above.
 		snProblemMirrorSvc := service.NewServiceNowProblemService(serviceNowIntegrationServiceClient)
 		activeProblemSvc = service.NewProblemServiceWithSNMirror(problemRepo, snProblemMirrorSvc, snWritebackDispatcher)
+		// Resolving an incident as Solved (Workaround) creates its problem in
+		// both stores, in the resolve request (workaround_problem.go); the
+		// background post-resolution flow skips it in this mode (main.go).
+		// Set in place, so incidentHandler above already has it.
+		if creator, ok := activeProblemSvc.(service.WorkaroundProblemCreator); ok {
+			activeIncidentSvc = service.WithWorkaroundProblemCreator(activeIncidentSvc, creator)
+		}
 	default:
 		activeProblemSvc = service.NewProblemService(problemRepo)
 	}
@@ -1301,7 +1367,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		configurationItemHandler = handler.NewConfigurationItemHandler(service.NewConfigurationItemService(db))
 	}
 
-	commentRepo := repository.NewCommentRepository(repository.NewScoped(db))
+	commentRepo := repository.NewCommentRepository(repository.NewScoped(db), crVisibility)
 	var activeCommentSvc service.CommentService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
@@ -1697,6 +1763,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /incidents/aggregate", internalOnly(accessSvc, incidentHandler.AggregateIncidents))
 	mux.HandleFunc("POST /incidents/{id}/activities/search", internalOnly(accessSvc, incidentHandler.SearchIncidentActivities))
 	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", internalOnly(accessSvc, incidentHandler.HandOffIncidentToSpecialist))
+	mux.HandleFunc("GET /specialist-handoff-teams", internalOnly(accessSvc, incidentHandler.ListSpecialistHandoffTeams))
 
 	// Postgres-backed, and deliberately separate from outageHandler above:
 	// that one is the ServiceNow-backed outage entity API, this is only the
@@ -1817,6 +1884,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		if projectEventPublisher != nil {
 			projectEventPublisher.Close()
 		}
+		if srEventPublisher != nil {
+			srEventPublisher.Close()
+		}
 		// Last: the retry worker above can still be invalidating users
 		// until it has stopped.
 		closeUserCache()
@@ -1853,4 +1923,41 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			),
 		),
 	), closePublishers
+}
+
+// CRVisibilityFromConfig builds the change request customer-visibility policy
+// from CR_STRICT_VISIBILITY_FROM (see config.Config.CRStrictVisibilityFromRaw).
+//
+// Unset means no cutover: every change request is legacy, which is what
+// customers saw before the strict rule existed (the safe default and the
+// rollback). An unparsable value is refused at startup by Config.Validate;
+// should this ever be reached with one (a caller that skipped Validate) it fails
+// CLOSED: strict for every change request, so a typo can never widen what a
+// customer sees.
+func CRVisibilityFromConfig(cfg *config.Config) repository.CRVisibility {
+	from, err := cfg.CRStrictVisibilityFrom()
+	if err != nil {
+		// Strict for every change request that can exist: a change request is
+		// strict when it was created AT OR AFTER the instant, so the instant is
+		// the earliest one a row could carry, never a far-future one (which would
+		// make every row legacy, the opposite of failing closed).
+		epoch := time.Unix(0, 0).UTC()
+		return repository.CRVisibility{StrictFrom: &epoch}
+	}
+	return repository.CRVisibility{StrictFrom: from}
+}
+
+// logCRVisibility says at startup which visibility mode this process runs in:
+// unset is also the state in which a deployment that means to be strict is
+// silently NOT strict, so it is a WARN, not a note.
+func logCRVisibility(cfg *config.Config) {
+	from, err := cfg.CRStrictVisibilityFrom()
+	switch {
+	case err != nil:
+		log.Printf("ERROR: %v -- treating EVERY change request as strict (visible to a customer only when designated to them)", err)
+	case from == nil:
+		log.Printf("WARN: CR_STRICT_VISIBILITY_FROM is not set: every change request is treated as legacy, so a customer sees every change request of their project past Authorize (and, in addition, the ones designated to them); set it to this release's instant to turn the designated-only rule on for change requests created from then on")
+	default:
+		log.Printf("change request customer visibility: strict (designated-only) for change requests created at or after %s; earlier ones are legacy", from.Format(time.RFC3339))
+	}
 }

@@ -300,21 +300,39 @@ export function useMyTimeCards(
  * Approvals tab's own State filter, defaulting to "Submitted" but user
  * changeable to Approved/Rejected/"All states") now has that respected
  * instead of silently overridden.
+ *
+ * `isAdmin` omits the `approverId` scope entirely instead of setting it to
+ * the caller's own id: an admin's approve-by-exception
+ * (`TransitionTimeCardState` on the backend, see entity-service's own
+ * `CLAUDE.md`) isn't limited to cards they hold a `time_card_approver` row
+ * for, so scoping their queue by `approverId` the normal way would show them
+ * nothing on every project they aren't specifically assigned to — the exact
+ * opposite of what "approve by exception" is for. This does mean an admin's
+ * own submitted cards can appear in their queue (no `approverId` means no
+ * server-side self-exclusion either) — `CsmTimeCardsPage`'s own
+ * `approvalsRoleFor` computes `isOwner` per card instead of assuming it's
+ * always false, so those rows render as editable, never as a self-decide
+ * the backend would reject anyway.
  */
 export function useApprovalQueue(
   enabled: boolean,
   filters: TimeCardSearchFilters | undefined,
   pagination: TimeCardPagination,
+  isAdmin: boolean,
 ): UseQueryResult<TimeCardSearchResult, Error> {
   const api = useBackendApi();
   const me = useCurrentEngineer();
   return useQuery<TimeCardSearchResult, Error>({
-    queryKey: [ApiQueryKeys.TIME_CARD_APPROVAL_QUEUE, me.id, filters, pagination],
+    queryKey: [ApiQueryKeys.TIME_CARD_APPROVAL_QUEUE, me.id, isAdmin, filters, pagination],
     queryFn: async (): Promise<TimeCardSearchResult> => {
       if (!me.id) return { cards: [], total: 0 };
       return searchTimeCards(
         api,
-        { ...filters, approverId: me.id, states: filters?.states?.length ? filters.states : ["submitted"] },
+        {
+          ...filters,
+          ...(isAdmin ? {} : { approverId: me.id }),
+          states: filters?.states?.length ? filters.states : ["submitted"],
+        },
         pagination,
       );
     },

@@ -75,12 +75,15 @@ export function formatOperationsOverviewChangeRequestsSubtitle(
   return `Latest ${limit} change requests`;
 }
 
-/** Labels excluded from customer-facing "allowed" states (internal pre-approval workflow). */
-const EXCLUDED_ALLOWED_CR_STATE_LABELS = new Set<string>([
-  ChangeRequestStates.NEW,
-  ChangeRequestStates.ASSESS,
-  ChangeRequestStates.AUTHORIZE,
-]);
+/**
+ * State filter ids from the filters response, as numbers. An id that is not a
+ * number (a raw enum a vocabulary does not know) is dropped: JSON turns NaN into
+ * null, which the API reads as state 0, a different state, so it must never be
+ * sent in a state filter.
+ */
+function toStateIds(states: MetadataItem[]): number[] {
+  return states.map((s) => Number(s.id)).filter((id) => Number.isFinite(id));
+}
 
 /** Labels of CR states excluded from the "outstanding" view. */
 const EXCLUDED_OUTSTANDING_CR_STATE_LABELS = new Set<string>([
@@ -106,8 +109,20 @@ const CLOSED_CR_STATE_LABELS = new Set<string>([
 ]);
 
 /**
- * Derives all customer-visible CR state IDs from the project filters response by excluding
- * internal pre-approval workflow states (New, Assess, Authorize).
+ * Derives the CR state IDs the state filter offers, which is every state the
+ * project filters response carries.
+ *
+ * This used to drop New, Assess and Authorize here, as the three internal
+ * pre-approval states. It must not: which change requests a customer may see is
+ * decided by the server, per customer (a change request is visible once it was
+ * designated to them, in whatever state it is in, and a hidden one is never
+ * returned), so a state is never hidden by the page. A change request the
+ * customer proposed a new time for waits in Authorize and stays on their list,
+ * and the filter has to be able to name it. The filters response itself offers
+ * only states a customer's change request can be in (the API leaves out New and
+ * Assess, and on the ServiceNow data source Authorize too), so what is sent is
+ * what the server may return; the server holds the same line for a request that
+ * names or omits a state differently.
  *
  * @param changeRequestStates - `changeRequestStates` array from `useGetProjectFilters`.
  * @returns Array of numeric state IDs, or `undefined` if metadata is not yet loaded.
@@ -116,9 +131,7 @@ export function resolveAllowedCrStateIds(
   changeRequestStates: MetadataItem[] | undefined,
 ): number[] | undefined {
   if (!changeRequestStates) return undefined;
-  return changeRequestStates
-    .filter((s) => !EXCLUDED_ALLOWED_CR_STATE_LABELS.has(s.label))
-    .map((s) => Number(s.id));
+  return toStateIds(changeRequestStates);
 }
 
 /**
@@ -132,9 +145,9 @@ export function resolveOutstandingCrStateIds(
   changeRequestStates: MetadataItem[] | undefined,
 ): number[] | undefined {
   if (!changeRequestStates) return undefined;
-  return changeRequestStates
-    .filter((s) => !EXCLUDED_OUTSTANDING_CR_STATE_LABELS.has(s.label))
-    .map((s) => Number(s.id));
+  return toStateIds(
+    changeRequestStates.filter((s) => !EXCLUDED_OUTSTANDING_CR_STATE_LABELS.has(s.label)),
+  );
 }
 
 /**
@@ -147,9 +160,9 @@ export function resolveActionRequiredCrStateIds(
   changeRequestStates: MetadataItem[] | undefined,
 ): number[] | undefined {
   if (!changeRequestStates) return undefined;
-  return changeRequestStates
-    .filter((s) => ACTION_REQUIRED_CR_STATE_LABELS.has(s.label))
-    .map((s) => Number(s.id));
+  return toStateIds(
+    changeRequestStates.filter((s) => ACTION_REQUIRED_CR_STATE_LABELS.has(s.label)),
+  );
 }
 
 /**
@@ -162,9 +175,9 @@ export function resolveScheduledCrStateIds(
   changeRequestStates: MetadataItem[] | undefined,
 ): number[] | undefined {
   if (!changeRequestStates) return undefined;
-  return changeRequestStates
-    .filter((s) => SCHEDULED_CR_STATE_LABELS.has(s.label))
-    .map((s) => Number(s.id));
+  return toStateIds(
+    changeRequestStates.filter((s) => SCHEDULED_CR_STATE_LABELS.has(s.label)),
+  );
 }
 
 /**
@@ -177,9 +190,9 @@ export function resolveClosedCrStateIds(
   changeRequestStates: MetadataItem[] | undefined,
 ): number[] | undefined {
   if (!changeRequestStates) return undefined;
-  return changeRequestStates
-    .filter((s) => CLOSED_CR_STATE_LABELS.has(s.label))
-    .map((s) => Number(s.id));
+  return toStateIds(
+    changeRequestStates.filter((s) => CLOSED_CR_STATE_LABELS.has(s.label)),
+  );
 }
 
 /**

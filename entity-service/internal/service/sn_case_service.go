@@ -2701,9 +2701,8 @@ type snUpdateCasePayload struct {
 	RelatedCaseID *string `json:"relatedCaseId,omitempty"`
 	// AutocloseHoldUntil places the case on hold in ServiceNow's staged auto-closure
 	// sequence, internally setting u_autoclosure_step = ON_HOLD and
-	// u_autoclosure_state_time = this date together. A matching field on the backing
-	// service's case-update payload exists, but is not yet available in the backing
-	// service.
+	// u_autoclosure_state_time = this date together. Date only (YYYY-MM-DD): the
+	// integration service constrains it to that shape.
 	AutocloseHoldUntil *string `json:"autocloseHoldUntil,omitempty"`
 	// Title/DeploymentID/DeployedProductID as PATCH-time fields (previously the backing
 	// service's case-update payload only supported these at create time, via the
@@ -3851,8 +3850,8 @@ func (s *snCaseService) patchCaseParent(ctx context.Context, caseID, parentID st
 // patchCaseFieldsBundle performs a bare ServiceNow PATCH covering the part
 // of UpdateCase's combinable "plain field" bundle the backing service
 // actually implements today -- Subject/DeploymentID/DeployedProductID/
-// RelatedCaseID/BestCaseFixEta/MostLikelyFixEta/WorstCaseFixEta/
-// WorkaroundProvided -- with none of UpdateCase's enrichment reads, no-op
+// RelatedCaseID/AutocloseHoldUntil/BestCaseFixEta/MostLikelyFixEta/
+// WorstCaseFixEta/WorkaroundProvided -- with none of UpdateCase's enrichment reads, no-op
 // detection, or event publishing -- same reasoning as patchCaseFields's own
 // doc comment, extended to this bundle for
 // DATA_SOURCE=postgres-servicenow-dual-write's async mirror (see
@@ -3877,9 +3876,10 @@ func (s *snCaseService) patchCaseParent(ctx context.Context, caseID, parentID st
 // GlideRecordSecure, which does enforce it) -- sending it would be silently
 // dropped by that ACL, leaving ServiceNow's copy no better off than not
 // mirroring it at all. Returns nil without a PATCH call when req sets none
-// of the eight supported fields, rather than sending an empty no-op request.
+// of the nine supported fields, rather than sending an empty no-op request.
 func (s *snCaseService) patchCaseFieldsBundle(ctx context.Context, caseID string, req domain.UpdateCaseRequest) error {
 	if req.Subject == nil && req.DeploymentID == nil && req.DeployedProductID == nil && req.RelatedCaseID == nil &&
+		req.AutocloseHoldUntil == nil &&
 		req.BestCaseFixEta == nil && req.MostLikelyFixEta == nil && req.WorstCaseFixEta == nil && req.WorkaroundProvided == nil {
 		return nil
 	}
@@ -3902,6 +3902,15 @@ func (s *snCaseService) patchCaseFieldsBundle(ctx context.Context, caseID string
 	if req.RelatedCaseID != nil {
 		sysid := uuidToSysid(*req.RelatedCaseID)
 		payload.RelatedCaseID = &sysid
+	}
+	// The hold is what ServiceNow's own auto-closure flow reads (it sets
+	// u_autoclosure_step = ON_HOLD and u_autoclosure_state_time together), so
+	// unlike the display-only fields it is the one write here that decides
+	// whether the case is actually closed. Same date-only wire format as
+	// UpdateCase's own AutocloseHoldUntil handling.
+	if req.AutocloseHoldUntil != nil {
+		holdUntil := formatSNDateOnly(req.AutocloseHoldUntil)
+		payload.AutocloseHoldUntil = &holdUntil
 	}
 	_, err := s.client.Patch(ctx, "/cases/"+uuidToSysid(caseID), token, payload)
 	return err

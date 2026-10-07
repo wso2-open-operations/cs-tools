@@ -40,9 +40,7 @@ func NewGlobalService(repo repository.ReferenceDataRepository, search repository
 	return &globalService{repo: repo, search: search, access: access}
 }
 
-// GetSystemMetadata implements GlobalService. FeedbackEmojis is left empty:
-// it's static ServiceNow-side configuration (feedback emoji image assets),
-// not data backed by any Postgres table.
+// GetSystemMetadata implements GlobalService.
 func (s *globalService) GetSystemMetadata(ctx context.Context) (domain.SystemMetadataResponse, error) {
 	projectTypes, err := s.repo.ListProjectTypes(ctx)
 	if err != nil {
@@ -63,7 +61,27 @@ func (s *globalService) GetSystemMetadata(ctx context.Context) (domain.SystemMet
 		tzItems = append(tzItems, domain.ChoiceListItem{ID: tz.Value, Label: tz.Label})
 	}
 
-	return domain.SystemMetadataResponse{ProjectTypes: items, TimeZones: tzItems}, nil
+	feedbackEmojis, err := s.repo.ListFeedbackEmojis(ctx)
+	if err != nil {
+		return domain.SystemMetadataResponse{}, err
+	}
+	emojiItems := make([]domain.FeedbackEmoji, 0, len(feedbackEmojis))
+	for _, e := range feedbackEmojis {
+		chips := make([]domain.FeedbackEmojiChip, 0, len(e.Chips))
+		for _, c := range e.Chips {
+			chips = append(chips, domain.FeedbackEmojiChip{ID: c.ID, Name: c.Name, Value: c.Value})
+		}
+		emojiItems = append(emojiItems, domain.FeedbackEmoji{
+			ID:              e.ID,
+			Name:            e.Name,
+			Value:           e.Value,
+			UnselectedImage: e.UnselectedImage,
+			SelectedImage:   e.SelectedImage,
+			Chips:           chips,
+		})
+	}
+
+	return domain.SystemMetadataResponse{ProjectTypes: items, TimeZones: tzItems, FeedbackEmojis: emojiItems}, nil
 }
 
 // globalSearchSortFields maps the accepted sortBy.field values to the

@@ -26,4 +26,30 @@ describe("ChangeRequestsList", () => {
     );
     expect(screen.getByText(CHANGE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE)).toBeInTheDocument();
   });
+
+  it("lists a change request waiting in Authorize with its state", () => {
+    render(
+      <ChangeRequestsList
+        changeRequests={[
+          {
+            id: "cr-authorize",
+            number: "CHG0001234",
+            title: "Rotate the gateway certificates",
+            startDate: "2031-03-15 09:00:00",
+            endDate: "2031-03-15 11:00:00",
+            duration: null,
+            hasServiceOutage: false,
+            impact: null,
+            state: { id: "-3", label: "Authorize" },
+            type: null,
+          } as never,
+        ]}
+        isLoading={false}
+        isError={false}
+      />,
+    );
+    expect(screen.getByText("Rotate the gateway certificates")).toBeInTheDocument();
+    expect(screen.getByText("Authorize")).toBeInTheDocument();
+    expect(screen.queryByText(CHANGE_REQUESTS_LIST_EMPTY_DEFAULT_MESSAGE)).not.toBeInTheDocument();
+  });
 });

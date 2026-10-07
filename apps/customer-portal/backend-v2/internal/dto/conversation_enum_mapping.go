@@ -16,7 +16,10 @@
 
 package dto
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // conversationStateIDs mirrors entity-service's private
 // snConversationStateKeyMap (internal/service/sn_conversation_service.go) —
@@ -64,6 +67,55 @@ func conversationStateRef(state *string) *IDLabelRef {
 		label = *state
 	}
 	return &IDLabelRef{ID: conversationStateIDs[*state], Label: label}
+}
+
+// conversationStateEnumToDomain bridges a Postgres conversation_state_enum
+// label to the lowercase domain vocabulary normalizeConversationStateChoices
+// looks up by. Every label but the closed state's already matches the domain
+// value once lowercased (open/active/resolved/converted/abandoned); only
+// Postgres's own label for closed ('CLOSE', no D -- see entity-service's
+// conversation_repo.go) differs from the domain enum's CLOSED.
+var conversationStateEnumToDomain = map[string]string{
+	"close": "closed",
+}
+
+// conversationStateIDsByDomain/conversationStateLabelsByDomain re-key
+// conversationStateIDs/conversationStateLabels by lowercase domain value
+// (open/active/resolved/...) -- the casing normalizeChoices looks up by --
+// rather than duplicating the id/label table as a second literal.
+var (
+	conversationStateIDsByDomain    = lowerKeyedCopy(conversationStateIDs)
+	conversationStateLabelsByDomain = lowerKeyedCopy(conversationStateLabels)
+)
+
+func lowerKeyedCopy(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[strings.ToLower(k)] = v
+	}
+	return out
+}
+
+// normalizeConversationStateChoices is normalizeCaseSeverityChoices for
+// conversation states (see that function's own doc comment for the general
+// shape; normalizeChangeRequestStateChoices hit the identical bug for
+// change-request states).
+//
+// GET /projects/{id}/filters' conversationStates never went through this at
+// all -- unlike every sibling choice list on the same response. On the
+// Postgres data source, ReferenceDataRepository.EnumLabels (entity-service)
+// returns the raw enum label as both id and label (e.g.
+// {"id":"ACTIVE","label":"ACTIVE"}), since Postgres enums have no separate
+// numeric id of their own -- so AllConversationsPage.tsx's
+// `filters.stateId ? [Number(filters.stateId)] : undefined` converted every
+// selection to NaN, which JSON-encodes as null and conversationIDsToEnums
+// then refuses as an unmapped state id (id 0). Selecting ANY state in the
+// filter therefore failed the search request every time, and because the
+// page's own loading flag never clears while its query has no successful
+// response to show, the page was stuck showing its loader forever instead of
+// surfacing the error (digiops-cs#3273).
+func normalizeConversationStateChoices(items []ReferenceItem) []ReferenceItem {
+	return normalizeChoices(items, conversationStateEnumToDomain, conversationStateIDsByDomain, conversationStateLabelsByDomain)
 }
 
 // conversationIDsToEnums converts the frontend's numeric stateKeys filter to

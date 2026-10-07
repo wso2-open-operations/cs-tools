@@ -182,8 +182,8 @@ paths:
         `workState`, `watchList`, `assigneeEmail`, `parentId`, `acknowledge`, `subject`,
         `description`, `deploymentId`, `deployedProductId`, `relatedCaseId`,
         `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or `worstCaseFixEta`.
-        `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are supported only when
-        the ServiceNow data source is active.
+        `watchList`, `assigneeEmail`, and `parentId` are supported only when the ServiceNow data
+        source is active.
       operationId: patchCasesId
       parameters:
         - name: id
@@ -5291,6 +5291,29 @@ paths:
   /change-requests/{id}:
     patch:
       summary: Update a change request (ServiceNow data source only).
+      description: >-
+        Forwarded to the entity service as-is, after body checks that read keys the way
+        its decoder does -- without regard to case (isCustomerApproved, ISCUSTOMERAPPROVED
+        and iscustomerapproved are one field; a body naming it twice in different cases is
+        judged on every spelling): isCustomerApproved / isCustomerReviewed with any value
+        but null are a 400 (the customer's answer is the customer's), a customer
+        requirement box that is not a boolean, a malformed projectId / deploymentIds /
+        deploymentProductIds, and the removed customerGroupId / environmentIds are a 400
+        too, each with no upstream call. The state is the entity service's: it accepts only
+        the state the change request is in or a move legalNextStates offers, and answers
+        every other with a 400 whose message is echoed.
+
+        Customer requirements lock (the entity service's rules, echoed verbatim): the
+        Customer Project and the two requirement boxes are free while the change request
+        is new; from Request Approval (`{state: "assess"}`) on the project is frozen and the
+        boxes can only be turned on. A box that is set needs a Customer Project that has
+        somebody who can be asked -- a registered portal-user contact other than the
+        requester -- so Request Approval, and turning a box on after it, are a 400 on a
+        project nobody can be asked on: "customer approval is required but nobody on this
+        project can be asked (no registered contact other than the requester): register a
+        contact for the project first" ("customer review is ..." for the review box,
+        "customer approval and customer review are ..." for both). Without a Customer
+        Project at all Request Approval keeps its own message.
       operationId: patchChangeRequest
       security:
         - bearerAuth: []
@@ -5316,7 +5339,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchChangeRequestResponse'
         "400":
-          description: Bad request.
+          description: >-
+            Bad request. The entity service's refusals are echoed, among them the customer
+            requirements lock's: "approval cannot be requested: the customer's approval
+            and/or review is required but no Customer Project is set, ..." and "customer
+            approval is required but nobody on this project can be asked (no registered
+            contact other than the requester): register a contact for the project first"
+            (Request Approval, or a box turned on after it, on a project nobody can be asked
+            on; likewise "customer review is ..." / "customer approval and customer review
+            are ...").
           content:
             application/json:
               schema:
@@ -5328,13 +5359,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden.
+          description: >-
+            Forbidden. The message is a fixed text; the body's `errorCode`, when
+            entity-service names the refusal, says which.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: Change request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: >-
+            The request conflicts with the change request's state; the entity service's
+            reason is echoed and nothing was changed. The body's `errorCode`, when
+            entity-service names the refusal, says which (a client never branches on the
+            message).
           content:
             application/json:
               schema:
@@ -5513,7 +5556,8 @@ paths:
             The approval is no longer pending: the change request has moved to a
             state the caller's stage cannot be decided in (e.g. a Review approver
             once the change is Customer Review or Closed). The message says where
-            the change is; nothing was changed.
+            the change is; nothing was changed. The body's `errorCode` is
+            `change_request_approval_not_pending`.
           content:
             application/json:
               schema:
@@ -5560,14 +5604,18 @@ paths:
                     customer's approval before it is scheduled. CAB / ECAB
                     approval (or Request Approval on a Standard change) then
                     moves it to `customer_approval` instead of `scheduled`.
-                    Defaults to false. A non-boolean value is a 400.
+                    Defaults to false. A non-boolean value is a 400. Request
+                    Approval later needs a Customer Project that has somebody who
+                    can be asked (a registered portal-user contact other than the
+                    requester): otherwise it is a 400.
                 customerReviewRequired:
                   type: boolean
                   description: >-
                     The "Customer Review" checkbox: the change needs the
                     customer's review before it is closed. Review then offers
                     `customer_review` instead of `closed`. Defaults to false. A
-                    non-boolean value is a 400.
+                    non-boolean value is a 400. As the Customer Approval box for
+                    Request Approval.
                 projectId:
                   type: string
                   format: uuid
@@ -7310,6 +7358,47 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /specialist-handoff-teams:
+    get:
+      summary: The Special Ops teams the "Escalate to specialist team" dialog offers.
+      description: >-
+        The teams of the product the incident's service belongs to, from the entity
+        service's SPECIALIST_HANDOFF_CONFIG. Several teams mean the user must pick one
+        (escalationTeam); one team is the handoff's target with nothing to pick; none
+        means the service cannot be handed off.
+      operationId: listSpecialistHandoffTeams
+      parameters:
+        - name: serviceId
+          in: query
+          required: false
+          description: The incident's service. Omitted, every product's teams.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        label:
+                          type: string
+        "401":
+          description: Unauthorized
           content:
             application/json:
               schema:
@@ -13394,9 +13483,30 @@ components:
   schemas:
     ErrorPayload:
       type: object
+      description: >-
+        The body of an error response. `message` is the reason, worded for people: it
+        can change, so a client must never branch on it. `errorCode` is the stable
+        machine-readable name entity-service gave a refusal, passed through unchanged
+        on the 400, 403, 409 and 422 of PATCH /change-requests/{id} and on the 403 and
+        409 of POST /change-requests/{id}/approvals/decision; it is omitted when the
+        refusal has none, which is the body this API has always returned, so a client
+        treats its absence, and a value it does not know, as "no more specific than the
+        status". The status and the message are the same with or without it.
       properties:
         message:
           type: string
+        errorCode:
+          type: string
+          description: >-
+            Stable machine-readable name of the refusal. Named so far, the refusals of a
+            customer's answer to a change request and of the approvals decision route:
+            `change_request_on_hold` (409), `change_request_schedule_changed` (409),
+            `change_request_approval_not_pending` (409: the approval is no longer
+            pending), `change_request_not_proposable` (409), `change_request_not_asked`
+            (403: not asked on the customer group's stage) and `change_request_forbidden`
+            (403: the change request's creator, or a user who may not decide an internal
+            stage). The list grows, so this is deliberately not a closed enum.
+          example: change_request_approval_not_pending
 
     HealthDependenciesResponse:
       type: object
@@ -13430,8 +13540,10 @@ components:
       additionalProperties: false
       description: >
         Any combination of fields may be supplied; at least one is required.
-        Omitted fields are left unchanged. isCustomerApproved, isCustomerReviewed,
-        and requestApproval are mutually exclusive: at most one may be set.
+        Omitted fields are left unchanged. isCustomerApproved and isCustomerReviewed
+        are the customer's own answer, not an edit: any value but null is refused (a
+        400, no upstream call), see each. The schema still declares that at most one of
+        isCustomerApproved, isCustomerReviewed and requestApproval may be set.
       allOf:
         - not:
             required: [isCustomerApproved, isCustomerReviewed]
@@ -13475,6 +13587,20 @@ components:
           enum: [high, medium, low]
         state:
           type: string
+          description: >-
+            The next state, from the change request's own legalNextStates: the entity
+            service accepts exactly those (or the state the change request is already in),
+            trimmed and case-insensitive, and refuses every other with a 400 that changes
+            nothing -- a closed, canceled or rolled-back change request cannot be moved, and
+            no request skips a step or a gate (new -> implement, assess -> scheduled, ...).
+            "scheduled"
+            is never accepted (a 400, from every state): it is reached by the approval
+            flow or, out of customer_approval, by the customer's own approval in the
+            Customer Portal. Out of customer_approval / customer_review only canceled,
+            authorize (Re-schedule, customer_approval) and rollback (customer_review)
+            are accepted; anything else, "closed" included, is a 400 saying that the
+            customer's approval / review can only be given by the customer in the
+            Customer Portal and what to do instead.
           enum: [new, assess, authorize, customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
         type:
           type: string
@@ -13494,18 +13620,25 @@ components:
         customerApprovalRequired:
           type: boolean
           description: >-
-            The "Customer Approval" checkbox. Editable only until the approval
-            gate has been passed (state new, assess or authorize); changing it
-            afterwards is a 400 ("customerApprovalRequired can no longer be
-            changed ..."). Resending the stored value is always accepted. A
-            non-boolean value is a 400.
+            The "Customer Approval" checkbox. Free while the change request is new; from
+            Request Approval on it can only be turned on, and only until the approval gate
+            has been passed (state assess or authorize): turning it off is a 400
+            ("customerApprovalRequired can no longer be turned off ...") and so is changing
+            it afterwards ("customerApprovalRequired can no longer be changed ..."). Turning
+            it on needs a Customer Project that has somebody who can be asked (400 "customer
+            approval is required but nobody on this project can be asked ..."). Resending the
+            stored value is always accepted. A non-boolean value is a 400.
         customerReviewRequired:
           type: boolean
           description: >-
-            The "Customer Review" checkbox. Editable until the change leaves
-            review (any state up to and including review); changing it from
-            customer_review onwards is a 400 ("customerReviewRequired can no
-            longer be changed ..."). A non-boolean value is a 400.
+            The "Customer Review" checkbox. Free while the change request is new; from
+            Request Approval on it can only be turned on, and only until the change leaves
+            review (any state up to and including review): turning it off is a 400
+            ("customerReviewRequired can no longer be turned off ..."), and changing it from
+            customer_review onwards is a 400 ("customerReviewRequired can no longer be
+            changed ..."). Turning it on needs a Customer Project that has somebody who can
+            be asked (400 "customer review is required but nobody on this project can be
+            asked ..."). A non-boolean value is a 400.
         deploymentIds:
           type: array
           items:
@@ -13563,19 +13696,26 @@ components:
         isCustomerApproved:
           type: boolean
           description: >-
-            Records the customer's approval decision on the change request.
-            Mutually exclusive with isCustomerReviewed and requestApproval.
+            NOT ACCEPTED from the portal (any value but null is a 400, no upstream
+            call): the customer's approval is the customer's own decision, given in the
+            Customer Portal, and no staff action records it on their behalf (a
+            compliance rule: the change request's record of it is audited). Message:
+            `isCustomerApproved cannot be set on the customer's behalf: the customer's
+            approval can only be given by the customer in the Customer Portal`.
         isCustomerReviewed:
           type: boolean
           description: >-
-            Records the customer's post-implementation review decision.
-            Mutually exclusive with isCustomerApproved and requestApproval.
+            NOT ACCEPTED from the portal (any value but null is a 400, no upstream
+            call): the customer's review is the customer's own decision, given in the
+            Customer Portal. Message: `isCustomerReviewed cannot be set on the customer's
+            behalf: the customer's review can only be given by the customer in the
+            Customer Portal`.
         requestApproval:
           type: boolean
           description: >-
             Transitions the change request from New to Assess and requests
-            approval. Mutually exclusive with isCustomerApproved and
-            isCustomerReviewed.
+            approval. Not combinable with isCustomerApproved or isCustomerReviewed
+            (the customer's own answer, refused for every caller of this API).
 
     PatchChangeRequestResponse:
       type: object
@@ -13809,7 +13949,7 @@ components:
         Exactly one of `state`, `severity`, `workState`, `watchList`, `assigneeEmail`, `parentId`,
         `acknowledge`, `type`, `subject`, `description`, `deploymentId`, `deployedProductId`,
         `relatedCaseId`, `autocloseHoldUntil`, `bestCaseFixEta`, `mostLikelyFixEta`, or
-        `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, `parentId`, and `autocloseHoldUntil` are
+        `worstCaseFixEta` must be provided. `watchList`, `assigneeEmail`, and `parentId` are
         supported only for the ServiceNow data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional resolution fields that may only be
         provided alongside `state: closed` or `state: solution_proposed`.
@@ -13958,7 +14098,12 @@ components:
             Places the case on hold in the backing data source's staged auto-closure sequence
             until this date, mirroring the real ServiceNow UX (an engineer picks a hold-until
             date). This is the only supported write against that sequence — the raw
-            `autoclosureStep` state is not directly settable (ServiceNow only).
+            `autoclosureStep` state is not directly settable. Supported on every data source
+            except for announcements, which have no auto-closure sequence (400); under
+            dual-write the hold is also forwarded to ServiceNow, whose own flow does the
+            closing. The hold is a calendar day, and the day is the UTC date of the value: send
+            the chosen day at 00:00 UTC (`2026-10-22T00:00:00Z` holds until 22 Oct). The end of
+            the chosen day in a timezone west of UTC is already the next UTC day.
         bestCaseFixEta:
           type: string
           format: date
@@ -14424,6 +14569,15 @@ components:
       type: object
       nullable: true
       properties:
+        skipTotal:
+          type: boolean
+          description: >-
+            When true, the search does not count every matching record: the
+            response's `total` is -1 and only the requested page is read. For
+            callers that never show a total (global search shows a handful of
+            hits). Defaults to false, which returns the exact total as before.
+            Ignored on the ServiceNow data source, which always reports one,
+            and for a search that sets groupBy (its totals are the bucket counts).
         filters:
           $ref: '#/components/schemas/CaseSearchFilters'
         sortBy:
@@ -14454,7 +14608,8 @@ components:
             $ref: '#/components/schemas/CaseSearchView'
         total:
           type: integer
-          description: Total number of matching cases
+          description: >-
+            Total number of matching cases. -1 when the request set skipTotal: the count was not run, so there is no total (not a lower bound).
         limit:
           type: integer
         offset:
@@ -15421,7 +15576,8 @@ components:
             Where the case sits in the backing data source's staged auto-closure sequence
             (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Informational only — the
             sequence itself is fully owned by the backing data source's own flows; the only
-            supported write is `autocloseHoldUntil` on the PATCH request (ServiceNow only).
+            supported write is `autocloseHoldUntil` on the PATCH request. Only `ON_HOLD` is a
+            hold; the two `*_COMMENT` steps are later stages of the countdown to closure.
         autoclosureStateTime:
           type: string
           format: date-time
@@ -15429,7 +15585,7 @@ components:
           nullable: true
           description: >-
             When the auto-closure sequence next advances — e.g. the "eligible again after" date
-            for a held case (ServiceNow only).
+            for a held case.
         nextStates:
           type: array
           readOnly: true
@@ -18204,6 +18360,14 @@ components:
       type: object
       nullable: true
       properties:
+        skipTotal:
+          type: boolean
+          description: >-
+            When true, the search does not count every matching record: the
+            response's `total` is -1 and only the requested page is read. For
+            callers that never show a total (global search shows a handful of
+            hits). Defaults to false, which returns the exact total as before.
+            Ignored on the ServiceNow data source, which always reports one.
         filters:
           type: object
           properties:
@@ -18373,7 +18537,8 @@ components:
             $ref: '#/components/schemas/ChangeRequestSearchView'
         total:
           type: integer
-          description: Total number of matching change requests
+          description: >-
+            Total number of matching change requests. -1 when the request set skipTotal: the count was not run, so there is no total (not a lower bound).
         limit:
           type: integer
         offset:
@@ -18479,15 +18644,19 @@ components:
                 Next states a human may move the change request to, per state.
                 new: [assess, canceled] ("assess" is the "Request Approval"
                 action for every type; the state it lands in depends on the
-                type and on customerApprovalRequired). assess: [authorize,
-                canceled]. authorize: [canceled] (CAB/ECAB approval moves the
-                change on by itself: to scheduled, or to customer_approval when
-                customerApprovalRequired). customer_approval: [scheduled,
-                canceled] -- "scheduled" here means "record the customer's
-                approval" and is the only state it is offered from. scheduled:
+                type and on customerApprovalRequired). assess: [canceled] (the
+                peer approval moves the change on by itself). authorize:
+                [canceled] (CAB/ECAB approval moves the change on by itself: to
+                scheduled, or to customer_approval when customerApprovalRequired). customer_approval: [authorize,
+                canceled] -- never "scheduled": only the CUSTOMER's own approval
+                (Customer Portal) schedules the change, and no staff action
+                records it for them; "authorize" here is Re-schedule. scheduled:
                 [implement, canceled]. implement: [review, canceled]. review:
-                [customer_review, canceled] when customerReviewRequired, else
-                [closed, canceled]. customer_review: [closed, canceled].
+                [customer_review, rollback, canceled] when customerReviewRequired,
+                else [closed, rollback, canceled]. customer_review: [rollback,
+                canceled] -- never "closed": only the CUSTOMER's own review closes
+                the change -- or [canceled] while the customer group's review
+                request is pending. Terminal states: none.
 
     TaskSummary:
       type: object
@@ -19378,6 +19547,14 @@ components:
     ConversationSearchPayload:
       type: object
       properties:
+        skipTotal:
+          type: boolean
+          description: >-
+            When true, the search does not count every matching record: the
+            response's `total` is -1 and only the requested page is read. For
+            callers that never show a total (global search shows a handful of
+            hits). Defaults to false, which returns the exact total as before.
+            Ignored on the ServiceNow data source, which always reports one.
         filters:
           type: object
           properties:
@@ -19463,7 +19640,8 @@ components:
             $ref: '#/components/schemas/ConversationView'
         total:
           type: integer
-          description: Total number of matching conversations
+          description: >-
+            Total number of matching conversations. -1 when the request set skipTotal: the count was not run, so there is no total (not a lower bound).
         limit:
           type: integer
         offset:
@@ -20116,6 +20294,14 @@ components:
     IncidentSearchPayload:
       type: object
       properties:
+        skipTotal:
+          type: boolean
+          description: >-
+            When true, the search does not count every matching record: the
+            response's `total` is -1 and only the requested page is read. For
+            callers that never show a total (global search shows a handful of
+            hits). Defaults to false, which returns the exact total as before.
+            Ignored on the ServiceNow data source, which always reports one.
         filters:
           type: object
           properties:
@@ -20198,7 +20384,8 @@ components:
             $ref: '#/components/schemas/Incident'
         total:
           type: integer
-          description: Total number of matching incidents
+          description: >-
+            Total number of matching incidents. -1 when the request set skipTotal: the count was not run, so there is no total (not a lower bound).
         limit:
           type: integer
         offset:
@@ -20675,8 +20862,11 @@ components:
         escalationTeam:
           type: string
           nullable: true
-          description: Only meaningful for a Choreo-routed handoff.
-          enum: [choreo-runtime-team, choreo-apim-team]
+          maxLength: 64
+          description: >-
+            A team key from GET /specialist-handoff-teams?serviceId=. Required when the
+            incident's product has several teams; ignored when it has one. The entity
+            service validates it against its configuration.
         createGithubIssue:
           type: boolean
           default: true
@@ -20730,7 +20920,6 @@ components:
             escalationTeam:
               type: string
               nullable: true
-              enum: [choreo-runtime-team, choreo-apim-team]
             task:
               $ref: '#/components/schemas/IncidentSpecialistHandoffTask'
             githubIssue:
@@ -20783,7 +20972,6 @@ components:
         escalationTeam:
           type: string
           nullable: true
-          enum: [choreo-runtime-team, choreo-apim-team]
         handedOffAt:
           type: string
         handedOffBy:
@@ -20858,6 +21046,14 @@ components:
     ProblemSearchPayload:
       type: object
       properties:
+        skipTotal:
+          type: boolean
+          description: >-
+            When true, the search does not count every matching record: the
+            response's `total` is -1 and only the requested page is read. For
+            callers that never show a total (global search shows a handful of
+            hits). Defaults to false, which returns the exact total as before.
+            Ignored on the ServiceNow data source, which always reports one.
         filters:
           type: object
           properties:
@@ -20928,7 +21124,8 @@ components:
             $ref: '#/components/schemas/Problem'
         total:
           type: integer
-          description: Total number of matching problems
+          description: >-
+            Total number of matching problems. -1 when the request set skipTotal: the count was not run, so there is no total (not a lower bound).
         limit:
           type: integer
         offset:

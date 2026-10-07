@@ -48,6 +48,18 @@ describe("useQuickCaseSearch", () => {
     postMock.mockResolvedValue({ cases: [] });
   });
 
+  it("asks the server not to count every match: the palette never shows a total", async () => {
+    const { result } = renderHook(() => useQuickCaseSearch("printer jam"), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/search",
+      expect.objectContaining({ skipTotal: true }),
+    );
+  });
+
   it("requests every known case sub-type, not just the default 'case' type", async () => {
     // "free text" query — doesn't match the number/internalId patterns,
     // so this goes through the free-text `searchQuery` path.

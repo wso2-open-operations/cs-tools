@@ -18,7 +18,6 @@ package service
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
@@ -37,14 +36,13 @@ import (
 //   - EndDateClosureState/InvoiceDueDateClosureState/
 //     ComplianceViolationClosureState -- project table columns of the same
 //     name (migration 0014).
+//   - SuspensionProcessState -- project.suspension_process_state (migration
+//     0202), stored as sent and returned by GET/search.
 //   - HasAgent/HasKbReferences -- the linked account's
 //     ai_gen_response_enabled/smart_knowledge_base_suggestions_enabled
 //     columns (migration 0012), the same mapping
 //     ProjectRepository.GetProjectByID already reads from (see that file's
 //     own doc comment for why the name doesn't match).
-//
-// SuspensionProcessState has no project column yet (parked), so it is accepted,
-// logged and dropped rather than rejected.
 //
 // ClosureState is recomputed by the repository in the same transaction, from the
 // rule ServiceNow's "Update WSO2 Closure State" business rule applies.
@@ -109,14 +107,8 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	if _, err := authorizeProject(ctx, s.access, id); err != nil {
 		return domain.ProjectUpdateResponse{}, err
 	}
-	if !hasStoredProjectFields(req) && req.SuspensionProcessState == nil {
+	if !hasStoredProjectFields(req) {
 		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "at least one field must be provided"}
-	}
-	// Parked: no project column yet. A request carrying only this field still
-	// succeeds and just bumps updated_on/updated_by.
-	if req.SuspensionProcessState != nil {
-		slog.WarnContext(ctx, "update project: suspensionProcessState is not stored on Postgres; ignored", "projectId", id)
-		req.SuspensionProcessState = nil
 	}
 
 	updatedBy, err := s.resolveUpdatedBy(ctx)
@@ -134,8 +126,7 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	// has already committed by this point; this fires after, asynchronously,
 	// and never affects this response -- the same UPDATE-stays-Postgres-
 	// first/async shape as caseService.UpdateCase's own mirror (see that
-	// method's own doc comment). SuspensionProcessState is already cleared above,
-	// so the mirror never carries a field this mode didn't persist.
+	// method's own doc comment).
 	if s.snWriteback != nil && s.snMirror != nil && hasStoredProjectFields(req) {
 		mirrorReq := req
 		s.snWriteback.Dispatch(ctx, "project", id, "update", mirrorReq, func(writeCtx context.Context) error {
@@ -184,5 +175,6 @@ func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, 
 // hasStoredProjectFields reports whether req sets a field Postgres stores.
 func hasStoredProjectFields(req domain.ProjectUpdateRequest) bool {
 	return req.HasAgent != nil || req.HasKbReferences != nil || req.EndDateClosureState != nil ||
-		req.InvoiceDueDateClosureState != nil || req.ComplianceViolationClosureState != nil
+		req.InvoiceDueDateClosureState != nil || req.ComplianceViolationClosureState != nil ||
+		req.SuspensionProcessState != nil
 }

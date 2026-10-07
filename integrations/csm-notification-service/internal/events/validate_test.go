@@ -195,3 +195,56 @@ func TestValidate_ChangeRequestRules(t *testing.T) {
 		})
 	}
 }
+
+// TestValidate_ServiceRequest covers the three sr.* types: their required
+// fields, commentType's closed set, the caseId/entityId match, and that the
+// optional parts (sreTeamName, tags, description, ...) may be absent.
+func TestValidate_ServiceRequest(t *testing.T) {
+	const (
+		created     = `{"caseId":"SR-1","number":"SR0001001","wso2CaseId":"WSO2-1","subject":"Open port 443","sreTeamId":"T-1","sreTeamName":"MS/PC SRE Group","assignmentGroupName":"MS/PC SRE Group","description":"<p>Please</p>","state":"Open","projectId":"P-1","projectName":"Acme","createdBy":"Jane","createdOn":"2026-10-07T10:00:00Z"}`
+		acked       = `{"caseId":"SR-1","number":"SR0001001","subject":"Open port 443","sreTeamName":"MS/PC SRE Group","commentId":"C-1"}`
+		commentBase = `"caseId":"SR-1","number":"SR0001001","subject":"Open port 443","sreTeamName":"MS/PC SRE Group","commentId":"C-2","content":"hi","authorEmail":"jane@acme.com","authorName":"Jane","createdOn":"2026-10-07T10:05:00Z"`
+	)
+	cases := []struct {
+		name     string
+		entityID string
+		typ      Type
+		payload  string
+		wantErr  bool
+	}{
+		{"created", "SR-1", TypeSRCreated, created, false},
+		{"created minimal", "SR-1", TypeSRCreated, `{"caseId":"SR-1","number":"SR0001001","subject":"s","state":"","createdOn":"2026-10-07T10:00:00Z"}`, false},
+		{"created without subject (catalog form SR)", "SR-1", TypeSRCreated, `{"caseId":"SR-1","number":"SR0001001","subject":"","state":"Open","createdOn":"2026-10-07T10:00:00Z"}`, false},
+		{"created missing number", "SR-1", TypeSRCreated, `{"caseId":"SR-1","subject":"s","state":"Open","createdOn":"2026-10-07T10:00:00Z"}`, true},
+		{"created missing createdOn", "SR-1", TypeSRCreated, `{"caseId":"SR-1","number":"SR0001001","subject":"s","state":"Open"}`, true},
+		{"created caseId/entityId mismatch", "SR-2", TypeSRCreated, created, true},
+		{"created unknown field", "SR-1", TypeSRCreated, `{"caseId":"SR-1","number":"SR0001001","subject":"s","state":"Open","createdOn":"2026-10-07T10:00:00Z","extra":1}`, true},
+
+		{"acknowledged", "SR-1", TypeSRAcknowledged, acked, false},
+		{"acknowledged without subject", "SR-1", TypeSRAcknowledged, `{"caseId":"SR-1","number":"SR0001001","subject":"","commentId":"C-1"}`, false},
+		{"acknowledged missing commentId", "SR-1", TypeSRAcknowledged, `{"caseId":"SR-1","number":"SR0001001","subject":"s"}`, true},
+		{"acknowledged missing number", "SR-1", TypeSRAcknowledged, `{"caseId":"SR-1","subject":"s","commentId":"C-1"}`, true},
+		{"acknowledged caseId/entityId mismatch", "SR-2", TypeSRAcknowledged, acked, true},
+
+		{"comment_added comment", "SR-1", TypeSRCommentAdded, `{` + commentBase + `,"commentType":"comment","tags":["devops-sm"]}`, false},
+		{"comment_added work note, no tags", "SR-1", TypeSRCommentAdded, `{` + commentBase + `,"commentType":"work_note","tags":[]}`, false},
+		{"comment_added null tags", "SR-1", TypeSRCommentAdded, `{` + commentBase + `,"commentType":"comment","tags":null}`, false},
+		{"comment_added unknown commentType", "SR-1", TypeSRCommentAdded, `{` + commentBase + `,"commentType":"note","tags":[]}`, true},
+		{"comment_added missing commentType", "SR-1", TypeSRCommentAdded, `{` + commentBase + `,"tags":[]}`, true},
+		{"comment_added missing authorEmail", "SR-1", TypeSRCommentAdded, `{"caseId":"SR-1","number":"SR0001001","subject":"s","commentId":"C-2","commentType":"comment","content":"hi","createdOn":"2026-10-07T10:05:00Z","tags":[]}`, true},
+		{"comment_added missing commentId", "SR-1", TypeSRCommentAdded, `{"caseId":"SR-1","number":"SR0001001","subject":"s","commentType":"comment","content":"hi","authorEmail":"jane@acme.com","createdOn":"2026-10-07T10:05:00Z","tags":[]}`, true},
+		{"comment_added missing createdOn", "SR-1", TypeSRCommentAdded, `{"caseId":"SR-1","number":"SR0001001","subject":"s","commentId":"C-2","commentType":"comment","content":"hi","authorEmail":"jane@acme.com","tags":[]}`, true},
+		{"comment_added caseId/entityId mismatch", "SR-2", TypeSRCommentAdded, `{` + commentBase + `,"commentType":"comment","tags":[]}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !c.typ.IsKnown() {
+				t.Fatalf("%s is not in KnownTypes", c.typ)
+			}
+			err := Validate(c.entityID, c.typ, rawJSON(t, c.payload))
+			if (err != nil) != c.wantErr {
+				t.Errorf("Validate() = %v, wantErr %v", err, c.wantErr)
+			}
+		})
+	}
+}

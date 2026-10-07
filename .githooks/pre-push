@@ -61,6 +61,7 @@ WEBAPP_CR_TEST_FILES="
 src/features/csm-cases/components/LinkedChangeRequestsWidget.test.tsx
 src/features/csm-operations/utils/changeRequestsFiltersUrl.test.ts
 src/features/csm-operations/utils/__tests__/changeRequests.test.ts
+src/features/csm-operations/utils/__tests__/changeRequestStages.test.ts
 src/features/csm-operations/components/ChangeRequestLifecycleStepper.test.tsx
 src/features/csm-operations/components/ChangeRequestTransitionReasonDialog.test.tsx
 src/features/csm-operations/components/ChangeRequestsFilterBar.test.tsx
@@ -95,11 +96,12 @@ run_webapp_tests() {
     # block the push on a false negative instead of skipping cleanly.
     if curl -sf -o /dev/null http://localhost:3001 && curl -sf -o /dev/null http://localhost:9100/healthz && curl -sf -o /dev/null http://localhost:8081/health; then
         echo "[pre-push] local webapp + mock-oidc detected — running Change Request E2E lifecycle spec..."
-        # One session per seed persona (see tests/e2e/auth/README.md): jane.doe
-        # (the requester), alice.perera (an internal approver) and the two
-        # customer contacts of project 401, dave.mendis and erin.jayawardena.
-        for persona in "crApprover jane.doe" "crInternalApprover alice.perera" \
-                       "crCustomerContact dave.mendis" "crCustomerContact2 erin.jayawardena"; do
+        # One session per internal seed persona (see tests/e2e/auth/README.md):
+        # jane.doe (the requester) and alice.perera (an internal approver).
+        # Customers do not sign in to the CSM portal, so there is no session for
+        # the seed's customer contacts: the spec applies a customer's answer
+        # server-side instead (tests/e2e/utils/customerPortalDecision.ts).
+        for persona in "crApprover jane.doe" "crInternalApprover alice.perera"; do
             set -- $persona
             (cd "$REPO_ROOT/$WEBAPP_DIR" && \
                 E2E_NO_WEBSERVER=1 E2E_AUTH_EMAIL="$2@example.com" E2E_AUTH_GROUPS=cs_engineer E2E_AUTH_ROLE="$1" \

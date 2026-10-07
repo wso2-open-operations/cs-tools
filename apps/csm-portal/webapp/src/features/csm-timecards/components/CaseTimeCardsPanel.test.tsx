@@ -21,7 +21,7 @@ import type { CsmTimeCard } from "@features/csm-timecards/types/timeCards";
 
 // CaseTimeCardsPanel pulls in useCaseTimeCards/useDecideTimeCard/
 // useDeleteTimeCard (React Query hooks backed by useBackendApi) and
-// useCurrentEngineer/useIsTeamLead (auth-derived). None of those are under
+// useCurrentEngineer/useTimecardRole (auth-derived). None of those are under
 // test here -- the "View details" interaction is -- so every one of them is
 // mocked directly rather than wiring a QueryClientProvider + backend mock,
 // matching how other case-detail-tab tests in this feature folder isolate
@@ -78,8 +78,8 @@ vi.mock("@features/csm-timecards/api/useTimeCards", () => ({
 vi.mock("@features/csm-timecards/api/useTimeSheets", () => ({
   useCurrentEngineer: () => ({ id: "user-1", name: "Jane Doe" }),
 }));
-vi.mock("@features/csm-timecards/hooks/useIsTeamLead", () => ({
-  useIsTeamLead: () => false,
+vi.mock("@features/csm-timecards/hooks/useTimecardRole", () => ({
+  useTimecardRole: () => ({ isApprover: false, isAdmin: false }),
 }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: vi.fn() }),

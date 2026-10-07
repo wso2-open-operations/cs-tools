@@ -79,8 +79,9 @@ import {
   buildCloneChangeRequestNavState,
   changeRequestBlockingReason,
   changeRequestCategoryLabel,
-  noCustomerContactsHelper,
+  noCustomerAskedHelper,
   isChangeRequestCreator,
+  pendingCustomerReview,
   changeRequestCommentGateReason,
   changeRequestTransitionRequiresReason,
   changeRequestImpactColor,
@@ -289,7 +290,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   // the engineer lands on a different tab. Both call sites share the same
   // query key, so react-query dedupes this into a single request rather than
   // fetching twice.
-  const { data: approvalsData } = useGetChangeRequestApprovals(id);
+  const { data: approvalsData, isFetching: approvalsFetching } = useGetChangeRequestApprovals(id);
   const { showError } = useErrorBanner();
   const { user } = useCurrentUser();
   const patchCr = usePatchChangeRequest();
@@ -338,11 +339,11 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   // bug: this tab's `hasDraft` never became true, so its close-confirm
   // never fired for an unsent reply.
   useReportCaseTabDraft(id, composerOpen);
-  // Destructive transition awaiting confirmation (`rollback`/`canceled`), the
-  // inline error for that attempt, and whether its reason comment already
-  // landed — the last one so a retry after a failed patch re-sends only the
-  // state change instead of duplicating the comment.
-  const [reasonTarget, setReasonTarget] = useState<string | null>(null);
+  // Transition awaiting a reason (`rollback`/`canceled`), the inline error for
+  // that attempt, and whether its reason comment already landed — the last
+  // one so a retry after a failed patch re-sends only the state change
+  // instead of duplicating the comment.
+  const [reasonTransition, setReasonTransition] = useState<{ target: string } | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [reasonRecorded, setReasonRecorded] = useState(false);
   // Re-schedule (Customer Approval -> Authorize) collects the new planned
@@ -460,21 +461,35 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     cr.state === "closed" || cr.state === "canceled" || cr.state === "rollback"
       ? null
       : changeRequestBlockingReason(approvalsData?.approvals, cr.state);
-  // At a customer gate whose project has no registered contacts the backend
-  // had no one to assign the Customer Approval / Customer Review stage to.
-  // `customerContacts` absent from the payload (another data source) yields
-  // null, so nothing is claimed.
-  const noCustomerGroupNote = noCustomerContactsHelper(cr.state, cr.customerContacts);
-  // A transition is in flight whenever either half of a destructive
-  // transition (the reason comment, then the patch) or a plain patch is
+  // At a customer gate nobody is being asked to answer when the project has no
+  // registered contacts (the backend had no one to assign the stage to), and
+  // also when it has some but none has a request waiting: only the requester,
+  // contacts no longer active, or a legacy change with no stage at all. The
+  // second case needs the approvals, and not while they are being reloaded (a
+  // state change refetches them after the detail, so the old rows would read
+  // as "nobody is waiting" for a moment). `customerContacts` absent from the
+  // payload (another data source) yields null, so nothing is claimed.
+  const noCustomerGroupNote = noCustomerAskedHelper(
+    cr.state,
+    cr.customerContacts,
+    approvalsFetching ? undefined : approvalsData?.approvals,
+  );
+  // The customer's review the change is waiting for, if any, from the same
+  // approval stages as the note above. The action bar uses it to show Roll back
+  // disabled, with who the review is waiting on, instead of leaving it out (a
+  // failed review is the customer's to give in the Customer Portal). `null`
+  // until the approvals load.
+  const customerReviewPending = pendingCustomerReview(approvalsData?.approvals, cr.state);
+  // A transition is in flight whenever either half of a transition that needs
+  // a reason (the reason comment, then the patch) or a plain patch is
   // running, so the bar stays disabled across both and a double-click can't
   // fire two transitions.
   const transitionPending = patchCr.isPending || postComment.isPending;
 
   /**
-   * Apply `target` to this change request. Destructive targets are diverted
-   * into the confirmation dialog first — see `confirmReasonTransition` for
-   * the comment-then-patch ordering they then follow.
+   * Apply `target` to this change request. Targets that need a reason (the
+   * destructive ones) are diverted into the confirmation dialog first — see `confirmReasonTransition` for the
+   * comment-then-patch ordering they then follow.
    */
   const onTransition = (target: string): void => {
     // `authorize` is only offered as Re-schedule, which needs the new window.
@@ -487,7 +502,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     if (changeRequestTransitionRequiresReason(target)) {
       setReasonError(null);
       setReasonRecorded(false);
-      setReasonTarget(target);
+      setReasonTransition({ target });
       return;
     }
     patchCr.mutate(
@@ -500,8 +515,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   };
 
   /**
-   * Confirmed destructive transition. The reason is recorded as an ordinary
-   * comment *before* the state changes, deliberately in that order: the PATCH
+   * Confirmed transition that needs a reason. The reason is recorded as an
+   * ordinary comment *before* the state changes, deliberately in that order: the PATCH
    * contract carries no reason field, and a silent unexplained rollback or
    * cancellation is worse than a failed one. So a failed comment aborts
    * without touching the state.
@@ -512,11 +527,11 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
    * a retry.
    *
    * Posted as an internal work note rather than a customer-visible comment:
-   * whether a rollback/cancellation reason should be shown to the customer
-   * hasn't been decided, and a work note is the choice that can't leak.
+   * whether a rollback/cancellation reason should be shown to the
+   * customer hasn't been decided, and a work note is the choice that can't leak.
    */
   const confirmReasonTransition = async (reason: string): Promise<void> => {
-    const target = reasonTarget;
+    const target = reasonTransition?.target;
     if (!target) return;
     setReasonError(null);
 
@@ -551,11 +566,11 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
 
     try {
       await patchCr.mutateAsync({ id: cr.id, patch: buildTransitionPatch(target) });
-      setReasonTarget(null);
+      setReasonTransition(null);
       setReasonRecorded(false);
     } catch (err) {
       setReasonError(
-        `Your reason was recorded as a comment, but the state did not change: ${backendErrorMessage(
+        `Your reason was recorded as an internal note, but the state did not change: ${backendErrorMessage(
           err,
           transitionFallbackMessage(target),
         )} You don't need to retype it.`,
@@ -678,17 +693,13 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             )}
           </Box>
           <Typography variant="h5">{cr.subject || "Change request"}</Typography>
-          <ChangeRequestLifecycleStepper
-            state={cr.state}
-            customerApprovalRequired={cr.customerApprovalRequired}
-            customerReviewRequired={cr.customerReviewRequired}
-          />
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
           <Box className="csm-print-hide" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <ChangeRequestActionBar
               cr={cr}
               isPending={transitionPending}
+              pendingCustomerReview={customerReviewPending}
               onAction={onTransition}
             />
             <Button
@@ -718,6 +729,17 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           </Box>
         </Box>
       </Box>
+
+      {/* Full width, under the header: eleven stages need more room than the
+          header's left block leaves beside the action bar. */}
+      <ChangeRequestLifecycleStepper
+        state={cr.state}
+        customerApprovalRequired={cr.customerApprovalRequired}
+        customerReviewRequired={cr.customerReviewRequired}
+        approvals={approvalsData?.approvals}
+        customerApproved={cr.hasCustomerApproved}
+        hasCustomerContacts={cr.customerContacts ? cr.customerContacts.length > 0 : undefined}
+      />
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Overview</Typography>
@@ -1081,15 +1103,15 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
         </Card>
       )}
 
-      {reasonTarget && (
+      {reasonTransition && (
         <ChangeRequestTransitionReasonDialog
-          target={reasonTarget}
+          target={reasonTransition.target}
           isSubmitting={transitionPending}
           error={reasonError}
           reasonRecorded={reasonRecorded}
           onClose={() => {
             if (transitionPending) return;
-            setReasonTarget(null);
+            setReasonTransition(null);
             setReasonError(null);
             setReasonRecorded(false);
           }}

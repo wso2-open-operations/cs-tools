@@ -94,15 +94,12 @@ func (r *recordingSLAEngineRepo) SetPaused(_ context.Context, workItemID, target
 
 func TestSLAEngineService_RegisterCaseClocks_CatastrophicRegistersAllThree(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.RegisterCaseClocks(context.Background(), "case-1", &sev, "")
 
-	// plan defaults to Open Source (nil projectSvc) but P0 only exists
-	// under Managed Services -- the resolver's own cross-plan fallback
-	// must still find all three P0 policies.
-	want := []string{"case-1|p0-r-ms", "case-1|p0-w-ms", "case-1|p0-res-ms"}
+	want := []string{"case-1|s0-r", "case-1|s0-w", "case-1|s0-res"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
@@ -115,19 +112,19 @@ func TestSLAEngineService_RegisterCaseClocks_CatastrophicRegistersAllThree(t *te
 
 func TestSLAEngineService_RegisterCaseClocks_LowSeverityRegistersResponseOnly(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityLow
 	svc.RegisterCaseClocks(context.Background(), "case-2", &sev, "")
 
-	if len(repo.registered) != 1 || repo.registered[0] != "case-2|q-r-os" {
-		t.Errorf("registered = %v, want exactly [case-2|q-r-os] (Query/LOW: response only, matching the old sla_clocks design's LOW-severity behavior)", repo.registered)
+	if len(repo.registered) != 1 || repo.registered[0] != "case-2|s4-r" {
+		t.Errorf("registered = %v, want exactly [case-2|s4-r] (Query/LOW: response only, matching the old sla_clocks design's LOW-severity behavior)", repo.registered)
 	}
 }
 
 func TestSLAEngineService_RegisterCaseClocks_NilSeverityRegistersNothing(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	svc.RegisterCaseClocks(context.Background(), "case-3", nil, "")
 
@@ -140,13 +137,13 @@ func TestSLAEngineService_RegisterCaseClocks_MissingPolicySkipsThatClockTypeOnly
 	repo := newRecordingSLAEngineRepo()
 	// Remove the workaround policy so CATASTROPHIC's middle clock type has
 	// nothing to resolve -- response and resolution must still register.
-	delete(repo.policies, "P0 - Workaround (Managed Services)|WORKAROUND")
-	svc := NewSLAEngineService(repo, nil)
+	delete(repo.policies, "S0 - WORKAROUND (CSM)|WORKAROUND")
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.RegisterCaseClocks(context.Background(), "case-4", &sev, "")
 
-	want := []string{"case-4|p0-r-ms", "case-4|p0-res-ms"}
+	want := []string{"case-4|s0-r", "case-4|s0-res"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
@@ -154,7 +151,7 @@ func TestSLAEngineService_RegisterCaseClocks_MissingPolicySkipsThatClockTypeOnly
 
 func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	svc.CompleteResponseClock(context.Background(), "case-5")
 
@@ -165,7 +162,7 @@ func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
 
 func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	svc.CompleteWorkaroundClock(context.Background(), "case-5")
 
@@ -180,7 +177,7 @@ func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
 // exactly one target.
 func TestSLAEngineService_CompleteFixEtaSharedClocks(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	svc.CompleteFixEtaSharedClocks(context.Background(), "case-5")
 
@@ -230,7 +227,7 @@ func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newRecordingSLAEngineRepo()
-			svc := NewSLAEngineService(repo, nil)
+			svc := NewSLAEngineService(repo)
 
 			svc.ApplyCaseStateEffects(context.Background(), "case-6", tt.state)
 
@@ -262,7 +259,7 @@ func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 // clocks carry no relation to the old ones (fresh start_on, zero elapsed).
 func TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic // P0
 	svc.ReviseCaseClocks(context.Background(), "case-8", &sev, "")
@@ -270,7 +267,7 @@ func TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh(t *testing.
 	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-8" {
 		t.Fatalf("cancelled = %v, want [case-8]", repo.cancelled)
 	}
-	want := []string{"case-8|p0-r-ms", "case-8|p0-w-ms", "case-8|p0-res-ms"}
+	want := []string{"case-8|s0-r", "case-8|s0-w", "case-8|s0-res"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
@@ -290,7 +287,7 @@ func TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh(t *testing.
 // many (fewer, for a downgrade) clock types get freshly registered.
 func TestSLAEngineService_ReviseCaseClocks_DowngradeStillCancelsEveryClockType(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityLow // Query -- response only
 	svc.ReviseCaseClocks(context.Background(), "case-9", &sev, "")
@@ -298,8 +295,8 @@ func TestSLAEngineService_ReviseCaseClocks_DowngradeStillCancelsEveryClockType(t
 	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-9" {
 		t.Fatalf("cancelled = %v, want [case-9]", repo.cancelled)
 	}
-	if len(repo.registered) != 1 || repo.registered[0] != "case-9|q-r-os" {
-		t.Errorf("registered = %v, want [case-9|q-r-os]", repo.registered)
+	if len(repo.registered) != 1 || repo.registered[0] != "case-9|s4-r" {
+		t.Errorf("registered = %v, want [case-9|s4-r]", repo.registered)
 	}
 }
 
@@ -313,7 +310,7 @@ func TestSLAEngineService_ReviseCaseClocks_NothingHappensIfRepoFails(t *testing.
 	repo := newRecordingSLAEngineRepo()
 	repo.cancelErr = errors.New("db unavailable")
 	repo.failReviseClocksTimes = -1 // fail every call, including both retry attempts
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.ReviseCaseClocks(context.Background(), "case-11", &sev, "")
@@ -338,7 +335,7 @@ func TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers(t *testing.T) 
 	repo := newRecordingSLAEngineRepo()
 	repo.cancelErr = errors.New("db unavailable")
 	repo.failReviseClocksTimes = 1 // fail once, then succeed
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.ReviseCaseClocks(context.Background(), "case-13", &sev, "")
@@ -349,7 +346,7 @@ func TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers(t *testing.T) 
 	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-13" {
 		t.Errorf("cancelled = %v, want [case-13] -- the retry should have succeeded", repo.cancelled)
 	}
-	want := []string{"case-13|p0-r-ms", "case-13|p0-w-ms", "case-13|p0-res-ms"}
+	want := []string{"case-13|s0-r", "case-13|s0-w", "case-13|s0-res"}
 	if len(repo.registered) != len(want) {
 		t.Errorf("registered = %v, want %v -- the retry should have succeeded", repo.registered, want)
 	}
@@ -361,7 +358,7 @@ func TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers(t *testing.T) 
 // keep its old clocks running just because the new one can't be resolved.
 func TestSLAEngineService_ReviseCaseClocks_NilSeverityStillCancels(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 
 	svc.ReviseCaseClocks(context.Background(), "case-10", nil, "")
 
@@ -384,9 +381,9 @@ func TestSLAEngineService_ReviseCaseClocks_NilSeverityStillCancels(t *testing.T)
 // CancelActiveClocks) is never even called.
 func TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	repo.errOnName = "P0 - Workaround (Managed Services)" // one of P0's three clock types
+	repo.errOnName = "S0 - WORKAROUND (CSM)" // one of S0's three clock types
 
-	svc := NewSLAEngineService(repo, nil)
+	svc := NewSLAEngineService(repo)
 	sev := domain.CaseSeverityCatastrophic
 	svc.ReviseCaseClocks(context.Background(), "case-12", &sev, "")
 
@@ -398,21 +395,20 @@ func TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure(t *testin
 	}
 }
 
-// TestSLAEngineService_RegisterCaseClocks_UsesResolvedPlan confirms
-// RegisterCaseClocks actually threads the project-derived plan through to
-// the resolver (rather than always defaulting) for a non-P0 severity,
-// where the plan choice actually changes which policy matches.
-func TestSLAEngineService_RegisterCaseClocks_UsesResolvedPlan(t *testing.T) {
+// TestSLAEngineService_RegisterCaseClocks_MediumSeverityUsesOnlyFakedClockType
+// confirms registration depends on severity alone now (no project/plan
+// lookup involved at all): only S3 - Resolution is faked, so a Medium-
+// severity case registers only that one clock type, with response/
+// workaround for S3 simply missing from the fake set (same "no fallback
+// duration" behavior as a genuinely unconfigured policy).
+func TestSLAEngineService_RegisterCaseClocks_MediumSeverityUsesOnlyFakedClockType(t *testing.T) {
 	repo := newRecordingSLAEngineRepo()
-	projectSvc := fakeProjectSvc{project: domain.ProjectDetailsView{SubscriptionType: domain.SubscriptionTypeManagedCloudSubscription}}
-	svc := NewSLAEngineService(repo, projectSvc)
+	svc := NewSLAEngineService(repo)
 
-	sev := domain.CaseSeverityMedium // P3
-	svc.RegisterCaseClocks(context.Background(), "case-7", &sev, "proj-1")
+	sev := domain.CaseSeverityMedium // S3
+	svc.RegisterCaseClocks(context.Background(), "case-7", &sev, "")
 
-	// Only P3 - Resolution (Managed Services) is faked; response/workaround
-	// for P3 aren't in the fake set at all, so only resolution registers.
-	if len(repo.registered) != 1 || repo.registered[0] != "case-7|p3-res-ms" {
-		t.Errorf("registered = %v, want [case-7|p3-res-ms]", repo.registered)
+	if len(repo.registered) != 1 || repo.registered[0] != "case-7|s3-res" {
+		t.Errorf("registered = %v, want [case-7|s3-res]", repo.registered)
 	}
 }

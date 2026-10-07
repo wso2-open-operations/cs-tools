@@ -113,15 +113,29 @@ const (
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.
+//
+// Message is wording for people and may change, so no client branches on it.
+// ErrorCode is the stable machine-readable name of the few refusals a client does
+// branch on (entity-service's apierror/codes.go, passed through by
+// mapUpstreamError; a refusal this backend raises itself has its own, see
+// errCodeChangeRequestForbidden). It is omitted when a refusal has none, which is
+// the body this API has always returned.
 type errorBody struct {
-	Message string `json:"message"`
+	Message   string `json:"message"`
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 // writeError writes a JSON error response: {"message": "..."}.
 func writeError(w http.ResponseWriter, statusCode int, message string) {
+	writeErrorCode(w, statusCode, message, "")
+}
+
+// writeErrorCode is writeError for a refusal that has a machine-readable name:
+// {"message": "...", "errorCode": "..."}. errorCode is left out when empty.
+func writeErrorCode(w http.ResponseWriter, statusCode int, message, errorCode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(errorBody{Message: message})
+	_ = json.NewEncoder(w).Encode(errorBody{Message: message, ErrorCode: errorCode})
 }
 
 // writeJSONValue marshals v and writes the result as a JSON response.
@@ -147,6 +161,12 @@ func writeJSONValue(w http.ResponseWriter, statusCode int, v any) {
 // into "Invalid request payload." for every 400 makes debugging a rejected
 // request needlessly harder for API consumers. ErrMsgBadRequest is only used
 // when entity-service didn't supply a body at all.
+//
+// A machine-readable errorCode that entity-service named the refusal with
+// (apierror.Error.Code) goes on with the 400, 403, 409 and 422 it belongs to --
+// the 403 included, whose message stays the fixed one: the code is the one thing
+// of its body a client may branch on, and it is a plain lower-case name, never
+// text. An upstream that names none (an older one) leaves the body as it was.
 func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) {
@@ -154,7 +174,7 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 		case http.StatusUnauthorized:
 			writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		case http.StatusForbidden:
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			writeErrorCode(w, http.StatusForbidden, ErrMsgForbidden, apiErr.Code)
 		case http.StatusNotFound:
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)
 		case http.StatusBadRequest:
@@ -162,9 +182,9 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 			if msg == "" {
 				msg = ErrMsgBadRequest
 			}
-			writeError(w, http.StatusBadRequest, msg)
+			writeErrorCode(w, http.StatusBadRequest, msg, apiErr.Code)
 		case http.StatusConflict, http.StatusUnprocessableEntity:
-			writeError(w, apiErr.StatusCode, apiErr.Body)
+			writeErrorCode(w, apiErr.StatusCode, apiErr.Body, apiErr.Code)
 		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			writeError(w, http.StatusServiceUnavailable, fallbackMsg)
 		default:

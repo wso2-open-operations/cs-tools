@@ -44,6 +44,7 @@ import {
 import RecommendationsCard from "@features/support/components/novera-ai-assistant/novera-chat-page/RecommendationsCard";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import { buildBotMarkdownComponents, TextWithLinks } from "@features/support/utils/markdown";
+import { stripThinkingBlocks } from "@features/support/utils/chat";
 
 /** Tighter line breaks while tokens stream (model often sends blank lines). */
 function collapseStreamLineBreaks(s: string): string {
@@ -167,7 +168,9 @@ export default function ChatMessageBubble({
     ? isUsageLimitError
       ? "The AI assistant is temporarily unavailable due to usage limits. Please try again later."
       : "Something went wrong"
-    : message.text;
+    : message.sender === ChatSender.BOT
+      ? stripThinkingBlocks(message.text)
+      : message.text;
 
   /**
    * Offer "request an increase" only for a limit hit in THIS session.

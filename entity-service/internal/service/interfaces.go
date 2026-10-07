@@ -208,8 +208,13 @@ type EventPublisherService interface {
 type SLAStatusService interface {
 	// SearchActiveSLAStatuses returns every currently-active SLA clock across
 	// every case-like work item, paginated. A ValidationError is returned for
-	// an invalid pagination limit.
-	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination) (domain.SearchSLAStatusResponse, error)
+	// an invalid pagination limit or an unrecognized sourceFilter.
+	// sourceFilter, case-insensitive, accepts "" (no filter), "csm" or
+	// "servicenow" -- "csm" is what csm-notification-service's own
+	// Redis-recovery reconciliation pass sends, so it only ever scans this
+	// engine's own (much smaller) row set rather than the full
+	// ServiceNow-synced table.
+	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string) (domain.SearchSLAStatusResponse, error)
 }
 
 // SLADurationPolicyService backs GET /sla-duration-policy — see
@@ -1159,6 +1164,11 @@ type IncidentService interface {
 	// ConflictError if the incident is not eligible (wrong business service, not in
 	// progress, or already with the specialist group for this service).
 	HandOffIncidentToSpecialist(ctx context.Context, req domain.HandOffIncidentToSpecialistRequest) (domain.HandOffIncidentToSpecialistResponse, error)
+	// ListSpecialistHandoffTeams returns the sub-teams a handoff of an
+	// incident on serviceID can name, for the handoff dialog's team select:
+	// empty when the service has only one specialist team, so the dialog
+	// offers no choice. An empty serviceID lists every sub-team.
+	ListSpecialistHandoffTeams(ctx context.Context, serviceID string) (domain.SpecialistHandoffTeamsResponse, error)
 }
 
 // ProblemService defines the operations available on the problems entity.

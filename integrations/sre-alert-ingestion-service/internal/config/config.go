@@ -174,7 +174,7 @@ func Defaults() Config {
 		Reject: RejectConfig{BodyPreviewChars: 500},
 		Log:    LogConfig{PayloadMaxBytes: 64 << 10},
 		Payloads: PayloadsConfig{
-			FlushInterval:  Duration(10 * time.Minute),
+			FlushInterval:  Duration(5 * time.Minute),
 			MaxBufferBytes: 32 << 20,
 			FlushTimeout:   Duration(30 * time.Second),
 		},
@@ -293,6 +293,8 @@ type Env struct {
 	AuthAuditOnly    bool   `env:"-"`
 	// WakeToken is the shared ALERT_CORE_WAKE_TOKEN alerts-core checks on /alertz, sent only over https.
 	WakeToken string `env:"ALERT_CORE_WAKE_TOKEN"`
+	// DBFallbackChatURL is the Google Chat webhook that gets alerts the database could not store; empty only logs them.
+	DBFallbackChatURL string `env:"DB_FALLBACK_CHAT_WEBHOOK_URL"`
 }
 
 // LoadEnv parses Env.
@@ -303,6 +305,7 @@ func LoadEnv() (Env, error) {
 	}
 	e.WakeURL = strings.TrimSpace(e.WakeURL)
 	e.WakeToken = strings.TrimSpace(e.WakeToken)
+	e.DBFallbackChatURL = strings.TrimSpace(e.DBFallbackChatURL)
 	var err error
 	if e.AuthEnabled, err = parseBool("AUTH_ENABLED", e.AuthEnabledRaw); err != nil {
 		return Env{}, err

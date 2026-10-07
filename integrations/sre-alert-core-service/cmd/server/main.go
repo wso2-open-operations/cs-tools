@@ -47,6 +47,12 @@ import (
 	"alert-core-service/internal/store"
 )
 
+// dbProbeTimeout bounds GET /dbz's ping, and dbProbeEvery is how long one result is reused.
+const (
+	dbProbeTimeout = 2 * time.Second
+	dbProbeEvery   = time.Second
+)
+
 // lockPoolHeadroom covers the retention job's lock and connection churn beyond notify.delivery_concurrency delivery workers.
 const lockPoolHeadroom = 8
 
@@ -169,6 +175,16 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := pool.Ping(r.Context()); err != nil {
 			logger.Warn("health check failed: postgres unreachable", "error", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	// dbz reports only whether Postgres is reachable, reusing one ping per dbProbeEvery so frequent probes can't drain the pool.
+	dbProbe := postgres.NewProbe(pool, dbProbeTimeout, dbProbeEvery)
+	mux.HandleFunc("GET /dbz", func(w http.ResponseWriter, r *http.Request) {
+		if err := dbProbe.Check(r.Context()); err != nil {
+			logger.Warn("db health check failed: postgres unreachable", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}

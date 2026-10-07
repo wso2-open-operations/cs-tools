@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   countListSearchAndFilters,
   hasListSearchOrFilters,
+  isValidNumericIdFilters,
   normalizeCaseSearchIssueIds,
 } from "@features/support/utils/listView";
 
@@ -44,6 +45,34 @@ describe("countListSearchAndFilters", () => {
 
   it("counts non-empty array filters once", () => {
     expect(countListSearchAndFilters("", { issueTypes: ["1", "2"] })).toBe(1);
+  });
+});
+
+describe("isValidNumericIdFilters", () => {
+  it("accepts an empty object", () => {
+    expect(isValidNumericIdFilters({})).toBe(true);
+  });
+
+  it("accepts a numeric-id string field", () => {
+    expect(isValidNumericIdFilters({ stateId: "2" })).toBe(true);
+  });
+
+  it("accepts an undefined field", () => {
+    expect(isValidNumericIdFilters({ stateId: undefined })).toBe(true);
+  });
+
+  it("rejects a raw enum-label value left over from before a choice-list id format change", () => {
+    expect(isValidNumericIdFilters({ stateId: "ACTIVE" })).toBe(false);
+  });
+
+  it("rejects a non-object value", () => {
+    expect(isValidNumericIdFilters("ACTIVE")).toBe(false);
+    expect(isValidNumericIdFilters(null)).toBe(false);
+    expect(isValidNumericIdFilters(undefined)).toBe(false);
+  });
+
+  it("rejects when any field among several is non-numeric", () => {
+    expect(isValidNumericIdFilters({ a: "1", b: "ACTIVE" })).toBe(false);
   });
 });
 

@@ -91,7 +91,7 @@ func NewKBArticleRepository(db *pgxpool.Pool) KBArticleRepository {
 	return &kbArticleRepo{db: db}
 }
 
-const kbArticleColumns = `id, knowledge_base_id, title, body, state, author_id,
+const kbArticleColumns = `id, knowledge_base_id, title, COALESCE(body, '') AS body, COALESCE(state, '') AS state, author_id,
 	revised_by_id, source_case_id, rejection_comment, updated_by, base_version_id, latest,
 	created_on, updated_on, published_on, retired_on`
 
@@ -332,7 +332,7 @@ func (r *kbArticleRepo) DeleteKBArticle(ctx context.Context, id string) error {
 // ListKBArticleHistory implements KBArticleRepository.
 func (r *kbArticleRepo) ListKBArticleHistory(ctx context.Context, kbArticleID string) ([]domain.KBArticleHistoryEntry, error) {
 	const query = `
-		SELECT id, knowledge_article_id, title, body, state, changed_by, created_on
+		SELECT id, knowledge_article_id, title, COALESCE(body, '') AS body, COALESCE(state, '') AS state, changed_by, created_on
 		FROM knowledge_article_history
 		WHERE knowledge_article_id = $1
 		ORDER BY created_on DESC`

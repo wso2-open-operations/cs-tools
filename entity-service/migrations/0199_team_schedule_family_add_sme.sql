@@ -1,0 +1,25 @@
+-- Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+--
+-- WSO2 LLC. licenses this file to you under the Apache License,
+-- Version 2.0 (the "License"); you may not use this file except
+-- in compliance with the License.
+-- You may obtain a copy of the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing,
+-- software distributed under the License is distributed on an
+-- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+-- KIND, either express or implied.  See the License for the
+-- specific language governing permissions and limitations
+-- under the License.
+
+-- A third rota family: SME, the product special rotations (Asgardeo, Choreo
+-- Runtime, Bijira, Devant, WSO2 Cloud, Moesif) from "CSM SRE + SME on call".
+--
+-- Alone in its own file and outside a transaction: a value added with ADD
+-- VALUE cannot be used in the transaction that adds it, so 0200 -- which seeds
+-- SME rotas and windows -- has to run after this one has committed. IF NOT
+-- EXISTS makes re-running a no-op. Purely additive: no existing row or value
+-- changes, and CRE / SRE keep meaning exactly what they meant.
+ALTER TYPE team_schedule_shift_family_enum ADD VALUE IF NOT EXISTS 'SME';

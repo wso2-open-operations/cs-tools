@@ -286,6 +286,14 @@ Domain code lives under `src/features/`:
 
 Pages compose components from `src/components/` and their feature folder; avoid defining inline page-level components in route files.
 
+#### Change requests: what a customer sees
+
+Which change requests a customer sees is decided by the server, never by the page. A change request is visible to a customer once it was **designated** to them (it reached Customer Approval and/or Customer Review and they were one of the contacts asked), in every later state, and nothing else is: a change request that is not shared with them is absent from the list, the counts, the calendar and the exports, and a `404` on its details page (which says only that it was not found). So the pages hide **no state** themselves, and ask for exactly the states the project's filters carry (`resolveAllowedCrStateIds`).
+
+- **Authorize** is a state a customer can be looking at: a change request waits there after they propose a new implementation time (WSO2 re-approves it internally before asking again). It is in the state filter, on the calendar legend, in the list and exports (the state chip reads "Authorize"), and its details page says "WSO2 is reviewing this change request internally". New and Assess are never offered (nothing visible is ever in them).
+- **Where Authorize counts.** *Outstanding*: it is waiting on WSO2, not finished (the Outstanding list asks for every state except Rollback, Closed and Canceled, so it is in). *Ongoing* on the stat cards (`ONGOING_STATE_IDS`, with Scheduled / Implement / Review). Never *Action Required* or *Awaiting Your Action*: those are Customer Approval and Customer Review only, because the customer has nothing to answer. The dashboard's Outstanding count is entity-service's `outstandingCount`, which counts Authorize the same way.
+- The Rollback grouping differs between the dashboard (entity-service: outstanding) and the Outstanding list / stat cards (this webapp: completed); that predates this and is unchanged.
+
 ## Import Aliases
 
 Path aliases are defined in `vite.config.ts` and `tsconfig.app.json`. Prefer these over deep relative imports:

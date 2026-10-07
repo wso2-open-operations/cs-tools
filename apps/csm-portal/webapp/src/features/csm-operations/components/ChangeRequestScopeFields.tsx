@@ -24,6 +24,12 @@ import type { ChangeRequestScope } from "@features/csm-operations/hooks/useChang
 interface ChangeRequestScopeFieldsProps {
   scope: ChangeRequestScope;
   disabled?: boolean;
+  /**
+   * Disables the Customer Project picker alone (the deployments follow
+   * `disabled`): the project is frozen once approval was requested, while the
+   * deployments stay editable until Implement.
+   */
+  projectDisabled?: boolean;
   /** Prefix for element ids (`cr` on the create page, `cr-edit` in the dialog). */
   idPrefix: string;
   /** Whether the Customer Project can be cleared once picked (default true). */
@@ -47,6 +53,7 @@ function selectedOptions(
 export default function ChangeRequestScopeFields({
   scope,
   disabled = false,
+  projectDisabled = false,
   idPrefix,
   projectClearable = true,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
@@ -63,7 +70,7 @@ export default function ChangeRequestScopeFields({
         value={scope.projectId}
         knownLabel={scope.projectLabel || undefined}
         onChange={scope.setProject}
-        disabled={disabled}
+        disabled={disabled || projectDisabled}
         disableClearable={!projectClearable}
       />
 

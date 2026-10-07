@@ -205,6 +205,14 @@ type ChangeRequestSearchRequest struct {
 // into entity-service's SearchChangeRequestsRequest. projectID (the {id}
 // path parameter) always populates Filters.ProjectIDs — never the request
 // body, which the frontend never sends one in.
+//
+// Which change requests a caller may see is entity-service's decision, made for
+// the signed-in contact on every read (a change request is visible to the
+// customer it was designated to, in whatever state it is in now), not this
+// translator's: StateKeys only NARROWS what that returns. No state list is
+// invented here, so a search that names none gets every change request the
+// customer may see, in every state, and one that names a state nobody can see
+// (New, Assess) gets none.
 func BuildEntitySearchChangeRequestsRequest(projectID string, req ChangeRequestSearchRequest) entity.SearchChangeRequestsRequest {
 	return entity.SearchChangeRequestsRequest{
 		Filters: entity.SearchChangeRequestsFilters{
@@ -234,6 +242,24 @@ type ChangeRequestDetails struct {
 	HasCustomerReviewed bool        `json:"hasCustomerReviewed"`
 	ApprovedBy          *IDLabelRef `json:"approvedBy,omitempty"`
 	ApprovedOn          *string     `json:"approvedOn,omitempty"`
+
+	// CustomerCanAnswer is whether the signed-in customer may answer this change
+	// request RIGHT NOW: approve or reject it in Customer Approval, confirm or
+	// fail it in Customer Review (and, in Customer Approval, propose a new
+	// implementation time unless the change is on hold). entity-service computes
+	// it for the caller from the approval it asked of them, so it is exact where
+	// hasCustomerApproved / hasCustomerReviewed (the recorded OUTCOME, not
+	// "is it waiting for me") are not; the portal shows the buttons from it.
+	// Passed through untouched, and omitted when entity-service did not compute
+	// it (nil): an absent value means "unknown", which is not the same as false.
+	CustomerCanAnswer *bool `json:"customerCanAnswer,omitempty"`
+
+	// IsOnHold is whether WSO2 has this change request on hold (the reason is
+	// WSO2's own note and is not passed on). A held change refuses a proposed
+	// implementation time (but not an answer), so the portal turns Propose New
+	// Time off, and says why, instead of letting a customer type a window only to
+	// be refused. Omitted when entity-service did not say, which is not "not held".
+	IsOnHold *bool `json:"isOnHold,omitempty"`
 }
 
 // MapChangeRequestDetails builds the portal response from entity-service's ChangeRequest.
@@ -251,6 +277,8 @@ func MapChangeRequestDetails(r entity.ChangeRequest) ChangeRequestDetails {
 		HasCustomerReviewed:  r.HasCustomerReviewed,
 		ApprovedBy:           entityRefToIDLabel(r.ApprovedBy),
 		ApprovedOn:           r.ApprovedOn,
+		CustomerCanAnswer:    r.CustomerCanAnswer,
+		IsOnHold:             r.OnHold,
 	}
 }
 
@@ -272,13 +300,24 @@ func MapChangeRequestUpdate(r entity.PatchChangeRequestResponse) ChangeRequestUp
 }
 
 // ChangeRequestUpdateRequest is the portal's request shape for
-// PATCH /change-requests/{id} — a deliberately restricted subset of
-// entity-service's PatchChangeRequestRequest. Excluded fields are internal
-// WSO2 support operations: ProjectID/CaseID/DeploymentID/DeployedProductID
-// (change-request relinking), AssignedEngineerID/AssignedTeamID (support
-// assignment), and State (state transitions are driven through the
-// dedicated approval workflow — IsCustomerApproved/IsCustomerReviewed/
-// RequestApproval below — not by setting state directly).
+// PATCH /change-requests/{id} at the staff level (ActionUpdate) — a deliberately
+// restricted subset of entity-service's PatchChangeRequestRequest. Excluded
+// fields are internal WSO2 support operations: ProjectID/CaseID/DeploymentID/
+// DeployedProductID (change-request relinking), AssignedEngineerID/
+// AssignedTeamID (support assignment), and State (a state key is dropped by the
+// decode; RequestApproval below records that approval was requested, on
+// entity-service's PostgreSQL data source with no state change).
+//
+// IsCustomerApproved / IsCustomerReviewed are on this shape only because the
+// body is decoded into it: they are the CUSTOMER's own answer, which no staff
+// action records on a customer's behalf. They are forwarded unchanged and
+// entity-service refuses them from a staff caller (a 400 that writes nothing) on
+// its PostgreSQL data source; a customer gives them at the other level
+// (ChangeRequestCustomerUpdateRequest).
+//
+// ExpectedPlannedStartOn / ExpectedPlannedEndOn go with a customer's answer and
+// nothing else, so they are on this shape only to be REFUSED: a staff body that
+// carries either is a 400 (the handler), never silently dropped by the decode.
 type ChangeRequestUpdateRequest struct {
 	Title              *string `json:"title,omitempty"`
 	Description        *string `json:"description,omitempty"`
@@ -295,11 +334,22 @@ type ChangeRequestUpdateRequest struct {
 	IsCustomerApproved *bool   `json:"isCustomerApproved,omitempty"`
 	IsCustomerReviewed *bool   `json:"isCustomerReviewed,omitempty"`
 	RequestApproval    *bool   `json:"requestApproval,omitempty"`
+
+	// Refused, never forwarded: see the type's doc comment.
+	ExpectedPlannedStartOn *string `json:"expectedPlannedStartOn,omitempty"`
+	ExpectedPlannedEndOn   *string `json:"expectedPlannedEndOn,omitempty"`
+}
+
+// HasExpectedWindow reports whether the staff body names the planned window a
+// customer's answer was given for, which a staff body can never carry.
+func (r ChangeRequestUpdateRequest) HasExpectedWindow() bool {
+	return r.ExpectedPlannedStartOn != nil || r.ExpectedPlannedEndOn != nil
 }
 
 // BuildEntityPatchChangeRequestRequest converts the portal's restricted
 // update request into entity-service's full request shape, leaving every
-// excluded field nil.
+// excluded field nil (the expected window included: the handler has refused a
+// body that carries it before this runs).
 func BuildEntityPatchChangeRequestRequest(req ChangeRequestUpdateRequest) entity.PatchChangeRequestRequest {
 	return entity.PatchChangeRequestRequest{
 		Title:              req.Title,
@@ -317,6 +367,69 @@ func BuildEntityPatchChangeRequestRequest(req ChangeRequestUpdateRequest) entity
 		IsCustomerApproved: req.IsCustomerApproved,
 		IsCustomerReviewed: req.IsCustomerReviewed,
 		RequestApproval:    req.RequestApproval,
+	}
+}
+
+// ChangeRequestCustomerUpdateRequest is the ONLY request shape a caller who
+// holds the customer-decision grant (middleware.ActionDecide) but not
+// ActionUpdate may send to PATCH /change-requests/{id}: the customer's own
+// answer on a change request that is waiting on them, or a proposal for a
+// different implementation window.
+//
+//   - IsCustomerApproved: approve (true) or reject (false) a change request in
+//     Customer Approval.
+//   - IsCustomerReviewed: confirm the implementation succeeded (true) or failed
+//     (false) on a change request in Customer Review.
+//   - ExpectedPlannedStartOn / ExpectedPlannedEndOn: with an answer, the planned
+//     window the customer was shown (the detail's startDate / endDate). The answer
+//     is recorded only while that is still the change's window, so a page opened
+//     before the change was re-scheduled cannot approve a time its reader never
+//     saw. Optional; the webapp sends them.
+//   - PlannedStartOn / PlannedEndOn: "propose new implementation time". The
+//     webapp sends both: a customer proposes a whole window.
+//
+// It is a struct of exactly these six fields on purpose: the handler decodes the
+// body into it with unknown fields refused, so a field that is not here cannot
+// reach entity-service however the body is spelled, and the entity-service
+// request is built from it field by field (BuildEntityCustomerPatchChangeRequestRequest)
+// rather than by copying a wider shape. Add a field here only after deciding that
+// a customer may set it.
+type ChangeRequestCustomerUpdateRequest struct {
+	IsCustomerApproved     *bool   `json:"isCustomerApproved,omitempty"`
+	IsCustomerReviewed     *bool   `json:"isCustomerReviewed,omitempty"`
+	PlannedStartOn         *string `json:"plannedStartOn,omitempty"`
+	PlannedEndOn           *string `json:"plannedEndOn,omitempty"`
+	ExpectedPlannedStartOn *string `json:"expectedPlannedStartOn,omitempty"`
+	ExpectedPlannedEndOn   *string `json:"expectedPlannedEndOn,omitempty"`
+}
+
+// HasExpectedWindow reports whether the request names the planned window the
+// customer's answer was given for.
+func (r ChangeRequestCustomerUpdateRequest) HasExpectedWindow() bool {
+	return r.ExpectedPlannedStartOn != nil || r.ExpectedPlannedEndOn != nil
+}
+
+// HasDecision reports whether the request carries the customer's answer.
+func (r ChangeRequestCustomerUpdateRequest) HasDecision() bool {
+	return r.IsCustomerApproved != nil || r.IsCustomerReviewed != nil
+}
+
+// HasWindow reports whether the request proposes a different planned window.
+func (r ChangeRequestCustomerUpdateRequest) HasWindow() bool {
+	return r.PlannedStartOn != nil || r.PlannedEndOn != nil
+}
+
+// BuildEntityCustomerPatchChangeRequestRequest builds entity-service's PATCH
+// request from a customer's restricted one, setting nothing but the fields it
+// carries.
+func BuildEntityCustomerPatchChangeRequestRequest(req ChangeRequestCustomerUpdateRequest) entity.PatchChangeRequestRequest {
+	return entity.PatchChangeRequestRequest{
+		IsCustomerApproved:     req.IsCustomerApproved,
+		IsCustomerReviewed:     req.IsCustomerReviewed,
+		PlannedStartOn:         req.PlannedStartOn,
+		PlannedEndOn:           req.PlannedEndOn,
+		ExpectedPlannedStartOn: req.ExpectedPlannedStartOn,
+		ExpectedPlannedEndOn:   req.ExpectedPlannedEndOn,
 	}
 }
 

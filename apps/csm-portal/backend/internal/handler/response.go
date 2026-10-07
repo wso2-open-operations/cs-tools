@@ -21,26 +21,29 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
 
 // Error message constants matching the customer-portal error vocabulary.
 const (
-	ErrMsgUnauthorized           = "You are not authorized to perform this action. Please try again."
-	ErrMsgForbidden              = "Access to the requested resource is forbidden!"
-	ErrMsgNotFound               = "The requested resource was not found!"
-	ErrMsgBadRequest             = "Invalid request payload."
-	ErrMsgTooLarge               = "Request body too large."
-	ErrMsgInternal               = "An internal server error occurred. Please try again later."
-	ErrMsgInvalidTransition      = "Invalid state transition."
-	ErrMsgWorkStateNotAllowed    = "Work state can only be updated when the case is in progress."
-	ErrMsgCommentNotAllowed      = "Comments can only be added when the case is in progress and the work state is ongoing."
-	ErrMsgCommentNotOwnCase      = "Only the assigned engineer can add a public comment on this case."
-	ErrMsgWorkNoteOnClosedCase   = "Work notes cannot be added to a closed case."
-	ErrMsgCommentOnClosedCase    = "Comments cannot be added to a closed case."
-	ErrMsgAttachmentOnClosedCase = "Attachments cannot be added to a closed case."
-	ErrMsgAttachmentNotShareable = "This attachment is not available for direct download."
+	ErrMsgUnauthorized            = "You are not authorized to perform this action. Please try again."
+	ErrMsgForbidden               = "Access to the requested resource is forbidden!"
+	ErrMsgNotFound                = "The requested resource was not found!"
+	ErrMsgBadRequest              = "Invalid request payload."
+	ErrMsgTooLarge                = "Request body too large."
+	ErrMsgInternal                = "An internal server error occurred. Please try again later."
+	ErrMsgInvalidTransition       = "Invalid state transition."
+	ErrMsgWorkStateNotAllowed     = "Work state can only be updated when the case is in progress."
+	ErrMsgCommentNotAllowed       = "Comments can only be added when the case is in progress and the work state is ongoing."
+	ErrMsgCommentNotOwnCase       = "Only the assigned engineer can add a public comment on this case."
+	ErrMsgCaseCloseNotOwnCase     = "Only the assigned engineer (or an admin) can close this case."
+	ErrMsgIncidentCloseNotOwnCase = "Only the assigned engineer (or an admin) can close this incident."
+	ErrMsgWorkNoteOnClosedCase    = "Work notes cannot be added to a closed case."
+	ErrMsgCommentOnClosedCase     = "Comments cannot be added to a closed case."
+	ErrMsgAttachmentOnClosedCase  = "Attachments cannot be added to a closed case."
+	ErrMsgAttachmentNotShareable  = "This attachment is not available for direct download."
 	// ErrMsgAttachmentStorageUnsupportedRef is returned by the direct-upload
 	// (SFTPGo-backed) mint endpoint for a reference type whose attachments
 	// cannot be persisted through that storage mode yet — the caller should
@@ -52,15 +55,28 @@ const (
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.
+//
+// Message is wording for people and may change, so no client branches on it.
+// ErrorCode is the stable machine-readable name entity-service gave the refusal
+// (its apierror/codes.go), passed through by mapUpstreamError and
+// mapApprovalDecisionError for the refusals a client may branch on; omitted when
+// there is none, which is the body this API has always returned.
 type errorBody struct {
-	Message string `json:"message"`
+	Message   string `json:"message"`
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 // writeError writes a JSON error response: {"message": "..."}.
 func writeError(w http.ResponseWriter, statusCode int, message string) {
+	writeErrorCode(w, statusCode, message, "")
+}
+
+// writeErrorCode is writeError for a refusal that has a machine-readable name:
+// {"message": "...", "errorCode": "..."}. errorCode is left out when empty.
+func writeErrorCode(w http.ResponseWriter, statusCode int, message, errorCode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(errorBody{Message: message})
+	_ = json.NewEncoder(w).Encode(errorBody{Message: message, ErrorCode: errorCode})
 }
 
 // writeJSON writes a raw JSON response with the given status code.
@@ -90,6 +106,12 @@ func writeJSONValue(w http.ResponseWriter, statusCode int, v any) {
 // upstream isn't necessarily something the caller could have avoided, and
 // echoing it would just leak upstream/internal implementation detail (e.g. a
 // JSON decoder's field names).
+//
+// The machine-readable errorCode entity-service named a refusal with (see
+// upstreamErrorCode) goes on with the 400, 403, 409 and 422 it belongs to -- the
+// 403 included, whose message stays the fixed one: a plain lower-case name is the
+// one thing of the body a client may branch on, and it is never text. An upstream
+// that names none (an older one) leaves the body as it was.
 func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) {
@@ -97,13 +119,13 @@ func mapUpstreamError(w http.ResponseWriter, err error, fallbackMsg string) {
 		case http.StatusUnauthorized:
 			writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		case http.StatusForbidden:
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			writeErrorCode(w, http.StatusForbidden, ErrMsgForbidden, upstreamErrorCode(apiErr.Body))
 		case http.StatusNotFound:
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)
 		case http.StatusBadRequest:
-			writeError(w, http.StatusBadRequest, upstreamErrorMessageStrict(apiErr.Body, ErrMsgBadRequest))
+			writeErrorCode(w, http.StatusBadRequest, upstreamErrorMessageStrict(apiErr.Body, ErrMsgBadRequest), upstreamErrorCode(apiErr.Body))
 		case http.StatusConflict, http.StatusUnprocessableEntity:
-			writeError(w, apiErr.StatusCode, upstreamErrorMessage(apiErr.Body, fallbackMsg))
+			writeErrorCode(w, apiErr.StatusCode, upstreamErrorMessage(apiErr.Body, fallbackMsg), upstreamErrorCode(apiErr.Body))
 		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			writeError(w, http.StatusServiceUnavailable, fallbackMsg)
 		default:
@@ -174,6 +196,33 @@ func upstreamErrorMessage(body string, fallbackMsg string) string {
 		return parsed.Message
 	}
 	return body
+}
+
+// errorCodeRe is the shape of a machine-readable error code: lower-case words
+// joined by underscores, at most 64 characters. A value of any other shape is not
+// passed on, so nothing but a plain name can reach a client through it.
+var errorCodeRe = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
+
+// upstreamErrorCode extracts the machine-readable name of a refusal from an
+// upstream JSON error body shaped like {"message": "...", "errorCode": "..."}
+// (the entity service's error envelope): the empty string when the body is not
+// such an object, names no code, or names one that is not a plain lower-case
+// name. Like upstreamErrorMessageStrict it never falls back to the raw body.
+func upstreamErrorCode(body string) string {
+	if body == "" {
+		return ""
+	}
+	var parsed struct {
+		ErrorCode any `json:"errorCode"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return ""
+	}
+	code, ok := parsed.ErrorCode.(string)
+	if !ok || len(code) > 64 || !errorCodeRe.MatchString(code) {
+		return ""
+	}
+	return code
 }
 
 // upstreamErrorMessageStrict is like upstreamErrorMessage but never falls back

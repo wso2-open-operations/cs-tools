@@ -54,8 +54,11 @@ interface TimeCardsTableProps {
    * avoids reserving the extra button space for it. The Actions column
    * itself (eye icon) is always present. */
   showActionsColumn?: boolean;
-  /** Per-card role context — varies per row on "All" (isOwner depends on who
-   * submitted that specific card), constant on "My time sheets"/"Approvals". */
+  /** Per-card role context — varies per row on "All" and "Approvals" (isOwner
+   * depends on who submitted that specific card; an admin's approve-by-
+   * exception queue isn't scoped to exclude their own cards server-side, so
+   * Approvals needs this too — see useApprovalQueue's own doc comment),
+   * constant on "My time sheets". */
   roleFor: (card: CsmTimeCard) => TimecardRoleCtx;
   onCardAction: (card: CsmTimeCard, action: TimecardAction) => void;
   /** Adds a leading checkbox column for multi-select bulk approve — Approvals

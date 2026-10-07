@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -46,7 +45,11 @@ import (
 //     that still sends customerGroupId, or environmentIds, is refused
 //     (rejectRemovedChangeRequestFields).
 //
-// PATCH additionally enforces the edit window (changeRequestLinksLockedStates).
+// PATCH additionally enforces the edit window (changeRequestLinksLockedStates)
+// for the deployments and deployment products, and the stricter customer
+// requirements lock for the project: it can be chosen or changed only while the
+// change request is New (change_request_customer_lock.go); from Request Approval
+// on it is frozen, and what is chosen with it must belong to it.
 
 // maxChangeRequestLinkIDs caps each id list of a selection.
 const maxChangeRequestLinkIDs = 100
@@ -193,7 +196,7 @@ func RejectRemovedPatchFields(req domain.PatchChangeRequestRequest) error {
 // customerContactsSQL selects the REGISTERED portal-user contacts of a project:
 // a project_contact in state REGISTERED holding the PORTAL_USER project role
 // (the same "registered contact with role X on project Y" chain
-// callerMayGrantChangeRequestCustomerFlag uses), with the name and the "user"
+// callerIsRegisteredPortalContact uses), with the name and the "user"
 // row resolved the way ProjectContactRepository does it (account_contact.user_name
 // matched to "user".user_name, case-insensitively). A contact whose "user" row is
 // deactivated is not listed. Contacts are the customer's own people, so they are
@@ -529,11 +532,19 @@ type changeRequestLinkPlan struct {
 }
 
 // planChangeRequestLinks decides, for a PATCH carrying scope fields, what to
-// write -- or returns the 400 that explains why not. It locks the work_item
-// row first (the same lock order every other PATCH takes). Returns nil when the
-// request has no scope field. A field re-sent with the value already stored is
-// a no-op and is never refused, whatever the state.
-func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domain.PatchChangeRequestRequest) (*changeRequestLinkPlan, error) {
+// write -- or returns the 400 that explains why not. snap is the change request
+// as it stands, read by the caller AFTER it locked the work_item row (and the
+// change_request row) in this transaction (lockChangeRequestForPatch), so the
+// stored project and state it judges against are current. Returns nil when the
+// request has no scope field. A field re-sent with the value already stored is a
+// no-op and is never refused, whatever the state.
+//
+// The Customer Project can change only in the creation phase (New): after it the
+// stored project is frozen (change_request_customer_lock.go), and the
+// deployments and deployment products, which keep their until-implement window,
+// are resolved against that stored project -- they can no longer be moved to
+// another one together with it.
+func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domain.PatchChangeRequestRequest, snap changeRequestGateSnapshot) (*changeRequestLinkPlan, error) {
 	if req.ProjectID == nil && req.DeploymentIDs == nil && req.DeploymentProductIDs == nil {
 		return nil, nil
 	}
@@ -541,17 +552,7 @@ func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domai
 		return nil, linkValidationf("deploymentId and deployedProductId cannot be combined with deploymentIds: send deploymentIds only")
 	}
 
-	var storedProject, state *string
-	if err := tx.QueryRow(ctx, `
-		SELECT wi.project_id::text, cr.state::text
-		FROM work_item wi JOIN change_request cr ON cr.id = wi.id
-		WHERE wi.id = $1::uuid AND wi.type = 'CHANGE_REQUEST'
-		FOR UPDATE OF wi`, id).Scan(&storedProject, &state); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, &apierror.NotFoundError{Msg: "change request not found"}
-		}
-		return nil, fmt.Errorf("patch change request: read stored scope: %w", err)
-	}
+	storedProject := snap.projectID
 	storedDeps, storedProds, err := loadChangeRequestLinks(ctx, tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("patch change request: %w", err)
@@ -563,6 +564,11 @@ func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domai
 	if req.ProjectID != nil {
 		effProject = req.ProjectID
 		projectChanged = storedProject == nil || !strings.EqualFold(*storedProject, *req.ProjectID)
+		// The caller has applied this rule already; it is kept here so that what
+		// this function plans can never be a moved project after New.
+		if err := checkCustomerProjectEdit(snap.state, storedProject, req.ProjectID); err != nil {
+			return nil, err
+		}
 	}
 	effDeps := storedDepIDs
 	depsChanged := false
@@ -600,7 +606,7 @@ func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domai
 	plan.writeDeployments = depsChanged
 	plan.writeProducts = depsChanged || (req.DeploymentProductIDs != nil && !sameIDSet(links.productIDs(), storedProdIDs) && !sameIDSet(normalizeUUIDList(*req.DeploymentProductIDs), storedProdIDs))
 
-	// Edit window.
+	// Edit window (the project part of it is the stricter rule above, New only).
 	var changedField string
 	switch {
 	case projectChanged:
@@ -610,9 +616,9 @@ func planChangeRequestLinks(ctx context.Context, tx pgx.Tx, id string, req domai
 	case plan.writeProducts:
 		changedField = "deploymentProductIds"
 	}
-	if changedField != "" && state != nil && changeRequestLinksLockedStates[*state] {
+	if changedField != "" && changeRequestLinksLockedStates[snap.state] {
 		return nil, linkValidationf("%s can no longer be changed: the change request is in state %q (project, deployments and deployment products are editable only before implementation starts)",
-			changedField, strings.ToLower(*state))
+			changedField, strings.ToLower(snap.state))
 	}
 
 	if plan.writeDeployments {
@@ -642,6 +648,8 @@ func applyChangeRequestLinkPlan(ctx context.Context, tx pgx.Tx, id string, plan 
 }
 
 // ValidateChangeRequestLinks implements ChangeRequestRepository.
+//
+// crvis: internal callers only: it is the create form's pre-flight, reached from POST /change-requests (internalOnly); it reads no change request
 func (r *changeRequestRepo) ValidateChangeRequestLinks(ctx context.Context, sel domain.ChangeRequestLinkSelection) (domain.ChangeRequestLinkSet, error) {
 	res, err := resolveChangeRequestLinks(ctx, r.db, sel, resolveLinkOpts{})
 	if err != nil {
@@ -651,6 +659,8 @@ func (r *changeRequestRepo) ValidateChangeRequestLinks(ctx context.Context, sel 
 }
 
 // GetChangeRequestLinkOptions implements ChangeRequestRepository.
+//
+// crvis: internal callers only: POST /change-requests/link-options is wrapped by internalOnly (server/routes.go); it reads no change request, only the project's deployments
 func (r *changeRequestRepo) GetChangeRequestLinkOptions(ctx context.Context, req domain.ChangeRequestLinkOptionsRequest) (domain.ChangeRequestLinkOptionsResponse, error) {
 	project := strings.ToLower(strings.TrimSpace(req.ProjectID))
 	resp := domain.ChangeRequestLinkOptionsResponse{

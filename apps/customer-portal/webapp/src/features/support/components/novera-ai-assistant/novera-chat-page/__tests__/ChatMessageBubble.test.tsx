@@ -73,6 +73,44 @@ describe("ChatMessageBubble", () => {
     expect(screen.getByText("Hello User")).toBeInTheDocument();
   });
 
+  it("should not show the model's <thinking> reasoning in a bot answer", () => {
+    renderBubble(
+      botAnswer({
+        text: "<thinking> The user asks about a product.\nI should ask a follow-up.\n</thinking>\n\nWhich environment is this?",
+      }),
+    );
+
+    expect(screen.getByTestId("markdown")).toHaveTextContent(
+      "Which environment is this?",
+    );
+    expect(screen.queryByText(/thinking/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/follow-up/)).not.toBeInTheDocument();
+  });
+
+  it("should hide a <thinking> block that is still streaming in", () => {
+    renderBubble(
+      botAnswer({
+        text: "<thinking>The user wants to",
+        isStreaming: true,
+        feedbackMessageId: undefined,
+      }),
+    );
+
+    expect(screen.queryByText(/The user wants/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/<thinking>/)).not.toBeInTheDocument();
+  });
+
+  it("should leave a user's own message alone", () => {
+    renderBubble({
+      id: "u",
+      text: "why does <thinking> show up?",
+      sender: ChatSender.USER,
+      timestamp: new Date(),
+    });
+
+    expect(screen.getByText("why does <thinking> show up?")).toBeInTheDocument();
+  });
+
   it("should render error state", () => {
     renderBubble({
       id: "2",

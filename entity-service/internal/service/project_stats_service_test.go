@@ -47,6 +47,9 @@ type fakeProjectStatsRepo struct {
 
 	timeLoggedStart string
 	timeLoggedEnd   string
+	// crStatesSeen is the change request outstanding state list the service
+	// passed to OutstandingCounts.
+	crStatesSeen []string
 }
 
 func (f *fakeProjectStatsRepo) TimeLoggedMinutes(_ context.Context, _, startDate, endDate string) (int, int, error) {
@@ -65,7 +68,8 @@ func (f *fakeProjectStatsRepo) InstanceCount(context.Context, string) (int, erro
 func (f *fakeProjectStatsRepo) LastDeploymentOn(context.Context, string) (*time.Time, error) {
 	return f.lastDeployment, nil
 }
-func (f *fakeProjectStatsRepo) OutstandingCounts(context.Context, string, []string, []string) (map[string]int, error) {
+func (f *fakeProjectStatsRepo) OutstandingCounts(_ context.Context, _ string, _, crStates []string) (map[string]int, error) {
+	f.crStatesSeen = crStates
 	return f.outstanding, nil
 }
 func (f *fakeProjectStatsRepo) SLAStatusInputs(context.Context, string) (repository.ProjectSLAStatusInputs, error) {
@@ -402,5 +406,54 @@ func TestProjectStats_UnrestrictedCallerIsAllowed(t *testing.T) {
 	}
 	if resp.TotalCount != 4 {
 		t.Errorf("totalCount = %d, want 4", resp.TotalCount)
+	}
+}
+
+// A customer sees only the change requests designated to them (or legacy ones),
+// and the only way one comes to be in Authorize for them is a re-schedule: it is
+// theirs and in motion, so their outstanding count includes Authorize (the card
+// matches their list). Staff keep the grouping the ServiceNow constants define,
+// in which Authorize is active but not yet outstanding.
+func TestProjectChangeRequestStats_AuthorizeIsOutstandingForCustomersOnly(t *testing.T) {
+	counts := []repository.StateCount{
+		{State: "AUTHORIZE", Count: 2},
+		{State: "CUSTOMER_APPROVAL", Count: 3},
+		{State: "SCHEDULED", Count: 4},
+	}
+	ref := statsEnums()
+	customer := stubAccess{scope: AccessScope{ProjectIDs: []string{testUUID}, ViewerEmail: "dave@example.com"}}
+	custRepo := &fakeProjectStatsRepo{changeRequests: counts, outstanding: map[string]int{}}
+	custSvc := NewProjectStatsService(custRepo, ref, customer, NewProjectMetadataService(ref),
+		NewProjectCaseStatsService(&fakeCaseStatsRepo{}, ref, customer))
+	resp, err := custSvc.GetProjectChangeRequestStats(context.Background(), testUUID)
+	if err != nil {
+		t.Fatalf("GetProjectChangeRequestStats: %v", err)
+	}
+	if resp.OutstandingCount != 9 {
+		t.Errorf("a customer's outstandingCount = %d, want 9 (Authorize counted)", resp.OutstandingCount)
+	}
+	if resp.ActionRequiredCount != 3 {
+		t.Errorf("a customer's actionRequiredCount = %d, want 3 (Authorize is not waiting on them)", resp.ActionRequiredCount)
+	}
+	if _, err := custSvc.GetProjectStats(context.Background(), testUUID); err != nil {
+		t.Fatalf("GetProjectStats: %v", err)
+	}
+	if !containsString(custRepo.crStatesSeen, "AUTHORIZE") {
+		t.Errorf("the dashboard's outstanding states for a customer = %v, want AUTHORIZE among them", custRepo.crStatesSeen)
+	}
+
+	staffRepo := &fakeProjectStatsRepo{changeRequests: counts, outstanding: map[string]int{}}
+	staffResp, err := newStatsService(staffRepo).GetProjectChangeRequestStats(context.Background(), testUUID)
+	if err != nil {
+		t.Fatalf("GetProjectChangeRequestStats (staff): %v", err)
+	}
+	if staffResp.OutstandingCount != 7 {
+		t.Errorf("staff's outstandingCount = %d, want 7 (Authorize not yet outstanding)", staffResp.OutstandingCount)
+	}
+	if _, err := newStatsService(staffRepo).GetProjectStats(context.Background(), testUUID); err != nil {
+		t.Fatalf("GetProjectStats (staff): %v", err)
+	}
+	if containsString(staffRepo.crStatesSeen, "AUTHORIZE") {
+		t.Errorf("the dashboard's outstanding states for staff = %v, want AUTHORIZE left out", staffRepo.crStatesSeen)
 	}
 }

@@ -729,6 +729,8 @@ export const CHANGE_REQUESTS_LIST = {
     list: "List View",
     calendar: "Calendar View",
   },
+  /** The Operations hub's footer button that opens this list. */
+  hubViewAllButton: "View all change requests",
   /** Shown when the list has nothing to show — the second only once a search or
    * filter has been applied. */
   emptyMessage: "No change requests yet.",
@@ -743,6 +745,118 @@ export const CHANGE_REQUESTS_LIST = {
    * list reads as empty.
    */
   numberPattern: /CHG\d+/,
+} as const;
+
+/** A change request's detail page
+ * (`/projects/:projectId/operations/change-requests/:changeRequestId`), as a
+ * customer sees it while the change waits on them (Customer Approval / Customer
+ * Review).
+ *
+ * Every string here is the page's own copy (ChangeRequestDetailsPage,
+ * ChangeRequestRejectConfirmDialog, ProposeNewImplementationTimeModal and the
+ * helpers in features/operations/utils), kept in one place so a rewording is one
+ * edit. The answer buttons carry no test id: they are told apart by name. */
+export const CHANGE_REQUEST_DETAILS = {
+  /** The answer buttons. Customer Approval offers the first three, Customer
+   * Review the last two (it has no Propose New Time). */
+  buttons: {
+    approve: "Approve",
+    reject: "Reject",
+    proposeNewTime: "Propose New Time",
+    successful: "Successful",
+    unsuccessful: "Unsuccessful",
+  },
+  /** The lifecycle panel's stage names, as the page prints them. */
+  stages: {
+    new: "New",
+    assess: "Assess",
+    authorize: "Authorize",
+    customerApproval: "Customer Approval",
+    scheduled: "Scheduled",
+    implement: "Implement",
+    review: "Review",
+    customerReview: "Customer Review",
+    rollback: "Rollback",
+    closed: "Closed",
+    canceled: "Canceled",
+  },
+  /** The page's own marker for the stage the change is in. */
+  currentMarker: "Current",
+  /** The banners that answer a click (role "alert"). */
+  banners: {
+    approved: "Change request approved. It is now scheduled.",
+    rejected: "Change request rejected. It has been canceled.",
+    markedSuccessful: "Change request marked as successful. It is now closed.",
+    markedUnsuccessful:
+      "Change request marked as unsuccessful. It is now in rollback.",
+    /** HTTP 409 on an answer: somebody answered first, or nothing is asked any more. */
+    alreadyAnswered:
+      "This request was already answered or is no longer waiting for your answer.",
+    proposedNormal:
+      "New time proposed. We'll ask for your approval again once it's confirmed internally.",
+    proposedStandard:
+      "New time proposed. Review the updated schedule and approve it when you are ready.",
+    /** HTTP 409 on an answer: the schedule moved while the page was open. */
+    scheduleChanged:
+      "The schedule of this change request changed after you opened it. Review the updated schedule, then answer again.",
+  },
+  /** What the page says around the answer buttons. */
+  notes: {
+    /** Customer Review's question, which also names its two buttons' group. */
+    reviewPrompt: "This change has been implemented. Was it successful?",
+    /** The group of Customer Approval's three buttons. */
+    approvalGroup: "Answer this change request",
+    /** Beside a Propose New Time that is switched off because WSO2 holds the change. */
+    onHold:
+      "WSO2 has this change request on hold, so a new time cannot be proposed right now. You can still approve or reject it.",
+    /** Kept on the page (not a five-second banner) while a proposed time waits for WSO2. */
+    internalReview:
+      "WSO2 is reviewing this change request internally. You will be asked to approve the schedule once it is confirmed.",
+  },
+  /** The window card's title: a plan until the change is scheduled. */
+  windowCard: {
+    planned: "Planned Maintenance Window",
+    scheduled: "Scheduled Maintenance Window",
+  },
+  /** The confirmation before the answers that cannot be taken back. */
+  rejectConfirm: {
+    approvalTitle: "Reject this change request?",
+    approvalMessage: "Rejecting cancels this change request.",
+    approvalHint:
+      "If you only need a different time, go back and use Propose New Time instead.",
+    /** What the hint says instead while WSO2 has the change on hold (Propose New Time is off). */
+    approvalHintOnHold:
+      "A new time cannot be proposed right now because WSO2 has this change request on hold.",
+    approvalConfirm: "Reject change request",
+    reviewTitle: "Mark this change as unsuccessful?",
+    reviewMessage: "Marking it unsuccessful sends the change into rollback.",
+    reviewConfirm: "Mark unsuccessful",
+    goBack: "Go back",
+  },
+  /** Propose New Implementation Time dialog. */
+  propose: {
+    title: "Propose New Implementation Time",
+    startLabel: "Proposed start",
+    endLabel: "Proposed end",
+    submit: "Submit Proposal",
+    cancel: "Cancel",
+    noticeNormal:
+      "You are proposing a new time, not approving one. WSO2 will review it internally first, and you will then be asked to approve the new time.",
+    noticeStandard:
+      "You are proposing a new time. It replaces the current schedule, and you will then be asked to approve it.",
+    errors: {
+      startRequired: "Enter the proposed start date and time.",
+      endRequired: "Enter the proposed end date and time.",
+      startPast: "The proposed start must be in the future.",
+      endNotAfterStart: "The proposed end must be after the proposed start.",
+      /** The window equals the one already on the change request (the backend refuses it too). */
+      unchanged:
+        "This is the same as the current schedule. Change the start or the end to propose a different time.",
+      /** HTTP 409 on a proposal: WSO2 has the change on hold (an answer is still taken). */
+      onHold:
+        "This change request is on hold, so a new time cannot be proposed right now.",
+    },
+  },
 } as const;
 
 /** MUI TablePagination's default labels.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ type stubCaseRepo struct {
 	deleteCaseAttachment          func(ctx context.Context, id string) error
 	updateAttachmentName          func(ctx context.Context, id, name, updatedBy string) (time.Time, error)
 	confirmCaseAttachment         func(ctx context.Context, id string) (domain.Attachment, error)
+	addCaseWatcherIfAbsent        func(ctx context.Context, caseID, userID string) error
 	searchCaseComments            func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
 	updateCase                    func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error)
 	createCaseFromServiceNow      func(ctx context.Context, req domain.CreateCaseRequest, id, number, wso2ID, createdBy, state string) (domain.Case, error)
@@ -80,6 +82,13 @@ type stubCaseRepo struct {
 	setCaseTagSNSysID             func(ctx context.Context, caseID, tagID, snSysID string) error
 	getCaseTagSNSysID             func(ctx context.Context, caseID, tagID string) (*string, error)
 	markCaseFixIssued             func(ctx context.Context, caseID string) (time.Time, bool, error)
+	getCaseFeedback               func(ctx context.Context, caseID string) (repository.CaseFeedbackRow, bool, error)
+	createCaseFeedback            func(ctx context.Context, caseID string, params repository.CreateCaseFeedbackParams) (repository.CaseFeedbackCreated, error)
+	// updateCaseActorID captures the actorID UpdateCase was last called with,
+	// for tests asserting it was resolved from the caller's token rather
+	// than left nil -- see CaseRepository.UpdateCase's own interface doc
+	// comment on what actorID is for.
+	updateCaseActorID *string
 }
 
 func (s *stubCaseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
@@ -130,7 +139,8 @@ func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.Search
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+func (s *stubCaseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
+	s.updateCaseActorID = actorID
 	if s.updateCase != nil {
 		return s.updateCase(ctx, req)
 	}
@@ -211,11 +221,34 @@ func (s *stubCaseRepo) GetCaseTagSNSysID(ctx context.Context, caseID, tagID stri
 func (s *stubCaseRepo) SearchTags(context.Context, string, string, int) ([]domain.Tag, error) {
 	panic("not implemented")
 }
+func (s *stubCaseRepo) GetCaseFeedback(ctx context.Context, caseID string) (repository.CaseFeedbackRow, bool, error) {
+	if s.getCaseFeedback != nil {
+		return s.getCaseFeedback(ctx, caseID)
+	}
+	panic("not implemented")
+}
+func (s *stubCaseRepo) CreateCaseFeedback(ctx context.Context, caseID string, params repository.CreateCaseFeedbackParams) (repository.CaseFeedbackCreated, error) {
+	if s.createCaseFeedback != nil {
+		return s.createCaseFeedback(ctx, caseID, params)
+	}
+	panic("not implemented")
+}
 func (s *stubCaseRepo) SetCaseWatchList(ctx context.Context, caseID string, userIDs []string, actorEmail string) ([]domain.WatchListUser, time.Time, error) {
 	if s.setCaseWatchList != nil {
 		return s.setCaseWatchList(ctx, caseID, userIDs, actorEmail)
 	}
 	panic("not implemented")
+}
+
+// AddCaseWatcherIfAbsent defaults to a no-op rather than panicking: every
+// comment-creation test case (from before this method existed) doesn't care
+// about the commenter-auto-subscribe side effect it backs, same reasoning as
+// AccountDefaultWatcherEmails below.
+func (s *stubCaseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error {
+	if s.addCaseWatcherIfAbsent != nil {
+		return s.addCaseWatcherIfAbsent(ctx, caseID, userID)
+	}
+	return nil
 }
 
 // AccountDefaultWatcherEmails defaults to empty rather than panicking:
@@ -472,6 +505,46 @@ func TestCaseService_SearchCases_SupportedFieldsStillReachRepository(t *testing.
 				t.Fatalf("expected repo.SearchCases to be called for supported field %q", tc.name)
 			}
 		})
+	}
+}
+
+// TestCaseService_SearchCases_SortByAssignee is the regression guard for
+// digiops-cs#2998: domain.CaseSortFieldAssignee existed but validCaseSortField
+// didn't include it, so the webapp's already-built "sort by assignee" column
+// header 400'd. A real, unsupported sort field must still be rejected --
+// this isn't a permissive change.
+func TestCaseService_SearchCases_SortByAssignee(t *testing.T) {
+	called := false
+	repo := &stubCaseRepo{
+		searchCases: func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
+			called = true
+			if req.SortBy.Field != domain.CaseSortFieldAssignee {
+				t.Errorf("repo received SortBy.Field = %q, want %q", req.SortBy.Field, domain.CaseSortFieldAssignee)
+			}
+			return nil, 0, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	req := domain.SearchCasesRequest{SortBy: domain.CaseSort{Field: domain.CaseSortFieldAssignee, Order: domain.CaseSortOrderAsc}}
+	if _, err := svc.SearchCases(ctx, req); err != nil {
+		t.Fatalf("unexpected error sorting by assignee: %v", err)
+	}
+	if !called {
+		t.Fatal("expected repo.SearchCases to be called for sortBy.field = assignee")
+	}
+}
+
+func TestCaseService_SearchCases_RejectsUnknownSortField(t *testing.T) {
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	req := domain.SearchCasesRequest{SortBy: domain.CaseSort{Field: "notARealField", Order: domain.CaseSortOrderAsc}}
+	_, err := svc.SearchCases(ctx, req)
+	var ve *apierror.ValidationError
+	if !asValidationError(err, &ve) {
+		t.Fatalf("expected *apierror.ValidationError for an unknown sort field, got %T: %v", err, err)
 	}
 }
 
@@ -737,7 +810,6 @@ func TestCaseService_UpdateCase_RejectsTypeTransferFields(t *testing.T) {
 		{name: "addPublicComment", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AddPublicComment: func() *bool { v := true; return &v }()}},
 		{name: "product", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, Product: strPtr("WSO2 API Manager")}},
 		{name: "publicTicket", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, PublicTicket: strPtr("gh-1")}},
-		{name: "autocloseHoldUntil", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: func() *time.Time { v := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC); return &v }()}},
 	}
 
 	for _, tc := range cases {
@@ -764,6 +836,7 @@ func TestCaseService_UpdateCase_RejectsExclusiveFieldCombinations(t *testing.T) 
 	ack := true
 	subject := "New subject"
 	parentID := testDeploymentUUID
+	holdUntil := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 
 	cases := []struct {
 		name string
@@ -782,6 +855,10 @@ func TestCaseService_UpdateCase_RejectsExclusiveFieldCombinations(t *testing.T) 
 		// handled the other field.
 		{name: "assigneeEmail+closeNotes", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AssigneeEmail: json.RawMessage(`"` + email + `"`), CloseNotes: &subject}},
 		{name: "subject+closeNotes", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, Subject: &subject, CloseNotes: &subject}},
+		// autocloseHoldUntil is a plain combinable field, so it obeys the same
+		// "never with an exclusive field" rule as subject does.
+		{name: "state+autocloseHoldUntil", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &open, AutocloseHoldUntil: &holdUntil}},
+		{name: "assigneeEmail+autocloseHoldUntil", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AssigneeEmail: json.RawMessage(`"` + email + `"`), AutocloseHoldUntil: &holdUntil}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1122,6 +1199,179 @@ func TestCaseService_UpdateCase_UpdatesFieldsBundle(t *testing.T) {
 	}
 	if resp.Case.BestCaseFixEta == nil || *resp.Case.BestCaseFixEta != bestCaseFixEta {
 		t.Errorf("response BestCaseFixEta = %v, want %q", resp.Case.BestCaseFixEta, bestCaseFixEta)
+	}
+}
+
+// TestCaseService_UpdateCase_AcceptsAutocloseHold is the regression guard for
+// digiops-cs#3318: the CSM portal's "Hold auto-closure" PATCH carries only
+// autocloseHoldUntil, which this data source used to reject with a 400 ("only
+// supported for the ServiceNow data source") even though every case-like table
+// has the autoclosure_step/autoclosure_state_on columns for it. It must reach
+// CaseRepository.UpdateCaseFields untouched, alone and beside other plain fields.
+func TestCaseService_UpdateCase_AcceptsAutocloseHold(t *testing.T) {
+	holdUntil := time.Date(2026, 10, 22, 18, 29, 0, 0, time.UTC)
+	subject := "Updated subject"
+
+	tests := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{name: "alone", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: &holdUntil}},
+		{name: "with another plain field", req: domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: &holdUntil, Subject: &subject}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotReq domain.UpdateCaseRequest
+			repo := &stubCaseRepo{
+				updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
+					gotReq = req
+					return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
+				},
+			}
+			userRepo := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+				return domain.User{ID: "actor-id", Email: email}, nil
+			}}
+			svc := NewCaseService(repo, userRepo, nil, alwaysUnrestrictedAccess{}, nil)
+
+			ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+			if _, err := svc.UpdateCase(ctx, tc.req); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotReq.AutocloseHoldUntil == nil || !gotReq.AutocloseHoldUntil.Equal(holdUntil) {
+				t.Errorf("repo saw AutocloseHoldUntil = %v, want %v", gotReq.AutocloseHoldUntil, holdUntil)
+			}
+		})
+	}
+}
+
+// TestCaseService_UpdateCase_AutocloseHoldIsMirroredToServiceNow proves the hold
+// reaches ServiceNow under dual-write, in ServiceNow's date-only format, and is
+// recorded in the writeback payload so a failed mirror can be replayed. This is
+// the write that matters: ServiceNow's own flow is what closes (or doesn't close)
+// the case, so a hold stored only in Postgres would not stop anything.
+func TestCaseService_UpdateCase_AutocloseHoldIsMirroredToServiceNow(t *testing.T) {
+	holdUntil := time.Date(2026, 10, 22, 18, 29, 0, 0, time.UTC)
+
+	var mu sync.Mutex
+	var gotReq domain.UpdateCaseRequest
+	called := make(chan struct{})
+	mirror := &stubMirrorCaseService{
+		patchCaseFieldsBundleFn: func(_ context.Context, _ string, req domain.UpdateCaseRequest) error {
+			mu.Lock()
+			gotReq = req
+			mu.Unlock()
+			close(called)
+			return errors.New("sn down")
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	repo := &stubCaseRepo{
+		updateCaseFields: func(_ context.Context, _ domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
+			return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
+		},
+	}
+	userRepo := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+		return domain.User{ID: "actor-id", Email: email}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, nil, dispatcher, mirror, nil, "")
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: &holdUntil}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.patchCaseFieldsBundle was never called")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotReq.AutocloseHoldUntil == nil || !gotReq.AutocloseHoldUntil.Equal(holdUntil) {
+		t.Errorf("mirror saw AutocloseHoldUntil = %v, want %v", gotReq.AutocloseHoldUntil, holdUntil)
+	}
+
+	// The mirror failed on purpose: the replay payload must carry the date.
+	waitFor(t, func() bool { return failures.count() == 1 })
+	failures.mu.Lock()
+	defer failures.mu.Unlock()
+	var payload map[string]any
+	if err := json.Unmarshal(failures.calls[0].Payload, &payload); err != nil {
+		t.Fatalf("decode writeback payload: %v", err)
+	}
+	if got := payload["autocloseHoldUntil"]; got != "2026-10-22" {
+		t.Errorf("writeback payload autocloseHoldUntil = %v, want 2026-10-22", got)
+	}
+}
+
+// TestCaseService_UpdateCase_AutocloseHoldReachesServiceNowOverHTTP is the
+// end-to-end proof for the dual-write promise: the hold must actually arrive at
+// ServiceNow. Unlike the stubbed-mirror test above, this runs the real chain
+// production wires in routes.go -- caseService, the async writeback dispatcher
+// and a real snCaseService as the mirror -- against a fake ServiceNow server,
+// and asserts the request ServiceNow receives: a PATCH on the case's own sysid,
+// the date-only value its integration service accepts, only that one field,
+// and the caller's own token forwarded so ServiceNow attributes the change.
+func TestCaseService_UpdateCase_AutocloseHoldReachesServiceNowOverHTTP(t *testing.T) {
+	// 18:29 UTC on the 22nd is the end of that day in Sri Lanka, which is what
+	// the portal sends for a hold picked as 22 Oct.
+	holdUntil := time.Date(2026, 10, 22, 18, 29, 0, 0, time.UTC)
+	userToken := fakeJWTWithEmail(t, "jane.doe@example.com")
+
+	type seen struct {
+		method, path, userToken string
+		body                    map[string]any
+	}
+	got := make(chan seen, 1)
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		select {
+		case got <- seen{method: r.Method, path: r.URL.Path, userToken: r.Header.Get("x-user-id-token"), body: body}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message": "Case updated successfully.", "case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-10-07 10:00:00", "updatedBy": "jane.doe@example.com"}}`))
+	})
+	mirror := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
+
+	repo := &stubCaseRepo{
+		updateCaseFields: func(_ context.Context, _ domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
+			return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
+		},
+	}
+	userRepo := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+		return domain.User{ID: "actor-id", Email: email}, nil
+	}}
+	failures := &recordingSNWritebackFailures{}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, nil, NewSNWritebackDispatcher(failures), mirror, nil, "")
+
+	if _, err := svc.UpdateCase(contextWithUserIDToken(userToken), domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: &holdUntil}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case r := <-got:
+		if r.method != http.MethodPatch {
+			t.Errorf("ServiceNow got %s, want PATCH", r.method)
+		}
+		if want := "/cases/" + uuidToSysid(testDeploymentUUID); r.path != want {
+			t.Errorf("ServiceNow got path %q, want %q", r.path, want)
+		}
+		if r.userToken != userToken {
+			t.Errorf("the caller's user token was not forwarded to ServiceNow")
+		}
+		if len(r.body) != 1 || r.body["autocloseHoldUntil"] != "2026-10-22" {
+			t.Errorf("ServiceNow got body %v, want exactly {autocloseHoldUntil: 2026-10-22}", r.body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ServiceNow never received the hold: the dual-write mirror did not reach it")
+	}
+	// ServiceNow accepted it, so nothing must be queued for replay.
+	time.Sleep(50 * time.Millisecond)
+	if n := failures.count(); n != 0 {
+		t.Errorf("recorded %d writeback failures for a mirror ServiceNow accepted", n)
 	}
 }
 
@@ -1640,6 +1890,67 @@ func TestCaseService_UpdateCase_StatusChanged_RecipientsIncludeFreshDefaultsAndD
 		if got == "stale@example.com" {
 			t.Errorf("Recipients = %v, want it to NOT include the stale watcher's email", payload.Recipients)
 		}
+	}
+}
+
+// TestCaseService_UpdateCase_ResolvesActorIDForClosedByStamp is the
+// regression guard for a real, reported bug: a case closed through this
+// data source always had closed_by_user_id left NULL, so the case detail
+// page fell back to showing "Case closed by system" regardless of who
+// actually closed it -- CaseRepository.UpdateCase was never given an actor
+// id to stamp onto it at all. This proves UpdateCase resolves the caller's
+// own "user" id from their x-user-id-token and passes it through to the
+// repository as actorID -- never read from the request body itself, which
+// has no such field.
+func TestCaseService_UpdateCase_ResolvesActorIDForClosedByStamp(t *testing.T) {
+	closed := domain.CaseStateClosed
+	open := domain.CaseStateOpen
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &open}, nil
+		},
+		updateCase: func(_ context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+			return domain.Case{ID: req.ID, State: req.State}, nil, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{
+		getUserByEmail: func(ctx context.Context, email string) (domain.User, error) {
+			return domain.User{ID: "closer-user-id", Email: email}, nil
+		},
+	}, nil, alwaysUnrestrictedAccess{}, nil)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &closed}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.updateCaseActorID == nil || *repo.updateCaseActorID != "closer-user-id" {
+		t.Fatalf("UpdateCase was called with actorID = %v, want a pointer to \"closer-user-id\"", repo.updateCaseActorID)
+	}
+}
+
+// TestCaseService_UpdateCase_LeavesActorIDNilWithoutAToken proves a caller
+// with no (or an invalid) x-user-id-token still succeeds -- this branch has
+// never required an authenticated caller (see updateCaseAssignee's own doc
+// comment) -- and simply passes a nil actorID through, rather than failing
+// the whole update or guessing at who the actor is.
+func TestCaseService_UpdateCase_LeavesActorIDNilWithoutAToken(t *testing.T) {
+	closed := domain.CaseStateClosed
+	open := domain.CaseStateOpen
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{ID: testDeploymentUUID, State: &open}, nil
+		},
+		updateCase: func(_ context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+			return domain.Case{ID: req.ID, State: req.State}, nil, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+
+	if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &closed}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.updateCaseActorID != nil {
+		t.Fatalf("UpdateCase was called with actorID = %v, want nil", *repo.updateCaseActorID)
 	}
 }
 
@@ -3469,9 +3780,14 @@ func TestCaseService_CreateCaseComment_DoesNotMirrorWithoutSNWriteback(t *testin
 // TestCaseService_CreateCaseCommentAs_UsesActorEmailDirectly covers the M2M
 // path this method exists for: no x-user-id-token is required, and --
 // mirroring addCaseTagAs -- the caller-supplied actorEmail is used directly
-// for created_by and the published event's author name, with no
-// userRepo.GetUserByEmail lookup at all (stubUserRepo{} panics if it were
-// called, since no getUserByEmail func is configured here). Also proves the
+// for created_by and the published event's author name, with no identity
+// resolution required to succeed. subscribeCommenterToWatchList does make a
+// best-effort userRepo.GetUserByEmail lookup here (same as
+// isSupportEngineerAuthor already does elsewhere in this same call), which
+// the configured getUserByEmail below answers with a NotFoundError -- an M2M
+// actorEmail is not guaranteed to be a provisioned sys_user-equivalent row,
+// so this proves that case is swallowed silently (no AddCaseWatcherIfAbsent
+// call, no error surfaced) rather than failing the comment. Also proves the
 // created comment's CreatedBy in the response is the actorEmail, not a
 // resolved user row's email.
 func TestCaseService_CreateCaseCommentAs_UsesActorEmailDirectly(t *testing.T) {
@@ -3489,9 +3805,18 @@ func TestCaseService_CreateCaseCommentAs_UsesActorEmailDirectly(t *testing.T) {
 			}, nil
 		},
 	}
-	// Deliberately no getUserByEmail configured -- CreateCaseCommentAs must
-	// never call it (unlike CreateCaseComment).
-	userRepo := stubUserRepo{}
+	// An M2M actorEmail has no guaranteed "user" row -- see
+	// subscribeCommenterToWatchList's own doc comment.
+	addWatcherCalled := false
+	repo.addCaseWatcherIfAbsent = func(context.Context, string, string) error {
+		addWatcherCalled = true
+		return nil
+	}
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{}, &apierror.NotFoundError{Msg: "user not found"}
+		},
+	}
 	publisher := &mockEventPublisher{}
 	svc := NewCaseService(repo, userRepo, publisher, alwaysUnrestrictedAccess{}, nil)
 
@@ -3516,6 +3841,9 @@ func TestCaseService_CreateCaseCommentAs_UsesActorEmailDirectly(t *testing.T) {
 	}
 	if payload.Name != actorEmail {
 		t.Errorf("published author Name = %q, want %q (actorEmail, since no user row was looked up)", payload.Name, actorEmail)
+	}
+	if addWatcherCalled {
+		t.Error("AddCaseWatcherIfAbsent was called despite the actorEmail not resolving to a real user")
 	}
 }
 

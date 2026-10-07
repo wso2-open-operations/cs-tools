@@ -16,13 +16,33 @@
  * under the License.
  */
 
-/** An SRE time zone. `weekendZoneCode` names the zone that absorbs this one
- *  at the weekend, when three weekday zones collapse into two. */
+/** The rota families: CRE's ABT rota, SRE, and SME -- the product special
+ *  rotations. Within SRE and SME the work is split further into rotas. */
+export type RotaFamily = "CRE" | "SRE" | "SME";
+
+/** A block of the day a rota is worked in: SaaS SRE's time zones, or a
+ *  rotation's Day and Night. `weekendZoneCode` names the zone that absorbs
+ *  this one at the weekend, when three weekday zones collapse into two.
+ *  `rotaCode` is the rota the zone belongs to, absent for one no rota claims. */
 export interface ScheduleZone {
   id: string;
   code: string;
   label: string;
   weekendZoneCode?: string;
+  sortOrder: number;
+  rotaCode?: string;
+}
+
+/** A named rotation inside a family -- SRE's SaaS and IaaS, one per SME
+ *  product -- with the rules its own sheet states. */
+export interface ScheduleRota {
+  code: string;
+  label: string;
+  family: RotaFamily;
+  rotates: "DAILY" | "WEEKLY" | "IRREGULAR";
+  /** Informational: the escalation ladder keeps its own timing. */
+  escalationMinutes?: number;
+  sourceSheet?: string;
   sortOrder: number;
 }
 
@@ -36,7 +56,7 @@ export interface ScheduleShift {
   code: string;
   shortCode: string;
   label: string;
-  family: "CRE" | "SRE";
+  family: RotaFamily;
   zoneCode?: string;
   tier?: ScheduleTier;
   dayScope: "WEEKDAY" | "WEEKEND" | "ANY";
@@ -67,21 +87,45 @@ export interface ScheduleAbsenceKind {
   /** A tag a lead added from the portal, which a lead may also delete. The
    *  catalogue's own kinds are never custom. */
   custom?: boolean;
-  /** The rota the kind is offered on; absent for a kind both use, which is
-   *  every kind of leave. SRE allocates RnD, CRE allocates Migration. */
-  family?: "CRE" | "SRE";
+  /** The rota the kind is offered on; absent for a kind every rota uses,
+   *  which is every kind of leave. SRE allocates RnD, CRE allocates Migration. */
+  family?: RotaFamily;
   /** No longer offered. Still served so the days already marked with it keep
    *  their label, but a picker must not offer it. */
   retired?: boolean;
+  /** The team a span of this kind is spent working for -- the Brazil
+   *  rotation moves someone to the Americas team. Such a span is filed under
+   *  that team, so the roster shows the person there for its dates. */
+  movesToTeamKey?: string;
+  /** That stint is rota work on the other team, so the person is not listed
+   *  as off the rota on its days. */
+  worksRotaThere?: boolean;
+  /** The standing window a span of this kind is drawn as on the roster: on
+   *  the team it moves someone to, they work its normal hours (NLK, LK). */
+  showsAsShiftCode?: string;
 }
 
 /** One team the rota is run for, served so no client holds the list. */
 export interface ScheduleTeam {
   key: string;
   name: string;
-  family: "CRE" | "SRE";
+  family: RotaFamily;
   /** Display order, and what gives a team a stable colour. */
   sortOrder: number;
+  /** The rota this team's type belongs to; absent for a team on no named
+   *  rota (CRE's teams, Americas). */
+  rotaCode?: string;
+  /** Everyone on the team, with their role. Older servers do not send it. */
+  members?: ScheduleTeamMember[];
+  /** The standing window a member's ordinary weekday is (Americas cover for
+   *  the Americas team). Absent means Regular hours. */
+  defaultShiftCode?: string;
+}
+
+/** One member of a rota team. role is as stored: engineer (or member), lead,
+ *  americas_team_lead, ... */
+export interface ScheduleTeamMember extends ScheduleEngineer {
+  role: string;
 }
 
 export interface ScheduleCatalogue {
@@ -89,6 +133,8 @@ export interface ScheduleCatalogue {
   shifts: ScheduleShift[];
   absenceKinds: ScheduleAbsenceKind[];
   teams: ScheduleTeam[];
+  /** Absent from a server older than the rotas; read as "no named rotas". */
+  rotas?: ScheduleRota[];
 }
 
 export interface ScheduleEngineer {
@@ -133,6 +179,9 @@ export interface ScheduleAbsence {
   /** Who an allocation is for -- the customer, or the product team for RnD.
    *  The kind says what sort of time it is; this says for whom. */
   allocatedTo?: string;
+  /** The person's own team, on a span filed under the team a kind moved them
+   *  to (teamKey). Its lead still owns the span. */
+  homeTeamKey?: string;
 }
 
 /** One leave or allocation span as a roster cell hands it to the picker, so
@@ -144,13 +193,15 @@ export interface CellAbsence {
   /** Absent for a span that runs until further notice. */
   endsOn?: string;
   allocatedTo?: string;
+  /** The person's own team, on a span that moved them to another one. */
+  homeTeamKey?: string;
 }
 
 export interface SearchScheduleAssignmentsPayload {
   from: string;
   to: string;
   teamKeys?: string[];
-  family?: "CRE" | "SRE";
+  family?: RotaFamily;
   userId?: string;
   /** Find one engineer's own rota. The portal knows its users by email, so
    *  entity-service resolves that rather than every client doing it. */

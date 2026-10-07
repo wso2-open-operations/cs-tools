@@ -52,6 +52,7 @@ import AllConversationsList from "@features/support/components/all-conversations
 import {
   hasListSearchOrFilters,
   countListSearchAndFilters,
+  isValidNumericIdFilters,
 } from "@features/support/utils/support";
 import { ConversationStatus } from "@features/support/constants/supportConstants";
 import { SortOrder } from "@/types/common";
@@ -84,7 +85,7 @@ export default function AllConversationsPage(): JSX.Element {
   const [filters, setFilters] = useSessionState<AllConversationsFilterValues>(
     `${sessionPrefix}-filters`,
     {},
-    undefined,
+    isValidNumericIdFilters<AllConversationsFilterValues>,
     { popOnly: true },
   );
   const [isFiltersOpen, setIsFiltersOpen] = useState(

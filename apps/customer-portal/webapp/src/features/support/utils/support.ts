@@ -2004,6 +2004,7 @@ export function computeMinScheduleDatetimeLocalForTimeZone(
 export {
   countListSearchAndFilters,
   hasListSearchOrFilters,
+  isValidNumericIdFilters,
   normalizeCaseSearchIssueIds,
 } from "@features/support/utils/listView";
 

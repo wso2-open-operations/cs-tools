@@ -76,6 +76,9 @@ func (unusedReferenceDataRepo) ListTimeZones(context.Context) ([]repository.Time
 func (unusedReferenceDataRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
 	return nil, nil
 }
+func (unusedReferenceDataRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
+	return nil, nil
+}
 
 // fakeTimeZoneRepo backs TestGlobalService_GetSystemMetadata_MapsTimeZones --
 // a configurable ListTimeZones alongside the same fixed-empty everything
@@ -97,6 +100,9 @@ func (f fakeTimeZoneRepo) ListTimeZones(context.Context) ([]repository.TimeZoneR
 	return f.timeZones, nil
 }
 func (fakeTimeZoneRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
+	return nil, nil
+}
+func (fakeTimeZoneRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
 	return nil, nil
 }
 
@@ -123,6 +129,69 @@ func TestGlobalService_GetSystemMetadata_MapsTimeZones(t *testing.T) {
 	}
 	if resp.TimeZones[1].ID != "America/New_York" || resp.TimeZones[1].Label != "Eastern Time (US/Canada)" {
 		t.Errorf("unexpected second time zone: %+v", resp.TimeZones[1])
+	}
+}
+
+// fakeFeedbackEmojiRepo backs TestGlobalService_GetSystemMetadata_MapsFeedbackEmojis --
+// a configurable ListFeedbackEmojis alongside the same fixed-empty
+// everything else unusedReferenceDataRepo provides.
+type fakeFeedbackEmojiRepo struct {
+	emojis []repository.FeedbackEmojiRow
+}
+
+func (fakeFeedbackEmojiRepo) ListProjectTypes(context.Context) ([]repository.ProjectTypeRow, error) {
+	return nil, nil
+}
+func (fakeFeedbackEmojiRepo) GetProjectByID(context.Context, string) (bool, *repository.ProjectTypeRow, error) {
+	return false, nil, nil
+}
+func (fakeFeedbackEmojiRepo) EnumLabels(context.Context, []string) (map[string][]string, error) {
+	return nil, nil
+}
+func (fakeFeedbackEmojiRepo) ListTimeZones(context.Context) ([]repository.TimeZoneRow, error) {
+	return nil, nil
+}
+func (fakeFeedbackEmojiRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
+	return nil, nil
+}
+func (f fakeFeedbackEmojiRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
+	return f.emojis, nil
+}
+
+// TestGlobalService_GetSystemMetadata_MapsFeedbackEmojis is the regression
+// guard for GET /metadata's feedbackEmojies field actually being populated
+// from work_item_feedback_metric/work_item_feedback_metric_option instead of
+// always coming back empty.
+func TestGlobalService_GetSystemMetadata_MapsFeedbackEmojis(t *testing.T) {
+	repo := fakeFeedbackEmojiRepo{emojis: []repository.FeedbackEmojiRow{
+		{
+			ID:              "emoji-1",
+			Name:            "Very Satisfied",
+			Value:           "5",
+			UnselectedImage: "/assets/feedback/very-satisfied.svg",
+			SelectedImage:   "/assets/feedback/very-satisfied-selected.svg",
+			Chips: []repository.FeedbackEmojiChipRow{
+				{ID: "chip-1", Name: "Fast response", Value: "1"},
+			},
+		},
+	}}
+	svc := NewGlobalService(repo, nil, nil)
+
+	resp, err := svc.GetSystemMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.FeedbackEmojis) != 1 {
+		t.Fatalf("got %d feedback emojis, want 1", len(resp.FeedbackEmojis))
+	}
+	emoji := resp.FeedbackEmojis[0]
+	if emoji.ID != "emoji-1" || emoji.Name != "Very Satisfied" || emoji.Value != "5" ||
+		emoji.UnselectedImage != "/assets/feedback/very-satisfied.svg" ||
+		emoji.SelectedImage != "/assets/feedback/very-satisfied-selected.svg" {
+		t.Errorf("unexpected emoji: %+v", emoji)
+	}
+	if len(emoji.Chips) != 1 || emoji.Chips[0].ID != "chip-1" || emoji.Chips[0].Name != "Fast response" || emoji.Chips[0].Value != "1" {
+		t.Errorf("unexpected chips: %+v", emoji.Chips)
 	}
 }
 

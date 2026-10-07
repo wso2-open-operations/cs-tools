@@ -24,11 +24,12 @@ import (
 )
 
 // On a shared topic an unknown type belongs to some other consumer: skipped
-// cleanly, so it is neither retried nor dead-lettered.
+// cleanly, so it is neither retried nor dead-lettered. (This used sr.created
+// as its example until this service started handling the sr.* types.)
 func TestDispatcher_HandleShared_SkipsUnknownTypes(t *testing.T) {
 	mock := &mockEmailSender{}
 	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
-	rec := eventbus.Record{Topic: "sre-events", Value: []byte(`{"type":"sr.created","entityId":"SR-1","payload":{}}`)}
+	rec := eventbus.Record{Topic: "sre-events", Value: []byte(`{"type":"problem.created","entityId":"PRB-1","payload":{}}`)}
 
 	if err := d.HandleShared(context.Background(), rec); err != nil {
 		t.Fatalf("unknown type on a shared topic returned %v, want nil", err)

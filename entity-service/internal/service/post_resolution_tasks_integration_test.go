@@ -191,3 +191,37 @@ func TestPostResolutionIntegration_FalseAlarmCreatesTheAlertTask(t *testing.T) {
 		t.Errorf("a false alarm created %d problems", problems)
 	}
 }
+
+// Any service gets the workaround problem, not only the flow's two; it takes
+// the incident's own service and group.
+func TestPostResolutionIntegration_WorkaroundOnAnotherService(t *testing.T) {
+	pool := incidentReportTestPool(t)
+	d := irDrainer(pool)
+	prSeed(t, pool, d)
+	ctx := context.Background()
+
+	const otherService = "47777777-0000-0000-0000-0000000000b1"
+	prEnsure(t, pool, "service", otherService,
+		`INSERT INTO service (id, created_on, updated_on, created_by, updated_by, name, number) VALUES ($1, NOW(), NOW(), 't', 't', 'monitoring', 'SVC-PR-2')`,
+		otherService)
+	irExec(t, pool, `UPDATE incident SET service_id = $2 WHERE id = $1`, prIncidentID, otherService)
+	irExec(t, pool, `UPDATE work_item SET assignment_group_id = $2 WHERE id = $1`, prIncidentID, groupWSO2SRETeam)
+	irExec(t, pool, `UPDATE incident SET state = 'RESOLVED', resolution_code = 'SOLVED_WORK_AROUND' WHERE id = $1`, prIncidentID)
+	for i := 0; i < 3; i++ {
+		if _, err := d.drainOnce(ctx); err != nil {
+			t.Fatalf("drainOnce: %v", err)
+		}
+	}
+
+	var group, service, linked string
+	err := pool.QueryRow(ctx, `
+		SELECT wi.assignment_group_id::text, p.service_id::text, (SELECT i.problem_id::text FROM incident i WHERE i.id = $1)
+		FROM problem p JOIN work_item wi ON wi.id = p.id
+		WHERE p.incident_id = $1`, prIncidentID).Scan(&group, &service, &linked)
+	if err != nil {
+		t.Fatalf("read the problem: %v", err)
+	}
+	if group != groupWSO2SRETeam || service != otherService || linked == "" {
+		t.Errorf("group/service/linked = %s / %s / %q, want the incident's group and service, linked", group, service, linked)
+	}
+}

@@ -141,7 +141,11 @@ type BrowserConn interface {
 // StreamChat opens a dedicated upstream WebSocket connection for sessionID,
 // sends payload, then forwards every event verbatim to caller until a
 // "final" event arrives, an "error" event arrives, a read/write fails, or
-// the upstream connection closes normally. Mirrors
+// the upstream connection closes normally. The one thing not forwarded verbatim
+// is the answer text of the "final" event: any <thinking> reasoning the agent put
+// in it is removed first (see StripThinkingBlocks), both from the frame the
+// browser receives and from the payload returned for the caller to persist.
+// Mirrors
 // apps/customer-portal/backend's ai_chat_agent:streamChat, except it also
 // reports failure to the caller (below) via a non-nil error, so a failed
 // turn is never mistaken for a successful one.
@@ -177,27 +181,30 @@ func (c *WSClient) StreamChat(ctx context.Context, sessionID, payload string, ca
 			return nil, fmt.Errorf("aichatagent: read upstream message: %w", err)
 		}
 
-		if writeErr := caller.WriteMessage(websocket.TextMessage, data); writeErr != nil {
-			return nil, fmt.Errorf("aichatagent: forward message to browser: %w", writeErr)
-		}
-
 		var parsed map[string]json.RawMessage
 		if err := json.Unmarshal(data, &parsed); err != nil {
+			// Not JSON: nothing to inspect, forward it as it came.
+			if writeErr := caller.WriteMessage(websocket.TextMessage, data); writeErr != nil {
+				return nil, fmt.Errorf("aichatagent: forward message to browser: %w", writeErr)
+			}
 			continue
 		}
 		var evtType string
 		if raw, ok := parsed[eventTypeKey]; ok {
 			_ = json.Unmarshal(raw, &evtType)
 		}
+
+		frame := data
+		var finalFields map[string]json.RawMessage
 		if evtType == eventFinal {
-			if raw, ok := parsed[eventPayloadKey]; ok {
-				var nested map[string]json.RawMessage
-				if err := json.Unmarshal(raw, &nested); err == nil {
-					finalPayload = nested
-					break
-				}
-			}
-			finalPayload = parsed
+			frame, finalFields = scrubFinalEvent(parsed, data)
+		}
+		if writeErr := caller.WriteMessage(websocket.TextMessage, frame); writeErr != nil {
+			return nil, fmt.Errorf("aichatagent: forward message to browser: %w", writeErr)
+		}
+
+		if evtType == eventFinal {
+			finalPayload = finalFields
 			break
 		}
 		if evtType == eventError {

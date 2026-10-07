@@ -82,7 +82,7 @@ payload_max_bytes = 65536
 
 [payloads]
 # Raw webhook bodies wait in memory this long, then are written to raw_alerts in one insert.
-flush_interval = "10m"
+flush_interval = "5m"
 # Memory cap for waiting bodies; half of it flushes early, and a body past it is not stored.
 max_buffer_bytes = 33554432
 # Time limit for one flush insert.

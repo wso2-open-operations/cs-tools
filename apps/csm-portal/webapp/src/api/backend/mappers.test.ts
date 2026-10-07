@@ -194,6 +194,25 @@ describe("uiCommentFromBe — /comments/search shape and chat", () => {
     expect(ui.authorRole).toBe("chatbot");
   });
 
+  it("drops Novera's <thinking> reasoning but never edits a person's message", () => {
+    const withThinking = "<thinking>internal notes</thinking>\n\nWhich environment?";
+    const bot = uiCommentFromBe(
+      {
+        ...msg,
+        content: withThinking,
+        createdBy: { id: null, email: "novera@bot", name: "Novera" },
+      },
+      { context: "conversation" },
+    );
+    expect(bot.bodyHtml).toBe("Which environment?");
+
+    const person = uiCommentFromBe(
+      { ...msg, content: withThinking },
+      { context: "conversation" },
+    );
+    expect(person.bodyHtml).toBe(withThinking);
+  });
+
   it("marks a work_note as internal", () => {
     const ui = uiCommentFromBe({ ...msg, type: "work_note" });
     expect(ui.internal).toBe(true);

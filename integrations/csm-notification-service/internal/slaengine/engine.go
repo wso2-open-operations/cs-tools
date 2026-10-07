@@ -66,9 +66,9 @@ type store interface {
 	GetClock(ctx context.Context, caseID, clockType string) (ClockMeta, bool, error)
 	SetPaused(ctx context.Context, caseID, clockType string, paused bool) error
 	SetState(ctx context.Context, caseID, clockType, state string) error
-	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int) error
-	ClaimTier(ctx context.Context, caseID, clockType string, tier int) (claimed bool, err error)
-	ReleaseTier(ctx context.Context, caseID, clockType string, tier int) error
+	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int, incarnation time.Time) (applied bool, err error)
+	ClaimTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) (claimed bool, err error)
+	ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error
 }
 
 // eventPublisher abstracts eventbus.Producer for testability.
@@ -275,7 +275,7 @@ func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string
 		e.setPaused(ctx, caseID, ClockWorkaround, true)
 		e.setPaused(ctx, caseID, ClockResolution, true)
 	case effectClose:
-		if err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResolution, 100); err != nil {
+		if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResolution, 100, time.Time{}); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to complete resolution clock on case close", "caseId", caseID, "err", err)
 		}
 		e.setPaused(ctx, caseID, ClockWorkaround, true)
@@ -298,7 +298,7 @@ func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused
 // its own). Idempotent: AdvanceAlertedTier never moves the cursor backward,
 // so a redelivered comment-added event is harmless.
 func (e *Engine) CompleteResponseClock(ctx context.Context, caseID string) {
-	if err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResponse, 100); err != nil {
+	if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResponse, 100, time.Time{}); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to complete response clock", "caseId", caseID, "err", err)
 	}
 }
@@ -352,7 +352,7 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return e.store.RemoveWake(ctx, member)
 	}
 
-	claimed, err := e.store.ClaimTier(ctx, caseID, clockType, tier)
+	claimed, err := e.store.ClaimTier(ctx, caseID, clockType, tier, meta.StartedAt)
 	if err != nil {
 		return fmt.Errorf("claim tier %d for %s/%s: %w", tier, caseID, clockType, err)
 	}
@@ -361,20 +361,35 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 	}
 
 	if err := e.alertTier(ctx, meta, caseID, clockType, tier); err != nil {
-		if releaseErr := e.store.ReleaseTier(ctx, caseID, clockType, tier); releaseErr != nil {
+		if releaseErr := e.store.ReleaseTier(ctx, caseID, clockType, tier, meta.StartedAt); releaseErr != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to release tier claim after a failed publish, tier may be stuck until it expires", "caseId", caseID, "clockType", clockType, "tier", tier, "err", releaseErr)
 		}
 		return fmt.Errorf("alert tier %d for %s/%s: %w", tier, caseID, clockType, err)
 	}
-	if err := e.store.AdvanceAlertedTier(ctx, caseID, clockType, tier); err != nil {
+	applied, err := e.store.AdvanceAlertedTier(ctx, caseID, clockType, tier, meta.StartedAt)
+	if err != nil {
 		// Logged, not returned/retried: the alert (publish + Chat) has
 		// already gone out, and the tier claim above already prevents a
 		// future tick from re-alerting this exact tier regardless of
 		// whether this cursor update lands — see ClaimTier's own doc
 		// comment. Leaving the wake member in place here would only cause
 		// it to be re-examined (and immediately re-dropped by the
-		// claimed=false branch above) forever.
+		// claimed=false branch above) forever, so RemoveWake below still
+		// runs on this path.
 		slog.ErrorContext(ctx, "slaengine: failed to advance alerted-tier cursor after a successful alert", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
+	} else if !applied {
+		// The clock has moved on to a new incarnation since this tick read
+		// meta (see advanceAlertedTierScript's own doc comment) — the alert
+		// already sent reflects the OLD incarnation's data, which can't be
+		// undone, but this tick's own work for THIS wake member ends here:
+		// the wake-index member for (caseID, clockType, tier) may already
+		// belong to the new incarnation's own, independently-scheduled
+		// entry (AddWake overwrites the same key), so removing it now would
+		// delete a still-valid future alert out from under the new clock.
+		// Its cursor was never touched either, so nothing here needs
+		// correcting on the new incarnation's behalf.
+		slog.InfoContext(ctx, "slaengine: tier alerted under a clock incarnation that has since been replaced, leaving the new incarnation's own state untouched", "caseId", caseID, "clockType", clockType, "tier", tier)
+		return nil
 	}
 	if err := e.store.RemoveWake(ctx, member); err != nil {
 		return fmt.Errorf("remove wake entry after alerting tier %d for %s/%s: %w", tier, caseID, clockType, err)
@@ -448,6 +463,142 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 			slog.ErrorContext(ctx, "slaengine: failed to send sla breach alert to chat space, not retrying", "caseId", caseID, "clockType", clockType, "tier", tier, "chatSpace", audience, "err", err)
 		}
 	}
+}
+
+// entityActiveClocksClient abstracts EntityClient.GetActiveCSMSLAClocks for
+// testability.
+type entityActiveClocksClient interface {
+	GetActiveCSMSLAClocks(ctx context.Context) ([]activeSLAClock, error)
+}
+
+// Reconcile rebuilds this engine's entire Redis-held state from
+// entity-service's own durable record (GET /sla-status?source=csm) — the one
+// thing Redis itself has no durability for (see redis.go's own package doc
+// comment: every clock's state lives in Redis, nowhere else). Entity-service
+// already writes the matching source='CSM' "sla" row synchronously, in the
+// same request, for every lifecycle event this engine also reacts to (see
+// that repo's own CLAUDE.md, "CSM-native SLA clock engine") — so if this
+// engine's own Redis instance is ever flushed or replaced, this is what lets
+// it resume tracking every still-open case's clocks from that record instead
+// of silently losing them all with no way to recover, which is the normal,
+// silent outcome without this.
+//
+// Intended to run once, at process startup, before RunTicker starts (see
+// cmd/server/main.go) — not a recurring poll, and not gated on "only run if
+// Redis looks empty": calling it against a Redis instance that already holds
+// everything correctly is a safe, cheap no-op in effect, since every write
+// it makes (SetClock/AddWake/AdvanceAlertedTier) is already idempotent (see
+// each one's own doc comment in redis.go). As a side effect, this also
+// closes RegisterClocks' own documented "no backfill" gap for any case that
+// already had an entity-service "sla" row before this engine's Redis ever
+// saw it — not its primary purpose, but a natural consequence of rebuilding
+// from the same durable source.
+//
+// A fetch failure is logged and returned (so main.go can decide whether to
+// still start RunTicker) rather than treated as fatal — same "nice-to-have
+// engine, not core delivery" posture as GetDurationPolicy's own startup
+// call. A per-clock write failure is logged and the reconciliation
+// continues with the next clock — one bad row must not abandon every other
+// case's recovery.
+func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient) error {
+	clocks, err := client.GetActiveCSMSLAClocks(ctx)
+	if err != nil {
+		return fmt.Errorf("slaengine: reconcile: fetch active clocks: %w", err)
+	}
+
+	now := time.Now()
+	for _, c := range clocks {
+		e.reconcileClock(ctx, c, now)
+	}
+	slog.InfoContext(ctx, "slaengine: reconciled sla clocks from entity-service", "count", len(clocks))
+	return nil
+}
+
+// reconcileClock rebuilds one (caseID, clockType) clock's Redis state from
+// its durable entity-service row — the same due-date arithmetic
+// RegisterClocks uses (tierTime/avoidWeekend), just anchored on that row's
+// own StartedOn rather than a fresh case.created payload's CreatedAt, since
+// a case's three clock types aren't guaranteed to share one under every
+// historical code path (a severity revision, for one — see entity-service's
+// own CLAUDE.md, "ReviseCaseClocks").
+//
+// Unlike a fresh RegisterClocks call, this does NOT blindly schedule a wake
+// entry for every tier: a tier whose due time has already passed is instead
+// pre-marked via AdvanceAlertedTier (which never moves the cursor backward,
+// so this can never un-complete a tier Redis already knows about) — without
+// this, every already-overdue tier would be immediately picked up by the
+// very next Tick and alerted on all at once, flooding Chat with stale
+// "breach" alerts for history that's probably already been alerted on
+// before whatever wiped Redis. Only a tier still in the future gets a real
+// wake entry, so normal ticking resumes seamlessly from here.
+func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) {
+	durations, ok := e.durations[strings.ToUpper(strings.TrimSpace(c.Priority))]
+	if !ok {
+		slog.WarnContext(ctx, "slaengine: reconcile: no duration policy for this severity, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
+		return
+	}
+	duration, ok := durations[c.ClockType]
+	if !ok {
+		slog.WarnContext(ctx, "slaengine: reconcile: no duration policy for this clock type, skipping", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
+		return
+	}
+	if c.StartedOn == nil {
+		slog.WarnContext(ctx, "slaengine: reconcile: no start time, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType)
+		return
+	}
+	startedAt := *c.StartedOn
+
+	dueAt := startedAt.Add(duration)
+	if c.ClockType == ClockResolution && strings.EqualFold(c.Priority, "MEDIUM") {
+		dueAt = avoidWeekend(dueAt)
+	}
+	actualDuration := dueAt.Sub(startedAt)
+
+	meta := ClockMeta{
+		CaseNumber: c.CaseNumber,
+		WSO2CaseID: c.WSO2CaseID,
+		CaseTitle:  c.CaseTitle,
+		CaseType:   c.CaseType,
+		Product:    c.Product,
+		Team:       c.Team,
+		Priority:   c.Priority,
+		State:      c.State,
+		StartedAt:  startedAt,
+	}
+	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
+		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
+		return
+	}
+
+	highestPastTier := 0
+	for _, tier := range tierSequence {
+		at := tierTime(startedAt, actualDuration, tier)
+		if at.After(now) {
+			if err := e.store.AddWake(ctx, wakeMember(c.CaseID, c.ClockType, tier), at); err != nil {
+				slog.ErrorContext(ctx, "slaengine: reconcile: failed to schedule sla wake entry", "caseId", c.CaseID, "clockType", c.ClockType, "tier", tier, "err", err)
+			}
+			continue
+		}
+		highestPastTier = tier
+	}
+	if highestPastTier > 0 {
+		// Scoped to the incarnation this call itself just wrote via SetClock
+		// above: a concurrent reconciliation pass (another replica, or an
+		// overlapping run) for the SAME case racing a different severity
+		// could otherwise clobber whichever one writes last, the same class
+		// of race AdvanceAlertedTier's own doc comment describes for Tick.
+		if _, err := e.store.AdvanceAlertedTier(ctx, c.CaseID, c.ClockType, highestPastTier, startedAt); err != nil {
+			slog.ErrorContext(ctx, "slaengine: reconcile: failed to pre-claim already-past tiers", "caseId", c.CaseID, "clockType", c.ClockType, "tier", highestPastTier, "err", err)
+		}
+	}
+	// Always applied, not just when true: the durable row is the source of
+	// truth for this flag during reconciliation, and Redis may currently
+	// hold the opposite value (e.g. paused while Redis was down, then
+	// resumed before this reconciliation pass runs) -- only ever setting
+	// true here would leave a stale paused=true in Redis forever, which
+	// Tick's own "drop if paused" check (processDueMember) would then
+	// silently swallow every future tier crossing for, never alerting.
+	e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused)
 }
 
 // RunTicker calls Tick every interval until ctx is done. Run from its own

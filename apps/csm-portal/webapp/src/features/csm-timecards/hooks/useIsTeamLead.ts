@@ -17,11 +17,12 @@
 import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 
 /**
- * True when the signed-in user may approve time cards. Thin alias over
- * {@link useTimecardRole}'s `isApprover` (the dedicated approver group only —
- * being a general portal admin doesn't count), kept for the case "Time
- * tracking" tab. Prefer `useTimecardRole` for new code.
+ * True when the signed-in user may approve time cards — either the
+ * dedicated approver group, or a time-card admin's approve-by-exception
+ * (see {@link useTimecardRole}'s own `isAdmin` doc comment). Kept for the
+ * case "Time tracking" tab. Prefer `useTimecardRole` for new code.
  */
 export function useIsTeamLead(): boolean {
-  return useTimecardRole().isApprover;
+  const { isApprover, isAdmin } = useTimecardRole();
+  return isApprover || isAdmin;
 }

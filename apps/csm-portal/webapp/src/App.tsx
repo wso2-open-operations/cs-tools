@@ -116,9 +116,9 @@ import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticle
 import CsmKBArticleHistoryDetailPage from "@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage";
 import CsmKBReviewQueuePage from "@features/csm-kb-articles/pages/CsmKBReviewQueuePage";
 import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
-import RouteGuard from "@features/spl/pages/RouteGuard";
-import AccountsPage from "@features/spl/accounts/pages/AccountsPage";
-import AccountDetailPage from "@features/spl/accounts/pages/AccountDetailPage";
+import RouteGuard from "@features/sales-sa/pages/RouteGuard";
+import AccountsPage from "@features/sales-sa/accounts/pages/AccountsPage";
+import AccountDetailPage from "@features/sales-sa/accounts/pages/AccountDetailPage";
 import ProjectsPage from "@features/sales-sa/projects/pages/ProjectsPage";
 import ProjectDetailPage from "@features/sales-sa/projects/pages/ProjectDetailPage";
 import SlaReportPage from "@features/sales-sa/reports/pages/SlaReportPage";
@@ -126,7 +126,7 @@ import CsReportPage from "@features/sales-sa/reports/pages/CsReportPage";
 import TimelogsReportPage from "@features/sales-sa/reports/pages/TimelogsReportPage";
 import TeamSchedulePage from "@features/sales-sa/schedule/pages/TeamSchedulePage";
 import UserScanPage from "@features/sales-sa/user-scan/pages/UserScanPage";
-import UsageMetricsPage from "@features/spl/usage-metrics/pages/UsageMetricsPage";
+import UsageMetricsPage from "@features/sales-sa/usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/sales-sa/customer-health/pages/CustomerHealthDashboardPage";
 import CustomerHealthDetailPage from "@features/sales-sa/customer-health/pages/CustomerHealthDetailPage";
 

@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ballerina/websocket;
+import customer_portal.reasoning_filter;
+
 import ballerina/log;
+import ballerina/websocket;
 # Create case classification for the given payload.
 #
 # + payload - Case classification payload
@@ -41,7 +43,15 @@ public isolated function createChat(string projectId, string conversationId, Con
         conversationId: conversationId,
         envProducts: payload.envProducts
     };
-    return aiChatAgentClient->/chat.post(chatPayload);
+    ChatResponse|error response = aiChatAgentClient->/chat.post(chatPayload);
+    if response is ChatResponse {
+        // The agent can put its <thinking> reasoning inside the answer. Callers
+        // persist this reply as a conversation comment, hand it to the recommender
+        // and return it to the browser, so it is removed here, once, before any of
+        // them see it.
+        response.message = reasoning_filter:stripThinkingBlocks(response.message);
+    }
+    return response;
 }
 
 # List conversations for the given project ID.
@@ -89,7 +99,10 @@ public isolated function getSummary(string projectId, string conversationId) ret
 
 # Stream chat events from the upstream AI chat agent WebSocket back to the browser caller.
 # Opens a dedicated upstream connection per call, sends the payload, then pipes every event
-# verbatim until a "final" or "error" event or the upstream connection closes.
+# verbatim until a "final" or "error" event or the upstream connection closes. The one thing
+# not forwarded verbatim is the answer text of the "final" event: any <thinking> reasoning the
+# agent put in it is removed first (see reasoning_filter:stripThinkingBlocks), both from the frame the browser
+# receives and from the payload returned for the caller to persist.
 #
 # + sessionId - Conversation/session ID used to route to the upstream Python session
 # + payload - Raw JSON string (user_message) to forward to the upstream agent
@@ -115,25 +128,30 @@ public isolated function streamChat(string sessionId, string payload, websocket:
             }
             break;
         }
-        error? writeErr = caller->writeTextMessage(event);
-        if writeErr is error {
-            log:printError("Failed to forward event to caller (client disconnected)", writeErr);
-            break;
-        }
         json|error parsed = event.fromJsonString();
         if parsed is error {
             log:printError("Failed to parse upstream event as JSON", parsed);
         }
-        if parsed is map<json> {
-            string evtType = (parsed[EVENT_TYPE_KEY] ?: "").toString();
-            if evtType == EVENT_FINAL {
-                json eventPayload = parsed[EVENT_PAYLOAD_KEY] ?: parsed;
-                finalPayload = eventPayload is map<json> ? eventPayload : parsed;
-                break;
-            }
-            if evtType == EVENT_ERROR {
-                break;
-            }
+        string evtType = parsed is map<json> ? (parsed[EVENT_TYPE_KEY] ?: "").toString() : "";
+
+        string frame = event;
+        map<json> finalFields = {};
+        if parsed is map<json> && evtType == EVENT_FINAL {
+            [string, map<json>] scrubbed = reasoning_filter:scrubFinalEvent(parsed, event);
+            frame = scrubbed[0];
+            finalFields = scrubbed[1];
+        }
+        error? writeErr = caller->writeTextMessage(frame);
+        if writeErr is error {
+            log:printError("Failed to forward event to caller (client disconnected)", writeErr);
+            break;
+        }
+        if evtType == EVENT_FINAL && parsed is map<json> {
+            finalPayload = finalFields;
+            break;
+        }
+        if evtType == EVENT_ERROR {
+            break;
         }
     }
     if !upstreamClosed {

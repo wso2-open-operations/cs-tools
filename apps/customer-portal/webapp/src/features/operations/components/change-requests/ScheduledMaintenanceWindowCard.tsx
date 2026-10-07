@@ -22,6 +22,16 @@ import {
   formatChangeRequestDisplayDate,
   formatChangeRequestDuration,
 } from "@features/operations/utils/changeRequests";
+import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
+import { resolveChangeRequestCanonicalState } from "@features/operations/utils/changeRequestUi";
+
+/** States in which the window is a plan, not yet a scheduled maintenance window. */
+const UNSCHEDULED_STATES: readonly string[] = [
+  ChangeRequestStates.NEW,
+  ChangeRequestStates.ASSESS,
+  ChangeRequestStates.AUTHORIZE,
+  ChangeRequestStates.CUSTOMER_APPROVAL,
+];
 
 
 /**
@@ -63,7 +73,11 @@ export default function ScheduledMaintenanceWindowCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
           <Calendar size={20} color={colors.grey[600]} aria-hidden />
           <Typography variant="h6" color="text.primary">
-            Scheduled Maintenance Window
+            {UNSCHEDULED_STATES.includes(
+              resolveChangeRequestCanonicalState(changeRequest?.state) ?? "",
+            )
+              ? "Planned Maintenance Window"
+              : "Scheduled Maintenance Window"}
           </Typography>
         </Box>
       </Box>

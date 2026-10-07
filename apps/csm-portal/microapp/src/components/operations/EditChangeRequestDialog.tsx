@@ -15,7 +15,7 @@
 // under the License.
 
 import { useState } from "react";
-import { AdapterDateFns, Button, Card, DatePickers, Dialog, Stack, Switch, Typography } from "@wso2/oxygen-ui";
+import { AdapterDateFns, Button, Card, DatePickers, Dialog, Stack, Typography } from "@wso2/oxygen-ui";
 import { format } from "date-fns";
 import type { ChangeRequestDetail } from "@src/types";
 
@@ -26,16 +26,13 @@ interface EditChangeRequestDialogProps {
   changeRequest: ChangeRequestDetail;
   isSubmitting: boolean;
   onClose: () => void;
-  onSubmit: (fields: {
-    plannedStartOn?: string | null;
-    isCustomerApproved?: boolean;
-    isCustomerReviewed?: boolean;
-  }) => void;
+  onSubmit: (fields: { plannedStartOn?: string | null }) => void;
 }
 
-// Mirrors the webapp's EditChangeRequestDialog: only 3 fields are editable, matching exactly what
-// the backend's PatchChangeRequestPayload accepts (minProperties: 1) — Planned start, Customer
-// approved, Customer reviewed. Save is disabled until something actually differs.
+// Only the planned start is editable here. The customer's approval and review are the CUSTOMER's own decisions, given in the
+// Customer Portal: no staff action records them on the customer's behalf (the backend refuses isCustomerApproved /
+// isCustomerReviewed from staff with a 400), so this dialog offers no "Customer approved" / "Customer reviewed" switch.
+// Save is disabled until the planned start actually differs.
 export function EditChangeRequestDialog({
   changeRequest,
   isSubmitting,
@@ -44,22 +41,15 @@ export function EditChangeRequestDialog({
 }: EditChangeRequestDialogProps) {
   const initialPlannedStart = changeRequest.plannedStartOn ? new Date(changeRequest.plannedStartOn) : null;
   const [plannedStart, setPlannedStart] = useState<Date | null>(initialPlannedStart);
-  const [customerApproved, setCustomerApproved] = useState(changeRequest.hasCustomerApproved);
-  const [customerReviewed, setCustomerReviewed] = useState(changeRequest.hasCustomerReviewed);
 
   const plannedStartChanged = (plannedStart?.getTime() ?? null) !== (initialPlannedStart?.getTime() ?? null);
-  const hasChanges =
-    plannedStartChanged ||
-    customerApproved !== changeRequest.hasCustomerApproved ||
-    customerReviewed !== changeRequest.hasCustomerReviewed;
+  const hasChanges = plannedStartChanged;
 
   const handleSave = () => {
     onSubmit({
       ...(plannedStartChanged && {
         plannedStartOn: plannedStart ? format(plannedStart, WIRE_FORMAT) : null,
       }),
-      ...(customerApproved !== changeRequest.hasCustomerApproved && { isCustomerApproved: customerApproved }),
-      ...(customerReviewed !== changeRequest.hasCustomerReviewed && { isCustomerReviewed: customerReviewed }),
     });
   };
 
@@ -82,16 +72,6 @@ export function EditChangeRequestDialog({
           slotProps={{ textField: { size: "small", fullWidth: true }, field: { clearable: true } }}
         />
       </LocalizationProvider>
-
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="body2">Customer approved</Typography>
-        <Switch checked={customerApproved} onChange={(e) => setCustomerApproved(e.target.checked)} />
-      </Stack>
-
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="body2">Customer reviewed</Typography>
-        <Switch checked={customerReviewed} onChange={(e) => setCustomerReviewed(e.target.checked)} />
-      </Stack>
 
       <Stack direction="row" justifyContent="end" gap={1}>
         <Button variant="outlined" onClick={onClose} disabled={isSubmitting}>

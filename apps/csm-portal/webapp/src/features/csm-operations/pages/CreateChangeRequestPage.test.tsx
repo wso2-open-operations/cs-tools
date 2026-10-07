@@ -1297,6 +1297,20 @@ describe("CreateChangeRequestPage — customer project, deployments, deployment 
     expect(showErrorMock).toHaveBeenCalledWith(message, err);
   });
 
+  it("surfaces the backend's refusal when nobody on the project can be asked, verbatim, in the same error banner", async () => {
+    const { BackendApiError } = await import("@api/backend/client");
+    render(<CreateChangeRequestPage />);
+    fillSubject();
+    pickProject("proj-a");
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const [, options] = postChangeRequestMutateMock.mock.calls[0];
+    const message =
+      "customer approval is required but nobody on this project can be asked (no registered contact other than the requester): register a contact for the project first";
+    const err = new (BackendApiError as unknown as new (s: number, m: string) => Error)(400, message);
+    options.onError(err);
+    expect(showErrorMock).toHaveBeenCalledWith(message, err);
+  });
+
   describe("Customer Group: the project's registered contacts, read-only", () => {
     it("is a locked, read-only field that says it is derived, and cannot be typed into", () => {
       render(<CreateChangeRequestPage />);

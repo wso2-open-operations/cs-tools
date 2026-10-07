@@ -92,3 +92,20 @@ func TestParseTeamRegistry_RejectsMalformedSreGroupID(t *testing.T) {
 		t.Fatal("ParseTeamRegistry returned no error, want a rejection of the malformed sreGroupId")
 	}
 }
+
+// SME, the product special rotations, is a family the registry accepts --
+// without it a deploy listing an SME team fails at startup -- while a family
+// nobody branches on is still refused.
+func TestParseTeamRegistry_AcceptsTheSMEFamily(t *testing.T) {
+	teams, err := ParseTeamRegistry("moesif|Moesif|SME-MOESIF,asgardeo|Asgardeo|sme")
+	if err == nil {
+		t.Fatalf("SME-MOESIF is not one of the closed families and must be refused, got %+v", teams)
+	}
+	teams, err = ParseTeamRegistry("moesif|Moesif|SME,iaas|IaaS|SRE")
+	if err != nil {
+		t.Fatalf("ParseTeamRegistry: %v", err)
+	}
+	if teams[0].Family != FamilySME || teams[1].Family != FamilySRE {
+		t.Fatalf("families = %q, %q; want %q, %q", teams[0].Family, teams[1].Family, FamilySME, FamilySRE)
+	}
+}

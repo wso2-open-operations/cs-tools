@@ -22,7 +22,13 @@ import { useNavigate } from "react-router";
 
 import { useOrganizations, useProducts } from "@features/plg/api/hooks";
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, StatusChip } from "@features/plg/components/common";
-import { LIFECYCLE_STAGES, type LifecycleStage, type UserRef } from "@features/plg/api/types";
+import {
+  LIFECYCLE_STAGES,
+  SUBSCRIPTION_TIERS,
+  type LifecycleStage,
+  type SubscriptionTier,
+  type UserRef,
+} from "@features/plg/api/types";
 import { CSUserSelect } from "@features/plg/components/CSUserSelect";
 import { formatDate, humanizeEnum } from "@features/plg/utils/format";
 import { selectLabelProps } from "@features/plg/components/selectLabelProps";
@@ -55,6 +61,7 @@ export default function OrganizationsPage() {
   const [query, setQuery] = useState("");
   const [productCode, setProductCode] = useState("");
   const [stage, setStage] = useState("");
+  const [tier, setTier] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [ownerRef, setOwnerRef] = useState<UserRef | null>(null);
   // Bumped by Clear to remount the owner picker.
@@ -74,6 +81,7 @@ export default function OrganizationsPage() {
         query: query.trim() || undefined,
         productCodes: productCode ? [productCode] : undefined,
         lifecycleStages: stage ? [stage as LifecycleStage] : undefined,
+        subscriptionTiers: tier ? [tier as SubscriptionTier] : undefined,
         ownerIds: ownerId && ownerId !== "UNASSIGNED" ? [ownerId] : undefined,
         unowned: ownerId === "UNASSIGNED" ? true : undefined,
       },
@@ -81,7 +89,7 @@ export default function OrganizationsPage() {
       sortBy: "registered" as const,
       sortOrder: "desc" as const,
     }),
-    [query, productCode, stage, ownerId, page],
+    [query, productCode, stage, tier, ownerId, page],
   );
 
   const { data, isPending, error } = useOrganizations(request);
@@ -104,7 +112,7 @@ export default function OrganizationsPage() {
 
       <Card sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={1.5}>
-          <Grid size={{ xs: 12, md: 4 }}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <TextField
               fullWidth
               size="small"
@@ -113,7 +121,7 @@ export default function OrganizationsPage() {
               onChange={(e) => resetTo(setQuery)(e.target.value)}
             />
           </Grid>
-          <Grid size={{ xs: 12, sm: 4, md: 2.5 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <TextField
               select
               {...selectLabelProps(productCode)}
@@ -131,7 +139,7 @@ export default function OrganizationsPage() {
               ))}
             </TextField>
           </Grid>
-          <Grid size={{ xs: 12, sm: 4, md: 2.5 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <TextField
               select
               {...selectLabelProps(stage)}
@@ -149,7 +157,25 @@ export default function OrganizationsPage() {
               ))}
             </TextField>
           </Grid>
-          <Grid size={{ xs: 12, sm: 4, md: 2.5 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <TextField
+              select
+              {...selectLabelProps(tier)}
+              fullWidth
+              size="small"
+              label="Subscription tier"
+              value={tier}
+              onChange={(e) => resetTo(setTier)(e.target.value)}
+            >
+              <MenuItem value="">All tiers</MenuItem>
+              {SUBSCRIPTION_TIERS.map((t) => (
+                <MenuItem key={t} value={t}>
+                  {humanizeEnum(t)}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <CSUserSelect
               key={pickerKey}
               label="CS owner"
@@ -164,13 +190,16 @@ export default function OrganizationsPage() {
               }}
             />
           </Grid>
-          <Grid size={{ xs: 12, md: 0.5 }}>
+          <Grid
+            size={{ xs: 12, md: 1 }}
+            sx={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
             <Button
-              fullWidth
               onClick={() => {
                 setQuery("");
                 setProductCode("");
                 setStage("");
+                setTier("");
                 setOwnerId("");
                 // Without this the picker would keep offering the engineer it
                 // last pinned, as an option nothing had selected.

@@ -181,9 +181,17 @@ func (c *Client) CreateCaseClassification(ctx context.Context, req CaseClassific
 }
 
 // CreateChat calls POST /chat.
+//
+// The agent can put its <thinking> reasoning inside the answer. The handlers
+// persist this reply as a conversation comment, hand it to the recommender and
+// return it to the browser, so it is removed here, once, before any of them see
+// it (see StripThinkingBlocks).
 func (c *Client) CreateChat(ctx context.Context, req ChatPayload) (ChatResponse, error) {
 	var out ChatResponse
 	err := c.postJSON(ctx, "/chat", req, &out)
+	if err == nil {
+		out.Message = StripThinkingBlocks(out.Message)
+	}
 	return out, err
 }
 

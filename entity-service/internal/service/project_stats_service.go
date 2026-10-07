@@ -61,6 +61,24 @@ var (
 	crActionRequiredStates = []string{"CUSTOMER_APPROVAL", "CUSTOMER_REVIEW"}
 )
 
+// crOutstandingStatesFor is crOutstandingStates for the caller asking. A
+// customer sees only the change requests designated to them (or legacy ones),
+// and the only way a customer comes to see one in Authorize is a re-schedule:
+// they proposed a new time (or WSO2 moved the plan) and the change request is
+// back with the approval board, still theirs and still in motion -- so for them
+// it is outstanding, exactly like the Scheduled / Implement states they already
+// count, and the stat card matches the list they see. Staff keep the grouping
+// the ServiceNow constants define: for them Authorize is active but not yet
+// outstanding.
+func crOutstandingStatesFor(scope AccessScope) []string {
+	if scope.Unrestricted {
+		return crOutstandingStates
+	}
+	out := make([]string, 0, len(crOutstandingStates)+1)
+	out = append(out, "AUTHORIZE")
+	return append(out, crOutstandingStates...)
+}
+
 const crResolvedState = "CLOSED"
 
 // conversationActiveStates mirrors ServiceNow's CHAT_ACTIVE_STATE_VALUES.
@@ -136,9 +154,11 @@ func (s *projectStatsService) requireProject(ctx context.Context, projectID stri
 // GetProjectStats implements ProjectStatsService -- ServiceNow's
 // getProjectStatistics.
 func (s *projectStatsService) GetProjectStats(ctx context.Context, projectID string) (domain.ProjectStatsResponse, error) {
-	if _, err := s.requireProject(ctx, projectID); err != nil {
+	scope, err := s.requireProject(ctx, projectID)
+	if err != nil {
 		return domain.ProjectStatsResponse{}, err
 	}
+	crOutstanding := crOutstandingStatesFor(scope)
 
 	// The six aggregations below share only the project id, so they run
 	// concurrently rather than as six serial round trips -- the same
@@ -197,7 +217,7 @@ func (s *projectStatsService) GetProjectStats(ctx context.Context, projectID str
 	})
 	g.Go(func() error {
 		var err error
-		outstanding, err = s.repo.OutstandingCounts(gctx, projectID, caseStatsOutstandingStates, crOutstandingStates)
+		outstanding, err = s.repo.OutstandingCounts(gctx, projectID, caseStatsOutstandingStates, crOutstanding)
 		return err
 	})
 	g.Go(func() error {
@@ -365,9 +385,11 @@ func validateStatsDate(name, value string) error {
 // GetProjectChangeRequestStats implements ProjectStatsService -- ServiceNow's
 // getProjectChangeRequestStats.
 func (s *projectStatsService) GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error) {
-	if _, err := s.requireProject(ctx, projectID); err != nil {
+	scope, err := s.requireProject(ctx, projectID)
+	if err != nil {
 		return domain.ProjectChangeRequestStatsResponse{}, err
 	}
+	crOutstanding := crOutstandingStatesFor(scope)
 
 	labels, err := s.refRepo.EnumLabels(ctx, []string{changeRequestStateEnumType})
 	if err != nil {
@@ -388,7 +410,7 @@ func (s *projectStatsService) GetProjectChangeRequestStats(ctx context.Context, 
 		if containsString(crActiveStates, row.State) {
 			resp.ActiveCount += row.Count
 		}
-		if containsString(crOutstandingStates, row.State) {
+		if containsString(crOutstanding, row.State) {
 			resp.OutstandingCount += row.Count
 		}
 		if containsString(crActionRequiredStates, row.State) {

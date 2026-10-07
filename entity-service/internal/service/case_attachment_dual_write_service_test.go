@@ -422,6 +422,54 @@ func TestCaseAttachmentDualWriteService_UpdateAttachment_PostgresFirstThenAsyncM
 	}
 }
 
+// TestCaseAttachmentDualWriteService_UpdateAttachment_DeploymentSkipsPostgres
+// covers the real bug this skip fixes: *caseService.UpdateAttachment's own
+// validatePGAttachmentUpdate unconditionally rejects any ReferenceType other
+// than "case" ("only 'case' is supported for this data source"), so editing
+// a deployment-tab attachment's name/description 400'd unconditionally --
+// reported live as PATCH /deployments/{id}/attachments/{id} always
+// returning 400. Neither the repo rename call nor actor resolution (which
+// that call alone needed) should be reached at all for a deployment
+// reference -- stubCaseRepo panics on UpdateCaseAttachmentName and
+// stubUserRepo{} (no GetUserByEmail configured) panics on actor resolution,
+// so either happening fails the test.
+func TestCaseAttachmentDualWriteService_UpdateAttachment_DeploymentSkipsPostgres(t *testing.T) {
+	name := "renamed-plan.pdf"
+	req := domain.UpdateAttachmentRequest{
+		AttachmentID:  testAttachmentID,
+		ReferenceID:   testWorkItemID,
+		ReferenceType: domain.ReferenceTypeDeployment,
+		Name:          &name,
+	}
+	mirror := &stubCaseAttachmentSNMirror{
+		updateAttachment: func(_ context.Context, r domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
+			if r.ReferenceType != domain.ReferenceTypeDeployment {
+				t.Fatalf("mirror got referenceType %q, want deployment", r.ReferenceType)
+			}
+			return domain.UpdateAttachmentResponse{
+				Message: "Attachment updated successfully",
+				Attachment: domain.UpdatedAttachment{
+					ID:        r.AttachmentID,
+					UpdatedOn: time.Now(),
+					UpdatedBy: "jane.doe@example.com",
+				},
+			}, nil
+		},
+	}
+
+	svc := newDualWriteAttachmentService(&stubCaseRepo{}, stubUserRepo{}, mirror, nil)
+	resp, err := svc.UpdateAttachment(context.Background(), req)
+	if err != nil {
+		t.Fatalf("UpdateAttachment returned error: %v", err)
+	}
+	if resp.Attachment.ID != testAttachmentID {
+		t.Errorf("response id = %q, want %q", resp.Attachment.ID, testAttachmentID)
+	}
+	if resp.Attachment.UpdatedBy != "jane.doe@example.com" {
+		t.Errorf("response UpdatedBy = %q, want ServiceNow's own value (no Postgres actor was resolved)", resp.Attachment.UpdatedBy)
+	}
+}
+
 // TestCaseAttachmentDualWriteService_SearchCaseAttachments_InheritsEmbeddedPostgresPath
 // proves SearchCaseAttachments is NOT overridden -- it reaches the embedded
 // *caseService's Postgres-backed implementation directly, exactly the "reads

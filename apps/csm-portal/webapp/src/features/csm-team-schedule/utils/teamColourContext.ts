@@ -18,6 +18,7 @@
 
 import { createContext, useContext } from "react";
 import { teamColour } from "./rotaHues";
+import { teamDisplayName } from "./teamDisplayName";
 
 /**
  * A team's colour, by its position in the list the catalogue serves.
@@ -48,12 +49,11 @@ export function useTeamColour(): (teamKey: string) => string {
  * beside the key, so the lookup rides along with the colour rather than being
  * threaded separately through every card.
  *
- * Falls back to the key itself, so a team the catalogue has not got still
- * renders something recognisable instead of an empty label.
+ * Falls back to the key itself, tidied by teamDisplayName, so a team the
+ * catalogue has not got still renders something recognisable instead of an
+ * empty label.
  */
-export const TeamNameContext = createContext<(teamKey: string) => string>(
-  (teamKey) => teamKey,
-);
+export const TeamNameContext = createContext<(teamKey: string) => string>(teamDisplayName);
 
 /** The display name for a team, from whatever list the page was given. */
 export function useTeamName(): (teamKey: string) => string {

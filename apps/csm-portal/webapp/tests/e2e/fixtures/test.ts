@@ -39,19 +39,15 @@ import path from "node:path";
 //   crInternalApprover  alice.perera@example.com      internal; peer / CAB / ECAB
 //                                                     approver (also bob.fernando,
 //                                                     carol.silva hold the same seats)
-//   crCustomerContact   dave.mendis@example.com       external; registered contact of
-//                                                     project 401 — answers the
-//                                                     Customer Approval / Review stages
-//   crCustomerContact2  erin.jayawardena@example.com  external; the other contact
+//
+// There is no session for the seed's customers (dave.mendis, erin.jayawardena, ...):
+// customers do not sign in to the CSM portal. They answer the Customer Approval /
+// Customer Review stages in the customer portal, and a CSM spec that needs that answer
+// applies it server-side (utils/customerPortalDecision.ts, or the fake API's
+// `customerDecides`) and checks what the CSM page shows to an internal user.
 //
 // Minting: auth/README.md.
-export type TimecardRole =
-  | "approver"
-  | "engineer"
-  | "crApprover"
-  | "crInternalApprover"
-  | "crCustomerContact"
-  | "crCustomerContact2";
+export type TimecardRole = "approver" | "engineer" | "crApprover" | "crInternalApprover";
 
 /** A captured session: the origin's localStorage + sessionStorage snapshots.
  * `cookies` (optional) carries the IdP-domain cookies so the SDK's silent

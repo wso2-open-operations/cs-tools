@@ -301,9 +301,13 @@ function PeekRows({
     type Group = { key: string; label: string; token: string; list: ScheduleAssignment[]; sort: number };
     const zoneCols: { zoneCode: string; label: string; tiers: Group[] }[] = [];
     const byTurn = new Map<string, Group>();
-    if (rows.some((r) => shifts.get(r.shiftCode)?.family === "SRE")) {
-      const sreShifts = [...shifts.values()].filter((sh) => sh.family === "SRE");
-      for (const row of escalationGrid(sreShifts, iso)) {
+    // The zone grid of whichever zoned rota the day's turns are on -- SRE's
+    // time zones, or an SME rotation's Day and Night. The page passes only the
+    // reader's own rota's windows, so another rota's zones never appear here.
+    const zoned = rows.map((r) => shifts.get(r.shiftCode)).find((sh) => sh?.zoneCode && sh.family !== "CRE");
+    if (zoned) {
+      const zonedShifts = [...shifts.values()].filter((sh) => sh.family === zoned.family);
+      for (const row of escalationGrid(zonedShifts, iso)) {
         const tiers = row.tiers.map(({ tier }, ti) => {
           const g: Group = { key: `esc:${row.zoneCode}|${tier}`, label: `${tier} support`, token: tier, list: [], sort: ti };
           byTurn.set(g.key, g);

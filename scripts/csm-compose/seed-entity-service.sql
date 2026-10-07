@@ -25,6 +25,8 @@
 -- are SELF-HEALING instead (upserted / deleted and re-inserted), so an
 -- already-seeded database converges to the current fixtures on a re-run -- and
 -- the fixtures are put back to their starting state each time (see there).
+-- So are the customer portal entitlements of the local project type (the
+-- project_type UPDATE below) and the project type of "Lumen Works Platform".
 
 BEGIN;
 
@@ -50,6 +52,27 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO account (id, created_on, updated_on, created_by, updated_by, name, number, sf_id, customer_success_manager_id, country, city, drive_location) VALUES
   ('00000000-0000-0000-0000-000000000301', now(), now(), 'seed', 'seed', 'Example Corp', 'ACC-0001', 'SF-0001', '00000000-0000-0000-0000-000000000001', 'United States', 'Mountain View', 'https://drive.example.com/example-corp')
 ON CONFLICT (id) DO NOTHING;
+
+-- Customer portal entitlements of the local project type. The customer portal shows its
+-- Operations menu (Service requests, Change requests) only when the project's type grants
+-- read access to them -- GET /projects/{id}/features, read from project_type
+-- (has_service_request_read_access / has_change_request_read_access, migration 0130) -- and
+-- the local "Subscription" fixture row (a3, the type of the seeded projects below; see
+-- fixtures/0031_project_type_table.sql) is created with every flag FALSE, so a customer of
+-- project 401 would see no Operations menu and could never reach a change request to
+-- approve. (ServiceNow's own "Subscription" does not grant these either; this is a local
+-- stand-in, which is why it is only touched while it is still the local fixture row.)
+-- An UPDATE, not an INSERT ... ON CONFLICT DO NOTHING: the row already exists on a
+-- database seeded earlier, and has to be corrected there too. Only the two flags a
+-- customer needs for Operations are set; every other flag of the row, and every other
+-- project type, stays as the migration left it.
+UPDATE project_type
+SET has_change_request_read_access = TRUE,
+    has_service_request_read_access = TRUE,
+    updated_on = now()
+WHERE id = '00000000-0000-0000-0000-0000000000a3'
+  AND created_by = 'local-fixture'
+  AND (NOT has_change_request_read_access OR NOT has_service_request_read_access);
 
 -- project_type_id is set (a3 = "Subscription", from the project_type fixture) because the
 -- customer portal treats a project with no type as "type not loaded" and then offers no
@@ -367,6 +390,22 @@ INSERT INTO "user" (id, created_on, updated_on, created_by, updated_by, user_nam
   ('00000000-0000-0000-0000-000000000024', now(), now(), 'seed', 'seed', 'noel.prasad@lumenworks.example', 'Noel Prasad', 'Noel', 'Prasad', 'noel.prasad@lumenworks.example', true, false)
 ON CONFLICT (id) DO NOTHING;
 
+-- The generator also gives every project a RANDOM project type, and only some types let a
+-- customer see Operations in the customer portal (see the project_type entitlements near the
+-- top): "Lumen Works Platform" can come out as e.g. "Cloud Support", whose customers (mira,
+-- noel) would then see no Change requests at all. So a Lumen Works Platform whose type does
+-- not grant change request read access is put on "Subscription" (a3). A type that already
+-- grants it ("Managed Cloud Subscription", or a3 itself) is left alone.
+UPDATE project
+SET project_type_id = '00000000-0000-0000-0000-0000000000a3', updated_on = now()
+WHERE id = (
+    SELECT id FROM project
+    WHERE name = 'Lumen Works Platform' AND account_id IS NOT NULL
+    ORDER BY created_on, id LIMIT 1)
+  AND NOT EXISTS (
+    SELECT 1 FROM project_type pt
+    WHERE pt.id = project.project_type_id AND pt.has_change_request_read_access);
+
 -- No created_by on purpose (see the personas above).
 INSERT INTO user_role (id, created_on, updated_on, user_id, role_id) VALUES
   ('00000000-0000-0000-0000-000000000223', now(), now(), '00000000-0000-0000-0000-000000000023', '00000000-0000-0000-0000-000000000102'),
@@ -463,6 +502,19 @@ ON CONFLICT (id) DO NOTHING;
 -- The customer stages have no assignment group (the Customer Group is the
 -- project's contacts, not a "group" row) and carry an explicit checkpoint_label
 -- (migration 0179), which is how they are recognised.
+--
+-- WHAT A CUSTOMER SEES OF THESE (entity-service/CLAUDE.md, "Customer visibility and
+-- the cutover"; the local stack runs with CR_STRICT_VISIBILITY_FROM far in the
+-- past, so every fixture here is strict): a change request is visible to a customer
+-- only when it was DESIGNATED to them -- they hold an approver row, in any state, on
+-- one of its "Customer Approval" / "Customer Review" stages. That is exactly the
+-- approver rows of CHG-FIXED-007 and -008 below: dave and erin see those two, in every
+-- state the specs walk them through (their rows turn APPROVED / REJECTED / CANCELLED,
+-- never away). Every other fixture -- New, Assess, Authorize, the Review one with
+-- Customer Review ticked but not yet asked -- has no customer-stage row, so a customer
+-- does not see it (absent from the list and its counts, 404 by id). A fixture that must
+-- be visible to a customer needs a customer-stage approver row for them (CANCELLED
+-- counts: it is what the sibling of a contact who answered holds).
 DELETE FROM approval_stage_approver WHERE work_item_id IN (
   '00000000-0000-0000-0000-000000001001', '00000000-0000-0000-0000-000000001002',
   '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000001004',

@@ -401,12 +401,17 @@ func TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade(t *testi
 // TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess
 // confirms the cascade is scoped exactly to Assess->Authorize: approving a
 // Peer-stage approver on a change request that isn't currently in Assess (e.g.
-// one already sitting in Authorize) must leave state untouched. A stage can
-// only be decided in the state it belongs to (a Peer stage in Assess), so the
-// decision is now refused outright with a 409 rather than recorded without a
-// cascade: nothing changes, the approver row stays requested (the state
-// reconcile does not run on a refused decision). The seeded stage has no
-// label, so it is classified by position, as Peer.
+// one already sitting in Authorize) must leave state untouched.
+//
+// The seeded stage has NO label -- it is the shape csm-sync-service mirrors from
+// ServiceNow -- and sits at position 0, which the historical convention reads as
+// Peer. A position is only a guess (runtimeApprovalStageKind), and the guess
+// counts only while the change is in the state it implies: here the change is in
+// Authorize, so the stage is of no known kind, and the approver's decision is
+// RECORDED (no cascade, the state stays Authorize) instead of refused with a 409
+// as a Peer stage out of its state would be. Before migrated data was taken into
+// account this test asserted that 409; a native stage (which always has a label)
+// is still refused, see the StaleApprovals tests.
 func TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
@@ -425,14 +430,9 @@ func TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess(t *t
 	seedChangeRequestForApprovalTest(t, scoped, "AUTHORIZE")
 	seedApprovalStageForDecisionTest(t, scoped, changeRequestApprovalApproverUserID)
 
-	_, err = repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
-		changeRequestApprovalApproverUserID, "approved", "cr-approval-test")
-	var conflict *apierror.ConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("DecideChangeRequestApproval(approved) outside Assess: err = %v (%T), want *apierror.ConflictError", err, err)
-	}
-	if want := "this approval is no longer pending: the change request is in Authorize, but the Peer Approval stage can only be decided while it is in Assess"; conflict.Msg != want {
-		t.Fatalf("refusal message = %q, want %q", conflict.Msg, want)
+	if _, err = repo.DecideChangeRequestApproval(sys, changeRequestApprovalTestID,
+		changeRequestApprovalApproverUserID, "approved", "cr-approval-test"); err != nil {
+		t.Fatalf("DecideChangeRequestApproval(approved) on an unlabeled position-0 stage of a change in Authorize: %v", err)
 	}
 
 	var gotState, gotStatus string
@@ -441,15 +441,15 @@ func TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess(t *t
 		t.Fatalf("read back state: %v", scanErr)
 	}
 	if gotState != "AUTHORIZE" {
-		t.Fatalf("state after a refused approval outside Assess = %q, want unchanged \"AUTHORIZE\"", gotState)
+		t.Fatalf("state after approving outside Assess = %q, want unchanged \"AUTHORIZE\"", gotState)
 	}
 	if scanErr := scoped.QueryRow(sys,
 		`SELECT state FROM approval_stage_approver WHERE work_item_id = $1 AND approver_user_id = $2`,
 		changeRequestApprovalTestID, changeRequestApprovalApproverUserID).Scan(&gotStatus); scanErr != nil {
 		t.Fatalf("read back approver status: %v", scanErr)
 	}
-	if gotStatus != "REQUESTED" {
-		t.Fatalf("approver status after a refused decision = %q, want unchanged \"REQUESTED\"", gotStatus)
+	if gotStatus != "APPROVED" {
+		t.Fatalf("approver status after the decision = %q, want \"APPROVED\" (recorded, no cascade)", gotStatus)
 	}
 }
 
@@ -2146,6 +2146,13 @@ func TestChangeRequestIntegration_AssessAuthorizeAndReviewStagesCoexist(t *testi
 	// a deliberately different assigned team so this test also confirms
 	// Review's own provisioning uses THIS request's team, not whatever was
 	// left on work_item by the Assess/Authorize steps above.
+	//
+	// Review is entered from Implement, the only edge into it (the CAB approval
+	// and Start implementation have tests of their own): the change is put there
+	// directly, as the fixture of this test, rather than walked through them.
+	if _, err := scoped.Exec(sys, `UPDATE change_request SET state = 'IMPLEMENT' WHERE id = $1`, changeRequestAssessGateTestID); err != nil {
+		t.Fatalf("put the change request in Implement: %v", err)
+	}
 	reviewTeamID := changeRequestReviewGateGroupID
 	review := domain.ChangeRequestStateReview
 	if _, err := repo.PatchChangeRequest(sys, changeRequestAssessGateTestID,
@@ -2695,6 +2702,20 @@ func seedChangeRequestForCustomerFlagTest(t *testing.T, pool *repository.Scoped,
 		id, approved, reviewed)
 }
 
+// setCustomerFlagTestState moves a change request seeded by
+// seedChangeRequestForCustomerFlagTest (New) to state. What a customer can reach
+// depends on it: a change request still in New / Assess / Authorize was never
+// designated to a customer and is invisible to them (404, whatever they send),
+// while one past Authorize is visible to its project's registered contacts when
+// it is legacy (no cutover is configured in these tests).
+func setCustomerFlagTestState(t *testing.T, pool *repository.Scoped, id, state string) {
+	t.Helper()
+	sys := repository.WithSystemIdentity(context.Background())
+	if _, err := pool.Exec(sys, `UPDATE change_request SET state = $2::change_request_state_enum WHERE id = $1`, id, state); err != nil {
+		t.Fatalf("set state %s: %v", state, err)
+	}
+}
+
 // externalCallerCtx builds a ctx carrying a non-internal (Unrestricted:
 // false) caller identity for email -- repository.Scoped's own InTx/Query/
 // QueryRow/Exec only need SOME identity present (CallerIdentityFromContext's
@@ -2705,11 +2726,16 @@ func externalCallerCtx(email string) context.Context {
 	return repository.WithCallerIdentity(context.Background(), repository.SearchScope{ViewerEmail: email})
 }
 
-// TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCanSetBoth
-// confirms an internal caller may flip BOTH is_customer_approval_required and
-// is_customer_review_required from false to true, in one PATCH, with no project
-// membership or project_contact row involved at all.
-func TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCanSetBoth(t *testing.T) {
+// TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCannotSetEither
+// confirms an internal caller (WSO2 staff, a client credential) can NOT record
+// the customer's approval or review for them: a PATCH carrying
+// isCustomerApproved or isCustomerReviewed -- true or false, alone or both -- is
+// refused outright with a message that says who may give the answer, and
+// nothing is written (neither flag, nor the state, nor updated_on). The flags
+// used to be the staff-settable booleans this test confirmed; they are the
+// customer's own answer now (compliance: ServiceNow's record of it is audited),
+// and the customer gives it in the Customer Portal.
+func TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCannotSetEither(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
 		t.Skip("CHANGE_REQUEST_TEST_DSN not set")
@@ -2728,32 +2754,95 @@ func TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCanSetBoth(t *t
 	seedChangeRequestCustomerFlagProject(t, pool, crCustomerFlagProjectID, "CRCFPROJ01")
 	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagInternalTestID, "CRCFINT001", crCustomerFlagProjectID, false, false)
 
-	yes := true
-	cr, err := repo.PatchChangeRequest(sys, crCustomerFlagInternalTestID,
-		domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, IsCustomerReviewed: &yes}, "cr-customer-flag-test")
-	if err != nil {
-		t.Fatalf("PatchChangeRequest(isCustomerApproved=true, isCustomerReviewed=true) as internal: %v", err)
-	}
-	if !cr.HasCustomerApproved {
-		t.Error("HasCustomerApproved after patch = false, want true")
-	}
-	if !cr.HasCustomerReviewed {
-		t.Error("HasCustomerReviewed after patch = false, want true")
+	yes, no := true, false
+	const (
+		approvedMsg = "isCustomerApproved cannot be set on the customer's behalf: the customer's approval can only be given by the customer in the Customer Portal"
+		reviewedMsg = "isCustomerReviewed cannot be set on the customer's behalf: the customer's review can only be given by the customer in the Customer Portal"
+	)
+	for name, tc := range map[string]struct {
+		req  domain.PatchChangeRequestRequest
+		want string
+	}{
+		"approved true":          {domain.PatchChangeRequestRequest{IsCustomerApproved: &yes}, approvedMsg},
+		"approved false":         {domain.PatchChangeRequestRequest{IsCustomerApproved: &no}, approvedMsg},
+		"reviewed true":          {domain.PatchChangeRequestRequest{IsCustomerReviewed: &yes}, reviewedMsg},
+		"reviewed false":         {domain.PatchChangeRequestRequest{IsCustomerReviewed: &no}, reviewedMsg},
+		"both true":              {domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, IsCustomerReviewed: &yes}, approvedMsg},
+		"with another field":     {domain.PatchChangeRequestRequest{IsCustomerReviewed: &yes, Comment: scopeStrp("hello")}, reviewedMsg},
+		"with a state":           {domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, State: ptrCRState(domain.ChangeRequestStateCanceled)}, approvedMsg},
+		"with the planned times": {domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, PlannedStartOn: scopeStrp("2031-01-01T09:00:00Z")}, approvedMsg},
+	} {
+		before := snapshotCustomerFlagRow(t, scoped, crCustomerFlagInternalTestID)
+		_, err := repo.PatchChangeRequest(sys, crCustomerFlagInternalTestID, tc.req, "cr-customer-flag-test")
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) || ve.Msg != tc.want {
+			t.Fatalf("%s: err = %v (%T), want a 400 saying %q", name, err, err, tc.want)
+		}
+		if after := snapshotCustomerFlagRow(t, scoped, crCustomerFlagInternalTestID); after != before {
+			t.Fatalf("%s: a refused PATCH changed the row: before %q, after %q", name, before, after)
+		}
 	}
 
 	got, err := repo.GetChangeRequestByID(sys, crCustomerFlagInternalTestID)
 	if err != nil {
 		t.Fatalf("GetChangeRequestByID: %v", err)
 	}
-	if !got.HasCustomerApproved || !got.HasCustomerReviewed {
-		t.Errorf("GetChangeRequestByID HasCustomerApproved/HasCustomerReviewed = %v/%v, want true/true", got.HasCustomerApproved, got.HasCustomerReviewed)
+	if got.HasCustomerApproved || got.HasCustomerReviewed {
+		t.Errorf("HasCustomerApproved/HasCustomerReviewed after the refused PATCHes = %v/%v, want false/false", got.HasCustomerApproved, got.HasCustomerReviewed)
+	}
+	// A request without either flag still works: the refusal is about the flags.
+	if _, err := repo.PatchChangeRequest(sys, crCustomerFlagInternalTestID, domain.PatchChangeRequestRequest{Comment: scopeStrp("still fine")}, "cr-customer-flag-test"); err != nil {
+		t.Errorf("a PATCH without either flag: %v", err)
 	}
 }
 
-// TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactCanApprove
-// confirms a REGISTERED project_contact holding PORTAL_USER on the change
-// request's OWN project may flip is_customer_approval_required false -> true.
-func TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactCanApprove(t *testing.T) {
+func ptrCRState(s domain.ChangeRequestState) *domain.ChangeRequestState { return &s }
+
+// snapshotCustomerFlagRow renders what a refused PATCH must leave untouched on a
+// row seeded by seedChangeRequestForCustomerFlagTest: the state, both outcome
+// flags, the journal and work_item.updated_on / updated_by / change_request
+// start/end.
+func snapshotCustomerFlagRow(t *testing.T, pool *repository.Scoped, id string) string {
+	t.Helper()
+	sys := repository.WithSystemIdentity(context.Background())
+	var state *string
+	var approved, reviewed *bool
+	var updatedOn, updatedBy string
+	var start, end *string
+	var comments int
+	if err := pool.QueryRow(sys,
+		`SELECT cr.state::text, cr.is_customer_approval_required, cr.is_customer_review_required, wi.updated_on::text, COALESCE(wi.updated_by, ''),
+		        cr.start_on::text, cr.end_on::text, (SELECT COUNT(*) FROM comment WHERE work_item_id = wi.id)
+		 FROM change_request cr JOIN work_item wi ON wi.id = cr.id WHERE cr.id = $1`, id).Scan(&state, &approved, &reviewed, &updatedOn, &updatedBy, &start, &end, &comments); err != nil {
+		t.Fatalf("snapshot %s: %v", id, err)
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return "<nil>"
+		}
+		return *p
+	}
+	flag := func(p *bool) string {
+		if p == nil {
+			return "<nil>"
+		}
+		return fmt.Sprint(*p)
+	}
+	return fmt.Sprintf("state=%s approved=%s reviewed=%s updated_on=%s updated_by=%s start=%s end=%s comments=%d",
+		str(state), flag(approved), flag(reviewed), updatedOn, updatedBy, str(start), str(end), comments)
+}
+
+// TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactNeedsTheCustomerState
+// confirms what a REGISTERED project_contact holding PORTAL_USER on the change
+// request's OWN project can and cannot do with isCustomerApproved. The flag used
+// to be a plain boolean such a contact could stamp at any time; it is now the
+// customer's ANSWER (the same decision the Approvals tab records, see
+// change_request_customer_outcome.go), so on a change request that is not
+// waiting on the customer -- this one is New -- it is refused with the
+// stale-approval 409 and nothing is stamped. The answering path itself, in
+// Customer Approval and Customer Review, is covered end to end by
+// TestChangeRequestCustomerOutcomeIntegration_*.
+func TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactNeedsTheCustomerState(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
 		t.Skip("CHANGE_REQUEST_TEST_DSN not set")
@@ -2765,6 +2854,7 @@ func TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactCa
 	t.Cleanup(pool.Close)
 
 	scoped := repository.NewScoped(pool)
+	sys := repository.WithSystemIdentity(context.Background())
 	repo := repository.NewChangeRequestRepository(scoped)
 
 	seedChangeRequestCustomerFlagAccount(t, pool)
@@ -2774,13 +2864,31 @@ func TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactCa
 	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagQualifyingTestID, "CRCFQUAL01", crCustomerFlagProjectID, false, false)
 
 	yes := true
-	cr, err := repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagPortalUserEmail), crCustomerFlagQualifyingTestID,
+	// New: never designated to a customer, so it does not exist for them.
+	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagPortalUserEmail), crCustomerFlagQualifyingTestID,
 		domain.PatchChangeRequestRequest{IsCustomerApproved: &yes}, crCustomerFlagPortalUserEmail)
-	if err != nil {
-		t.Fatalf("PatchChangeRequest(isCustomerApproved=true) as a REGISTERED PORTAL_USER contact on the same project: %v", err)
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("PatchChangeRequest(isCustomerApproved=true) by a qualifying contact on a New change request: got %T (%v), want *apierror.NotFoundError", err, err)
 	}
-	if !cr.HasCustomerApproved {
-		t.Error("HasCustomerApproved after patch = false, want true")
+	// Scheduled: visible (legacy), but not waiting on the customer.
+	setCustomerFlagTestState(t, scoped, crCustomerFlagQualifyingTestID, "SCHEDULED")
+	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagPortalUserEmail), crCustomerFlagQualifyingTestID,
+		domain.PatchChangeRequestRequest{IsCustomerApproved: &yes}, crCustomerFlagPortalUserEmail)
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("PatchChangeRequest(isCustomerApproved=true) by a qualifying contact on a Scheduled change request: got %T (%v), want *apierror.ConflictError", err, err)
+	}
+	if !strings.Contains(ce.Msg, "no longer pending") || !strings.Contains(ce.Msg, "in Scheduled") {
+		t.Errorf("message = %q, want the stale-approval refusal naming Scheduled", ce.Msg)
+	}
+
+	got, err := repo.GetChangeRequestByID(sys, crCustomerFlagQualifyingTestID)
+	if err != nil {
+		t.Fatalf("GetChangeRequestByID: %v", err)
+	}
+	if got.HasCustomerApproved {
+		t.Error("HasCustomerApproved after the refused patch = true, want unchanged false")
 	}
 }
 
@@ -2831,9 +2939,11 @@ func TestChangeRequestIntegration_PatchCustomerFlagContactOnDifferentProjectCann
 	if err == nil {
 		t.Fatal("PatchChangeRequest(isCustomerApproved=true) from a different project's own contact: want error, got nil")
 	}
-	var fe *apierror.ForbiddenError
-	if !errors.As(err, &fe) {
-		t.Fatalf("got %T (%v), want *apierror.ForbiddenError", err, err)
+	// Not a member of the change request's project: it does not exist for them
+	// (404), on a superuser connection as much as under row-level security.
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("got %T (%v), want *apierror.NotFoundError", err, err)
 	}
 
 	var gotApproved *bool
@@ -2878,6 +2988,9 @@ func TestChangeRequestIntegration_PatchCustomerFlagWrongRoleContactForbiddenStat
 	seedProjectContactWithRole(t, pool, crCustomerFlagNoRoleProjectID,
 		crCustomerFlagWrongRoleEmail, "REGISTERED", "SECURITY_CONTACT", "CR Customer Flag Wrong Role Group")
 	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagWrongRoleTestID, "CRCFWRNG01", crCustomerFlagNoRoleProjectID, false, false)
+	// Waiting on the customer, so that the contact (a registered member of the
+	// project) can see the change request and reaches this feature's own check.
+	setCustomerFlagTestState(t, scoped, crCustomerFlagWrongRoleTestID, "CUSTOMER_APPROVAL")
 
 	yes := true
 	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagWrongRoleEmail), crCustomerFlagWrongRoleTestID,
@@ -2947,18 +3060,20 @@ func TestChangeRequestIntegration_PatchCustomerFlagInvitedContactCannotReach(t *
 	if err == nil {
 		t.Fatal("PatchChangeRequest(isCustomerApproved=true) from a still-INVITED PORTAL_USER contact: want error, got nil")
 	}
-	var fe *apierror.ForbiddenError
-	if !errors.As(err, &fe) {
-		t.Fatalf("got %T (%v), want *apierror.ForbiddenError", err, err)
+	// An invited contact is not a member of the project yet: the change request
+	// does not exist for them (404).
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("got %T (%v), want *apierror.NotFoundError", err, err)
 	}
 }
 
 // TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert is the
 // main regression guard for this feature's one-way lock: once either flag
 // is true, a PATCH attempting to set it back to false is always rejected
-// with a ValidationError -- regardless of whether the caller is internal or
-// the same qualifying customer contact that could have set it true in the
-// first place.
+// with a ValidationError -- for an internal caller because staff never write
+// the flags at all, and for the qualifying customer contact because the
+// customer's answer is final once given.
 func TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
@@ -2979,6 +3094,8 @@ func TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert(t *tes
 	seedProjectContactWithRole(t, pool, crCustomerFlagProjectID,
 		crCustomerFlagPortalUserEmail, "REGISTERED", "PORTAL_USER", "CR Customer Flag Portal User Group")
 	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagLockedTestID, "CRCFLOCK01", crCustomerFlagProjectID, true, true)
+	// Scheduled: visible to the contact (legacy), and not waiting on them.
+	setCustomerFlagTestState(t, scoped, crCustomerFlagLockedTestID, "SCHEDULED")
 
 	no := false
 
@@ -2993,14 +3110,19 @@ func TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert(t *tes
 		t.Fatalf("got %T (%v), want *apierror.ValidationError", err, err)
 	}
 
-	// The same qualifying contact that could have set it true: also rejected.
+	// The same qualifying contact: also refused. For a customer false is the
+	// answer "no", which only means something while the change request is in
+	// Customer Review; this record is Scheduled, so it is the stale-approval 409. (The
+	// lock on a record that IS in the right state is asserted by
+	// TestChangeRequestCustomerOutcomeIntegration_PatchRespectsTheFlagLock.)
 	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagPortalUserEmail), crCustomerFlagLockedTestID,
 		domain.PatchChangeRequestRequest{IsCustomerReviewed: &no}, crCustomerFlagPortalUserEmail)
 	if err == nil {
 		t.Fatal("PatchChangeRequest(isCustomerReviewed=false) as the qualifying contact against an already-true record: want error, got nil")
 	}
-	if !errors.As(err, &ve) {
-		t.Fatalf("got %T (%v), want *apierror.ValidationError", err, err)
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("got %T (%v), want *apierror.ConflictError", err, err)
 	}
 
 	var gotApproved, gotReviewed bool
@@ -3013,12 +3135,16 @@ func TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert(t *tes
 	}
 }
 
-// TestChangeRequestIntegration_PatchCustomerFlagFalseToFalseNoOpSucceeds
-// confirms setting an already-false flag to false again is a no-op that
-// always succeeds trivially -- deliberately exercised by a caller who does
-// NOT qualify to grant it (a REGISTERED contact holding no PORTAL_USER
-// role), proving no-op writes need no authorization check at all.
-func TestChangeRequestIntegration_PatchCustomerFlagFalseToFalseNoOpSucceeds(t *testing.T) {
+// TestChangeRequestIntegration_PatchCustomerFlagFalseFromNonContactIsRefused
+// confirms that for an external caller false is not a "no change": it is the
+// customer's answer "no" (rejecting a Customer Approval / Customer Review), so a
+// caller who is not a registered PORTAL_USER contact of the change request's
+// project (here: a REGISTERED contact holding only SECURITY_CONTACT) is refused
+// even for false -- the old "a write that changes nothing needs no
+// authorization" no longer applies to a customer. An internal caller's no-op
+// false -> false is unchanged (see TestChangeRequestIntegration_PatchCustomerFlag
+// InternalCallerCanSetBoth for the internal path).
+func TestChangeRequestIntegration_PatchCustomerFlagFalseFromNonContactIsRefused(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
 		t.Skip("CHANGE_REQUEST_TEST_DSN not set")
@@ -3030,6 +3156,7 @@ func TestChangeRequestIntegration_PatchCustomerFlagFalseToFalseNoOpSucceeds(t *t
 	t.Cleanup(pool.Close)
 
 	scoped := repository.NewScoped(pool)
+	sys := repository.WithSystemIdentity(context.Background())
 	repo := repository.NewChangeRequestRepository(scoped)
 
 	seedChangeRequestCustomerFlagAccount(t, pool)
@@ -3037,25 +3164,40 @@ func TestChangeRequestIntegration_PatchCustomerFlagFalseToFalseNoOpSucceeds(t *t
 	seedProjectContactWithRole(t, pool, crCustomerFlagNoRoleProjectID,
 		crCustomerFlagWrongRoleEmail, "REGISTERED", "SECURITY_CONTACT", "CR Customer Flag No-op Wrong Role Group")
 	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagNoOpTestID, "CRCFNOOP01", crCustomerFlagNoRoleProjectID, false, false)
+	// Scheduled: a change request this registered (but never asked) contact can
+	// see, so the request is classified and refused on its own merits.
+	setCustomerFlagTestState(t, scoped, crCustomerFlagNoOpTestID, "SCHEDULED")
 
 	no := false
-	cr, err := repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagWrongRoleEmail), crCustomerFlagNoOpTestID,
+	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagWrongRoleEmail), crCustomerFlagNoOpTestID,
 		domain.PatchChangeRequestRequest{IsCustomerApproved: &no, IsCustomerReviewed: &no}, crCustomerFlagWrongRoleEmail)
-	if err != nil {
-		t.Fatalf("PatchChangeRequest(isCustomerApproved=false, isCustomerReviewed=false) no-op from a non-qualifying contact: %v", err)
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("both outcomes in one customer PATCH: got %T (%v), want *apierror.ValidationError", err, err)
 	}
-	if cr.HasCustomerApproved || cr.HasCustomerReviewed {
-		t.Fatalf("HasCustomerApproved/HasCustomerReviewed after no-op patch = %v/%v, want false/false", cr.HasCustomerApproved, cr.HasCustomerReviewed)
+	_, err = repo.PatchChangeRequest(externalCallerCtx(crCustomerFlagWrongRoleEmail), crCustomerFlagNoOpTestID,
+		domain.PatchChangeRequestRequest{IsCustomerApproved: &no}, crCustomerFlagWrongRoleEmail)
+	var fe *apierror.ForbiddenError
+	if !errors.As(err, &fe) {
+		t.Fatalf("isCustomerApproved=false from a non-qualifying contact: got %T (%v), want *apierror.ForbiddenError", err, err)
+	}
+
+	got, err := repo.GetChangeRequestByID(sys, crCustomerFlagNoOpTestID)
+	if err != nil {
+		t.Fatalf("GetChangeRequestByID: %v", err)
+	}
+	if got.HasCustomerApproved || got.HasCustomerReviewed {
+		t.Fatalf("HasCustomerApproved/HasCustomerReviewed after the refused patches = %v/%v, want false/false", got.HasCustomerApproved, got.HasCustomerReviewed)
 	}
 }
 
-// TestChangeRequestIntegration_PatchCustomerFlagsLockIndependentPerField
-// confirms one field's own lock state has no bearing on the other's: a
-// single PATCH with is_customer_approval_required ALREADY true (so true -> true, a
-// no-op, always allowed) and is_customer_review_required false -> true (the one
-// real gated transition, allowed here since the caller is internal)
-// succeeds as a whole, changing only is_customer_review_required.
-func TestChangeRequestIntegration_PatchCustomerFlagsLockIndependentPerField(t *testing.T) {
+// TestChangeRequestIntegration_PatchCustomerFlagsNeverFromStaffWhateverIsStored
+// confirms the staff refusal does not depend on what the flags already hold: a
+// request that would have been a no-op (true -> true, false -> false), a new
+// stamp (false -> true) or a revert (true -> false) is refused alike, and the
+// stored flags stay exactly as they were. (A no-op used to be accepted: it
+// would have let a client resend a stamp it was no longer allowed to make.)
+func TestChangeRequestIntegration_PatchCustomerFlagsNeverFromStaffWhateverIsStored(t *testing.T) {
 	dsn := os.Getenv("CHANGE_REQUEST_TEST_DSN")
 	if dsn == "" {
 		t.Skip("CHANGE_REQUEST_TEST_DSN not set")
@@ -3072,19 +3214,27 @@ func TestChangeRequestIntegration_PatchCustomerFlagsLockIndependentPerField(t *t
 
 	seedChangeRequestCustomerFlagAccount(t, pool)
 	seedChangeRequestCustomerFlagProject(t, pool, crCustomerFlagProjectID, "CRCFPROJ09")
-	seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagIndependentTestID, "CRCFINDP01", crCustomerFlagProjectID, true, false)
 
-	yes := true
-	cr, err := repo.PatchChangeRequest(sys, crCustomerFlagIndependentTestID,
-		domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, IsCustomerReviewed: &yes}, "cr-customer-flag-test")
-	if err != nil {
-		t.Fatalf("PatchChangeRequest(isCustomerApproved=true [no-op], isCustomerReviewed=true [new]): %v", err)
-	}
-	if !cr.HasCustomerApproved {
-		t.Error("HasCustomerApproved after patch = false, want unchanged true")
-	}
-	if !cr.HasCustomerReviewed {
-		t.Error("HasCustomerReviewed after patch = false, want true")
+	for _, stored := range []struct{ approved, reviewed bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		seedChangeRequestForCustomerFlagTest(t, scoped, crCustomerFlagIndependentTestID, "CRCFINDP01", crCustomerFlagProjectID, stored.approved, stored.reviewed)
+		before := snapshotCustomerFlagRow(t, scoped, crCustomerFlagIndependentTestID)
+		for _, v := range []bool{true, false} {
+			v := v
+			for what, req := range map[string]domain.PatchChangeRequestRequest{
+				"isCustomerApproved": {IsCustomerApproved: &v},
+				"isCustomerReviewed": {IsCustomerReviewed: &v},
+				"both":               {IsCustomerApproved: &v, IsCustomerReviewed: &v},
+			} {
+				_, err := repo.PatchChangeRequest(sys, crCustomerFlagIndependentTestID, req, "cr-customer-flag-test")
+				var ve *apierror.ValidationError
+				if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "on the customer's behalf") {
+					t.Fatalf("stored %v/%v, staff sending %s=%v: err = %v (%T), want the on-the-customer's-behalf refusal", stored.approved, stored.reviewed, what, v, err, err)
+				}
+			}
+		}
+		if after := snapshotCustomerFlagRow(t, scoped, crCustomerFlagIndependentTestID); after != before {
+			t.Fatalf("stored %v/%v: the refused PATCHes changed the row: before %q, after %q", stored.approved, stored.reviewed, before, after)
+		}
 	}
 }
 
@@ -3271,6 +3421,8 @@ type crFlow struct {
 	scoped *repository.Scoped
 	repo   repository.ChangeRequestRepository
 	sys    context.Context
+	// scopeSeeded: seedScope ran for this flow (customerProject).
+	scopeSeeded bool
 }
 
 func newCRFlow(t *testing.T) *crFlow {
@@ -3545,7 +3697,7 @@ func TestChangeRequestFlowIntegration_NormalFullLifecycle(t *testing.T) {
 	assertApprovers(t, "peer stage", stages[0].approvers, map[string]string{
 		crFlowCreatorID: "CANCELLED", crFlowPeerAID: "REQUESTED", crFlowPeerBID: "REQUESTED", crFlowOutsiderID: "REQUESTED",
 	})
-	assertStates(t, "legalNextStates(Assess)", f.legal(id), "authorize", "canceled")
+	assertStates(t, "legalNextStates(Assess)", f.legal(id), "canceled")
 
 	// There is no manual shortcut past the approvals.
 	for _, target := range []domain.ChangeRequestState{domain.ChangeRequestStateScheduled, domain.ChangeRequestStateAuthorize} {
@@ -4044,7 +4196,7 @@ func TestChangeRequestFlowIntegration_AllExternalGroupsAreRefusedClearly(t *test
 		f.execSQL(`UPDATE "user" SET user_type = 'EXTERNAL'::user_type_enum WHERE id = $1`, crCABMemberUserID1)
 		err := f.decide(id, crFlowPeerAID, "approved")
 		f.wantValidationError("peer approval into a CAB of customers only", err, `the "CAB Approval" group has no active internal (WSO2) members`)
-		f.expect(id, "after the refused peer approval", "ASSESS", "authorize", "canceled")
+		f.expect(id, "after the refused peer approval", "ASSESS", "canceled")
 	})
 	t.Run("Review", func(t *testing.T) {
 		f := newCRFlow(t)
@@ -4548,12 +4700,118 @@ func TestChangeRequestFlowIntegration_CreateRequiresCreatableType(t *testing.T) 
 
 func boolp(b bool) *bool { return &b }
 
-// createGated is crFlow.create with the creation form's two checkboxes.
-func (f *crFlow) createGated(typ domain.ChangeRequestType, groupID string, approval, review *bool) string {
+// The project of a customer with no registered contacts, for the tests about a
+// change that reaches a customer state with NOBODY to ask: no customer stage is
+// provisioned, and no staff action answers for the customer (the compliance
+// rule), so the change can only be cancelled or re-scheduled. Ticking a box needs
+// a Customer Project since the customer requirements lock (Request Approval is
+// refused without one), so "no customer group" is a project without contacts
+// rather than no project.
+const (
+	crNoContactAccountID = "3bbbbbbb-0000-0000-0000-0000000000a1"
+	crNoContactProjectID = "3bbbbbbb-0000-0000-0000-0000000000a2"
+)
+
+// noContactProject creates that project (once per flow) and removes it on
+// cleanup, after the change requests that use it.
+func (f *crFlow) noContactProject() *string {
+	f.t.Helper()
+	var exists bool
+	if err := f.scoped.QueryRow(f.sys, `SELECT EXISTS (SELECT 1 FROM project WHERE id = $1)`, crNoContactProjectID).Scan(&exists); err != nil {
+		f.t.Fatalf("check the no-contact project: %v", err)
+	}
+	if !exists {
+		exec := func(sql string, args ...any) {
+			f.t.Helper()
+			if _, err := f.scoped.Exec(f.sys, sql, args...); err != nil {
+				f.t.Fatalf("seed the no-contact project (%.60s): %v", sql, err)
+			}
+		}
+		exec(`INSERT INTO account (id, created_on, updated_on, created_by, updated_by, name, number, sf_id)
+		      VALUES ($1, now(), now(), 'cr-flow-test', 'cr-flow-test', 'CR No Contact Account', 'CR-NOCONTACT-ACC', 'CR-NOCONTACT-SF') ON CONFLICT DO NOTHING`, crNoContactAccountID)
+		exec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, sf_id, name, account_id)
+		      VALUES ($1, now(), now(), 'cr-flow-test', 'cr-flow-test', 'CRNOCONTACT', 'CRNOCONTACT', 'CRNOCONTACT', $2) ON CONFLICT DO NOTHING`, crNoContactProjectID, crNoContactAccountID)
+		f.t.Cleanup(func() {
+			_, _ = f.scoped.Exec(f.sys, `DELETE FROM work_item WHERE subject = $1`, crFlowSubject)
+			_, _ = f.scoped.Exec(f.sys, `DELETE FROM project WHERE id = $1`, crNoContactProjectID)
+			_, _ = f.scoped.Exec(f.sys, `DELETE FROM account WHERE id = $1`, crNoContactAccountID)
+		})
+	}
+	id := crNoContactProjectID
+	return &id
+}
+
+// customerProject is a Customer Project WITH registered contacts: project A of
+// seedScope, whose Customer Group is Alice and Bob (crScopeUserA1 / A2). A change
+// that ticks a box on it is answered by the customer, as it is in production:
+// entering Customer Approval / Customer Review asks them through a stage, and
+// customerApproves / customerConfirmsReview are their answers.
+func (f *crFlow) customerProject() *string {
+	f.t.Helper()
+	if !f.scopeSeeded {
+		f.seedScope()
+		f.scopeSeeded = true
+	}
+	return sp(crScopeProjectA)
+}
+
+// createAnswerable is crFlow.create with the creation form's two checkboxes on a
+// project whose contacts can answer (see customerProject).
+func (f *crFlow) createAnswerable(typ domain.ChangeRequestType, groupID string, approval, review *bool) string {
 	f.t.Helper()
 	g := groupID
 	resp, err := f.repo.CreateChangeRequest(f.sys, domain.CreateChangeRequestRequest{
-		Subject: crFlowSubject, Type: &typ, GroupID: &g,
+		Subject: crFlowSubject, Type: &typ, GroupID: &g, ProjectID: f.customerProject(),
+		CustomerApprovalRequired: approval, CustomerReviewRequired: review,
+	}, crFlowEmail(crFlowCreatorID))
+	if err != nil {
+		f.t.Fatalf("CreateChangeRequest(%s): %v", typ, err)
+	}
+	if _, err := f.scoped.Exec(f.sys, `UPDATE change_request SET requested_by_user_id = $1::uuid WHERE id = $2`, crFlowCreatorID, resp.ChangeRequest.ID); err != nil {
+		f.t.Fatalf("set requested_by: %v", err)
+	}
+	return resp.ChangeRequest.ID
+}
+
+// customerApproves is the CUSTOMER's own approval: Alice, a registered contact
+// asked in the live Customer Approval stage, approving it in the customer portal
+// (PATCH {isCustomerApproved: true} as an external caller). It is the only way a
+// change leaves Customer Approval for Scheduled.
+func (f *crFlow) customerApproves(id string) {
+	f.t.Helper()
+	if _, err := f.approveAs(id, crScopeUserA1, true); err != nil {
+		f.t.Fatalf("the customer's approval: %v", err)
+	}
+}
+
+// customerConfirmsReview is the customer's own review, the only way a change
+// leaves Customer Review for Closed.
+func (f *crFlow) customerConfirmsReview(id string) {
+	f.t.Helper()
+	if _, err := f.reviewAs(id, crScopeUserA1, true); err != nil {
+		f.t.Fatalf("the customer's review: %v", err)
+	}
+}
+
+// internalStages counts the change's approval stages that are not the customer's.
+func (f *crFlow) internalStages(id string) int {
+	f.t.Helper()
+	return len(f.stages(id)) - len(f.customerStages(id))
+}
+
+// createGated is crFlow.create with the creation form's two checkboxes. A change
+// that ticks a box is put on the project with no registered contacts (see
+// noContactProject): nobody is asked through a stage, and no staff action can
+// answer for the customer. See createAnswerable for a change the customer answers.
+func (f *crFlow) createGated(typ domain.ChangeRequestType, groupID string, approval, review *bool) string {
+	f.t.Helper()
+	g := groupID
+	var project *string
+	if (approval != nil && *approval) || (review != nil && *review) {
+		project = f.noContactProject()
+	}
+	resp, err := f.repo.CreateChangeRequest(f.sys, domain.CreateChangeRequestRequest{
+		Subject: crFlowSubject, Type: &typ, GroupID: &g, ProjectID: project,
 		CustomerApprovalRequired: approval, CustomerReviewRequired: review,
 	}, crFlowEmail(crFlowCreatorID))
 	if err != nil {
@@ -4646,7 +4904,7 @@ func TestChangeRequestFlowIntegration_NormalCustomerGateLifecycles(t *testing.T)
 			f := newCRFlow(t)
 			f.seedAssignedGroup()
 			seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1, crCABMemberUserID2)
-			id := f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(tc.approval), boolp(tc.review))
+			id := f.createAnswerable(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(tc.approval), boolp(tc.review))
 
 			// The checkboxes are stored and read back as ticked.
 			cr := f.get(id)
@@ -4656,21 +4914,25 @@ func TestChangeRequestFlowIntegration_NormalCustomerGateLifecycles(t *testing.T)
 			f.expect(id, "after create", "NEW", "assess", "canceled")
 
 			f.requestApproval(id)
-			f.expect(id, "after Request Approval", "ASSESS", "authorize", "canceled")
+			f.expect(id, "after Request Approval", "ASSESS", "canceled")
 
 			// Both gates sit AFTER the internal approvals: nothing short-circuits them.
 			f.approvePeerAndCAB(id, map[bool]string{true: "CUSTOMER_APPROVAL", false: "SCHEDULED"}[tc.approval],
-				map[bool][]string{true: {"scheduled", "authorize", "canceled"}, false: {"implement", "canceled"}}[tc.approval]...)
+				map[bool][]string{true: {"authorize", "canceled"}, false: {"implement", "canceled"}}[tc.approval]...)
 			if approved, _ := f.customerOutcome(id); approved {
 				t.Fatal("is_customer_approval_required is already true before the customer approved anything")
 			}
 
 			if tc.approval {
-				// The customer's approval is recorded by the human action
-				// "scheduled", which is legal only here.
-				f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
+				// Only the customer's own approval schedules the change: the
+				// manual "scheduled" is refused, and Alice approving is not.
+				_, err := f.patchState(id, domain.ChangeRequestStateScheduled)
+				f.wantValidationError("manual scheduled from Customer Approval", err, "can only be given by the customer in the Customer Portal")
+				f.expect(id, "after the refused manual scheduled", "CUSTOMER_APPROVAL", "authorize", "canceled")
+				f.customerApproves(id)
+				f.expect(id, "after the customer approved", "SCHEDULED", "implement", "canceled")
 				if approved, _ := f.customerOutcome(id); !approved {
-					t.Fatal("is_customer_approval_required = false after recording the customer's approval, want true")
+					t.Fatal("is_customer_approval_required = false after the customer's approval, want true")
 				}
 			} else if approved, _ := f.customerOutcome(id); approved {
 				t.Fatal("is_customer_approval_required = true although no customer approval was required or given")
@@ -4683,13 +4945,18 @@ func TestChangeRequestFlowIntegration_NormalCustomerGateLifecycles(t *testing.T)
 				_, err := f.patchState(id, domain.ChangeRequestStateClosed)
 				f.wantValidationError("closed from review (customer review required)", err, "customer review is required")
 				f.expect(id, "after refused close", "REVIEW", "customer_review", "rollback", "canceled")
-				f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "closed", "rollback", "canceled")
+				// The customer is being asked (a live stage): staff may only cancel.
+				f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "canceled")
 				if _, reviewed := f.customerOutcome(id); reviewed {
 					t.Fatal("is_customer_review_required is already true before the customer review was recorded")
 				}
-				f.step(id, domain.ChangeRequestStateClosed, "CLOSED")
+				_, err = f.patchState(id, domain.ChangeRequestStateClosed)
+				f.wantValidationError("manual closed from Customer Review", err, "can only be given by the customer in the Customer Portal")
+				f.expect(id, "after the refused manual closed", "CUSTOMER_REVIEW", "canceled")
+				f.customerConfirmsReview(id)
+				f.expect(id, "after the customer's review", "CLOSED")
 				if _, reviewed := f.customerOutcome(id); !reviewed {
-					t.Fatal("is_customer_review_required = false after closing from customer_review, want true")
+					t.Fatal("is_customer_review_required = false after the customer's review, want true")
 				}
 			} else {
 				f.step(id, domain.ChangeRequestStateReview, "REVIEW", "closed", "rollback", "canceled")
@@ -4705,23 +4972,33 @@ func TestChangeRequestFlowIntegration_NormalCustomerGateLifecycles(t *testing.T)
 			if approved, _ := f.customerOutcome(id); approved != tc.approval {
 				t.Fatalf("is_customer_approval_required at the end = %v, want %v", approved, tc.approval)
 			}
-			// The two internal approval stages (peer, CAB) are untouched by the
-			// customer gates: Customer Approval is a state, not an approval stage.
-			if n := len(f.stages(id)); n != 3 {
-				t.Fatalf("stages at the end = %d, want 3 (peer, CAB, review)", n)
+			// The three internal approval stages (peer, CAB, review) are untouched
+			// by the customer gates; the customer's own stages come on top.
+			if n := f.internalStages(id); n != 3 {
+				t.Fatalf("internal stages at the end = %d, want 3 (peer, CAB, review)", n)
+			}
+			wantCustomer := 0
+			if tc.approval {
+				wantCustomer++
+			}
+			if tc.review {
+				wantCustomer++
+			}
+			if n := len(f.customerStages(id)); n != wantCustomer {
+				t.Fatalf("customer stages at the end = %d, want %d", n, wantCustomer)
 			}
 		})
 	}
 }
 
 // Emergency with Customer Approval ticked: ECAB approval moves the change to
-// Customer Approval (not Scheduled); recording the customer's approval then
-// schedules it. Unticked is covered by EmergencyLifecycle.
+// Customer Approval (not Scheduled); the customer's own approval then schedules
+// it. Unticked is covered by EmergencyLifecycle.
 func TestChangeRequestFlowIntegration_EmergencyCustomerApprovalLifecycle(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
 	seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
-	id := f.createGated(domain.ChangeRequestTypeEmergency, crFlowGroupID, boolp(true), nil)
+	id := f.createAnswerable(domain.ChangeRequestTypeEmergency, crFlowGroupID, boolp(true), nil)
 
 	f.expect(id, "after create", "NEW", "assess", "canceled")
 	f.requestApproval(id)
@@ -4735,14 +5012,15 @@ func TestChangeRequestFlowIntegration_EmergencyCustomerApprovalLifecycle(t *test
 	if err := f.decide(id, crECABMemberUserID, "approved"); err != nil {
 		t.Fatalf("ECAB approval: %v", err)
 	}
-	f.expect(id, "after ECAB approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.expect(id, "after ECAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	if approved, _ := f.customerOutcome(id); approved {
-		t.Fatal("is_customer_approval_required is true before the customer's approval was recorded")
+		t.Fatal("is_customer_approval_required is true before the customer's approval was given")
 	}
 
-	f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
+	f.customerApproves(id)
+	f.expect(id, "after the customer's approval", "SCHEDULED", "implement", "canceled")
 	if approved, _ := f.customerOutcome(id); !approved {
-		t.Fatal("is_customer_approval_required = false after recording the customer's approval")
+		t.Fatal("is_customer_approval_required = false after the customer's approval")
 	}
 	f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "closed", "rollback", "canceled") // review not ticked: straight to Closed
@@ -4755,30 +5033,38 @@ func TestChangeRequestFlowIntegration_EmergencyCustomerApprovalLifecycle(t *test
 func TestChangeRequestFlowIntegration_StandardCustomerApprovalLifecycle(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
-	id := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), boolp(true))
+	id := f.createAnswerable(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), boolp(true))
 
 	f.expect(id, "after create", "NEW", "assess", "canceled")
 	f.requestApproval(id)
-	f.expect(id, "after Request Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
-	if n := len(f.stages(id)); n != 0 {
-		t.Fatalf("standard change has %d approval stages, want none", n)
+	f.expect(id, "after Request Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	if n := f.internalStages(id); n != 0 {
+		t.Fatalf("standard change has %d internal approval stages, want none", n)
+	}
+	if n := len(f.customerStages(id)); n != 1 {
+		t.Fatalf("standard change has %d customer stages in Customer Approval, want the customer's one", n)
 	}
 	// A resend of Request Approval while it waits for the customer is idempotent.
 	if _, err := f.patchState(id, domain.ChangeRequestStateAssess); err != nil {
 		t.Fatalf("resent Request Approval: %v", err)
 	}
-	f.expect(id, "after resent Request Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.expect(id, "after resent Request Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	if n := len(f.customerStages(id)); n != 1 {
+		t.Fatalf("the resent Request Approval changed the customer stages: %d", n)
+	}
 
-	f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
+	f.customerApproves(id)
+	f.expect(id, "after the customer's approval", "SCHEDULED", "implement", "canceled")
 	if approved, _ := f.customerOutcome(id); !approved {
-		t.Fatal("is_customer_approval_required = false after recording the customer's approval")
+		t.Fatal("is_customer_approval_required = false after the customer's approval")
 	}
 	f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "customer_review", "rollback", "canceled")
-	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "closed", "rollback", "canceled")
-	f.step(id, domain.ChangeRequestStateClosed, "CLOSED")
+	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "canceled")
+	f.customerConfirmsReview(id)
+	f.expect(id, "after the customer's review", "CLOSED")
 	if _, reviewed := f.customerOutcome(id); !reviewed {
-		t.Fatal("is_customer_review_required = false after closing from customer_review")
+		t.Fatal("is_customer_review_required = false after the customer's review")
 	}
 }
 
@@ -4788,21 +5074,32 @@ func TestChangeRequestFlowIntegration_StandardCustomerApprovalLifecycle(t *testi
 func TestChangeRequestFlowIntegration_StandardCustomerApprovalTickedWithRequestApproval(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
+	f.customerProject() // seeded up front: seeding it clears the flow's change requests
 
+	// Request Approval needs a Customer Project for a box that is ticked (the
+	// project is frozen by it), and a project somebody can be asked on (else the
+	// change would reach Customer Approval with nobody to answer): refused for no
+	// project and for the project with no contacts, accepted for project A.
 	together := f.create(domain.ChangeRequestTypeStandard, crFlowGroupID)
 	st := domain.ChangeRequestStateAssess
-	if _, err := f.patch(together, domain.PatchChangeRequestRequest{State: &st, CustomerApprovalRequired: boolp(true)}); err != nil {
-		t.Fatalf("PATCH {state: assess, customerApprovalRequired: true}: %v", err)
+	_, err := f.patch(together, domain.PatchChangeRequestRequest{State: &st, CustomerApprovalRequired: boolp(true)})
+	f.wantExact("PATCH {state: assess, customerApprovalRequired: true} on a change with no Customer Project", err, lockMsgRequestNoProj)
+	f.expect(together, "after the refused combined PATCH", "NEW", "assess", "canceled")
+	_, err = f.patch(together, domain.PatchChangeRequestRequest{State: &st, CustomerApprovalRequired: boolp(true), ProjectID: f.noContactProject()})
+	f.wantExact("PATCH {state: assess, customerApprovalRequired: true, projectId} with a project nobody can be asked on", err, nobodyMsgApproval)
+	f.expect(together, "after the second refused combined PATCH", "NEW", "assess", "canceled")
+	if _, err := f.patch(together, domain.PatchChangeRequestRequest{State: &st, CustomerApprovalRequired: boolp(true), ProjectID: f.customerProject()}); err != nil {
+		t.Fatalf("PATCH {state: assess, customerApprovalRequired: true, projectId}: %v", err)
 	}
-	f.expect(together, "after the combined PATCH", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.expect(together, "after the combined PATCH", "CUSTOMER_APPROVAL", "authorize", "canceled")
 
 	separate := f.create(domain.ChangeRequestTypeStandard, crFlowGroupID)
-	if _, err := f.patch(separate, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)}); err != nil {
+	if _, err := f.patch(separate, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true), ProjectID: f.customerProject()}); err != nil {
 		t.Fatalf("PATCH {customerApprovalRequired: true}: %v", err)
 	}
 	f.expect(separate, "after ticking the box", "NEW", "assess", "canceled")
 	f.requestApproval(separate)
-	f.expect(separate, "after Request Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.expect(separate, "after Request Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 }
 
 // The checkboxes are accepted on create (both create paths) and PATCH, and
@@ -4863,12 +5160,16 @@ func TestChangeRequestFlowIntegration_CustomerGateFlagsAcceptedAndReturned(t *te
 	}
 }
 
-// customerApprovalRequired is editable while the change is New, Assess or
-// Authorize -- and what it is at CAB approval decides the cascade. After that
-// the gate has been passed and an edit is refused with a clear 400.
+// customerApprovalRequired is free in New, and ADD-ONLY from Request Approval on
+// (the customer requirements lock): ticking is still accepted through Assess and
+// Authorize -- what it is at CAB approval decides the cascade -- and refused with
+// a clear 400 once the gate has been passed; unticking is refused in every state
+// after New. (Before the lock it could be unticked until the gate; the old
+// assertions of that are what this replaces.)
 func TestChangeRequestFlowIntegration_CustomerApprovalRequiredEditableUntilGatePassed(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
+	f.customerProject() // seeded up front: seeding it clears the flow's change requests
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1)
 	id := f.create(domain.ChangeRequestTypeNormal, crFlowGroupID)
 
@@ -4876,48 +5177,59 @@ func TestChangeRequestFlowIntegration_CustomerApprovalRequiredEditableUntilGateP
 		_, err := f.patch(id, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(v)})
 		return err
 	}
-	if err := set(true); err != nil {
-		t.Fatalf("tick in New: %v", err)
+	// New: both ways, with or without a project.
+	for _, v := range []bool{true, false, true} {
+		if err := set(v); err != nil {
+			t.Fatalf("set %v in New: %v", v, err)
+		}
+	}
+	// Ticked with no project: Request Approval is refused (nobody to ask), and
+	// the project, set in New, lets it through.
+	st := domain.ChangeRequestStateAssess
+	_, err := f.patch(id, domain.PatchChangeRequestRequest{State: &st})
+	f.wantValidationError("Request Approval with the box ticked and no project", err, "no Customer Project is set")
+	f.expect(id, "after the refused Request Approval", "NEW", "assess", "canceled")
+	if _, err := f.patch(id, domain.PatchChangeRequestRequest{ProjectID: f.customerProject()}); err != nil {
+		t.Fatalf("set the project in New: %v", err)
 	}
 	f.requestApproval(id)
-	if err := set(false); err != nil {
-		t.Fatalf("untick in Assess: %v", err)
-	}
+
+	// Assess: ticked stays ticked (resending it is a no-op), unticking is refused.
 	if err := set(true); err != nil {
-		t.Fatalf("tick in Assess: %v", err)
+		t.Fatalf("resend the ticked box in Assess: %v", err)
 	}
+	f.wantValidationError("untick in Assess", set(false), "customerApprovalRequired can no longer be turned off")
 	if err := f.decide(id, crFlowPeerAID, "approved"); err != nil {
 		t.Fatalf("peer approval: %v", err)
 	}
 	f.expect(id, "after peer approval", "AUTHORIZE", "canceled")
-	if err := set(false); err != nil {
-		t.Fatalf("untick in Authorize: %v", err)
-	}
-	if err := set(true); err != nil {
-		t.Fatalf("tick in Authorize: %v", err)
+	f.wantValidationError("untick in Authorize", set(false), "customerApprovalRequired can no longer be turned off")
+	if !f.get(id).CustomerApprovalRequired {
+		t.Fatal("customerApprovalRequired changed although the edit was refused")
 	}
 
 	// The value at CAB approval decides: ticked -> Customer Approval.
 	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
 		t.Fatalf("CAB approval: %v", err)
 	}
-	f.expect(id, "after CAB approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.expect(id, "after CAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 
 	// The gate has been passed: refused, state and flag unchanged.
-	f.wantValidationError("untick in Customer Approval", set(false), "customerApprovalRequired can no longer be changed")
+	f.wantValidationError("untick in Customer Approval", set(false), "customerApprovalRequired can no longer be turned off")
 	if !f.get(id).CustomerApprovalRequired {
 		t.Fatal("customerApprovalRequired changed although the edit was refused")
 	}
-	f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
-	f.wantValidationError("untick in Scheduled", set(false), "customerApprovalRequired can no longer be changed")
+	f.customerApproves(id)
+	f.expect(id, "after the customer's approval", "SCHEDULED", "implement", "canceled")
+	f.wantValidationError("untick in Scheduled", set(false), "customerApprovalRequired can no longer be turned off")
 	// Resending the stored value is not an edit.
 	if err := set(true); err != nil {
 		t.Fatalf("resending the stored value after the gate: %v", err)
 	}
 	// ... and the refusal is atomic: nothing else in the same PATCH was written.
 	title := "should not be written"
-	_, err := f.patch(id, domain.PatchChangeRequestRequest{Title: &title, CustomerApprovalRequired: boolp(false)})
-	f.wantValidationError("title + untick in Scheduled", err, "can no longer be changed")
+	_, err = f.patch(id, domain.PatchChangeRequestRequest{Title: &title, CustomerApprovalRequired: boolp(false)})
+	f.wantValidationError("title + untick in Scheduled", err, "can no longer be turned off")
 	var subject string
 	if err := f.scoped.QueryRow(f.sys, `SELECT subject FROM work_item WHERE id = $1`, id).Scan(&subject); err != nil {
 		t.Fatalf("read subject: %v", err)
@@ -4926,69 +5238,104 @@ func TestChangeRequestFlowIntegration_CustomerApprovalRequiredEditableUntilGateP
 		t.Fatalf("subject = %q after a refused PATCH, want it untouched (%q)", subject, crFlowSubject)
 	}
 
-	// Unticked at CAB approval: straight to Scheduled.
+	// A box that was NOT ticked can still be ticked in Assess / Authorize (a peer
+	// finds the customer must approve), and it then decides the cascade; unticked
+	// at CAB approval it is straight to Scheduled.
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1)
 	id2 := f.create(domain.ChangeRequestTypeNormal, crFlowGroupID)
-	if err := func() error {
-		_, err := f.patch(id2, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)})
-		return err
-	}(); err != nil {
-		t.Fatalf("tick: %v", err)
-	}
-	if _, err := f.patch(id2, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(false)}); err != nil {
-		t.Fatalf("untick: %v", err)
+	if _, err := f.patch(id2, domain.PatchChangeRequestRequest{ProjectID: f.noContactProject()}); err != nil {
+		t.Fatalf("set the project: %v", err)
 	}
 	f.requestApproval(id2)
-	f.approvePeerAndCAB(id2, "SCHEDULED", "implement", "canceled")
+	// The project has nobody to ask, so the box cannot be turned on (the change would
+	// reach Customer Approval with nobody to answer)...
+	_, err = f.patch(id2, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)})
+	f.wantExact("tick in Assess on a project nobody can be asked on", err, nobodyMsgApproval)
+	// ...a project with contacts is what lets it through, and the project is frozen
+	// by Request Approval, so this is a change that was on project A from New.
+	id2 = f.create(domain.ChangeRequestTypeNormal, crFlowGroupID)
+	if _, err := f.patch(id2, domain.PatchChangeRequestRequest{ProjectID: f.customerProject()}); err != nil {
+		t.Fatalf("set the project: %v", err)
+	}
+	f.requestApproval(id2)
+	if _, err := f.patch(id2, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)}); err != nil {
+		t.Fatalf("tick in Assess: %v", err)
+	}
+	if err := f.decide(id2, crFlowPeerAID, "approved"); err != nil {
+		t.Fatalf("peer approval: %v", err)
+	}
+	f.expect(id2, "after peer approval", "AUTHORIZE", "canceled")
+	if err := f.decide(id2, crCABMemberUserID1, "approved"); err != nil {
+		t.Fatalf("CAB approval: %v", err)
+	}
+	f.expect(id2, "after CAB approval of a box ticked in Assess", "CUSTOMER_APPROVAL", "authorize", "canceled")
+
+	id3 := f.create(domain.ChangeRequestTypeNormal, crFlowGroupID)
+	f.requestApproval(id3)
+	f.approvePeerAndCAB(id3, "SCHEDULED", "implement", "canceled")
+	// Past the gate even ticking is refused, with the gate's own message.
+	_, err = f.patch(id3, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)})
+	f.wantValidationError("tick in Scheduled", err, "customerApprovalRequired can no longer be changed")
 }
 
-// customerReviewRequired is editable until the change leaves Review -- it
-// decides what Review offers -- and refused afterwards.
+// customerReviewRequired is free in New and ADD-ONLY afterwards -- it decides
+// what Review offers, and ticking it stays possible until the change leaves
+// Review (a project is needed once approval has been requested) -- and refused
+// from Customer Review on; unticking is refused in every state after New.
 func TestChangeRequestFlowIntegration_CustomerReviewRequiredEditableUntilReviewLeft(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
+	f.customerProject() // seeded up front: seeding it clears the flow's change requests
 	id := f.create(domain.ChangeRequestTypeStandard, crFlowGroupID)
 	set := func(v bool) error {
 		_, err := f.patch(id, domain.PatchChangeRequestRequest{CustomerReviewRequired: boolp(v)})
 		return err
 	}
-	for _, step := range []struct {
-		state domain.ChangeRequestState // "" = stay
-	}{{""}, {domain.ChangeRequestStateAssess}, {domain.ChangeRequestStateImplement}} {
-		if step.state != "" {
-			if _, err := f.patchState(id, step.state); err != nil {
-				t.Fatalf("PATCH state %s: %v", step.state, err)
-			}
+	// New: both ways, no project needed to tick it.
+	for _, v := range []bool{true, false, true, false} {
+		if err := set(v); err != nil {
+			t.Fatalf("set %v in New: %v", v, err)
 		}
-		if err := set(true); err != nil {
-			t.Fatalf("tick in %s: %v", f.state(id), err)
-		}
-		if err := set(false); err != nil {
-			t.Fatalf("untick in %s: %v", f.state(id), err)
-		}
+	}
+	// After New ticking needs a Customer Project, which can no longer be set:
+	// this change has none, so the add is refused...
+	f.requestApproval(id)
+	f.expect(id, "after Request Approval (nothing ticked, no project needed)", "SCHEDULED", "implement", "canceled")
+	f.wantValidationError("tick on a change with no project", func() error { return set(true) }(), "customerReviewRequired cannot be turned on")
+	f.wantValidationError("the project cannot be set after New", func() error {
+		_, err := f.patch(id, domain.PatchChangeRequestRequest{ProjectID: f.noContactProject()})
+		return err
+	}(), "projectId can no longer be changed")
+
+	// ... and a change that has one can tick it through Review, once.
+	id = f.create(domain.ChangeRequestTypeStandard, crFlowGroupID)
+	if _, err := f.patch(id, domain.PatchChangeRequestRequest{ProjectID: f.customerProject()}); err != nil {
+		t.Fatalf("set the project in New: %v", err)
+	}
+	f.requestApproval(id)
+	f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
+	if err := set(true); err != nil {
+		t.Fatalf("tick in Implement: %v", err)
+	}
+	f.wantValidationError("untick in Implement", set(false), "customerReviewRequired can no longer be turned off")
+
+	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "customer_review", "rollback", "canceled")
+	// Ticked stays ticked in Review, and Review offers Customer Review.
+	f.wantValidationError("untick in Review", set(false), "customerReviewRequired can no longer be turned off")
+	f.expect(id, "after the refused untick in Review", "REVIEW", "customer_review", "rollback", "canceled")
+	if err := set(true); err != nil {
+		t.Fatalf("resend the ticked box in Review: %v", err)
 	}
 
-	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "closed", "rollback", "canceled")
-	// Still editable in Review, and it flips what Review offers.
-	if err := set(true); err != nil {
-		t.Fatalf("tick in Review: %v", err)
-	}
-	f.expect(id, "after ticking in Review", "REVIEW", "customer_review", "rollback", "canceled")
-	if err := set(false); err != nil {
-		t.Fatalf("untick in Review: %v", err)
-	}
-	f.expect(id, "after unticking in Review", "REVIEW", "closed", "rollback", "canceled")
-	if err := set(true); err != nil {
-		t.Fatalf("tick in Review (again): %v", err)
-	}
-
-	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "closed", "rollback", "canceled")
-	f.wantValidationError("untick in Customer Review", set(false), "customerReviewRequired can no longer be changed")
+	// The customer is asked (a live stage): staff may only cancel.
+	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "canceled")
+	f.wantValidationError("untick in Customer Review", set(false), "customerReviewRequired can no longer be turned off")
 	if err := set(true); err != nil {
 		t.Fatalf("resending the stored value: %v", err)
 	}
-	f.step(id, domain.ChangeRequestStateClosed, "CLOSED")
-	f.wantValidationError("untick in Closed", set(false), "customerReviewRequired can no longer be changed")
+	f.customerConfirmsReview(id)
+	f.expect(id, "after the customer's review", "CLOSED")
+	f.wantValidationError("untick in Closed", set(false), "customerReviewRequired can no longer be turned off")
 	f.wantValidationError("tick approval in Closed", func() error {
 		_, err := f.patch(id, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(true)})
 		return err
@@ -4996,14 +5343,34 @@ func TestChangeRequestFlowIntegration_CustomerReviewRequiredEditableUntilReviewL
 	if !f.get(id).CustomerReviewRequired {
 		t.Fatal("customerReviewRequired changed although the edit was refused")
 	}
+
+	// A box that was not ticked can still be ticked while the change is in Review,
+	// and Review then offers Customer Review.
+	other := f.create(domain.ChangeRequestTypeStandard, crFlowGroupID)
+	if _, err := f.patch(other, domain.PatchChangeRequestRequest{ProjectID: f.customerProject()}); err != nil {
+		t.Fatalf("set the project: %v", err)
+	}
+	f.requestApproval(other)
+	f.step(other, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
+	f.step(other, domain.ChangeRequestStateReview, "REVIEW", "closed", "rollback", "canceled")
+	if _, err := f.patch(other, domain.PatchChangeRequestRequest{CustomerReviewRequired: boolp(true)}); err != nil {
+		t.Fatalf("tick in Review: %v", err)
+	}
+	f.expect(other, "after ticking in Review", "REVIEW", "customer_review", "rollback", "canceled")
+	f.step(other, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "canceled")
+	f.customerConfirmsReview(other)
+	f.expect(other, "after the customer's review", "CLOSED")
 }
 
-// Unticking Customer Review in the same PATCH that closes a Review lets the
-// close through; closing a required Review without unticking is refused.
+// A required review cannot be skipped by closing a Review: closing from Review is
+// refused while customerReviewRequired is set, and the box cannot be unticked in
+// the same PATCH (or any other) to let it through -- the way on is Customer
+// Review. (Unticking Customer Review in the PATCH that closes used to be the
+// way out; the customer requirements lock removed it.)
 func TestChangeRequestFlowIntegration_CloseFromReviewHonoursTheFlagInTheSamePatch(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
-	id := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, nil, boolp(true))
+	id := f.createAnswerable(domain.ChangeRequestTypeStandard, crFlowGroupID, nil, boolp(true))
 	f.requestApproval(id)
 	f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "customer_review", "rollback", "canceled")
@@ -5013,18 +5380,27 @@ func TestChangeRequestFlowIntegration_CloseFromReviewHonoursTheFlagInTheSamePatc
 	f.wantValidationError("close a review that requires the customer", err, "customer review is required")
 	f.expect(id, "after the refused close", "REVIEW", "customer_review", "rollback", "canceled")
 
-	if _, err := f.patch(id, domain.PatchChangeRequestRequest{State: &closed, CustomerReviewRequired: boolp(false)}); err != nil {
-		t.Fatalf("PATCH {state: closed, customerReviewRequired: false}: %v", err)
+	_, err = f.patch(id, domain.PatchChangeRequestRequest{State: &closed, CustomerReviewRequired: boolp(false)})
+	f.wantValidationError("close and untick in one PATCH", err, "customerReviewRequired can no longer be turned off")
+	f.expect(id, "after the refused close-and-untick", "REVIEW", "customer_review", "rollback", "canceled")
+	if cr := f.get(id); !cr.CustomerReviewRequired {
+		t.Fatal("customerReviewRequired was unticked by a refused PATCH")
 	}
-	f.expect(id, "after closing with the box unticked", "CLOSED")
-	if _, reviewed := f.customerOutcome(id); reviewed {
-		t.Fatal("is_customer_review_required = true although the change closed straight from Review")
+
+	// The way on is Customer Review, which only the customer's own review closes.
+	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "canceled")
+	f.customerConfirmsReview(id)
+	f.expect(id, "after the customer's review", "CLOSED")
+	if _, reviewed := f.customerOutcome(id); !reviewed {
+		t.Fatal("is_customer_review_required = false after the customer's review")
 	}
 }
 
-// Manual {state: scheduled} is legal ONLY from Customer Approval; from every
-// other state it is refused and nothing changes.
-func TestChangeRequestFlowIntegration_ManualScheduledOnlyFromCustomerApproval(t *testing.T) {
+// Manual {state: scheduled} is refused from every state the approval flow
+// passes through on the way to Scheduled, and nothing changes. (From Customer
+// Approval it is refused too, as the customer's answer: see
+// TestChangeRequestNoBypassIntegration_*.)
+func TestChangeRequestFlowIntegration_ManualScheduledRefusedBeforeCustomerApproval(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1)
@@ -5053,7 +5429,7 @@ func TestChangeRequestFlowIntegration_ManualScheduledOnlyFromCustomerApproval(t 
 		t.Fatalf("CAB approval: %v", err)
 	}
 	f.expect(normal, "after CAB approval (not ticked)", "SCHEDULED", "implement", "canceled")
-	// Scheduled itself: a resent scheduled is not "recording the customer's approval".
+	// Scheduled itself: a resent scheduled is refused as well.
 	refused(normal, "SCHEDULED")
 	f.step(normal, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 	refused(normal, "IMPLEMENT")
@@ -5071,55 +5447,12 @@ func TestChangeRequestFlowIntegration_ManualScheduledOnlyFromCustomerApproval(t 
 	}
 }
 
-// Recording the customer's approval: stamps is_customer_approval_required through the
-// same one-way lock as a direct isCustomerApproved write, refuses a
-// contradictory isCustomerApproved:false, and is blocked while on hold.
-func TestChangeRequestFlowIntegration_CustomerApprovalRecordsTheApproval(t *testing.T) {
-	f := newCRFlow(t)
-	f.seedAssignedGroup()
-	id := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), nil)
-	f.requestApproval(id)
-	f.expect(id, "at Customer Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
-
-	// Contradictory flag in the same PATCH.
-	sched := domain.ChangeRequestStateScheduled
-	_, err := f.patch(id, domain.PatchChangeRequestRequest{State: &sched, IsCustomerApproved: boolp(false)})
-	f.wantValidationError("scheduled + isCustomerApproved false", err, "isCustomerApproved cannot be false")
-	f.expect(id, "after the contradictory PATCH", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
-
-	// On hold blocks the state change like any other.
-	if _, err := f.patch(id, domain.PatchChangeRequestRequest{OnHold: boolp(true)}); err != nil {
-		t.Fatalf("put on hold: %v", err)
-	}
-	_, err = f.patchState(id, domain.ChangeRequestStateScheduled)
-	f.wantValidationError("scheduled while on hold", err, "on hold")
-	f.expect(id, "while on hold", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
-	if approved, _ := f.customerOutcome(id); approved {
-		t.Fatal("is_customer_approval_required stamped by a PATCH that was refused")
-	}
-	// Off hold and approve in one call.
-	if _, err := f.patch(id, domain.PatchChangeRequestRequest{State: &sched, OnHold: boolp(false)}); err != nil {
-		t.Fatalf("take off hold and record the approval: %v", err)
-	}
-	f.expect(id, "after recording the approval", "SCHEDULED", "implement", "canceled")
-	if approved, _ := f.customerOutcome(id); !approved {
-		t.Fatal("is_customer_approval_required = false after recording the customer's approval")
-	}
-
-	// With the explicit flag alongside (true), also fine; a second record is refused as manual scheduled.
-	id2 := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), nil)
-	f.requestApproval(id2)
-	if _, err := f.patch(id2, domain.PatchChangeRequestRequest{State: &sched, IsCustomerApproved: boolp(true)}); err != nil {
-		t.Fatalf("scheduled + isCustomerApproved true: %v", err)
-	}
-	f.expect(id2, "after scheduled + isCustomerApproved", "SCHEDULED", "implement", "canceled")
-}
-
 // The customer declining: Cancel is offered at Customer Approval and works.
 func TestChangeRequestFlowIntegration_CustomerApprovalCanBeCancelled(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
-	id := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), nil)
+	f.customerProject() // seeded up front: seeding it clears the flow's change requests
+	id := f.createAnswerable(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), nil)
 	f.requestApproval(id)
 	f.step(id, domain.ChangeRequestStateCanceled, "CANCELED")
 	if approved, _ := f.customerOutcome(id); approved {
@@ -5132,9 +5465,10 @@ func TestChangeRequestFlowIntegration_CustomerApprovalCanBeCancelled(t *testing.
 func TestChangeRequestFlowIntegration_ApproverRulesHoldWithCustomerGates(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
+	f.customerProject() // seeded up front: seeding it clears the flow's change requests
 	seedExternalGroupMembers(t, f.scoped, crFlowGroupID, crFlowExternalID)
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1)
-	id := f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(true), boolp(true))
+	id := f.createAnswerable(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(true), boolp(true))
 	f.requestApproval(id)
 
 	// The creator cannot approve the peer stage; a customer who is a member of
@@ -5178,7 +5512,8 @@ func TestChangeRequestFlowIntegration_ApproverRulesHoldWithCustomerGates(t *test
 
 // Rows that predate the checkboxes (false/false): approval behaves as before
 // (no customer step), a Review offers Closed directly, and a row already
-// sitting in Customer Approval / Customer Review gets their outgoing moves.
+// sitting in Customer Approval / Customer Review gets exactly the outgoing moves
+// that answer nothing for the customer (never "scheduled" / "closed").
 func TestChangeRequestFlowIntegration_LegacyRowsDefaultToNoCustomerSteps(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
@@ -5192,8 +5527,8 @@ func TestChangeRequestFlowIntegration_LegacyRowsDefaultToNoCustomerSteps(t *test
 		legal []string
 	}{
 		{"REVIEW", []string{"closed", "rollback", "canceled"}},
-		{"CUSTOMER_APPROVAL", []string{"scheduled", "authorize", "canceled"}},
-		{"CUSTOMER_REVIEW", []string{"closed", "rollback", "canceled"}},
+		{"CUSTOMER_APPROVAL", []string{"authorize", "canceled"}},
+		{"CUSTOMER_REVIEW", []string{"rollback", "canceled"}},
 		{"SCHEDULED", []string{"implement", "canceled"}},
 	} {
 		if _, err := f.scoped.Exec(f.sys, `UPDATE change_request SET state = $2::change_request_state_enum WHERE id = $1`, id, tc.state); err != nil {
@@ -5201,11 +5536,17 @@ func TestChangeRequestFlowIntegration_LegacyRowsDefaultToNoCustomerSteps(t *test
 		}
 		f.expect(id, "for a legacy row in "+tc.state, tc.state, tc.legal...)
 	}
-	// A legacy row already in customer_approval can have its approval recorded.
+	// A legacy row already in customer_approval cannot have its approval recorded
+	// by staff either: the customer's own approval is the only way out.
 	if _, err := f.scoped.Exec(f.sys, `UPDATE change_request SET state = 'CUSTOMER_APPROVAL' WHERE id = $1`, id); err != nil {
 		t.Fatalf("seed state: %v", err)
 	}
-	f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
+	_, err := f.patchState(id, domain.ChangeRequestStateScheduled)
+	f.wantValidationError("manual scheduled out of a legacy customer_approval", err, "can only be given by the customer in the Customer Portal")
+	f.expect(id, "after the refused manual scheduled", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	if approved, _ := f.customerOutcome(id); approved {
+		t.Fatal("a refused manual scheduled stamped is_customer_approval_required on a legacy row")
+	}
 }
 
 // Migration 0189 is idempotent: re-running it changes neither the columns nor
@@ -5965,8 +6306,11 @@ func TestChangeRequestScopeIntegration_PatchDeploymentProductsReadOnly(t *testin
 		[]string{crScopeDPProdOne, crScopeDPProdTwo, crScopeDPStageOne, extra})
 }
 
-// The edit window: project, deployments and deployment products
-// change freely through Scheduled and are refused from Implement on; resending
+// The edit window: deployments and deployment products change freely through
+// Scheduled and are refused from Implement on. The Customer Project is stricter
+// since the customer requirements lock: it moves only while the change is New
+// (the window used to be New through Scheduled; see
+// change_request_customer_lock_integration_test.go for the whole rule). Resending
 // the stored values is always accepted; everything else stays editable.
 func TestChangeRequestScopeIntegration_PatchEditWindow(t *testing.T) {
 	for state, open := range map[string]bool{
@@ -5997,6 +6341,11 @@ func TestChangeRequestScopeIntegration_PatchEditWindow(t *testing.T) {
 			}
 			for field, req := range attempts {
 				_, err := f.patch(id, req)
+				// The project is open in New only; the lists stay open until Implement.
+				open := open
+				if field == "projectId" {
+					open = state == "NEW"
+				}
 				if open {
 					if err != nil {
 						t.Fatalf("%s change in %s: %v", field, state, err)
@@ -6419,7 +6768,7 @@ func (f *crFlow) wantRolledBack(id string) {
 		domain.ChangeRequestStateCustomerReview, domain.ChangeRequestStateClosed, domain.ChangeRequestStateCanceled,
 	} {
 		_, err := f.patchState(id, to)
-		f.wantValidationError("PATCH {state: "+string(to)+"} out of rollback", err, "rollback is final")
+		f.wantValidationError("PATCH {state: "+string(to)+"} out of rollback", err, "a change request that is rolled back cannot be moved")
 	}
 	_, err := f.patchState(id, domain.ChangeRequestStateRollback)
 	f.wantValidationError("PATCH {state: rollback} again", err, rollbackOnlyFromReviewMsg)
@@ -6435,8 +6784,9 @@ func TestChangeRequestFlowIntegration_NormalRollbackFromReview(t *testing.T) {
 		t.Run(fmt.Sprintf("customerReviewRequired=%v", review), func(t *testing.T) {
 			f := newCRFlow(t)
 			f.seedAssignedGroup()
+			f.customerProject() // seeded up front: seeding it clears the flow's change requests
 			seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1, crCABMemberUserID2)
-			id := f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, nil, boolp(review))
+			id := f.createAnswerable(domain.ChangeRequestTypeNormal, crFlowGroupID, nil, boolp(review))
 			f.expect(id, "after create", "NEW", "assess", "canceled")
 
 			// Rollback is not available before Review.
@@ -6456,10 +6806,11 @@ func TestChangeRequestFlowIntegration_NormalRollbackFromReview(t *testing.T) {
 				t.Fatal("the Review stage has no REQUESTED approvers before the rollback, so the cancellation below proves nothing")
 			}
 
-			// A rollback is a failed review: it cannot also record the review.
+			// A rollback is a failed review: it cannot also record the review (and
+			// staff cannot record the customer's review at all).
 			_, err = f.patch(id, domain.PatchChangeRequestRequest{
 				State: stateptr(domain.ChangeRequestStateRollback), IsCustomerReviewed: boolp(true)})
-			f.wantValidationError("rollback with isCustomerReviewed", err, "isCustomerReviewed cannot be true when rolling back")
+			f.wantValidationError("rollback with isCustomerReviewed", err, "isCustomerReviewed cannot be set on the customer's behalf")
 			f.expect(id, "after the refused rollback", "REVIEW", forward, "rollback", "canceled")
 
 			f.step(id, domain.ChangeRequestStateRollback, "ROLLBACK")
@@ -6472,16 +6823,21 @@ func TestChangeRequestFlowIntegration_NormalRollbackFromReview(t *testing.T) {
 	}
 }
 
-// Normal with Customer Review ticked and no customer group: ... -> Review ->
-// Customer Review -> Roll back (the manual fallback path).
+// Normal with Customer Review ticked and nobody to ask (a project with no
+// registered contacts): ... -> Review -> Customer Review -> Roll back. With no
+// live customer stage Rollback is on offer to staff (Closed never is). Request
+// Approval refuses this project, so the change gets here by the residual edge:
+// the contact it had when approval was requested is gone before the review.
 func TestChangeRequestFlowIntegration_NormalRollbackFromCustomerReview(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1, crCABMemberUserID2)
 	id := f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, nil, boolp(true))
-	f.driveNormalToImplement(id)
+	f.requestApprovalThenContactsLeave(id)
+	f.approvePeerAndCAB(id, "SCHEDULED", "implement", "canceled")
+	f.step(id, domain.ChangeRequestStateImplement, "IMPLEMENT", "review", "canceled")
 	f.step(id, domain.ChangeRequestStateReview, "REVIEW", "customer_review", "rollback", "canceled")
-	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "closed", "rollback", "canceled")
+	f.step(id, domain.ChangeRequestStateCustomerReview, "CUSTOMER_REVIEW", "rollback", "canceled")
 	if _, reviewed := f.customerOutcome(id); reviewed {
 		t.Fatal("is_customer_review_required is already true before the customer review was recorded")
 	}
@@ -6505,8 +6861,14 @@ func TestChangeRequestFlowIntegration_RollbackRefusedFromEveryOtherState(t *test
 		}
 		_, err := f.patchState(id, domain.ChangeRequestStateRollback)
 		var ve *apierror.ValidationError
-		if !errors.As(err, &ve) || ve.Msg != rollbackOnlyFromReviewMsg {
-			t.Fatalf("PATCH {state: rollback} from %q: err = %v, want a 400 %q", st, err, rollbackOnlyFromReviewMsg)
+		// A closed or canceled change cannot be moved at all (that refusal names the
+		// state); a repeated rollback gets the "only from review" one.
+		want := rollbackOnlyFromReviewMsg
+		if st == "CLOSED" || st == "CANCELED" {
+			want = fmt.Sprintf(`state "rollback" cannot be set manually from %s: a change request that is %s cannot be moved`, strings.ToLower(st), strings.ToLower(st))
+		}
+		if !errors.As(err, &ve) || ve.Msg != want {
+			t.Fatalf("PATCH {state: rollback} from %q: err = %v, want a 400 %q", st, err, want)
 		}
 		if got := f.state(id); got != st {
 			t.Fatalf("state after the refused rollback from %q = %q, want unchanged", st, got)
@@ -6729,7 +7091,7 @@ func TestChangeRequestFlowIntegration_RescheduleNormalWithCustomerGroup(t *testi
 		f.wantValidationError("re-schedule with "+what, f.reschedule(id, args[0], args[1]), "re-scheduling requires a changed planned start or end")
 	}
 	f.wantValidationError("re-schedule ending before it starts", f.reschedule(id, sp(rsStart3), sp(rsEnd1)), "planned start must not be after the planned end")
-	f.wantValidationError("re-schedule with a garbage date", f.reschedule(id, sp("next tuesday"), nil), "valid date-times")
+	f.wantValidationError("re-schedule with a garbage date", f.reschedule(id, sp("next tuesday"), nil), "plannedStartOn must be a valid date-time")
 	f.expect(id, "after the refused re-schedules", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	f.wantPlanned(id, "after the refused re-schedules", rsStart1, rsEnd1)
 	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,Customer Approval" {
@@ -6801,11 +7163,12 @@ func TestChangeRequestFlowIntegration_RescheduleNormalWithCustomerGroup(t *testi
 	}
 }
 
-// Normal, Customer Approval ticked, NO customer group (manual fallback), the
-// creator also sits in the CAB group: Re-schedule twice. The creator never gets a
-// decidable row on a new CAB stage; rejecting the new stage behaves as a CAB
-// rejection does (the change stays in Authorize).
-func TestChangeRequestFlowIntegration_RescheduleManualFallbackTwice(t *testing.T) {
+// Normal, Customer Approval ticked, NOBODY to ask (a project with no registered
+// contacts), the creator also sits in the CAB group: Re-schedule twice. The
+// creator never gets a decidable row on a new CAB stage; rejecting the new stage
+// behaves as a CAB rejection does (the change stays in Authorize). Back in
+// Customer Approval, staff still cannot answer for the customer.
+func TestChangeRequestFlowIntegration_RescheduleWithNobodyToAskTwice(t *testing.T) {
 	f := newCRFlow(t)
 	f.seedAssignedGroup()
 	seedApprovalGroupMembers(t, f.scoped, crCABGroupID, crCABMemberUserID1, crCABMemberUserID2)
@@ -6821,8 +7184,13 @@ func TestChangeRequestFlowIntegration_RescheduleManualFallbackTwice(t *testing.T
 	})
 	id := f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(true), nil)
 	f.setPlanned(id, rsStart1, rsEnd1)
-	f.requestApproval(id)
-	f.approvePeerAndCAB(id, "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	// Request Approval refuses a ticked box on a project nobody can be asked on: the
+	// change gets to the gate with nobody asked by the residual edge (the contact it
+	// had when approval was requested is gone before the gate).
+	_, err := f.patchState(id, domain.ChangeRequestStateAssess)
+	f.wantExact("Request Approval with nobody to ask", err, nobodyMsgApproval)
+	f.requestApprovalThenContactsLeave(id)
+	f.approvePeerAndCAB(id, "CUSTOMER_APPROVAL", "authorize", "canceled")
 
 	// Re-schedule #1.
 	if err := f.reschedule(id, sp(rsStartEarly), nil); err != nil { // only the start changes
@@ -6853,8 +7221,8 @@ func TestChangeRequestFlowIntegration_RescheduleManualFallbackTwice(t *testing.T
 	// Start over on a second change to approve the second round and loop again.
 	id = f.createGated(domain.ChangeRequestTypeNormal, crFlowGroupID, boolp(true), nil)
 	f.setPlanned(id, rsStart1, rsEnd1)
-	f.requestApproval(id)
-	f.approvePeerAndCAB(id, "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+	f.requestApprovalThenContactsLeave(id)
+	f.approvePeerAndCAB(id, "CUSTOMER_APPROVAL", "authorize", "canceled")
 	for round, w := range [][2]string{{rsStart2, rsEnd2}, {rsStart3, rsEnd3}} {
 		if err := f.reschedule(id, sp(w[0]), sp(w[1])); err != nil {
 			t.Fatalf("re-schedule round %d: %v", round+1, err)
@@ -6864,14 +7232,18 @@ func TestChangeRequestFlowIntegration_RescheduleManualFallbackTwice(t *testing.T
 		if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
 			t.Fatalf("CAB approval round %d: %v", round+1, err)
 		}
-		f.expect(id, "back in Customer Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+		f.expect(id, "back in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	}
 	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,CAB Approval,CAB Approval" {
 		t.Fatalf("stages after two re-schedules = %s", got)
 	}
-	f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
-	if approved, _ := f.customerOutcome(id); !approved {
-		t.Fatal("manual Record customer approval did not stamp is_customer_approval_required")
+	// Nobody was asked and nobody may answer for them: the refused manual
+	// scheduled stamps nothing and moves nothing.
+	_, err = f.patchState(id, domain.ChangeRequestStateScheduled)
+	f.wantValidationError("manual scheduled with nobody to ask", err, "can only be given by the customer in the Customer Portal")
+	f.expect(id, "after the refused manual scheduled", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	if approved, _ := f.customerOutcome(id); approved {
+		t.Fatal("a refused manual scheduled stamped is_customer_approval_required")
 	}
 }
 
@@ -6918,7 +7290,7 @@ func TestChangeRequestFlowIntegration_RescheduleEmergency(t *testing.T) {
 
 // Standard has no internal approval to repeat: Re-schedule applies the dates,
 // stays in Customer Approval and asks the customer again (a fresh stage when the
-// change has a customer group; the manual path stays without one).
+// change has a customer group; with nobody to ask there is nothing to renew).
 func TestChangeRequestFlowIntegration_RescheduleStandard(t *testing.T) {
 	t.Run("with a customer group", func(t *testing.T) {
 		f := newCustomerGroupFlow(t)
@@ -6950,17 +7322,24 @@ func TestChangeRequestFlowIntegration_RescheduleStandard(t *testing.T) {
 		f.seedAssignedGroup()
 		id := f.createGated(domain.ChangeRequestTypeStandard, crFlowGroupID, boolp(true), nil)
 		f.setPlanned(id, rsStart1, rsEnd1)
-		f.requestApproval(id)
-		f.expect(id, "after Request Approval", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+		// A Standard change reaches Customer Approval inside Request Approval, which
+		// refuses a ticked box on a project nobody can be asked on: the row with
+		// nobody asked is a legacy one, written directly (no stage, as before).
+		_, err := f.patchState(id, domain.ChangeRequestStateAssess)
+		f.wantExact("Request Approval with nobody to ask", err, nobodyMsgApproval)
+		f.legacyInCustomerState(id, "CUSTOMER_APPROVAL")
+		f.expect(id, "the legacy row in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 		if err := f.reschedule(id, sp(rsStartEarly), nil); err != nil {
 			t.Fatalf("re-schedule: %v", err)
 		}
-		f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "scheduled", "authorize", "canceled")
+		f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
 		f.wantPlanned(id, "after Re-schedule", rsStartEarly, rsEnd1)
 		if n := len(f.stages(id)); n != 0 {
 			t.Fatalf("standard change has %d stages after Re-schedule, want none", n)
 		}
-		f.step(id, domain.ChangeRequestStateScheduled, "SCHEDULED", "implement", "canceled")
+		_, err = f.patchState(id, domain.ChangeRequestStateScheduled)
+		f.wantValidationError("manual scheduled with nobody to ask", err, "can only be given by the customer in the Customer Portal")
+		f.expect(id, "after the refused manual scheduled", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	})
 }
 
@@ -6981,8 +7360,12 @@ func TestChangeRequestFlowIntegration_RescheduleRefusedFromEveryOtherState(t *te
 		}
 		err := f.reschedule(id, sp(rsStart2), sp(rsEnd2))
 		var ve *apierror.ValidationError
-		if !errors.As(err, &ve) || ve.Msg != rescheduleOnlyFromCustomerApprovalMsg {
-			t.Fatalf("manual authorize from %q: err = %v, want a 400 %q", st, err, rescheduleOnlyFromCustomerApprovalMsg)
+		want := rescheduleOnlyFromCustomerApprovalMsg
+		if st == "CLOSED" || st == "CANCELED" {
+			want = fmt.Sprintf(`state "authorize" cannot be set manually from %s: a change request that is %s cannot be moved`, strings.ToLower(st), strings.ToLower(st))
+		}
+		if !errors.As(err, &ve) || ve.Msg != want {
+			t.Fatalf("manual authorize from %q: err = %v, want a 400 %q", st, err, want)
 		}
 		if got := f.state(id); got != st {
 			t.Fatalf("state after the refused re-schedule from %q = %q", st, got)
@@ -6993,7 +7376,7 @@ func TestChangeRequestFlowIntegration_RescheduleRefusedFromEveryOtherState(t *te
 	if _, err := f.scoped.Exec(f.sys, `UPDATE change_request SET state = 'ROLLBACK' WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	f.wantValidationError("re-schedule from rollback", f.reschedule(id, sp(rsStart2), nil), "rollback is final")
+	f.wantValidationError("re-schedule from rollback", f.reschedule(id, sp(rsStart2), nil), "a change request that is rolled back cannot be moved")
 }
 
 // The on-hold gate applies, and an unsatisfiable re-schedule (nobody can give

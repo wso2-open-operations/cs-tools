@@ -99,6 +99,63 @@ func conversationStateFromEnum(enumValue string) domain.ConversationState {
 	return domain.ConversationState(enumValue)
 }
 
+// conversationSearchFrom is the whole FROM clause SearchConversations' WHERE
+// needs: every filter reads work_item (wi) or conversation (c) and nothing
+// else. The display joins (project, linked case, creator) live only in the
+// page query below, and are applied to the rows of one page.
+const conversationSearchFrom = `
+	FROM work_item wi
+	JOIN conversation c ON c.id = wi.id`
+
+// conversationSearchQueries renders the COUNT and page queries for one
+// conversation search from its WHERE clause (conversationWhereClause).
+// pageArgs is the number of bind arguments the WHERE uses; LIMIT and OFFSET
+// are the two placeholders after them.
+//
+// The page is chosen first, by an inner query that selects only wi.id, and the
+// display columns are joined onto just those rows afterwards -- the same shape
+// SearchCases uses. The count carries no display joins either. Before, both
+// queries ran the three display joins for every matching conversation, and the
+// creator join (LOWER("user".email) = LOWER(wi.created_by)) is not on a unique
+// key: the planner could choose a nested loop that rescanned the whole "user"
+// table once per matching row, so a search matching a few hundred
+// conversations cost hundreds of milliseconds of database time per query (and
+// two queries per request). That could not be fixed with an index alone: the
+// plan flipped with the planner's row estimate for the free-text filter.
+//
+// The creator is resolved by LATERAL ... LIMIT 1, ordered by id, for the
+// reason SearchWorkItemAttachments does the same: "user".email has no unique
+// constraint, so a plain join fans one conversation out into one row per user
+// sharing the address, and the COUNT (which cannot see that join) disagrees
+// with the page. Every join here is a LEFT JOIN and the WHERE reads only
+// wi/c, so neither query returns a row it did not before; row-level security
+// still applies to every table involved on every statement.
+func conversationSearchQueries(where, sortCol, sortDir string, pageArgs int) (countQuery, dataQuery string) {
+	countQuery = "SELECT COUNT(*) " + conversationSearchFrom + " " + where
+	dataQuery = fmt.Sprintf(
+		`SELECT wi.id, wi.number, p.id, p.name, case_wi.id, case_wi.number, c.state::TEXT,
+		        wi.created_on, u.id, wi.created_by, u.name, u.first_name, u.last_name, wi.description
+		 FROM (SELECT wi.id %s %s
+		       ORDER BY %s %s, wi.id
+		       LIMIT $%d OFFSET $%d) page
+		 JOIN work_item wi ON wi.id = page.id
+		 JOIN conversation c ON c.id = wi.id
+		 LEFT JOIN project p ON p.id = wi.project_id
+		 LEFT JOIN work_item case_wi ON case_wi.id = wi.parent_id
+		 LEFT JOIN LATERAL (
+		     SELECT u2.id, u2.name, u2.first_name, u2.last_name
+		     FROM "user" u2
+		     WHERE LOWER(u2.email) = LOWER(wi.created_by)
+		     ORDER BY u2.id
+		     LIMIT 1
+		 ) u ON TRUE
+		 ORDER BY %s %s, wi.id`,
+		conversationSearchFrom, where, sortCol, sortDir, pageArgs+1, pageArgs+2,
+		sortCol, sortDir,
+	)
+	return countQuery, dataQuery
+}
+
 const conversationFromJoins = `
 	FROM work_item wi
 	JOIN conversation c ON c.id = wi.id
@@ -200,15 +257,7 @@ func (r *conversationRepo) SearchConversations(ctx context.Context, req domain.S
 		sortDir = "ASC"
 	}
 
-	countQuery := "SELECT COUNT(*) " + conversationFromJoins + " " + where
-	dataQuery := fmt.Sprintf(
-		`SELECT wi.id, wi.number, p.id, p.name, case_wi.id, case_wi.number, c.state::TEXT,
-		        wi.created_on, u.id, wi.created_by, u.name, u.first_name, u.last_name, wi.description
-		 %s %s
-		 ORDER BY %s %s, wi.id
-		 LIMIT $%d OFFSET $%d`,
-		conversationFromJoins, where, sortCol, sortDir, len(args)+1, len(args)+2,
-	)
+	countQuery, dataQuery := conversationSearchQueries(where, sortCol, sortDir, len(args))
 	dataArgs := append(append([]any{}, args...), req.Pagination.Limit, req.Pagination.Offset)
 
 	var total int
@@ -216,12 +265,19 @@ func (r *conversationRepo) SearchConversations(ctx context.Context, req domain.S
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
-	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, countQuery, args...).Scan(&total); err != nil {
-			return fmt.Errorf("count conversations: %w", err)
-		}
-		return nil
-	})
+	// SkipTotal: the caller does not show a total (global search shows a handful
+	// of hits), so the COUNT is not run at all -- it is as costly as the page
+	// query and holds a second pool connection while it runs.
+	if req.SkipTotal {
+		total = domain.TotalNotComputed
+	} else {
+		eg.Go(func() error {
+			if err := r.db.QueryRow(egCtx, countQuery, args...).Scan(&total); err != nil {
+				return fmt.Errorf("count conversations: %w", err)
+			}
+			return nil
+		})
+	}
 
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)

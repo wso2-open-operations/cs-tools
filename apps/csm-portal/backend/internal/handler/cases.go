@@ -181,9 +181,18 @@ func (h *CaseHandler) WithInlineImageProcessor(p *InlineImageProcessor) *CaseHan
 	return h
 }
 
+// userMeGetter is satisfied by any entity client exposing GetUserMe — both
+// entityCaseClient and entityIncidentClient do, which is what lets
+// resolveCurrentUserID below be shared by CaseHandler and IncidentHandler
+// without either depending on the other's full interface.
+type userMeGetter interface {
+	GetUserMe(ctx context.Context) ([]byte, error)
+}
+
 // resolveCurrentUserID returns the caller's platform user id — the id
 // GET /users/me resolves via the entity service — for comparing against a
-// platform record's own user references (e.g. a case's assigned engineer).
+// platform record's own user references (e.g. a case's assigned engineer,
+// or an incident's assignedTo).
 //
 // This is deliberately NOT user.UserID from the JWT: that claim is whatever
 // identity value the gateway/identity provider embeds, an identifier from a
@@ -196,21 +205,21 @@ func (h *CaseHandler) WithInlineImageProcessor(p *InlineImageProcessor) *CaseHan
 // Returns an empty id when the lookup fails or yields nothing, so callers
 // gating on it fail closed rather than falling back to an id that can never
 // match.
-func (h *CaseHandler) resolveCurrentUserID(r *http.Request, user *middleware.UserInfo) string {
-	raw, err := h.entity.GetUserMe(r.Context())
+func resolveCurrentUserID(ctx context.Context, entity userMeGetter, user *middleware.UserInfo) string {
+	raw, err := entity.GetUserMe(ctx)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe failed while resolving the caller's platform user id", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "entity GetUserMe failed while resolving the caller's platform user id", "userID", user.UserID, "err", err)
 		return ""
 	}
 	var me struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &me); err != nil {
-		slog.ErrorContext(r.Context(), "entity GetUserMe: parse response failed while resolving the caller's platform user id", "userID", user.UserID, "err", err)
+		slog.ErrorContext(ctx, "entity GetUserMe: parse response failed while resolving the caller's platform user id", "userID", user.UserID, "err", err)
 		return ""
 	}
 	if me.ID == "" {
-		slog.ErrorContext(r.Context(), "entity GetUserMe returned an empty id while resolving the caller's platform user id", "userID", user.UserID)
+		slog.ErrorContext(ctx, "entity GetUserMe returned an empty id while resolving the caller's platform user id", "userID", user.UserID)
 	}
 	return me.ID
 }
@@ -539,7 +548,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 			// against the identity provider's user id on the JWT. Resolved here,
 			// after the state gate, so the extra lookup is only paid on a request
 			// that would otherwise be accepted.
-			currentUserID := h.resolveCurrentUserID(r, user)
+			currentUserID := resolveCurrentUserID(r.Context(), h.entity, user)
 			if currentUserID == "" {
 				// The caller's identity could not be established, so ownership
 				// cannot be decided either way: fail closed, but as a server-side
@@ -1416,7 +1425,10 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var currentCase struct {
-			State string `json:"state"`
+			State            string `json:"state"`
+			AssignedEngineer *struct {
+				ID *string `json:"id"`
+			} `json:"assignedEngineer"`
 		}
 		if err := json.Unmarshal(current, &currentCase); err != nil {
 			slog.ErrorContext(r.Context(), "failed to parse current case state", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -1430,6 +1442,23 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		if patch.WorkState != nil && currentCase.State != caseStateWorkInProgress {
 			writeError(w, http.StatusBadRequest, ErrMsgWorkStateNotAllowed)
 			return
+		}
+		// Ownership check: closing a case is restricted to its own assigned
+		// engineer, unless the caller is admin (an operational override).
+		// Scoped to only the transition that sets state to closed — not every
+		// PATCH — since the issue this guards against is specifically about
+		// closing a ticket that isn't yours. Mirrors CreateCaseComment's own
+		// ownership guard above.
+		if patch.State != nil && *patch.State == caseStateClosed && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
+			currentUserID := resolveCurrentUserID(r.Context(), h.entity, user)
+			if currentUserID == "" {
+				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+				return
+			}
+			if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
+				writeError(w, http.StatusForbidden, ErrMsgCaseCloseNotOwnCase)
+				return
+			}
 		}
 	}
 

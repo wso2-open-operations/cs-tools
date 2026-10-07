@@ -19,6 +19,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -352,5 +353,33 @@ func TestPayloadLog(t *testing.T) {
 func TestTruncateBytes_KeepsCharactersWhole(t *testing.T) {
 	if got := truncateBytes([]byte("ab\u00e9cd"), 3); got != "ab" {
 		t.Errorf("truncateBytes = %q, want %q", got, "ab")
+	}
+}
+
+type fakeDB struct{ err error }
+
+func (f fakeDB) Check(context.Context) error { return f.err }
+
+func TestDbz(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"reachable":   {nil, http.StatusOK},
+		"unreachable": {errors.New("connection refused"), http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := New(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: auth.None{}, DB: fakeDB{tc.err}})
+			s.StartDraining()
+			if rec := do(t, s, "GET", "/dbz", ""); rec.Code != tc.want {
+				t.Errorf("dbz = %d, want %d regardless of draining", rec.Code, tc.want)
+			}
+		})
+	}
+}
+
+func TestDbz_NotRegisteredWithoutDB(t *testing.T) {
+	if rec := do(t, newTestServer(nil), "GET", "/dbz", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("dbz = %d, want 404 when no DB is configured", rec.Code)
 	}
 }

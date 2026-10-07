@@ -970,7 +970,6 @@ func TestCaseService_SearchCaseAttachments_DeploymentDualWrite(t *testing.T) {
 		{name: "dual-write deployment delegates to mirror", refType: domain.ReferenceTypeDeployment, withMirror: true, wantMirror: 1, wantMirrorR: true},
 		{name: "dual-write deployment returns mirror error", refType: domain.ReferenceTypeDeployment, withMirror: true, mirrorErr: mirrorErr, wantMirror: 1, wantErr: mirrorErr},
 		{name: "plain postgres deployment is a validation error", refType: domain.ReferenceTypeDeployment, withMirror: false, wantValid: true},
-		{name: "dual-write case stays on postgres", refType: domain.ReferenceTypeCase, withMirror: true, wantRepo: true},
 		{name: "dual-write incident stays on postgres", refType: domain.ReferenceTypeIncident, withMirror: true, wantRepo: true},
 		{name: "dual-write bogus type is a validation error", refType: "bogus", withMirror: true, wantValid: true},
 	}
@@ -1033,6 +1032,89 @@ func TestCaseService_SearchCaseAttachments_DeploymentDualWrite(t *testing.T) {
 			}
 			if tc.wantMirrorR && (resp.Total != 1 || len(resp.Attachments) != 1 || resp.Attachments[0].ID != testAttachmentID) {
 				t.Fatalf("response not passed through from mirror: %+v", resp)
+			}
+		})
+	}
+}
+
+// TestCaseService_SearchCaseAttachments_CaseDualWriteFallback covers the
+// case stopgap: an empty Postgres result at offset 0 falls back to the mirror
+// only when one is configured; a Postgres error or non-zero offset never does.
+func TestCaseService_SearchCaseAttachments_CaseDualWriteFallback(t *testing.T) {
+	pgAtt := domain.Attachment{ID: testAttachmentID, ReferenceID: testCaseID, ReferenceType: domain.ReferenceTypeCase, Name: "pg.pdf"}
+	mirrorResp := domain.SearchAttachmentsResponse{
+		Attachments: []domain.Attachment{{ID: testAttachmentID, ReferenceID: testCaseID, ReferenceType: domain.ReferenceTypeCase, Name: "mirror.pdf"}},
+		Total:       1, Limit: 10, Offset: 0,
+	}
+	pgErr := errors.New("pg down")
+	mirrorErr := errors.New("mirror unavailable")
+	tests := []struct {
+		name       string
+		withMirror bool
+		pgRows     []domain.Attachment
+		pgTotal    int
+		pgErr      error
+		mirrorErr  error
+		offset     int
+		wantMirror int
+		wantErr    error
+		wantName   string // "" means expect an empty result
+	}{
+		{name: "pg non-empty returns pg, mirror not called", withMirror: true, pgRows: []domain.Attachment{pgAtt}, pgTotal: 1, wantName: "pg.pdf"},
+		{name: "pg empty with mirror returns mirror result", withMirror: true, wantMirror: 1, wantName: "mirror.pdf"},
+		{name: "pg empty with mirror returns mirror error", withMirror: true, mirrorErr: mirrorErr, wantMirror: 1, wantErr: mirrorErr},
+		{name: "pg empty without mirror returns empty result", withMirror: false},
+		{name: "pg error returns error, mirror not called", withMirror: true, pgErr: pgErr, wantErr: pgErr},
+		{name: "offset > 0 with pg empty does not fall back", withMirror: true, offset: 10},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &stubCaseRepo{
+				searchCaseAttachments: func(context.Context, string, domain.Pagination) ([]domain.Attachment, int, error) {
+					return tc.pgRows, tc.pgTotal, tc.pgErr
+				},
+			}
+			mirror := &stubAttachmentSearchMirror{
+				search: func(_ context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
+					if req.ReferenceID != testCaseID || req.ReferenceType != domain.ReferenceTypeCase {
+						t.Fatalf("mirror got %q/%q", req.ReferenceID, req.ReferenceType)
+					}
+					if tc.mirrorErr != nil {
+						return domain.SearchAttachmentsResponse{}, tc.mirrorErr
+					}
+					return mirrorResp, nil
+				},
+			}
+			var svc CaseService
+			if tc.withMirror {
+				svc = NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, nil, mirror, nil, "")
+			} else {
+				svc = NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+			}
+			resp, err := svc.SearchCaseAttachments(context.Background(), domain.SearchAttachmentsRequest{
+				ReferenceID: testCaseID, ReferenceType: domain.ReferenceTypeCase,
+				Pagination: domain.Pagination{Limit: 10, Offset: tc.offset},
+			})
+			if mirror.calls != tc.wantMirror {
+				t.Fatalf("mirror calls = %d, want %d", mirror.calls, tc.wantMirror)
+			}
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantName == "" {
+				if resp.Total != 0 || len(resp.Attachments) != 0 {
+					t.Fatalf("want empty result, got %+v", resp)
+				}
+				return
+			}
+			if len(resp.Attachments) != 1 || resp.Attachments[0].Name != tc.wantName {
+				t.Fatalf("got %+v, want attachment %q", resp, tc.wantName)
 			}
 		})
 	}

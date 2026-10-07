@@ -90,23 +90,12 @@ func main() {
 		}
 	}
 
-	// CSM-native SLA engine recompute worker: periodically recomputes every
-	// source='CSM' "sla" row's elaped percentage/breach status (migration
-	// 000088) — see service.SLAEngineRecomputeWorker's own doc comment.
-	// Gated on pool the same way the GitHub outbound worker above is:
-	// nowhere to read/write a clock at all with no database configured.
-	// WithSystemIdentity: this worker runs on its own process-startup
-	// context, never an HTTP request, so there is no caller identity to
-	// inherit. sla no longer has RLS (migration 0153), but this worker still
-	// writes through the Scoped repository, which requires an identity on ctx;
-	// it is genuinely internal.
-	slaEngineCtx, stopSLAEngine := context.WithCancel(repository.WithSystemIdentity(context.Background()))
-	defer stopSLAEngine()
-	if pool != nil {
-		slaEngineWorker := service.NewSLAEngineRecomputeWorker(repository.NewSLAEngineRepository(repository.NewScoped(pool)), cfg.SLARecomputeInterval)
-		go slaEngineWorker.Run(slaEngineCtx)
-		log.Printf("sla engine recompute worker enabled (every %s)", cfg.SLARecomputeInterval)
-	}
+	// CSM-native SLA engine recompute worker: removed. It used to rewrite
+	// every active source='CSM' "sla" row's elapsed percentage/breach status
+	// on a timer (migration 000088) purely so GET /sla-status/
+	// POST /task-slas/search would show a fresh number -- a continuous
+	// Postgres write with no bearing on alerting. The sla_live view
+	// (migration 0204) computes the same number live, at read time, instead.
 
 	// Change-request notices: a background poller over event_outbox, gated on
 	// CR_NOTICES_ENABLED. Off by default because ServiceNow still sends these
@@ -141,7 +130,7 @@ func main() {
 				}),
 				service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(pool)),
 			)
-			crRepo := repository.NewCRNoticeRepository(repository.NewScoped(pool))
+			crRepo := repository.NewCRNoticeRepository(repository.NewScoped(pool), server.CRVisibilityFromConfig(cfg))
 			drainer := service.NewCRNoticeDrainer(
 				crRepo,
 				service.NewCRNoticeService(crRepo, crPublisher),
@@ -242,9 +231,15 @@ func main() {
 	incidentReportCtx, stopIncidentReport := context.WithCancel(repository.WithSystemIdentity(context.Background()))
 	defer stopIncidentReport()
 	if pool != nil {
+		// Dual-write creates the workaround problem in the resolve request,
+		// in ServiceNow and Postgres (workaround_problem.go), not here.
+		incidentReportFlows := service.NewIncidentReportService()
+		if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
+			incidentReportFlows = service.NewDualWriteIncidentReportService()
+		}
 		incidentReportDrainer := service.NewIncidentReportDrainer(
 			repository.NewIncidentReportRepository(repository.NewScoped(pool)),
-			service.NewIncidentReportService(),
+			incidentReportFlows,
 			cfg.IncidentReportPollInterval,
 			service.IncidentReportMaxAttempts,
 		)
@@ -300,6 +295,5 @@ func main() {
 	if crPublisher != nil {
 		crPublisher.Close()
 	}
-	stopSLAEngine()
 	log.Println("server stopped")
 }

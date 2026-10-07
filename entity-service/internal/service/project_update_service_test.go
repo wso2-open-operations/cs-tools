@@ -89,13 +89,14 @@ func testProjectUserRepo() stubUserRepo {
 	}
 }
 
-// TestPgProjectUpdateService_IgnoresSuspensionProcessState pins that the parked field is
-// accepted but never handed to the repository, alone or alongside a stored field.
-func TestPgProjectUpdateService_IgnoresSuspensionProcessState(t *testing.T) {
+// TestPgProjectUpdateService_StoresSuspensionProcessState pins that ACP's state reaches the
+// repository unchanged, alone or alongside a sub-state.
+func TestPgProjectUpdateService_StoresSuspensionProcessState(t *testing.T) {
 	open := "Open"
+	state := []byte(`{"based_on_due_invoices":{"event_type":"open"}}`)
 	for name, req := range map[string]domain.ProjectUpdateRequest{
-		"alone":            {SuspensionProcessState: []byte(`{"a":1}`)},
-		"with a sub-state": {SuspensionProcessState: []byte(`{"a":1}`), EndDateClosureState: &open},
+		"alone":            {SuspensionProcessState: state},
+		"with a sub-state": {SuspensionProcessState: state, EndDateClosureState: &open},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &stubProjectUpdateRepo{}
@@ -105,8 +106,8 @@ func TestPgProjectUpdateService_IgnoresSuspensionProcessState(t *testing.T) {
 			if _, err := svc.UpdateProject(ctx, "11111111-1111-1111-1111-111111111111", req); err != nil {
 				t.Fatalf("UpdateProject() error = %v, want success", err)
 			}
-			if !repo.called || repo.gotReq.SuspensionProcessState != nil {
-				t.Fatalf("repo called = %v with suspensionProcessState %s, want called without it", repo.called, repo.gotReq.SuspensionProcessState)
+			if !repo.called || string(repo.gotReq.SuspensionProcessState) != string(state) {
+				t.Fatalf("repo called = %v with suspensionProcessState %s, want %s", repo.called, repo.gotReq.SuspensionProcessState, state)
 			}
 		})
 	}
@@ -286,8 +287,5 @@ func TestPgProjectUpdateService_DualWriteDispatchesExactlyOneMirrorCallOnSuccess
 	}
 	if mirror.gotID != id {
 		t.Fatalf("ServiceNow mirror UpdateProject id = %q, want %q", mirror.gotID, id)
-	}
-	if mirror.gotReq.SuspensionProcessState != nil {
-		t.Fatal("ServiceNow mirror UpdateProject req carried suspensionProcessState, which this data source never persisted")
 	}
 }

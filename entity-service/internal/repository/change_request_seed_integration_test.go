@@ -222,13 +222,13 @@ func TestChangeRequestSeedIntegration_FixtureApprovers(t *testing.T) {
 		t.Fatalf("CHG-FIXED-003 stages = %v, want one Peer Approval stage%s", f.labels(seedCR003), reset)
 	}
 	assertApprovers(t, "CHG-FIXED-003 peer"+reset, peer["Peer Approval"], map[string]string{
-		seedAliceID: "requested", seedBobID: "requested", seedCarolID: "requested"})
+		seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 	assertApprovers(t, "CHG-FIXED-004 peer"+reset, f.seededStages(seedCR004)["Peer Approval"], map[string]string{
-		seedAliceID: "approved", seedBobID: "cancelled", seedCarolID: "cancelled"})
+		seedAliceID: "APPROVED", seedBobID: "CANCELLED", seedCarolID: "CANCELLED"})
 	assertApprovers(t, "CHG-FIXED-007 customer approval"+reset, f.seededStages(seedCR007)["Customer Approval"], map[string]string{
-		seedDaveID: "requested", seedErinID: "requested"})
+		seedDaveID: "REQUESTED", seedErinID: "REQUESTED"})
 	assertApprovers(t, "CHG-FIXED-008 customer review"+reset, f.seededStages(seedCR008)["Customer Review"], map[string]string{
-		seedDaveID: "requested", seedErinID: "requested"})
+		seedDaveID: "REQUESTED", seedErinID: "REQUESTED"})
 
 	// jane.doe and john.smith hold no approver row on any fixture.
 	var n int
@@ -273,7 +273,7 @@ func TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPers
 	if _, err := f.repo.PatchChangeRequest(f.sys, id, domain.PatchChangeRequestRequest{State: stateptr(domain.ChangeRequestStateAssess)}, "jane.doe@example.com"); err != nil {
 		t.Fatalf("Request Approval: %v", err)
 	}
-	f.wantPeerPool(id, seededGroupID, map[string]string{seedAliceID: "requested", seedBobID: "requested", seedCarolID: "requested"})
+	f.wantPeerPool(id, seededGroupID, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 
 	// john.smith (external, in the group) cannot decide even with a row forced
 	// in; alice can, and the seeded CAB group takes over.
@@ -394,11 +394,11 @@ func TestChangeRequestSeedIntegration_SeedIsSelfHealing(t *testing.T) {
 	          WHERE pg."group" = 'General Access' ON CONFLICT (id) DO NOTHING`)
 	mustExec(`DELETE FROM approval_stage_approver WHERE work_item_id IN ($1, $2, $3)`, seedCR003, seedCR007, seedCR008)
 	mustExec(`INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, state)
-	          VALUES (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $4, 'requested'),
-	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $5, 'requested'),
-	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001305', $2, $4, 'requested'),
-	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001305', $2, $5, 'requested'),
-	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001306', $3, $4, 'requested')`,
+	          VALUES (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $4, 'REQUESTED'),
+	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001005', $1, $5, 'REQUESTED'),
+	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001305', $2, $4, 'REQUESTED'),
+	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001305', $2, $5, 'REQUESTED'),
+	                 (gen_random_uuid(), now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001306', $3, $4, 'REQUESTED')`,
 		seedCR003, seedCR007, seedCR008, seedJaneID, seedJohnID)
 	mustExec(`INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, group_id)
 	          VALUES ('00000000-0000-0000-0000-000000001101', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', $1, $3),
@@ -564,5 +564,135 @@ func TestChangeRequestSeedIntegration_LumenWorksPlatformContacts(t *testing.T) {
 		if got := contactNames(seedProject401); got != "Dave Mendis,Erin Jayawardena" {
 			t.Errorf("%s: project 401 contacts = %q, want Dave and Erin only", pass, got)
 		}
+	}
+}
+
+// The project types of the local project fixtures (fixtures/0031_project_type_table.sql).
+const (
+	seedTypeManagedCloudID = "00000000-0000-0000-0000-0000000000a1"
+	seedTypeEvaluationID   = "00000000-0000-0000-0000-0000000000a2"
+	seedTypeSubscriptionID = "00000000-0000-0000-0000-0000000000a3"
+	seedTypeCloudSupportID = "00000000-0000-0000-0000-0000000000a4"
+)
+
+// TestChangeRequestSeedIntegration_CustomerPortalEntitlements: the customer portal offers
+// its Operations menu (service requests, change requests) only when GET /projects/{id}/features
+// -- read from the project's project_type -- grants read access to them. The seed must therefore
+// leave the local "Subscription" type (the type of projects 401 / 402) granting both, and put
+// "Lumen Works Platform" (whose type the generator picks at random) on a type that does, while
+// touching no other flag and no other type. It must also correct a database that was seeded
+// BEFORE this existed (flags still FALSE), which an ON CONFLICT DO NOTHING insert would not.
+// Runs in a rolled-back transaction, the seed twice per scenario (idempotent).
+func TestChangeRequestSeedIntegration_CustomerPortalEntitlements(t *testing.T) {
+	f := newSeededFlow(t)
+	raw, err := os.ReadFile(seedSQLPath)
+	if err != nil {
+		t.Skipf("seed file not readable from here (%v)", err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed == "BEGIN;" || trimmed == "COMMIT;" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	seedSQL := strings.Join(kept, "\n")
+
+	ctx := context.Background()
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	mustExec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("exec (%.70s): %v", sql, err)
+		}
+	}
+	scalar := func(sql string, args ...any) string {
+		t.Helper()
+		var out string
+		if err := tx.QueryRow(ctx, sql, args...).Scan(&out); err != nil {
+			t.Fatalf("query (%.70s): %v", sql, err)
+		}
+		return out
+	}
+	// What GET /projects/{id}/features reads for the project (reference_data_repo.go's
+	// GetProjectByID joins the same columns), as "type:change-request-read/service-request-read".
+	features := func(projectID string) string {
+		t.Helper()
+		return scalar(`SELECT pt.name || ':' || pt.has_change_request_read_access::text || '/' || pt.has_service_request_read_access::text
+		               FROM project p JOIN project_type pt ON pt.id = p.project_type_id WHERE p.id = $1`, projectID)
+	}
+	// Every flag of every project type EXCEPT the two the seed owns on a3, so any collateral change shows.
+	collateral := func() string {
+		t.Helper()
+		return scalar(`SELECT string_agg(id::text || '=' || name || ':' ||
+		                 has_service_request_write_access::text || has_sra_write_access::text || has_sra_read_access::text ||
+		                 has_engagements_read_access::text || has_updates_read_access::text || has_deployment_write_access::text ||
+		                 has_deployment_read_access::text || has_time_logs_read_access::text || has_component_analysis_read_access::text ||
+		                 has_usage_metrics_read_access::text ||
+		                 CASE WHEN id = $1::uuid THEN '' ELSE ':' || has_service_request_read_access::text || has_change_request_read_access::text END,
+		               ';' ORDER BY id) FROM project_type`, seedTypeSubscriptionID)
+	}
+
+	// A database seeded BEFORE the entitlements existed: every flag of the local type is FALSE.
+	mustExec(`UPDATE project_type SET has_change_request_read_access = FALSE, has_service_request_read_access = FALSE WHERE id = $1`, seedTypeSubscriptionID)
+	if got := features(seedProject401); got != "Subscription:false/false" {
+		t.Fatalf("simulated old state: project 401 features = %q, want Subscription:false/false", got)
+	}
+	// The set-aside / generated "Lumen Works Platform", on a type that grants nothing ("Cloud Support").
+	mustExec(`UPDATE project SET name = 'Lumen Works Platform (set aside by the test)' WHERE name = 'Lumen Works Platform'`)
+	const acct, proj = "00000000-0000-0000-0000-00000000bb01", "00000000-0000-0000-0000-00000000bb02"
+	mustExec(`INSERT INTO account (id, created_on, updated_on, created_by, updated_by, name, number, sf_id, country, city)
+	          VALUES ($1, now(), now(), 'seed', 'seed', 'Lumen Works', 'ACC-LUMEN-E', 'SF-LUMEN-E', 'Sri Lanka', 'Colombo')`, acct)
+	mustExec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, sf_id, name, account_id, is_active, project_type_id)
+	          VALUES ($1, now(), now(), 'seed', 'seed', 'LUMEN-E', 'SF-PROJ-LUMEN-E', 'Lumen Works Platform', $2, true, $3)`, proj, acct, seedTypeCloudSupportID)
+	if got := features(proj); got != "Cloud Support:false/false" {
+		t.Fatalf("simulated generated state: Lumen features = %q, want Cloud Support:false/false", got)
+	}
+	before := collateral()
+
+	// 1. Seed twice: the local type grants both, Lumen is moved off the type that grants nothing,
+	//    nothing else about any project type changed.
+	for _, pass := range []string{"first run", "second run"} {
+		mustExec(seedSQL)
+		for _, id := range []string{seedProject401, seedProject402} {
+			if got := features(id); got != "Subscription:true/true" {
+				t.Errorf("%s: features of project %s = %q, want Subscription:true/true", pass, id, got)
+			}
+		}
+		if got := features(proj); got != "Subscription:true/true" {
+			t.Errorf("%s: features of Lumen Works Platform = %q, want it moved to Subscription:true/true", pass, got)
+		}
+		if got := collateral(); got != before {
+			t.Errorf("%s: another project type flag changed.\n before: %s\n after:  %s", pass, before, got)
+		}
+		// The types that grant nothing locally still grant nothing; the one that grants everything still does.
+		for _, tc := range []struct{ id, want string }{
+			{seedTypeEvaluationID, "false/false"},
+			{seedTypeCloudSupportID, "false/false"},
+			{seedTypeManagedCloudID, "true/true"},
+		} {
+			if got := scalar(`SELECT has_change_request_read_access::text || '/' || has_service_request_read_access::text FROM project_type WHERE id = $1`, tc.id); got != tc.want {
+				t.Errorf("%s: project type %s = %s, want %s", pass, tc.id, got, tc.want)
+			}
+		}
+	}
+
+	// 2. A Lumen Works Platform already on a type that grants Operations is left on it (not forced to a3).
+	mustExec(`UPDATE project SET project_type_id = $2 WHERE id = $1`, proj, seedTypeManagedCloudID)
+	mustExec(seedSQL)
+	if got := features(proj); got != "Managed Cloud Subscription:true/true" {
+		t.Errorf("Lumen on Managed Cloud Subscription = %q after the seed, want it left as Managed Cloud Subscription:true/true", got)
+	}
+
+	// 3. Only the local fixture row is ever touched: a "Subscription" type that came from elsewhere
+	//    (a synced environment's own row) keeps whatever it has.
+	mustExec(`UPDATE project_type SET has_change_request_read_access = FALSE, has_service_request_read_access = FALSE, created_by = 'servicenow-sync' WHERE id = $1`, seedTypeSubscriptionID)
+	mustExec(seedSQL)
+	if got := scalar(`SELECT has_change_request_read_access::text || '/' || has_service_request_read_access::text FROM project_type WHERE id = $1`, seedTypeSubscriptionID); got != "false/false" {
+		t.Errorf("a non-fixture Subscription type = %s after the seed, want it untouched (false/false)", got)
 	}
 }

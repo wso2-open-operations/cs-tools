@@ -704,45 +704,9 @@ describe("ChangeRequestApprovals — customer group stages (Customer Approval / 
     expect(screen.getByText("Member One").closest("tr")).toHaveTextContent("Customer Approval");
   });
 
-  it("gives a group member canDecide=true enabled Approve/Reject on their own Customer Approval row, and submits the decision", () => {
-    mockQueryResult({
-      data: customerStage("Customer Approval", [
-        { id: "me", name: "Me Member", status: "REQUESTED", canDecide: true },
-        { id: "m2", name: "Other Member", status: "REQUESTED", canDecide: false },
-      ]),
-    });
-    mockCurrentUser("me");
-    render(<ChangeRequestApprovals id="chg-1" />);
-    const mine = screen.getByText("Me Member").closest("tr")!;
-    // By name, not position: the Assignment group cell now holds a button of its own.
-    const approve = within(mine).getByRole("button", { name: "Approve" });
-    expect(approve).toHaveTextContent("Approve");
-    expect(approve).toBeEnabled();
-    fireEvent.click(approve);
-    expect(decideMutateMock).toHaveBeenCalledWith({ id: "chg-1", decision: "approved" }, expect.anything());
-    fireEvent.click(within(mine).getByRole("button", { name: "Reject" }));
-    expect(decideMutateMock).toHaveBeenLastCalledWith({ id: "chg-1", decision: "rejected" }, expect.anything());
-    // Another member's row never shows controls for the signed-in user.
-    expect(screen.getByText("Other Member").closest("tr")).not.toHaveTextContent(/Approve|Reject/);
-  });
-
-  it("disables Approve/Reject on the user's own customer row when the backend says canDecide=false, with the existing explanation", () => {
-    mockQueryResult({
-      data: customerStage("Customer Review", [
-        { id: "me", name: "Me Member", status: "REQUESTED", canDecide: false },
-      ]),
-    });
-    mockCurrentUser("me");
-    render(<ChangeRequestApprovals id="chg-1" />);
-    const buttons = within(screen.getByText("Me Member").closest("tr")!).getAllByRole("button", {
-      name: /^(Approve|Reject)$/,
-    });
-    expect(buttons).toHaveLength(2);
-    buttons.forEach((b) => expect(b).toBeDisabled());
-    expect(screen.getByLabelText(/you aren't able to approve or reject this stage/i)).toBeInTheDocument();
-  });
-
-  it("shows a non-member (no row of their own) no Approve/Reject on a customer stage", () => {
+  // The customer answers in the customer portal; the CSM Approvals tab only shows the
+  // stage. Nobody who signs in here (an internal user) holds a row of it.
+  it("shows a CSM user (no row of their own) no Approve/Reject on a live customer stage, whatever its rows say", () => {
     mockQueryResult({
       data: customerStage("Customer Approval", [
         { id: "m1", name: "Member One", status: "REQUESTED", canDecide: false },
@@ -751,9 +715,44 @@ describe("ChangeRequestApprovals — customer group stages (Customer Approval / 
     });
     mockCurrentUser("outsider");
     render(<ChangeRequestApprovals id="chg-1" />);
+    expect(screen.getByText("Member One").closest("tr")).toHaveTextContent("Requested");
+    expect(screen.getByText("Member Two").closest("tr")).toHaveTextContent("Requested");
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reject/i })).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["Customer Approval", "APPROVED", "Approved"],
+    ["Customer Approval", "REJECTED", "Rejected"],
+    ["Customer Review", "APPROVED", "Approved"],
+    ["Customer Review", "REJECTED", "Rejected"],
+  ])(
+    "shows the answer the customer gave to the %s stage (%s): the deciding contact's row decided, the co-contacts' Cancelled, no controls",
+    (stage, status, shown) => {
+      mockQueryResult({
+        data: {
+          approvals: [
+            {
+              stage,
+              approverType: "STATIC_GROUP",
+              approverName: "Customer Group",
+              status,
+              approvers: [
+                { id: "m1", name: "Member One", status, canDecide: false },
+                { id: "m2", name: "Member Two", status: "CANCELLED", canDecide: false },
+              ],
+            },
+          ],
+        },
+      });
+      mockCurrentUser("outsider");
+      render(<ChangeRequestApprovals id="chg-1" />);
+      expect(screen.getByText("Member One").closest("tr")).toHaveTextContent(stage);
+      expect(screen.getByText("Member One").closest("tr")).toHaveTextContent(shown);
+      expect(screen.getByText("Member Two").closest("tr")).toHaveTextContent("Cancelled");
+      expect(screen.queryByRole("button", { name: /^(approve|reject)$/i })).not.toBeInTheDocument();
+    },
+  );
 
   it("disables the creator's own customer-stage row (creator is never allowed to decide)", () => {
     mockQueryResult({

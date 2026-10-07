@@ -137,7 +137,8 @@ describe("DayLadder: cards that share their hours", () => {
 
     expect(screen.getByText("Regular hours")).toBeInTheDocument();
     expect(screen.queryByText("India region shift")).not.toBeInTheDocument();
-    expect(screen.getByText(/bravo/)).toBeInTheDocument();
+    // The card's own team row, not the team picker's option of the same name.
+    expect(screen.getByText(/Bravo/, { ignore: "option" })).toBeInTheDocument();
   });
 
   it("never folds an on-call window into a crowded card", () => {
@@ -248,5 +249,66 @@ describe("DayLadder: TZ3 is one card", () => {
     expect(labels).toEqual(["L1 escalation", "L2 escalation", "L3 escalation", "Regular hours"]);
     expect(screen.getByText("Nimal")).toBeInTheDocument();
     expect(container.textContent).not.toContain("Others in TZ3");
+  });
+});
+
+describe("DayLadder: a stint worked on another team's rota", () => {
+  const BRAZIL = {
+    id: "k-br", code: "ALLO_BR", shortCode: "BR", label: "Brazil rotation", bucket: "ALLOCATION" as const,
+    colourToken: "BR", sortOrder: 70, movesToTeamKey: "americas", worksRotaThere: true,
+  };
+  const MIGRATION = {
+    id: "k-mig", code: "MIGRATION", shortCode: "Mig", label: "Migration", bucket: "ALLOCATION" as const,
+    colourToken: "MIG", sortOrder: 90, movesToTeamKey: "migration",
+  };
+
+  it("is not listed as off the rota, while other time away still is", () => {
+    render(
+      <DayLadder
+        day={WEDNESDAY}
+        tz={TZ}
+        zoneLabel="IST"
+        lanes={[lane([])]}
+        shifts={SHIFTS}
+        zones={ZONES}
+        absences={[
+          absence({ name: "Bruna", startsOn: "2026-09-01", endsOn: "2026-12-31", kindCode: "ALLO_BR", teamKey: "americas" }),
+          absence({ name: "Milan", startsOn: "2026-09-01", endsOn: "2026-12-31", kindCode: "MIGRATION", teamKey: "migration" }),
+          absence({ name: "Lena", startsOn: "2026-09-23", endsOn: "2026-09-23" }),
+        ]}
+        absenceKinds={[ANNUAL_LEAVE, BRAZIL, MIGRATION]}
+        {...scopeControls()}
+      />,
+    );
+    expect(screen.queryByText("Bruna")).not.toBeInTheDocument();
+    expect(screen.getByText("Milan")).toBeInTheDocument();
+    expect(screen.getByText("Lena")).toBeInTheDocument();
+    expect(screen.getByText("2 not available")).toBeInTheDocument();
+  });
+
+  it("leaves a retired tag's entries out of who is off today", () => {
+    const ONBOARDING = {
+      id: "k-onb", code: "ONBOARDING", shortCode: "ONB", label: "Onboarding", bucket: "ALLOCATION" as const,
+      colourToken: "ONB", sortOrder: 100, retired: true,
+    };
+    render(
+      <DayLadder
+        day={WEDNESDAY}
+        tz={TZ}
+        zoneLabel="IST"
+        lanes={[lane([])]}
+        shifts={SHIFTS}
+        zones={ZONES}
+        absences={[
+          absence({ name: "Omar", startsOn: "2026-09-01", endsOn: "2026-12-31", kindCode: "ONBOARDING" }),
+          absence({ name: "Lena", startsOn: "2026-09-23", endsOn: "2026-09-23" }),
+        ]}
+        absenceKinds={[ANNUAL_LEAVE, ONBOARDING]}
+        {...scopeControls()}
+      />,
+    );
+    expect(screen.queryByText("Omar")).not.toBeInTheDocument();
+    expect(screen.getByText("Lena")).toBeInTheDocument();
+    expect(screen.getByText("1 not available")).toBeInTheDocument();
   });
 });

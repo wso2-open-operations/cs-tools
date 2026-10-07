@@ -35,6 +35,8 @@ service never creates incidents and never touches alert-core's own tables.
   poll interval. If the call fails, that poll still picks the rows up.
 - **Health and liveness endpoints.** `/healthz` never checks Postgres, so a database outage
   doesn't pull every replica out of rotation; `/livez` always answers `200` while the process runs.
+  `/dbz` reports only database reachability (`200` or `503`) for monitoring; it reuses one ping per
+  second, so frequent checks hold at most one connection.
 - **Routing signals.** Alongside the canonical fields, an alert can carry what alert-core uses to
   choose its CSM assignment group: `assignment_group` (an AWS alarm's `AlarmDescription` JSON may
   name one, e.g. `{"service":"...","assignment_group":"SRE - Apollo"}`) and, for AWS,
@@ -51,6 +53,9 @@ service never creates incidents and never touches alert-core's own tables.
   on.
 - `internal/outbound/corewake`: the coalesced `POST /alertz` call to alert-core.
 - `internal/outbound/snsconfirm`: confirms AWS SNS topic subscriptions.
+- `internal/outbound/dbfallback`: on a database outage, posts a DATABASE CONNECTION FAILURE card to
+  one Google Chat space, then each alert that fails its last write as a reply in that card's
+  thread. The next stored batch ends the outage, so a later one opens a new thread.
 - `internal/transport/server`: the HTTP handlers for the source webhooks and health/liveness
   endpoints.
 - `internal/transport/auth`: optional per-source credential checking against alert-core's
@@ -85,12 +90,15 @@ cp .env.example .env
    `integrations/sre-alert-ingestion-service` and the Dockerfile build preset.
 2. Endpoints come from `.choreo/component.yaml`: the source webhooks under
    `/api/wso2/v1/sre_alert_api` (defined per-source in `openapi.yaml`, so only known source paths
-   are accepted), plus `/healthz` and `/livez` as the readiness and liveness probes.
+   are accepted), plus `/healthz` and `/livez` as the readiness and liveness probes, and `/dbz`
+   for database health.
 3. Set the environment variables documented in `.env.example`, marking `PGPASSWORD` as a secret.
 4. Mount a customized `config.toml` under **Manage > Configs and Secrets > File Mount** if any
    default needs changing; without it the service runs on `config.toml.example`'s values.
 5. Connect this component to `sre-alert-core-service`'s endpoint and point `ALERT_CORE_WAKE_URL`
    at its `/alertz` path. Set `ALERT_CORE_WAKE_TOKEN` (a secret, from `openssl rand -hex 32`) to the
    same value on both components. Both services must share the same `PG*` values.
+   Set `DB_FALLBACK_CHAT_WEBHOOK_URL` (a secret) to the webhook of the Chat space that should get
+   alerts the database could not store.
 6. Any number of replicas is safe: ids stay unique across replicas because every claim pulls from
    `alert_seq`, which can never hand out the same value twice.

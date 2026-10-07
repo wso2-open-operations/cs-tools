@@ -42,7 +42,7 @@ const maxGithubDeliveryBody = int64(3 << 20)
 // GitHub has to reach the webhook from the internet, and entity-service is
 // Organization-visible in Choreo -- exposing it so one route could be
 // reached would publish every other route with it. So the public endpoint
-// moved to operations/csm-webhooks, which verifies the signature over
+// moved to operations/csm-webhooks/github, which verifies the signature over
 // the raw body and forwards the result here.
 //
 // This endpoint is therefore INTERNAL-CLIENT ONLY. It trusts its caller, so

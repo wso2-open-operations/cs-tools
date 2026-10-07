@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { postSkippingTotal } from "@api/backend/postSkippingTotal";
 import { severityFromBe, uiStateFromBe } from "@api/backend/mappers";
 import type {
   BeCaseFieldFilter,
@@ -122,7 +123,8 @@ export function useQuickCaseSearch(
                 { field: scope, op: "eq", values: [q] },
               ],
             };
-      const res = await api.post<BeCaseSearchPayload, BeCaseSearchResponse>(
+      const res = await postSkippingTotal<BeCaseSearchPayload, BeCaseSearchResponse>(
+        api,
         "/cases/search",
         {
           pagination: { offset: 0, limit: QUICK_CASE_LIMIT },

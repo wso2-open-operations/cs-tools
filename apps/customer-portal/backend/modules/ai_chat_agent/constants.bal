@@ -23,9 +23,6 @@ const string EVENT_ERROR = "error";
 # JSON key for the event type field in upstream WebSocket messages.
 const string EVENT_TYPE_KEY = "type";
 
-# JSON key for the payload field in the final upstream WebSocket event.
-const string EVENT_PAYLOAD_KEY = "payload";
-
 # WebSocket event acknowledging a stored answer rating.
 const string EVENT_FEEDBACK_ACK = "feedback_ack";
 

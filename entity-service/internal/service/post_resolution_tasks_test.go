@@ -76,11 +76,14 @@ func TestPostResolution_AlertTasks(t *testing.T) {
 
 // Blocks 8-14: a workaround with no problem creates one, copies the
 // incident's service/impact/urgency/priority, links it, and picks the group
-// by service.
+// by service -- on any service, not only the flow's two: another service's
+// problem takes the incident's own group.
 func TestPostResolution_WorkaroundCreatesAndLinksAProblem(t *testing.T) {
+	const otherService = "11111111-1111-4111-8111-111111111111"
 	for service, group := range map[string]string{
 		postResolutionServiceChoreo:   groupChoreoSpecialOps,
 		postResolutionServiceAsgardeo: groupAsgardeoOperationsTeam,
+		otherService:                  "grp",
 	} {
 		tx := resolve(t, resolvedOn(service, "SOLVED_WORK_AROUND"))
 		if len(tx.problems) != 1 {
@@ -101,6 +104,23 @@ func TestPostResolution_WorkaroundCreatesAndLinksAProblem(t *testing.T) {
 	}
 }
 
+// Another service's incident with no group, or no service at all, still gets
+// its problem -- unassigned, or with the incident's group.
+func TestPostResolution_WorkaroundProblemWithoutServiceOrGroup(t *testing.T) {
+	noGroup := resolvedOn("11111111-1111-4111-8111-111111111111", "SOLVED_WORK_AROUND")
+	noGroup.AssignmentGroupID = nil
+	if tx := resolve(t, noGroup); len(tx.problems) != 1 || tx.problems[0].AssignmentGroupID != nil {
+		t.Errorf("no group: problems = %+v, want one, unassigned", tx.problems)
+	}
+
+	noService := resolvedOn("", "SOLVED_WORK_AROUND")
+	noService.ServiceID = nil
+	tx := resolve(t, noService)
+	if len(tx.problems) != 1 || tx.problems[0].ServiceID != nil || strOrEmpty(tx.problems[0].AssignmentGroupID) != "grp" {
+		t.Errorf("no service: problems = %+v, want one with no service and the incident's group", tx.problems)
+	}
+}
+
 // Block 8's second half: an incident that already has a problem gets no new one.
 func TestPostResolution_ExistingProblemIsKept(t *testing.T) {
 	src := resolvedOn(postResolutionServiceChoreo, "SOLVED_WORK_AROUND")
@@ -111,12 +131,13 @@ func TestPostResolution_ExistingProblemIsKept(t *testing.T) {
 	}
 }
 
-// The trigger: only Choreo and Asgardeo incidents, and only other close codes
-// do nothing. The incident report is still written for every service.
+// The trigger: alert tasks only for Choreo and Asgardeo incidents, and other
+// close codes do nothing. The incident report is still written for every
+// service.
 func TestPostResolution_OnlyTheTwoServicesAndCodes(t *testing.T) {
 	for name, src := range map[string]repository.IncidentReportSource{
-		"other service, workaround":  resolvedOn("11111111-1111-4111-8111-111111111111", "SOLVED_WORK_AROUND"),
 		"other service, false alarm": resolvedOn("11111111-1111-4111-8111-111111111111", "FALSE_ALARM"),
+		"other service, duplicate":   resolvedOn("11111111-1111-4111-8111-111111111111", "DUPLICATE"),
 		"Choreo, solved permanently": resolvedOn(postResolutionServiceChoreo, "SOLVED_PERMANENTLY"),
 		"Choreo, no service": func() repository.IncidentReportSource {
 			s := resolvedOn("", "FALSE_ALARM")
@@ -155,5 +176,31 @@ func TestPostResolution_WriteErrorsPropagate(t *testing.T) {
 		incidentStateChange("IN_PROGRESS", "RESOLVED", time.Now()))
 	if !errors.Is(err, boom) {
 		t.Errorf("err = %v, want boom", err)
+	}
+}
+
+// Dual-write: the resolve request creates the workaround problem in both
+// stores, so the flow writes the report and alert tasks but no problem.
+func TestPostResolution_DualWriteLeavesTheProblemToTheRequest(t *testing.T) {
+	for _, src := range []repository.IncidentReportSource{
+		resolvedOn(postResolutionServiceChoreo, "SOLVED_WORK_AROUND"),
+		resolvedOn("11111111-1111-4111-8111-111111111111", "SOLVED_WORK_AROUND"),
+	} {
+		tx := &fakeIncidentReportTx{src: src}
+		if err := NewDualWriteIncidentReportService().HandleChange(context.Background(), tx,
+			incidentStateChange("IN_PROGRESS", "RESOLVED", time.Now())); err != nil {
+			t.Fatalf("HandleChange: %v", err)
+		}
+		if len(tx.problems) != 0 || len(tx.links) != 0 {
+			t.Errorf("problems %v links %v, want none in dual-write", tx.problems, tx.links)
+		}
+		if tx.reports[incidentReportTestID] == "" {
+			t.Errorf("the incident report must still be written")
+		}
+	}
+	tx := &fakeIncidentReportTx{src: resolvedOn(postResolutionServiceChoreo, "FALSE_ALARM")}
+	if err := NewDualWriteIncidentReportService().HandleChange(context.Background(), tx,
+		incidentStateChange("IN_PROGRESS", "RESOLVED", time.Now())); err != nil || len(tx.tasks) != 1 {
+		t.Errorf("alert task in dual-write: tasks %d, err %v, want 1", len(tx.tasks), err)
 	}
 }

@@ -171,7 +171,7 @@ func TestCaseLikeExtension_UpdateCase_SucceedsForNonCaseTypes(t *testing.T) {
 				Cause:      &cause,
 				CloseNotes: &closeNotes,
 			}
-			updated, oldSev, err := repo.UpdateCase(ctx, req)
+			updated, oldSev, err := repo.UpdateCase(ctx, req, nil)
 			if err != nil {
 				t.Fatalf("UpdateCase(%s) as registered project member: unexpected error = %v", c.name, err)
 			}
@@ -210,10 +210,10 @@ func TestCaseLikeExtension_UpdateCase_WorkStateAndResolutionCode(t *testing.T) {
 		{"security_report_analysis", cleSecReport},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, State: &inProgress}); err != nil {
+			if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, State: &inProgress}, nil); err != nil {
 				t.Fatalf("set work_in_progress: %v", err)
 			}
-			updated, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, WorkState: &paused})
+			updated, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: c.id, WorkState: &paused}, nil)
 			if err != nil {
 				t.Fatalf("set workState: %v", err)
 			}
@@ -231,7 +231,7 @@ func TestCaseLikeExtension_UpdateCase_WorkStateAndResolutionCode(t *testing.T) {
 
 			if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{
 				ID: c.id, State: &closed, Cause: &cause, CloseNotes: &closeNotes, ResolutionCode: &resCode,
-			}); err != nil {
+			}, nil); err != nil {
 				t.Fatalf("close with resolutionCode: %v", err)
 			}
 			cv, err = repo.GetCaseByID(ctx, c.id, repository.SearchScope{Unrestricted: true})
@@ -274,14 +274,14 @@ func TestCaseLikeExtension_UpdateCase_OneOngoingAcrossTypes(t *testing.T) {
 	inProgress := domain.CaseStateWorkInProgress
 	ongoing := domain.CaseWorkStateOngoing
 	for _, id := range []string{cleServiceReq, cleEngagement} {
-		if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: id, State: &inProgress}); err != nil {
+		if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: id, State: &inProgress}, nil); err != nil {
 			t.Fatalf("set work_in_progress on %s: %v", id, err)
 		}
 	}
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleServiceReq, WorkState: &ongoing}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleServiceReq, WorkState: &ongoing}, nil); err != nil {
 		t.Fatalf("first Ongoing: %v", err)
 	}
-	_, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleEngagement, WorkState: &ongoing})
+	_, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: cleEngagement, WorkState: &ongoing}, nil)
 	var conflict *apierror.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("second Ongoing: err = %v, want *apierror.ConflictError", err)

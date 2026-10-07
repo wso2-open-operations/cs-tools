@@ -30,8 +30,15 @@ import (
 type SLAStatusRepository interface {
 	// SearchActiveSLAStatuses returns every currently-active (sla.is_active =
 	// true) clock across every case-like work item, one row per
-	// (work_item, sla_policy.target), paginated.
-	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination) ([]domain.SLAStatus, int, error)
+	// (work_item, sla_policy.target), paginated. sourceFilter, when
+	// non-empty, must be a real sla_source_enum label ("CSM"/"SERVICENOW")
+	// and narrows the result to just that source -- added for
+	// csm-notification-service's own Redis-recovery reconciliation pass
+	// (source=CSM), which only ever needs this engine's own rows and would
+	// otherwise pay the cost of scanning the full, much larger
+	// ServiceNow-synced row set for nothing. Empty means no filter, the
+	// original, unscoped behavior.
+	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, sourceFilter string) ([]domain.SLAStatus, int, error)
 }
 
 type slaStatusRepo struct {
@@ -52,16 +59,29 @@ func NewSLAStatusRepository(db *Scoped) SLAStatusRepository {
 // sp.target IS NOT NULL excludes the handful of "sla" rows (3, checked live)
 // whose policy has no target set at all -- nothing this endpoint could label
 // as a clock type.
-const activeSLAStatusCTE = `
+//
+// sourceArgIndex, when > 0, adds "AND s.source = $<sourceArgIndex>" -- the
+// placeholder's position differs between the count query (which otherwise
+// binds nothing) and the data query (which already binds limit/offset/the
+// evaluation-subscription project type name), so the caller passes whichever
+// index is next free in its own query rather than this function assuming one.
+// 0 means no source filter at all, the original unscoped behavior.
+func activeSLAStatusCTE(sourceArgIndex int) string {
+	sourceFilter := ""
+	if sourceArgIndex > 0 {
+		sourceFilter = fmt.Sprintf(" AND s.source = $%d::sla_source_enum", sourceArgIndex)
+	}
+	return `
 	WITH active_sla AS (
 		SELECT DISTINCT ON (s.work_item_id, sp.target)
-			s.work_item_id, sp.target, s.business_elapsed_percentage,
-			s.has_breached, s.stage, s.start_on
-		FROM sla s
+			s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
+			s.live_has_breached AS has_breached, s.live_stage AS stage, s.start_on
+		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
-		WHERE s.is_active AND sp.target IS NOT NULL
+		WHERE s.is_active AND sp.target IS NOT NULL` + sourceFilter + `
 		ORDER BY s.work_item_id, sp.target, s.start_on DESC NULLS LAST, s.updated_on DESC
 	)`
+}
 
 // activeSLAStatusFromJoins resolves each row's case-like display data --
 // mirrors caseRepo.GetCaseByID's own product/severity joins exactly (see
@@ -153,12 +173,31 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 }
 
 // SearchActiveSLAStatuses implements SLAStatusRepository.
-func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination) ([]domain.SLAStatus, int, error) {
-	countQuery := activeSLAStatusCTE + `
+func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, sourceFilter string) ([]domain.SLAStatus, int, error) {
+	// Placeholder numbering: the count query binds only the source filter
+	// (if present, as $1); the data query already binds limit/offset/the
+	// evaluation-subscription project type name as $1-$3, so the source
+	// filter there is $4. activeSLAStatusCTE takes 0 to omit the filter
+	// entirely, keeping both queries' SQL text byte-identical to before this
+	// parameter existed when sourceFilter is "".
+	countArgs := []any{}
+	countSourceArg := 0
+	if sourceFilter != "" {
+		countSourceArg = 1
+		countArgs = append(countArgs, sourceFilter)
+	}
+	dataArgs := []any{pagination.Limit, pagination.Offset, evaluationSubscriptionProjectTypeName}
+	dataSourceArg := 0
+	if sourceFilter != "" {
+		dataSourceArg = 4
+		dataArgs = append(dataArgs, sourceFilter)
+	}
+
+	countQuery := activeSLAStatusCTE(countSourceArg) + `
 		SELECT COUNT(*)
 		` + activeSLAStatusFromJoins
 
-	dataQuery := activeSLAStatusCTE + `
+	dataQuery := activeSLAStatusCTE(dataSourceArg) + `
 		SELECT als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
 		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
@@ -189,13 +228,13 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, countQuery).Scan(&total); err != nil {
+		if err := r.db.QueryRow(egCtx, countQuery, countArgs...).Scan(&total); err != nil {
 			return fmt.Errorf("count active sla statuses: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
-		rows, err := r.db.Query(egCtx, dataQuery, pagination.Limit, pagination.Offset, evaluationSubscriptionProjectTypeName)
+		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
 		if err != nil {
 			return fmt.Errorf("query active sla statuses: %w", err)
 		}

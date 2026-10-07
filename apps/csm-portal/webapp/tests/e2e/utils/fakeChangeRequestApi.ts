@@ -23,10 +23,22 @@
 // suite runs against, and the browser session is still the captured one.
 //
 // The contract encoded here is the one the UI is built against:
-//   - `legalNextStates` offers no manual way to `scheduled` -- except from
-//     `customer_approval`, where `scheduled` means "record the customer's
-//     approval" -- and `authorize` (listed from Assess) is the approval path,
-//     never a button;
+//   - `legalNextStates` offers no manual way to `scheduled` at all, nor to `closed`
+//     out of `customer_review`: staff never record a customer's approval or review.
+//     They are given by the customer, in the Customer Portal (a manual PATCH of
+//     either is a 400 whoever sends it, see `customerAnswerRefusal`). Assess lists
+//     only Cancel: `authorize` is reached by the peer approval, never offered or taken
+//     by a PATCH (it is Re-schedule only, out of Customer Approval);
+//   - a manual state change is checked like entity-service's `patchChangeRequestTx` (see
+//     `manualStateRefusal`), and a refusal is a 400 that writes nothing (not even the rest of its own
+//     request): (1) a FINAL state (closed, canceled, rollback) has no exit at all, Cancel and a Re-schedule
+//     included (`finalStateMessage`): a cancelled change cannot be revived with
+//     `{state:"implement"}`; (2) the target-specific refusals (Request Approval only from New; `authorize` only
+//     as Re-schedule; `customer_approval` and `scheduled` never manual; Roll back only from the review
+//     states; Customer Review only when required; Close from Review only when not required); (3) the state
+//     machine's own edges: a target that is not a next state of the current one is a jump over a state and
+//     every approval gate on the way (`{state:"implement"}` from New, Assess or Authorize with the customer's
+//     approval ticked would skip Peer, CAB and the customer) and is refused (`stateJumpMessage`);
 //   - Request Approval (`PATCH {state:"assess"}`) on a Normal CR enters Assess
 //     with a "Peer Approval" stage; on an Emergency CR it enters Authorize with
 //     an "ECAB Approval" stage only; on a Standard CR it goes straight to
@@ -35,24 +47,28 @@
 //     Authorize; approving CAB/ECAB moves the CR on by itself;
 //   - "the post-approval state" is `customer_approval` when the CR has
 //     `customerApprovalRequired`, else `scheduled`;
-//   - from `customer_approval` legalNextStates = [scheduled, authorize, canceled]
-//     ([authorize, canceled] while a customer-group stage is live); "authorize"
-//     there is Re-schedule: PATCH {state:"authorize", plannedStartOn?,
+//   - from `customer_approval` legalNextStates = [authorize, canceled], live customer
+//     stage or not; "authorize" there is Re-schedule: PATCH {state:"authorize", plannedStartOn?,
 //     plannedEndOn?} is accepted ONLY from `customer_approval` and only when the
 //     window changes (else a 400 with the backend's wording); it cancels the
 //     customer's pending stage (kept as a record, reported PENDING with every
 //     approver CANCELLED, like the backend), moves a Normal / Emergency CR to
 //     `authorize` with a fresh "CAB Approval" / "ECAB Approval" stage, and keeps
 //     a Standard CR in `customer_approval` with a fresh customer stage; the new
-//     CAB / ECAB approval sends the CR to `customer_approval` again;
+//     CAB / ECAB approval sends the CR to `customer_approval` again -- ALWAYS, even
+//     when the stored `customerApprovalRequired` is false (a migrated row defaults
+//     to false): the customer was being asked, so Re-schedule re-asks them rather
+//     than falling through to `scheduled` with nobody asked;
 //   - Review offers [customer_review, rollback, canceled] when
 //     `customerReviewRequired`, else [closed, rollback, canceled];
-//     `customer_review` -> [closed, rollback, canceled]. `rollback` ("Roll
+//     `customer_review` -> [rollback, canceled] ([canceled] while a customer-group
+//     review stage is live: a failed review is the customer's to give).
+//     `rollback` ("Roll
 //     back", the failed-review off-ramp) is accepted ONLY from those two states
 //     (any other state is a 400 `state "rollback" can only be set from review
 //     or customer_review`), is refused while a customer-group review stage is
 //     live, cancels every still-requested approver row, and is final (a later
-//     state change is a 400); the UI posts its reason as a comment first
+//     state change is a 400); the UI posts its reason as an internal note first
 //     (`POST /change-requests/{id}/comments`, recorded in `journal()`);
 //   - customer group: the CR's Customer Group is READ-ONLY and derived from its
 //     Customer Project -- the project's registered contacts (`customerContacts`
@@ -64,18 +80,48 @@
 //     new project's contacts. `customerGroupId` is no longer accepted (400
 //     `customerGroupId is no longer accepted: ...`), nor is `environmentIds`
 //     (400 `environmentIds is no longer supported: ...`). While that stage is live
-//     (still has REQUESTED approvers) legalNextStates for those two states is
-//     [canceled] only, and the manual PATCH {state:"scheduled"} /
-//     {state:"closed"} is refused with a 400. A member's decision settles the
-//     stage (their co-members become NOT_REQUIRED): Customer Approval approved
-//     -> scheduled, rejected -> canceled; Customer Review approved -> closed,
-//     rejected -> rollback (terminal: legalNextStates none). With no project, or a
-//     project with no eligible contact, no stage is provisioned and the manual paths above
-//     remain. `canDecide` is true only on the signed-in member's own
-//     REQUESTED row of a live stage, never for the creator;
+//     (still has REQUESTED approvers) legalNextStates for Customer Review is
+//     [canceled] only (Re-schedule stays at Customer Approval), and the manual
+//     PATCH {state:"rollback"} out of Customer Review is refused with a 400 whose
+//     message is the backend's own (`customerStageManualRefusal` below) -- which
+//     is also why the CSM portal's Roll back entry is disabled while a review stage
+//     is live. The manual PATCH {state:"scheduled"} out of Customer Approval and
+//     {state:"closed"} out of Customer Review are refused ALWAYS, live stage or
+//     not (`customerAnswerRefusal`): staff never record the customer's answer. The
+//     customer's answer is NOT given
+//     in the CSM portal -- customers sign in to the customer portal, and nobody
+//     in CSM is an approver of a customer stage -- so it never arrives through
+//     this fake's decision route (a decision POSTed there while a customer stage
+//     is live is a 403 naming the customer group, like the backend). A spec that
+//     needs the customer's answer applies it server-side with
+//     `customerDecides(contact, decision)`, which settles the stage like the
+//     backend does: the contact's own row APPROVED / REJECTED, the co-contacts'
+//     rows CANCELLED; Customer Approval approved -> scheduled, rejected ->
+//     canceled; Customer Review approved -> closed, rejected -> rollback
+//     (terminal: legalNextStates none); then the spec reloads the CSM page to see
+//     it. With no project, or a project with no eligible contact, no stage is
+//     provisioned: nobody is asked and nobody can answer, so the change waits at
+//     the gate (Re-schedule, Roll back and Cancel are still on offer where they are
+//     for any gate). Such a change can no longer be MADE by Request Approval, which is
+//     refused (a 400 with the backend's words, `nobodyToAskMessage`; and
+//     `REQUEST_APPROVAL_NEEDS_PROJECT` with no project at all) while a customer box is
+//     ticked and nobody on the project can be asked, so a spec that needs the dead end
+//     that remains for OLDER changes starts at the gate (`startAtState`). Ticking
+//     a customer box on after New is refused with the same words in that case.
+//     `canDecide` is true only on the signed-in user's own REQUESTED
+//     row of a live stage, never for the creator;
 //   - `customerApprovalRequired` / `customerReviewRequired` are on the detail
-//     response and editable via PATCH until their gate passes; a late edit is
-//     refused with a 400 and a readable message;
+//     response. They are fully editable in New (the creation phase). From the moment
+//     the change leaves New they are ADD-ONLY: false -> true is accepted until the
+//     gate the box controls has passed (Customer Approval: while the change is in
+//     New / Assess / Authorize; Customer Review: until Customer Review) and only
+//     when the change already has a Customer Project; true -> false is refused in
+//     every state but New. Each refusal is a 400 with the backend's own message
+//     (see the constants below);
+//   - `hasCustomerApproved` / `hasCustomerReviewed` (the customer's outcome) are
+//     on the detail response and stamped true when a customer gate is left by the
+//     customer's own answer (`customerDecides`: approved out of Customer Approval /
+//     Customer Review), never by a staff action;
 //   - the CR's creator can never approve;
 //   - an approval is only actionable while the CR is in the state its stage belongs
 //     to (Peer Approval: assess, CAB / ECAB Approval: authorize, Review: review,
@@ -108,8 +154,14 @@
 //     `deploymentProductIds` / `category` / `comment` / `workNote` after the
 //     backend's own validation -- deployments must belong to the project,
 //     deployment products must be exactly the derived set (all else a 400 with a
-//     readable message), and the project / deployments are locked from
-//     `implement` onwards. The detail response returns `project`, `deployments`,
+//     readable message). The Customer Project is editable only in New and FROZEN
+//     from the moment the change leaves it (a PATCH that names a different project
+//     is a 400; naming the stored one is an accepted no-op); the deployments stay
+//     editable until `implement`, within the frozen project. A change can never
+//     return to New (`{state: "new"}` after New is a 400), and Request Approval
+//     (`{state: "assess"}`) is refused when a customer box is ticked and the change
+//     has no Customer Project, or has one with nobody who can be asked (no registered
+//     contact other than the creator). The detail response returns `project`, `deployments`,
 //     `deploymentProducts`, `customerContacts`, `category` (EntityRef /
 //     EntityRef[] / {id,name,email}[] / the category enum value).
 //
@@ -271,6 +323,103 @@ const CUSTOMER_GROUP_ID_REMOVED =
   "customerGroupId is no longer accepted: the customer group is derived from the customer project's registered contacts";
 const ENVIRONMENT_IDS_REMOVED = "environmentIds is no longer supported: deployments carry the environment";
 
+// The lock on the customer's part of a change request (entity-service
+// `patchChangeRequestTx`, "creation-phase gate"). Same text, character for character:
+// the state is the change request's CURRENT one, in its API spelling.
+export const CANNOT_RETURN_TO_NEW =
+  'state "new" cannot be set: a change request that has left New cannot return to it. Cancel it and clone it instead.';
+/**
+ * The refusal of a state change out of a FINAL state (Closed, Canceled, Rollback): nothing moves a finished change
+ * request anywhere (entity-service `changeRequestFinalRefusal`, the same words for the three, and for `{state: "new"}`
+ * too, which says more than "cannot return to New"). A Cancel out of Customer Approval followed by
+ * `{state: "implement"}` used to answer 200 and revive a change nobody had answered for.
+ */
+export const finalStateMessage = (target: string, from: string): string =>
+  `state "${target}" cannot be set manually from ${from}: a change request that is ${from === "rollback" ? "rolled back" : from} cannot be moved`;
+
+/** The refusal of a `state` that is none of the lifecycle's (entity-service `normalizeRequestedChangeRequestState`). */
+export const notAStateMessage = (raw: string): string => `state ${JSON.stringify(raw)} is not a change request state`;
+
+/** What a change waits for in a state staff cannot move it out of (entity-service `changeRequestWaitingOn`). */
+const WAITING_ON: Record<string, string> = {
+  new: 'approval has not been requested yet (Request Approval is state "assess")',
+  assess: "it is waiting for its peer approval, which moves it on by itself",
+  authorize:
+    "it is waiting for its CAB approval, which moves it on by itself (to Customer Approval first when the customer's approval is required)",
+  scheduled: "a change request goes through implement and review in order, one step at a time",
+  implement: "a change request goes through implement and review in order, one step at a time",
+  review: "a change request cannot go back to an earlier step",
+};
+
+/**
+ * The refusal of a manual jump (entity-service `changeRequestJumpRefusal`): the state machine has no such edge from the
+ * current state, so a step and every approval gate on the way would be skipped (`{state: "implement"}` from New, Assess or
+ * Authorize with the customer's approval ticked used to land in Implement, with Peer, CAB and the customer skipped). It
+ * says what the change waits for and which moves ARE open to staff from here (`legalNextStates`, with the review branch
+ * the box picks).
+ */
+export const stateJumpMessage = (target: string, from: string, reviewRequired: boolean): string => {
+  const open = legalNextStates(from, { customerApprovalRequired: false, customerReviewRequired: reviewRequired });
+  const opens = open.length === 0 ? "none" : open.length === 1 ? `only ${open[0]}` : open.join(", ");
+  return `state "${target}" cannot be set manually from ${from}: ${
+    WAITING_ON[from] ?? "that is not a step of the change request's lifecycle from here"
+  }; the moves open to staff from ${from} are: ${opens}`;
+};
+export const projectFrozenMessage = (state: string): string =>
+  `projectId can no longer be changed: the Customer Project is fixed once approval has been requested (current state: ${state}). Cancel this change request and clone it to use another project.`;
+export const requirementCannotBeRemovedMessage = (field: string, state: string): string =>
+  `${field} can no longer be turned off: once approval has been requested a customer requirement can be added but never removed (current state: ${state}). Cancel and clone to correct it.`;
+export const requirementNeedsProjectMessage = (field: string): string =>
+  `${field} cannot be turned on: this change request has no Customer Project, and one can no longer be set after approval was requested. Cancel and clone it with a project.`;
+/** The refusal of adding a customer requirement after the gate it controls has passed (entity-service validateCustomerGateEdits). */
+export const requirementGatePassedMessage = (field: "customerApprovalRequired" | "customerReviewRequired", state: string): string =>
+  field === "customerApprovalRequired"
+    ? `customerApprovalRequired can no longer be changed: the change request has already passed the approval stage (current state: ${state})`
+    : `customerReviewRequired can no longer be changed: the change request has already left the review stage (current state: ${state})`;
+export const REQUEST_APPROVAL_NEEDS_PROJECT =
+  "approval cannot be requested: the customer's approval and/or review is required but no Customer Project is set, so there is nobody to ask. Select a Customer Project first (or clear the requirement).";
+/**
+ * The refusal of Request Approval (and of ticking a customer box on after New) when the Customer Project is set but nobody on
+ * it can be asked: its registered contacts, leaving out the requester and anyone no longer active, are none (entity-service
+ * `nobodyToAskMsg`). Such a change would reach Customer Approval / Customer Review with nobody to answer, and staff never answer
+ * for the customer, so it could only be cancelled (or rolled back from Review). It names the box (or both) the refusal is about:
+ * at Request Approval the boxes that are set (the request's value, else the stored one), after New the box(es) turned on. Same
+ * text, character for character, which the real-stack spec asserts against the real API.
+ */
+export const nobodyToAskMessage = (approval: boolean, review: boolean): string =>
+  `${approval && review ? "customer approval and customer review are" : review ? "customer review is" : "customer approval is"} required but nobody on this project can be asked (no registered contact other than the requester): register a contact for the project first`;
+
+/**
+ * The 400 the backend answers a manual PATCH of `rollback` out of Customer Review
+ * with while the customer group's review request is live (entity-service
+ * `customerStageManualRefusal`, a ValidationError the BFF passes through): a failed
+ * review is the customer's rejection, which they give in the Customer Portal. Same
+ * text, character for character.
+ */
+export function customerStageManualRefusal(target: "rollback"): string {
+  return `state "${target}" cannot be set manually: the customer's review has been requested from the customer group (the registered contacts of the change request's project) and is given by one of them approving or rejecting it in the change request's approvals (POST /change-requests/{id}/approvals/decision)`;
+}
+
+/**
+ * The 400 the backend answers a manual PATCH out of a customer state with, from ANY caller and whether or not anybody
+ * was asked (entity-service `customerOutcomeRefusal` behind `refuseStaffExitFromCustomerState`, a ValidationError the BFF
+ * passes through): `scheduled` out of Customer Approval is the customer's approval and `closed` out of Customer Review is
+ * the customer's review, which staff never record, and so is every other destination (`{state: "implement"}` out of
+ * Customer Approval would skip the customer as surely): they are given in the Customer Portal. The closing words say what
+ * staff can do instead, which depends on the state: Re-schedule or Cancel at Customer Approval; Roll back or Cancel at
+ * Customer Review while nobody is being asked, and only Cancel (`reviewPending`) while the customer's review request is
+ * live. `from` is the gate the change sits in (default: the one `scheduled` / `closed` leave). Same text, character for
+ * character.
+ */
+export function customerAnswerRefusal(target: string, reviewPending = false, from?: "customer_approval" | "customer_review"): string {
+  const gate = from ?? (target === "scheduled" ? "customer_approval" : "customer_review");
+  if (gate === "customer_approval") {
+    return `state "${target}" cannot be set manually from customer_approval: the customer's approval can only be given by the customer in the Customer Portal; cancel the change or re-schedule it instead`;
+  }
+  const instead = reviewPending ? "cancel the change" : "roll the change back or cancel it";
+  return `state "${target}" cannot be set manually from customer_review: the customer's review can only be given by the customer in the Customer Portal; ${instead} instead`;
+}
+
 interface Approver {
   id: string;
   name: string;
@@ -335,6 +484,39 @@ export interface FakeChangeRequestApi {
    * error state), or serve normally again with `null`.
    */
   failGroups(status: number | null): void;
+  /**
+   * The customer's answer, applied server-side: stands in for the customer
+   * portal, where customers decide (they do not sign in to the CSM portal, so no
+   * CSM page ever sends this decision). `contact`'s own REQUESTED row of the live
+   * Customer Approval / Customer Review stage becomes APPROVED / REJECTED, the
+   * co-contacts' rows CANCELLED, and the CR moves on like the backend moves it
+   * (Customer Approval: approved -> scheduled, rejected -> canceled; Customer
+   * Review: approved -> closed, rejected -> rollback). Throws, like the backend's
+   * 403, when `contact` has no pending row on a live customer stage of the CR's
+   * current state (a contact of another customer, a superseded stage, ...). The
+   * open CSM page is not refreshed: reload it to see the outcome.
+   */
+  customerDecides(contact: FakeUser, decision: "approved" | "rejected"): void;
+  /**
+   * An OLDER change request, already in `state` with nobody asked: the internal approvals (Peer / CAB, or ECAB) settled the way
+   * the flow leaves them, the change in `state`, and NO customer stage and nobody to answer. Request Approval can no longer
+   * produce this change when a customer box is ticked (it is refused for a project nobody on which can be asked), so a spec that
+   * needs the dead end that remains for changes that reached a customer gate before that rule -- or whose contacts left the
+   * project afterwards, or that was migrated from the previous system without a request -- starts here: at `customer_approval` or
+   * `customer_review` (the Review stage of a Normal change settled too), or at `review` for a change that is still to go to the
+   * customer's review. Nothing is provisioned (like a legacy row: the customer stage appears only on the next write that
+   * touches the state or the project, `syncCustomers`); the open page is not refreshed. A Standard change has no internal stage.
+   */
+  startAtState(state: "review" | "customer_approval" | "customer_review"): void;
+  /**
+   * What the backend does on the next write that touches the change's state or
+   * project (someone else's edit, a re-schedule, ...): the project's registered
+   * contacts are asked -- a live customer stage is provisioned, or a stale one
+   * replaced -- when the CR sits at a customer gate. Lets a spec make a customer
+   * request appear behind an open page, so the page still lists Roll back as
+   * available while the backend would now refuse it. The open page is not refreshed.
+   */
+  syncCustomers(): void;
 }
 
 const CUSTOMER_STAGES = ["Customer Approval", "Customer Review"];
@@ -348,36 +530,54 @@ const STAGE_STATE: Record<string, string> = {
   "Customer Approval": "customer_approval",
   "Customer Review": "customer_review",
 };
-/** States nothing can be approved in any more. */
+/** States nothing can be approved in, or moved out of, any more. */
 const FINAL_STATES = ["closed", "canceled", "rollback"];
+/** Every state of the lifecycle: what a `state` in a PATCH may name. */
+const ALL_STATES = ["new", "assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"];
 /** "customer_review" -> "Customer Review", for the refusal message. */
 const stateName = (s: string): string => s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
-function legalNextStates(state: string, flags: FakeCustomerFlags, liveCustomerStage = false): string[] {
-  switch (state) {
-    case "new":
-      return ["assess", "canceled"];
-    case "assess":
-      return ["authorize", "canceled"]; // authorize = the approval path, never a button
-    case "authorize":
-      return ["canceled"];
-    case "customer_approval":
-      // scheduled = "Record customer approval", unless the customer group decides
-      // ... and "authorize" there is Re-schedule, which an internal user keeps
-      // even while the customer group's request is pending.
-      return liveCustomerStage ? ["authorize", "canceled"] : ["scheduled", "authorize", "canceled"];
-    case "scheduled":
-      return ["implement", "canceled"];
-    case "implement":
-      return ["review", "canceled"];
-    case "review":
-      return flags.customerReviewRequired ? ["customer_review", "rollback", "canceled"] : ["closed", "rollback", "canceled"];
-    case "customer_review":
-      // a pending customer-group review is decided by its members
-      return liveCustomerStage ? ["canceled"] : ["closed", "rollback", "canceled"];
-    default:
-      return [];
-  }
+/**
+ * The forward moves a staff PATCH `{state}` is accepted for out of each non-final state (entity-service
+ * `changeRequestForwardNextStates`). ONE table: `legalNextStates` renders it (what the page offers) and the fake's
+ * `manualStateRefusal` enforces it (what the backend accepts), so the two cannot drift. Assess and Authorize are the approval
+ * waits (the peer / CAB approval moves them on, never a PATCH: only Cancel is left), Customer Approval is the customer's step
+ * (the customer's own answer moves it on; staff keep Re-schedule, `authorize`, and Cancel), Review lists both Closed and
+ * Customer Review (the box picks one) and Customer Review has no forward move at all.
+ */
+const FORWARD_NEXT_STATES: Record<string, string[]> = {
+  new: ["assess"],
+  assess: [],
+  authorize: [],
+  customer_approval: ["authorize"],
+  scheduled: ["implement"],
+  implement: ["review"],
+  review: ["closed", "customer_review"],
+  customer_review: [],
+};
+/** The states a change can be rolled back from (the failed-review off-ramp). */
+const ROLLBACK_FROM = ["review", "customer_review"];
+
+/** Every state a staff PATCH may name from `state`, whatever the review box says; none for a final state. */
+const staffTargets = (state: string): string[] => {
+  const forward = FORWARD_NEXT_STATES[state];
+  if (!forward) return [];
+  return [...forward, ...(ROLLBACK_FROM.includes(state) ? ["rollback"] : []), "canceled"];
+};
+
+function legalNextStates(
+  state: string,
+  flags: Pick<FakeCustomerFlags, "customerReviewRequired"> & Partial<FakeCustomerFlags>,
+  liveCustomerStage = false,
+): string[] {
+  return staffTargets(state).filter((target) => {
+    // Review lists Closed and Customer Review: the box picks one.
+    if (state === "review" && target === "customer_review" && !flags.customerReviewRequired) return false;
+    if (state === "review" && target === "closed" && flags.customerReviewRequired) return false;
+    // A failed review is the customer's rejection too, so Roll back is withheld while the group's review is pending.
+    if (state === "customer_review" && target === "rollback" && liveCustomerStage) return false;
+    return true;
+  });
 }
 
 const nextStage = (name: string, group: FakeApprovalGroup, who: FakeUser): Stage => ({
@@ -400,6 +600,10 @@ export async function installFakeChangeRequestApi(
   let type = initialType;
   let currentViewer = viewer;
   let state = "new";
+  // The customer's outcome, stamped like the backend does when a customer gate is left by the customer's
+  // own answer: `hasCustomerApproved` / `hasCustomerReviewed`.
+  let customerApproved = false;
+  let customerReviewed = false;
   let subject = "[E2E] approval flow (mocked)";
   const scope: FakeScope = {
     projectId: null,
@@ -429,6 +633,12 @@ export async function installFakeChangeRequestApi(
   const contacts = new Map<string, FakeUser[]>(Object.entries(FAKE_PROJECT_CONTACTS).map(([id, users]) => [id, [...users]]));
   /** The CR's customer group as the fake derives it: its project's registered contacts. */
   const currentContacts = (): FakeUser[] => (scope.projectId ? (contacts.get(scope.projectId) ?? []) : []);
+  /**
+   * Who the backend could ask at a customer gate for `projectId`: its registered contacts leaving out the requester (the one
+   * rule `syncCustomerStage` and the two refusals below share, like the backend's one provisioning function).
+   */
+  const askableContacts = (projectId: string | null | undefined): FakeUser[] =>
+    projectId ? (contacts.get(projectId) ?? []).filter((u) => u.id !== FAKE_CREATOR.id) : [];
   /** When set, GET /groups/{id} fails with this status. */
   let groupFailure: number | null = null;
   let plannedStartOn = "2030-03-01 09:00:00";
@@ -439,6 +649,8 @@ export async function installFakeChangeRequestApi(
   const legal = (): string[] => legalNextStates(state, flags, hasLiveCustomerStage());
   /** Moves the CR to `next`; entering a customer gate provisions the group's stage. */
   const enter = (next: string): void => {
+    if (state === "customer_approval" && next === "scheduled") customerApproved = true;
+    if (state === "customer_review" && next === "closed") customerReviewed = true;
     state = next;
     provisionReview();
     syncCustomerStage();
@@ -494,13 +706,14 @@ export async function installFakeChangeRequestApi(
    * exactly one live stage. Entered with contacts -> provisioned; project (or
    * its contacts) changed while a stage is live -> the old stage's REQUESTED
    * rows are cancelled and a new one is provisioned; no contacts -> pending
-   * rows cancelled (manual path returns); a stage already approved/rejected is
-   * never re-provisioned.
+   * rows cancelled and nobody is asked (nobody can answer either: staff never
+   * record the customer's answer); a stage already approved/rejected is never
+   * re-provisioned.
    */
   function syncCustomerStage(): void {
     const kind = state === "customer_approval" ? "Customer Approval" : state === "customer_review" ? "Customer Review" : null;
     if (!kind) return;
-    const members = currentContacts().filter((u) => u.id !== FAKE_CREATOR.id);
+    const members = askableContacts(scope.projectId);
     const live = stages.find((s) => s.stage === kind && s.status === "REQUESTED");
     if (live) {
       const have = live.approvers.map((a) => a.id);
@@ -523,6 +736,32 @@ export async function installFakeChangeRequestApi(
     ];
   }
 
+  /**
+   * The customer's answer (see `customerDecides` on the returned API): the contact's
+   * own live row is settled, the co-contacts' rows are cancelled, and the CR moves
+   * on -- Customer Approval approved -> scheduled, rejected -> canceled; Customer
+   * Review approved -> closed, rejected -> rollback.
+   */
+  function settleCustomerStage(contact: FakeUser, decision: "approved" | "rejected"): void {
+    const current = stages.find(
+      (s) =>
+        CUSTOMER_STAGES.includes(s.stage) &&
+        s.status === "REQUESTED" &&
+        !stageOutOfState(s) &&
+        s.approvers.some((a) => a.id === contact.id && a.status === "REQUESTED"),
+    );
+    const row = current?.approvers.find((a) => a.id === contact.id && a.status === "REQUESTED");
+    if (!current || !row) {
+      throw new Error(`${contact.name} has no pending customer approval or review on this change request`);
+    }
+    row.status = decision === "approved" ? "APPROVED" : "REJECTED";
+    current.status = row.status;
+    for (const a of current.approvers) if (a !== row && a.status === "REQUESTED") a.status = "CANCELLED";
+    if (decision === "approved") enter(current.stage === "Customer Approval" ? "scheduled" : "closed");
+    else enter(current.stage === "Customer Approval" ? "canceled" : "rollback");
+    reconcile();
+  }
+
   const detail = (): Record<string, unknown> => ({
     id: FAKE_CR_ID,
     number: "CHG0099001",
@@ -535,6 +774,8 @@ export async function installFakeChangeRequestApi(
     requestedBy: { id: FAKE_CREATOR.id, name: FAKE_CREATOR.name },
     customerApprovalRequired: flags.customerApprovalRequired,
     customerReviewRequired: flags.customerReviewRequired,
+    hasCustomerApproved: customerApproved,
+    hasCustomerReviewed: customerReviewed,
     legalNextStates: legal(),
     plannedStartOn,
     plannedEndOn,
@@ -562,6 +803,8 @@ export async function installFakeChangeRequestApi(
       return `category must be one of ${CATEGORIES.join(", ")}`;
     }
     if (isPatch) {
+      // The Customer Project part is frozen far earlier (creationPhaseProblem); what
+      // is left here is the deployments' own window, which closes at Implement.
       const touchesScope =
         (body.projectId !== undefined && body.projectId !== scope.projectId) ||
         (body.deploymentIds !== undefined && !sameSet(body.deploymentIds as string[], scope.deploymentIds));
@@ -601,6 +844,132 @@ export async function installFakeChangeRequestApi(
     return next;
   };
 
+  /**
+   * The backend's creation-phase gate on a PATCH body (the customer's part of a
+   * change request is fully editable only in New): the first refusal wins, in the
+   * backend's order, and nothing is written when one applies. Resending a value
+   * that is already stored is never a refusal.
+   */
+  const creationPhaseProblem = (body: Record<string, unknown>): string | null => {
+    const inNew = state === "new";
+    // 1. A change request that has left New cannot return to it.
+    // (a FINAL change is refused as every other request to move it is, which says more than "cannot return to New")
+    if (body.state === "new" && !inNew) return FINAL_STATES.includes(state) ? finalStateMessage("new", state) : CANNOT_RETURN_TO_NEW;
+    // 2. The Customer Project is frozen once the change leaves New.
+    if (!inNew && body.projectId !== undefined && body.projectId !== scope.projectId) {
+      return projectFrozenMessage(state);
+    }
+    const boxes = [
+      { field: "customerApprovalRequired", stored: flags.customerApprovalRequired, gateLocked: APPROVAL_FLAG_LOCKED },
+      { field: "customerReviewRequired", stored: flags.customerReviewRequired, gateLocked: REVIEW_FLAG_LOCKED },
+    ] as const;
+    // 3. After New a customer requirement can be added but never removed.
+    for (const box of boxes) {
+      if (!inNew && box.stored && body[box.field] === false) return requirementCannotBeRemovedMessage(box.field, state);
+    }
+    // 4. ... and added only before its gate, and only with a Customer Project to ask.
+    for (const box of boxes) {
+      if (!inNew && !box.stored && body[box.field] === true) {
+        if (box.gateLocked.includes(state)) return requirementGatePassedMessage(box.field, state);
+        if (!scope.projectId) return requirementNeedsProjectMessage(box.field);
+      }
+    }
+    // 4b. ... and a box turned on needs somebody on that project who can be asked (the refusal names the box(es) turned on).
+    if (!inNew) {
+      const approvalOn = !flags.customerApprovalRequired && body.customerApprovalRequired === true;
+      const reviewOn = !flags.customerReviewRequired && body.customerReviewRequired === true;
+      if ((approvalOn || reviewOn) && askableContacts(scope.projectId).length === 0) return nobodyToAskMessage(approvalOn, reviewOn);
+    }
+    // 6. Request Approval needs somebody to ask when the customer's part is required: a Customer Project, with at least one
+    // registered contact other than the requester (the same people the customer stage would ask).
+    if (body.state === "assess" && inNew) {
+      const approval = typeof body.customerApprovalRequired === "boolean" ? body.customerApprovalRequired : flags.customerApprovalRequired;
+      const review = typeof body.customerReviewRequired === "boolean" ? body.customerReviewRequired : flags.customerReviewRequired;
+      const project = typeof body.projectId === "string" && body.projectId ? body.projectId : scope.projectId;
+      if ((approval || review) && !project) return REQUEST_APPROVAL_NEEDS_PROJECT;
+      if ((approval || review) && askableContacts(project).length === 0) return nobodyToAskMessage(approval, review);
+    }
+    return null;
+  };
+
+  /**
+   * The backend's manual state change (a PATCH body's `state`, already trimmed and lower-cased), in its order; returns the
+   * 400 message, or null when it is allowed. Nothing is written when one applies.
+   *
+   *  1. The graph (`checkStaffStateRequest`): naming the state the change is in is a resend, no move; a FINAL state
+   *     (Closed, Canceled, Rollback) has no exit, whatever the target, Cancel and a Re-schedule included; a customer state
+   *     is left to 3.; the targets that have a refusal of their own in 2. are left to it; any other target must be a
+   *     move staff may make from here (`staffTargets`), else it is a jump over a state and every approval gate on the way.
+   *  2. The target-specific refusals: Request Approval only from New; `authorize` only as Re-schedule from Customer
+   *     Approval, with a changed window; `customer_approval` and `scheduled` are never a manual choice; Roll back only from
+   *     the two review states and not while the customer's review is live; Customer Review only when it is required, Close
+   *     from Review only when it is not.
+   *  3. A customer state is left only by the exits that answer nothing for the customer (`refuseStaffExitFromCustomerState`):
+   *     Cancel, Re-schedule out of Customer Approval, Roll back out of Customer Review, or staying where it is. Every other
+   *     destination is the customer's own answer (`customerAnswerRefusal`).
+   */
+  const OWN_REFUSAL = ["new", "assess", "authorize", "customer_approval", "scheduled", "rollback"];
+  const manualStateRefusal = (target: string, body: Record<string, unknown>): string | null => {
+    // The gate flags in effect are the ones this very request carries, else the stored ones.
+    const reviewRequired = typeof body.customerReviewRequired === "boolean" ? body.customerReviewRequired : flags.customerReviewRequired;
+    const approvalRequired = typeof body.customerApprovalRequired === "boolean" ? body.customerApprovalRequired : flags.customerApprovalRequired;
+    const inCustomerGate = state === "customer_approval" || state === "customer_review";
+    // 1.
+    if (target !== state) {
+      if (FINAL_STATES.includes(state)) return finalStateMessage(target, state);
+      if (!inCustomerGate && !OWN_REFUSAL.includes(target) && !staffTargets(state).includes(target)) {
+        return stateJumpMessage(target, state, reviewRequired);
+      }
+    }
+    // 2.
+    switch (target) {
+      case "assess": {
+        // Where Request Approval lands, by the change's type: a resend of it from there is no move.
+        const destination = type === "standard" ? (approvalRequired ? "customer_approval" : "scheduled") : type === "emergency" ? "authorize" : "assess";
+        if (state !== "new" && state !== destination) return "approval can only be requested for a change request in the New state";
+        break;
+      }
+      case "authorize": {
+        if (state !== "customer_approval") {
+          return 'state "authorize" cannot be set manually: it is reached automatically through the approval flow (Request Approval, then peer approval); it can only be set by hand to re-schedule a change from customer_approval';
+        }
+        const newStart = typeof body.plannedStartOn === "string" ? body.plannedStartOn : undefined;
+        const newEnd = typeof body.plannedEndOn === "string" ? body.plannedEndOn : undefined;
+        if ((!newStart || newStart === plannedStartOn) && (!newEnd || newEnd === plannedEndOn)) {
+          return "re-scheduling requires a changed planned start or end: send plannedStartOn and/or plannedEndOn with a value different from the stored one";
+        }
+        if ((newStart ?? plannedStartOn) > (newEnd ?? plannedEndOn)) return "the planned start must not be after the planned end";
+        break;
+      }
+      case "customer_approval":
+        return 'state "customer_approval" cannot be set manually: it is reached automatically through the approval flow when customerApprovalRequired is set';
+      case "scheduled":
+        // The customer's approval is theirs to give, in the Customer Portal (3.); from anywhere else it is reached by the flow.
+        if (state === "customer_approval") break;
+        return 'state "scheduled" cannot be set manually: it is reached automatically through the approval flow (Request Approval, then peer/CAB approval), or by the customer\'s own approval from customer_approval';
+      case "rollback":
+        if (state !== "review" && state !== "customer_review") return 'state "rollback" can only be set from review or customer_review';
+        if (state === "customer_review" && hasLiveCustomerStage()) return customerStageManualRefusal("rollback");
+        break;
+      case "customer_review":
+        if (!reviewRequired) {
+          return 'state "customer_review" cannot be set: customer review is not required for this change request (customerReviewRequired is false); close it from review instead';
+        }
+        break;
+      case "closed":
+        if (state === "review" && reviewRequired) {
+          return 'state "closed" cannot be set from review: customer review is required for this change request (customerReviewRequired is true); move it to customer_review first';
+        }
+        break;
+    }
+    // 3.
+    if ((state === "customer_approval" || state === "customer_review") && target !== state && target !== "canceled") {
+      const exit = state === "customer_approval" ? "authorize" : "rollback";
+      if (target !== exit) return customerAnswerRefusal(target, hasLiveCustomerStage(), state);
+    }
+    return null;
+  };
+
   const cors = (route: Route): Record<string, string> => ({
     "access-control-allow-origin": route.request().headers()["origin"] ?? "*",
     "access-control-allow-headers": "*",
@@ -622,13 +991,21 @@ export async function installFakeChangeRequestApi(
     async (route) => {
       const type = route.request().resourceType();
       if (route.request().method() !== "GET" || (type !== "fetch" && type !== "xhr")) return route.fallback();
-      const real = await route.fetch();
-      const profile = (await real.json()) as Record<string, unknown>;
-      const [firstName, ...rest] = currentViewer.name.split(" ");
-      await route.fulfill({
-        response: real,
-        json: { ...profile, id: currentViewer.id, email: currentViewer.email, firstName, lastName: rest.join(" ") },
-      });
+      try {
+        const real = await route.fetch();
+        const profile = (await real.json()) as Record<string, unknown>;
+        const [firstName, ...rest] = currentViewer.name.split(" ");
+        await route.fulfill({
+          response: real,
+          json: { ...profile, id: currentViewer.id, email: currentViewer.email, firstName, lastName: rest.join(" ") },
+        });
+      } catch {
+        // The test can end (the page and its context close, and the pending response is disposed)
+        // while this is still fetching the live profile from the BFF, which is not an error of the
+        // test. There is nobody left to answer then; if the page is still there, hand the request on
+        // to the network as it is.
+        await route.fallback().catch(() => undefined);
+      }
     },
   );
 
@@ -786,12 +1163,28 @@ export async function installFakeChangeRequestApi(
       if (path.endsWith("/approvals/decision") && req.method() === "POST") {
         const { decision } = req.postDataJSON() as { decision: "approved" | "rejected" };
         // The caller's pending stage: their row on a stage decidable in the CR's
-        // current state, else (all of theirs are stale) the first one.
-        const mine = stages.filter((s) => s.status === "REQUESTED" && s.approvers.some((a) => a.id === currentViewer.id && a.status === "REQUESTED"));
+        // current state, else (all of theirs are stale) the first one. The customer
+        // stages are not the CSM portal's to decide (see customerDecides).
+        const mine = stages.filter(
+          (s) =>
+            !CUSTOMER_STAGES.includes(s.stage) &&
+            s.status === "REQUESTED" &&
+            s.approvers.some((a) => a.id === currentViewer.id && a.status === "REQUESTED"),
+        );
         const current = mine.find((s) => !stageOutOfState(s)) ?? mine[0];
         const row = current?.approvers.find((a) => a.id === currentViewer.id && a.status === "REQUESTED");
         if (!current || !row || currentViewer.id === FAKE_CREATOR.id) {
-          return json(route, { message: "Access to the requested resource is forbidden!" }, 403);
+          // A change waiting on its live customer stage says so, like the backend.
+          const waiting = stages.find((s) => CUSTOMER_STAGES.includes(s.stage) && s.status === "REQUESTED" && !stageOutOfState(s));
+          return json(
+            route,
+            {
+              message: waiting
+                ? `only members of the customer group (the registered contacts of this change request's project) can approve or reject the customer's ${waiting.stage === "Customer Approval" ? "approval" : "review"} of this change request`
+                : "Access to the requested resource is forbidden!",
+            },
+            403,
+          );
         }
         if (stageOutOfState(current)) {
           // Nothing is changed: the approval is no longer pending.
@@ -805,16 +1198,9 @@ export async function installFakeChangeRequestApi(
         }
         row.status = decision === "approved" ? "APPROVED" : "REJECTED";
         current.status = row.status;
-        if (!CUSTOMER_STAGES.includes(current.stage)) {
-          // Like the backend, a resolving decision cancels the stage's other pending approvers.
-          for (const a of current.approvers) if (a !== row && a.status === "REQUESTED") a.status = "CANCELLED";
-        }
-        if (CUSTOMER_STAGES.includes(current.stage)) {
-          // One member's decision settles the stage; co-members are no longer needed.
-          for (const a of current.approvers) if (a !== row && a.status === "REQUESTED") a.status = "NOT_REQUIRED";
-          if (decision === "approved") enter(current.stage === "Customer Approval" ? "scheduled" : "closed");
-          else enter(current.stage === "Customer Approval" ? "canceled" : "rollback");
-        } else if (decision === "approved") {
+        // Like the backend, a resolving decision cancels the stage's other pending approvers.
+        for (const a of current.approvers) if (a !== row && a.status === "REQUESTED") a.status = "CANCELLED";
+        if (decision === "approved") {
           if (current.stage === "Peer Approval") {
             state = "authorize";
             stages = [...stages, nextStage("CAB Approval", FAKE_CAB_GROUP, FAKE_CAB)];
@@ -858,6 +1244,20 @@ export async function installFakeChangeRequestApi(
           customerApprovalRequired?: boolean;
           customerReviewRequired?: boolean;
         } & Record<string, unknown>;
+        // The requested state is read the way the table of moves is written -- trimmed, lower case -- and a value that is not
+        // a state of the lifecycle is refused before anything else (entity-service `normalizeRequestedChangeRequestState`).
+        if (body.state !== undefined && body.state !== null) {
+          const asked = typeof body.state === "string" ? body.state.trim().toLowerCase() : "";
+          if (!ALL_STATES.includes(asked)) return json(route, { message: notAStateMessage(String(body.state)) }, 400);
+          body.state = asked;
+        }
+        // The creation-phase gate: nothing below is written when it refuses.
+        const gateProblem = creationPhaseProblem(body);
+        if (gateProblem) return json(route, { message: gateProblem }, 400);
+        // A refused state change writes nothing either, not even the rest of its own request (a comment, a scope field,
+        // a tick box): the backend refuses inside the one transaction.
+        const refusal = typeof body.state === "string" ? manualStateRefusal(body.state, body) : null;
+        if (refusal) return json(route, { message: refusal }, 400);
         // Customer scope / category (and the removed customerGroupId / environmentIds,
         // which are refused), validated like the backend.
         const touchesScopeFields = ["projectId", "deploymentIds", "environmentIds", "deploymentProductIds", "customerGroupId", "category"].some(
@@ -868,78 +1268,45 @@ export async function installFakeChangeRequestApi(
           const problem = validateScope(body, next, true);
           if (problem) return json(route, { message: problem }, 400);
           Object.assign(scope, next);
-          // A project written while the CR already sits at a customer gate
-          // (re)provisions the stage for that project's contacts, like the backend.
+          // A project written (even the stored one again: an accepted no-op) while the
+          // CR already sits at a customer gate (re)provisions the stage for that
+          // project's contacts, like the backend.
           if (body.projectId !== undefined) syncCustomerStage();
         }
         for (const kind of ["comment", "workNote"] as const) {
           const text = body[kind];
           if (typeof text === "string" && text.trim()) journal.push({ kind, text });
         }
-        // Checkbox edits: refused once the gate they control has passed.
-        if (body.customerApprovalRequired !== undefined) {
-          if (APPROVAL_FLAG_LOCKED.includes(state)) {
-            return json(route, { message: `customerApprovalRequired cannot be changed once the change request is ${state}` }, 400);
-          }
-          flags.customerApprovalRequired = body.customerApprovalRequired;
-        }
-        if (body.customerReviewRequired !== undefined) {
-          if (REVIEW_FLAG_LOCKED.includes(state)) {
-            return json(route, { message: `customerReviewRequired cannot be changed once the change request is ${state}` }, 400);
-          }
-          flags.customerReviewRequired = body.customerReviewRequired;
-        }
+        // Checkbox edits: the gate above has refused every one that is not allowed.
+        if (typeof body.customerApprovalRequired === "boolean") flags.customerApprovalRequired = body.customerApprovalRequired;
+        if (typeof body.customerReviewRequired === "boolean") flags.customerReviewRequired = body.customerReviewRequired;
         const target = body.state;
         if (target === undefined) {
           return json(route, { id: FAKE_CR_ID, state, message: "Change request updated.", changeRequest: detail() });
         }
-        if (state === "rollback" && target !== "rollback") {
-          return json(route, { message: "change request has been rolled back; rollback is final and its state can no longer be changed" }, 400);
-        }
-        if (target === "rollback") {
-          if (state !== "review" && state !== "customer_review") {
-            return json(route, { message: 'state "rollback" can only be set from review or customer_review' }, 400);
-          }
-          if (hasLiveCustomerStage()) {
-            return json(route, { message: "The customer group must decide the review; it cannot be rolled back manually." }, 400);
-          }
+        // (Already accepted by `manualStateRefusal` above.) Naming the state the change is in is a resend: no move.
+        if (target === state) {
+          // nothing to do
+        } else if (target === "rollback") {
           // Rolling back cancels every still-requested approver row (the closing reconcile).
           state = "rollback";
         } else if (target === "authorize") {
-          // Re-schedule: the one manual way into Authorize, from Customer Approval only,
-          // and only when the planned window really changes.
-          if (state !== "customer_approval") {
-            return json(
-              route,
-              {
-                message:
-                  'state "authorize" cannot be set manually: it is reached automatically through the approval flow (Request Approval, then peer approval); it can only be set by hand to re-schedule a change from customer_approval',
-              },
-              400,
-            );
-          }
-          const newStart = typeof body.plannedStartOn === "string" ? body.plannedStartOn : undefined;
-          const newEnd = typeof body.plannedEndOn === "string" ? body.plannedEndOn : undefined;
-          if ((!newStart || newStart === plannedStartOn) && (!newEnd || newEnd === plannedEndOn)) {
-            return json(
-              route,
-              { message: "re-scheduling requires a changed planned start or end: send plannedStartOn and/or plannedEndOn with a value different from the stored one" },
-              400,
-            );
-          }
-          if ((newStart ?? plannedStartOn) > (newEnd ?? plannedEndOn)) {
-            return json(route, { message: "the planned start must not be after the planned end" }, 400);
-          }
-          plannedStartOn = newStart ?? plannedStartOn;
-          plannedEndOn = newEnd ?? plannedEndOn;
-          // The customer's pending request is superseded: rows cancelled, the stage stays
-          // as a record and is reported PENDING (nothing was approved or rejected on it).
+          // Re-schedule (the one manual way into Authorize, from Customer Approval only, with a changed window: all
+          // checked above). The customer's pending request is superseded: rows cancelled, the stage stays as a record
+          // and is reported PENDING (nothing was approved or rejected on it).
+          plannedStartOn = typeof body.plannedStartOn === "string" ? body.plannedStartOn : plannedStartOn;
+          plannedEndOn = typeof body.plannedEndOn === "string" ? body.plannedEndOn : plannedEndOn;
           for (const st of stages) {
             if (CUSTOMER_STAGES.includes(st.stage) && st.status === "REQUESTED") {
               for (const a of st.approvers) if (a.status === "REQUESTED") a.status = "CANCELLED";
               st.status = "PENDING";
             }
           }
+          // The customer WAS being asked, so the new approval asks them again whatever the stored requirement says: the
+          // Re-schedule writes the (our own) requirement column true with the new window, so a row that never had its box
+          // ticked (a migrated one, defaulted to false by migration 0189) does not fall through to Scheduled with nobody
+          // asked. Never the sync-owned outcome flag.
+          flags.customerApprovalRequired = true;
           if (type === "standard") {
             syncCustomerStage(); // nothing internal to repeat: the customer is asked again
           } else {
@@ -955,18 +1322,8 @@ export async function installFakeChangeRequestApi(
             state = "assess";
             stages = [nextStage("Peer Approval", FAKE_PEER_GROUP, FAKE_PEER)];
           }
-        } else if (target === "scheduled" && state === "customer_approval") {
-          if (hasLiveCustomerStage()) {
-            return json(route, { message: "The customer group must approve this change request; it cannot be recorded manually." }, 400);
-          }
-          state = "scheduled"; // the customer's approval was recorded
-        } else if (target !== "scheduled" && target !== "authorize" && target !== "customer_approval") {
-          if (!legal().includes(target)) {
-            return json(route, { message: `Illegal transition from ${state} to ${target}.` }, 400);
-          }
-          enter(target);
         } else {
-          return json(route, { message: `Illegal transition to ${String(target)}.` }, 400);
+          enter(target); // implement, review, customer_review, closed, canceled: each an edge of the state machine
         }
         reconcile();
         return json(route, { id: FAKE_CR_ID, state });
@@ -1000,6 +1357,29 @@ export async function installFakeChangeRequestApi(
     },
     failGroups: (status) => {
       groupFailure = status;
+    },
+    customerDecides: (contact, decision) => settleCustomerStage(contact, decision),
+    syncCustomers: () => {
+      syncCustomerStage();
+      reconcile();
+    },
+    startAtState: (next) => {
+      const settled = (name: string, group: FakeApprovalGroup, who: FakeUser): Stage => ({
+        ...nextStage(name, group, who),
+        status: "APPROVED",
+        approvers: [{ id: who.id, name: who.name, status: "APPROVED" }],
+      });
+      const internal: Stage[] =
+        type === "normal"
+          ? [settled("Peer Approval", FAKE_PEER_GROUP, FAKE_PEER), settled("CAB Approval", FAKE_CAB_GROUP, FAKE_CAB)]
+          : type === "emergency"
+            ? [settled("ECAB Approval", FAKE_ECAB_GROUP, FAKE_ECAB)]
+            : [];
+      // The Review stage a Normal change had before it was sent to the customer's review.
+      if (next === "customer_review" && type === "normal") internal.push(settled("Review", FAKE_PEER_GROUP, FAKE_PEER));
+      stages = internal;
+      state = next;
+      provisionReview(); // the Review stage of a Normal change that sits in Review (still to be decided)
     },
     stages: () =>
       stages.map((st) => ({

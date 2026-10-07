@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -91,6 +92,31 @@ type ReferenceDataRepository interface {
 	// that mapping is defined, so this method stays the only repository
 	// read anywhere that needs to apply it for this table.
 	ListSLADurationPolicy(ctx context.Context) ([]SLADurationPolicyRow, error)
+	// ListFeedbackEmojis returns the five case-feedback emoji choices (the
+	// "<rating> - Reasons" rows of work_item_feedback_metric, migration
+	// 0127), each with its own reason chips -- backs GET /metadata's
+	// feedbackEmojies field. See case_feedback_repo.go's own doc comment
+	// for the shared rating-scale design this and
+	// GetCaseFeedback/CreateCaseFeedback both depend on.
+	ListFeedbackEmojis(ctx context.Context) ([]FeedbackEmojiRow, error)
+}
+
+// FeedbackEmojiChipRow is one selectable reason chip under a feedback emoji
+// (a work_item_feedback_metric_option row).
+type FeedbackEmojiChipRow struct {
+	ID    string
+	Name  string
+	Value string
+}
+
+// FeedbackEmojiRow is one of the five feedback-form emoji choices.
+type FeedbackEmojiRow struct {
+	ID              string
+	Name            string
+	Value           string
+	UnselectedImage string
+	SelectedImage   string
+	Chips           []FeedbackEmojiChipRow
 }
 
 // SLADurationPolicyRow is one row of the sla_duration_policy table, already
@@ -191,6 +217,78 @@ func (r *referenceDataRepo) ListSLADurationPolicy(ctx context.Context) ([]SLADur
 		})
 	}
 	return out, rows.Err()
+}
+
+// ListFeedbackEmojis implements ReferenceDataRepository.
+func (r *referenceDataRepo) ListFeedbackEmojis(ctx context.Context) ([]FeedbackEmojiRow, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id::TEXT, name, selected_image, unselected_image
+		FROM work_item_feedback_metric
+		WHERE selected_image IS NOT NULL AND is_active
+		ORDER BY display_order NULLS LAST, name`)
+	if err != nil {
+		return nil, fmt.Errorf("list feedback emojis: %w", err)
+	}
+
+	var emojis []FeedbackEmojiRow
+	for rows.Next() {
+		var id, name string
+		var selectedImage, unselectedImage *string
+		if err := rows.Scan(&id, &name, &selectedImage, &unselectedImage); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan feedback emoji: %w", err)
+		}
+		rating, label, ok := resolveCaseFeedbackRating(name)
+		if !ok {
+			// Not one of the five known "<rating> - Reasons" rows -- a
+			// malformed or renamed row the fixed scale can't place. Skipped
+			// rather than surfaced with a guessed label.
+			continue
+		}
+		emojis = append(emojis, FeedbackEmojiRow{
+			ID:              id,
+			Name:            label,
+			Value:           strconv.Itoa(rating),
+			UnselectedImage: stringOrEmpty(unselectedImage),
+			SelectedImage:   stringOrEmpty(selectedImage),
+		})
+	}
+	closeErr := rows.Err()
+	rows.Close()
+	if closeErr != nil {
+		return nil, fmt.Errorf("iterate feedback emojis: %w", closeErr)
+	}
+
+	for i := range emojis {
+		chipRows, err := r.db.Query(ctx, `
+			SELECT id::TEXT, label, value
+			FROM work_item_feedback_metric_option
+			WHERE metric_id = $1
+			ORDER BY display_order NULLS LAST, label`,
+			emojis[i].ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list feedback emoji chips: %w", err)
+		}
+		var chips []FeedbackEmojiChipRow
+		for chipRows.Next() {
+			var chipID, label string
+			var value int
+			if err := chipRows.Scan(&chipID, &label, &value); err != nil {
+				chipRows.Close()
+				return nil, fmt.Errorf("scan feedback emoji chip: %w", err)
+			}
+			chips = append(chips, FeedbackEmojiChipRow{ID: chipID, Name: label, Value: strconv.Itoa(value)})
+		}
+		chipErr := chipRows.Err()
+		chipRows.Close()
+		if chipErr != nil {
+			return nil, fmt.Errorf("iterate feedback emoji chips: %w", chipErr)
+		}
+		emojis[i].Chips = chips
+	}
+
+	return emojis, nil
 }
 
 // GetProjectByID implements ReferenceDataRepository.

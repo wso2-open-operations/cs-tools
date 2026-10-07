@@ -241,13 +241,30 @@ func (s *caseAttachmentDualWriteService) DeleteCaseAttachment(ctx context.Contex
 }
 
 // UpdateAttachment implements CaseService. Same Postgres-first/async-mirror
-// shape as DeleteCaseAttachment above, for the same reason. The embedded
-// *caseService.UpdateAttachment enforces this data source's existing rename
-// rule (reference type "case" only, description forbidden) -- the same
-// restriction this mode already lives with for case attachments generally
-// (only ReferenceTypeCase is modeled in Postgres here), so no new validation
-// gap is introduced by reusing it as-is.
+// shape as DeleteCaseAttachment above, for the same reason -- for a "case"
+// reference, where the embedded *caseService.UpdateAttachment enforces this
+// data source's existing rename rule (reference type "case" only,
+// description forbidden).
+//
+// A deployment-referenced attachment skips the Postgres path entirely and
+// goes straight to ServiceNow, synchronously -- same "no Postgres
+// deployment attachment table yet" gap CreateCaseAttachment/GetAttachmentByID/
+// DeleteCaseAttachment already work around (see CreateCaseAttachment's own
+// doc comment). validatePGAttachmentUpdate unconditionally rejects any
+// ReferenceType other than "case" ("only 'case' is supported for this data
+// source"), so routing a deployment-referenced update through
+// *caseService.UpdateAttachment first -- as an earlier revision of this
+// method did, reasoning it was just reusing an existing, harmless
+// restriction -- made editing a deployment-tab attachment's name 400
+// unconditionally, regardless of whether ServiceNow itself would have
+// allowed it. There is nothing to write to Postgres or mirror
+// asynchronously on this path, so the ServiceNow response is returned
+// directly, the same as CreateCaseAttachment's own deployment branch.
 func (s *caseAttachmentDualWriteService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
+	if req.ReferenceType == domain.ReferenceTypeDeployment {
+		return s.snMirror.UpdateAttachment(ctx, req)
+	}
+
 	resp, err := s.caseService.UpdateAttachment(ctx, req)
 	if err != nil {
 		return domain.UpdateAttachmentResponse{}, err

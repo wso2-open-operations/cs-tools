@@ -315,15 +315,7 @@ func main() {
 	mux.HandleFunc("GET /products", productHandler.GetProducts)
 	mux.HandleFunc("POST /products/{id}/versions/search", productHandler.SearchProductVersions)
 
-	// entity-service only supports change requests and call requests on its
-	// ServiceNow data source — see internal/entity/change_requests.go and
-	// internal/entity/call_requests.go.
-	mux.Handle("POST /change-requests", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionCreate)(http.HandlerFunc(changeRequestHandler.CreateChangeRequest)))
-	mux.Handle("POST /projects/{id}/change-requests/search", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(changeRequestHandler.SearchChangeRequests)))
-	mux.Handle("GET /change-requests/{id}", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(changeRequestHandler.GetChangeRequest)))
-	mux.Handle("PATCH /change-requests/{id}", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionUpdate)(http.HandlerFunc(changeRequestHandler.PatchChangeRequest)))
-	mux.Handle("GET /change-requests/{id}/approvals", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(changeRequestHandler.GetChangeRequestApprovals)))
-	mux.Handle("POST /change-requests/{id}/approvals/decision", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionUpdate)(http.HandlerFunc(changeRequestHandler.DecideChangeRequestApproval)))
+	registerChangeRequestRoutes(mux, roleResolver, changeRequestHandler)
 
 	mux.Handle("POST /cases/{caseId}/call-requests", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionCreate)(http.HandlerFunc(callRequestHandler.CreateCallRequest)))
 	mux.Handle("POST /cases/{caseId}/call-requests/search", middleware.RequirePermission(roleResolver, middleware.ModuleCases, middleware.ActionRead)(http.HandlerFunc(callRequestHandler.SearchCallRequests)))
@@ -487,6 +479,30 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("Customer Portal Backend (v2) stopped")
+}
+
+// registerChangeRequestRoutes registers the change-request routes, with the
+// permission each one needs. A function of its own (rather than inline in main)
+// so the route-to-permission wiring is exercised by tests -- see
+// TestChangeRequestRouteGating in main_rbac_test.go.
+func registerChangeRequestRoutes(mux *http.ServeMux, roleResolver middleware.RoleResolver, h *handler.ChangeRequestHandler) {
+	// entity-service only supports change requests and call requests on its
+	// ServiceNow data source — see internal/entity/change_requests.go and
+	// internal/entity/call_requests.go.
+	mux.Handle("POST /change-requests", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionCreate)(http.HandlerFunc(h.CreateChangeRequest)))
+	mux.Handle("POST /projects/{id}/change-requests/search", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(h.SearchChangeRequests)))
+	mux.Handle("GET /change-requests/{id}", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(h.GetChangeRequest)))
+	// PATCH serves two levels of access: ActionUpdate (WSO2-side roles) may send
+	// the whole customer-safe field set, ActionDecide alone (customer and partner
+	// roles) only the customer's own answer or a proposed implementation time --
+	// see handler.PatchChangeRequest. Update is listed first so a caller who holds
+	// both is served at the broader level.
+	mux.Handle("PATCH /change-requests/{id}", middleware.RequirePermissionOneOf(roleResolver, middleware.ModuleChangeRequests, middleware.ActionUpdate, middleware.ActionDecide)(http.HandlerFunc(h.PatchChangeRequest)))
+	mux.Handle("GET /change-requests/{id}/approvals", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionRead)(http.HandlerFunc(h.GetChangeRequestApprovals)))
+	// The decision route takes ActionDecide, not ActionUpdate: a customer contact
+	// answers the Customer Approval / Customer Review they were asked here, and
+	// entity-service accepts a decision only on the caller's own pending approval.
+	mux.Handle("POST /change-requests/{id}/approvals/decision", middleware.RequirePermission(roleResolver, middleware.ModuleChangeRequests, middleware.ActionDecide)(http.HandlerFunc(h.DecideChangeRequestApproval)))
 }
 
 // dispatchDeploymentsProductsMetricsSearch resolves the two distinct routes

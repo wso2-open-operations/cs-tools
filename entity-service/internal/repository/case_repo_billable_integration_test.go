@@ -132,7 +132,7 @@ func TestBillableIntegration_EnteringLowWithExistingPatchTagStaysNonBillable(t *
 	}
 
 	low := domain.CaseSeverityLow
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW) error = %v", err)
 	}
 
@@ -157,7 +157,7 @@ func TestBillableIntegration_EnteringLowWithoutPatchTagBecomesBillable(t *testin
 	repo := repository.NewCaseRepository(repository.NewScoped(pool))
 
 	low := domain.CaseSeverityLow
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW) error = %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestBillableIntegration_LeavingLowMakesTimeCardsNonBillable(t *testing.T) {
 	repo := repository.NewCaseRepository(repository.NewScoped(pool))
 
 	low := domain.CaseSeverityLow
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW) error = %v", err)
 	}
 	if !caseIsBillable(t, pool, caseID) {
@@ -185,7 +185,7 @@ func TestBillableIntegration_LeavingLowMakesTimeCardsNonBillable(t *testing.T) {
 	}
 
 	critical := domain.CaseSeverityCritical
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &critical}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &critical}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=CRITICAL) error = %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestBillableIntegration_PatchTagAddedWhileAlreadyLowSetsNonBillable(t *test
 	repo := repository.NewCaseRepository(repository.NewScoped(pool))
 
 	low := domain.CaseSeverityLow
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW) error = %v", err)
 	}
 	if !caseIsBillable(t, pool, caseID) {
@@ -236,7 +236,7 @@ func TestBillableIntegration_LeaveAndReenterLowAfterPatchStaysNonBillable(t *tes
 
 	low := domain.CaseSeverityLow
 	critical := domain.CaseSeverityCritical
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW) error = %v", err)
 	}
 	if _, err := repo.AddCaseTag(ctx, caseID, "patch", "billable-test-reenter@example.com"); err != nil {
@@ -246,10 +246,10 @@ func TestBillableIntegration_LeaveAndReenterLowAfterPatchStaysNonBillable(t *tes
 		t.Fatalf("precondition failed: time cards should be non-billable after the patch override")
 	}
 
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &critical}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &critical}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=CRITICAL) error = %v", err)
 	}
-	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}); err != nil {
+	if _, _, err := repo.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, Severity: &low}, nil); err != nil {
 		t.Fatalf("UpdateCase(severity=LOW again) error = %v", err)
 	}
 

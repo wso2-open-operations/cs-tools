@@ -180,19 +180,33 @@ export default function WorkQueuePage() {
                           <Typography variant="body2" fontWeight={600} noWrap>
                             {tile.stageName}
                           </Typography>
-                          {/* What kind of work, not only how much. */}
+                          {/* What kind of work, not only how much.
+
+                              All in the theme's own primary rather than a
+                              colour per kind. These are TALLIES — how many
+                              pairings on this tile fall into each bucket — and
+                              a colour scale over them read as a verdict: green
+                              "running" looked like good news and amber "at
+                              risk" like bad, when both are just counts of work
+                              waiting to be picked up. Worse, "at risk" and
+                              "idle" were the same amber, so the two were
+                              distinguishable only by reading them.
+
+                              "not started" stays outlined, which separates the
+                              bucket that needs no decision from the three that
+                              do without spending a second hue on it. */}
                           <Stack direction="row" spacing={0.5} mt={0.75} flexWrap="wrap" useFlexGap>
                             {tile.atRisk > 0 ? (
-                              <Chip size="small" color="warning" label={`${tile.atRisk} at risk`} />
+                              <Chip size="small" color="primary" label={`${tile.atRisk} at risk`} />
                             ) : null}
                             {tile.noPlaybook > 0 ? (
-                              <Chip size="small" color="warning" label={`${tile.noPlaybook} idle`} />
+                              <Chip size="small" color="primary" label={`${tile.noPlaybook} idle`} />
                             ) : null}
                             {tile.notStarted > 0 ? (
                               <Chip size="small" variant="outlined" label={`${tile.notStarted} not started`} />
                             ) : null}
                             {tile.inProgress > 0 ? (
-                              <Chip size="small" color="success" label={`${tile.inProgress} running`} />
+                              <Chip size="small" color="primary" label={`${tile.inProgress} running`} />
                             ) : null}
                           </Stack>
                         </CardContent>
@@ -328,7 +342,10 @@ function NeedsCell({ item }: { item: WorkQueueItem }) {
       }
     >
       <Stack direction="row" spacing={1} alignItems="center">
-        <Chip size="small" color="warning" label="No playbook" />
+        {/* Primary, matching the "idle" tally on the tile above that counts
+            this same row. It was amber, the one colour left on this page after
+            the tiles moved to the theme accent. */}
+        <Chip size="small" color="primary" label="No playbook" />
         <Typography variant="caption" color="text.secondary">
           {item.availablePlaybooks > 0
             ? `${item.availablePlaybooks} available`

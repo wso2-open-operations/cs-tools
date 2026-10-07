@@ -21,6 +21,7 @@ import type {
   RecommendationApiMessage,
   RecommendationSearchRequest,
 } from "@features/support/types/recommendations";
+import { stripThinkingBlocks } from "@features/support/utils/chat";
 
 /**
  * Maps a similarity score (0–1) to a whole-number percentage label.
@@ -125,10 +126,13 @@ export function buildRecommendationRequestFromCase(
   });
 
   for (const c of sortedComments) {
-    const content = c.content?.trim() ?? "";
+    const role = roleFromCaseComment(c);
+    // The recommender should see the answer, not the model's reasoning.
+    const raw = c.content ?? "";
+    const content = (role === "assistant" ? stripThinkingBlocks(raw) : raw).trim();
     if (!content) continue;
     chatHistory.push({
-      role: roleFromCaseComment(c),
+      role,
       content,
       timestamp: c.createdOn ?? createdOn,
     });
@@ -166,11 +170,13 @@ export function buildRecommendationRequestFromConversationMessages(
 
   const chatHistory: RecommendationApiMessage[] = [];
   for (const m of sorted) {
-    const content = (m.content?.trim() ?? "").slice(-150);
-    if (!content) continue;
     const isBot =
       m.type?.toLowerCase() === "bot" ||
       m.createdBy?.toLowerCase() === "novera";
+    // The recommender should see the answer, not the model's reasoning.
+    const raw = m.content ?? "";
+    const content = (isBot ? stripThinkingBlocks(raw) : raw).trim().slice(-150);
+    if (!content) continue;
     chatHistory.push({
       role: isBot ? "assistant" : "user",
       content,

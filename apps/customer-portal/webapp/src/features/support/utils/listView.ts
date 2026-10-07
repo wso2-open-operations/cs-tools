@@ -56,6 +56,28 @@ export function countListSearchAndFilters(
 }
 
 /**
+ * Type guard for a filters object whose every present field is a numeric-id
+ * string (e.g. {@link AllConversationsFilterValues}'s `stateId`). Intended as
+ * `useSessionState`'s own `validate` parameter, to discard a value restored
+ * from `sessionStorage` whose shape predates a choice-list id format change --
+ * e.g. a raw Postgres enum label like `"ACTIVE"` left over from before
+ * backend-v2's conversationStates normalization fix (digiops-cs#3273), which
+ * can never produce a valid search request and must not be silently restored.
+ *
+ * @param value - The raw, JSON-parsed value read back from sessionStorage.
+ * @returns {boolean} True when `value` is an object and every present field's
+ *   value is a string of digits (or `undefined`).
+ */
+export function isValidNumericIdFilters<T extends Record<string, string | undefined>>(
+  value: unknown,
+): value is T {
+  if (typeof value !== "object" || value === null) return false;
+  return Object.values(value as Record<string, unknown>).every(
+    (v) => v === undefined || (typeof v === "string" && /^\d+$/.test(v)),
+  );
+}
+
+/**
  * Normalizes category / issue-type filter values for case search API requests.
  *
  * @param issueTypes - Selected issue type id(s) from multi- or single-select filters.

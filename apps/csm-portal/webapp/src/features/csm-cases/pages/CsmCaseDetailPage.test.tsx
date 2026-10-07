@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
 import {
@@ -1139,6 +1139,47 @@ describe("CsmCaseDetailPage — onboarding chip", () => {
     expect(
       await screen.findByText("Onboarding owner: Unassigned"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("CsmCaseDetailPage — auto-closure hold chip", () => {
+  function renderWithAutoclosure(
+    autoclosureStep: string | undefined,
+    autoclosureStateTime: string | undefined,
+  ): void {
+    useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+      ...(defaultCaseDetailImpl(id) as object),
+      data: id
+        ? { ...buildCase(id), autoclosureStep, autoclosureStateTime }
+        : undefined,
+    }));
+    renderPage();
+  }
+
+  it("shows the hold chip with its date for a case that is on hold", () => {
+    renderWithAutoclosure("ON_HOLD", "2099-06-15T00:00:00.000Z");
+
+    // The held calendar day, not a date-time shifted into the viewer's
+    // timezone (which reads as the previous evening west of UTC).
+    expect(screen.getByText("On hold until Jun 15, 2099")).toBeInTheDocument();
+  });
+
+  it("shows no hold chip while the case is only counting down to auto-closure", () => {
+    // FIRST_COMMENT / SECOND_COMMENT are later stages of the same sequence,
+    // not a pause; their state time is when the next stage fires, so an "On
+    // hold until" chip would be wrong for the thousands of cases sitting there.
+    for (const step of ["FIRST_COMMENT", "SECOND_COMMENT", "DEFAULT"]) {
+      renderWithAutoclosure(step, "2099-06-15T00:00:00.000Z");
+      expect(screen.queryByText(/On hold until/)).not.toBeInTheDocument();
+      expect(screen.queryByText("On auto-closure hold")).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it("shows no hold chip for a case with no auto-closure step at all", () => {
+    renderWithAutoclosure(undefined, undefined);
+
+    expect(screen.queryByText(/On hold until/)).not.toBeInTheDocument();
   });
 });
 

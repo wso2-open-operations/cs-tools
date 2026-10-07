@@ -274,6 +274,30 @@ reached the browser; this is what stops them being sent at all to a caller who s
 to the entity service as-is (no field allow-list), with two checks on top:
 
 * `POST` requires `type` of `standard`, `normal` or `emergency` (`validateChangeRequestCreateType`).
+* **Every body guard of the change request handlers reads keys the way the entity service's decoder
+  does -- without regard to case.** The entity service decodes with `encoding/json`, which matches a
+  key to a field case-insensitively, so `ISCUSTOMERAPPROVED`, `iscustomerreviewed` and
+  `{"isCustomerApproved": null, "ISCUSTOMERAPPROVED": true}` are the flag there (a body that names a
+  field twice is read as the last spelling reached, `null` included). A guard that looked up one
+  exact key let them through; on `DATA_SOURCE=servicenow` the entity service forwards the flag. All
+  the guards below (the two customer flags, the two requirement boxes, `type`, `projectId`,
+  `deploymentIds`, `deploymentProductIds`, `customerGroupId`, `environmentIds`, `category`,
+  `comment`, `workNote`) look a field up through `payloadValues`, which returns the value under
+  **every** spelling of the key and judges all of them: the customer flags are refused when any
+  spelling carries a value that is not `null` (the null/true pair in either order too).
+  `TestPatchChangeRequestRefusesTheCustomersAnswer` and
+  `TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys`.
+* **Compliance rule: nobody here records the customer's approval or review on the customer's
+  behalf.** `PATCH` refuses (400, no upstream call) a body that carries `isCustomerApproved` or
+  `isCustomerReviewed` with any value but `null` -- `true` or `false`, alone or with a state
+  (`validateChangeRequestCustomerOutcomeFlags`): `isCustomerApproved cannot be set on the
+  customer's behalf: the customer's approval can only be given by the customer in the Customer
+  Portal` (likewise `isCustomerReviewed` / "review"). The customer gives it in the Customer
+  Portal (`apps/customer-portal`); the answer is the customer's decision and the change request's record
+  of it is audited. The state half -- no manual `{state: "scheduled"}` out of Customer Approval,
+  no `{state: "closed"}` out of Customer Review -- needs the change request's state, so it is the
+  entity service's refusal, echoed verbatim (below). There is no "Bypass customer approval" /
+  "Bypass customer review".
 * Both accept the creation form's two checkboxes, **`customerApprovalRequired`**
   and **`customerReviewRequired`**, and refuse (400, "… must be a boolean (true
   or false)") any value that is not a JSON boolean, `null` included
@@ -281,7 +305,18 @@ to the entity service as-is (no field allow-list), with two checks on top:
   until when they are editable, is the entity service's call — see its CLAUDE.md,
   "Customer Approval / Customer Review checkboxes". `PATCH` and `POST` echo the entity service's 400 message (`mapUpstreamError`), so its
   refusals ("customerApprovalRequired can no longer be changed …", "customer
-  review is required …") reach the form verbatim (`POST` does the same, see below).
+  review is required …") reach the form verbatim (`POST` does the same, see below). Among them,
+  the **customer requirements lock's nobody-to-ask refusal**: Request Approval (`{state:
+  "assess"}`) on a change that has a customer box set and a Customer Project with nobody who can
+  be asked (no registered portal-user contact other than the requester), and turning a box on
+  after it, are a 400 `customer approval is required but nobody on this project can be asked (no
+  registered contact other than the requester): register a contact for the project first`
+  (`customer review is …` / `customer approval and customer review are …`); a change with no
+  Customer Project at all keeps `approval cannot be requested: … no Customer Project is set …`.
+  The BFF neither decides nor pre-checks any of it (it has no contact data; the entity service's
+  `customerGroupCanBeAsked` is the one test, the same the customer stage's provisioning
+  applies), so `TestPatchChangeRequest_CustomerGateFlags/surfaces_the_entity_service's_refusal_messages`
+  pins that these words come through unchanged.
 * Both shape-check the customer-scope and journal fields
   (`validateChangeRequestScopeFields`): `projectId` a UUID string; `deploymentIds`,
   `deploymentProductIds` arrays of UUID strings (at most 100, `null` is not an
@@ -310,20 +345,29 @@ to the entity service as-is (no field allow-list), with two checks on top:
   and `legalNextStates` untouched; the webapp renders `legalNextStates` as-is. It also
   carries `project`, `deployments`, `deploymentProducts`, `customerContacts` (the
   derived, read-only Customer Group) and `category`.
-* **Customer Group approvals.** The change's customer group (the project's registered
-  contacts) answers Customer Approval / Customer Review through the approvals
-  (`POST /change-requests/{id}/approvals/decision`), with the stages "Customer
-  Approval" / "Customer Review" in `GET .../approvals` (see the entity service's
-  CLAUDE.md, "Customer Group"). While such a stage is live `legalNextStates` for
-  those states is just `["canceled"]` and a manual `{state: "scheduled"}` /
-  `{state: "closed"}` PATCH is a 400 whose message is echoed verbatim. A
-  non-contact's decision is a 403 whose reason is shown (`mapApprovalDecisionError`
-  already surfaces any 403 reason: `only members of the customer group (the
-  registered contacts of this change request's project) can approve or reject …`).
-  The decision route is `PermWrite` (cs_engineer / admin): registered customer
-  contacts cannot reach it through this BFF. A rejected Customer Approval cancels the change, a
-  rejected Customer Review moves it to `rollback`. No BFF code change was needed;
-  `TestCustomerGroupApprovalMessages` pins both messages.
+* **Customer Group approvals (not decided here).** The change's customer group (the
+  project's registered contacts) answers Customer Approval / Customer Review **in the
+  customer portal**, not through this BFF: customers do not sign in to the CSM portal, and
+  the decision route (`POST /change-requests/{id}/approvals/decision`) is `PermWrite`
+  (cs_engineer / admin) for internal approvers. The stages "Customer Approval" / "Customer
+  Review" still appear in `GET .../approvals` (see the entity service's CLAUDE.md,
+  "Customer Group") so the Approvals tab can show who was asked and the outcome. While such a
+  stage is live `legalNextStates` for Customer Review is just `["canceled"]` (Customer Approval
+  keeps Re-schedule: `["authorize", "canceled"]`; Assess and Authorize offer `["canceled"]` only --
+  the peer / CAB approval moves them on -- and the entity service accepts exactly the states
+  `legalNextStates` offers, see its CLAUDE.md, "The transition graph of `PATCH {state}`": a change
+  that is closed, canceled or rolled back cannot be moved by any request, and no request skips a
+  step), and a manual `{state: "scheduled"}` /
+  `{state: "closed"}` PATCH is a 400 -- live stage or not, whatever the project (see the entity
+  service's CLAUDE.md, "There is no "Schedule" action") -- whose message is echoed
+  verbatim (`state "scheduled" cannot be set manually from customer_approval: the customer's
+  approval can only be given by the customer in the Customer Portal; cancel the change or
+  re-schedule it instead`); a CSM user's decision on it is a 403 whose reason is shown
+  (`mapApprovalDecisionError` already surfaces any 403 reason: `only members of the customer
+  group (the registered contacts of this change request's project) can approve or reject …`).
+  A rejected Customer Approval cancels the change, a rejected Customer Review moves it to
+  `rollback`. `TestCustomerGroupApprovalMessages` pins both refusal messages as they are echoed,
+  `TestPatchChangeRequestRefusesTheCustomersAnswer` the BFF's own refusal of the two flags.
 * **A stale approval is a 409.** A decision on a stage whose state the change has left
   (a Review approver once the change is in Customer Review / Closed -- the entity
   service cancels such rows when the change moves on, and refuses a decision on one it
@@ -336,6 +380,20 @@ to the entity service as-is (no field allow-list), with two checks on top:
   `TestDecideChangeRequestApproval` pins both ("a 409 carrying the entity service's
   reason shows it", "... without a readable reason stays generic"). `canDecide` is
   `false` on such a row, so the portal does not offer the buttons in the first place.
+
+**The refusals' machine-readable `errorCode`.** entity-service names the refusals a client has
+to tell apart with a stable `errorCode` string in its error body (`change_request_approval_not_pending`
+for the 409 above, `change_request_not_asked` / `change_request_forbidden` for its 403s,
+`change_request_on_hold`, `change_request_schedule_changed`, `change_request_not_proposable`; the table is in
+its CLAUDE.md, "Error types"). The BFF passes it through, beside the message, with the status it
+gives it: `mapUpstreamError` (the PATCH handlers) on the 400, 403, 409 and 422, and
+`mapApprovalDecisionError` on the decision route's 403 and 409 (`errorBody.ErrorCode`, `writeErrorCode`,
+`upstreamErrorCode`). The code is read from the upstream envelope (`apierror.Error.Body` holds it whole,
+`maxEntityErrBody`) and kept only when it is a plain lower-case snake_case name of at most 64
+characters, so nothing else reaches a client through it; a refusal with none (an older entity
+service) adds no key, and `mapUpstreamErrorGeneric` (every other endpoint) never echoes it, as it never
+echoes the message. The CSM webapp does not branch on it today (it keys on the 409 status); it is
+there for the next client that has to. Pinned by `TestUpstreamErrorCodesPassThrough`.
 
 ## Opening an approval stage's assignment group (`GET /groups/{id}`)
 

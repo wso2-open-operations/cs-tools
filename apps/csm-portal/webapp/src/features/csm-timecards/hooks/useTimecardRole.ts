@@ -23,17 +23,28 @@ import {
 export interface TimecardRole {
   /** May approve/reject/recall time cards — the dedicated approver group only. */
   isApprover: boolean;
-  /** Time-card admin: edit any user's editable cards, approve by exception. */
+  /**
+   * Time-card admin: edit any user's editable cards, approve by exception.
+   * "By exception" is literal here, not aspirational — entity-service's
+   * `TransitionTimeCardState` lets a holder of the global `admin` role
+   * decide ANY submitted card, not just ones where they hold a
+   * `time_card_approver` row for that specific card (see that repo's own
+   * `CLAUDE.md`, "Comment, product vulnerability, and time-card Postgres
+   * support"). `isAdmin` is therefore a strictly broader grant than
+   * `isApprover`, which is itself still scoped per card.
+   */
   isAdmin: boolean;
 }
 
 /**
  * The signed-in user's time-card role, resolved from `GET /users/me` roles
  * (platform-owned data from the entity service). `isApprover` and `isAdmin`
- * are deliberately independent — being a general portal admin no longer
- * implies time-card approval rights, and doesn't put the Approvals tab in
- * front of someone who isn't actually a time-card approver. Client-side
- * affordance only — the backend must enforce the same gates.
+ * are surfaced independently so each caller can decide which capability it
+ * actually needs — `isApprover` alone for a per-card eligibility check,
+ * `isApprover || isAdmin` wherever admin's approve-by-exception should also
+ * apply (every Approve/Reject surface in this feature does). Client-side
+ * affordance only — the backend must enforce the same gates, and does (see
+ * `isAdmin`'s own doc comment).
  */
 export function useTimecardRole(): TimecardRole {
   const { data: me } = useGetUsersMe();

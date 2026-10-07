@@ -129,6 +129,7 @@ func (r *githubSyncRepository) RepoMapping(ctx context.Context, owner, repositor
 	return &m, nil
 }
 
+// crvis: GitHub inbound sync under the system identity (M2M-only webhook handlers); no customer identity reaches it
 func (r *githubSyncRepository) ChangeRequestByGitReference(ctx context.Context, issueURL string) (*GithubChangeRequest, error) {
 	ctx = withGithubSystemIdentity(ctx)
 	const query = `

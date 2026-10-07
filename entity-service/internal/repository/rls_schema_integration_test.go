@@ -166,11 +166,21 @@ func TestRLSSchemaIntegration_PolicyHelperFunctionsAreParallelSafe(t *testing.T)
 
 // rlsCommandsDeniedOnPurpose lists table/command pairs that intentionally have
 // no policy, so the database refuses that command for every caller (internal
-// ones included). It is empty on purpose: until migration 0190 seven such
-// pairs existed, nobody had written down that they were deliberate, and the
-// csm-sync-service -- which does run those commands -- had every one of them
-// refused. To leave a pair without a policy, add it here with the reason.
-var rlsCommandsDeniedOnPurpose = map[string]map[string]string{}
+// ones included). Until migration 0190 seven such pairs existed, nobody had
+// written down that they were deliberate, and the csm-sync-service -- which
+// does run those commands -- had every one of them refused. To leave a pair
+// without a policy, add it here with the reason, and the reason must say why
+// the sync does not need it.
+var rlsCommandsDeniedOnPurpose = map[string]map[string]string{
+	// Our own table (migration 0191): nothing outside entity-service writes it
+	// (the sync's change_request_product / change_request_product_version are
+	// different tables), and entity-service only ever deletes and re-inserts
+	// the whole list, so it never issues an UPDATE. change_request_deployment,
+	// the sync's own junction, does have the UPDATE policy (migration 0205).
+	"change_request_deployed_product": {
+		"UPDATE": "entity-service deletes and re-inserts the snapshot; the sync never writes this table",
+	},
+}
 
 // TestRLSSchemaIntegration_EveryProtectedTableHasAPolicyForEveryCommand
 // guards against a table being left with RLS enabled and no policy for one of

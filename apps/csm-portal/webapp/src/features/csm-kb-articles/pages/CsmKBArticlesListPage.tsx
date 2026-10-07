@@ -115,7 +115,7 @@ export default function CsmKBArticlesListPage(): JSX.Element {
   const { data: kbList } = useListKnowledgeBases();
   const kbNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const kb of kbList?.knowledgeBases ?? []) map.set(kb.id, kb.name);
+    for (const kb of kbList?.knowledgeBases ?? []) map.set(kb.id, kb.title);
     return map;
   }, [kbList]);
   const kbOptions = useMemo(

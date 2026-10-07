@@ -196,7 +196,7 @@ func (s *crNoticeService) approvalNotice(ctx context.Context, change repository.
 		recipients, err = s.repo.GroupMemberEmails(ctx, branch.group)
 	} else {
 		notice.Subject = crSubject(details.Number, branch.suffix, "")
-		recipients, err = s.repo.ProjectContactEmails(ctx, details.ProjectID)
+		recipients, err = s.repo.CustomerNoticeEmails(ctx, change.EntityID, details.ProjectID)
 	}
 	if err != nil {
 		return fmt.Errorf("crnotice: resolve %s recipients: %w", branch.audience, err)
@@ -283,13 +283,13 @@ func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.
 		notice.Kind = events.CRPlanDateAccepted
 		notice.Audience = events.CRAudienceCustomer
 		notice.Subject = crPlanDateSubject(details.Number, "Accepted the plan start date")
-		recipients, err = s.repo.ProjectContactEmails(ctx, details.ProjectID)
+		recipients, err = s.repo.CustomerNoticeEmails(ctx, change.EntityID, details.ProjectID)
 
 	case crTurnWSO2Rejected:
 		notice.Kind = events.CRPlanDateRejected
 		notice.Audience = events.CRAudienceCustomer
 		notice.Subject = crPlanDateSubject(details.Number, "Reject the proposed plan start date")
-		recipients, err = s.repo.ProjectContactEmails(ctx, details.ProjectID)
+		recipients, err = s.repo.CustomerNoticeEmails(ctx, change.EntityID, details.ProjectID)
 	}
 	if err != nil {
 		return fmt.Errorf("crnotice: resolve %s recipients: %w", notice.Audience, err)

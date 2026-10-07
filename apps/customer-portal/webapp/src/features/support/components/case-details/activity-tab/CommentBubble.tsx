@@ -60,6 +60,7 @@ import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedI
 import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
+import { stripThinkingBlocks } from "@features/support/utils/chat";
 
 function commentAuthorDisplayName(comment: CaseComment): string {
   if (comment.createdByFullName?.trim()) {
@@ -86,7 +87,12 @@ export default function CommentBubble({
   const isDarkMode = useDarkMode();
   const { downloadAttachment, isDownloading, downloadingId } =
     useGetAttachmentContent();
-  const rawContent = comment.content ?? "";
+  // The case Activity tab merges the linked Novera chat into the timeline, so a
+  // Novera answer can arrive here still carrying its <thinking> reasoning.
+  const isNoveraComment = isNoveraOrBotSender(comment.createdBy, comment.type);
+  const rawContent = isNoveraComment
+    ? stripThinkingBlocks(comment.content ?? "")
+    : (comment.content ?? "");
   const isFullCodeWrap = hasSingleCodeWrapper(rawContent);
   const codeBlockCount = rawContent.match(/\[code\]/gi)?.length ?? 0;
   const afterCode = isFullCodeWrap
@@ -100,7 +106,7 @@ export default function CommentBubble({
     withoutLabel,
     comment.inlineAttachments,
   );
-  const renderAsMarkdown = isNoveraOrBotSender(comment.createdBy, comment.type);
+  const renderAsMarkdown = isNoveraComment;
   const darkModeHtml = isDarkMode
     ? stripLightModeInlineStyles(withImages)
     : withImages;
@@ -142,7 +148,7 @@ export default function CommentBubble({
     return "?";
   }, [isCurrentUser, comment, userDetails]);
 
-  const isNovera = isNoveraOrBotSender(comment.createdBy, comment.type);
+  const isNovera = isNoveraComment;
   const isAttachmentEntry = comment.type?.toLowerCase() === "attachment";
   const attachmentCategory = getAttachmentFileCategory(
     comment.fileName ?? "",

@@ -26,6 +26,8 @@ import {
   isPastDateTime,
   isPastZonedInput,
   parseDateOnly,
+  formatUtcDateForDisplay,
+  utcDateOnlyValue,
 } from "./dateTime";
 
 describe("isPastDateTime", () => {
@@ -287,5 +289,33 @@ describe("isPastZonedInput", () => {
     freezeNow();
     expect(isPastZonedInput("")).toBe(false);
     expect(isPastZonedInput("not a date")).toBe(false);
+  });
+});
+
+describe("utcDateOnlyValue / formatUtcDateForDisplay", () => {
+  // A calendar-date field is stored as <day> 00:00 UTC. These must name that
+  // day in any viewer timezone: local getters give the previous day west of
+  // UTC, which is the off-by-one the auto-closure hold hit.
+  it("names the UTC calendar day of a midnight-UTC value", () => {
+    expect(utcDateOnlyValue("2026-10-22T00:00:00.000Z")).toBe("2026-10-22");
+    expect(utcDateOnlyValue("2026-01-01T00:00:00Z")).toBe("2026-01-01");
+    expect(formatUtcDateForDisplay("2026-10-22T00:00:00.000Z")).toBe("Oct 22, 2026");
+  });
+
+  it("reads an unzoned backend value as UTC, like every other backend timestamp", () => {
+    expect(utcDateOnlyValue("2026-10-22 00:00:00")).toBe("2026-10-22");
+  });
+
+  it("keeps the UTC day for an instant late in that day", () => {
+    expect(utcDateOnlyValue("2026-10-22T23:59:59.000Z")).toBe("2026-10-22");
+    expect(formatUtcDateForDisplay("2026-10-22T23:59:59.000Z")).toBe("Oct 22, 2026");
+  });
+
+  it("returns null for empty or unparseable input", () => {
+    expect(utcDateOnlyValue(undefined)).toBeNull();
+    expect(utcDateOnlyValue("")).toBeNull();
+    expect(utcDateOnlyValue("not a date")).toBeNull();
+    expect(formatUtcDateForDisplay(null)).toBeNull();
+    expect(formatUtcDateForDisplay("not a date")).toBeNull();
   });
 });

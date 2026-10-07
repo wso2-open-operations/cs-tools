@@ -27,6 +27,7 @@ import {
 } from "react";
 import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } from "../types";
 import { escalationGrid } from "../utils/rota";
+import { useTeamName } from "../utils/teamColourContext";
 
 
 export interface CellPickerTarget {
@@ -70,6 +71,9 @@ interface CellPickerProps {
    *  only to name what a cell already holds. A day marked with a kind this
    *  rota no longer offers still says what it is when a lead opens it. */
   allKinds?: ScheduleAbsenceKind[];
+  /** Tags that move somebody to another team for a span ("Move to
+   *  Migration"), offered in a section of their own. */
+  moveKinds?: ScheduleAbsenceKind[];
   /** Put them on a window over the span. `tier` is set for an escalation
    *  window that leaves the tier to the person. */
   onApply: (shiftCode: string, from: string, to: string, tier?: ScheduleTier) => void;
@@ -106,6 +110,14 @@ export interface NewAbsenceKind {
 const TAG_COLOURS = [
   "AL", "LL", "MAT", "PAT", "RND", "EXT", "INT", "BR", "MIG", "ONB", "EXC", "IND",
 ] as const;
+
+/** An ISO day plus n days -- the end of an open-ended span, for moving
+ *  somebody back from it (the server takes a year at most). */
+function isoPlusDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 /** "12 Mar" -- short enough to sit beside a chip in the picker's header. */
 function shortDate(iso: string): string {
@@ -165,6 +177,7 @@ export default function CellPicker({
   shifts,
   awayKinds,
   allKinds,
+  moveKinds,
   onApply,
   onMarkAway,
   onClear,
@@ -228,20 +241,36 @@ export default function CellPicker({
   /** Leave is not marked from a weekend -- see the Away buttons below. */
   const onWeekend = isWeekendIso(firstDay);
 
+  const teamNameOf = useTeamName();
+  /** Moves offered from this cell: to a team the person is not already on. */
+  const moves = (moveKinds ?? []).filter(
+    (k) => k.movesToTeamKey && k.movesToTeamKey.toLowerCase() !== target.teamKey.toLowerCase(),
+  );
+
+  /** The move this day is part of, where it is one. On a move to a team that
+   *  works no rota (Migration) they take no rotation -- the server refuses
+   *  one too -- and either way they can be moved back from here. */
+  const heldKind = target.absence
+    ? (allKinds ?? awayKinds).find((k) => k.code === target.absence?.kindCode)
+    : undefined;
+  const heldMove = heldKind?.movesToTeamKey ? heldKind : undefined;
+  const offRota = Boolean(heldMove && !heldMove.worksRotaThere);
+  const offRotaWhy = heldMove ? `on ${heldMove.label}, not rota work` : "";
+
   /** Rotations first under their own heading, then the standing windows,
    *  each marked with whether it is worked on the day the picker opened on. */
   const groups = useMemo(() => {
     const decorate = (list: ScheduleShift[]) =>
       [...list]
         .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((s) => ({ shift: s, ok: allowedOn(s, firstDay) }));
+        .map((s) => ({ shift: s, ok: allowedOn(s, firstDay) && !(offRota && s.isRotation) }));
     // Escalation windows are picked from the grid below, by zone and tier,
     // rather than listed here a second time.
     return [
       { heading: "Rotations", items: decorate(shifts.filter((s) => s.isRotation && !s.isEscalation)) },
       { heading: "Standing hours", items: decorate(shifts.filter((s) => !s.isRotation)) },
     ].filter((g) => g.items.length > 0);
-  }, [shifts, firstDay]);
+  }, [shifts, firstDay, offRota]);
 
   /** L1, L2 and L3 for every zone worked on the span's first day. */
   const grid = useMemo(() => escalationGrid(shifts, firstDay), [shifts, firstDay]);
@@ -316,6 +345,12 @@ export default function CellPicker({
           {(() => {
             const ab = target.absence;
             const kind = (allKinds ?? awayKinds).find((k) => k.code === ab.kindCode);
+            // A move worked as another team's normal hours reads as those
+            // hours -- Americas cover -- not as the tag that records it.
+            const shownAs =
+              kind?.worksRotaThere && kind.showsAsShiftCode
+                ? shifts.find((sh) => sh.code === kind.showsAsShiftCode)
+                : undefined;
             const range = ab.endsOn
               ? ab.endsOn === ab.startsOn
                 ? shortDate(ab.startsOn)
@@ -323,9 +358,11 @@ export default function CellPicker({
               : `from ${shortDate(ab.startsOn)}, until further notice`;
             return (
               <>
-                <span className={`chip sm ${kind?.colourToken ?? ""}`}>{kind?.shortCode ?? ab.kindCode}</span>
+                <span className={`chip sm ${shownAs?.colourToken ?? kind?.colourToken ?? ""}`}>
+                  {shownAs?.shortCode ?? kind?.shortCode ?? ab.kindCode}
+                </span>
                 <span className="pkrm-t">
-                  <b>{kind?.label ?? ab.kindCode}</b>
+                  <b>{shownAs?.label ?? kind?.label ?? ab.kindCode}</b>
                   {ab.allocatedTo ? ` · ${ab.allocatedTo}` : ""}
                   <small>{range}</small>
                 </span>
@@ -337,6 +374,22 @@ export default function CellPicker({
                 >
                   Remove
                 </button>
+                {/* Only from a day the move still covers: a later start would
+                    send a backwards range, which the server swaps round --
+                    clearing the move's last day and whatever else lies in
+                    between. */}
+                {heldMove && ab.homeTeamKey && (!ab.endsOn || firstDay <= ab.endsOn) ? (
+                  // The end of a move: back on their own team from the day
+                  // picked, the days before it kept as they were.
+                  <button
+                    type="button"
+                    className="pkrm-b back"
+                    disabled={busy}
+                    onClick={() => onMarkAway("", firstDay, ab.endsOn ?? isoPlusDays(firstDay, 365))}
+                  >
+                    Back to {teamNameOf(ab.homeTeamKey)} from {shortDate(firstDay)}
+                  </button>
+                ) : null}
               </>
             );
           })()}
@@ -407,7 +460,7 @@ export default function CellPicker({
                 type="button"
                 className={`pk-c ${shift.code === target.shiftCode ? "on" : ""} ${ok ? "" : "bad"}`}
                 disabled={!ok || busy}
-                title={ok ? shift.label : `${shift.label} — ${notWorked(shift)}`}
+                title={ok ? shift.label : `${shift.label} — ${offRota && shift.isRotation ? offRotaWhy : notWorked(shift)}`}
                 onClick={() => onApply(shift.code, firstDay, lastDay)}
               >
                 <span className={`chip sm ${shift.colourToken}`}>{shift.shortCode}</span>
@@ -416,7 +469,9 @@ export default function CellPicker({
                     work out which weekend window was which. */}
                 <span className="pk-l">
                   {shift.label}
-                  {ok ? null : <small className="pk-n">{notWorked(shift)}</small>}
+                  {ok ? null : (
+                    <small className="pk-n">{offRota && shift.isRotation ? offRotaWhy : notWorked(shift)}</small>
+                  )}
                 </span>
               </button>
             ))}
@@ -446,7 +501,7 @@ export default function CellPicker({
                         key={tier}
                         type="button"
                         className={`pk-t${held ? " on" : ""}`}
-                        disabled={!shift || busy}
+                        disabled={!shift || busy || offRota}
                         aria-label={`${tier} for ${row.label}`}
                         title={shift ? `${tier} · ${shift.label}` : `${row.label} has no ${tier} window`}
                         onClick={() =>
@@ -460,6 +515,27 @@ export default function CellPicker({
                 </div>
               ))}
             </div>
+          </>
+        ) : null}
+
+        {moves.length > 0 ? (
+          <>
+            <div className="pk-sec">Move to another team</div>
+            {moves.map((kind) => (
+              <button
+                key={kind.code}
+                type="button"
+                className={`pk-c ${kind.code === target.absenceKindCode ? "on" : ""}`}
+                disabled={busy}
+                // A span like any other: from and to above. They show under
+                // that team for those days, and come back with "Back to ...".
+                title={`${kind.label}: on the ${teamNameOf(kind.movesToTeamKey ?? "")} team for the span`}
+                onClick={() => onMarkAway(kind.code, firstDay, lastDay)}
+              >
+                <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
+                <span className="pk-l">Move to {teamNameOf(kind.movesToTeamKey ?? "")}</span>
+              </button>
+            ))}
           </>
         ) : null}
 

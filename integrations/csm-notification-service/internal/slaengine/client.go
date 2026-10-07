@@ -165,3 +165,71 @@ func (c *EntityClient) GetDurationPolicy(ctx context.Context) (map[string]map[st
 	}
 	return out, nil
 }
+
+// activeSLAClock mirrors the one shape of entity-service's
+// domain.SLAStatus this engine's reconciliation pass actually needs — a
+// deliberately narrow subset (no BusinessElapsedPercent/HasBreached/the
+// onboarding-routing or email-reaction fields: none of them feed
+// RegisterClocks-equivalent state), decoded from the same wire response as
+// every other field on that type.
+type activeSLAClock struct {
+	CaseID     string     `json:"caseId"`
+	ClockType  string     `json:"clockType"`
+	IsPaused   bool       `json:"isPaused"`
+	StartedOn  *time.Time `json:"startedOn"`
+	CaseNumber string     `json:"caseNumber"`
+	WSO2CaseID string     `json:"wso2CaseId"`
+	CaseTitle  string     `json:"caseTitle"`
+	CaseType   string     `json:"caseType"`
+	Product    string     `json:"product"`
+	Team       string     `json:"team"`
+	Priority   string     `json:"priority"`
+	State      string     `json:"state"`
+}
+
+type searchActiveSLAStatusResponse struct {
+	Statuses []activeSLAClock `json:"statuses"`
+	Total    int              `json:"total"`
+	Limit    int              `json:"limit"`
+	Offset   int              `json:"offset"`
+}
+
+// activeSLAStatusPageSize is this client's own page size for
+// GetActiveCSMSLAClocks — well under entity-service's own 2000-row cap
+// (internal/service/sla_status_service.go's maxSLAStatusLimit), chosen
+// purely so one slow page can't single-handedly reproduce the gateway
+// timeout the abandoned poll design hit (see this package's own doc
+// comment above) — this call is scoped to source=csm, a much smaller row
+// set than that design ever had to page through, but there's no reason to
+// risk a single, large round trip when several small ones cost nothing
+// extra at startup.
+const activeSLAStatusPageSize = 200
+
+// GetActiveCSMSLAClocks calls GET /sla-status?source=csm, paging through
+// every currently-open clock this engine's own entity-service counterpart
+// (source='CSM' "sla" rows) is tracking, and returns the full, flattened
+// list. Called once, from Engine.Reconcile, itself called once at process
+// startup (see that method's own doc comment for why) — never on a
+// recurring basis, unlike the poll design this package's own doc comment
+// describes abandoning GET /sla-status for.
+func (c *EntityClient) GetActiveCSMSLAClocks(ctx context.Context) ([]activeSLAClock, error) {
+	var all []activeSLAClock
+	offset := 0
+	for {
+		path := fmt.Sprintf("/sla-status?source=csm&limit=%d&offset=%d", activeSLAStatusPageSize, offset)
+		respBody, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("slaengine: fetch active csm sla clocks (offset %d): %w", offset, err)
+		}
+		var resp searchActiveSLAStatusResponse
+		if err := json.Unmarshal(respBody, &resp); err != nil {
+			return nil, fmt.Errorf("slaengine: decode active csm sla clocks response (offset %d): %w", offset, err)
+		}
+		all = append(all, resp.Statuses...)
+		offset += len(resp.Statuses)
+		if len(resp.Statuses) == 0 || offset >= resp.Total {
+			break
+		}
+	}
+	return all, nil
+}

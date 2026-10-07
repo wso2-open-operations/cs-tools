@@ -21,7 +21,10 @@ import {
   timeCardDraftErrors,
   totalMinutes,
 } from "@features/csm-timecards/utils/timeCardTotals";
-import { WORK_LOG_MAX } from "@features/csm-timecards/constants/timeCardConstants";
+import {
+  MAX_MINUTES_PER_TICKET_PER_DAY,
+  WORK_LOG_MAX,
+} from "@features/csm-timecards/constants/timeCardConstants";
 
 describe("timeCardTotals", () => {
   it("emptyBreakdown is all zeros and sums to 0", () => {
@@ -110,6 +113,31 @@ describe("timeCardTotals", () => {
         workLogComment: "<p>Investigated <strong>root cause</strong>.</p>",
       });
       expect(errors.workLogComment).toBeUndefined();
+    });
+
+    it("flags a total over 8 hours (480 minutes)", () => {
+      const errors = timeCardDraftErrors({
+        ...valid,
+        breakdown: {
+          ...emptyBreakdown(),
+          analysisDebugging: 200,
+          reproduce: 150,
+          settingUp: 100,
+          providingSolution: 40,
+        },
+      });
+      expect(errors.minutes).toBeDefined();
+    });
+
+    it("accepts a total at exactly the 8-hour cap", () => {
+      const errors = timeCardDraftErrors({
+        ...valid,
+        breakdown: {
+          ...emptyBreakdown(),
+          analysisDebugging: MAX_MINUTES_PER_TICKET_PER_DAY,
+        },
+      });
+      expect(errors.minutes).toBeUndefined();
     });
   });
 });

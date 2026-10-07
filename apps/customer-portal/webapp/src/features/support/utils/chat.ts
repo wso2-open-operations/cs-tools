@@ -40,6 +40,62 @@ export function sanitizeStreamToken(token: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+// Found with sticky scans (never a backtracking pattern over the whole text), so
+// the cost stays linear however many openers there are.
+const THINKING_OPEN_RE = /<thinking>/gi;
+const THINKING_CLOSE_RE = /<\/thinking>/gi;
+// A half-typed opening tag at the very end of the text (the answer is streaming).
+const THINKING_PARTIAL_OPEN_RE = /<t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?$/i;
+const LEADING_THINKING_RE = /^\s*<thinking>/i;
+
+/**
+ * Remove the model's `<thinking>…</thinking>` reasoning from assistant text.
+ *
+ * The agent can emit its reasoning inside the answer itself, so it arrives on
+ * the stream, in the `final` payload, and in the comment the backend persisted
+ * (which is why history replays it too). Run this when text is displayed or
+ * forwarded, not when it is received: tokens are appended one at a time, and a
+ * tag split across two of them can only be recognised in the accumulated text.
+ * Only assistant text — never strip what a user typed.
+ *
+ * Removes complete blocks, everything after an opening tag that is never closed
+ * (the answer is still streaming, or was cut off), and a half-typed opening tag
+ * at the very end. Known limits: a complete block the answer merely *mentions*
+ * (e.g. in backticks) is removed too, and an unclosed mention hides the rest of
+ * the text; nested blocks and a stray closing tag are left as they are.
+ *
+ * The CSM portal webapp has its own copy (`src/utils/stripThinkingBlocks.ts`);
+ * keep the two in step.
+ */
+export function stripThinkingBlocks(text: string): string {
+  if (!/<t/i.test(text)) return text;
+  let kept = "";
+  let pos = 0;
+  for (;;) {
+    THINKING_OPEN_RE.lastIndex = pos;
+    const open = THINKING_OPEN_RE.exec(text);
+    if (!open) {
+      kept += text.slice(pos);
+      break;
+    }
+    kept += text.slice(pos, open.index);
+    THINKING_CLOSE_RE.lastIndex = open.index + open[0].length;
+    const close = THINKING_CLOSE_RE.exec(text);
+    if (!close) break; // never closed: the rest is reasoning
+    pos = close.index + close[0].length;
+  }
+  const stripped = kept.replace(THINKING_PARTIAL_OPEN_RE, "");
+  if (stripped === text) return text;
+  // Only a block at the very start leaves a gap to tidy; whitespace anywhere
+  // else is the author's (an indented code line must stay indented).
+  if (!LEADING_THINKING_RE.test(text)) return stripped;
+  // Drop the gap but keep the first real line's own indentation: when the gap
+  // spans lines, cut up to the last newline; when it is inline, cut it all.
+  const gap = /^\s*/.exec(stripped)?.[0] ?? "";
+  const lastNewline = gap.lastIndexOf("\n");
+  return stripped.slice(lastNewline === -1 ? gap.length : lastNewline + 1);
+}
+
 // REST conversation history sometimes stores bot content as JSON; show `message` only.
 export function displayTextFromConversationContent(
   raw: string,
@@ -81,8 +137,12 @@ export function getFinalMessageFromPayload(
  * support had already raised the limit.
  *
  * Kept deliberately narrow (no bare credit/billing/quota) so an ordinary answer
- * that merely mentions those words does not sprout a CTA.
+ * that merely mentions those words does not sprout a CTA. It reads only what the
+ * customer can see: reasoning that happens to mention a rate limit must not make
+ * the CTA appear beside an answer that never said so.
  */
 export function isTokenLimitNoticeText(text: string): boolean {
-  return !!text && /token limit|usage limit|rate limit/i.test(text);
+  return (
+    !!text && /token limit|usage limit|rate limit/i.test(stripThinkingBlocks(text))
+  );
 }

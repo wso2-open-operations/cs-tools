@@ -191,7 +191,6 @@ func TestPatchCaseAttachment_ClosedCase(t *testing.T) {
 type fakeClosedCaseAttachmentClient struct {
 	entityAttachmentClient
 	referenceID       string
-	referenceType     *entity.ReferenceType
 	getAttachmentErr  error
 	caseState         string
 	getCaseErr        error
@@ -203,7 +202,7 @@ func (f *fakeClosedCaseAttachmentClient) GetAttachment(ctx context.Context, id s
 	if f.getAttachmentErr != nil {
 		return entity.AttachmentDetails{}, f.getAttachmentErr
 	}
-	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID, ReferenceType: f.referenceType}, nil
+	return entity.AttachmentDetails{ID: id, ReferenceID: f.referenceID}, nil
 }
 
 func (f *fakeClosedCaseAttachmentClient) GetCase(ctx context.Context, id string) (entity.CaseView, error) {
@@ -267,13 +266,15 @@ func TestDeleteAttachment_ClosedCase(t *testing.T) {
 		// uploader could never delete it, because authorizeAttachmentAccess
 		// always ran GetCase against the attachment's referenceId — which is a
 		// deployment id here, so GetCase could never resolve it and the delete
-		// 404'd unconditionally regardless of who uploaded it.
+		// 404'd unconditionally regardless of who uploaded it. getCaseErr is
+		// a 404 here because a deployment id is never a real case -- that's
+		// the actual, live response GetCase returns for one.
 		"deployment-referenced attachment visible to the caller: delete succeeds": {
-			client:     fakeClosedCaseAttachmentClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: true},
+			client:     fakeClosedCaseAttachmentClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, deploymentVisible: true},
 			wantStatus: http.StatusOK,
 		},
 		"deployment-referenced attachment outside the caller's scope: denied": {
-			client:     fakeClosedCaseAttachmentClient{referenceID: testDeploymentID, referenceType: refType(entity.ReferenceTypeDeployment), deploymentVisible: false},
+			client:     fakeClosedCaseAttachmentClient{referenceID: testDeploymentID, getCaseErr: &apierror.Error{StatusCode: http.StatusNotFound}, deploymentVisible: false},
 			wantStatus: http.StatusNotFound,
 			wantDenied: true,
 		},

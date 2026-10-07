@@ -359,7 +359,7 @@ backend-v2/
 - `POST /cases/{id}/activities/search` — search a case's activity feed (comments, attachments, field changes)
 - `POST /change-requests` — create a change request (ServiceNow data source only)
 - `POST /projects/{id}/change-requests/search` — search a project's change requests (ServiceNow data source only)
-- `GET /change-requests/{id}` — get change request by ID (ServiceNow data source only)
+- `GET /change-requests/{id}` — get change request by ID (ServiceNow data source only); carries `customerCanAnswer`, the signed-in customer's own "may I approve / reject (or confirm / fail the review of) this now" (absent, not false, when entity-service did not compute it — see CLAUDE.md)
 - `PATCH /change-requests/{id}` — update a change request (restricted, customer-safe field subset — see CLAUDE.md; ServiceNow data source only)
 - `GET /change-requests/{id}/approvals` — get a change request's approval stages (ServiceNow data source only)
 - `POST /change-requests/{id}/approvals/decision` — approve/reject the caller's own pending approval (ServiceNow data source only)

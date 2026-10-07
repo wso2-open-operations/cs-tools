@@ -86,16 +86,33 @@ describe("resolveAllowedCrStateIds", () => {
     expect(resolveAllowedCrStateIds(undefined)).toBeUndefined();
   });
 
-  it("excludes New, Assess, and Authorize by label", () => {
+  it("offers every state the server's filters carry, Authorize included, and hides none itself", () => {
+    // What GET /projects/{id}/filters sends: New and Assess are left out by the
+    // server (nothing a customer can see is ever in them), Authorize is in.
     const states = [
-      { id: "-5", label: "New" },
-      { id: "-4", label: "Assess" },
       { id: "-3", label: "Authorize" },
       { id: "5", label: "Customer Approval" },
       { id: "-2", label: "Scheduled" },
       { id: "3", label: "Closed" },
     ];
-    expect(resolveAllowedCrStateIds(states)).toEqual([5, -2, 3]);
+    expect(resolveAllowedCrStateIds(states)).toEqual([-3, 5, -2, 3]);
+  });
+
+  it("does not second-guess the server: a New or Assess entry in the filters is passed on, not dropped", () => {
+    const states = [
+      { id: "-5", label: "New" },
+      { id: "-4", label: "Assess" },
+      { id: "5", label: "Customer Approval" },
+    ];
+    expect(resolveAllowedCrStateIds(states)).toEqual([-5, -4, 5]);
+  });
+
+  it("never sends an id that is not a number (JSON turns NaN into null, which the API reads as state 0)", () => {
+    const states = [
+      { id: "AUTHORIZE", label: "AUTHORIZE" },
+      { id: "5", label: "Customer Approval" },
+    ];
+    expect(resolveAllowedCrStateIds(states)).toEqual([5]);
   });
 });
 
@@ -178,9 +195,12 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(req.filters?.stateKeys).toEqual([]);
   });
 
-  it("resolves outstanding state IDs from metadata when outstandingOnly is true", () => {
+  it("resolves outstanding state IDs from metadata when outstandingOnly is true, Authorize among them", () => {
     const req = buildChangeRequestSearchRequest({}, "", true, false, false, allStates);
     expect(req.filters?.stateKeys).toEqual([-5, -4, -3, 5, -2, -1, 0, 1]);
+    // A change request waiting in Authorize after the customer proposed a new time
+    // is still outstanding for them: not Closed, Canceled or Rollback.
+    expect(req.filters?.stateKeys).toContain(-3);
   });
 
   it("resolves action-required state IDs from metadata", () => {
@@ -193,11 +213,25 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(req.filters?.stateKeys).toEqual([-2]);
   });
 
-  it("excludes New, Assess, Authorize from default allowed states", () => {
+  it("asks for every state the filters carry by default, hiding none (a designated change request in Authorize must show)", () => {
     const req = buildChangeRequestSearchRequest({}, "", false, false, false, allStates);
-    expect(req.filters?.stateKeys).not.toContain(-5);
-    expect(req.filters?.stateKeys).not.toContain(-4);
-    expect(req.filters?.stateKeys).not.toContain(-3);
+    expect(req.filters?.stateKeys).toEqual([-5, -4, -3, 5, -2, -1, 0, 1, 2, 3, 4]);
+    expect(req.filters?.stateKeys).toContain(-3);
+  });
+
+  it("with the filters the server really sends (no New, no Assess) the default view is every state a customer's change request can be in", () => {
+    const offered = allStates.filter((s) => s.label !== "New" && s.label !== "Assess");
+    const req = buildChangeRequestSearchRequest({}, "", false, false, false, offered);
+    expect(req.filters?.stateKeys).toEqual([-3, 5, -2, -1, 0, 1, 2, 3, 4]);
+  });
+
+  it("lets the customer filter by Authorize and keeps only selections the filters offer", () => {
+    const offered = allStates.filter((s) => s.label !== "New" && s.label !== "Assess");
+    const authorizeOnly = buildChangeRequestSearchRequest({ stateIds: ["-3"] }, "", false, false, false, offered);
+    expect(authorizeOnly.filters?.stateKeys).toEqual([-3]);
+    // A stale selection of a state the filters no longer carry is dropped, not sent.
+    const stale = buildChangeRequestSearchRequest({ stateIds: ["-5", "5"] }, "", false, false, false, offered);
+    expect(stale.filters?.stateKeys).toEqual([5]);
   });
 
   it("sorts by updatedOn descending by default", () => {

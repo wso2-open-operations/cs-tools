@@ -227,6 +227,22 @@ type Config struct {
 	// last pass came back short. A backlog drains at full speed regardless.
 	GithubOutboundInterval time.Duration
 
+	// SpecialistHandoffConfig is SPECIALIST_HANDOFF_CONFIG, raw: the JSON
+	// that routes "Escalate to specialist team" handoffs (products, their
+	// services, Special Ops teams and GitHub repository). Parsed and
+	// validated by service.ParseSpecialistHandoffConfig at startup; empty
+	// hands nothing off.
+	SpecialistHandoffConfig string
+	// SpecialistHandoffGithubTokens is SPECIALIST_HANDOFF_GITHUB_TOKENS, a
+	// secret: one line of JSON mapping a credential name to the GitHub token
+	// that files a specialist handoff's internal issue (ServiceNow's
+	// InternalGitHubIssues REST message), {"wso2-enterprise":"github_pat_..."}.
+	// A product's github.credential picks one, defaulting to its owner.
+	// A credential the map does not name uses GITHUB_TOKEN; with neither, the
+	// handoff still goes through and reports that no issue was filed.
+	// Independent of the change-request sync.
+	SpecialistHandoffGithubTokens string
+
 	// CSMPortalBaseURL builds the link back to a change request in comments
 	// posted to GitHub. Empty omits the link rather than rendering a broken one.
 	CSMPortalBaseURL string
@@ -260,6 +276,21 @@ type Config struct {
 	// onboarding dead-letter queue can be watched on its own.
 	// csm-notification-service consumes it with its own consumer group.
 	ProjectEventHubTopic string
+	// CRStrictVisibilityFromRaw is CR_STRICT_VISIBILITY_FROM: the instant (RFC
+	// 3339, with a zone, e.g. 2026-11-01T00:00:00Z) from which a change request
+	// is visible to a customer only when it was designated to them (the
+	// customer's approval or review was asked of them). A change request created
+	// BEFORE it is "legacy" and keeps the visibility customers had before the
+	// strict rule: everything past Authorize, to the registered contacts of its
+	// project. See CRStrictVisibilityFrom and CLAUDE.md "Customer visibility and
+	// the cutover".
+	//
+	// UNSET OR EMPTY MEANS NO CUTOVER: every change request is legacy, which is
+	// today's behaviour and the safe default and the rollback. Set it once at
+	// release, in each environment, to that release's own instant and do not
+	// move it afterwards: moving it re-classifies existing rows retroactively.
+	// An unparsable value refuses to start the service.
+	CRStrictVisibilityFromRaw string
 	// CRNoticePollInterval is how often to poll event_outbox when the last
 	// pass came back short. A backlog drains at full speed regardless, so this
 	// governs only the idle case: notice latency against query volume.
@@ -278,6 +309,18 @@ type Config struct {
 	// them by event type, as it already does on every topic. Empty keeps the
 	// two separate topics exactly as before.
 	SREEventHubTopic string
+	// SRAlertSRETeamIDs are the SRE teams (group ids) whose new service
+	// requests are automated the way ServiceNow's "SR New Request -
+	// Acknowledge & Chat Alert" flow does it: the SR is assigned to its
+	// account's SRE team and gets the automatic acknowledgement comment. The
+	// flow's own trigger is limited to one team (MS/PC SRE Group,
+	// 6c3db375-1b1c-b2d0-a002-c9d3604bcb0c), hence a list rather than a switch.
+	// Empty -- the default -- automates no team. sr.* events are published to
+	// SREEventHubTopic regardless; this list only gates the two writes.
+	//
+	// Leave a team off while ServiceNow's flow still runs for it, or its SRs
+	// are assigned, commented on and announced twice.
+	SRAlertSRETeamIDs []string
 	// OutageNoticePollInterval is the drainer's FALLBACK poll (default 60s).
 	// The emails normally go out about a second after an outage changes: the
 	// drainer LISTENs for migration 0186's NOTIFY. This interval only catches
@@ -322,12 +365,6 @@ type Config struct {
 	// "CS engineer" and "support engineer" are the same real-world role,
 	// not two different configs.
 	CSEngineerRole string
-	// SLARecomputeInterval is how often SLAEngineRecomputeWorker
-	// recomputes every CSM-native "sla" row's elapsed percentage/breach
-	// status (internal/service/sla_engine_recompute_worker.go). Same
-	// envDuration convention as CRNoticePollInterval/GithubOutboundInterval
-	// above.
-	SLARecomputeInterval time.Duration
 	// SalesforceIngestRetryInterval is how often SalesforceIngestRetryWorker
 	// re-runs Salesforce ingests that FAILED because the record's parent
 	// (project, account) was not in CSM yet
@@ -602,11 +639,14 @@ func Load() *Config {
 		GithubIntegrationLogin:                   os.Getenv("GITHUB_INTEGRATION_LOGIN"),
 		GithubOutboundInterval:                   envDuration("GITHUB_OUTBOUND_INTERVAL", 15*time.Second),
 		CSMPortalBaseURL:                         os.Getenv("CSM_PORTAL_BASE_URL"),
+		SpecialistHandoffConfig:                  os.Getenv("SPECIALIST_HANDOFF_CONFIG"),
+		SpecialistHandoffGithubTokens:            os.Getenv("SPECIALIST_HANDOFF_GITHUB_TOKENS"),
 		GithubLabelTypeIncident:                  os.Getenv("GITHUB_LABEL_TYPE_INCIDENT"),
 		GithubLabelTypeServiceRequest:            os.Getenv("GITHUB_LABEL_TYPE_SERVICE_REQUEST"),
 		GithubLabelsClass:                        os.Getenv("GITHUB_LABELS_CLASS"),
 		GithubLabelStatusAssigned:                os.Getenv("GITHUB_LABEL_STATUS_ASSIGNED"),
 		CRNoticesEnabled:                         os.Getenv("CR_NOTICES_ENABLED") == "true",
+		CRStrictVisibilityFromRaw:                strings.TrimSpace(os.Getenv("CR_STRICT_VISIBILITY_FROM")),
 		CSMMigrationSalesforceMembershipIngestEnabled: os.Getenv("CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED") == "true",
 		CSMMigrationSalesforceAccountIngestEnabled:    os.Getenv("CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED") == "true",
 		CSMMigrationPortalWritesEnabled:               os.Getenv("CSM_MIGRATION_PORTAL_WRITES_ENABLED") == "true",
@@ -615,6 +655,7 @@ func Load() *Config {
 		CRNoticePollInterval:                          envDuration("CR_NOTICE_POLL_INTERVAL", 5*time.Second),
 		OutageEventHubTopic:                           getEnvOrDefault("OUTAGE_EVENT_HUB_TOPIC", "outage-events"),
 		SREEventHubTopic:                              strings.TrimSpace(os.Getenv("SRE_EVENT_HUB_TOPIC")),
+		SRAlertSRETeamIDs:                             splitComma(os.Getenv("SR_ALERT_SRE_TEAM_IDS")),
 		OutageNoticePollInterval:                      envDuration("OUTAGE_NOTICE_POLL_INTERVAL", 60*time.Second),
 		OutageNotificationRecipients:                  splitComma(os.Getenv("OUTAGE_NOTIFICATION_RECIPIENTS")),
 		OutageCommunicationRecipients:                 splitComma(os.Getenv("OUTAGE_COMMUNICATION_RECIPIENTS")),
@@ -628,7 +669,6 @@ func Load() *Config {
 		CustomerPortalBackendClientID:                 os.Getenv("CUSTOMER_PORTAL_BACKEND_CLIENT_ID"),
 		CustomerRoles:                                 splitComma(os.Getenv("CUSTOMER_ROLES")),
 		CSEngineerRole:                                os.Getenv("CS_ENGINEER_ROLE"),
-		SLARecomputeInterval:                          envDuration("SLA_RECOMPUTE_INTERVAL", 45*time.Second),
 		CloudStatusServiceIDs:                         splitComma(os.Getenv("CLOUD_STATUS_SERVICE_IDS")),
 		CloudStatusDrainerEnabled:                     os.Getenv("CLOUD_STATUS_DRAINER_ENABLED") == "true",
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
@@ -825,6 +865,13 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("%s must be greater than 0, got %s", t.name, t.val)
 		}
 	}
+	// A team id that is not a UUID can never match account.sre_team_id, so
+	// the team it was meant to automate would silently never be.
+	for _, id := range c.SRAlertSRETeamIDs {
+		if !validate.IsUUID(id) {
+			return fmt.Errorf("SR_ALERT_SRE_TEAM_IDS: %q is not a UUID", id)
+		}
+	}
 	// The health server is a separate listener precisely so that only its
 	// own routes are reachable at public visibility (see HealthPort). Two
 	// listeners cannot share a port: the second ListenAndServe would fail
@@ -975,6 +1022,9 @@ func (c *Config) Validate() error {
 	if v := c.CustomerEngagementFirefightingTypeID; v != "" && !isSysID(v) {
 		return fmt.Errorf("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID must be a 32-character hex sys_id")
 	}
+	if _, err := c.CRStrictVisibilityFrom(); err != nil {
+		return err
+	}
 	// The URL carries the Redis password, so neither it nor url.Parse's own
 	// error (which quotes its input) may appear in this message.
 	if c.RedisURL != "" {
@@ -984,6 +1034,24 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// CRStrictVisibilityFrom is the parsed CR_STRICT_VISIBILITY_FROM: nil when it
+// is unset or empty (no cutover: every change request is legacy), otherwise the
+// instant, which must be RFC 3339 WITH a zone offset so that the cutover means
+// the same moment in every environment ("2026-11-01T00:00:00Z", not a bare
+// local date).
+func (c *Config) CRStrictVisibilityFrom() (*time.Time, error) {
+	raw := strings.TrimSpace(c.CRStrictVisibilityFromRaw)
+	if raw == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, fmt.Errorf("CR_STRICT_VISIBILITY_FROM %q must be an RFC 3339 instant with a zone, e.g. 2026-11-01T00:00:00Z: %w", raw, err)
+	}
+	t = t.UTC()
+	return &t, nil
 }
 
 // isSysID reports whether v is a 32-character lowercase hex ServiceNow sys_id.
@@ -1097,7 +1165,7 @@ func (c *Config) DSN() string {
 //
 // *** GITHUB_WEBHOOK_SECRET IS NO LONGER PART OF THIS, AND ITS ABSENCE HERE
 // IS NOT AN OVERSIGHT. *** The HMAC check moved to
-// operations/csm-webhooks along with the public endpoint, so this
+// operations/csm-webhooks/github along with the public endpoint, so this
 // service never sees a signature and holding the secret would only imply it
 // did. What still gates the integration is the outbound half: a token to
 // call GitHub with, and the login whose own events must be ignored as ours.

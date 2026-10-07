@@ -40,6 +40,14 @@ type stubProblemRepo struct {
 	lastCreatePriority     string
 	updateProblemFields    func(ctx context.Context, req domain.UpdateProblemRequest, actorEmail string) (time.Time, error)
 	applyProblemTransition func(ctx context.Context, req domain.UpdateProblemRequest, t repository.ProblemTransition, enforceFrom bool, actorEmail string) (time.Time, error)
+	linkWorkaroundProblem  func(ctx context.Context, problemID, incidentID string, groupID *string, actorEmail string) (*string, error)
+}
+
+func (s *stubProblemRepo) LinkWorkaroundProblem(ctx context.Context, problemID, incidentID string, groupID *string, actorEmail string) (*string, error) {
+	if s.linkWorkaroundProblem != nil {
+		return s.linkWorkaroundProblem(ctx, problemID, incidentID, groupID, actorEmail)
+	}
+	panic("LinkWorkaroundProblem called unexpectedly")
 }
 
 func (s *stubProblemRepo) ApplyProblemTransition(ctx context.Context, req domain.UpdateProblemRequest, t repository.ProblemTransition, enforceFrom bool, actorEmail string) (time.Time, error) {

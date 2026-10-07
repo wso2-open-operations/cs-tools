@@ -218,6 +218,59 @@ var validIncidentSpecialistHandoffEscalationTeam = map[domain.IncidentSpecialist
 	domain.IncidentSpecialistHandoffTeamChoreoAPIM:    true,
 }
 
+// validateHandOffRequest checks a handoff request's shape; both data
+// sources apply it before doing anything.
+func validateHandOffRequest(req domain.HandOffIncidentToSpecialistRequest) error {
+	if err := validateUUIDs("id", []string{req.IncidentID}); err != nil {
+		return err
+	}
+	if req.ReasonCode == "" {
+		return &apierror.ValidationError{Msg: "reasonCode is required"}
+	}
+	if !validIncidentSpecialistHandoffReasonCode[req.ReasonCode] {
+		return &apierror.ValidationError{Msg: "invalid reasonCode: " + string(req.ReasonCode)}
+	}
+	return nil
+}
+
+// ServiceNow's handoff routing (IncidentHandoffUtils' IHU_SERVICE_ROUTING)
+// as the dialog lists it: Choreo's default Special Ops group plus its two
+// sub-teams, and Asgardeo's one group. The "-special-ops" keys stand for the
+// default group, which ServiceNow's API reaches by naming no team.
+const (
+	snChoreoServiceID   = "b9c999f8-1b86-a010-00ae-86acdd4bcb61"
+	snAsgardeoServiceID = "97ed1b8b-1ba2-6c10-00ae-86acdd4bcbd3"
+
+	snChoreoSpecialOpsTeam   domain.IncidentSpecialistHandoffEscalationTeam = "choreo-special-ops"
+	snAsgardeoSpecialOpsTeam domain.IncidentSpecialistHandoffEscalationTeam = "asgardeo-special-ops"
+)
+
+var snSpecialistHandoffTeams = map[string][]domain.SpecialistHandoffTeam{
+	snChoreoServiceID: {
+		{Key: string(snChoreoSpecialOpsTeam), Label: "Choreo Special Ops"},
+		{Key: string(domain.IncidentSpecialistHandoffTeamChoreoRuntime), Label: "Choreo Runtime Team"},
+		{Key: string(domain.IncidentSpecialistHandoffTeamChoreoAPIM), Label: "Choreo APIM Team"},
+	},
+	snAsgardeoServiceID: {
+		{Key: string(snAsgardeoSpecialOpsTeam), Label: "Asgardeo Special Ops"},
+	},
+}
+
+// ListSpecialistHandoffTeams implements IncidentService for ServiceNow,
+// whose routing is code, not data: the teams above for Choreo and
+// Asgardeo, none for any other service, and all of them for no service.
+func (s *snIncidentService) ListSpecialistHandoffTeams(_ context.Context, serviceID string) (domain.SpecialistHandoffTeamsResponse, error) {
+	if serviceID == "" {
+		all := append(append([]domain.SpecialistHandoffTeam{}, snSpecialistHandoffTeams[snChoreoServiceID]...), snSpecialistHandoffTeams[snAsgardeoServiceID]...)
+		return domain.SpecialistHandoffTeamsResponse{Teams: all}, nil
+	}
+	teams := snSpecialistHandoffTeams[strings.ToLower(serviceID)]
+	if teams == nil {
+		teams = []domain.SpecialistHandoffTeam{}
+	}
+	return domain.SpecialistHandoffTeamsResponse{Teams: teams}, nil
+}
+
 var validIncidentSortField = map[domain.IncidentSortField]bool{
 	domain.IncidentSortFieldCreatedOn: true,
 	domain.IncidentSortFieldUpdatedOn: true,
@@ -1933,14 +1986,12 @@ type snHandOffIncidentResponse struct {
 // POST /incidents/{id}/specialist-handoffs operation. Deliberately not routed through any
 // case-escalation code path: this is a distinct contract sharing no vocabulary with it.
 func (s *snIncidentService) HandOffIncidentToSpecialist(ctx context.Context, req domain.HandOffIncidentToSpecialistRequest) (domain.HandOffIncidentToSpecialistResponse, error) {
-	if err := validateUUIDs("id", []string{req.IncidentID}); err != nil {
+	if err := validateHandOffRequest(req); err != nil {
 		return domain.HandOffIncidentToSpecialistResponse{}, err
 	}
-	if req.ReasonCode == "" {
-		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "reasonCode is required"}
-	}
-	if !validIncidentSpecialistHandoffReasonCode[req.ReasonCode] {
-		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "invalid reasonCode: " + string(req.ReasonCode)}
+	// The default groups' keys are ServiceNow's "no team".
+	if req.EscalationTeam != nil && (*req.EscalationTeam == snChoreoSpecialOpsTeam || *req.EscalationTeam == snAsgardeoSpecialOpsTeam) {
+		req.EscalationTeam = nil
 	}
 	if req.EscalationTeam != nil && !validIncidentSpecialistHandoffEscalationTeam[*req.EscalationTeam] {
 		return domain.HandOffIncidentToSpecialistResponse{}, &apierror.ValidationError{Msg: "invalid escalationTeam: " + string(*req.EscalationTeam)}

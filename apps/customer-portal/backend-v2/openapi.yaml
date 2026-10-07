@@ -1720,7 +1720,6 @@ paths:
   /change-requests:
     post:
       summary: Create a change request.
-      description: Only entity-service's ServiceNow data source supports this route.
       operationId: postChangeRequests
       requestBody:
         content:
@@ -1771,8 +1770,11 @@ paths:
       summary: Search change requests.
       description: >
         projectId is set server-side from the path parameter — any
-        client-supplied value in the request body is ignored. Only
-        entity-service's ServiceNow data source supports this route.
+        client-supplied value in the request body is ignored. Only the change
+        requests that were designated to the signed-in contact (they were asked
+        to approve or review them) are returned, in whatever state they are in
+        now, Authorize included; every other change request is absent from the
+        list and from the totals. stateKeys only narrows that set.
       operationId: postProjectsIdChangeRequestsSearch
       parameters:
         - name: id
@@ -1828,7 +1830,18 @@ paths:
   /change-requests/{id}:
     get:
       summary: Get a change request by ID.
-      description: Only entity-service's ServiceNow data source supports this route.
+      description: >-
+        The detail carries `customerCanAnswer`, the per-caller answer to "may I
+        approve / reject (or confirm / fail the review of) this change request
+        now", and `isOnHold`; the approvals and the identities of the WSO2
+        approvers are not part of the customer's detail.
+
+
+        A change request that was not designated to the signed-in contact (it
+        never reached a customer stage with them among the contacts asked, or it
+        belongs to another project) is a 404, exactly like one that does not
+        exist; once designated it stays readable in every later state. The same
+        holds for its approvals, the decision, and the PATCH.
       operationId: getChangeRequestsId
       parameters:
         - name: id
@@ -1877,10 +1890,56 @@ paths:
     patch:
       summary: Update a change request.
       description: >
-        At least one field is required. Only entity-service's ServiceNow data
-        source supports this route. State transitions are driven through
-        isCustomerApproved/isCustomerReviewed/requestApproval, not by setting
-        state directly.
+        At least one field is required. The change request's state cannot be
+        set through this operation (a `state` key is dropped).
+        isCustomerApproved and isCustomerReviewed are the customer's own answer
+        in Customer Approval / Customer Review, which moves the change request
+        on; they are the customer's alone, and no staff action records them on
+        a customer's behalf. requestApproval records that approval was
+        requested (entity-service's PostgreSQL data source sets the change
+        request's approval to REQUESTED; it moves no state).
+
+
+        Two levels of access. Roles that hold the `change_requests:update`
+        permission (admin, agent, internal) may send the edit fields and
+        requestApproval of ChangeRequestUpdateRequest; a key outside that schema
+        (state, assignedTeamId, ...) is dropped. isCustomerApproved and
+        isCustomerReviewed are the customer's answer, not an edit: from a staff
+        caller they are forwarded and entity-service refuses them (a 400, nothing
+        recorded) on its PostgreSQL data source. expectedPlannedStartOn /
+        expectedPlannedEndOn belong to a customer's answer only: on a staff body
+        they are a 400 and nothing is sent, never silently dropped. Customer and
+        partner roles hold only
+        `change_requests:decide` and may send the customer's own answer or a
+        proposed implementation time, nothing else: exactly one of
+        isCustomerApproved (approve / reject while the change request is in
+        Customer Approval), isCustomerReviewed (confirm / fail the review in
+        Customer Review), or plannedStartOn and/or plannedEndOn ("propose new
+        implementation time" -- it sends the change request back through
+        approval, so the customer is asked again only once WSO2 has approved
+        the new time). An answer may carry expectedPlannedStartOn /
+        expectedPlannedEndOn, the planned window the customer was shown: it is
+        then recorded only while that is still the window (409 otherwise). Any
+        other field is a 403 and nothing is forwarded; combining an answer with
+        a proposed time, both outcomes, or the expected window with anything but
+        an answer, is a 400.
+
+
+        Whether the caller may answer or propose on THIS change request is
+        entity-service's decision from the forwarded user token: only a
+        registered portal-user contact of the change request's own project who
+        was asked for the customer's approval (403 otherwise), only while it is
+        in the state the answer belongs to (409 otherwise, e.g. a second
+        contact answering after the first), and, for a proposed time, a window
+        still to come with a duration, on a change that is not on hold. A
+        change request that was not designated to the caller is a 404 (see the
+        read). A planned time is validated here first and again by
+        entity-service: RFC 3339 with a zone or "YYYY-MM-DD HH:MM:SS" (UTC), in
+        the years 2000 to 2100, never `tomorrow`, `now` or `infinity` (400);
+        both layouts are accepted whichever data source entity-service runs on
+        (the ServiceNow one converts RFC 3339 to UTC "YYYY-MM-DD HH:MM:SS"
+        before forwarding it); a customer's proposal must also be still to
+        come and, with both bounds, start before it ends (400).
       operationId: patchChangeRequestsId
       parameters:
         - name: id
@@ -1915,13 +1974,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden
+          description: >-
+            Forbidden. For a customer's answer or proposed time the body's `errorCode`
+            says which: `change_request_not_asked` (a contact the customer's request was
+            never sent to) or `change_request_forbidden` (not a registered contact of the
+            change request's project, its own creator, or a field a customer may not set).
+            The message is the same fixed text for all of them.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "404":
           description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: >-
+            The answer does not apply in the change request's state (for example
+            a second contact answering after the first), or the proposed time is refused.
+            Nothing was changed. The body's `errorCode` says which, and the client
+            branches on it rather than on the message: `change_request_approval_not_pending`
+            (already answered, or nothing waits for an answer),
+            `change_request_schedule_changed` (the window the answer names is no longer the
+            change request's), `change_request_not_proposable` (a proposed time where none
+            can be proposed) or `change_request_on_hold` (a proposed time while WSO2 has the
+            change on hold).
           content:
             application/json:
               schema:
@@ -1942,7 +2021,10 @@ paths:
   /change-requests/{id}/approvals:
     get:
       summary: Get a change request's approval stages.
-      description: Only entity-service's ServiceNow data source supports this route.
+      description: >-
+        The customer's own stages (Customer Approval / Customer Review) are given
+        whole; WSO2's internal stages (Peer, CAB, ECAB, Review) are reduced by
+        entity-service to their label and status, with no approver names or ids.
       operationId: getChangeRequestsIdApprovals
       parameters:
         - name: id
@@ -1992,7 +2074,13 @@ paths:
   /change-requests/{id}/approvals/decision:
     post:
       summary: Record the caller's decision on their own pending change-request approval.
-      description: Only entity-service's ServiceNow data source supports this route.
+      description: >
+        Requires `change_requests:decide`, which customer and partner roles
+        hold along with the WSO2-side roles. Customers answer a Customer
+        Approval / Customer Review here (or with PATCH isCustomerApproved /
+        isCustomerReviewed, the same decision); entity-service accepts a decision
+        only on the caller's own pending approval, so a customer who was not
+        asked is refused.
       operationId: postChangeRequestsIdApprovalsDecision
       parameters:
         - name: id
@@ -5919,9 +6007,36 @@ components:
   schemas:
     ErrorPayload:
       type: object
+      description: >-
+        The body of an error response. `message` is the reason, worded for people: it
+        can change, so a client must never branch on it. `errorCode` names the few
+        refusals a client does branch on, today those of a customer's answer to a
+        change request or a proposed implementation time (PATCH
+        /change-requests/{id}); it is omitted when a refusal has no name, which is the
+        body this API has always returned, so a client treats its absence, and a value
+        it does not know, as "no more specific than the status". The status and the
+        message are the same with or without it.
       properties:
         message:
           type: string
+        errorCode:
+          type: string
+          description: >-
+            Stable machine-readable name of the refusal, passed through from
+            entity-service (or raised by this API for a field a customer may not set):
+            `change_request_on_hold` (409: a proposed time on a change request WSO2 has
+            on hold; the answer itself is still possible), `change_request_schedule_changed`
+            (409: an answer for a planned window that has since changed; nothing recorded),
+            `change_request_approval_not_pending` (409: the answer was already given, by
+            the caller or a sibling contact, or the change request has left the state the
+            answer belongs to), `change_request_not_proposable` (409: a proposed time on a
+            change request that is not in Customer Approval or that nobody was asked to
+            approve), `change_request_not_asked` (403: a contact of the project whom the
+            customer's request was never sent to) and `change_request_forbidden` (403:
+            not a registered contact of the change request's project, its own creator, or
+            a field a customer may not set). The list grows, so this is deliberately not
+            a closed enum.
+          example: change_request_on_hold
 
     Pagination:
       type: object
@@ -7909,8 +8024,39 @@ components:
               type: string
             hasCustomerApproved:
               type: boolean
+              description: >-
+                The customer's OUTCOME: true once the customer's approval has
+                been recorded. NOT "is this waiting for me" -- it is false while
+                the change waits for the customer; use customerCanAnswer.
             hasCustomerReviewed:
               type: boolean
+              description: >-
+                The customer's OUTCOME: true once the customer's review has been
+                recorded. Use customerCanAnswer for "is this waiting for me".
+            customerCanAnswer:
+              type: boolean
+              description: >-
+                Whether the signed-in customer may answer this change request
+                RIGHT NOW: approve or reject it in Customer Approval, confirm or
+                fail it in Customer Review (PATCH isCustomerApproved /
+                isCustomerReviewed). In Customer Approval it is also the "may
+                propose a new implementation time" signal, apart from the change
+                being on hold (a proposal on a held change is a 409). Computed
+                by entity-service for this caller from the approval it asked of
+                them: true only for a registered contact who still holds a
+                pending approval, false in every other state, for a contact who
+                was not asked, whose request was cancelled by a colleague's
+                answer or superseded by a re-schedule, and for the change's
+                creator. ABSENT (not false) when entity-service did not compute it
+                -- the ServiceNow data source, a non-customer caller; a client
+                then keeps its old behaviour. Passed through unchanged.
+            isOnHold:
+              type: boolean
+              description: >-
+                Whether WSO2 has the change request on hold (the reason is not
+                passed on). A held change refuses a proposed implementation time,
+                so the portal does not offer one; an answer is still accepted.
+                ABSENT when entity-service did not say, which is not "not held".
             approvedBy:
               $ref: '#/components/schemas/IdLabelRef'
             approvedOn:
@@ -7928,9 +8074,13 @@ components:
 
     ChangeRequestUpdateRequest:
       description: >
-        At least one field is required. State transitions are driven through
-        isCustomerApproved/isCustomerReviewed/requestApproval, not by
-        setting state directly.
+        At least one field is required. The change request's state cannot be
+        set here (a `state` key is dropped). In Customer Approval / Customer
+        Review the change request moves on by the customer's own answer
+        (isCustomerApproved / isCustomerReviewed), which no staff action gives
+        on a customer's behalf. This is the staff-level body; the customer level
+        (PATCH, `change_requests:decide` only) is the customer's answer or a
+        proposed implementation time, see the operation.
       type: object
       properties:
         title:
@@ -7939,8 +8089,27 @@ components:
           type: string
         plannedStartOn:
           type: string
+          description: >-
+            A date-time, "YYYY-MM-DD HH:MM:SS" (UTC) or RFC 3339 with a zone,
+            in the years 2000 to 2100. Both layouts are accepted on every data
+            source behind entity-service.
         plannedEndOn:
           type: string
+          description: Same formats as plannedStartOn.
+        expectedPlannedStartOn:
+          type: string
+          description: >-
+            A CUSTOMER's answer only, with isCustomerApproved /
+            isCustomerReviewed: the planned start the customer was shown (the
+            detail's startDate). The answer is recorded only while it is still
+            the change's start (409 otherwise). On a staff body (an edit) it is
+            a 400 and nothing is sent: a staff caller gives no answer for it to
+            go with, and it is never silently dropped.
+        expectedPlannedEndOn:
+          type: string
+          description: >-
+            A CUSTOMER's answer only: the planned end the customer was shown
+            (the detail's endDate); see expectedPlannedStartOn.
         impact:
           type: string
         type:
@@ -7959,10 +8128,24 @@ components:
           type: string
         isCustomerApproved:
           type: boolean
+          description: >-
+            The customer's own approval (true) or rejection (false) while the
+            change request is in Customer Approval: the customer level of the
+            operation. A staff caller who sends it has it forwarded and
+            refused by entity-service (a 400, nothing recorded) on its
+            PostgreSQL data source: no staff action gives it for a customer.
         isCustomerReviewed:
           type: boolean
+          description: >-
+            The customer's own confirmation (true) or failure (false) of the
+            review while the change request is in Customer Review; refused for
+            a staff caller like isCustomerApproved.
         requestApproval:
           type: boolean
+          description: >-
+            Records that approval was requested: entity-service's PostgreSQL
+            data source sets the change request's approval to REQUESTED and
+            moves no state.
 
     ChangeRequestApprover:
       type: object

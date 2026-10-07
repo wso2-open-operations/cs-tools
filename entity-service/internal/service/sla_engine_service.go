@@ -28,8 +28,11 @@ import (
 // SLAEngineService is the CSM-native SLA clock engine: it registers,
 // completes, pauses and resumes source='CSM' "sla" rows (migration 0134)
 // in reaction to case-lifecycle events, sourcing real durations from the
-// ServiceNow-synced sla_policy table (via slaPolicyResolver) instead of the
-// old, deleted sla_clocks design's hardcoded severity->duration map (see
+// deterministic, severity-keyed sla_policy rows migration 0203 seeds (via
+// slaPolicyResolver) -- not the real, ServiceNow-synced sla_policy rows
+// (those are looked up by name/pattern-guessing nothing here does anymore;
+// see slaPolicyResolver's own doc comment for why), and not the old,
+// deleted sla_clocks design's hardcoded severity->duration map either (see
 // git history for internal/service/sla_policy.go before commit
 // 116d43522). Every method here is called directly, in-process, from
 // snCaseService's own case-lifecycle hooks (sn_case_service.go) -- never
@@ -49,8 +52,10 @@ type SLAEngineService interface {
 	// RegisterCaseClocks resolves and registers a new source='CSM' "sla"
 	// row for every clock type severity applies to (see
 	// slaApplicableClockTypes) -- called once, from CreateCase, right after
-	// a case is created. projectID may be empty (see resolveCasePlan's own
-	// doc comment); severity may be nil (a real, if rare, production state
+	// a case is created. projectID is accepted for call-site compatibility
+	// but no longer used: policy resolution is keyed on severity alone (see
+	// slaPolicyResolver's own doc comment). severity may be nil (a real, if
+	// rare, production state
 	// -- see domain.CaseView.Severity's own doc comment on confirmed null
 	// rates), in which case this logs and returns without registering
 	// anything, same as the old design's "severity not in map" handling.
@@ -99,8 +104,8 @@ type SLAEngineService interface {
 	// cancelled and no replacement -- either the whole revision applies, or
 	// none of it does and the case's prior clocks are untouched.
 	//
-	// severity/projectID have the exact same nil/empty handling as
-	// RegisterCaseClocks (see its own doc comment).
+	// severity/projectID have the exact same handling as RegisterCaseClocks
+	// (see its own doc comment) -- projectID is likewise unused.
 	ReviseCaseClocks(ctx context.Context, caseID string, severity *domain.CaseSeverity, projectID string)
 	// CompleteResponseClock marks the case's CSM-authored "response" clock
 	// ACHIEVED -- called from CreateCaseComment when the new comment
@@ -155,17 +160,14 @@ type SLAEngineService interface {
 }
 
 type slaEngineService struct {
-	resolver   *slaPolicyResolver
-	repo       repository.SLAEngineRepository
-	projectSvc ProjectService
+	resolver *slaPolicyResolver
+	repo     repository.SLAEngineRepository
 }
 
 // NewSLAEngineService constructs an SLAEngineService backed by the given
-// repository. projectSvc backs resolveCasePlan's own project lookup (see
-// its doc comment) and may be nil -- every call site already tolerates a
-// nil projectSvc by falling back to slaPlanOpenSource.
-func NewSLAEngineService(repo repository.SLAEngineRepository, projectSvc ProjectService) SLAEngineService {
-	return &slaEngineService{resolver: newSLAPolicyResolver(repo), repo: repo, projectSvc: projectSvc}
+// repository.
+func NewSLAEngineService(repo repository.SLAEngineRepository) SLAEngineService {
+	return &slaEngineService{resolver: newSLAPolicyResolver(repo), repo: repo}
 }
 
 // resolveApplicablePolicies resolves the real sla_policy row for every clock
@@ -187,7 +189,7 @@ func NewSLAEngineService(repo repository.SLAEngineRepository, projectSvc Project
 // failure (not because the policy is genuinely unconfigured) would cancel
 // the case's existing clocks and commit no replacement for the one that
 // failed to resolve.
-func (s *slaEngineService) resolveApplicablePolicies(ctx context.Context, caseID string, severity *domain.CaseSeverity, projectID string) (policies []repository.SLAPolicyRef, lookupFailed bool) {
+func (s *slaEngineService) resolveApplicablePolicies(ctx context.Context, caseID string, severity *domain.CaseSeverity, _ string) (policies []repository.SLAPolicyRef, lookupFailed bool) {
 	if severity == nil {
 		return nil, false
 	}
@@ -196,10 +198,9 @@ func (s *slaEngineService) resolveApplicablePolicies(ctx context.Context, caseID
 		return nil, false
 	}
 
-	plan := resolveCasePlan(ctx, s.projectSvc, projectID)
 	policies = make([]repository.SLAPolicyRef, 0, len(clockTypes))
 	for _, clockType := range clockTypes {
-		policy, ok, err := s.resolver.resolve(ctx, *severity, clockType, plan)
+		policy, ok, err := s.resolver.resolve(ctx, *severity, clockType)
 		if err != nil {
 			// resolve already logged why -- this clock type's policy
 			// couldn't be determined right now, not that it doesn't exist.

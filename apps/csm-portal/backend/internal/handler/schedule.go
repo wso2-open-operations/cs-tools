@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/servicenow"
 )
@@ -255,6 +256,22 @@ func (h *ScheduleHandler) GetMyLeadTeams(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, result)
 }
 
+// mapScheduleWriteError is mapUpstreamErrorGeneric for a lead's edit to the
+// rota, except that a refusal keeps entity-service's own reason. Its 403 and
+// 409 messages are written for the lead -- "that engineer is not on
+// americas...", "this person already has a window that overlaps this one..."
+// -- and without them the picker could only say that nothing had saved,
+// leaving a lead to guess why. Every other status stays generic, so nothing
+// internal reaches the page.
+func mapScheduleWriteError(w http.ResponseWriter, err error, fallbackMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusConflict) {
+		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
+		return
+	}
+	mapUpstreamErrorGeneric(w, err, fallbackMsg)
+}
+
 // ApplyScheduleRange handles POST /team-schedule/assignments/apply.
 func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Request) {
 	body, userID, ok := readScheduleBody(w, r)
@@ -265,7 +282,7 @@ func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Requ
 	result, err := h.entity.ApplyScheduleRange(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ApplyScheduleRange failed", "userID", userID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to change the rota.")
+		mapScheduleWriteError(w, err, "Failed to change the rota.")
 		return
 	}
 
@@ -282,7 +299,7 @@ func (h *ScheduleHandler) ApplyScheduleAbsence(w http.ResponseWriter, r *http.Re
 	result, err := h.entity.ApplyScheduleAbsence(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ApplyScheduleAbsence failed", "userID", userID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to change who is away.")
+		mapScheduleWriteError(w, err, "Failed to change who is away.")
 		return
 	}
 

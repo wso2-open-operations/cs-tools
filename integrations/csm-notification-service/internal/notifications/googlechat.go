@@ -210,8 +210,14 @@ type chatCardHeader struct {
 }
 
 type chatCardSection struct {
-	Header  string           `json:"header,omitempty"`
-	Widgets []chatCardWidget `json:"widgets"`
+	Header string `json:"header,omitempty"`
+	// Collapsible folds the section behind a "Show more" toggle, leaving its
+	// first UncollapsibleWidgetsCount widgets visible (cardsV2 Section
+	// schema). Only the SR-created card's description uses it, matching
+	// ServiceNow's card.
+	Collapsible               bool             `json:"collapsible,omitempty"`
+	UncollapsibleWidgetsCount int              `json:"uncollapsibleWidgetsCount,omitempty"`
+	Widgets                   []chatCardWidget `json:"widgets"`
 }
 
 // chatCardWidget is a union type: exactly one of TextParagraph or ButtonList

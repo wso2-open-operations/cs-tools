@@ -92,6 +92,11 @@ type PayloadRecorder interface {
 	Add(receivedAt time.Time, body []byte)
 }
 
+// DBChecker reports whether Postgres is reachable; *postgres.Probe implements it.
+type DBChecker interface {
+	Check(ctx context.Context) error
+}
+
 // Options configures a Server.
 type Options struct {
 	Logger       *slog.Logger
@@ -104,6 +109,8 @@ type Options struct {
 	PreviewChars int
 	// Payloads stores each raw body before the transform; nil stores nothing.
 	Payloads PayloadRecorder
+	// DB backs GET /dbz; nil leaves the route unregistered.
+	DB DBChecker
 	// PayloadLogBytes caps the raw body logged before the transform (log.payload_max_bytes); 0 logs nothing.
 	PayloadLogBytes int64
 	ReadTimeout     time.Duration
@@ -124,6 +131,7 @@ type Server struct {
 	previewChars int
 	payloadLog   int64
 	payloads     PayloadRecorder
+	db           DBChecker
 	draining     atomic.Bool
 	handler      http.Handler
 	readTimeout  time.Duration
@@ -143,6 +151,7 @@ func New(opts Options) *Server {
 		previewChars: opts.PreviewChars,
 		payloadLog:   opts.PayloadLogBytes,
 		payloads:     opts.Payloads,
+		db:           opts.DB,
 		readTimeout:  opts.ReadTimeout,
 		writeTimeout: opts.WriteTimeout,
 		idleTimeout:  opts.IdleTimeout,
@@ -154,6 +163,9 @@ func New(opts Options) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /livez", s.livez)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	if s.db != nil {
+		mux.HandleFunc("GET /dbz", s.dbz)
+	}
 	mux.HandleFunc(SourceRoutePrefix+"{source}", s.sourceRoute)
 	s.handler = s.withRequestID(s.withAccessLog(mux))
 	return s
@@ -185,6 +197,16 @@ func (s *Server) livez(w http.ResponseWriter, _ *http.Request) {
 // healthz reports readiness, 200 unless shutting down, without checking Postgres so pods stay in rotation during a DB outage.
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 	if s.draining.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// dbz reports whether Postgres is reachable; it is separate from healthz so a DB outage never takes pods out of rotation.
+func (s *Server) dbz(w http.ResponseWriter, r *http.Request) {
+	if err := s.db.Check(r.Context()); err != nil {
+		s.logger.Warn("db health check failed: postgres unreachable", "error", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -420,7 +442,7 @@ func requestInfoFrom(ctx context.Context) *requestInfo {
 // withAccessLog writes one line per request with the source, alt ids and latency, skipping health probes.
 func (s *Server) withAccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/livez" || r.URL.Path == "/healthz" {
+		if r.URL.Path == "/livez" || r.URL.Path == "/healthz" || r.URL.Path == "/dbz" {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -363,6 +363,41 @@ export function formatAbsoluteForUser(
 }
 
 /**
+ * The UTC calendar day of a backend timestamp as "YYYY-MM-DD", for a field
+ * that is a calendar date with no time of day (the auto-closure hold: the
+ * backing system stores the picked day as that day at 00:00 UTC). Reading it
+ * in the viewer's timezone instead would show the previous day to anyone west
+ * of UTC.
+ *
+ * Returns `null` when the input is empty or unparseable.
+ */
+export function utcDateOnlyValue(
+  rawTimestamp: string | null | undefined,
+): string | null {
+  const date = parseBackendTimestamp(rawTimestamp);
+  return date ? date.toISOString().slice(0, 10) : null;
+}
+
+/**
+ * {@link utcDateOnlyValue} formatted for display, e.g. "Oct 22, 2026". Always
+ * the UTC calendar day, never shifted into the viewer's timezone.
+ *
+ * Returns `null` when the input is empty or unparseable.
+ */
+export function formatUtcDateForDisplay(
+  rawTimestamp: string | null | undefined,
+): string | null {
+  const date = parseBackendTimestamp(rawTimestamp);
+  if (!date) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/**
  * "YYYY-MM-DD" to a local-midnight Date, for handing a date-only field's wire
  * value to a picker component. Avoids the UTC-parse day-shift a plain
  * `new Date(dateString)` can cause depending on the viewer's timezone.

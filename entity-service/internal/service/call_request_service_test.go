@@ -35,6 +35,7 @@ type stubCallRequestRepo struct {
 	updateCallRequest               func(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string) (domain.UpdateCallRequestResponse, error)
 	setCallRequestSNSysID           func(ctx context.Context, id, snSysID string) error
 	getCallRequestSNSysID           func(ctx context.Context, id string) (*string, error)
+	searchAllCallRequests           func(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, p domain.Pagination) ([]domain.CallRequestView, int, error)
 }
 
 func (s *stubCallRequestRepo) CreateCallRequest(ctx context.Context, req domain.CreateCallRequestRequest, callerID, callerEmail string) (domain.CreateCallRequestResponse, error) {
@@ -52,7 +53,10 @@ func (s *stubCallRequestRepo) CreateCallRequestFromServiceNow(ctx context.Contex
 func (s *stubCallRequestRepo) SearchCallRequests(context.Context, string, []domain.CallRequestStateType, domain.Pagination) ([]domain.CallRequestView, int, error) {
 	panic("not implemented")
 }
-func (s *stubCallRequestRepo) SearchAllCallRequests(context.Context, domain.SearchAllCallRequestsFilters, domain.CallRequestSort, domain.Pagination) ([]domain.CallRequestView, int, error) {
+func (s *stubCallRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.SearchAllCallRequestsFilters, sortBy domain.CallRequestSort, p domain.Pagination) ([]domain.CallRequestView, int, error) {
+	if s.searchAllCallRequests != nil {
+		return s.searchAllCallRequests(ctx, f, sortBy, p)
+	}
 	panic("not implemented")
 }
 func (s *stubCallRequestRepo) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string) (domain.UpdateCallRequestResponse, error) {
@@ -221,10 +225,12 @@ func TestCallRequestService_SearchValidation(t *testing.T) {
 	})
 	requireErrKind(t, "search invalid state", err, &apierror.ValidationError{})
 
+	// assignmentTeamIds is supported (the case's account CRE team), so only a
+	// malformed id is refused here -- a well-formed one goes on to the repository.
 	_, err = svc.SearchAllCallRequests(ctx, domain.SearchAllCallRequestsRequest{
-		Filters: domain.SearchAllCallRequestsFilters{AssignmentTeamIDs: []string{testUUID}},
+		Filters: domain.SearchAllCallRequestsFilters{AssignmentTeamIDs: []string{"not-a-uuid"}},
 	})
-	requireErrKind(t, "search-all assignmentTeamIds is unsupported, not silently ignored", err, &apierror.ValidationError{})
+	requireErrKind(t, "search-all malformed assignmentTeamIds", err, &apierror.ValidationError{})
 
 	_, err = svc.SearchAllCallRequests(ctx, domain.SearchAllCallRequestsRequest{
 		Filters: domain.SearchAllCallRequestsFilters{CaseStates: []domain.CaseState{"bogus"}},
@@ -235,6 +241,63 @@ func TestCallRequestService_SearchValidation(t *testing.T) {
 		SortBy: domain.CallRequestSort{Field: "bogus"},
 	})
 	requireErrKind(t, "search-all invalid sort field", err, &apierror.ValidationError{})
+}
+
+// TestCallRequestService_SearchAll_PassesTeamAndAssigneeFiltersToTheRepo guards the
+// "Calls To Attend" and "My Call Requests" dashboard widgets (digiops-cs#3314). A
+// valid assignmentTeamIds used to be refused with a 400 before it ever reached the
+// repository, which the widget showed as "Could not load this widget"; the
+// validation-error test above passes against that old behaviour too (it also
+// returned a ValidationError), so this one asserts the positive path in the default
+// suite, which has no database: the filters the widgets send arrive at the
+// repository unchanged, and the service does not turn them into an error.
+func TestCallRequestService_SearchAll_PassesTeamAndAssigneeFiltersToTheRepo(t *testing.T) {
+	const otherUUID = "22222222-2222-4222-8222-222222222222"
+	var got domain.SearchAllCallRequestsFilters
+	calls := 0
+	svc := &callRequestService{repo: &stubCallRequestRepo{
+		searchAllCallRequests: func(_ context.Context, f domain.SearchAllCallRequestsFilters, _ domain.CallRequestSort, _ domain.Pagination) ([]domain.CallRequestView, int, error) {
+			calls++
+			got = f
+			return []domain.CallRequestView{{ID: testUUID}}, 1, nil
+		},
+	}}
+
+	want := domain.SearchAllCallRequestsFilters{
+		AssignedUserIDs:   []string{testUUID},
+		AssignmentTeamIDs: []string{otherUUID},
+		ExcludeCaseStates: []domain.CaseState{domain.CaseStateClosed},
+		States:            []domain.CallRequestStateType{domain.CallRequestStatePendingOnWSO2, domain.CallRequestStateNotesPending},
+	}
+	resp, err := svc.SearchAllCallRequests(context.Background(), domain.SearchAllCallRequestsRequest{Filters: want})
+	if err != nil {
+		t.Fatalf("a valid team + assignee filter must not be refused: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("repository called %d times, want exactly 1", calls)
+	}
+	if len(resp.CallRequests) != 1 || resp.Total != 1 {
+		t.Errorf("response = %+v, want the repository's one row and total 1", resp)
+	}
+	if len(got.AssignmentTeamIDs) != 1 || got.AssignmentTeamIDs[0] != otherUUID {
+		t.Errorf("assignmentTeamIds reaching the repository = %v, want [%s]", got.AssignmentTeamIDs, otherUUID)
+	}
+	if len(got.AssignedUserIDs) != 1 || got.AssignedUserIDs[0] != testUUID {
+		t.Errorf("assignedUserIds reaching the repository = %v, want [%s]", got.AssignedUserIDs, testUUID)
+	}
+	if len(got.States) != 2 || len(got.ExcludeCaseStates) != 1 {
+		t.Errorf("states / excludeCaseStates were altered on the way: %+v", got)
+	}
+
+	// A malformed id is still refused up front and never reaches the repository.
+	calls = 0
+	_, err = svc.SearchAllCallRequests(context.Background(), domain.SearchAllCallRequestsRequest{
+		Filters: domain.SearchAllCallRequestsFilters{AssignmentTeamIDs: []string{otherUUID, "not-a-uuid"}},
+	})
+	requireErrKind(t, "one malformed team id among valid ones", err, &apierror.ValidationError{})
+	if calls != 0 {
+		t.Errorf("a refused request still reached the repository %d time(s)", calls)
+	}
 }
 
 func TestCallRequestService_UpdateValidation(t *testing.T) {

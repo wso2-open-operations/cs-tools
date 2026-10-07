@@ -120,31 +120,13 @@ type SLAPolicyRef struct {
 // entire point of sharing the table (see migration 0134's own comment).
 type SLAEngineRepository interface {
 	// FindPolicyByName resolves the single active sla_policy row matching
-	// name/target, preferring a source='SERVICENOW' row (the real
-	// ServiceNow-synced policy) but falling back to a source='CSM' row (a
-	// gap-filling policy this engine itself seeded, e.g. the P0 rows added
-	// by migration 0136) when no synced row exists under that exact name.
-	// Returns apierror.NotFoundError if neither exists.
+	// name/target, preferring a source='SERVICENOW' row over a source='CSM'
+	// one should both ever exist under the same name (they shouldn't in
+	// practice: this engine's own resolver only ever looks up the
+	// deterministic "<severity> - <target> (CSM)" names migration 0203
+	// seeds, e.g. "S4 - RESPONSE (CSM)", a name ServiceNow's own sync would
+	// never produce). Returns apierror.NotFoundError if no row matches.
 	FindPolicyByName(ctx context.Context, name, target string) (SLAPolicyRef, error)
-
-	// FindPolicyByPattern is sla_policy_resolver.go's last-resort fallback,
-	// tried only once FindPolicyByName has failed under both plan labels --
-	// see resolve's own doc comment for why. Real ServiceNow tenants outside
-	// prod (confirmed on wso2sndev.service-now.com's synced data) don't all
-	// follow the "P{n} - {Type} ({Plan})" naming convention prod's policies
-	// were verified against, e.g. "P2 - IR - Resolution (Open Source)"
-	// instead of "P2 - Resolution (Open Source)" -- an exact-name lookup
-	// finds nothing there even though a policy for that severity/clockType
-	// clearly exists. Matches any name that starts with "<prefix> - " and
-	// contains <label> anywhere after that, for the given target, preferring
-	// the shortest matching name (closest to the canonical form) when more
-	// than one qualifies. Returns apierror.NotFoundError if none match --
-	// callers treat that exactly like FindPolicyByName's own NotFoundError.
-	// derivedPlan is a preference, not a filter: a matching name containing
-	// it is ranked first, but a policy that doesn't mention any plan at all
-	// is still returned rather than treated as absent -- see this method's
-	// own implementation doc comment for the full ordering rule.
-	FindPolicyByPattern(ctx context.Context, prefix, label, target, derivedPlan string) (SLAPolicyRef, error)
 
 	// RegisterClock inserts a new source='CSM' "sla" row for
 	// (workItemID, policy.Target) and starts it running now, UNLESS an
@@ -271,48 +253,6 @@ func (r *slaEngineRepo) FindPolicyByName(ctx context.Context, name, target strin
 	}
 	if err != nil {
 		return SLAPolicyRef{}, fmt.Errorf("find sla policy by name: %w", err)
-	}
-	ref.Duration = time.Duration(durationSeconds * float64(time.Second))
-	return ref, nil
-}
-
-// FindPolicyByPattern implements SLAEngineRepository.
-//
-// ORDER BY a plan-match rank first, then length(name), then source: a row
-// whose name contains derivedPlan always sorts ahead of one that doesn't,
-// regardless of length -- CodeRabbit correctly flagged that plain
-// length(name) ordering alone can pick the wrong plan, e.g. preferring a
-// shorter "P2 - IR - Resolution (Open Source)" over the derived plan's own
-// "P2 - IR - Resolution (Managed Services)" purely because it's shorter.
-// Within the same plan-match rank, shortest name first still prefers a
-// plain "<prefix> - <label> (<plan>)" row over a longer, more qualified
-// variant like "<prefix> - IR - <label> (<plan>)"; source is the final
-// tiebreaker for the same reason FindPolicyByName uses it. derivedPlan is
-// still only ever a preference, never a filter -- a policy that doesn't
-// mention it at all is still returned (matching resolve()'s own two-plan
-// fallback philosophy: a guessed-wrong plan must not silently drop SLA
-// tracking).
-func (r *slaEngineRepo) FindPolicyByPattern(ctx context.Context, prefix, label, target, derivedPlan string) (SLAPolicyRef, error) {
-	const query = `
-		SELECT id, name, target::TEXT, EXTRACT(EPOCH FROM duration)
-		FROM sla_policy
-		WHERE name ILIKE $1 || ' - %'
-		  AND name ILIKE '%' || $2 || '%'
-		  AND target = $3::sla_policy_target_enum
-		  AND source IN ('SERVICENOW', 'CSM')
-		  AND (is_active IS NULL OR is_active)
-		  AND duration IS NOT NULL
-		ORDER BY (CASE WHEN name ILIKE '%' || $4 || '%' THEN 0 ELSE 1 END), length(name), source
-		LIMIT 1`
-
-	var ref SLAPolicyRef
-	var durationSeconds float64
-	err := r.db.QueryRow(ctx, query, prefix, label, target, derivedPlan).Scan(&ref.ID, &ref.Name, &ref.Target, &durationSeconds)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return SLAPolicyRef{}, &apierror.NotFoundError{Msg: "no sla_policy found matching " + prefix + "/" + label + "/" + target}
-	}
-	if err != nil {
-		return SLAPolicyRef{}, fmt.Errorf("find sla policy by pattern: %w", err)
 	}
 	ref.Duration = time.Duration(durationSeconds * float64(time.Second))
 	return ref, nil

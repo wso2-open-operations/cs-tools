@@ -26,8 +26,10 @@ import { type Locator, type Page, expect } from "@playwright/test";
  * Normal, ECAB for Emergency, straight to Scheduled for Standard).
  * There is deliberately no "Schedule" button: a CR is moved to Scheduled
  * automatically by its CAB/ECAB approval (or, when it requires customer
- * approval, by "Record customer approval" from the Customer Approval step) --
- * see `scheduleButton()`, which exists only so specs can assert its absence.
+ * approval, by the customer answering in the customer portal) -- see
+ * `scheduleButton()`, which exists only so specs can assert its absence.
+ * Staff never record a customer's approval or review, so there is no action for
+ * it either: `answerForCustomerWording()` exists only so specs can assert that.
  */
 export class ChangeRequestDetailPage {
   constructor(readonly page: Page) {}
@@ -83,13 +85,36 @@ export class ChangeRequestDetailPage {
     return this.page.getByText(/^Awaiting .+ (Approval|review)$/i);
   }
 
-  /** "Record customer approval" -- the only place `scheduled` is a manual action. */
-  recordCustomerApprovalButton(): Locator {
-    return this.page.getByRole("button", { name: "Record customer approval" });
+  /**
+   * Never expected to be visible: staff never record a customer's approval or review.
+   * Matches any text, button or menu entry that words an engineer answering for the
+   * customer ("Bypass customer approval" / "Bypass customer review", the retired
+   * "Record customer approval"). Only meaningful with the "Change state" menu open
+   * for its entries (a closed menu renders none).
+   */
+  answerForCustomerWording(): Locator {
+    const wording = /bypass|record customer|on (their|the customer's) behalf/i;
+    return this.page
+      .getByText(wording)
+      .or(this.page.getByRole("button", { name: wording }))
+      .or(this.page.getByRole("menuitem", { name: wording }));
   }
 
-  async recordCustomerApproval(): Promise<void> {
-    await this.recordCustomerApprovalButton().click();
+  /** Every entry of the open "Change state" menu. */
+  menuItems(): Locator {
+    return this.page.getByRole("menuitem");
+  }
+
+  /** Opens the "Change state" menu and waits for its entries. */
+  async openChangeStateMenu(): Promise<void> {
+    await this.changeStateButton().click();
+    await expect(this.menuItems().first()).toBeVisible();
+  }
+
+  /** Closes the "Change state" menu again. */
+  async closeChangeStateMenu(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.menuItems()).toHaveCount(0);
   }
 
   /** Review's forward move when the CR requires customer review. */
@@ -97,7 +122,11 @@ export class ChangeRequestDetailPage {
     return this.page.getByRole("button", { name: "Send for customer review" });
   }
 
-  /** The primary "Close" button (as opposed to the overflow menu entry). */
+  /**
+   * The primary "Close" button: Review's forward move when no customer review is
+   * required. It is never there at Customer Review, where closing is the customer's
+   * own answer, given in the Customer Portal.
+   */
   closeButton(): Locator {
     return this.page.getByRole("button", { name: "Close", exact: true });
   }
@@ -111,9 +140,18 @@ export class ChangeRequestDetailPage {
       .getByText(/^(Yes|No)$/);
   }
 
-  /** The lifecycle stepper's step labels, in order. */
+  /**
+   * The lifecycle stepper's stages, in order: the eleven of the customer portal's
+   * workflow (Customer Approval / Customer Review only when ticked). Each one's
+   * text is its label plus a visually-hidden status, "Review, done".
+   */
   stepLabels(): Locator {
     return this.lifecycleStepper().getByRole("listitem");
+  }
+
+  /** One stage of the stepper by its label ("Review" never matches "Customer Review"). */
+  stage(label: string): Locator {
+    return this.stepLabels().filter({ hasText: new RegExp(`^${label}, `) });
   }
 
   /** The Customer Approval / Customer Review checkboxes in the edit dialog. */

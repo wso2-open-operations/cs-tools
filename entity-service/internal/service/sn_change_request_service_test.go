@@ -45,11 +45,32 @@ func TestToDownstreamUTCDateTime(t *testing.T) {
 		}
 	})
 
+	t.Run("an RFC 3339 value is read as the instant it names", func(t *testing.T) {
+		for in, want := range map[string]string{
+			"2026-08-01T10:00:00Z":      "2026-08-01T10:00:00Z",
+			"2026-08-01T15:30:00+05:30": "2026-08-01T10:00:00Z",
+			"2026-08-01T05:00:00-05:00": "2026-08-01T10:00:00Z",
+		} {
+			got, err := toDownstreamUTCDateTime("plannedStartDate", in)
+			if err != nil {
+				t.Errorf("input %q: unexpected error: %v", in, err)
+				continue
+			}
+			if got != want {
+				t.Errorf("input %q: got %q, want %q", in, got, want)
+			}
+		}
+	})
+
 	t.Run("rejects bad input with a validation error naming the field", func(t *testing.T) {
 		for _, in := range []string{
-			"2026-08-01T10:00:00Z", // already UTC form: not the platform's format
+			"2026-08-01T10:00:00", // a time with no zone designator is neither layout
 			"2026-08-01",
 			"01-08-2026 10:00:00",
+			"infinity",
+			"now",
+			"tomorrow",
+			"1999-12-31T23:59:59Z", // RFC 3339, but outside the years 2000 to 2100
 			"not a date",
 			"",
 		} {
@@ -169,7 +190,9 @@ func TestSNChangeRequestService_SearchChangeRequests_NumberFilterPassedThrough(t
 // verifies the New/Assess/Authorize states -- already fully wired end-to-end
 // (domain enum, SN key mapping) except for validChangeRequestState -- no longer
 // fail search validation and reach the outgoing payload with the correct SN
-// numeric state keys (-5/-4/-3).
+// numeric state keys (-5/-4/-3). The caller is staff (an unrestricted scope):
+// a customer is never sent these three states, see
+// sn_change_request_customer_view_test.go.
 func TestSNChangeRequestService_SearchChangeRequests_NewAssessAuthorizeStatesAccepted(t *testing.T) {
 	var gotBody map[string]any
 	mux := http.NewServeMux()
@@ -193,7 +216,7 @@ func TestSNChangeRequestService_SearchChangeRequests_NewAssessAuthorizeStatesAcc
 			},
 		},
 	}
-	if _, err := svc.SearchChangeRequests(contextWithUserIDToken("token"), req); err != nil {
+	if _, err := svc.SearchChangeRequests(snStaffCtx(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -622,33 +645,47 @@ func TestSNChangeRequestService_CreateChangeRequest_RequiresType(t *testing.T) {
 	}
 }
 
-// TestWithoutManualScheduled: ServiceNow's own offered next states never reach
-// the portal with "scheduled" in them -- Scheduled is reached by CAB/ECAB
-// approval, there is no Schedule action -- except from Customer Approval, where
-// "scheduled" is the action that records the customer's approval.
-func TestWithoutManualScheduled(t *testing.T) {
+// TestWithoutCustomerOutcomeStates: ServiceNow's own offered next states never
+// reach the portal with the two states only the CUSTOMER can reach in them --
+// "scheduled" (from any state, Customer Approval included: the customer's own
+// approval schedules the change) and "closed" out of Customer Review (only the
+// customer's own review closes it) -- so this data source's legalNextStates
+// agrees with the PostgreSQL one. "closed" from Review, Rollback and Cancel stay.
+func TestWithoutCustomerOutcomeStates(t *testing.T) {
 	str := func(s string) *string { return &s }
-	got := withoutManualScheduled([]string{"scheduled", "implement", "Scheduled", "canceled"}, str("assess"))
+	got := withoutCustomerOutcomeStates([]string{"scheduled", "implement", "Scheduled", "canceled"}, str("assess"))
 	if strings.Join(got, ",") != "implement,canceled" {
-		t.Fatalf("withoutManualScheduled = %v, want [implement canceled]", got)
+		t.Fatalf("withoutCustomerOutcomeStates = %v, want [implement canceled]", got)
 	}
-	if withoutManualScheduled(nil, nil) != nil {
+	if withoutCustomerOutcomeStates(nil, nil) != nil {
 		t.Fatal("nil must stay nil")
 	}
-	if got := withoutManualScheduled([]string{"scheduled", "canceled"}, nil); strings.Join(got, ",") != "canceled" {
-		t.Fatalf("withoutManualScheduled with unknown state = %v, want [canceled]", got)
+	if got := withoutCustomerOutcomeStates([]string{"scheduled", "canceled"}, nil); strings.Join(got, ",") != "canceled" {
+		t.Fatalf("withoutCustomerOutcomeStates with unknown state = %v, want [canceled]", got)
 	}
-	// Rollback (the failed-review off-ramp ServiceNow offers from Review and
-	// Customer Review) is never stripped.
-	for _, st := range []string{"review", "customer_review"} {
-		got = withoutManualScheduled([]string{"closed", "rollback", "canceled"}, str(st))
-		if strings.Join(got, ",") != "closed,rollback,canceled" {
-			t.Fatalf("withoutManualScheduled from %s = %v, want [closed rollback canceled]", st, got)
+	// Review keeps Closed and Rollback (the failed-review off-ramp).
+	got = withoutCustomerOutcomeStates([]string{"closed", "rollback", "canceled"}, str("review"))
+	if strings.Join(got, ",") != "closed,rollback,canceled" {
+		t.Fatalf("withoutCustomerOutcomeStates from review = %v, want [closed rollback canceled]", got)
+	}
+	// Customer Review: only the customer's review closes the change, so Closed
+	// goes (in any case), Rollback and Cancel stay.
+	for _, st := range []string{"customer_review", "Customer_Review"} {
+		got = withoutCustomerOutcomeStates([]string{"closed", "Closed", "rollback", "canceled"}, str(st))
+		if strings.Join(got, ",") != "rollback,canceled" {
+			t.Fatalf("withoutCustomerOutcomeStates from %s = %v, want [rollback canceled]", st, got)
 		}
 	}
-	got = withoutManualScheduled([]string{"scheduled", "canceled"}, str("customer_approval"))
-	if strings.Join(got, ",") != "scheduled,canceled" {
-		t.Fatalf("withoutManualScheduled from customer_approval = %v, want [scheduled canceled] (records the customer's approval)", got)
+	// Customer Approval: the customer's own approval schedules the change, so
+	// "scheduled" goes here as well (it used to stay: it was a staff action),
+	// Re-schedule (authorize) and Cancel stay.
+	got = withoutCustomerOutcomeStates([]string{"scheduled", "authorize", "canceled"}, str("customer_approval"))
+	if strings.Join(got, ",") != "authorize,canceled" {
+		t.Fatalf("withoutCustomerOutcomeStates from customer_approval = %v, want [authorize canceled]", got)
+	}
+	// An empty (non-nil) answer stays empty, not nil.
+	if got := withoutCustomerOutcomeStates([]string{"scheduled"}, str("customer_approval")); got == nil || len(got) != 0 {
+		t.Fatalf("withoutCustomerOutcomeStates([scheduled]) = %#v, want an empty non-nil slice", got)
 	}
 }
 
@@ -873,7 +910,9 @@ func TestSNChangeRequestService_GetChangeRequest_MapsFieldParityKeys(t *testing.
 // returns the raw internal state value as the bucket key (e.g. "-5" for
 // "New") and the human-readable label separately. The platform's own
 // ChangeRequestState enum strings must come back as the key so the frontend
-// can round-trip it into a states filter. This test pins that remap.
+// can round-trip it into a states filter. This test pins that remap, for staff
+// (a customer is not handed the New / Assess buckets at all: see
+// sn_change_request_customer_view_test.go).
 func TestSNChangeRequestService_AggregateChangeRequests_StateGroupByRemapsKeyToDomainEnum(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/change-requests/aggregate", func(w http.ResponseWriter, r *http.Request) {
@@ -891,7 +930,7 @@ func TestSNChangeRequestService_AggregateChangeRequests_StateGroupByRemapsKeyToD
 	client := newTestSNClient(t, mux)
 	svc := NewServiceNowChangeRequestService(client)
 
-	resp, err := svc.AggregateChangeRequests(contextWithUserIDToken("token"), domain.AggregateChangeRequestsRequest{
+	resp, err := svc.AggregateChangeRequests(snStaffCtx(), domain.AggregateChangeRequestsRequest{
 		GroupBy: "state",
 	})
 	if err != nil {
@@ -980,4 +1019,265 @@ func TestSNChangeRequestService_RemovedFieldsAreRefused(t *testing.T) {
 			t.Errorf("%s patch: err = %v, want ValidationError %q", name, err, tc.want)
 		}
 	}
+}
+
+// The ServiceNow data source has no notion of who is viewing: its change request
+// detail never carries customerCanAnswer (absent means "unknown", and a client
+// falls back to the flags it already had), whatever the customer flags say.
+func TestSNChangeRequestDetail_LeavesCustomerCanAnswerAbsent(t *testing.T) {
+	t.Parallel()
+
+	const detail = `{
+		"id": "0123456789abcdef0123456789abcdef",
+		"state": {"label": "Customer Approval"},
+		"hasCustomerApproved": true,
+		"hasCustomerReviewed": false
+	}`
+	var cr snChangeRequestDetail
+	if err := json.Unmarshal([]byte(detail), &cr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := mapSNChangeRequestDetailToView(cr)
+	if got.CustomerCanAnswer != nil {
+		t.Fatalf("CustomerCanAnswer = %v, want nil (absent)", *got.CustomerCanAnswer)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "customerCanAnswer") {
+		t.Fatalf("the ServiceNow detail's JSON mentions customerCanAnswer: %s", raw)
+	}
+}
+
+// TestSNPlannedTimestamp pins what the ServiceNow service takes for a planned
+// start / end: the platform's own layout as sent, or RFC 3339 with a zone (which
+// the PostgreSQL data source reads too) converted to that layout in UTC, and
+// nothing else.
+func TestSNPlannedTimestamp(t *testing.T) {
+	t.Parallel()
+
+	for in, want := range map[string]string{
+		"2030-03-01 09:00:00":       "2030-03-01 09:00:00",
+		"2030-03-01T09:00:00Z":      "2030-03-01 09:00:00",
+		"2030-03-01T14:30:00+05:30": "2030-03-01 09:00:00",
+		"2030-03-01T04:00:00-05:00": "2030-03-01 09:00:00",
+		"2030-03-01T09:00:00.5Z":    "2030-03-01 09:00:00",
+		// The zoneless layout is forwarded as it always was, whatever its year.
+		"1999-01-01 00:00:00": "1999-01-01 00:00:00",
+	} {
+		got, err := snPlannedTimestamp("plannedStartOn", in)
+		if err != nil {
+			t.Errorf("input %q: unexpected error: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("input %q: got %q, want %q", in, got, want)
+		}
+	}
+
+	for _, in := range []string{
+		"infinity", "-infinity", "now", "today", "tomorrow", "epoch",
+		"2030-03-01",                // a date alone
+		"2030-03-01T09:00:00",       // a time with no zone designator
+		"2030-03-01 09:00:00 UTC",   // a zone name
+		"2030-03-01 09:00:00+05:30", // an offset on the zoneless layout
+		"1999-12-31T23:59:59Z",      // RFC 3339, outside the years 2000 to 2100
+		"2101-01-01T00:00:00Z",
+		" 2030-03-01T09:00:00Z",
+		"",
+	} {
+		_, err := snPlannedTimestamp("plannedStartOn", in)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Errorf("input %q: want a ValidationError, got %v", in, err)
+			continue
+		}
+		if want := "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+			t.Errorf("input %q: got msg %q, want %q", in, ve.Msg, want)
+		}
+	}
+}
+
+// TestSNChangeRequestService_PatchChangeRequest_PlannedWindowLayouts: the
+// planned window of a PATCH reaches ServiceNow in the zoneless UTC layout whichever
+// of the two documented layouts was sent, and a value that is neither is refused
+// before any downstream call.
+func TestSNChangeRequestService_PatchChangeRequest_PlannedWindowLayouts(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+
+	run := func(t *testing.T, start, end *string) (map[string]any, int, error) {
+		t.Helper()
+		var gotBody map[string]any
+		calls := 0
+		mux := http.NewServeMux()
+		mux.HandleFunc("/change-requests/", func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected PATCH, got %s", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok","changeRequest":{"id":"11111111222233334444555555555555"}}`))
+		})
+		svc := NewServiceNowChangeRequestService(newTestSNClient(t, mux))
+		_, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), id,
+			domain.PatchChangeRequestRequest{PlannedStartOn: start, PlannedEndOn: end})
+		return gotBody, calls, err
+	}
+
+	t.Run("RFC 3339 is converted, the zoneless layout is forwarded as sent", func(t *testing.T) {
+		for _, tc := range []struct{ name, start, end, wantStart, wantEnd string }{
+			{"zoneless", "2030-03-01 09:00:00", "2030-03-01 10:00:00", "2030-03-01 09:00:00", "2030-03-01 10:00:00"},
+			{"Z", "2030-03-01T09:00:00Z", "2030-03-01T10:00:00Z", "2030-03-01 09:00:00", "2030-03-01 10:00:00"},
+			{"an offset", "2030-03-01T14:30:00+05:30", "2030-03-01T15:30:00+05:30", "2030-03-01 09:00:00", "2030-03-01 10:00:00"},
+			{"one of each", "2030-03-01T09:00:00Z", "2030-03-01 10:00:00", "2030-03-01 09:00:00", "2030-03-01 10:00:00"},
+		} {
+			start, end := tc.start, tc.end
+			body, calls, err := run(t, &start, &end)
+			if err != nil || calls != 1 {
+				t.Fatalf("%s: err %v, downstream calls %d; want none and 1", tc.name, err, calls)
+			}
+			if body["plannedStartOn"] != tc.wantStart || body["plannedEndOn"] != tc.wantEnd {
+				t.Errorf("%s: forwarded %v / %v, want %q / %q", tc.name, body["plannedStartOn"], body["plannedEndOn"], tc.wantStart, tc.wantEnd)
+			}
+		}
+	})
+
+	t.Run("a start alone, an end alone", func(t *testing.T) {
+		v := "2030-03-01T09:00:00Z"
+		body, _, err := run(t, &v, nil)
+		if err != nil || body["plannedStartOn"] != "2030-03-01 09:00:00" {
+			t.Fatalf("start alone: err %v, body %v", err, body)
+		}
+		if _, has := body["plannedEndOn"]; has {
+			t.Errorf("an absent end was forwarded: %v", body["plannedEndOn"])
+		}
+		body, _, err = run(t, nil, &v)
+		if err != nil || body["plannedEndOn"] != "2030-03-01 09:00:00" {
+			t.Fatalf("end alone: err %v, body %v", err, body)
+		}
+	})
+
+	t.Run("anything else is refused and nothing is sent", func(t *testing.T) {
+		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00", "1999-12-31T23:59:59Z", ""} {
+			for _, which := range []string{"plannedStartOn", "plannedEndOn"} {
+				v := bad
+				var start, end *string
+				if which == "plannedStartOn" {
+					start = &v
+				} else {
+					end = &v
+				}
+				_, calls, err := run(t, start, end)
+				var ve *apierror.ValidationError
+				if !errors.As(err, &ve) || calls != 0 {
+					t.Errorf("%s %q: err %v, downstream calls %d; want a ValidationError and none", which, bad, err, calls)
+					continue
+				}
+				if want := which + " must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+					t.Errorf("%s %q: got msg %q, want %q", which, bad, ve.Msg, want)
+				}
+			}
+		}
+	})
+
+	t.Run("the caller's request is left as it was sent", func(t *testing.T) {
+		start := "2030-03-01T09:00:00Z"
+		req := domain.PatchChangeRequestRequest{PlannedStartOn: &start}
+		mux := http.NewServeMux()
+		mux.HandleFunc("/change-requests/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok","changeRequest":{"id":"11111111222233334444555555555555"}}`))
+		})
+		svc := NewServiceNowChangeRequestService(newTestSNClient(t, mux))
+		if _, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), id, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if *req.PlannedStartOn != "2030-03-01T09:00:00Z" {
+			t.Errorf("the caller's plannedStartOn was rewritten to %q", *req.PlannedStartOn)
+		}
+	})
+}
+
+// TestSNChangeRequestService_CreateChangeRequest_PlannedWindowLayouts: the same
+// for a create, which also reaches the ServiceNow service as the first write of
+// the dual-write create (with the text the caller sent, validated, not converted).
+func TestSNChangeRequestService_CreateChangeRequest_PlannedWindowLayouts(t *testing.T) {
+	run := func(t *testing.T, req domain.CreateChangeRequestRequest) (map[string]any, int, error) {
+		t.Helper()
+		var gotBody map[string]any
+		calls := 0
+		mux := http.NewServeMux()
+		mux.HandleFunc("/change-requests", func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok","changeRequest":{"id":"11111111222233334444555555555555","number":"CHG0000001"}}`))
+		})
+		svc := NewServiceNowChangeRequestService(newTestSNClient(t, mux))
+		_, err := svc.CreateChangeRequest(contextWithUserIDToken("token"), req)
+		return gotBody, calls, err
+	}
+	normal := domain.ChangeRequestTypeNormal
+	base := func(start, end string) domain.CreateChangeRequestRequest {
+		return domain.CreateChangeRequestRequest{Subject: "Window", Type: &normal, PlannedStartDate: &start, PlannedEndDate: &end}
+	}
+
+	t.Run("either layout reaches the create endpoint in the layout it requires", func(t *testing.T) {
+		for _, tc := range []struct{ name, start, end string }{
+			{"zoneless", "2030-03-01 09:00:00", "2030-03-01 10:00:00"},
+			{"Z", "2030-03-01T09:00:00Z", "2030-03-01T10:00:00Z"},
+			{"an offset", "2030-03-01T14:30:00+05:30", "2030-03-01T15:30:00+05:30"},
+		} {
+			body, calls, err := run(t, base(tc.start, tc.end))
+			if err != nil || calls != 1 {
+				t.Fatalf("%s: err %v, downstream calls %d; want none and 1", tc.name, err, calls)
+			}
+			if body["plannedStartDate"] != "2030-03-01T09:00:00Z" || body["plannedEndDate"] != "2030-03-01T10:00:00Z" {
+				t.Errorf("%s: forwarded %v / %v", tc.name, body["plannedStartDate"], body["plannedEndDate"])
+			}
+		}
+	})
+
+	t.Run("durationInput is checked against the window whichever layout it came in", func(t *testing.T) {
+		okDur, badDur := 3600, 60
+		req := base("2030-03-01T09:00:00Z", "2030-03-01T10:00:00+00:00")
+		req.DurationInput = &okDur
+		if _, calls, err := run(t, req); err != nil || calls != 1 {
+			t.Fatalf("matching duration: err %v, downstream calls %d", err, calls)
+		}
+		req.DurationInput = &badDur
+		_, calls, err := run(t, req)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) || calls != 0 || !strings.Contains(ve.Msg, "durationInput (60) must match plannedEndDate - plannedStartDate (3600)") {
+			t.Fatalf("mismatched duration: err %v, downstream calls %d", err, calls)
+		}
+	})
+
+	t.Run("anything else is refused and nothing is sent", func(t *testing.T) {
+		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00", "1999-12-31T23:59:59Z"} {
+			for _, field := range []string{"plannedStartDate", "plannedEndDate"} {
+				req := base("2030-03-01 09:00:00", "2030-03-01 10:00:00")
+				if field == "plannedStartDate" {
+					req.PlannedStartDate = &bad
+				} else {
+					req.PlannedEndDate = &bad
+				}
+				_, calls, err := run(t, req)
+				var ve *apierror.ValidationError
+				if !errors.As(err, &ve) || calls != 0 {
+					t.Errorf("%s %q: err %v, downstream calls %d; want a ValidationError and none", field, bad, err, calls)
+					continue
+				}
+				if want := field + " must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+					t.Errorf("%s %q: got msg %q, want %q", field, bad, ve.Msg, want)
+				}
+			}
+		}
+	})
 }

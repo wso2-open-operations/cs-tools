@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -49,11 +50,21 @@ type entityAttachmentClient interface {
 // the calling user, the same way DeploymentHandler.deploymentBelongsToProject
 // does: entity-service's SearchDeployments is evaluated under the caller's
 // own row-level-security scope (deployment has RLS, migration 0176), so a
-// non-empty result already proves access — no second project lookup needed.
-// Unlike deploymentBelongsToProject, this doesn't need to know the project
-// up front: SearchDeployments' ids filter (entity-service's SearchDeploymentsRequest.IDs)
-// resolves the single deployment directly, which is all an attachment's own
-// ReferenceID ever carries.
+// result actually matching deploymentID already proves access — no second
+// project lookup needed. Unlike deploymentBelongsToProject, this doesn't need
+// to know the project up front: SearchDeployments' ids filter (entity-service's
+// SearchDeploymentsRequest.IDs) resolves the single deployment directly, which
+// is all an attachment's own ReferenceID ever carries.
+//
+// Checks each returned DeploymentView.ID against deploymentID explicitly,
+// rather than trusting a non-empty result alone: the ServiceNow-backed
+// SearchDeployments adapter (snDeploymentService, plain DATA_SOURCE=servicenow)
+// doesn't forward the ids filter at all (see entity-service's own
+// SearchDeploymentsRequest.IDs doc comment — only the Postgres data source
+// applies it), so an unfiltered search could return an unrelated deployment
+// the caller happens to have access to. A bare len(resp.Deployments) > 0
+// check would then authorize against that unrelated deployment instead of
+// the one actually being asked about.
 func deploymentAttachmentIsVisible(ctx context.Context, client entityAttachmentClient, deploymentID string) (bool, error) {
 	resp, err := client.SearchDeployments(ctx, entity.SearchDeploymentsRequest{
 		IDs:        []string{deploymentID},
@@ -62,7 +73,12 @@ func deploymentAttachmentIsVisible(ctx context.Context, client entityAttachmentC
 	if err != nil {
 		return false, err
 	}
-	return len(resp.Deployments) > 0, nil
+	for _, deployment := range resp.Deployments {
+		if deployment.ID == deploymentID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // authorizeAttachmentAccess verifies the caller may see an attachment's
@@ -76,39 +92,55 @@ func deploymentAttachmentIsVisible(ctx context.Context, client entityAttachmentC
 // caller could read or delete any other customer's attachment just by
 // guessing or observing its id.
 //
-// Branches on attachment.ReferenceType where it's actually populated:
-// entity-service's SN-backed GetAttachmentByID doc comment says it's left
-// nil unconditionally ("the upstream attachment-details response carries no
-// reference type... callers must fail closed on it"), but that only holds
-// for the plain DATA_SOURCE=servicenow path. Under
-// DATA_SOURCE=postgres-servicenow-dual-write (what's actually live today),
-// GetAttachmentByID resolves to the Postgres-native implementation
-// (caseAttachmentDualWriteService embeds *caseService with no override),
-// which does populate ReferenceType from the real column.
+// Does NOT reliably branch on attachment.ReferenceType — an earlier revision
+// of this function did, and it was wrong in practice, confirmed live: under
+// DATA_SOURCE=postgres-servicenow-dual-write, entity-service's
+// GetAttachmentByID reports ReferenceType "case" when it reads its own
+// Postgres case_attachment table (which hardcodes that value on every row —
+// see that repository method's own doc comment) and reports it nil when it
+// falls back to the ServiceNow mirror, which it always does for a
+// deployment-referenced attachment specifically (case_attachment.case_id has
+// a hard FK into "case", so such a row can never exist there in the first
+// place — see CreateCaseAttachmentFromServiceNow's own doc comment). So
+// ReferenceType is never actually "deployment" on any path this backend can
+// observe, live-dual-write or not.
 //
-//   - ReferenceType == deployment: verified via deploymentAttachmentIsVisible
-//     (RLS-scoped SearchDeployments by id) — the only reference type besides
-//     case that's actually reachable from the Deployed tab today.
-//   - Anything else (case, nil, or any other type this codebase has no
-//     scoped ownership check for yet — conversation/change_request/incident):
-//     falls back to the original GetCase-based check, which both verifies a
-//     real case and fails closed on every type it can't tell apart from one
-//     (see entity-service's own CLAUDE.md, "Where this is actually enforced").
+// What actually happens here instead: try the case-based check (GetCase)
+// first, since that is the common case and entity-service already scopes it
+// correctly. Only on a 404-shaped failure — which an out-of-scope case and a
+// deployment-referenced attachment's ReferenceID both produce, and this
+// backend cannot tell apart from the response alone — fall back to
+// deploymentAttachmentIsVisible (RLS-scoped SearchDeployments by id, the only
+// other reference type actually reachable from the Deployed tab today).
+// Still fails closed on every type neither check can confirm (conversation/
+// change_request/incident — none of which has a scoped ownership check
+// anywhere in this codebase yet — see entity-service's own CLAUDE.md, "Where
+// this is actually enforced").
 func authorizeAttachmentAccess(ctx context.Context, client entityAttachmentClient, attachment entity.AttachmentDetails) (entity.CaseView, error) {
 	if attachment.ReferenceID == "" {
 		return entity.CaseView{}, &apierror.Error{StatusCode: http.StatusNotFound}
 	}
-	if attachment.ReferenceType != nil && *attachment.ReferenceType == entity.ReferenceTypeDeployment {
-		visible, err := deploymentAttachmentIsVisible(ctx, client, attachment.ReferenceID)
-		if err != nil {
-			return entity.CaseView{}, err
-		}
-		if !visible {
-			return entity.CaseView{}, &apierror.Error{StatusCode: http.StatusNotFound}
-		}
-		return entity.CaseView{}, nil
+
+	caseView, err := client.GetCase(ctx, attachment.ReferenceID)
+	if err == nil {
+		return caseView, nil
 	}
-	return client.GetCase(ctx, attachment.ReferenceID)
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		return entity.CaseView{}, err
+	}
+
+	visible, derr := deploymentAttachmentIsVisible(ctx, client, attachment.ReferenceID)
+	if derr != nil {
+		return entity.CaseView{}, derr
+	}
+	if !visible {
+		// Neither check resolved it -- report the original GetCase error,
+		// not the deployment one, since GetCase is the common case and its
+		// 404 is the more informative of the two to log/map from.
+		return entity.CaseView{}, err
+	}
+	return entity.CaseView{}, nil
 }
 
 // AttachmentHandler handles HTTP requests for attachment operations.

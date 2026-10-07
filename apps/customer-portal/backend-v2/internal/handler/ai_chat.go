@@ -319,18 +319,24 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Attributed to the assistant, not the customer whose token relayed it —
-	// see entity.CreatedByAgent.
-	if _, err := h.entity.CreateComment(r.Context(), entity.CreateCommentRequest{
-		ReferenceID:   conversationID,
-		ReferenceType: entity.ReferenceTypeConversation,
-		Type:          entity.CommentTypeComment,
-		Content:       chatResp.Message,
-		CreatedBy:     entity.CreatedByAgent,
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateComment failed for chat response", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to save chat response as comment.")
-		return
+	// An answer that was only <thinking> reasoning is empty once that is
+	// removed (see aichatagent.StripThinkingBlocks), and entity-service rejects a
+	// comment with no content — so there is nothing to store and the turn must
+	// not fail over it. Same rule as websocket.go's handleMessage.
+	if chatResp.Message != "" {
+		// Attributed to the assistant, not the customer whose token relayed it —
+		// see entity.CreatedByAgent.
+		if _, err := h.entity.CreateComment(r.Context(), entity.CreateCommentRequest{
+			ReferenceID:   conversationID,
+			ReferenceType: entity.ReferenceTypeConversation,
+			Type:          entity.CommentTypeComment,
+			Content:       chatResp.Message,
+			CreatedBy:     entity.CreatedByAgent,
+		}); err != nil {
+			slog.ErrorContext(r.Context(), "entity CreateComment failed for chat response", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+			mapUpstreamError(w, err, "Failed to save chat response as comment.")
+			return
+		}
 	}
 
 	if chatResp.Resolved != nil && *chatResp.Resolved {
@@ -408,18 +414,24 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Attributed to the assistant, not the customer whose token relayed it —
-	// see entity.CreatedByAgent.
-	if _, err := h.entity.CreateComment(r.Context(), entity.CreateCommentRequest{
-		ReferenceID:   conversationID,
-		ReferenceType: entity.ReferenceTypeConversation,
-		Type:          entity.CommentTypeComment,
-		Content:       chatResp.Message,
-		CreatedBy:     entity.CreatedByAgent,
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateComment failed for chat response", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to save chat response as comment.")
-		return
+	// An answer that was only <thinking> reasoning is empty once that is
+	// removed (see aichatagent.StripThinkingBlocks), and entity-service rejects a
+	// comment with no content — so there is nothing to store and the turn must
+	// not fail over it. Same rule as websocket.go's handleMessage.
+	if chatResp.Message != "" {
+		// Attributed to the assistant, not the customer whose token relayed it —
+		// see entity.CreatedByAgent.
+		if _, err := h.entity.CreateComment(r.Context(), entity.CreateCommentRequest{
+			ReferenceID:   conversationID,
+			ReferenceType: entity.ReferenceTypeConversation,
+			Type:          entity.CommentTypeComment,
+			Content:       chatResp.Message,
+			CreatedBy:     entity.CreatedByAgent,
+		}); err != nil {
+			slog.ErrorContext(r.Context(), "entity CreateComment failed for chat response", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+			mapUpstreamError(w, err, "Failed to save chat response as comment.")
+			return
+		}
 	}
 
 	if chatResp.Resolved != nil && *chatResp.Resolved {

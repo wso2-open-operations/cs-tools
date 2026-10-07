@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { postSkippingTotal } from "@api/backend/postSkippingTotal";
 import type {
   BeIncidentSearchPayload,
   BeIncidentSearchResponse,
@@ -87,7 +88,8 @@ export function useQuickIncidentSearch(
   return useQuery<QuickIncidentHit[], Error>({
     queryKey: [ApiQueryKeys.INCIDENTS, "quick-search", q, scope],
     queryFn: async (): Promise<QuickIncidentHit[]> => {
-      const res = await api.post<BeIncidentSearchPayload, BeIncidentSearchResponse>(
+      const res = await postSkippingTotal<BeIncidentSearchPayload, BeIncidentSearchResponse>(
+        api,
         "/incidents/search",
         {
           pagination: { offset: 0, limit: QUICK_INCIDENT_LIMIT },

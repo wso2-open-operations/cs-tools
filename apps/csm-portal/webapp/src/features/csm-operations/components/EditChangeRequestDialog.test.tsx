@@ -539,113 +539,221 @@ describe("EditChangeRequestDialog — the 'in the past' hint follows the profile
 describe("EditChangeRequestDialog — Customer Approval / Customer Review checkboxes", () => {
   const approvalBox = (): HTMLElement => screen.getByRole("checkbox", { name: "Customer Approval" });
   const reviewBox = (): HTMLElement => screen.getByRole("checkbox", { name: "Customer Review" });
+  const ACME = { id: "proj-a", name: "Acme Project" };
 
-  it("renders both as checkboxes reflecting the stored flags, enabled while the gates are ahead", () => {
-    renderDialog({ state: "assess", customerApprovalRequired: true, customerReviewRequired: false });
-    expect(approvalBox()).toBeChecked();
-    expect(approvalBox()).toBeEnabled();
-    expect(reviewBox()).not.toBeChecked();
-    expect(reviewBox()).toBeEnabled();
-    expect((approvalBox() as HTMLInputElement).type).toBe("checkbox");
-  });
-
-  it("treats absent flags as unchecked and leaves Save disabled with no change", () => {
-    renderDialog({ state: "new" });
-    expect(approvalBox()).not.toBeChecked();
-    expect(reviewBox()).not.toBeChecked();
-    expect(saveButton()).toBeDisabled();
-  });
-
-  it("sends only customerApprovalRequired when only Customer Approval was toggled", () => {
-    const { onSave } = renderDialog({ state: "authorize", customerApprovalRequired: false });
-    fireEvent.click(approvalBox());
-    fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({ customerApprovalRequired: true });
-  });
-
-  it("sends only customerReviewRequired when only Customer Review was toggled", () => {
-    const { onSave } = renderDialog({ state: "implement", customerReviewRequired: false });
-    fireEvent.click(reviewBox());
-    fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({ customerReviewRequired: true });
-  });
-
-  it("sends both, and can switch an enabled flag off", () => {
-    const { onSave } = renderDialog({
-      state: "assess",
-      customerApprovalRequired: true,
-      customerReviewRequired: false,
-    });
-    fireEvent.click(approvalBox());
-    fireEvent.click(reviewBox());
-    fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({
-      customerApprovalRequired: false,
-      customerReviewRequired: true,
-    });
-  });
-
-  it("does not send a flag that was toggled back to its original value", () => {
-    renderDialog({ state: "assess", customerApprovalRequired: false });
-    fireEvent.click(approvalBox());
-    fireEvent.click(approvalBox());
-    expect(saveButton()).toBeDisabled();
-  });
-
-  it.each(["customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"])(
-    "disables Customer Approval once the CR is in %s, with an explanation",
-    (state) => {
-      renderDialog({ state, customerApprovalRequired: true });
-      expect(approvalBox()).toBeDisabled();
-      expect(approvalBox()).toHaveAccessibleDescription(/locked/i);
-    },
-  );
-
-  it.each(["new", "assess", "authorize"])("keeps Customer Approval editable in %s", (state) => {
-    renderDialog({ state });
-    expect(approvalBox()).toBeEnabled();
-  });
-
-  it.each(["customer_review", "closed", "rollback", "canceled"])(
-    "disables Customer Review once the CR is in %s, with an explanation",
-    (state) => {
-      renderDialog({ state, customerReviewRequired: true });
-      expect(reviewBox()).toBeDisabled();
-      expect(reviewBox()).toHaveAccessibleDescription(/locked/i);
-    },
-  );
-
-  it.each(["new", "assess", "authorize", "customer_approval", "scheduled", "implement", "review"])(
-    "keeps Customer Review editable in %s",
-    (state) => {
-      renderDialog({ state });
+  describe("in New (the creation phase) everything is editable", () => {
+    it("renders both as checkboxes reflecting the stored flags, enabled, even with no project", () => {
+      renderDialog({ state: "new", customerApprovalRequired: true, customerReviewRequired: false });
+      expect(approvalBox()).toBeChecked();
+      expect(approvalBox()).toBeEnabled();
+      expect(reviewBox()).not.toBeChecked();
       expect(reviewBox()).toBeEnabled();
-    },
-  );
-
-  it("still lets Customer Review be changed while Customer Approval is locked, and sends only that", () => {
-    const { onSave } = renderDialog({
-      state: "scheduled",
-      customerApprovalRequired: true,
-      customerReviewRequired: false,
+      expect((approvalBox() as HTMLInputElement).type).toBe("checkbox");
     });
-    expect(approvalBox()).toBeDisabled();
-    fireEvent.click(reviewBox());
-    fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({ customerReviewRequired: true });
+
+    it("treats absent flags as unchecked and leaves Save disabled with no change", () => {
+      renderDialog({ state: "new" });
+      expect(approvalBox()).not.toBeChecked();
+      expect(reviewBox()).not.toBeChecked();
+      expect(saveButton()).toBeDisabled();
+    });
+
+    it("sends only customerApprovalRequired when only Customer Approval was toggled", () => {
+      const { onSave } = renderDialog({ state: "new", customerApprovalRequired: false });
+      fireEvent.click(approvalBox());
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({ customerApprovalRequired: true });
+    });
+
+    it("sends only customerReviewRequired when only Customer Review was toggled", () => {
+      const { onSave } = renderDialog({ state: "new", customerReviewRequired: false });
+      fireEvent.click(reviewBox());
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({ customerReviewRequired: true });
+    });
+
+    it("sends both, and can switch a ticked box OFF (nothing has been requested yet)", () => {
+      const { onSave } = renderDialog({
+        state: "new",
+        customerApprovalRequired: true,
+        customerReviewRequired: false,
+      });
+      fireEvent.click(approvalBox());
+      fireEvent.click(reviewBox());
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({
+        customerApprovalRequired: false,
+        customerReviewRequired: true,
+      });
+    });
+
+    it("does not send a flag that was toggled back to its original value", () => {
+      renderDialog({ state: "new", customerApprovalRequired: false });
+      fireEvent.click(approvalBox());
+      fireEvent.click(approvalBox());
+      expect(saveButton()).toBeDisabled();
+    });
+
+    it("says nothing about the box being final: it is not, yet", () => {
+      renderDialog({ state: "new" });
+      expect(screen.queryByText(/can't be removed/i)).not.toBeInTheDocument();
+    });
   });
 
-  it("shows the backend's refusal message when a late edit is rejected (400)", () => {
+  describe("after New a ticked box is read-only: a customer requirement can be added but never removed", () => {
+    it.each(["assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"])(
+      "Customer Approval, ticked, in %s",
+      (state) => {
+        const { onSave } = renderDialog({ state, project: ACME, customerApprovalRequired: true });
+        expect(approvalBox()).toBeChecked();
+        expect(approvalBox()).toBeDisabled();
+        expect(approvalBox()).toHaveAccessibleDescription(
+          "Once approval has been requested a customer requirement can be added but never removed.",
+        );
+        // Nothing to save: a ticked box cannot be taken back, so no patch can carry it.
+        expect(saveButton()).toBeDisabled();
+        expect(onSave).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"])(
+      "Customer Review, ticked, in %s",
+      (state) => {
+        renderDialog({ state, project: ACME, customerReviewRequired: true });
+        expect(reviewBox()).toBeChecked();
+        expect(reviewBox()).toBeDisabled();
+        expect(reviewBox()).toHaveAccessibleDescription(/added but never removed/);
+      },
+    );
+
+    it("is read-only even when the change request has no project (a stored flag is never taken back)", () => {
+      renderDialog({ state: "assess", customerApprovalRequired: true });
+      expect(approvalBox()).toBeDisabled();
+    });
+  });
+
+  describe("after New an unticked box can still be ticked until its gate, with a note that it can't be removed", () => {
+    it.each(["assess", "authorize"])("Customer Approval stays tickable in %s, and sends only that", (state) => {
+      const { onSave } = renderDialog({ state, project: ACME, customerApprovalRequired: false });
+      expect(approvalBox()).toBeEnabled();
+      expect(approvalBox()).toHaveAccessibleDescription(/Once saved this can't be removed\./);
+      fireEvent.click(approvalBox());
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({ customerApprovalRequired: true });
+    });
+
+    it.each(["assess", "authorize", "customer_approval", "scheduled", "implement", "review"])(
+      "Customer Review stays tickable in %s, and sends only that",
+      (state) => {
+        const { onSave } = renderDialog({ state, project: ACME, customerReviewRequired: false });
+        expect(reviewBox()).toBeEnabled();
+        expect(reviewBox()).toHaveAccessibleDescription(/Once saved this can't be removed\./);
+        fireEvent.click(reviewBox());
+        fireEvent.click(saveButton());
+        expect(onSave).toHaveBeenCalledWith({ customerReviewRequired: true });
+      },
+    );
+
+    it("a box that was ticked here and not saved can be unticked again (it is not stored yet)", () => {
+      renderDialog({ state: "assess", project: ACME, customerApprovalRequired: false });
+      fireEvent.click(approvalBox());
+      expect(approvalBox()).toBeChecked();
+      fireEvent.click(approvalBox());
+      expect(approvalBox()).not.toBeChecked();
+      expect(saveButton()).toBeDisabled();
+    });
+  });
+
+  describe("past its gate an unticked box is disabled with the existing reason", () => {
+    it.each(["customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"])(
+      "Customer Approval in %s",
+      (state) => {
+        renderDialog({ state, project: ACME, customerApprovalRequired: false });
+        expect(approvalBox()).not.toBeChecked();
+        expect(approvalBox()).toBeDisabled();
+        expect(approvalBox()).toHaveAccessibleDescription(
+          "Locked: the change request has already reached the customer approval step or later.",
+        );
+      },
+    );
+
+    it.each(["customer_review", "closed", "rollback", "canceled"])("Customer Review in %s", (state) => {
+      renderDialog({ state, project: ACME, customerReviewRequired: false });
+      expect(reviewBox()).not.toBeChecked();
+      expect(reviewBox()).toBeDisabled();
+      expect(reviewBox()).toHaveAccessibleDescription(
+        "Locked: the change request has already reached the customer review step or later.",
+      );
+    });
+
+    it("Customer Review can still be added while Customer Approval is past its gate, and sends only that", () => {
+      const { onSave } = renderDialog({
+        state: "scheduled",
+        project: ACME,
+        customerApprovalRequired: true,
+        customerReviewRequired: false,
+      });
+      expect(approvalBox()).toBeDisabled();
+      fireEvent.click(reviewBox());
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({ customerReviewRequired: true });
+    });
+  });
+
+  describe("after New an unticked box cannot be added without a Customer Project, and none can be set any more", () => {
+    it.each(["assess", "authorize"])("Customer Approval in %s", (state) => {
+      renderDialog({ state, customerApprovalRequired: false });
+      expect(approvalBox()).toBeDisabled();
+      expect(approvalBox()).toHaveAccessibleDescription("Needs a Customer Project, which can no longer be set. Cancel and clone.");
+    });
+
+    it("Customer Review in assess", () => {
+      renderDialog({ state: "assess", customerReviewRequired: false });
+      expect(reviewBox()).toBeDisabled();
+      expect(reviewBox()).toHaveAccessibleDescription(/Needs a Customer Project/);
+    });
+
+    it("and in New the same box is tickable (the project can still be chosen there)", () => {
+      renderDialog({ state: "new", customerApprovalRequired: false });
+      expect(approvalBox()).toBeEnabled();
+    });
+  });
+
+  describe("ticking a box on when nobody on the project can be asked: the backend refuses, and its words show (the dialog does not guess who can be asked)", () => {
+    // The backend names the box turned on (entity-service `nobodyToAskMsg`).
+    const nobodyCanBeAsked = (what: string): string =>
+      `${what} required but nobody on this project can be asked (no registered contact other than the requester): register a contact for the project first`;
+
+    it.each([
+      ["authorize", "Customer Approval", { customerApprovalRequired: true }, nobodyCanBeAsked("customer approval is")],
+      ["assess", "Customer Review", { customerReviewRequired: true }, nobodyCanBeAsked("customer review is")],
+    ] as const)("in %s the unticked %s box stays tickable and is sent; the refusal then shows verbatim in the dialog", (state, label, sent, refusal) => {
+      const onSave = vi.fn<(patch: BePatchChangeRequestPayload) => void>();
+      const cr: BeChangeRequestDetail = { ...BASE_CR, state, project: ACME };
+      const { rerender } = render(<EditChangeRequestDialog cr={cr} isSaving={false} onClose={vi.fn()} onSave={onSave} />);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("checkbox", { name: label }));
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith(sent);
+      // The page hands the backend's 400 back as `saveError`.
+      rerender(<EditChangeRequestDialog cr={cr} isSaving={false} saveError={refusal} onClose={vi.fn()} onSave={onSave} />);
+      expect(screen.getByRole("alert")).toHaveTextContent(refusal);
+      // The box is still there to untick (nothing was saved), so the dialog is not stuck.
+      expect(screen.getByRole("checkbox", { name: label })).toBeChecked();
+    });
+  });
+
+  it("shows the backend's refusal message when it still answers one (400), whatever the rule said", () => {
     render(
       <EditChangeRequestDialog
         cr={{ ...BASE_CR, state: "assess" }}
         isSaving={false}
-        saveError="customerApprovalRequired can no longer be changed once the change request is scheduled"
+        saveError="customerApprovalRequired can no longer be turned off: once approval has been requested a customer requirement can be added but never removed (current state: assess). Cancel and clone to correct it."
         onClose={vi.fn()}
         onSave={vi.fn()}
       />,
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(/can no longer be changed/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/can no longer be turned off/i);
   });
 });
 
@@ -709,7 +817,7 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
   });
 
   it("renders them empty (Deployments disabled) for a change request with no project", () => {
-    renderDialog();
+    renderDialog({ state: "new" });
     expect(screen.getByLabelText("Customer Project")).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Deployments" })).toBeDisabled();
     expect(saveButton()).toBeDisabled();
@@ -753,8 +861,8 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
     });
   });
 
-  it("clears the dependents when the project changes, and sends the new project with empty lists", () => {
-    const { onSave } = renderDialog(SCOPED_CR);
+  it("clears the dependents when the project changes (in New), and sends the new project with empty lists", () => {
+    const { onSave } = renderDialog({ ...SCOPED_CR, state: "new" });
     fireEvent.change(screen.getByLabelText("Customer Project"), { target: { value: "proj-b" } });
     expect(chips("Deployments")).toEqual([]);
     expect(productChips()).toEqual([]);
@@ -767,8 +875,8 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
     });
   });
 
-  it("sends the chosen project and deployments when a project is set for the first time", () => {
-    const { onSave } = renderDialog();
+  it("sends the chosen project and deployments when a project is set for the first time (in New)", () => {
+    const { onSave } = renderDialog({ state: "new" });
     fireEvent.change(screen.getByLabelText("Customer Project"), { target: { value: "proj-b" } });
     pickOptions("Deployments", ["Beta Development"]);
     fireEvent.click(saveButton());
@@ -782,7 +890,7 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
   it("does not let a saved project be cleared (the patch cannot express it), but does when none is saved", () => {
     const first = render(
       <EditChangeRequestDialog
-        cr={{ ...BASE_CR, ...SCOPED_CR }}
+        cr={{ ...BASE_CR, ...SCOPED_CR, state: "new" }}
         isSaving={false}
         onClose={vi.fn()}
         onSave={vi.fn()}
@@ -790,15 +898,15 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
     );
     expect(screen.getByLabelText("Customer Project")).toHaveAttribute("data-disable-clearable", "true");
     first.unmount();
-    renderDialog();
+    renderDialog({ state: "new" });
     expect(screen.getByLabelText("Customer Project")).toHaveAttribute("data-disable-clearable", "false");
   });
 
   it.each(["implement", "review", "customer_review", "closed", "canceled"])(
-    "locks the project and deployments, with the reason, once the change request is in %s",
+    "locks the deployments as well, with their reason, once the change request is in %s",
     (state) => {
       const { onSave } = renderDialog({ ...SCOPED_CR, state });
-      expect(screen.getByText(/can't be changed once implementation has started/i)).toBeInTheDocument();
+      expect(screen.getByText(/deployments can't be changed once implementation has started/i)).toBeInTheDocument();
       expect(screen.getByLabelText("Customer Project")).toBeDisabled();
       expect(screen.getByRole("combobox", { name: "Deployments" })).toBeDisabled();
       expect(saveButton()).toBeDisabled();
@@ -806,10 +914,69 @@ describe("EditChangeRequestDialog — customer project, deployments, deployment 
     },
   );
 
-  it("stays editable up to and including scheduled", () => {
+  it("keeps the deployments editable up to and including scheduled", () => {
     renderDialog({ ...SCOPED_CR, state: "scheduled" });
     expect(screen.queryByText(/can't be changed once implementation/i)).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Deployments" })).toBeEnabled();
+  });
+});
+
+describe("EditChangeRequestDialog — the Customer Project is fixed once approval was requested", () => {
+  const FROZEN = "Fixed when approval was requested. Cancel and clone to change it.";
+  const project = (): HTMLElement => screen.getByLabelText("Customer Project");
+
+  it("is editable in New, with no note about it being fixed", () => {
+    renderDialog({ ...SCOPED_CR, state: "new" });
+    expect(project()).toBeEnabled();
+    expect(screen.queryByText(FROZEN)).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Deployments" })).toBeEnabled();
+  });
+
+  it.each(["assess", "authorize", "customer_approval", "scheduled"])(
+    "is read-only in %s with the reason, while the deployments stay editable",
+    (state) => {
+      renderDialog({ ...SCOPED_CR, state });
+      expect(project()).toBeDisabled();
+      expect(project()).toHaveValue("proj-a");
+      expect(screen.getByText(FROZEN)).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Deployments" })).toBeEnabled();
+    },
+  );
+
+  it.each(["implement", "review", "customer_review", "closed", "rollback", "canceled"])(
+    "is read-only in %s too, with its reason beside the deployments'",
+    (state) => {
+      renderDialog({ ...SCOPED_CR, state });
+      expect(project()).toBeDisabled();
+      expect(screen.getByText(FROZEN)).toBeInTheDocument();
+      expect(screen.getByText(/deployments can't be changed once implementation has started/i)).toBeInTheDocument();
+    },
+  );
+
+  it("sends the stored project along with changed deployments, which is an accepted no-op, never a changed project", () => {
+    const { onSave } = renderDialog({ ...SCOPED_CR, state: "scheduled" });
+    pickOptions("Deployments", ["Acme Staging"]);
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({
+      projectId: "proj-a",
+      deploymentIds: ["dep-prod", "dep-stg"],
+      deploymentProductIds: ["dp-apim", "dp-is", "dp-apim-stg"],
+    });
+  });
+
+  it("does not take a typed project as an edit after New (the picker is disabled and the patch has no project)", () => {
+    const { onSave } = renderDialog({ ...SCOPED_CR, state: "assess" });
+    expect(project()).toBeDisabled();
+    expect(saveButton()).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("is read-only and empty for a change request that has none (it can no longer be set), with Deployments disabled", () => {
+    renderDialog({ state: "assess" });
+    expect(project()).toBeDisabled();
+    expect(project()).toHaveValue("");
+    expect(screen.getByText(FROZEN)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Deployments" })).toBeDisabled();
   });
 
   it("shows the backend's refusal of an inconsistent combination verbatim", () => {
@@ -846,13 +1013,13 @@ describe("EditChangeRequestDialog — Customer Group (the project's registered c
   });
 
   it("says to choose a project first for a change request that has none", () => {
-    renderDialog();
+    renderDialog({ state: "new" });
     expect(groupChips()).toEqual([]);
     expect(screen.getAllByText("Select a Customer Project first.").length).toBeGreaterThan(0);
   });
 
-  it("re-derives when the project changes, and sends no group with the new project", () => {
-    const { onSave } = renderDialog(SCOPED_CR);
+  it("re-derives when the project changes (in New), and sends no group with the new project", () => {
+    const { onSave } = renderDialog({ ...SCOPED_CR, state: "new" });
     fireEvent.change(screen.getByLabelText("Customer Project"), { target: { value: "proj-b" } });
     expect(groupChips()).toEqual(["Carol Cook"]);
     fireEvent.click(saveButton());

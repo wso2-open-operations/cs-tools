@@ -1,6 +1,5 @@
 import { Box, Stack, Typography, useTheme } from "@wso2/oxygen-ui";
 import type {
-  HealthState,
   LifecycleCatalogue,
   LifecycleStage,
 } from "@features/plg/api/types";
@@ -12,15 +11,18 @@ import type {
  * order, with ABANDONED hanging off all of them. A line can be laid out from the
  * stage order alone, so adding or renaming a stage needs no change here.
  *
- * Every stage is drawn identically. Colour is spent on ONE thing: the node the
- * pairing is standing on, painted green when the account is healthy and red
- * when it is at risk. Reading a stage as good or bad is the engineer's job, not
- * the palette's — COMMERCIAL is not success and REGISTRATION is not failure, so
- * neither gets a colour of its own.
+ * Every stage is drawn identically. Colour is spent on ONE thing: marking the
+ * node the pairing is standing on, in the theme accent. Reading a stage as good
+ * or bad is the engineer's job, not the palette's — COMMERCIAL is not success
+ * and REGISTRATION is not failure, so neither gets a colour of its own.
  *
- * That the position and the health share a single mark is the point. They are
- * the two things the diagram is asked at a glance, and one red box answers both
- * without the reader pairing up a node with a swatch somewhere else.
+ * THE MARK NO LONGER CARRIES HEALTH. It used to be painted green or red to
+ * answer position and health with one box. That made the diagram the third
+ * place on the page using green and red, competing with the health chip
+ * directly above it, and it meant a healthy pairing at an early stage looked
+ * like an endorsement of the stage. Health is now read from its own chip, which
+ * is the only green and red left, and the diagram answers the one question it
+ * is really asked: where does this pairing stand.
  *
  * IT DRAWS ONE PAIRING AND NOTHING ELSE. Each node once carried a caption
  * saying how many pairings sat at that stage, taken from the catalogue. That
@@ -70,29 +72,28 @@ function layout(stages: LifecycleStage[]) {
 export function StageFlow({
   catalogue,
   currentStage,
-  healthState,
   height = 260,
 }: {
   catalogue: LifecycleCatalogue;
+  /** The stage the pairing is standing on. Required, because this diagram only
+   *  ever draws one pairing — there is no abstract mode. */
   currentStage: LifecycleStage;
-  /** Colours the current node: green healthy, red at risk. Required, because
-   *  this diagram only ever draws one pairing — there is no abstract mode. */
-  healthState: HealthState;
   height?: number;
 }) {
   const theme = useTheme();
 
   const line = theme.palette.divider;
   const lineStrong = theme.palette.text.disabled;
-  const healthy = theme.palette.success.main;
-  const atRiskColour = theme.palette.error.main;
+  // One static accent for the node the pairing is standing on, taken from the
+  // theme's primary so it follows whichever palette the user has chosen — the
+  // same slot the stage and tier chips beside it use. Health is read from its
+  // own chip now; see the comment on this component.
+  const currentColour = theme.palette.primary.main;
 
   const ordered = [...catalogue.stages].sort((a, b) => a.displayOrder - b.displayOrder);
   const { pos, progression, width } = layout(ordered.map((s) => s.stage));
   const viewHeight = TERMINAL_Y + NODE_HEIGHT / 2 + MARGIN;
 
-  const atRisk = healthState === "AT_RISK";
-  const currentColour = atRisk ? atRiskColour : healthy;
 
   return (
     <Box>
@@ -196,10 +197,7 @@ export function StageFlow({
       </Box>
 
       <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: "wrap" }} useFlexGap>
-        <Legend
-          colour={currentColour}
-          label={atRisk ? "Here, and at risk" : "Here, and healthy"}
-        />
+        <Legend colour={currentColour} label="Where this pairing stands" />
         <Typography variant="caption" color="text.secondary">
           A pairing moves forward only. Abandoned is reachable from anywhere and
           nothing leaves it.

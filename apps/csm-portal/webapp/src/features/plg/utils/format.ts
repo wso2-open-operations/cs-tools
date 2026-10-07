@@ -33,10 +33,37 @@ export function formatRelative(value: string | null | undefined): string {
   return diffDays > 0 ? `in ${diffDays} days` : `${Math.abs(diffDays)} days ago`;
 }
 
-/** MANUAL_REVIEW_REQUIRED → "Manual review required". */
+/**
+ * Words that are acronyms, not prose, and must keep their case.
+ *
+ * Sentence-casing is right for MANUAL_REVIEW_REQUIRED and wrong for the handful
+ * of enum values built from initialisms: PLG_CS_ELIGIBLE became "Plg cs
+ * eligible" and PAYG became "Payg", in dropdowns and chips alike. Fixing it in
+ * the one function every label passes through keeps the filter list, the chip
+ * and the detail panel saying the same thing.
+ *
+ * Keyed on the lower-cased word so the lookup happens after the split, and
+ * matching is per word — PLG_CS_ELIGIBLE needs two substitutions and keeps
+ * "eligible" as ordinary prose.
+ */
+const ACRONYMS: Record<string, string> = {
+  plg: "PLG",
+  cs: "CS",
+  payg: "PAYG",
+};
+
+/** MANUAL_REVIEW_REQUIRED → "Manual review required"; PAYG → "PAYG". */
 export function humanizeEnum(value: string | null | undefined): string {
   if (!value) return "—";
-  const lower = value.toLowerCase().replace(/_/g, " ");
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
+  const words = value.toLowerCase().split("_");
+  return words
+    .map((word, i) => {
+      const acronym = ACRONYMS[word];
+      if (acronym) return acronym;
+      // Only the first word is capitalised: the result is a sentence, not a
+      // title, so "First value achieved" rather than "First Value Achieved".
+      return i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+    })
+    .join(" ");
 }
 

@@ -25,10 +25,21 @@ import { useLogger } from "@hooks/useLogger";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { PatchChangeRequestRequest } from "@features/operations/types/changeRequests";
 import type { PatchChangeRequestResponse } from "@features/operations/types/changeRequests";
-import { parseApiResponseMessage } from "@utils/ApiError";
+import {
+  ApiError,
+  parseApiResponseErrorCode,
+  parseApiResponseMessage,
+} from "@utils/ApiError";
 
 /**
- * Hook to update change request planned start (PATCH /change-requests/:id).
+ * Hook to patch a change request (PATCH /change-requests/:id): the customer's
+ * answer (approve / reject, review successful / unsuccessful) or a proposed
+ * implementation window.
+ *
+ * A failed request rejects with an {@link ApiError}, so callers can tell a
+ * conflict (409) or refusal (403) from an invalid request (400). On success the
+ * mutation settles only after the change request, the change request lists and
+ * their stats have been refetched, so whoever awaits it sees the new state.
  *
  * @param {string} changeRequestId - The change request id.
  * @returns {UseMutationResult<PatchChangeRequestResponse, Error, PatchChangeRequestRequest>} Mutation result.
@@ -42,7 +53,7 @@ export function usePatchChangeRequest(
 > {
   const logger = useLogger();
   const queryClient = useQueryClient();
-  const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
+  const { isSignedIn } = useAsgardeo();
   const authFetch = useAuthApiClient();
 
   return useMutation<
@@ -56,7 +67,12 @@ export function usePatchChangeRequest(
       logger.debug("[usePatchChangeRequest] Request payload:", payload);
 
       try {
-        if (!isSignedIn || isAuthLoading) {
+        // Not gated on the provider's `isLoading`: it flips on the SDK's own
+        // background token handling (seen on the local mock identity provider,
+        // where it was true on about one click in five), so a customer who is
+        // plainly signed in had Approve / Propose refused. `authFetch` gets the
+        // token itself and sends an expired session to sign-in.
+        if (!isSignedIn) {
           throw new Error("User must be signed in to update change request");
         }
 
@@ -78,7 +94,15 @@ export function usePatchChangeRequest(
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
+          // The refusal's machine-readable name rides with the message: the
+          // caller classifies by it, never by the wording.
+          throw new ApiError(
+            response.status,
+            response.statusText,
+            parseApiResponseMessage(text, response.status, response.statusText),
+            undefined,
+            parseApiResponseErrorCode(text),
+          );
         }
 
         const data: PatchChangeRequestResponse = await response.json();
@@ -89,10 +113,32 @@ export function usePatchChangeRequest(
         throw error;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [ApiQueryKeys.CHANGE_REQUEST_DETAILS, changeRequestId],
-      });
+    // Returned so the mutation stays pending until the refetch has landed: the
+    // page then never shows the old state with live buttons, and a second click
+    // cannot be sent against a change request that has already moved on.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.CHANGE_REQUEST_DETAILS, changeRequestId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.CHANGE_REQUESTS],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.CHANGE_REQUEST_STATS],
+        }),
+      ]),
+    // A 409 / 403 means the change request is no longer what the page showed:
+    // refetch so the buttons follow the real state.
+    onError: (error) => {
+      if (
+        error instanceof ApiError &&
+        (error.status === 409 || error.status === 403)
+      ) {
+        void queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.CHANGE_REQUEST_DETAILS, changeRequestId],
+        });
+      }
     },
   });
 }

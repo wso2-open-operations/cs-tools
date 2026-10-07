@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { postSkippingTotal } from "@api/backend/postSkippingTotal";
 import { classifyConversationQuery } from "@features/csm-projects/utils/conversationQueryScope";
 import type {
   BeSearchConversationsPayload,
@@ -81,10 +82,10 @@ export function useQuickConversationSearch(
   return useQuery<QuickConversationHit[], Error>({
     queryKey: [ApiQueryKeys.CONVERSATIONS_SEARCH, "quick-search", q, scope],
     queryFn: async (): Promise<QuickConversationHit[]> => {
-      const res = await api.post<
+      const res = await postSkippingTotal<
         BeSearchConversationsPayload,
         BeSearchConversationsResponse
-      >("/conversations/search", {
+      >(api, "/conversations/search", {
         pagination: { offset: 0, limit: QUICK_CONVERSATION_LIMIT },
         filters: scope === "number" ? { number: q } : { searchQuery: q },
       });

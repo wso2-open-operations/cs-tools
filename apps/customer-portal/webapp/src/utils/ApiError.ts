@@ -30,18 +30,28 @@ export class ApiError extends Error {
    * regardless of whether the response header made it back across CORS.
    */
   public readonly correlationId?: string;
+  /**
+   * The stable machine-readable name of the refusal (the error body's
+   * `errorCode`, e.g. `change_request_on_hold`), when the backend named it.
+   * This is what a caller may branch on: `message` is wording for people and
+   * can change. Absent when the backend sent none (an older one, or a refusal
+   * that has no name): treat that as "no more specific than the status".
+   */
+  public readonly code?: string;
 
   constructor(
     status: number,
     statusText: string,
     message?: string,
     correlationId?: string,
+    code?: string,
   ) {
     super(message ?? `${status} ${statusText}`);
     this.name = "ApiError";
     this.status = status;
     this.statusText = statusText;
     this.correlationId = correlationId;
+    this.code = code;
   }
 }
 
@@ -109,4 +119,37 @@ export function parseApiResponseMessage(
     }
   }
   return statusText?.trim() || `HTTP ${status}`;
+}
+
+/** Shape of a machine-readable error code: lower-case words joined by underscores. */
+const ERROR_CODE_PATTERN = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
+
+/**
+ * Extracts the machine-readable name of a refusal from an HTTP error response
+ * body: `body.errorCode` when the body is JSON and that is a plain lower-case
+ * name (`change_request_on_hold`), else `undefined`. Anything else (no body, not
+ * JSON, no `errorCode`, a value of another type or shape) is "no code", so an
+ * older backend and a refusal without a name are handled alike.
+ *
+ * @param text - Raw response body string (may be JSON or plain text).
+ * @returns The error code, or undefined when the body names none.
+ */
+export function parseApiResponseErrorCode(text: string): string | undefined {
+  if (!text) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed !== null && typeof parsed === "object" && "errorCode" in parsed) {
+      const code = (parsed as { errorCode: unknown }).errorCode;
+      if (
+        typeof code === "string" &&
+        code.length <= 64 &&
+        ERROR_CODE_PATTERN.test(code)
+      ) {
+        return code;
+      }
+    }
+  } catch {
+    // not JSON: no code
+  }
+  return undefined;
 }

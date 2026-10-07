@@ -130,8 +130,8 @@ func TestIncidentReportIntegration_BothFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read created task: %v", err)
 	}
-	if !strings.HasPrefix(number, "CS-PORTAL-") {
-		t.Errorf("number = %q, want the portal series", number)
+	if !strings.HasPrefix(number, "TASK1") {
+		t.Errorf("number = %q, want the TASK series above ServiceNow's range (migration 0201)", number)
 	}
 	if subject != "[Incident Report] Create the incident report for INC-IR-0001" {
 		t.Errorf("subject = %q", subject)

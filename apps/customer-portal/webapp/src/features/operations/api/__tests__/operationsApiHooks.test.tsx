@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,8 @@ import { usePostCase } from "@features/operations/api/usePostCase";
 import { useSearchCatalogs } from "@features/operations/api/useSearchCatalogs";
 import { useGetCatalogItemVariables } from "@features/operations/api/useGetCatalogItemVariables";
 import { SortOrder } from "@/types/common";
+import { ApiError } from "@utils/ApiError";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { ChangeRequestSortField } from "@features/operations/types/changeRequests";
 
 const mockAuthFetch = vi.fn();
@@ -197,6 +199,216 @@ describe("operations API hooks", () => {
       "https://api.test/change-requests/cr-1",
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  describe("usePatchChangeRequest", () => {
+    function wrapperWithClient() {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      );
+      return { wrapper, invalidate };
+    }
+
+    it("sends the customer's answer as the PATCH body", async () => {
+      mockAuthFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ id: "cr-1" }) });
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      await result.current.mutateAsync({ isCustomerApproved: false });
+
+      expect(mockAuthFetch).toHaveBeenCalledWith(
+        "https://api.test/change-requests/cr-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ isCustomerApproved: false }),
+        }),
+      );
+    });
+
+    it("still sends while the auth provider is busy refreshing, because the customer is signed in", async () => {
+      mockIsAuthLoading = true;
+      mockAuthFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ id: "cr-1" }) });
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      await result.current.mutateAsync({ isCustomerApproved: true });
+
+      expect(mockAuthFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses, without calling the API, when nobody is signed in", async () => {
+      mockIsSignedIn = false;
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      await expect(
+        result.current.mutateAsync({ isCustomerApproved: true }),
+      ).rejects.toThrow("User must be signed in");
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+    });
+
+    it("sends a proposed window with both ends", async () => {
+      mockAuthFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ id: "cr-1" }) });
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      await result.current.mutateAsync({
+        plannedStartOn: "2026-06-11 10:00:00",
+        plannedEndOn: "2026-06-11 12:00:00",
+      });
+
+      expect(JSON.parse(mockAuthFetch.mock.calls[0][1].body)).toEqual({
+        plannedStartOn: "2026-06-11 10:00:00",
+        plannedEndOn: "2026-06-11 12:00:00",
+      });
+    });
+
+    it("refreshes the change request, the lists and their stats before it settles", async () => {
+      mockAuthFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ id: "cr-1" }) });
+      const { wrapper, invalidate } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      await result.current.mutateAsync({ isCustomerApproved: true });
+
+      const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey);
+      expect(keys).toContainEqual([ApiQueryKeys.CHANGE_REQUEST_DETAILS, "cr-1"]);
+      expect(keys).toContainEqual([ApiQueryKeys.CHANGE_REQUESTS]);
+      expect(keys).toContainEqual([ApiQueryKeys.CHANGE_REQUEST_STATS]);
+    });
+
+    it("stays pending until the refetch of the change request has landed", async () => {
+      // The page reads "settled" as "the new state is on screen": a mutation that
+      // settled while the refetch was still in flight would leave the old state,
+      // with live buttons, to be clicked a second time.
+      mockAuthFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ id: "cr-1" }) });
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      );
+      let releaseRefetch: () => void = () => {};
+      let detailFetches = 0;
+      const queryFn = () => {
+        detailFetches += 1;
+        if (detailFetches === 1) return Promise.resolve({ state: "Customer Approval" });
+        return new Promise<{ state: string }>((resolve) => {
+          releaseRefetch = () => resolve({ state: "Scheduled" });
+        });
+      };
+      const { result } = renderHook(
+        () => ({
+          detail: useQuery({ queryKey: [ApiQueryKeys.CHANGE_REQUEST_DETAILS, "cr-1"], queryFn }),
+          patch: usePatchChangeRequest("cr-1"),
+        }),
+        { wrapper },
+      );
+      await waitFor(() => expect(result.current.detail.isSuccess).toBe(true));
+
+      let settled = false;
+      const answer = result.current.patch.mutateAsync({ isCustomerApproved: true }).then((value) => {
+        settled = true;
+        return value;
+      });
+      // The PATCH has been answered and the refetch it asked for is in flight...
+      await waitFor(() => expect(detailFetches).toBe(2));
+      await waitFor(() => expect(mockAuthFetch).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // ...and the answer has not settled, nor has the mutation left pending.
+      expect(settled).toBe(false);
+      expect(result.current.patch.isPending).toBe(true);
+
+      releaseRefetch();
+      await answer;
+      expect(settled).toBe(true);
+      await waitFor(() => expect(result.current.detail.data).toEqual({ state: "Scheduled" }));
+      expect(result.current.patch.isPending).toBe(false);
+    });
+
+    it("rejects with an ApiError that keeps the status and the backend's message", async () => {
+      mockAuthFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: "Conflict",
+        text: async () => JSON.stringify({ message: "this approval is no longer pending" }),
+      });
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      const error = await result.current
+        .mutateAsync({ isCustomerApproved: true })
+        .then(() => null, (e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(409);
+      expect((error as ApiError).message).toBe("this approval is no longer pending");
+    });
+
+    it("keeps the refusal's machine-readable code on the ApiError, beside the message", async () => {
+      mockAuthFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: "Conflict",
+        text: async () =>
+          JSON.stringify({
+            message: "this change request is on hold, so a new implementation time cannot be proposed now",
+            errorCode: "change_request_on_hold",
+          }),
+      });
+      const { wrapper } = wrapperWithClient();
+      const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+      const error = await result.current
+        .mutateAsync({ plannedStartOn: "2026-06-11 10:00:00" })
+        .then(() => null, (e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(409);
+      expect((error as ApiError).code).toBe("change_request_on_hold");
+      expect((error as ApiError).message).toContain("on hold");
+    });
+
+    it("has no code when the backend names none (an older one) or a malformed one", async () => {
+      for (const body of [
+        JSON.stringify({ message: "stale" }),
+        JSON.stringify({ message: "stale", errorCode: "Not A Code" }),
+        JSON.stringify({ message: "stale", errorCode: 409 }),
+        "not json at all",
+        "",
+      ]) {
+        mockAuthFetch.mockResolvedValueOnce({ ok: false, status: 409, statusText: "Conflict", text: async () => body });
+        const { wrapper } = wrapperWithClient();
+        const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+        const error = await result.current
+          .mutateAsync({ isCustomerApproved: true })
+          .then(() => null, (e: unknown) => e);
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).code, body).toBeUndefined();
+        expect((error as ApiError).status).toBe(409);
+      }
+    });
+
+    it("refetches the change request after a conflict or a refusal, but not after a bad request", async () => {
+      for (const [status, refetches] of [[409, true], [403, true], [400, false], [500, false]] as const) {
+        mockAuthFetch.mockResolvedValueOnce({
+          ok: false,
+          status,
+          statusText: "x",
+          text: async () => JSON.stringify({ message: "m" }),
+        });
+        const { wrapper, invalidate } = wrapperWithClient();
+        const { result } = renderHook(() => usePatchChangeRequest("cr-1"), { wrapper });
+
+        await result.current.mutateAsync({ isCustomerApproved: true }).catch(() => undefined);
+
+        await waitFor(() => expect(result.current.isError).toBe(true));
+        expect(invalidate.mock.calls.length > 0, `status ${status}`).toBe(refetches);
+      }
+    });
   });
 
   it("usePostCase creates a case", async () => {

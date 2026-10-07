@@ -22,6 +22,7 @@ import {
   isForbiddenError,
   isNotFoundError,
   isUnauthorizedError,
+  parseApiResponseErrorCode,
   parseApiResponseMessage,
 } from "@utils/ApiError";
 
@@ -52,5 +53,35 @@ describe("ApiError", () => {
       parseApiResponseMessage('{"message":"Case not found"}', 404, "Not Found"),
     ).toBe("Case not found");
     expect(parseApiResponseMessage("", 500, "")).toBe("HTTP 500");
+  });
+});
+
+describe("ApiError.code", () => {
+  it("carries the machine-readable code when it is given, and none when it is not", () => {
+    expect(new ApiError(409, "Conflict", "m", undefined, "change_request_on_hold").code).toBe("change_request_on_hold");
+    expect(new ApiError(409, "Conflict", "m").code).toBeUndefined();
+    expect(new ApiError(409, "Conflict", "m", "corr-1").correlationId).toBe("corr-1");
+  });
+});
+
+describe("parseApiResponseErrorCode", () => {
+  it("reads errorCode from a JSON error body", () => {
+    expect(
+      parseApiResponseErrorCode('{"message":"on hold","errorCode":"change_request_on_hold"}'),
+    ).toBe("change_request_on_hold");
+  });
+
+  it("is undefined when the body names no code", () => {
+    expect(parseApiResponseErrorCode('{"message":"on hold"}')).toBeUndefined();
+    expect(parseApiResponseErrorCode("")).toBeUndefined();
+    expect(parseApiResponseErrorCode("<html>502 Bad Gateway</html>")).toBeUndefined();
+    expect(parseApiResponseErrorCode("null")).toBeUndefined();
+    expect(parseApiResponseErrorCode("[]")).toBeUndefined();
+  });
+
+  it("is undefined for a value that is not a plain lower-case name", () => {
+    for (const code of ["Change_Request", "on hold", "<b>x</b>", "-x", "a__b", "", "a".repeat(65), 7, null, {}, ["a"]]) {
+      expect(parseApiResponseErrorCode(JSON.stringify({ message: "m", errorCode: code })), JSON.stringify(code)).toBeUndefined();
+    }
   });
 });

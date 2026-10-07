@@ -116,7 +116,11 @@ func gdUserID(userName string) string {
 	panic("unknown fixture user " + userName)
 }
 
-// gdMembership is one team_member row.
+// gdMembership is one team_member row. Every non-lead row takes the role the
+// database being tested accepts for an ordinary member (ordinaryMemberRole):
+// team_member_role_check has been 'member'/'lead', then 'engineer'/'sub_lead'/
+// 'lead'/... (migration 0170) and a fixture that names one fails in setup
+// against the other's schema, so all eight tests here go red at once.
 type gdMembership struct {
 	id     string
 	teamID string
@@ -125,7 +129,7 @@ type gdMembership struct {
 	role   string
 }
 
-func gdMemberships() []gdMembership {
+func gdMemberships(ordinary string) []gdMembership {
 	grp := func(id string) *string { return &id }
 	n := 0
 	m := func(teamID, user string, group *string, role string) gdMembership {
@@ -134,31 +138,31 @@ func gdMemberships() []gdMembership {
 	}
 	return []gdMembership{
 		// Ordinary group A, by group_id.
-		m(gdTeamUnrel, "gv-zoe", grp(gdGroupA), "member"),
+		m(gdTeamUnrel, "gv-zoe", grp(gdGroupA), ordinary),
 		m(gdTeamUnrel, "gv-zoe", grp(gdGroupA), "lead"), // a second row, lead: one member, and a lead
-		m(gdTeamUnrel, "gv-bob", grp(gdGroupA), "member"),
-		m(gdTeamUnrel, "gv-bob", grp(gdGroupA), "member"), // duplicate row: still one member
-		m(gdTeamUnrel, "gv-ian", grp(gdGroupA), "member"), // inactive
-		m(gdTeamUnrel, "gv-fay", grp(gdGroupA), "member"),
-		m(gdTeamUnrel, "gv-nia", grp(gdGroupA), "member"),
-		m(gdTeamUnrel, "gv-noname", grp(gdGroupA), "member"), // a user with only an email
-		m(gdTeamUnrel, "gv-cust", grp(gdGroupA), "member"),   // a customer
-		m(gdTeamUnrel, "gv-notype", grp(gdGroupA), "member"), // no derivable type
+		m(gdTeamUnrel, "gv-bob", grp(gdGroupA), ordinary),
+		m(gdTeamUnrel, "gv-bob", grp(gdGroupA), ordinary), // duplicate row: still one member
+		m(gdTeamUnrel, "gv-ian", grp(gdGroupA), ordinary), // inactive
+		m(gdTeamUnrel, "gv-fay", grp(gdGroupA), ordinary),
+		m(gdTeamUnrel, "gv-nia", grp(gdGroupA), ordinary),
+		m(gdTeamUnrel, "gv-noname", grp(gdGroupA), ordinary), // a user with only an email
+		m(gdTeamUnrel, "gv-cust", grp(gdGroupA), ordinary),   // a customer
+		m(gdTeamUnrel, "gv-notype", grp(gdGroupA), ordinary), // no derivable type
 		// People near group A who are NOT in its pool: a member of a team that merely
 		// shares its name, a member of a same-named duplicate group, another group's member.
-		m(gdTeamSameName, "gv-tom", nil, "member"),
-		m(gdTeamUnrel, "gv-dan", grp(gdGroupADup), "member"),
-		m(gdTeamUnrel, "gv-olga", grp(gdGroupOther), "member"),
+		m(gdTeamSameName, "gv-tom", nil, ordinary),
+		m(gdTeamUnrel, "gv-dan", grp(gdGroupADup), ordinary),
+		m(gdTeamUnrel, "gv-olga", grp(gdGroupOther), ordinary),
 
 		// The by-name group (Devops Approval): by group_id, by a same-named
 		// duplicate group, and by a same-named team (no group_id at all).
-		m(gdTeamUnrel, "gv-zoe", grp(gdGroupDevops), "member"),
-		m(gdTeamUnrel, "gv-dan", grp(gdGroupDevopsDup), "member"),
-		m(gdTeamDevops, "gv-tom", nil, "member"),
+		m(gdTeamUnrel, "gv-zoe", grp(gdGroupDevops), ordinary),
+		m(gdTeamUnrel, "gv-dan", grp(gdGroupDevopsDup), ordinary),
+		m(gdTeamDevops, "gv-tom", nil, ordinary),
 		m(gdTeamDevops, "gv-bob", nil, "lead"),
-		m(gdTeamUnrel, "gv-cust", grp(gdGroupDevops), "member"), // customer: never provisioned
-		m(gdTeamDevops, "gv-ian", nil, "member"),                // inactive
-		m(gdTeamUnrel, "gv-olga", grp(gdGroupOther), "member"),
+		m(gdTeamUnrel, "gv-cust", grp(gdGroupDevops), ordinary), // customer: never provisioned
+		m(gdTeamDevops, "gv-ian", nil, ordinary),                // inactive
+		m(gdTeamUnrel, "gv-olga", grp(gdGroupOther), ordinary),
 	}
 }
 
@@ -222,7 +226,7 @@ func gdSetup(t *testing.T) *pgxpool.Pool {
 	          ($3, now(), now(), 'gv-test', 'gv-test', 'GV Unrelated Team', 'ABT', 'gv-team-unrelated'),
 	          ($4, now(), now(), 'gv-test', 'gv-test', $5, 'ABT', 'gv-team-devops')`,
 		gdTeamSameName, gdGroupAName, gdTeamUnrel, gdTeamDevops, domain.PeerApprovalFallbackGroupName)
-	for _, m := range gdMemberships() {
+	for _, m := range gdMemberships(ordinaryMemberRole(t, pool)) {
 		mustExec(`INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, group_id, role)
 		          VALUES ($1, now(), now(), 'gv-test', 'gv-test', $2, $3, $4, $5)`,
 			m.id, m.teamID, m.userID, m.group, m.role)

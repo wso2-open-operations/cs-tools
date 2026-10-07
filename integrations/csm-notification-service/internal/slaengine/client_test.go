@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -96,6 +97,60 @@ func TestGetDurationPolicy_UpstreamError(t *testing.T) {
 
 	c := newTestEntityClient(t, apiSrv)
 	if _, err := c.GetDurationPolicy(t.Context()); err == nil {
+		t.Fatal("expected an error for a non-2xx response")
+	}
+}
+
+// TestGetActiveCSMSLAClocks_PagesThroughEveryRow confirms the client keeps
+// requesting pages (always with source=csm) until it has every row the
+// server reports via total, not just the first page.
+func TestGetActiveCSMSLAClocks_PagesThroughEveryRow(t *testing.T) {
+	const total = activeSLAStatusPageSize + 1 // forces a second page
+	var gotPaths []string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.String())
+		if got := r.URL.Query().Get("source"); got != "csm" {
+			t.Errorf("source query param = %q, want csm", got)
+		}
+		offset := 0
+		if raw := r.URL.Query().Get("offset"); raw != "" {
+			offset, _ = strconv.Atoi(raw)
+		}
+		remaining := total - offset
+		pageSize := activeSLAStatusPageSize
+		if remaining < pageSize {
+			pageSize = remaining
+		}
+		statuses := make([]activeSLAClock, pageSize)
+		for i := range statuses {
+			statuses[i] = activeSLAClock{CaseID: "case-" + strconv.Itoa(offset+i), ClockType: ClockResponse}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(searchActiveSLAStatusResponse{Statuses: statuses, Total: total})
+	}))
+	defer apiSrv.Close()
+
+	c := newTestEntityClient(t, apiSrv)
+	got, err := c.GetActiveCSMSLAClocks(t.Context())
+	if err != nil {
+		t.Fatalf("GetActiveCSMSLAClocks() error = %v, want nil", err)
+	}
+	if len(got) != total {
+		t.Errorf("len(got) = %d, want %d", len(got), total)
+	}
+	if len(gotPaths) != 2 {
+		t.Errorf("requests made = %d, want 2 (one per page)", len(gotPaths))
+	}
+}
+
+func TestGetActiveCSMSLAClocks_UpstreamError(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer apiSrv.Close()
+
+	c := newTestEntityClient(t, apiSrv)
+	if _, err := c.GetActiveCSMSLAClocks(t.Context()); err == nil {
 		t.Fatal("expected an error for a non-2xx response")
 	}
 }

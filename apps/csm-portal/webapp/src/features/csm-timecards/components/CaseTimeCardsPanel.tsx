@@ -37,7 +37,7 @@ import {
   useDeleteTimeCard,
 } from "@features/csm-timecards/api/useTimeCards";
 import { useCurrentEngineer } from "@features/csm-timecards/api/useTimeSheets";
-import { useIsTeamLead } from "@features/csm-timecards/hooks/useIsTeamLead";
+import { useTimecardRole } from "@features/csm-timecards/hooks/useTimecardRole";
 import { billableLabel } from "@features/csm-timecards/constants/timeCardConstants";
 import { decisionSummary } from "@features/csm-timecards/utils/timeCardDecision";
 import { BackendApiError } from "@api/backend/client";
@@ -80,9 +80,11 @@ const GRID =
 
 /**
  * The body of a case's "Time tracking" tab: the time cards logged on this
- * case, with a running total and per-entry status. A team lead can review
- * (accept or reject) any submitted entry inline. Available even after the
- * case is closed — time is often logged after the fact.
+ * case, with a running total and per-entry status. An approver can review
+ * (accept or reject) any submitted entry they're listed as an approver for;
+ * an admin can review any submitted entry at all (approve-by-exception —
+ * see {@link useTimecardRole}'s own `isAdmin` doc comment). Available even
+ * after the case is closed — time is often logged after the fact.
  */
 export default function CaseTimeCardsPanel({
   caseId,
@@ -91,7 +93,7 @@ export default function CaseTimeCardsPanel({
 }: CaseTimeCardsPanelProps): JSX.Element {
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useCaseTimeCards(caseId);
-  const isTeamLead = useIsTeamLead();
+  const { isApprover, isAdmin } = useTimecardRole();
   const me = useCurrentEngineer();
   const decide = useDecideTimeCard();
   const deleteTimeCard = useDeleteTimeCard();
@@ -222,18 +224,23 @@ export default function CaseTimeCardsPanel({
             const decision = decisionSummary(c);
             const canEdit = c.state === "submitted" && !!me.id && c.userId === me.id;
             // Never shown on your own card: the backend 403s a self-decide
-            // regardless of approver status, so a card you submitted
-            // yourself can never actually be reviewed by you. Also gated on
-            // being in the card's own approver list -- this panel shows
-            // every submitted card on the case, not just ones assigned to
-            // the signed-in lead, and the backend 403s a decision from
-            // anyone not in that list (confirmed live).
+            // regardless of approver status (admin included), so a card you
+            // submitted yourself can never actually be reviewed by you. A
+            // plain approver is additionally gated on being in the card's
+            // own approver list -- this panel shows every submitted card on
+            // the case, not just ones assigned to the signed-in lead, and
+            // the backend 403s a decision from an approver not in that list
+            // (confirmed live). An admin skips that list check entirely --
+            // entity-service's TransitionTimeCardState lets an admin decide
+            // ANY submitted card (approve-by-exception, see
+            // useTimecardRole's own isAdmin doc comment), not just ones
+            // they're specifically listed as an approver for.
             const canReview =
-              isTeamLead &&
+              (isApprover || isAdmin) &&
               c.state === "submitted" &&
               !!me.id &&
               c.userId !== me.id &&
-              !!c.approvers?.some((a) => a.id === me.id);
+              (isAdmin || !!c.approvers?.some((a) => a.id === me.id));
 
             return (
               <Box

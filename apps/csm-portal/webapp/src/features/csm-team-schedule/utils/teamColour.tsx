@@ -19,6 +19,7 @@
 import { useMemo, type JSX, type ReactNode } from "react";
 import type { ScheduleTeam } from "../types";
 import { teamColour } from "./rotaHues";
+import { teamDisplayName } from "./teamDisplayName";
 import { TeamColourContext, TeamNameContext } from "./teamColourContext";
 
 /** Gives everything below it the colour for a team. See TeamColourContext. */
@@ -30,14 +31,24 @@ export function TeamColourProvider({
   children: ReactNode;
 }): JSX.Element {
   const colourOf = useMemo(() => {
-    // sortOrder is 1-based from the API; the palette is indexed from 0.
-    const order = new Map(teams.map((t) => [t.key.toLowerCase(), t.sortOrder - 1]));
+    // A team's place within its own group -- CRE, SRE or SME -- in the
+    // catalogue's order. One group is on screen at a time, so counting within
+    // it keeps every team there on a palette colour of its own; counted across
+    // every group, the SME rotas pushed the list past the palette and teams
+    // began sharing colours.
+    const order = new Map<string, number>();
+    const seen = new Map<string, number>();
+    for (const t of [...teams].sort((a, b) => a.sortOrder - b.sortOrder)) {
+      const i = seen.get(t.family) ?? 0;
+      order.set(t.key.toLowerCase(), i);
+      seen.set(t.family, i + 1);
+    }
     return (teamKey: string): string => teamColour(order.get(teamKey.toLowerCase()));
   }, [teams]);
 
     const nameOf = useMemo(() => {
-    const byKey = new Map(teams.map((t) => [t.key.toLowerCase(), t.name]));
-    return (teamKey: string): string => byKey.get(teamKey.toLowerCase()) ?? teamKey;
+    const byKey = new Map(teams.map((t) => [t.key.toLowerCase(), teamDisplayName(t.name)]));
+    return (teamKey: string): string => byKey.get(teamKey.toLowerCase()) ?? teamDisplayName(teamKey);
   }, [teams]);
 
   return (

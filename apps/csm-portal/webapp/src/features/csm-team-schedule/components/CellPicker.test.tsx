@@ -447,3 +447,42 @@ describe("CellPicker: deleting a tag a lead added", () => {
     expect(await screen.findByText(/still used on the rota/)).toBeInTheDocument();
   });
 });
+
+describe("CellPicker: moving somebody back", () => {
+  const MIG = {
+    id: "k-mig", code: "MIGRATION", shortCode: "Mig", label: "Migration", bucket: "ALLOCATION" as const,
+    colourToken: "MIG", sortOrder: 90, movesToTeamKey: "bravo",
+  };
+  const onMoved = (onMarkAway = vi.fn()) => {
+    render(
+      <CellPicker
+        target={target({
+          rotaDate: "2026-09-25",
+          absenceKindCode: "MIGRATION",
+          absence: { id: "ab-1", kindCode: "MIGRATION", startsOn: "2026-09-01", endsOn: "2026-09-30", homeTeamKey: "alpha" },
+        })}
+        shifts={[REGULAR, EVENING, WEEKEND]}
+        awayKinds={[ANNUAL_LEAVE]}
+        allKinds={[ANNUAL_LEAVE, MIG]}
+        onApply={vi.fn()}
+        onMarkAway={onMarkAway}
+        onClear={vi.fn()}
+        onRemoveAbsence={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    return onMarkAway;
+  };
+
+  it("ends the move from the day picked to the move's own end", () => {
+    const onMarkAway = onMoved();
+    fireEvent.click(screen.getByRole("button", { name: /^Back to .* from 25 Sept?$/ }));
+    expect(onMarkAway).toHaveBeenCalledWith("", "2026-09-25", "2026-09-30");
+  });
+
+  it("is not offered from a day after the move has ended", () => {
+    onMoved();
+    fireEvent.change(screen.getByLabelText("Mark from"), { target: { value: "2026-10-02" } });
+    expect(screen.queryByRole("button", { name: /^Back to/ })).not.toBeInTheDocument();
+  });
+});

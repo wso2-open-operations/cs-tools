@@ -120,7 +120,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   // Only knowledge bases currently accepting new articles -- the backend
   // enforces this too (a deactivated KB rejects article creation outright),
   // this just keeps a deactivated one from ever being offered as a choice.
-  const activeKnowledgeBases = (kbList?.knowledgeBases ?? []).filter((kb) => kb.isActive);
+  const activeKnowledgeBases = (kbList?.knowledgeBases ?? []).filter((kb) => kb.active);
 
   const [kbDefaulted, setKbDefaulted] = useState(false);
   if (isCreateMode && !kbDefaulted && activeKnowledgeBases.length) {
@@ -390,7 +390,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
               <Select labelId="kb-select-label" label="Knowledge base" value={knowledgeBaseId} onChange={handleKbChange}>
                 {activeKnowledgeBases.map((kb) => (
                   <MenuItem key={kb.id} value={kb.id}>
-                    {kb.name}
+                    {kb.title}
                   </MenuItem>
                 ))}
               </Select>

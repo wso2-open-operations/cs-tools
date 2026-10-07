@@ -48,6 +48,19 @@ describe("mapChangeRequestsToCsvRows", () => {
   });
 });
 
+describe("exports of a designated change request in any state", () => {
+  it("names Authorize in the State column of the CSV rows (the schedule export carries the same label)", () => {
+    const rows = mapChangeRequestsToCsvRows([
+      {
+        number: "CHG0001234",
+        title: "Rotate the gateway certificates",
+        state: { id: "-3", label: "Authorize" },
+      } as ChangeRequestItem,
+    ]);
+    expect(rows[0][2]).toBe("Authorize");
+  });
+});
+
 describe("buildChangeRequestsExportCsv", () => {
   it("includes required headers", () => {
     const csv = buildChangeRequestsExportCsv([]);

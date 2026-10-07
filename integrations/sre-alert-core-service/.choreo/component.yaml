@@ -24,7 +24,7 @@ endpoints:
       port: 8080
     type: REST
     networkVisibilities:
-      - Public
+      - Project
   - name: healthz
     displayName: Alert Healthz
     service:
@@ -41,3 +41,11 @@ endpoints:
     type: REST
     networkVisibilities:
       - Project
+  - name: dbz
+    displayName: Alert DB Health
+    service:
+      basePath: /dbz
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public

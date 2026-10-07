@@ -260,7 +260,12 @@ services:
       DATA_SOURCE: postgres
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USER: postgres
+      # Not `postgres`: a superuser skips every row-level-security policy, so as
+      # `postgres` any signed-in customer could read another project's change
+      # request or case by id (production's non-superuser role answers 404).
+      # The migrate service creates csm_app (scripts/csm-compose/migrate-and-seed.sh)
+      # and re-grants it on every pass, before this service starts.
+      DB_USER: csm_app
       DB_PASSWORD: devpassword
       DB_NAME: csm_platform
       DB_SSLMODE: disable
@@ -268,6 +273,15 @@ services:
       EVENT_HUB_CONNECTION_STRING: local-dev-shared-secret
       EVENT_HUB_TOPIC: case-events
       EVENT_PUBLISHING_ENABLED: "true"
+      # A customer sees only the change requests designated to them (the customer's
+      # approval or review was asked of them); a change request created BEFORE this
+      # instant is "legacy" and keeps being visible to its project's registered
+      # contacts past Authorize. Unset = every change request is legacy, which would
+      # leave this stack NOT strict. Far in the past on purpose: every change request
+      # the local seed and the specs create is strict, as production's will be after
+      # its own cutover. See entity-service/CLAUDE.md, "Customer visibility and the
+      # cutover".
+      CR_STRICT_VISIBILITY_FROM: "2000-01-01T00:00:00Z"
       SSL_CERT_FILE: /certs/ca.crt
       # Token validation is always on (see internal/config/config.go), so this
       # stack needs a real issuer to start at all -- mock-oidc, the same one
@@ -277,12 +291,32 @@ services:
       AUTH_ISSUER: http://localhost:9100/oauth2/token
       AUTH_JWKS_URL: http://mock-oidc:9100/oauth2/jwks
       AUTH_USER_TOKEN_AUDIENCES: csm-portal-webapp,customer-portal-webapp
-      # csm-notification-service is here for the call-escalation ladder: it
-      # reads the rota and the ranks behind it to decide who each rung
-      # reaches, machine to machine, with no user to carry a token. Both
-      # of those reads are internal-staff-only, so without this every
-      # rung resolves to nobody and the ladder silently reaches no one.
-      AUTH_INTERNAL_CLIENT_IDS: csm-portal-backend-dev-client,csm-integration-service-dev-client,csm-notification-service-dev-client
+      # How entity-service classifies a caller that arrives with a client-credentials token
+      # (x-jwt-assertion): internal/service/access_service.go ResolveScope, entity-service/README.md.
+      # (This file used to set AUTH_INTERNAL_CLIENT_IDS, which nothing reads any more -- it was renamed
+      # M2M_CLIENT_IDS -- so it had no effect, and its csm-portal-backend entry would have been wrong
+      # anyway: a client id in the M2M list is unrestricted whatever user token it forwards.)
+      #
+      # customer-portal-backend-v2: its calls are ALWAYS scoped by the x-user-id-token it forwards, so
+      # each customer sees only the projects they are a registered contact of -- never unrestricted,
+      # even if this id were also listed in M2M_CLIENT_IDS by mistake. It resolves this way without
+      # the line below (an unlisted client falls through to the user token); the line makes it a
+      # guarantee rather than a side effect.
+      CUSTOMER_PORTAL_BACKEND_CLIENT_ID: customer-portal-backend-dev-client
+      # Pure machine-to-machine callers, no signed-in person: unrestricted. Without an entry these get
+      # no caller identity and a 500 on every scoped endpoint. Not listed on purpose: the portal
+      # backends and both activity-stream services, which forward a person's token and must resolve
+      # to that person's own scope.
+      # csm-notification-service is here for the call-escalation ladder: it reads the rota and the
+      # ranks behind it to decide who each rung reaches, machine to machine, with no user to carry a
+      # token. Both of those reads are internal-staff-only, so without it every rung resolves to
+      # nobody and the ladder silently reaches no one.
+      M2M_CLIENT_IDS: csm-integration-service-dev-client,csm-notification-service-dev-client
+      # CSM_PORTAL_BACKEND_CLIENT_ID / CSM_PORTAL_USER_DOMAIN are deliberately NOT set. They make the
+      # CSM BFF unrestricted for any user whose email is in that domain (and refuse everyone else),
+      # but this stack's staff and customer personas share example.com, so the domain cannot tell them
+      # apart. Unset, each CSM portal user resolves from their own user record: internal sees
+      # everything, a customer only their registered projects.
     volumes:
       - csm-dev-certs:/certs:ro
     ports:
@@ -406,6 +440,12 @@ services:
       PRODUCT_CONSUMPTION_SUBSCRIPTION_URL: https://product-consumption.local.invalid
       REGISTRY_BASE_URL: https://registry.local.invalid
       USER_MANAGEMENT_BASE_URL: https://usermanagement.local.invalid
+      # There is no pre-cutover user-management service in this stack (the URL
+      # above is a placeholder that never resolves), so with this off
+      # GET /projects/{id}/contacts answers 500 and the portal's contact list
+      # and admin check fail. On, contacts are read from the CSM database
+      # through entity-service, which is what this stack seeds.
+      CSM_MIGRATION_PORTAL_CONTACTS_ENABLED: "true"
       AUTH_ADMIN_ROLE: cs_admin
       AUTH_JWKS_ENDPOINT: http://mock-oidc:9100/oauth2/jwks
       AUTH_ISSUER: http://localhost:9100/oauth2/token

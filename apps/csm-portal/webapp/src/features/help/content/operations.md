@@ -48,6 +48,20 @@ versa) and stay on this device/browser.
 
 The detail page shows:
 
+- A **lifecycle line** across the top, plotting the same eleven-stage workflow
+  the customer sees in the Customer Portal: New, Assess, Authorize, Customer
+  Approval, Scheduled, Implement, Review, Customer Review, **Rollback**,
+  Closed and **Canceled**. Stages already passed are ticked and the current
+  stage is highlighted. Rollback and Canceled are the two exits off the normal
+  path, so they stay faint until the change really ends there, when the stage
+  turns red. Customer Approval and Customer Review only appear when the change
+  requires them. A canceled change keeps no record of where it was canceled,
+  so a stage the approvals cannot prove it passed is drawn faint (and read out
+  as "history not recorded") rather than guessed. When the customer rejects the
+  change at Customer Approval (canceled) or Customer Review (rolled back), that
+  stage shows a red cross and, on a canceled change, the stages after it read
+  "not taken". Hover a stage for what it means (it also says when a stage was
+  not taken or its history is not recorded).
 - An **overview** card: Customer Project, type, linked case, deployment,
   deployed product, the selected deployments and their deployment products,
   the Customer Group, category, assigned engineer/team, duration, planned
@@ -83,9 +97,47 @@ From the detail page a CS engineer can:
 
 - **Change state**: the action bar's buttons are driven entirely by the
   record's own legal next states, so only valid transitions are ever offered.
-  Moving to a destructive state (rollback, cancel) requires typing a reason
-  first, which is recorded as an internal note before the state change is
-  applied.
+  The forward move (for example **Request Approval**, **Start implementation**,
+  **Mark implemented**, **Send for customer review**) is the main button;
+  **Re-schedule** (Customer Approval only) sits beside it; everything else is
+  behind the **Change state** menu. Moving to a destructive state (**Roll back**
+  from Review or Customer Review, **Cancel change**) requires typing a reason
+  first, which is recorded as an internal note (the customer does not see it)
+  before the state change is applied. **Go back** in that dialog leaves the
+  change as it was.
+- **The customer's answer is theirs to give.** Staff never record a customer's
+  approval or review: while a change waits at Customer Approval or Customer
+  Review, only the customer moves it on, by answering in the Customer Portal, so
+  there is no action for it here, not even a greyed-out one. At
+  Customer Approval you can **Re-schedule** (the customer is asked again) or
+  **Cancel change**; at Customer Review you can **Roll back** or **Cancel
+  change**, and there is no Close. While the customer's review is still pending,
+  **Roll back** is held back and says who the change is waiting on, since a
+  failed review is the customer's to give in the Customer Portal.
+- **When nobody can be asked.** The customer's request goes to the Customer
+  Project's registered contacts, leaving out whoever raised the change and anyone
+  no longer active. A change with Customer Approval and/or Customer Review ticked
+  is therefore **not sent for approval while nobody can be asked**: **Request
+  Approval** is refused, with a message that says so. Where the project has no
+  registered contact at all the button is greyed out with the reason ("Register a
+  contact for the Customer Project before requesting approval"); where it has
+  contacts but none can be asked (its only contact is the person who raised the
+  change, or its contacts are no longer active) the request goes out and the
+  refusal appears as an error. Register a contact for the project, then request
+  approval. Ticking a customer box on after approval was requested is refused the
+  same way. The Customer Project cannot be changed once approval has been
+  requested, which is why the contact has to be there first.
+  Only an older change can still be left waiting at a gate with nobody to answer:
+  one that reached Customer Approval or Customer Review before this was refused,
+  one whose contacts left the project since, or one migrated from the previous
+  system without a request. The Approval tab says so in a note, and since staff never
+  answer for the customer the exits are the ones staff always have there. When
+  nobody can be asked, **Cancel change** is the only way out of Customer
+  Approval: **Re-schedule** sends the change back through approval and then asks
+  the project's registered contacts again, so it helps only if somebody can be
+  asked this time (an older change with no request, on a project that has
+  eligible contacts, is the case where it does). **Roll back** or **Cancel
+  change** are the ways out of Customer Review.
 - **Approve or reject** a pending approval stage, if the engineer is listed
   as an approver on it: the Approve/Reject buttons only appear on that
   engineer's own pending approval.

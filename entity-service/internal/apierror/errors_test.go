@@ -16,7 +16,14 @@
 
 package apierror
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+)
 
 func TestInvalidValue(t *testing.T) {
 	if got := InvalidValue("sortBy", "x", "sort field", []string{"endDate"}).Msg; got != `sortBy: "x" is not a valid sort field; use endDate` {
@@ -24,5 +31,70 @@ func TestInvalidValue(t *testing.T) {
 	}
 	if got := InvalidValue("f", "a\"b", "thing", []string{"A", "B"}).Msg; got != `f: "a\"b" is not a valid thing; use one of A, B` {
 		t.Errorf("multi = %q", got)
+	}
+}
+
+// TestWriteJSON_HasNoErrorCodeUnlessGiven pins that a body without a
+// machine-readable name is exactly the body this API has always returned: a
+// client that does not know errorCode sees no new key.
+func TestWriteJSON_HasNoErrorCodeUnlessGiven(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteJSON(rec, http.StatusConflict, "stale")
+	if got, want := strings.TrimSpace(rec.Body.String()), `{"code":409,"message":"stale"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+}
+
+func TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteJSONWithCode(rec, http.StatusConflict, "this change request is on hold", CodeChangeRequestOnHold)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+	var body ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not JSON: %v", err)
+	}
+	if body.Code != 409 || body.Message != "this change request is on hold" || body.ErrorCode != "change_request_on_hold" {
+		t.Errorf("body = %+v", body)
+	}
+	if !strings.Contains(rec.Body.String(), `"errorCode":"change_request_on_hold"`) {
+		t.Errorf("wire name is not errorCode: %s", rec.Body.String())
+	}
+}
+
+// TestCodes_AreStableLowerSnakeCase guards the contract: a code is only ever
+// added to, so a rename shows up here as a failure, and each is a plain
+// lower-case snake_case string no client has to escape.
+func TestCodes_AreStableLowerSnakeCase(t *testing.T) {
+	want := map[string]string{
+		"CodeChangeRequestOnHold":             "change_request_on_hold",
+		"CodeChangeRequestScheduleChanged":    "change_request_schedule_changed",
+		"CodeChangeRequestApprovalNotPending": "change_request_approval_not_pending",
+		"CodeChangeRequestNotProposable":      "change_request_not_proposable",
+		"CodeChangeRequestNotAsked":           "change_request_not_asked",
+		"CodeChangeRequestForbidden":          "change_request_forbidden",
+	}
+	got := map[string]string{
+		"CodeChangeRequestOnHold":             CodeChangeRequestOnHold,
+		"CodeChangeRequestScheduleChanged":    CodeChangeRequestScheduleChanged,
+		"CodeChangeRequestApprovalNotPending": CodeChangeRequestApprovalNotPending,
+		"CodeChangeRequestNotProposable":      CodeChangeRequestNotProposable,
+		"CodeChangeRequestNotAsked":           CodeChangeRequestNotAsked,
+		"CodeChangeRequestForbidden":          CodeChangeRequestForbidden,
+	}
+	snake := regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
+	seen := map[string]string{}
+	for name, code := range got {
+		if code != want[name] {
+			t.Errorf("%s = %q, want %q (codes are a contract: never rename)", name, code, want[name])
+		}
+		if !snake.MatchString(code) {
+			t.Errorf("%s = %q is not lower snake_case", name, code)
+		}
+		if other, dup := seen[code]; dup {
+			t.Errorf("%s and %s share the code %q", name, other, code)
+		}
+		seen[code] = name
 	}
 }

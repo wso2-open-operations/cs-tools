@@ -34,7 +34,15 @@ export interface BePagination {
 }
 
 export interface BeErrorPayload {
+  /** The reason, worded for people: it can change, so never branch on it. */
   message?: string;
+  /**
+   * The stable machine-readable name of the refusal, when the backend names it
+   * (e.g. `change_request_approval_not_pending`): what a client may branch on.
+   * Absent for a refusal that has none, and for an older backend. Kept on
+   * {@link BackendApiError.payload}; today's callers key on the status.
+   */
+  errorCode?: string;
 }
 
 /** CSM list that owns a saved filter view. Isolated so views never leak across lists. */
@@ -66,6 +74,10 @@ export interface BeReorderSavedFilterViewPayload {
 }
 
 export interface BeSearchResponseBase {
+  /** Matching records, or -1 when the request set `skipTotal` and the count was
+   * skipped (not counted, not a lower bound: never display it). The ServiceNow
+   * data source and a grouped case search ignore `skipTotal` and report their own
+   * total, so only treat -1 as "no total", never the reverse. */
   total: number;
   limit: number;
   offset: number;
@@ -178,8 +190,9 @@ export type BeCaseSortField =
 /**
  * Where a case sits in the backing data source's staged auto-closure sequence
  * (DEFAULT -> FIRST_COMMENT -> ON_HOLD -> SECOND_COMMENT). Read-only — the
- * only supported write is `autocloseHoldUntil` on `PATCH /cases/{id}`
- * (ServiceNow only).
+ * only supported write is `autocloseHoldUntil` on `PATCH /cases/{id}`. Only
+ * `ON_HOLD` is a hold; the `*_COMMENT` steps are later stages of the countdown
+ * to closure.
  */
 export type BeCaseAutoclosureStep =
   | "DEFAULT"
@@ -444,7 +457,7 @@ export interface BeCaseView {
   autoclosureStep?: BeCaseAutoclosureStep | null;
   /**
    * When the auto-closure sequence next advances — e.g. the "eligible again
-   * after" date for a held case (ServiceNow only). Read-only.
+   * after" date for a held case. Read-only.
    */
   autoclosureStateTime?: string | null;
   /**
@@ -1115,6 +1128,13 @@ export interface BeCaseSearchPayload {
     field?: BeCaseSortField;
     order?: "asc" | "desc";
   };
+  /**
+   * Skip counting every matching record: the response's `total` is then -1 and
+   * only the requested page is read. For callers that never show a total
+   * (the quick-nav palette lists a handful of hits). Needs an entity service
+   * that declares the field; it rejects unknown request fields.
+   */
+  skipTotal?: boolean;
 }
 
 /**
@@ -1432,6 +1452,13 @@ export interface BeSearchConversationsPayload {
   filters?: BeSearchConversationsFilters;
   sortBy?: { field: "createdOn" | "updatedOn"; order: "asc" | "desc" };
   pagination?: BePagination;
+  /**
+   * Skip counting every matching record: the response's `total` is then -1 and
+   * only the requested page is read. For callers that never show a total
+   * (the quick-nav palette lists a handful of hits). Needs an entity service
+   * that declares the field; it rejects unknown request fields.
+   */
+  skipTotal?: boolean;
 }
 
 /** No `hasMore` on this response (unlike {@link BeSearchResponseBase}) —
@@ -3168,9 +3195,9 @@ export interface BeConfigurationItemSearchResponse {
  * one field is required by the BE (`minProperties: 1`). `plannedStartOn` and
  * `plannedEndOn` are `YYYY-MM-DD HH:MM:SS` strings.
  *
- * `isCustomerApproved`, `isCustomerReviewed` and `requestApproval` are
- * mutually exclusive with each other — at most one of the three may be set in
- * a single patch.
+ * `isCustomerApproved` / `isCustomerReviewed` are deliberately not modeled:
+ * they ARE the customer's answer, which only the customer gives (in the
+ * Customer Portal), and the backend refuses them from staff outright.
  *
  * This is a subset of what the endpoint accepts, not the whole contract: only
  * the fields the portal actually writes are modeled here. Add a field when a
@@ -3179,8 +3206,6 @@ export interface BeConfigurationItemSearchResponse {
 export interface BePatchChangeRequestPayload {
   plannedStartOn?: string;
   plannedEndOn?: string;
-  isCustomerApproved?: boolean;
-  isCustomerReviewed?: boolean;
   assignedTeamId?: string;
   /** Individual assignee (portal user UUID). Distinct from `assignedTeamId`
    * (the assignment group) — a CR can carry both, one, or neither. */
@@ -3310,6 +3335,13 @@ export interface BeChangeRequestSearchPayload {
     order?: "asc" | "desc";
   };
   pagination?: BePagination;
+  /**
+   * Skip counting every matching record: the response's `total` is then -1 and
+   * only the requested page is read. For callers that never show a total
+   * (the quick-nav palette lists a handful of hits). Needs an entity service
+   * that declares the field; it rejects unknown request fields.
+   */
+  skipTotal?: boolean;
 }
 
 /** Note: the CR search response carries no `hasMore` (unlike the other searches). */
@@ -3450,6 +3482,11 @@ export interface BeIncidentDetail extends BeIncident {
    * {@link BeSpecialistHandoffSummary}.
    */
   specialistHandoff?: BeSpecialistHandoffSummary | null;
+  /** Whether "Escalate to specialist team" applies now (In Progress, a
+   * routed service, not already with its Special Ops group) -- ServiceNow's
+   * canEscalateToSpecialOps. Absent when the backend does not say
+   * (ServiceNow data source), in which case the action stays offered. */
+  canHandOffToSpecialist?: boolean;
 }
 
 /**
@@ -3628,6 +3665,13 @@ export interface BeIncidentSearchPayload {
     order?: "asc" | "desc";
   };
   pagination?: BePagination;
+  /**
+   * Skip counting every matching record: the response's `total` is then -1 and
+   * only the requested page is read. For callers that never show a total
+   * (the quick-nav palette lists a handful of hits). Needs an entity service
+   * that declares the field; it rejects unknown request fields.
+   */
+  skipTotal?: boolean;
 }
 
 export interface BeIncidentSearchResponse {
@@ -3723,6 +3767,13 @@ export interface BeProblemSearchFilters {
 export interface BeProblemSearchPayload {
   filters?: BeProblemSearchFilters;
   pagination?: BePagination;
+  /**
+   * Skip counting every matching record: the response's `total` is then -1 and
+   * only the requested page is read. For callers that never show a total
+   * (the quick-nav palette lists a handful of hits). Needs an entity service
+   * that declares the field; it rejects unknown request fields.
+   */
+  skipTotal?: boolean;
 }
 
 /** Note: mirrors the change-request/incident search responses — no `hasMore`. */
@@ -4892,11 +4943,25 @@ export interface BeOutageMetadataResponse {
 // ---------------------------------------------------------------------------
 
 export type BeHandoffReasonCode = "no-runbook" | "runbook-not-working";
-export type BeHandoffEscalationTeam = "choreo-runtime-team" | "choreo-apim-team";
+/** A sub-team's key, e.g. "choreo-runtime-team". Teams are data
+ * (`GET /specialist-handoff-teams`), not a fixed list. */
+export type BeHandoffEscalationTeam = string;
+
+/** One `GET /specialist-handoff-teams` entry: `key` is sent as the handoff's
+ * `escalationTeam`, `label` is shown. */
+export interface BeSpecialistHandoffTeam {
+  key: BeHandoffEscalationTeam;
+  label: string;
+}
+
+export interface BeSpecialistHandoffTeamsResponse {
+  teams: BeSpecialistHandoffTeam[];
+}
 
 export interface BeHandOffIncidentPayload {
   reasonCode: BeHandoffReasonCode;
-  /** Choreo only; ignored (but not rejected) for any other service. */
+  /** A team key from `GET /specialist-handoff-teams`; a team the incident's
+   * service has no route for is ignored (the service's default team is used). */
   escalationTeam?: BeHandoffEscalationTeam;
   /** Defaults to `true` on the backend when omitted. */
   createGithubIssue?: boolean;

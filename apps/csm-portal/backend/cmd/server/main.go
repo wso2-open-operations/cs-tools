@@ -599,6 +599,7 @@ func main() {
 	route("POST /incidents/{id}/comments/search", handler.PermViewOperations, incidentHandler.SearchIncidentComments)
 	route("POST /incidents/{id}/activities/search", handler.PermViewOperations, incidentHandler.SearchIncidentActivities)
 	route("POST /incidents/{id}/specialist-handoffs", handler.PermWrite, incidentHandler.HandOffIncidentToSpecialist)
+	route("GET /specialist-handoff-teams", handler.PermViewOperations, incidentHandler.ListSpecialistHandoffTeams)
 	route("GET /alerts/{id}", handler.PermViewOperations, alertHandler.GetAlert)
 	route("GET /smart-alerts/{id}", handler.PermViewOperations, alertHandler.GetSmartAlert)
 	route("POST /change-requests/{id}/comments", handler.PermWrite, changeRequestHandler.CreateChangeRequestComment)
@@ -888,7 +889,7 @@ func loadDashboards() *dashboard.Registry {
 //	CSM_TEAM_REGISTRY  the team registry as
 //	                   "teamKey|Display Name|FAMILY|creGroupId|sreGroupId" rows
 //	                   separated by commas, where FAMILY is one of cre-abt,
-//	                   cre, sre-abt or sre (case insensitive) and FAMILY,
+//	                   cre, sre-abt, sre or sme (case insensitive) and FAMILY,
 //	                   creGroupId, and sreGroupId are all optional. Unset means
 //	                   no teams are configured; there is deliberately no
 //	                   default, because team names are organisation vocabulary

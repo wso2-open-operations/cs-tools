@@ -147,8 +147,8 @@ func (s *scheduleService) SearchAssignments(ctx context.Context, req domain.Sear
 	if err := validateUserID(req.UserID); err != nil {
 		return domain.ScheduleAssignmentsResponse{}, err
 	}
-	if req.Family != "" && req.Family != "CRE" && req.Family != "SRE" {
-		return domain.ScheduleAssignmentsResponse{}, &apierror.ValidationError{Msg: "family must be CRE or SRE"}
+	if req.Family != "" && req.Family != "CRE" && req.Family != "SRE" && req.Family != "SME" {
+		return domain.ScheduleAssignmentsResponse{}, &apierror.ValidationError{Msg: "family must be CRE, SRE or SME"}
 	}
 	rows, err := s.repo.SearchAssignments(ctx, req)
 	if err != nil {
@@ -203,9 +203,9 @@ func (s *scheduleService) OnDuty(ctx context.Context, at *time.Time) (domain.Sch
 // rota then cannot be fixed at all while its lead is away -- not by a manager,
 // not by the head of CRE, not by anyone. The answer is a named grant somebody
 // has to be given and can be taken back, rather than widening what a lead
-// already holds: cre_rota_admin and sre_rota_admin (migration 0156), one per
-// family, because the two rotas are run by different people and neither group
-// has any business in the other's cover.
+// already holds: cre_rota_admin and sre_rota_admin (migration 0156), and
+// sme_rota_admin (0200), one per family, because the rotas are run by
+// different people and no group has any business in another's cover.
 //
 // Leading is checked first because it is the common case by a wide margin --
 // eleven leads against a handful of admins -- so the second read usually never
@@ -283,6 +283,50 @@ func (s *scheduleService) requireRotaWriterOver(ctx context.Context, teamKey, us
 		}
 	}
 	return nil
+}
+
+// requireRotaWriterOverSpan is requireRotaWriterOver for a change over the
+// dates [from, to], and returns the team the person belongs to.
+//
+// A member of teamKey is checked exactly as requireRotaWriterOver does. So is
+// anyone with no claim on the team at all. The case between is somebody on a
+// span that moved them to teamKey for the whole of [from, to] -- the Brazil
+// rotation, which moves them to the Americas team for months: that team's
+// lead (or a rota admin for it) may roster them while it lasts, and, when
+// homeLeadMayManage is set, so may their own team's lead, who still owns the
+// span itself -- ending it early, moving it, marking leave inside it.
+func (s *scheduleService) requireRotaWriterOverSpan(ctx context.Context, teamKey, userID, from, to string, homeLeadMayManage bool) (string, error) {
+	if err := s.requireInternalCaller(ctx); err != nil {
+		return "", err
+	}
+	member, err := s.repo.UserInTeam(ctx, userID, teamKey)
+	if err != nil {
+		return "", err
+	}
+	if member {
+		return teamKey, s.requireRotaWriter(ctx, teamKey)
+	}
+	home, moved, err := s.repo.MovedToTeamOver(ctx, userID, teamKey, from, to)
+	if err != nil {
+		return "", err
+	}
+	if !moved {
+		// Unchanged from requireRotaWriterOver, refusals and their order.
+		if err := s.requireRotaWriter(ctx, teamKey); err != nil {
+			return "", err
+		}
+		return "", &apierror.ForbiddenError{
+			Msg: fmt.Sprintf("that engineer is not on %s, so their rota is not yours to change", teamKey),
+		}
+	}
+	writerErr := s.requireRotaWriter(ctx, teamKey)
+	if writerErr == nil {
+		return home, nil
+	}
+	if homeLeadMayManage && home != "" && s.requireRotaWriter(ctx, home) == nil {
+		return home, nil
+	}
+	return "", writerErr
 }
 
 // CreateAssignment implements ScheduleService.
@@ -451,7 +495,7 @@ func (s *scheduleService) ApplyRange(ctx context.Context, req domain.ApplySchedu
 			req.Tier = &t
 		}
 	}
-	if err := s.requireRotaWriterOver(ctx, req.TeamKey, req.UserID); err != nil {
+	if _, err := s.requireRotaWriterOverSpan(ctx, req.TeamKey, req.UserID, req.From, req.To, false); err != nil {
 		return domain.ApplyScheduleRangeResponse{}, err
 	}
 	return s.repo.ApplyRange(ctx, req, auth.IdentityFromContext(ctx).UserEmail)
@@ -485,9 +529,11 @@ func (s *scheduleService) ApplyAbsence(ctx context.Context, req domain.ApplySche
 			req.AllocatedTo = &v
 		}
 	}
-	if err := s.requireRotaWriterOver(ctx, req.TeamKey, req.UserID); err != nil {
+	home, err := s.requireRotaWriterOverSpan(ctx, req.TeamKey, req.UserID, req.From, req.To, true)
+	if err != nil {
 		return domain.ApplyScheduleAbsenceResponse{}, err
 	}
+	req.HomeTeamKey = home
 	return s.repo.ApplyAbsence(ctx, req, auth.IdentityFromContext(ctx).UserEmail)
 }
 

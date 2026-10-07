@@ -994,3 +994,64 @@ func TestConfig_Validate_Timeouts(t *testing.T) {
 		})
 	}
 }
+
+// CR_STRICT_VISIBILITY_FROM is the cutover instant of the customer-visibility
+// rule of change requests: unset is "no cutover" (every change request is
+// legacy, today's behaviour), a value is an RFC 3339 instant WITH a zone, and
+// anything else refuses to start so a typo can never silently change who sees what.
+func TestConfig_CRStrictVisibilityFrom(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      *time.Time
+		wantErr   bool
+	}{
+		{"unset", "", nil, false},
+		{"blank", "   ", nil, false},
+		{"UTC", "2026-11-01T00:00:00Z", ptrTime(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)), false},
+		{"with an offset, normalised to UTC", "2026-11-01T05:30:00+05:30", ptrTime(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)), false},
+		{"padded", " 2026-11-01T00:00:00Z ", ptrTime(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)), false},
+		{"a date with no zone", "2026-11-01", nil, true},
+		{"a datetime with no zone", "2026-11-01T00:00:00", nil, true},
+		{"words", "tomorrow", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CR_STRICT_VISIBILITY_FROM", tc.raw)
+			c := Load()
+			got, err := c.CRStrictVisibilityFrom()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("CRStrictVisibilityFrom() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				if !strings.Contains(err.Error(), "CR_STRICT_VISIBILITY_FROM") {
+					t.Errorf("error %q must name the variable", err)
+				}
+				return
+			}
+			if (got == nil) != (tc.want == nil) || (got != nil && !got.Equal(*tc.want)) {
+				t.Fatalf("CRStrictVisibilityFrom() = %v, want %v", got, tc.want)
+			}
+			if got != nil && got.Location() != time.UTC {
+				t.Errorf("the instant is in %v, want UTC", got.Location())
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_CRStrictVisibilityFromRefusesAnUnparsableValue(t *testing.T) {
+	c := baseValidConfig()
+	c.CRStrictVisibilityFromRaw = "next tuesday"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "CR_STRICT_VISIBILITY_FROM") {
+		t.Fatalf("Validate() = %v, want an error naming CR_STRICT_VISIBILITY_FROM", err)
+	}
+	c.CRStrictVisibilityFromRaw = "2026-11-01T00:00:00Z"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a valid cutover refused: %v", err)
+	}
+	c.CRStrictVisibilityFromRaw = ""
+	if err := c.Validate(); err != nil {
+		t.Fatalf("an unset cutover refused: %v", err)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }

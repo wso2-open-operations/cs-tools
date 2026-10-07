@@ -31,11 +31,11 @@ describe("SetAutocloseHoldDialog — submission gating", () => {
     expect(screen.getByRole("button", { name: /^hold$/i })).toBeDisabled();
   });
 
-  it("calls onSave with a UTC ISO string once a pre-seeded future date is submitted", () => {
+  it("sends the picked day at 00:00 UTC once a pre-seeded future date is submitted", () => {
     const onSave = vi.fn();
     render(
       <SetAutocloseHoldDialog
-        currentHoldUntil="2099-06-15T23:59:00.000Z"
+        currentHoldUntil="2099-06-15T00:00:00.000Z"
         isSaving={false}
         onClose={() => {}}
         onSave={onSave}
@@ -43,9 +43,27 @@ describe("SetAutocloseHoldDialog — submission gating", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^hold$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
-    const arg = onSave.mock.calls[0][0] as string;
-    expect(() => new Date(arg).toISOString()).not.toThrow();
-    expect(new Date(arg).getUTCFullYear()).toBe(2099);
+    // The exact day, whatever the viewer's timezone: sending end-of-day local
+    // time as a UTC instant lands on the NEXT UTC day for anyone west of UTC,
+    // and the backing systems read the day from the UTC date.
+    expect(onSave).toHaveBeenCalledWith("2099-06-15T00:00:00.000Z");
+  });
+
+  it("round-trips the stored hold day instead of shifting it by the viewer's UTC offset", () => {
+    // A hold the backing system stores as <day> 00:00 UTC must reopen on that
+    // same day: reading it with local getters shows the previous day to
+    // anyone west of UTC, and re-saving would then move the hold back a day.
+    const onSave = vi.fn();
+    render(
+      <SetAutocloseHoldDialog
+        currentHoldUntil="2099-01-01T00:00:00.000Z"
+        isSaving={false}
+        onClose={() => {}}
+        onSave={onSave}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^hold$/i }));
+    expect(onSave).toHaveBeenCalledWith("2099-01-01T00:00:00.000Z");
   });
 
   it("calls onClose on Cancel without calling onSave", () => {

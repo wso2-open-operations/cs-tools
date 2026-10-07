@@ -48,6 +48,9 @@ func (f *fakeCRRepo) GroupMemberEmails(_ context.Context, team string) ([]string
 func (f *fakeCRRepo) ProjectContactEmails(context.Context, string) ([]string, error) {
 	return f.contacts, nil
 }
+func (f *fakeCRRepo) CustomerNoticeEmails(context.Context, string, string) ([]string, error) {
+	return f.contacts, nil
+}
 
 type published struct {
 	Type     events.Type

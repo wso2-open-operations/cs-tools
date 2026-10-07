@@ -270,3 +270,13 @@ func TestIsCustomer_SearchFails_ReturnsError(t *testing.T) {
 		t.Fatal("expected an error when the entity-service search fails")
 	}
 }
+
+// TestServiceRequestLink: an SR opens on the portal's service-request page,
+// not /cases/<id>.
+func TestServiceRequestLink(t *testing.T) {
+	r := New(nil, testConfig())
+	want := "https://csm.example.com/operations/service-requests/sr-1"
+	if got := r.ServiceRequestLink("sr-1"); got != want {
+		t.Errorf("ServiceRequestLink = %q, want %q", got, want)
+	}
+}

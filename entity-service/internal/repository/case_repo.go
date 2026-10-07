@@ -233,12 +233,28 @@ const caseLikeCloseNotesColumn = `COALESCE(c.close_notes, eng.close_notes, sr.cl
 const caseLikeResolvedOnColumn = `COALESCE(c.resolved_on, eng.resolved_on, sr.resolved_on, sra.resolved_on, ann.resolved_on)`
 const caseLikeClosedOnColumn = `COALESCE(c.closed_on, eng.closed_on, sr.closed_on, sra.closed_on, ann.closed_on)`
 
+// caseLikeClosedByUserIDColumn mirrors caseLikeClosedOnColumn for
+// closed_by_user_id -- a real column on all five case-like extension tables
+// (migrations 0023/0024), joined in GetCaseByID to resolve CaseView.ClosedBy.
+// Written by UpdateCase (see updateCaseQuery and caseLikeExtensionUpdate's
+// own SQL) whenever a case-like work item's own state transitions to
+// closed, using the resolved actor id from the caller's x-user-id-token --
+// never from the request payload itself.
+const caseLikeClosedByUserIDColumn = `COALESCE(c.closed_by_user_id, eng.closed_by_user_id, sr.closed_by_user_id, sra.closed_by_user_id, ann.closed_by_user_id)`
+
 // caseLikeWorkStateColumn/caseLikeResolutionCodeColumn cover the four
 // case-like tables that carry these columns (migration 0184 added them to
 // engagement/service_request/security_report_analysis, using the same enum
 // types as "case"). announcement has neither.
 const caseLikeWorkStateColumn = `COALESCE(c.work_state::TEXT, eng.work_state::TEXT, sr.work_state::TEXT, sra.work_state::TEXT)`
 const caseLikeResolutionCodeColumn = `COALESCE(c.resolution_code::TEXT, eng.resolution_code::TEXT, sr.resolution_code::TEXT, sra.resolution_code::TEXT)`
+
+// caseLikeAutoclosureStepColumn/caseLikeAutoclosureStateOnColumn cover the four
+// case-like tables that carry the auto-closure sequence columns (migrations
+// 0023/0024; csm-sync-service fills them from u_autoclosure_step and
+// u_autoclosure_state_time). announcement has neither.
+const caseLikeAutoclosureStepColumn = `COALESCE(c.autoclosure_step, eng.autoclosure_step, sr.autoclosure_step, sra.autoclosure_step)`
+const caseLikeAutoclosureStateOnColumn = `COALESCE(c.autoclosure_state_on, eng.autoclosure_state_on, sr.autoclosure_state_on, sra.autoclosure_state_on)`
 
 // workStateWorkItemTypes are the case-like work_item types that carry a work
 // state and resolution code: all of caseLikeWorkItemTypes except ANNOUNCEMENT.
@@ -338,7 +354,16 @@ type CaseRepository interface {
 	// the CodeRabbit finding on PR #1683 this fixes.
 	//
 	// Returns a NotFoundError if no matching row exists.
-	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (c domain.Case, previousSeverity *domain.CaseSeverity, err error)
+	//
+	// actorID is the resolved caller's own "user" id (from the caller's
+	// x-user-id-token, never from the request body), used only to stamp
+	// closed_by_user_id when this update's own state transitions to closed --
+	// nil when the actor couldn't be resolved (this update still succeeds;
+	// closed_by_user_id simply stays unset, the same best-effort posture
+	// recordFieldChangeActivity's own actorEmail already uses). A state
+	// transition AWAY from closed clears closed_by_user_id back to NULL,
+	// mirroring closed_on's own existing clear-on-reopen behaviour.
+	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest, actorID *string) (c domain.Case, previousSeverity *domain.CaseSeverity, err error)
 	// CreateCaseAttachment inserts a new attachment metadata row for the case
 	// identified by req.ReferenceID. req.StorageKey must be non-nil: this data
 	// source stores file bytes externally in SFTPGo, never inline in Postgres.
@@ -427,6 +452,16 @@ type CaseRepository interface {
 	// down for the same future-authorization reason as AddCaseTag; tags are
 	// global vocabulary with no per-case or per-caller scope today.
 	SearchTags(ctx context.Context, searchQuery, callerEmail string, limit int) ([]domain.Tag, error)
+	// GetCaseFeedback returns the previously-submitted emoji feedback for
+	// caseID, and found=false when none has been submitted yet -- see
+	// case_feedback_repo.go's own doc comment for the full design (shared
+	// with CreateCaseFeedback just below).
+	GetCaseFeedback(ctx context.Context, caseID string) (CaseFeedbackRow, bool, error)
+	// CreateCaseFeedback records caseID's emoji feedback. Returns a
+	// *apierror.ConflictError if feedback was already submitted for this
+	// case (work_item_feedback.work_item_id is UNIQUE -- one submission per
+	// case, matching the ServiceNow-backed path's own one-shot survey).
+	CreateCaseFeedback(ctx context.Context, caseID string, params CreateCaseFeedbackParams) (CaseFeedbackCreated, error)
 	// SetCaseWatchList replaces the case's watch list (work_item_watcher
 	// rows keyed by the case's own id, which is also its work_item id)
 	// wholesale with userIDs, and bumps the case's underlying work_item
@@ -436,6 +471,16 @@ type CaseRepository interface {
 	// caseID does not exist; a ValidationError if any userID does not
 	// exist.
 	SetCaseWatchList(ctx context.Context, caseID string, userIDs []string, callerEmail string) ([]domain.WatchListUser, time.Time, error)
+	// AddCaseWatcherIfAbsent inserts one work_item_watcher row for
+	// (caseID, userID) unless one already exists -- a targeted add, unlike
+	// SetCaseWatchList's full delete+insert replace, so it can run from a
+	// comment-creation path without disturbing whatever else is already on
+	// the watch list. A no-op, not an error, when the row already exists or
+	// caseID does not exist (the comment this follows has already been
+	// written against that same caseID, so a missing case here would be a
+	// deeper, already-surfaced problem, not something to fail subscription
+	// over).
+	AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error
 	// AccountDefaultWatcherEmails returns the account owning projectID's
 	// four named stakeholders' email addresses -- technical_owner_id,
 	// secondary_technical_owner_id, account_manager_id,
@@ -576,11 +621,19 @@ type CaseRepository interface {
 
 type caseRepo struct {
 	db *Scoped
+	// vis is the change request customer-visibility policy. A few operations of
+	// this repository take an id and act on whatever work item it names (the
+	// comments, the watch list, the tags, the work-item attachments); a customer
+	// could pass a change request's id there, so those apply it (see
+	// CRVisibility.rejectHiddenChangeRequest).
+	vis CRVisibility
 }
 
-// NewCaseRepository constructs a CaseRepository backed by the given connection pool.
-func NewCaseRepository(db *Scoped) CaseRepository {
-	return &caseRepo{db: db}
+// NewCaseRepository constructs a CaseRepository backed by the given connection
+// pool. The optional CRVisibility is the change request customer-visibility
+// policy (see change_request_visibility.go).
+func NewCaseRepository(db *Scoped, vis ...CRVisibility) CaseRepository {
+	return &caseRepo{db: db, vis: firstCRVisibility(vis)}
 }
 
 // CreateCase implements CaseRepository.
@@ -626,6 +679,10 @@ func (r *caseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest)
 // result since every *PortalQuery below ends in the identical trailing
 // SELECT shape that helper already expects.
 func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) (domain.Case, error) {
+	restore, err := insertAsCheckedProjectMember(ctx, tx, req.Type, req.ProjectID)
+	if err != nil {
+		return domain.Case{}, err
+	}
 	var row pgx.Row
 	switch req.Type {
 	case "announcement":
@@ -664,7 +721,70 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 	if err != nil {
 		return domain.Case{}, mapCreateCaseError(err)
 	}
+	if err := restore(ctx); err != nil {
+		return domain.Case{}, err
+	}
 	return c, nil
+}
+
+// caseInsertsCheckedByProjectMembership are the case-like types whose
+// extension table's INSERT policy is "internal, or a member of the work
+// item's project" (case_write, migration 0147; engagement_write /
+// service_request_write / security_report_analysis_write, migration 0151).
+// announcement is deliberately absent: its own policies (000085) are not a
+// membership check, and nothing here may widen them.
+var caseInsertsCheckedByProjectMembership = map[string]bool{
+	"case": true, "service_request": true, "engagement": true, "security_report_analysis": true,
+}
+
+// insertAsCheckedProjectMember lets a project member's create through the
+// extension-table INSERT policies, which as written can never pass for one.
+//
+// Each create query inserts work_item and the extension row in ONE statement
+// (data-modifying CTEs). The extension policies find the project with a
+// subquery -- is_project_member((SELECT project_id FROM work_item WHERE id =
+// <row>.id)) -- and every sub-statement of one statement shares its snapshot,
+// so that subquery cannot see the work_item row the same statement just
+// inserted. It yields NULL, and the policy refuses every non-internal caller:
+// a customer creating a case or a service request got 404 "case not found"
+// (RLS migrations 0147/0151 met the single-statement native create of #2293).
+//
+// The fix checks, up front and under the caller's own identity, exactly what
+// those policies check -- an internal caller, or a member of req.ProjectID
+// (work_item_write already enforces the same on the work_item half) -- and
+// refuses a non-member with the same 404 RLS gave. Only then is the
+// transaction marked internal for the insert, and the caller's own value is
+// put back afterwards by the returned restore. For any other type, and for
+// an internal caller, nothing changes.
+func insertAsCheckedProjectMember(ctx context.Context, tx pgx.Tx, caseType, projectID string) (func(context.Context) error, error) {
+	noop := func(context.Context) error { return nil }
+	if !caseInsertsCheckedByProjectMembership[caseType] {
+		return noop, nil
+	}
+	var previous string
+	var internal, member bool
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(current_setting('app.is_internal', true), ''),
+		       COALESCE(current_setting('app.is_internal', true) = 'true', false),
+		       COALESCE(is_project_member($1::uuid), false)`, projectID,
+	).Scan(&previous, &internal, &member); err != nil {
+		return nil, fmt.Errorf("create case: check project membership: %w", err)
+	}
+	if internal {
+		return noop, nil
+	}
+	if !member {
+		return nil, &apierror.NotFoundError{Msg: "case not found"}
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', 'true', true)`); err != nil {
+		return nil, fmt.Errorf("create case: mark member insert: %w", err)
+	}
+	return func(ctx context.Context) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', $1, true)`, previous); err != nil {
+			return fmt.Errorf("create case: restore caller identity: %w", err)
+		}
+		return nil
+	}, nil
 }
 
 // createCasePortalQuery is CreateCase's (the plain-Postgres, caller-initiated
@@ -674,7 +794,7 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 // opened_by_user_id/account_id are resolved from req.CreatedBy (a user id)
 // via the "creator" CTE rather than taken as already-resolved values, since
 // there is no ServiceNow response to have resolved them from. severity uses
-// the same NULLIF(...,'') tolerance the pre-dispatch version of this method
+// the same NULLIF(...,”) tolerance the pre-dispatch version of this method
 // already relied on, for an unset req.Severity.
 const createCasePortalQuery = `
 	WITH creator AS (
@@ -1285,6 +1405,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		internalID                               *string
 		aeID, aeName, aeEmail                    *string
 		ackID, ackName, ackEmail                 *string
+		closerID, closerName                     *string
 		pcID, pcNum, pcType                      *string
 		rcID, rcNum                              *string
 		accountID, accountName, accountTier      *string
@@ -1305,6 +1426,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		creatorID, creatorName                   *string
 		bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
 		etaSharedOn                              *time.Time
+		autoclosureStep                          *string
+		autoclosureStateOn                       *time.Time
 	)
 	// A scoped caller asking for a case outside their access still gets
 	// pgx.ErrNoRows -> NotFoundError below, the same as a genuinely
@@ -1324,6 +1447,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        wi.created_on, wi.updated_on, `+caseLikeClosedOnColumn+`, `+caseLikeResolvedOnColumn+`,
 		        wi.subject,
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta, wi.eta_shared_on,
+		        `+caseLikeAutoclosureStepColumn+`, `+caseLikeAutoclosureStateOnColumn+`,
 		        wi.created_by, creator.id, COALESCE(creator.name, NULLIF(TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)), '')),
 		        p.id, p.name,
 		        d.id, d.name,
@@ -1333,6 +1457,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        cre.id, cre.name, sre.id, sre.name,
 		        ae.id, COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email,
 		        ack.id, COALESCE(ack.name, NULLIF(TRIM(CONCAT_WS(' ', ack.first_name, ack.last_name)), '')), ack.email,
+		        closer.id, COALESCE(closer.name, NULLIF(TRIM(CONCAT_WS(' ', closer.first_name, closer.last_name)), '')),
 		        pw.id, pw.number, pw.type::TEXT,
 		        rc_wi.id, rc_wi.number
 		 FROM work_item wi
@@ -1349,6 +1474,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 LEFT JOIN product_version pv ON pv.id = dp.version_id
 		 LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		 LEFT JOIN "user" ack ON ack.id = wi.acknowledged_by_user_id
+		 LEFT JOIN "user" closer ON closer.id = `+caseLikeClosedByUserIDColumn+`
 		 LEFT JOIN work_item pw ON pw.id = wi.parent_id
 		 LEFT JOIN "case" rc ON rc.id = c.related_case_id
 		 LEFT JOIN work_item rc_wi ON rc_wi.id = rc.id
@@ -1362,6 +1488,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&cv.CreatedOn, &cv.UpdatedOn, &cv.ClosedOn, &resolvedOn,
 		&cv.Subject,
 		&bestCaseEta, &mostLikelyEta, &worstCaseEta, &etaSharedOn,
+		&autoclosureStep, &autoclosureStateOn,
 		&creatorEmail, &creatorID, &creatorName,
 		&projID, &projName,
 		&depID, &depName,
@@ -1371,6 +1498,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&creTeamID, &creTeamName, &sreTeamID, &sreTeamName,
 		&aeID, &aeName, &aeEmail,
 		&ackID, &ackName, &ackEmail,
+		&closerID, &closerName,
 		&pcID, &pcNum, &pcType,
 		&rcID, &rcNum,
 	)
@@ -1411,6 +1539,15 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		cv.WorstCaseFixEta = &s
 	}
 	cv.EtaSharedOn = etaSharedOn
+	// autoclosure_step is csm-sync-service's copy of u_autoclosure_step
+	// (DEFAULT/FIRST_COMMENT/ON_HOLD/SECOND_COMMENT) and autoclosure_state_on of
+	// u_autoclosure_state_time, passed through as the ServiceNow data source
+	// does. An empty step is no step (NULL), so a case never in the sequence
+	// omits both fields.
+	if autoclosureStep != nil && *autoclosureStep != "" {
+		cv.AutoclosureStep = autoclosureStep
+		cv.AutoclosureStateTime = autoclosureStateOn
+	}
 	// case_state_enum/case_issue_type_enum are UPPER_SNAKE_CASE while the
 	// domain values are lowercase; case_severity_enum's 'S0'..'S4' labels
 	// have no case-only relationship to the domain value at all -- see
@@ -1540,6 +1677,9 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		}
 		cv.AcknowledgedBy = &domain.AssignedEngineerRef{ID: *ackID, Name: ackNameStr, Email: ackEmail}
 	}
+	if closerID != nil {
+		cv.ClosedBy = &domain.EntityRef{ID: *closerID, Name: stringOrEmpty(closerName)}
+	}
 	if pcID != nil {
 		// work_item.parent_id (migration 0039) is a generic self-reference
 		// across every work_item type, not case-specific -- unlike
@@ -1668,6 +1808,12 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 	// COALESCE($5, NOW()) rather than two separate query strings: $5 is a
 	// nil *time.Time (pgx sends SQL NULL) for the ordinary path, or a real
 	// timestamp for the mirror path.
+	// The id names ANY work item (see above), a change request included: one the
+	// caller may not see does not exist for them, exactly as through the change
+	// request routes.
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, req.CaseID, "case not found"); err != nil {
+		return domain.CaseComment{}, err
+	}
 	const query = `
 		INSERT INTO comment (id, created_on, created_by, type, work_item_id, content)
 		SELECT gen_random_uuid(), COALESCE($5, NOW()), $1, $2::comment_type_enum, w.id, $4
@@ -1697,6 +1843,11 @@ func (r *caseRepo) CreateCaseComment(ctx context.Context, req domain.CreateCaseC
 
 // SearchCaseComments implements CaseRepository.
 func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+	// The id names any work item, a change request included: one the caller may
+	// not see has no comments for them.
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, req.CaseID, "case not found"); err != nil {
+		return nil, 0, err
+	}
 	args := []any{req.CaseID}
 	typeFilter := ""
 	if req.Filters != nil && req.Filters.Type != nil {
@@ -1777,12 +1928,23 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 
 // updateCaseQuery is shared by both branches of UpdateCase below. case.id IS
 // work_item.id (migration 0023), so this updates both tables in one round
-// trip via a CTE: "case" carries state/severity/work_state/closed_on,
-// work_item carries everything else (including updated_on, bumped
-// unconditionally). The work_item UPDATE's "AND EXISTS (SELECT 1 FROM
-// updated_case)" guard means it only actually touches a row when the case
-// update did -- so a nonexistent id updates nothing anywhere and the final
-// join returns zero rows, not a partial update.
+// trip via a CTE: "case" carries state/severity/work_state/closed_on/
+// closed_by_user_id, work_item carries everything else (including
+// updated_on, bumped unconditionally). The work_item UPDATE's "AND EXISTS
+// (SELECT 1 FROM updated_case)" guard means it only actually touches a row
+// when the case update did -- so a nonexistent id updates nothing anywhere
+// and the final join returns zero rows, not a partial update.
+// $8 (actorID) is stamped only on a GENUINE transition INTO closed -- the
+// stored (pre-update) state must itself not already be closed, checked by
+// referencing the column's own pre-statement value on the right-hand side
+// (standard SQL UPDATE semantics: every SET expression sees the row as it
+// was before this statement, not the value state's own SET just computed) --
+// so a caller re-PATCHing an already-closed case's state to closed again
+// (a harmless, idempotent no-op everywhere else in this codebase) can never
+// overwrite the real closer with whoever/whatever happened to resend it.
+// Cleared back to NULL on a transition AWAY from closed, left untouched on
+// every other PATCH -- see UpdateCase's own interface doc comment for where
+// actorID itself comes from.
 // updateCaseQuery's $2/$3/$4 arrive already converted to their real enum
 // labels by UpdateCase below (state/work_state upper-cased, severity mapped
 // through caseSeverityToEnum) -- case_state_enum's "CLOSED" is what $2 = ”
@@ -1799,13 +1961,14 @@ func (r *caseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCase
 const updateCaseQuery = `
 	WITH updated_case AS (
 		UPDATE "case"
-		SET state           = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
-		    severity        = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
-		    work_state      = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
-		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    resolution_code = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
-		    cause           = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
-		    close_notes     = COALESCE($7, close_notes)
+		SET state             = CASE WHEN $2 <> '' THEN $2::case_state_enum ELSE state END,
+		    severity          = CASE WHEN $3 <> '' THEN $3::case_severity_enum ELSE severity END,
+		    work_state        = CASE WHEN $4 <> '' THEN $4::case_work_state_enum ELSE work_state END,
+		    closed_on         = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::case_state_enum THEN $8::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
+		    resolution_code   = CASE WHEN $5 <> '' THEN $5::case_resolution_code_enum ELSE resolution_code END,
+		    cause             = CASE WHEN $6 <> '' THEN $6::case_cause_enum ELSE cause END,
+		    close_notes       = COALESCE($7, close_notes)
 		WHERE id = $1
 		RETURNING id, severity, issue_type, state, work_state, closed_on
 	),
@@ -1826,12 +1989,13 @@ const updateCaseQuery = `
 const updateSecurityReportAnalysisQuery = `
 	WITH updated_sra AS (
 		UPDATE security_report_analysis
-		SET state           = CASE WHEN $2 <> '' THEN $2::security_report_analysis_state_enum ELSE state END,
-		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause           = CASE WHEN $3 <> '' THEN $3::security_report_analysis_cause_enum ELSE cause END,
-		    close_notes     = COALESCE($4, close_notes),
-		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
-		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
+		SET state             = CASE WHEN $2 <> '' THEN $2::security_report_analysis_state_enum ELSE state END,
+		    closed_on         = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::security_report_analysis_state_enum THEN $7::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
+		    cause             = CASE WHEN $3 <> '' THEN $3::security_report_analysis_cause_enum ELSE cause END,
+		    close_notes       = COALESCE($4, close_notes),
+		    work_state        = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code   = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
 		RETURNING id, state, work_state, closed_on
 	),
@@ -1852,12 +2016,13 @@ const updateSecurityReportAnalysisQuery = `
 const updateServiceRequestQuery = `
 	WITH updated_sr AS (
 		UPDATE service_request
-		SET state           = CASE WHEN $2 <> '' THEN $2::service_request_state_enum ELSE state END,
-		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause           = CASE WHEN $3 <> '' THEN $3::service_request_cause_enum ELSE cause END,
-		    close_notes     = COALESCE($4, close_notes),
-		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
-		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
+		SET state             = CASE WHEN $2 <> '' THEN $2::service_request_state_enum ELSE state END,
+		    closed_on         = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::service_request_state_enum THEN $7::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
+		    cause             = CASE WHEN $3 <> '' THEN $3::service_request_cause_enum ELSE cause END,
+		    close_notes       = COALESCE($4, close_notes),
+		    work_state        = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code   = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
 		RETURNING id, state, work_state, closed_on
 	),
@@ -1878,12 +2043,13 @@ const updateServiceRequestQuery = `
 const updateEngagementQuery = `
 	WITH updated_eng AS (
 		UPDATE engagement
-		SET state           = CASE WHEN $2 <> '' THEN $2::engagement_state_enum ELSE state END,
-		    closed_on       = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
-		    cause           = CASE WHEN $3 <> '' THEN $3::engagement_cause_enum ELSE cause END,
-		    close_notes     = COALESCE($4, close_notes),
-		    work_state      = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
-		    resolution_code = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
+		SET state             = CASE WHEN $2 <> '' THEN $2::engagement_state_enum ELSE state END,
+		    closed_on         = CASE WHEN $2 = 'CLOSED' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_on END,
+		    closed_by_user_id = CASE WHEN $2 = 'CLOSED' AND state IS DISTINCT FROM 'CLOSED'::engagement_state_enum THEN $7::uuid WHEN $2 <> '' AND $2 <> 'CLOSED' THEN NULL ELSE closed_by_user_id END,
+		    cause             = CASE WHEN $3 <> '' THEN $3::engagement_cause_enum ELSE cause END,
+		    close_notes       = COALESCE($4, close_notes),
+		    work_state        = CASE WHEN $5 <> '' THEN $5::case_work_state_enum ELSE work_state END,
+		    resolution_code   = CASE WHEN $6 <> '' THEN $6::case_resolution_code_enum ELSE resolution_code END
 		WHERE id = $1
 		RETURNING id, state, work_state, closed_on
 	),
@@ -1904,10 +2070,11 @@ const updateEngagementQuery = `
 const updateAnnouncementQuery = `
 	WITH updated_ann AS (
 		UPDATE announcement
-		SET state       = CASE WHEN $2 <> '' THEN $2::announcement_state_enum ELSE state END,
-		    closed_on   = CASE WHEN $2 = 'CLOSE' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSE' THEN NULL ELSE closed_on END,
-		    cause       = CASE WHEN $3 <> '' THEN $3::announcement_cause_enum ELSE cause END,
-		    close_notes = COALESCE($4, close_notes)
+		SET state             = CASE WHEN $2 <> '' THEN $2::announcement_state_enum ELSE state END,
+		    closed_on         = CASE WHEN $2 = 'CLOSE' THEN NOW() WHEN $2 <> '' AND $2 <> 'CLOSE' THEN NULL ELSE closed_on END,
+		    closed_by_user_id = CASE WHEN $2 = 'CLOSE' AND state IS DISTINCT FROM 'CLOSE'::announcement_state_enum THEN $5::uuid WHEN $2 <> '' AND $2 <> 'CLOSE' THEN NULL ELSE closed_by_user_id END,
+		    cause             = CASE WHEN $3 <> '' THEN $3::announcement_cause_enum ELSE cause END,
+		    close_notes       = COALESCE($4, close_notes)
 		WHERE id = $1
 		RETURNING id, state, closed_on
 	),
@@ -1955,20 +2122,24 @@ func validateUpdateCaseFieldsForType(workItemType string, req domain.UpdateCaseR
 // caseLikeExtensionUpdate returns the update statement and its arguments for
 // a non-"case" case-like work item, plus a label for error messages. "case"
 // itself goes through updateCaseQuery, which also handles severity.
-func caseLikeExtensionUpdate(workItemType string, req domain.UpdateCaseRequest, state, workState, resolutionCode, cause string) (query string, args []any, label string, ok bool) {
+//
+// actorID is passed straight through to the query as the closed_by_user_id
+// value to stamp on a transition to closed -- see UpdateCase's own interface
+// doc comment.
+func caseLikeExtensionUpdate(workItemType string, req domain.UpdateCaseRequest, state, workState, resolutionCode, cause string, actorID *string) (query string, args []any, label string, ok bool) {
 	switch workItemType {
 	case "SECURITY_REPORT_ANALYSIS":
-		return updateSecurityReportAnalysisQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "security report analysis", true
+		return updateSecurityReportAnalysisQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode, actorID}, "security report analysis", true
 	case "SERVICE_REQUEST":
-		return updateServiceRequestQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "service request", true
+		return updateServiceRequestQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode, actorID}, "service request", true
 	case "ENGAGEMENT":
-		return updateEngagementQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode}, "engagement", true
+		return updateEngagementQuery, []any{req.ID, state, cause, req.CloseNotes, workState, resolutionCode, actorID}, "engagement", true
 	case "ANNOUNCEMENT":
 		annState := state
 		if annState == "CLOSED" {
 			annState = "CLOSE"
 		}
-		return updateAnnouncementQuery, []any{req.ID, annState, cause, req.CloseNotes}, "announcement", true
+		return updateAnnouncementQuery, []any{req.ID, annState, cause, req.CloseNotes, actorID}, "announcement", true
 	}
 	return "", nil, "", false
 }
@@ -2026,7 +2197,7 @@ func scanUpdatedCase(row pgx.Row) (domain.Case, error) {
 }
 
 // UpdateCase implements CaseRepository.
-func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
 	state := ""
 	if req.State != nil {
 		state = strings.ToUpper(string(*req.State))
@@ -2095,13 +2266,13 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 		// here would only ever surface later as a failed mirror write. Checked in
 		// a transaction serialized per assignee.
 		if req.WorkState != nil && workState == "ONGOING" {
-			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause)
+			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause, actorID)
 		}
 
 		// req.Severity == nil: severity can't change, so there's nothing to
 		// race on — skip the transaction/lock overhead entirely.
 		if req.Severity == nil {
-			c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes))
+			c, err := scanUpdatedCase(r.db.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
 			if errors.Is(err, pgx.ErrNoRows) {
 				return domain.Case{}, nil, &apierror.NotFoundError{Msg: "case not found"}
 			}
@@ -2121,7 +2292,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 				return err
 			}
 			var txErr error
-			c, txErr = scanUpdatedCase(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes))
+			c, txErr = scanUpdatedCase(tx.QueryRow(ctx, updateCaseQuery, req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID))
 			if txErr != nil {
 				return txErr
 			}
@@ -2156,14 +2327,14 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest)
 		return c, previousSeverity, nil
 
 	default:
-		query, args, label, ok := caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause)
+		query, args, label, ok := caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)
 		if !ok {
 			return domain.Case{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
 		}
 		// Same one-Ongoing-per-engineer rule as "case": ServiceNow keeps the
 		// work state of every case-like type in one field on one table.
 		if req.WorkState != nil && workState == "ONGOING" {
-			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause)
+			return r.updateCaseEnforcingOneOngoing(ctx, req, workItemType, state, severity, workState, resolutionCode, cause, actorID)
 		}
 		c, err := scanUpdatedCase(r.db.QueryRow(ctx, query, args...))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -2383,6 +2554,13 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 	if !ok {
 		return nil, 0, &apierror.ValidationError{Msg: "referenceType is not supported by the Postgres data source: " + string(referenceType)}
 	}
+	// A change request's attachments are its own: a caller who may not see the
+	// change request gets the 404 the change request itself would give.
+	if referenceType == domain.ReferenceTypeChangeRequest {
+		if err := r.vis.requireVisibleChangeRequest(ctx, r.db, workItemID); err != nil {
+			return nil, 0, err
+		}
+	}
 
 	const where = `
 		WHERE wa.work_item_id = $1
@@ -2570,6 +2748,14 @@ var pgSortColMap = map[domain.CaseSortField]string{
 	domain.CaseSortFieldUpdatedOn: "wi.updated_on",
 	domain.CaseSortFieldSeverity:  "c.severity",
 	domain.CaseSortFieldState:     caseLikeStateSortColumn,
+	// Reuses the exact same assignee-display-name expression the SELECT list
+	// already computes (COALESCE(ae.name, first+last)) -- ae is already
+	// joined in caseSearchJoins for the assignedUserId filter/result field,
+	// so this needs no new join. LOWER(...) matches userRepo.SearchUsers's
+	// own case-insensitive name-sort convention. An unassigned case (ae.id
+	// IS NULL) evaluates to NULL here, which the query's existing "ORDER BY
+	// ... NULLS LAST" already sends to the end regardless of asc/desc.
+	domain.CaseSortFieldAssignee: "LOWER(COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')))",
 }
 
 // onboardingStatusLabels maps a projectOnboardingStatus filter value (keyed by
@@ -2695,7 +2881,14 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if len(req.Parsed.CreatedBy) > 0 {
 		// work_item.created_by is already a free-text email (not a UUID FK
 		// needing a join) -- see this file's other created_by fixes.
-		where += fmt.Sprintf(" AND wi.created_by = ANY($%d)", argIdx)
+		// Case-insensitive on both sides, matching conversation_repo.go's
+		// identical CreatedByMe comparison -- this one was a plain `=` until
+		// a real, reported gap: "My Cases" showed nothing for integration
+		// users whose work_item.created_by was stored in a different case
+		// than their token's own email claim (emailFromJWT does not
+		// normalize case either), while the unfiltered case list still
+		// showed those same cases fine.
+		where += fmt.Sprintf(" AND LOWER(wi.created_by) = ANY(SELECT LOWER(x) FROM unnest($%d::text[]) x)", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.CreatedBy)
 		argIdx++
 	}
@@ -2753,12 +2946,15 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		argIdx++
 	}
 	// state notIn: a row with no state satisfies it (the inverse of state in).
+	// See caseLikeStateLookupClause's own doc comment for why this is a
+	// targeted id lookup rather than caseLikeStateColumn's COALESCE.
 	if len(req.Parsed.ExcludeStates) > 0 {
 		states := make([]string, len(req.Parsed.ExcludeStates))
 		for i, st := range req.Parsed.ExcludeStates {
 			states[i] = strings.ToUpper(string(st))
 		}
-		where += fmt.Sprintf(" AND ("+caseLikeStateColumn+" IS NULL OR "+caseLikeStateColumn+" <> ALL($%d::text[]))", argIdx)
+		placeholder := fmt.Sprintf("$%d::text[]", argIdx)
+		where += " AND " + caseLikeStateLookupClause(req.Parsed.Types, placeholder, true)
 		filterArgs = append(filterArgs, states)
 		argIdx++
 	}
@@ -2773,9 +2969,9 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	// matches any breached row until that list is mapped onto sla_policy.
 	if req.Parsed.HasBreachedSLA != nil {
 		if *req.Parsed.HasBreachedSLA {
-			where += " AND EXISTS (SELECT 1 FROM sla bs WHERE bs.work_item_id = wi.id AND bs.has_breached IS TRUE)"
+			where += " AND EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = wi.id AND bs.live_has_breached IS TRUE)"
 		} else {
-			where += " AND NOT EXISTS (SELECT 1 FROM sla bs WHERE bs.work_item_id = wi.id AND bs.has_breached IS TRUE)"
+			where += " AND NOT EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = wi.id AND bs.live_has_breached IS TRUE)"
 		}
 	}
 	if req.Parsed.StartCreatedDate != nil {
@@ -2831,16 +3027,16 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if f := req.Parsed.TaskSLAFilter; f != nil && (f.MinBusinessElapsedPercent != nil || f.MaxBusinessElapsedPercent != nil) {
 		slaWhere := "tsla.work_item_id = wi.id"
 		if f.MinBusinessElapsedPercent != nil {
-			slaWhere += fmt.Sprintf(" AND tsla.business_elapsed_percentage >= $%d::numeric", argIdx)
+			slaWhere += fmt.Sprintf(" AND tsla.live_elapsed_percentage >= $%d::numeric", argIdx)
 			filterArgs = append(filterArgs, *f.MinBusinessElapsedPercent)
 			argIdx++
 		}
 		if f.MaxBusinessElapsedPercent != nil {
-			slaWhere += fmt.Sprintf(" AND tsla.business_elapsed_percentage <= $%d::numeric", argIdx)
+			slaWhere += fmt.Sprintf(" AND tsla.live_elapsed_percentage <= $%d::numeric", argIdx)
 			filterArgs = append(filterArgs, *f.MaxBusinessElapsedPercent)
 			argIdx++
 		}
-		where += " AND EXISTS (SELECT 1 FROM sla tsla WHERE " + slaWhere + ")"
+		where += " AND EXISTS (SELECT 1 FROM sla_live tsla WHERE " + slaWhere + ")"
 	}
 
 	// product: matched on the deployed product's own catalog name (prod is
@@ -2978,12 +3174,20 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	// Query each set the caller's identity (read from egCtx, stamped above)
 	// as their own implicit one-statement transaction, so there is no
 	// explicit tx/setCallerIdentity call needed here any more.
-	eg.Go(func() error {
-		if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
-			return fmt.Errorf("count cases: %w", err)
-		}
-		return nil
-	})
+
+	// SkipTotal: the caller does not show a total (global search shows a handful
+	// of hits), so the COUNT is not run at all -- it is as costly as the page
+	// query and holds a second pool connection while it runs.
+	if req.SkipTotal {
+		total = domain.TotalNotComputed
+	} else {
+		eg.Go(func() error {
+			if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
+				return fmt.Errorf("count cases: %w", err)
+			}
+			return nil
+		})
+	}
 
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
@@ -3111,29 +3315,94 @@ type rowsQuerier interface {
 // work_item_watcher's own migration comment: no per-row audit trail to sort
 // by), so results are ordered by user_name for a stable, deterministic
 // response instead.
+//
+// This is more than a plain read of work_item_watcher, by explicit product
+// decision:
+//
+//   - An EXTERNAL (customer) persisted watcher is only returned when they are
+//     currently a live (non-DEACTIVATED) project_contact on the case's own
+//     project -- a customer who has since left the project must not keep
+//     showing up as a watcher forever. An INTERNAL/SYSTEM/NOT_AVAILABLE
+//     watcher (an engineer) is never subject to this check at all: project_contact
+//     is an external-contact concept with no equivalent for staff, and an
+//     engineer's own Follow/Unfollow self-subscribe (see WatchersWidget in
+//     the CSM portal webapp) must keep working regardless of project_contact
+//     membership.
+//   - The project's account's five named stakeholders (technical owner,
+//     secondary technical owner, account manager, renewal account manager,
+//     and customer success manager) are additionally synthesized into the
+//     result, each with locked=true: they were never auto-persisted into
+//     work_item_watcher (see addRequestedWatchers' own doc comment for why
+//     that floor was removed), but the product decision here is to still
+//     *display* them on this read, read-only, so a caller can see every
+//     stakeholder associated with the case without being able to remove
+//     one. This is a strictly larger set than AccountDefaultWatcherEmails'
+//     own four -- that function deliberately excludes
+//     customer_success_manager_id from the default email audience (see its
+//     own doc comment), which is a decision about who gets emailed by
+//     default, not about who the account's named stakeholders are; this
+//     display is the latter, so the CSM is included here even though they
+//     are not unioned into a case.* email's Recipients.
+//   - A user who is both a real persisted watcher AND one of those five
+//     stakeholders appears exactly once, as the locked (stakeholder) copy --
+//     the inner DISTINCT ON picks locked=true first on a duplicate id. The
+//     outer query re-sorts by user_name afterward, since DISTINCT ON itself
+//     requires its own ORDER BY to start with the DISTINCT ON column.
+//
+// LEFT JOINs throughout the project_contact/account resolution so a case
+// with no project, or a project with no account, still returns every
+// INTERNAL watcher (and filters every EXTERNAL one, having nothing to
+// validate them against) rather than erroring or returning zero rows.
 func fetchCaseWatchers(ctx context.Context, q rowsQuerier, caseID string) ([]domain.WatchListUser, error) {
-	// locked mirrors AccountDefaultWatcherEmails' own four stakeholder
-	// columns (minus the email resolution), joined live rather than
-	// cross-checked against a snapshot -- see
-	// WatchListUser.Locked's own doc comment on why that's deliberate.
-	// LEFT JOINs throughout so a case with no project, or a project with no
-	// account, still returns every watcher with locked=false rather than
-	// zero rows (an INNER JOIN here would silently drop every watcher on
-	// such a case, the same class of false-empty-result bug this file's own
-	// "Case-like work_item types" fixes already guard against elsewhere).
 	rows, err := q.Query(ctx, `
-		SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)), u.email,
-		       COALESCE(u.id = acct.technical_owner_id, false)
-		           OR COALESCE(u.id = acct.secondary_technical_owner_id, false)
-		           OR COALESCE(u.id = acct.account_manager_id, false)
-		           OR COALESCE(u.id = acct.renewal_account_manager_id, false) AS locked
-		FROM work_item_watcher w
-		JOIN "user" u ON u.id = w.user_id
-		LEFT JOIN work_item wi ON wi.id = w.work_item_id
-		LEFT JOIN project p ON p.id = wi.project_id
-		LEFT JOIN account acct ON acct.id = p.account_id
-		WHERE w.work_item_id = $1
-		ORDER BY u.user_name`, caseID)
+		WITH case_context AS (
+			SELECT p.id AS project_id,
+			       acct.technical_owner_id, acct.secondary_technical_owner_id,
+			       acct.account_manager_id, acct.renewal_account_manager_id,
+			       acct.customer_success_manager_id
+			FROM work_item wi
+			LEFT JOIN project p ON p.id = wi.project_id
+			LEFT JOIN account acct ON acct.id = p.account_id
+			WHERE wi.id = $1
+		),
+		persisted AS (
+			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
+			       false AS locked
+			FROM work_item_watcher w
+			JOIN "user" u ON u.id = w.user_id
+			WHERE w.work_item_id = $1
+			  AND (
+			    u.user_type IS DISTINCT FROM 'EXTERNAL'::user_type_enum
+			    OR EXISTS (
+			        SELECT 1 FROM project_contact pc
+			        JOIN account_contact ac ON ac.id = pc.account_contact_id
+			        WHERE LOWER(ac.user_name) = LOWER(u.user_name)
+			          AND pc.project_id = (SELECT project_id FROM case_context)
+			          AND (pc.state IS NULL OR pc.state <> 'DEACTIVATED'::project_contact_state_enum)
+			    )
+			  )
+		),
+		stakeholders AS (
+			SELECT u.id, u.user_name, COALESCE(u.name, CONCAT_WS(' ', u.first_name, u.last_name)) AS name, u.email,
+			       true AS locked
+			FROM case_context cc
+			JOIN "user" u ON u.id IN (
+			    cc.technical_owner_id, cc.secondary_technical_owner_id,
+			    cc.account_manager_id, cc.renewal_account_manager_id,
+			    cc.customer_success_manager_id
+			)
+		),
+		deduped AS (
+			SELECT DISTINCT ON (id) id, user_name, name, email, locked
+			FROM (
+			    SELECT * FROM persisted
+			    UNION ALL
+			    SELECT * FROM stakeholders
+			) combined
+			ORDER BY id, locked DESC
+		)
+		SELECT id, user_name, name, email, locked FROM deduped
+		ORDER BY user_name`, caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query case watch list: %w", err)
 	}
@@ -3172,6 +3441,9 @@ func (r *caseRepo) SetCaseWatchList(ctx context.Context, caseID string, userIDs 
 	var updatedOn time.Time
 	var watchers []domain.WatchListUser
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if err := r.vis.rejectHiddenChangeRequest(ctx, tx, caseID, "case not found"); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1 RETURNING updated_on`, caseID, callerEmail).Scan(&updatedOn); err != nil {
 			return fmt.Errorf("touch work_item for watch list update: %w", err)
 		}
@@ -3203,6 +3475,30 @@ func (r *caseRepo) SetCaseWatchList(ctx context.Context, caseID string, userIDs 
 		return nil, time.Time{}, err
 	}
 	return watchers, updatedOn, nil
+}
+
+// AddCaseWatcherIfAbsent implements CaseRepository.
+func (r *caseRepo) AddCaseWatcherIfAbsent(ctx context.Context, caseID, userID string) error {
+	// ON CONFLICT DO NOTHING against work_item_watcher's own UNIQUE
+	// (work_item_id, user_id) constraint, not a WHERE NOT EXISTS check --
+	// the latter is a read-then-write race: two concurrent comments from the
+	// same not-yet-a-watcher user on the same case could both pass the
+	// EXISTS check before either commits, and the loser would then fail the
+	// INSERT on the unique constraint, surfacing as a confusing error from a
+	// call site (subscribeCommenterToWatchList) that only expects "add if
+	// absent" to ever fail on something genuinely wrong. ON CONFLICT
+	// resolves that atomically at the index level instead of racing two
+	// separate statements against it.
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO work_item_watcher (id, work_item_id, user_id)
+		SELECT gen_random_uuid(), wi.id, $2
+		FROM work_item wi
+		WHERE wi.id = $1
+		ON CONFLICT (work_item_id, user_id) DO NOTHING`, caseID, userID)
+	if err != nil {
+		return fmt.Errorf("add case watcher if absent: %w", err)
+	}
+	return nil
 }
 
 // AccountDefaultWatcherEmails implements CaseRepository.
@@ -3437,8 +3733,12 @@ func recomputeTimeCardsBillable(ctx context.Context, q txQuerier, caseID string,
 // UpdateCaseParent implements CaseRepository.
 func (r *caseRepo) UpdateCaseParent(ctx context.Context, caseID, parentID, callerEmail string) (time.Time, error) {
 	var updatedOn time.Time
+	// type = ANY(case-like): this writes a CASE's parent. Without the guard the
+	// id could name any other work item the caller can reach -- a change
+	// request a customer was never designated, for one -- and re-parent it.
 	err := r.db.QueryRow(ctx,
-		`UPDATE work_item SET parent_id = $2::uuid, updated_on = NOW(), updated_by = $3 WHERE id = $1 RETURNING updated_on`,
+		`UPDATE work_item SET parent_id = $2::uuid, updated_on = NOW(), updated_by = $3
+		  WHERE id = $1 AND type = ANY(`+caseLikeWorkItemTypes+`) RETURNING updated_on`,
 		caseID, parentID, callerEmail,
 	).Scan(&updatedOn)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -3558,6 +3858,12 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 		}
 	}
 
+	if req.AutocloseHoldUntil != nil {
+		if err := setAutocloseHoldTx(ctx, tx, req.ID, *req.AutocloseHoldUntil); err != nil {
+			return time.Time{}, err
+		}
+	}
+
 	// work_item.updated_on/updated_by are bumped unconditionally, matching
 	// every sibling UpdateCase branch, even when only "case" columns above
 	// changed.
@@ -3627,6 +3933,55 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	return updatedOn, nil
 }
 
+// autocloseHoldTables maps a case-like work_item type to the extension table
+// that carries its autoclosure_step/autoclosure_state_on columns (migrations
+// 0023/0024). ANNOUNCEMENT is absent on purpose: it has neither column, and
+// ServiceNow's auto-closure sequence never runs on one.
+var autocloseHoldTables = map[string]string{
+	"CASE":                     `"case"`,
+	"SERVICE_REQUEST":          "service_request",
+	"ENGAGEMENT":               "engagement",
+	"SECURITY_REPORT_ANALYSIS": "security_report_analysis",
+}
+
+// autoclosureStepOnHold is ServiceNow's u_autoclosure_step value for a held
+// case, the same literal csm-sync-service writes into autoclosure_step.
+const autoclosureStepOnHold = "ON_HOLD"
+
+// setAutocloseHoldTx places the case on auto-closure hold until holdUntil, the
+// Postgres equivalent of ServiceNow setting u_autoclosure_step = ON_HOLD and
+// u_autoclosure_state_time together. The date is stored as the UTC calendar day
+// at midnight: the hold has day granularity, and that is exactly what the
+// ServiceNow mirror sends (formatSNDateOnly) and what the sync reads back, so
+// the two stores never disagree about the day.
+//
+// Returns a NotFoundError for an unknown id and a ValidationError for a type
+// with no auto-closure columns (announcements).
+func setAutocloseHoldTx(ctx context.Context, tx pgx.Tx, caseID string, holdUntil time.Time) error {
+	var workItemType string
+	err := tx.QueryRow(ctx, `SELECT type::TEXT FROM work_item WHERE id = $1 AND type = ANY(`+caseLikeWorkItemTypes+`)`, caseID).Scan(&workItemType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &apierror.NotFoundError{Msg: "case not found"}
+	}
+	if err != nil {
+		return fmt.Errorf("set autoclose hold: read type: %w", err)
+	}
+	table, ok := autocloseHoldTables[workItemType]
+	if !ok {
+		return &apierror.ValidationError{Msg: "autocloseHoldUntil is not supported for announcements"}
+	}
+	u := holdUntil.UTC()
+	day := time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+	tag, err := tx.Exec(ctx, `UPDATE `+table+` SET autoclosure_step = $2, autoclosure_state_on = $3 WHERE id = $1`, caseID, autoclosureStepOnHold, day)
+	if err != nil {
+		return fmt.Errorf("set autoclose hold: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return &apierror.NotFoundError{Msg: "case not found"}
+	}
+	return nil
+}
+
 // scanTag scans a single (id, name) row into a domain.Tag. tag has no
 // "color" column (migration 0026), unlike ServiceNow's label table, so
 // Color is always nil for a Postgres-sourced tag.
@@ -3639,6 +3994,9 @@ func scanTag(row interface{ Scan(...any) error }) (domain.Tag, error) {
 // AddCaseTag implements CaseRepository.
 func (r *caseRepo) AddCaseTag(ctx context.Context, caseID, label, callerEmail string) (domain.Tag, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (domain.Tag, error) {
+		if err := r.vis.rejectHiddenChangeRequest(ctx, tx, caseID, "case not found"); err != nil {
+			return domain.Tag{}, err
+		}
 		return addCaseTagTx(ctx, tx, caseID, label, callerEmail)
 	})
 }
@@ -3726,6 +4084,9 @@ func addCaseTagTx(ctx context.Context, tx pgx.Tx, caseID, label, callerEmail str
 
 // RemoveCaseTag implements CaseRepository.
 func (r *caseRepo) RemoveCaseTag(ctx context.Context, caseID, tagID, _ string) error {
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, caseID, "case not found"); err != nil {
+		return err
+	}
 	tag, err := r.db.Exec(ctx, `DELETE FROM work_item_tag WHERE work_item_id = $1 AND tag_id = $2`, caseID, tagID)
 	if err != nil {
 		return fmt.Errorf("remove case tag: %w", err)
@@ -4055,11 +4416,11 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 // work item of any of those types, then runs the type's normal update in the
 // same transaction. An unassigned work item has no engineer to conflict with
 // and proceeds.
-func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string) (domain.Case, *domain.CaseSeverity, error) {
-	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes}, "case"
+func (r *caseRepo) updateCaseEnforcingOneOngoing(ctx context.Context, req domain.UpdateCaseRequest, workItemType, state, severity, workState, resolutionCode, cause string, actorID *string) (domain.Case, *domain.CaseSeverity, error) {
+	query, args, label := updateCaseQuery, []any{req.ID, state, severity, workState, resolutionCode, cause, req.CloseNotes, actorID}, "case"
 	if workItemType != "CASE" {
 		var ok bool
-		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause)
+		query, args, label, ok = caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)
 		if !ok {
 			return domain.Case{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
 		}

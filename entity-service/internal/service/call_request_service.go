@@ -231,13 +231,11 @@ func (s *callRequestService) SearchAllCallRequests(ctx context.Context, req doma
 	if err := validateUUIDs("filters.assignedUserIds", req.Filters.AssignedUserIDs); err != nil {
 		return domain.SearchCallRequestsResponse{}, err
 	}
-	// The parent case's assignment team has no column on this data source
-	// (work_item carries only assigned_to_id, and customer_call's own
-	// assignment_group was deliberately skipped in migration 0073), so this
-	// filter cannot be honored. Reject it rather than silently ignore it: an
-	// ignored filter would widen the result set.
-	if len(req.Filters.AssignmentTeamIDs) > 0 {
-		return domain.SearchCallRequestsResponse{}, &apierror.ValidationError{Msg: "filters.assignmentTeamIds is only supported for the ServiceNow data source"}
+	// The parent case's team is its account's CRE team on this data source; the
+	// repository binds these as uuid[], so a malformed id is rejected here
+	// (a 400 naming the field) rather than surfacing as a database cast error.
+	if err := validateUUIDs("filters.assignmentTeamIds", req.Filters.AssignmentTeamIDs); err != nil {
+		return domain.SearchCallRequestsResponse{}, err
 	}
 	for _, st := range req.Filters.States {
 		if _, ok := validCallRequestStates[st]; !ok {

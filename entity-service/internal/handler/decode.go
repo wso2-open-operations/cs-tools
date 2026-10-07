@@ -132,9 +132,10 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		apierror.WriteJSON(w, http.StatusUnauthorized, ue.Msg)
 
 	case errors.As(err, &fe):
-		// 403 – caller is authenticated but not permitted.
+		// 403 – caller is authenticated but not permitted. A refusal a client has to
+		// tell apart carries its machine-readable errorCode (apierror/codes.go).
 		log.Printf("Forbidden: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(fe.Msg)) // #nosec G706 -- path and message sanitized
-		apierror.WriteJSON(w, http.StatusForbidden, fe.Msg)
+		apierror.WriteJSONWithCode(w, http.StatusForbidden, fe.Msg, fe.Code)
 
 	case errors.As(err, &nfe):
 		// 404 – resource not found; message is safe to return.
@@ -143,8 +144,9 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 
 	case errors.As(err, &ce):
 		// 409 – request conflicts with the current state of the resource; message is safe to return.
+		// A refusal a client has to tell apart carries its machine-readable errorCode (apierror/codes.go).
 		log.Printf("Conflict: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ce.Msg)) // #nosec G706 -- path and message sanitized
-		apierror.WriteJSON(w, http.StatusConflict, ce.Msg)
+		apierror.WriteJSONWithCode(w, http.StatusConflict, ce.Msg, ce.Code)
 
 	case errors.As(err, &tme):
 		// 429 – the caller is repeating an operation inside its own cooldown;

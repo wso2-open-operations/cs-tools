@@ -61,6 +61,11 @@ const (
 	// FamilySRE identifies a Site Reliability Engineering team that is not an
 	// account-based team.
 	FamilySRE Family = "sre"
+	// FamilySME identifies a team on one of the SME (special) product
+	// rotations -- Asgardeo, Choreo Runtime, Moesif and the like. It has no
+	// dashboard type of its own, so a member lands on the CS-wide default, as
+	// a caller with no team does.
+	FamilySME Family = "sme"
 )
 
 // validFamilies is the closed set of family values the registry accepts.
@@ -75,6 +80,7 @@ var validFamilies = map[Family]bool{
 	FamilyCRE:    true,
 	FamilySREAbt: true,
 	FamilySRE:    true,
+	FamilySME:    true,
 }
 
 // Team is one of the organisation's teams. Team names are organisation
@@ -228,8 +234,8 @@ func parseFamily(family string) (Family, error) {
 	normalized := Family(strings.ToLower(trimmed))
 	if !validFamilies[normalized] {
 		return "", fmt.Errorf(
-			"unknown family %q: expected one of %q, %q, %q, %q, or empty",
-			trimmed, FamilyCREAbt, FamilyCRE, FamilySREAbt, FamilySRE)
+			"unknown family %q: expected one of %q, %q, %q, %q, %q, or empty",
+			trimmed, FamilyCREAbt, FamilyCRE, FamilySREAbt, FamilySRE, FamilySME)
 	}
 	return normalized, nil
 }

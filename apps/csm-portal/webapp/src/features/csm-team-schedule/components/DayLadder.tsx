@@ -17,7 +17,8 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from "react";
-import type { ScheduleAbsence, ScheduleAbsenceKind, ScheduleAssignment, ScheduleShift, ScheduleZone } from "../types";
+import RotaPicker, { type RotaOption } from "./RotaPicker";
+import type { ScheduleAbsence, ScheduleAbsenceKind, ScheduleAssignment, ScheduleShift, ScheduleZone, RotaFamily } from "../types";
 import {
   dayLabel,
   groupBy,
@@ -100,14 +101,19 @@ interface DayLadderProps {
   absenceKinds: ScheduleAbsenceKind[];
   /** The page's own group and team state. Rendered here as well as in the
    *  toolbar -- one control in two places, as the prototype has it. */
-  family: "CRE" | "SRE";
-  onFamilyChange: (family: "CRE" | "SRE") => void;
+  family: RotaFamily;
+  onFamilyChange: (family: RotaFamily) => void;
   teamKey: string;
   onTeamKeyChange: (teamKey: string) => void;
   teams: string[];
   /** CRE and SRE in the order they should read -- the reader's own group
    *  first, because the first of a pair reads as the default. */
-  families: readonly ("CRE" | "SRE")[];
+  families: readonly RotaFamily[];
+  /** The rotas of the family on screen, the one shown, and the change; the
+   *  picker appears only when there is more than one. */
+  rotas?: readonly RotaOption[];
+  rotaCode?: string;
+  onRotaChange?: (code: string) => void;
 }
 
 interface BlockRow {
@@ -203,7 +209,21 @@ export default function DayLadder({
   onTeamKeyChange,
   teams,
   families,
+  rotas,
+  rotaCode,
+  onRotaChange,
 }: DayLadderProps): JSX.Element {
+  const teamNameOf = useTeamName();
+  // Who is off the rota. Two kinds of span are left out:
+  //  - a stint that is rota work on another team -- the Brazil rotation,
+  //    worked on the Americas rota -- which is not time off it;
+  //  - a retired tag, such as Onboarding: no longer a reason anybody is away
+  //    today. Its old days keep their label on the month roster, which is
+  //    the record; this column answers who to plan around now.
+  const offRota = useMemo(() => {
+    const leaveOut = new Set(absenceKinds.filter((k) => k.worksRotaThere || k.retired).map((k) => k.code));
+    return absences.filter((a) => !leaveOut.has(a.kindCode));
+  }, [absences, absenceKinds]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const touched = useRef(false);
 
@@ -448,7 +468,7 @@ export default function DayLadder({
         {/* One group means nothing to switch to: only Today, or a manager,
             can look at the other group. */}
         {families.length > 1 ? (
-          <div className="seg teamseg" role="tablist" aria-label="Show CRE or SRE">
+          <div className="seg teamseg" role="tablist" aria-label={`Show ${families.join(" or ")}`}>
             {families.map((f) => (
               <button
                 key={f}
@@ -462,6 +482,8 @@ export default function DayLadder({
             ))}
           </div>
         ) : null}
+
+        <RotaPicker rotas={rotas} rotaCode={rotaCode} onRotaChange={onRotaChange} />
 
         <h2>
           On the rota <span className="count">{headcount}</span>
@@ -484,7 +506,7 @@ export default function DayLadder({
             <option value="">All teams</option>
             {teams.map((t) => (
               <option key={t} value={t}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {teamNameOf(t)}
               </option>
             ))}
           </select>
@@ -524,7 +546,7 @@ export default function DayLadder({
         ))}
         <div className="lnh offhd" style={{ ["--zc" as string]: "var(--muted)" }}>
           <span className="zchip off">Off rota</span>
-          <span className="lnt">{absences.length} not available</span>
+          <span className="lnt">{offRota.length} not available</span>
         </div>
       </div>
 
@@ -588,10 +610,10 @@ export default function DayLadder({
                 // one does not list its holder as away on the Saturday.
                 absences={
                   day.getDay() === 0 || day.getDay() === 6
-                    ? absences.filter(
+                    ? offRota.filter(
                         (a) => absenceKinds.find((k) => k.code === a.kindCode)?.bucket !== "LEAVE",
                       )
-                    : absences
+                    : offRota
                 }
                 kinds={absenceKinds}
               />

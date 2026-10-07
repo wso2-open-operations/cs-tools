@@ -309,8 +309,8 @@ func (t incidentReportTx) CreateIncidentTask(ctx context.Context, task NewIncide
 
 // insertIncidentTask inserts one work_item + incident_task pair.
 //
-// The number comes from next_portal_work_item_number() (migration 0140), the
-// series every record created in this service rather than synced uses.
+// The number is ServiceNow's TASK format, from migration 0180's TASK series
+// (next_work_item_number), started above ServiceNow's range by 0201.
 // wso2_id stays NULL: work_item_wso2_id_required_by_type does not cover
 // INCIDENT_TASK. state OPEN / active mirror ServiceNow's defaults for a new
 // incident_task, since the flows' Create Record steps leave both unset.
@@ -331,7 +331,7 @@ func (t incidentReportTx) insertIncidentTask(ctx context.Context, incidentID, su
 			)
 			VALUES (
 				gen_random_uuid(), NOW(), NOW(), $1, $1,
-				next_portal_work_item_number(), $2, 'INCIDENT_TASK'::work_item_type_enum,
+				next_work_item_number('INCIDENT_TASK'), $2, 'INCIDENT_TASK'::work_item_type_enum,
 				(SELECT g.id FROM "group" g WHERE g.id = $3::uuid), $4::uuid
 			)
 			RETURNING id, number

@@ -35,6 +35,43 @@ describe("recommendationScoreToPercent", () => {
 });
 
 describe("buildRecommendationRequestFromConversationMessages", () => {
+  it("sends the answer, not Novera's <thinking> reasoning, but never edits a user message", () => {
+    const base = {
+      createdOn: "2026-01-01T00:00:00Z",
+      isEscalated: false,
+      hasInlineAttachments: false,
+      inlineAttachments: [],
+    };
+    const req = buildRecommendationRequestFromConversationMessages([
+      { ...base, id: "1", type: "user", content: "<thinking>mine</thinking>hello" },
+      {
+        ...base,
+        id: "2",
+        type: "bot",
+        content: "<thinking>internal notes</thinking>\n\nWhich gateway is this?",
+      },
+    ]);
+    expect(req?.chatHistory.map((m) => m.content)).toEqual([
+      "<thinking>mine</thinking>hello",
+      "Which gateway is this?",
+    ]);
+  });
+
+  it("drops a bot message that was only reasoning", () => {
+    const req = buildRecommendationRequestFromConversationMessages([
+      {
+        id: "1",
+        type: "bot",
+        content: "<thinking>only reasoning</thinking>",
+        createdOn: "2026-01-01T00:00:00Z",
+        isEscalated: false,
+        hasInlineAttachments: false,
+        inlineAttachments: [],
+      },
+    ]);
+    expect(req).toBeNull();
+  });
+
   it("returns null for empty messages", () => {
     expect(buildRecommendationRequestFromConversationMessages([])).toBeNull();
   });
@@ -84,5 +121,31 @@ describe("buildRecommendationRequestFromCase", () => {
     expect(req?.conversationData.envProducts).toEqual({
       Prod: ["APIM 4.2.0"],
     });
+  });
+
+  it("drops Novera's <thinking> reasoning from case comments but not a person's", () => {
+    const data = {
+      title: "Slow API",
+      description: "",
+      createdOn: "2026-01-01T00:00:00Z",
+    } as CaseDetails;
+    const comment = (id: string, createdBy: string, content: string) => ({
+      id,
+      createdBy,
+      content,
+      type: "comments",
+      createdOn: `2026-01-02T00:00:0${id}Z`,
+      isEscalated: false,
+    });
+
+    const req = buildRecommendationRequestFromCase(data, [
+      comment("1", "support-engineer@wso2.com", "<thinking>x</thinking>keep me"),
+      comment("2", "Novera", "<thinking>internal</thinking>\n\nWhich gateway?"),
+    ]);
+
+    const contents = req?.chatHistory.map((m) => m.content) ?? [];
+    expect(contents).toContain("<thinking>x</thinking>keep me");
+    expect(contents).toContain("Which gateway?");
+    expect(contents.join("\n")).not.toContain("internal");
   });
 });

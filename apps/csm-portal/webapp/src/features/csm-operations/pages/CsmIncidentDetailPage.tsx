@@ -67,6 +67,7 @@ import IncidentActionBar from "@features/csm-operations/components/IncidentActio
 import IncidentCreateMenu from "@features/csm-operations/components/IncidentCreateMenu";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
 import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
+import { useSpecialistHandoffTeams } from "@features/csm-operations/api/useSpecialistHandoffTeams";
 import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
 import { useHandOffIncident } from "@features/csm-operations/api/useHandOffIncident";
 import {
@@ -227,6 +228,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const handOffIncident = useHandOffIncident();
   const [editOpen, setEditOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const handoffTeams = useSpecialistHandoffTeams(data?.service?.id, handoffOpen);
   // Kept for the dialog's inline success/warning result, cleared whenever the
   // dialog is reopened for a fresh attempt.
   const [handoffResult, setHandoffResult] = useState<BeIncidentHandoffResult | null>(null);
@@ -529,7 +531,6 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // Choreo/Asgardeo-specific copy would have to — a heuristic, not a gate:
   // the select is purely a convenience, and submitting it for a non-Choreo
   // incident is harmless (the backend just ignores it).
-  const isChoreoService = /choreo/i.test(incident.service?.name ?? "");
   const hasLinks = !!(incident.parent || incident.changeRequest || incident.problem || incident.causedBy);
   const hasLinkedServiceRequests =
     !!incident.linkedServiceRequests && incident.linkedServiceRequests.length > 0;
@@ -630,17 +631,23 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                 isPending={patchIncident.isPending}
                 onAction={onIncidentAction}
               />
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<UserCog size={14} />}
-                onClick={() => {
-                  setHandoffResult(null);
-                  setHandoffOpen(true);
-                }}
-              >
-                Escalate to specialist team
-              </Button>
+              {/* Shown when the incident can be handed off now, as
+                  ServiceNow shows "Escalate to Special Ops" only when
+                  canEscalateToSpecialOps holds. An absent flag (ServiceNow
+                  data source) keeps the button. */}
+              {incident.canHandOffToSpecialist !== false && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<UserCog size={14} />}
+                  onClick={() => {
+                    setHandoffResult(null);
+                    setHandoffOpen(true);
+                  }}
+                >
+                  Escalate to specialist team
+                </Button>
+              )}
               <IncidentCreateMenu
                 items={[
                   {
@@ -1104,7 +1111,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
 
       {handoffOpen && (
         <HandoffToSpecialistDialog
-          showTeamSelect={isChoreoService}
+          teamOptions={handoffTeams.data ?? []}
+          isLoadingTeams={handoffTeams.isLoading}
           isSubmitting={handOffIncident.isPending}
           result={handoffResult}
           onClose={() => {

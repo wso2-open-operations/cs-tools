@@ -130,11 +130,45 @@ type CommentRepository interface {
 
 type commentRepo struct {
 	db *Scoped
+	// vis decides which change requests a customer may see (change_request_
+	// visibility.go): the comments of a change request they may not see do not
+	// exist for them.
+	vis CRVisibility
 }
 
-// NewCommentRepository constructs a CommentRepository backed by the given connection pool.
-func NewCommentRepository(db *Scoped) CommentRepository {
-	return &commentRepo{db: db}
+// NewCommentRepository constructs a CommentRepository backed by the given
+// connection pool. The optional CRVisibility is the change request
+// customer-visibility policy, applied to every comment read or written by id of
+// a change request (CommentRepository's reference type change_request, and the
+// by-comment-id operations, which reach a change request's comments too).
+func NewCommentRepository(db *Scoped, vis ...CRVisibility) CommentRepository {
+	return &commentRepo{db: db, vis: firstCRVisibility(vis)}
+}
+
+// requireVisibleReference is the change request visibility guard for the
+// operations that name a work item by reference: for the change_request
+// reference type, a restricted caller who may not see the change request gets
+// the same 404 the change request itself would give. Other reference types are
+// not change requests and are left to row-level security as before.
+func (r *commentRepo) requireVisibleReference(ctx context.Context, referenceID string, referenceType domain.ReferenceType) error {
+	if referenceType != domain.ReferenceTypeChangeRequest {
+		return nil
+	}
+	return r.vis.requireVisibleChangeRequest(ctx, r.db, referenceID)
+}
+
+// hiddenChangeRequestComment is a restricted-caller-only extra condition for the
+// operations that name a comment by id: the comment must not belong to a change
+// request the caller may not see. sql is "" for an Unrestricted caller; alias is
+// the comment table's alias in the statement and nextArg the next free
+// placeholder.
+func (r *commentRepo) hiddenChangeRequestComment(ctx context.Context, alias string, args []any) (string, []any) {
+	frag, extra := r.vis.clause(ctx, "cwi", "ccr", len(args)+1)
+	if frag == "" {
+		return "", args
+	}
+	return fmt.Sprintf(` AND NOT EXISTS (SELECT 1 FROM work_item cwi JOIN change_request ccr ON ccr.id = cwi.id
+	                                       WHERE cwi.id = %s.work_item_id AND NOT (%s))`, alias, frag), append(args, extra...)
 }
 
 const commentColumns = `id, work_item_id, content, type, created_by, created_on, deleted_at, deleted_by, last_edited_at`
@@ -159,6 +193,9 @@ func (r *commentRepo) CreateComment(ctx context.Context, referenceID string, ref
 	workItemTypes, ok := ReferenceTypeToWorkItemType[referenceType]
 	if !ok {
 		return CommentRow{}, &apierror.ValidationError{Msg: "referenceType is not supported by the Postgres data source: " + string(referenceType)}
+	}
+	if err := r.requireVisibleReference(ctx, referenceID, referenceType); err != nil {
+		return CommentRow{}, err
 	}
 
 	// INSERT ... SELECT ... WHERE EXISTS rather than a plain INSERT, so the
@@ -190,6 +227,9 @@ func (r *commentRepo) SearchComments(ctx context.Context, referenceID string, re
 	workItemTypes, ok := ReferenceTypeToWorkItemType[referenceType]
 	if !ok {
 		return nil, 0, &apierror.ValidationError{Msg: "referenceType is not supported by the Postgres data source: " + string(referenceType)}
+	}
+	if err := r.requireVisibleReference(ctx, referenceID, referenceType); err != nil {
+		return nil, 0, err
 	}
 
 	args := []any{referenceID, workItemTypes}
@@ -275,7 +315,8 @@ func (r *commentRepo) SearchComments(ctx context.Context, referenceID string, re
 
 // GetCommentByID implements CommentRepository.
 func (r *commentRepo) GetCommentByID(ctx context.Context, id string) (CommentRow, error) {
-	row, err := scanComment(r.db.QueryRow(ctx, `SELECT `+commentColumns+` FROM comment WHERE id = $1`, id))
+	hide, args := r.hiddenChangeRequestComment(ctx, "comment", []any{id})
+	row, err := scanComment(r.db.QueryRow(ctx, `SELECT `+commentColumns+` FROM comment WHERE id = $1`+hide, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CommentRow{}, &apierror.NotFoundError{Msg: "comment not found: " + id}
 	}
@@ -294,7 +335,8 @@ func (r *commentRepo) UpdateComment(ctx context.Context, id string, newContent s
 		// SELECT ... FOR UPDATE: row-locked for the duration of the transaction so
 		// a concurrent edit or delete can't interleave between this read and the
 		// INSERT/UPDATE below.
-		if err := tx.QueryRow(ctx, `SELECT content, deleted_at FROM comment WHERE id = $1 FOR UPDATE`, id).Scan(&oldContent, &deletedAt); err != nil {
+		hide, args := r.hiddenChangeRequestComment(ctx, "comment", []any{id})
+		if err := tx.QueryRow(ctx, `SELECT content, deleted_at FROM comment WHERE id = $1`+hide+` FOR UPDATE OF comment`, args...).Scan(&oldContent, &deletedAt); err != nil {
 			return err
 		}
 		if deletedAt != nil {
@@ -331,12 +373,13 @@ func (r *commentRepo) UpdateComment(ctx context.Context, id string, newContent s
 // the row is retained verbatim so the service layer can still decide, per
 // caller, whether to show it redacted or not at all.
 func (r *commentRepo) SoftDeleteComment(ctx context.Context, id string, deletedByEmail string) error {
-	const query = `
+	hide, hideArgs := r.hiddenChangeRequestComment(ctx, "comment", []any{deletedByEmail, id})
+	query := `
 		UPDATE comment SET deleted_at = NOW(), deleted_by = $1
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $2 AND deleted_at IS NULL` + hide + `
 		RETURNING id`
 	var returnedID string
-	err := r.db.QueryRow(ctx, query, deletedByEmail, id).Scan(&returnedID)
+	err := r.db.QueryRow(ctx, query, hideArgs...).Scan(&returnedID)
 	if err == nil {
 		return nil
 	}
@@ -348,7 +391,8 @@ func (r *commentRepo) SoftDeleteComment(ctx context.Context, id string, deletedB
 	// comment doesn't exist, or it's already deleted. Distinguish the two
 	// with a follow-up read so the caller gets the right status code.
 	var alreadyDeleted bool
-	checkErr := r.db.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM comment WHERE id = $1`, id).Scan(&alreadyDeleted)
+	hideRead, readArgs := r.hiddenChangeRequestComment(ctx, "comment", []any{id})
+	checkErr := r.db.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM comment WHERE id = $1`+hideRead, readArgs...).Scan(&alreadyDeleted)
 	if errors.Is(checkErr, pgx.ErrNoRows) {
 		return &apierror.NotFoundError{Msg: "comment not found: " + id}
 	}
@@ -366,9 +410,12 @@ func (r *commentRepo) SoftDeleteComment(ctx context.Context, id string, deletedB
 
 // GetCommentEditHistory implements CommentRepository.
 func (r *commentRepo) GetCommentEditHistory(ctx context.Context, commentID string) ([]CommentEditHistoryRow, error) {
+	hide, args := r.hiddenChangeRequestComment(ctx, "c", []any{commentID})
 	rows, err := r.db.Query(ctx,
-		`SELECT id, comment_id, body, edited_by, edited_at FROM comment_edit_history WHERE comment_id = $1 ORDER BY edited_at DESC`,
-		commentID,
+		`SELECT h.id, h.comment_id, h.body, h.edited_by, h.edited_at
+		   FROM comment_edit_history h JOIN comment c ON c.id = h.comment_id
+		  WHERE h.comment_id = $1`+hide+` ORDER BY h.edited_at DESC`,
+		args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get comment edit history: %w", err)

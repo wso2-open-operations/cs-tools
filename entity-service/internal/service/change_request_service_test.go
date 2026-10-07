@@ -37,6 +37,7 @@ type stubChangeRequestRepo struct {
 	createChangeRequest               func(ctx context.Context, req domain.CreateChangeRequestRequest, createdBy string) (domain.CreateChangeRequestResponse, error)
 	createChangeRequestFromServiceNow func(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error)
 	patchChangeRequest                func(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, error)
+	getChangeRequestByID              func(ctx context.Context, id string) (domain.ChangeRequest, error)
 	getChangeRequestApprovals         func(ctx context.Context, id string) (domain.ChangeRequestApprovals, error)
 	decideChangeRequestApproval       func(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
 	validateChangeRequestLinks        func(ctx context.Context, sel domain.ChangeRequestLinkSelection) (domain.ChangeRequestLinkSet, error)
@@ -79,7 +80,10 @@ func (s *stubChangeRequestRepo) SearchChangeRequests(context.Context, domain.Sea
 func (s *stubChangeRequestRepo) AggregateChangeRequests(context.Context, domain.AggregateChangeRequestsRequest, string, int, *time.Time, *time.Time, *string) (domain.AggregateResponse, error) {
 	panic("not implemented")
 }
-func (s *stubChangeRequestRepo) GetChangeRequestByID(context.Context, string) (domain.ChangeRequest, error) {
+func (s *stubChangeRequestRepo) GetChangeRequestByID(ctx context.Context, id string) (domain.ChangeRequest, error) {
+	if s.getChangeRequestByID != nil {
+		return s.getChangeRequestByID(ctx, id)
+	}
 	panic("not implemented")
 }
 func (s *stubChangeRequestRepo) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, error) {
@@ -673,7 +677,7 @@ func TestChangeRequestService_DecideChangeRequestApproval_MirrorFailureRecordsWr
 // TestChangeRequestService_DecideChangeRequestApproval_RepoNotFoundPropagates
 // covers the "no pending approval for this caller" case: the repo's
 // NotFoundError (no approval_stage_approver row matched work_item_id +
-// approver_user_id + status='requested') must propagate as-is, with no
+// approver_user_id + state='REQUESTED') must propagate as-is, with no
 // mirror dispatch attempted -- stubMirrorChangeRequestService here has no
 // decideChangeRequestApproval configured, so a dispatch attempt would
 // panic.
@@ -1257,5 +1261,35 @@ func TestChangeRequestService_PatchChangeRequest_RefusesRemovedFields(t *testing
 		if !asValidationError(err, &ve) || ve.Msg != tc.want {
 			t.Fatalf("%s: err = %v, want ValidationError %q", name, err, tc.want)
 		}
+	}
+}
+
+// TestChangeRequestService_GetChangeRequest_PassesTheViewerAnswerThrough: the
+// detail's customerCanAnswer is the repository's, per viewer -- the service adds,
+// drops and recomputes nothing, and keeps absent, false and true apart.
+func TestChangeRequestService_GetChangeRequest_PassesTheViewerAnswerThrough(t *testing.T) {
+	yes, no := true, false
+	for name, want := range map[string]*bool{"absent": nil, "false": &no, "true": &yes} {
+		repo := &stubChangeRequestRepo{
+			getChangeRequestByID: func(_ context.Context, id string) (domain.ChangeRequest, error) {
+				if id != testUUID {
+					t.Errorf("repo got id %q, want %q", id, testUUID)
+				}
+				return domain.ChangeRequest{CustomerCanAnswer: want}, nil
+			},
+		}
+		got, err := NewChangeRequestService(repo, stubUserRepo{}).GetChangeRequest(context.Background(), testUUID)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", name, err)
+		}
+		if (got.CustomerCanAnswer == nil) != (want == nil) || (want != nil && *got.CustomerCanAnswer != *want) {
+			t.Errorf("%s: customerCanAnswer = %v, want %v", name, got.CustomerCanAnswer, want)
+		}
+	}
+
+	_, err := NewChangeRequestService(&stubChangeRequestRepo{}, stubUserRepo{}).GetChangeRequest(context.Background(), "not-a-uuid")
+	var ve *apierror.ValidationError
+	if !asValidationError(err, &ve) {
+		t.Fatalf("expected *apierror.ValidationError for an invalid id, got %T: %v", err, err)
 	}
 }

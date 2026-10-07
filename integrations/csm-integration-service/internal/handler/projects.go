@@ -91,14 +91,8 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// UpdateProject handles PATCH /projects/{id}. Targets a ServiceNow-data-source-only
-// entity-service operation that requires a forwarded end-user identity token — this
-// service is strictly M2M with no mechanism to supply one, so calls here always
-// receive a mapped 401 from upstream. Kept for API-shape completeness (see the
-// entity-client method's doc comment), not because it currently succeeds. The
-// request body is forwarded verbatim; the entity service enforces its own
-// "at least one field" business rule and 400s otherwise, so this handler does not
-// re-validate that.
+// UpdateProject handles PATCH /projects/{id}, forwarding the body verbatim; the entity
+// service validates it and authorizes this service as an allow-listed internal client.
 func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {

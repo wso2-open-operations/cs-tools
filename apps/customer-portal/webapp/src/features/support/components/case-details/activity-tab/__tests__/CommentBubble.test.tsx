@@ -60,6 +60,32 @@ function renderBubble(
 }
 
 describe("CommentBubble", () => {
+  it("hides Novera's <thinking> reasoning in the linked chat transcript", () => {
+    renderBubble({
+      comment: {
+        ...mockComment,
+        id: "novera-1",
+        createdBy: "Novera",
+        content:
+          "<thinking>The user asks about a product.\nI should ask a follow-up.</thinking>\n\nWhich environment is this?",
+      },
+    });
+    expect(screen.getByText(/Which environment is this\?/)).toBeInTheDocument();
+    expect(screen.queryByText(/follow-up/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/thinking/i)).not.toBeInTheDocument();
+  });
+
+  it("leaves a person's own comment alone, even if it contains the tag", () => {
+    renderBubble({
+      comment: {
+        ...mockComment,
+        id: "person-1",
+        content: "[code]<p>why does &lt;thinking&gt; show up?</p>[/code]",
+      },
+    });
+    expect(screen.getByText(/why does <thinking> show up\?/)).toBeInTheDocument();
+  });
+
   it("should render comment content", () => {
     renderBubble();
     expect(

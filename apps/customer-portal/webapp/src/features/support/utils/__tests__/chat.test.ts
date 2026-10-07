@@ -18,8 +18,10 @@ import { describe, expect, it } from "vitest";
 import {
   displayTextFromConversationContent,
   getFinalMessageFromPayload,
+  isTokenLimitNoticeText,
   sanitizeStreamToken,
   splitTokenForTyping,
+  stripThinkingBlocks,
 } from "@features/support/utils/chat";
 
 describe("splitTokenForTyping", () => {
@@ -39,6 +41,77 @@ describe("sanitizeStreamToken", () => {
   });
 });
 
+describe("stripThinkingBlocks", () => {
+  it("removes a leading thinking block and keeps the answer", () => {
+    const raw =
+      "<thinking> The user asks about Widget 2.\n- Dev: Widget 1\nI should ask.\n</thinking>\n\nI don't see Widget 2 in your environments.";
+    expect(stripThinkingBlocks(raw)).toBe(
+      "I don't see Widget 2 in your environments.",
+    );
+  });
+
+  it("removes every block, in any letter case", () => {
+    expect(
+      stripThinkingBlocks("A<thinking>x</thinking>B<Thinking>y</THINKING>C"),
+    ).toBe("ABC");
+  });
+
+  it("hides a block that is still open while the answer streams", () => {
+    expect(stripThinkingBlocks("<thinking>The user wants")).toBe("");
+    expect(stripThinkingBlocks("Done.\n<thinking>more reasoning")).toBe(
+      "Done.\n",
+    );
+  });
+
+  it("hides a half-typed opening tag at the end of the streamed text", () => {
+    for (const partial of ["<t", "<thin", "<thinking"]) {
+      expect(stripThinkingBlocks(`Hello ${partial}`)).toBe("Hello ");
+    }
+  });
+
+  it("shows only the answer, never reasoning, as a block is typed out", () => {
+    const full = "<thinking>reason</thinking>Answer";
+    // Starts at 2: a lone trailing "<" is deliberately kept because it can be
+    // real text, so it shows for one character until the next token arrives.
+    for (let i = 2; i <= full.length; i += 1) {
+      const shown = stripThinkingBlocks(full.slice(0, i));
+      expect(shown === "" || "Answer".startsWith(shown)).toBe(true);
+    }
+  });
+
+  it("keeps the author's indentation, whichever side of a block it is on", () => {
+    // A block removed later in the message must not eat leading whitespace.
+    expect(stripThinkingBlocks("    code\n<thinking>reason</thinking>")).toBe(
+      "    code\n",
+    );
+    // After a leading block only the gap goes; the first real line keeps its indent.
+    expect(stripThinkingBlocks("<thinking>x</thinking>\n\n    code")).toBe(
+      "    code",
+    );
+    expect(stripThinkingBlocks("<thinking>x</thinking>   Answer")).toBe(
+      "Answer",
+    );
+  });
+
+  it("stays linear however many openers there are", () => {
+    const manyOpeners = "<thinking>x".repeat(50_000);
+    const started = performance.now();
+    expect(stripThinkingBlocks(manyOpeners)).toBe("");
+    // A rescan per unclosed opener takes several seconds here; a linear scan well
+    // under a millisecond. The bound is ~1000x the real cost so load can't flake it.
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(stripThinkingBlocks("keep <thinking>x</thinking>".repeat(2_000))).toBe(
+      "keep ".repeat(2_000),
+    );
+  });
+
+  it("returns text without a thinking tag untouched", () => {
+    const plain = "Set `a < b` and use <b>bold</b> or <thead> markup.";
+    expect(stripThinkingBlocks(plain)).toBe(plain);
+    expect(stripThinkingBlocks("")).toBe("");
+  });
+});
+
 describe("displayTextFromConversationContent", () => {
   it("returns parsed message for bot JSON payloads", () => {
     const raw = '{"message":"Final answer","description":"hidden"}';
@@ -47,6 +120,21 @@ describe("displayTextFromConversationContent", () => {
 
   it("returns raw text for invalid JSON payloads", () => {
     expect(displayTextFromConversationContent("{bad-json", true)).toBe("{bad-json");
+  });
+});
+
+describe("isTokenLimitNoticeText", () => {
+  it("matches a limit notice the customer can see", () => {
+    expect(isTokenLimitNoticeText("You have hit the usage limit.")).toBe(true);
+  });
+
+  it("ignores a limit mentioned only inside hidden reasoning", () => {
+    expect(
+      isTokenLimitNoticeText(
+        "<thinking>They may be hitting a rate limit.</thinking>Which gateway is this?",
+      ),
+    ).toBe(false);
+    expect(isTokenLimitNoticeText("")).toBe(false);
   });
 });
 

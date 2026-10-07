@@ -14,10 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import ChangeRequestActionBar from "@features/csm-operations/components/ChangeRequestActionBar";
+import type { PendingCustomerReview } from "@features/csm-operations/utils/changeRequests";
 import type { BeChangeRequestDetail } from "@api/backend/types";
 
 const BASE_CR: BeChangeRequestDetail = {
@@ -32,12 +33,21 @@ const BASE_CR: BeChangeRequestDetail = {
 
 function renderBar(
   overrides: Partial<BeChangeRequestDetail>,
-  { isPending = false, onAction = vi.fn() } = {},
-): { onAction: ReturnType<typeof vi.fn>; container: HTMLElement } {
+  {
+    isPending = false,
+    onAction = vi.fn<(target: string) => void>(),
+    pendingCustomerReview,
+  }: {
+    isPending?: boolean;
+    onAction?: Mock<(target: string) => void>;
+    pendingCustomerReview?: PendingCustomerReview | null;
+  } = {},
+): { onAction: Mock<(target: string) => void>; container: HTMLElement } {
   const { container } = render(
     <ChangeRequestActionBar
       cr={{ ...BASE_CR, ...overrides }}
       isPending={isPending}
+      pendingCustomerReview={pendingCustomerReview}
       onAction={onAction}
     />,
   );
@@ -327,6 +337,109 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
     expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
   });
 
+  describe("Request Approval needs a Customer Project when a customer box is ticked", () => {
+    const REASON = "Select a Customer Project before requesting approval";
+    const ACME = { id: "proj-a", name: "Acme Project" };
+
+    it.each([
+      ["Customer Approval", { customerApprovalRequired: true }],
+      ["Customer Review", { customerReviewRequired: true }],
+      ["both", { customerApprovalRequired: true, customerReviewRequired: true }],
+    ])("is disabled, with the reason, when %s is ticked and there is no project", (_name, flags) => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess"], ...flags });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeDisabled();
+      expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${REASON}`);
+      fireEvent.click(button);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it("is enabled once a Customer Project is set", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], customerApprovalRequired: true, project: ACME });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    });
+
+    it("is enabled with no project when no customer part is required (a Standard change too)", () => {
+      renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], customerApprovalRequired: false });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    });
+
+    it("names the missing team first, when both are missing", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], assignedTeam: null, customerApprovalRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Set an assigned team before requesting approval",
+      );
+    });
+
+    it("leaves Cancel change usable behind the menu", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess", "canceled"], customerReviewRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+      expect(onAction).toHaveBeenCalledWith("canceled");
+    });
+  });
+
+  describe("Request Approval needs somebody to ask when a customer box is ticked (a project with at least one registered contact)", () => {
+    const REASON = "Register a contact for the Customer Project before requesting approval";
+    const PROJECT = { id: "proj-a", name: "Example Corp Platform" };
+    const CONTACT = { id: "k1", name: "Mia Member", email: "mia.member@example.com" };
+
+    it.each([
+      ["Customer Approval", { customerApprovalRequired: true }],
+      ["Customer Review", { customerReviewRequired: true }],
+      ["both", { customerApprovalRequired: true, customerReviewRequired: true }],
+    ])("is disabled, with the reason, when %s is ticked and the project has no registered contact", (_name, flags) => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess"], project: PROJECT, customerContacts: [], ...flags });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeDisabled();
+      expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${REASON}`);
+      fireEvent.click(button);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it("is enabled while the project has a registered contact (a requester-only project is the backend's refusal, shown when it answers)", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess"], project: PROJECT, customerContacts: [CONTACT], customerApprovalRequired: true });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it("is enabled when no customer part is required, however few contacts the project has (a Standard change too)", () => {
+      renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], project: PROJECT, customerContacts: [] });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    });
+
+    it("claims nothing while the contacts are not in the payload", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], project: PROJECT, customerApprovalRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    });
+
+    it("names the missing project, or the missing team, before the missing contact", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], customerContacts: [], customerApprovalRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Select a Customer Project before requesting approval",
+      );
+      cleanup();
+      renderBar({ state: "new", legalNextStates: ["assess"], assignedTeam: null, project: PROJECT, customerContacts: [], customerApprovalRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Set an assigned team before requesting approval",
+      );
+    });
+
+    it("leaves Cancel change usable behind the menu", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess", "canceled"], project: PROJECT, customerContacts: [], customerReviewRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+      expect(onAction).toHaveBeenCalledWith("canceled");
+    });
+  });
+
   it("blocks only the target with the unmet prerequisite, leaving the others clickable", () => {
     // `assess` is blocked *and* is first in FORWARD_ORDER, so it stays the
     // promoted (disabled) primary while `canceled` stays usable behind the
@@ -384,27 +497,57 @@ describe("ChangeRequestActionBar — Request Approval flow, no manual Schedule",
 });
 
 /**
- * Customer Approval / Customer Review gates. `scheduled` is a manual target in
- * exactly one place: leaving `customer_approval`, where it records the
- * customer's approval. `legalNextStates` stays the single source of truth for
- * which of Close / Send for customer review the Review state offers.
+ * Customer Approval / Customer Review gates. Staff never record a customer's
+ * approval or review: `scheduled` out of `customer_approval` and `closed` out of
+ * `customer_review` are the customer's own answers, given in the Customer
+ * Portal, so the bar never offers them -- not as a button, not as a menu entry,
+ * not even a disabled one -- whatever `legalNextStates` says. `legalNextStates`
+ * stays the single source of truth for which of Close / Send for customer
+ * review the Review state offers.
  */
 describe("ChangeRequestActionBar — customer approval and customer review gates", () => {
-  it("from customer_approval offers 'Record customer approval' (primary) and Cancel", () => {
+  const buttonLabels = (): Array<string | null> => screen.getAllByRole("button").map((b) => b.textContent);
+  const menuLabels = (): Array<string | null> => screen.getAllByRole("menuitem").map((i) => i.textContent);
+
+  it("from customer_approval offers Re-schedule and, in the menu, Cancel change: no way to record the customer's approval", () => {
     const { onAction } = renderBar({
       state: "customer_approval",
       customerApprovalRequired: true,
-      legalNextStates: ["scheduled", "canceled"],
+      legalNextStates: ["authorize", "canceled"],
     });
-    const record = screen.getByRole("button", { name: "Record customer approval" });
-    expect(record).toBeInTheDocument();
+    // Re-schedule is the outlined button; "Change state" is the contained one (there is no primary move).
+    expect(buttonLabels()).toEqual(["Re-schedule", "Change state"]);
+    expect(screen.getByRole("button", { name: "Re-schedule" }).className).toContain("MuiButton-outlined");
+    expect(screen.getByRole("button", { name: "Change state" }).className).toContain("MuiButton-contained");
     openMenu();
-    expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
-    // Cancel and Record are the only actions; no Schedule wording.
-    expect(screen.queryByText(/^schedule/i)).not.toBeInTheDocument();
-    fireEvent.click(record);
-    // Sent as a plain PATCH {state:"scheduled"} by the caller.
-    expect(onAction).toHaveBeenCalledWith("scheduled");
+    expect(menuLabels()).toEqual(["Cancel change"]);
+    // No bypass or Schedule wording anywhere, and the retired "Record customer approval" is long gone.
+    expect(screen.queryByText(/bypass|record customer|^schedule/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+    expect(onAction).toHaveBeenCalledWith("canceled");
+  });
+
+  it("never offers `scheduled` out of customer_approval, even when the backend lists it (an older one did)", () => {
+    const { onAction } = renderBar({
+      state: "customer_approval",
+      customerApprovalRequired: true,
+      legalNextStates: ["scheduled", "authorize", "canceled"],
+    });
+    expect(buttonLabels()).toEqual(["Re-schedule", "Change state"]);
+    openMenu();
+    expect(menuLabels()).toEqual(["Cancel change"]);
+    expect(screen.queryByText(/^schedul|bypass/i)).not.toBeInTheDocument();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("offers only Cancel change at customer_approval when Re-schedule is not legal, and nothing when `scheduled` is the only target", () => {
+    renderBar({ state: "customer_approval", legalNextStates: ["scheduled", "canceled"] });
+    expect(buttonLabels()).toEqual(["Change state"]);
+    openMenu();
+    expect(menuLabels()).toEqual(["Cancel change"]);
+    cleanup();
+    const { container } = renderBar({ state: "customer_approval", legalNextStates: ["scheduled"] });
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("never offers the customer_approval state itself as an action, even when listed", () => {
@@ -417,45 +560,49 @@ describe("ChangeRequestActionBar — customer approval and customer review gates
     expect(screen.queryByRole("menuitem", { name: /customer approval/i })).not.toBeInTheDocument();
   });
 
-  it("offers no Record customer approval outside customer_approval, even if scheduled is listed", () => {
-    for (const state of ["new", "assess", "authorize", "scheduled", "implement", "review", "customer_review"]) {
-      const { container } = renderBar({
-        state,
-        legalNextStates: ["scheduled"],
-      });
-      expect(container).toBeEmptyDOMElement();
-      expect(screen.queryByText(/record customer approval/i)).not.toBeInTheDocument();
+  it("offers `scheduled` from no state at all, even if the backend listed it", () => {
+    for (const state of [
+      "new", "assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review",
+      "closed", "canceled", "rollback",
+    ]) {
       cleanup();
+      const { container } = renderBar({ state, legalNextStates: ["scheduled"] });
+      expect(container, state).toBeEmptyDOMElement();
     }
   });
 
-  it("offers no button or menu item labelled Schedule/Scheduled in any state", () => {
+  it("offers no button or menu item labelled Schedule/Scheduled or Bypass in any state", () => {
     for (const state of ["new", "assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review"]) {
       renderBar({
         state,
         legalNextStates: ["assess", "scheduled", "implement", "review", "customer_review", "closed", "canceled"],
       });
-      expect(screen.queryByRole("button", { name: /schedul/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /schedul|bypass/i }), state).not.toBeInTheDocument();
       const trigger = screen.queryByRole("button", { name: /change state/i });
       if (trigger) {
         fireEvent.click(trigger);
-        expect(screen.queryByRole("menuitem", { name: /schedul/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("menuitem", { name: /schedul|bypass/i }), state).not.toBeInTheDocument();
       }
       cleanup();
     }
   });
 
-  it("Review with customer review NOT required offers Close and Cancel, and no customer review", () => {
-    renderBar({
+  it("Review with customer review NOT required offers Close (the primary move) and Cancel, and no customer review", () => {
+    const { onAction } = renderBar({
       state: "review",
       customerReviewRequired: false,
       legalNextStates: ["closed", "canceled"],
     });
-    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.className).toContain("MuiButton-contained");
     expect(screen.queryByText(/send for customer review/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
     openMenu();
     expect(screen.queryByRole("menuitem", { name: /customer review/i })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.click(close);
+    expect(onAction).toHaveBeenCalledWith("closed");
   });
 
   it("Review with customer review required offers Send for customer review and Cancel, and no Close", () => {
@@ -471,40 +618,77 @@ describe("ChangeRequestActionBar — customer approval and customer review gates
     expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
   });
 
-  it("customer_review offers Close and Cancel", () => {
-    renderBar({
+  it("from customer_review offers Roll back and Cancel change in the menu only: no Close, no way to record the customer's review", () => {
+    const { onAction } = renderBar({
       state: "customer_review",
       customerReviewRequired: true,
-      legalNextStates: ["closed", "canceled"],
+      legalNextStates: ["rollback", "canceled"],
     });
-    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
-    expect(screen.queryByText(/send for customer review/i)).not.toBeInTheDocument();
+    expect(buttonLabels()).toEqual(["Change state"]);
+    expect(screen.getByRole("button", { name: "Change state" }).className).toContain("MuiButton-contained");
+    expect(screen.queryByText(/send for customer review|bypass/i)).not.toBeInTheDocument();
     openMenu();
-    expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
+    expect(menuLabels()).toEqual(["Roll back", "Cancel change"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Roll back" }));
+    expect(onAction).toHaveBeenCalledWith("rollback");
+  });
+
+  it("never offers `closed` out of customer_review, even when the backend lists it (an older one did)", () => {
+    const { onAction } = renderBar({
+      state: "customer_review",
+      customerReviewRequired: true,
+      legalNextStates: ["closed", "rollback", "canceled"],
+    });
+    expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
+    expect(buttonLabels()).toEqual(["Change state"]);
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: /close|bypass/i })).not.toBeInTheDocument();
+    expect(menuLabels()).toEqual(["Roll back", "Cancel change"]);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("renders no bar at all from customer_review when `closed` is the only legal target", () => {
+    const { container } = renderBar({ state: "customer_review", legalNextStates: ["closed"] });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps `closed` out of every state but customer_review (Review's plain Close is not the customer's answer)", () => {
+    for (const state of ["review", "implement", "scheduled"]) {
+      cleanup();
+      renderBar({ state, legalNextStates: ["closed"] });
+      expect(screen.getByRole("button", { name: "Close" }), state).toBeInTheDocument();
+    }
   });
 });
 
 /**
- * With a live Customer Approval / Customer Review stage the backend offers only
- * `canceled`, so the bar shows Cancel alone; with no customer group (no stage)
- * it keeps offering the manual path. The bar never second-guesses the server.
+ * With a live Customer Review stage the backend offers only `canceled`; with
+ * nobody to ask it offers Roll back too. Roll back is enabled exactly when
+ * `legalNextStates` offers it, and shown disabled -- with who the customer's
+ * review is waiting on -- when the caller says one is pending (a failed review
+ * is the customer's to give, in the Customer Portal). Nothing here ever makes a
+ * customer's approval or review something staff can record.
  */
 describe("ChangeRequestActionBar — customer gates with and without a live customer stage", () => {
-  it("customer_approval with legalNextStates=[canceled] offers only Cancel (no Record customer approval)", () => {
-    renderBar({ state: "customer_approval", customerApprovalRequired: true, legalNextStates: ["canceled"] });
-    expect(screen.queryByRole("button", { name: /record customer approval/i })).not.toBeInTheDocument();
-    // Cancel is destructive: menu-only, so it is the sole item behind "Change state".
-    openMenu();
-    expect(screen.getAllByRole("menuitem")).toHaveLength(1);
-    expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
+  const PENDING_REVIEW: PendingCustomerReview = { contactNames: ["Mira Santos"] };
+  const ROLLBACK_PENDING_REASON =
+    "Customer review is pending from Mira Santos. A failed review is theirs to give in the Customer Portal, so the change can't be rolled back from here.";
+
+  it("customer_approval with a live customer request is the same as without: Re-schedule, and Cancel change in the menu", () => {
+    // Nobody can be asked about Roll back at Customer Approval, so even a pending review passed in adds nothing.
+    for (const pending of [null, PENDING_REVIEW]) {
+      cleanup();
+      renderBar(
+        { state: "customer_approval", customerApprovalRequired: true, legalNextStates: ["authorize", "canceled"] },
+        { pendingCustomerReview: pending },
+      );
+      expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Re-schedule", "Change state"]);
+      openMenu();
+      expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Cancel change"]);
+    }
   });
 
-  it("customer_approval fallback legalNextStates=[scheduled, canceled] still offers Record customer approval", () => {
-    renderBar({ state: "customer_approval", customerApprovalRequired: true, legalNextStates: ["scheduled", "canceled"] });
-    expect(screen.getByRole("button", { name: "Record customer approval" })).toBeInTheDocument();
-  });
-
-  it("customer_review with legalNextStates=[canceled] offers no Close", () => {
+  it("customer_review with legalNextStates=[canceled] and nothing known to be pending offers only Cancel", () => {
     renderBar({ state: "customer_review", customerReviewRequired: true, legalNextStates: ["canceled"] });
     expect(screen.queryByRole("button", { name: /^close$/i })).not.toBeInTheDocument();
     openMenu();
@@ -512,26 +696,258 @@ describe("ChangeRequestActionBar — customer gates with and without a live cust
     expect(screen.getByRole("menuitem", { name: /cancel change/i })).toBeInTheDocument();
   });
 
-  it("customer_review fallback legalNextStates=[closed, canceled] offers Close", () => {
-    renderBar({ state: "customer_review", customerReviewRequired: true, legalNextStates: ["closed", "canceled"] });
-    expect(screen.getByRole("button", { name: /^close$/i })).toBeInTheDocument();
+  it("customer_review with a pending review shows Roll back DISABLED, saying who is asked and where they answer, next to Cancel", () => {
+    const { onAction } = renderBar(
+      { state: "customer_review", customerReviewRequired: true, legalNextStates: ["canceled"] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Change state"]);
+    openMenu();
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      `Roll back${ROLLBACK_PENDING_REASON}`,
+      "Cancel change",
+    ]);
+    const rollBack = screen.getByRole("menuitem", { name: /^Roll back: / });
+    expect(rollBack).toHaveAttribute("aria-disabled", "true");
+    expect(rollBack).toHaveAttribute("aria-label", `Roll back: ${ROLLBACK_PENDING_REASON}`);
+    fireEvent.click(rollBack);
+    expect(onAction).not.toHaveBeenCalled();
+    // Cancel is the one way out an engineer still has; nothing else is added: no Close, no bypass.
+    expect(screen.getByRole("menuitem", { name: /cancel change/i })).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText(/bypass|^close/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+    expect(onAction).toHaveBeenCalledWith("canceled");
+  });
+
+  it("keeps the disabled Roll back reachable by keyboard so its reason can be read", () => {
+    renderBar(
+      { state: "customer_review", legalNextStates: ["canceled"] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    openMenu();
+    const item = screen.getByRole("menuitem", { name: /^Roll back: / });
+    act(() => item.focus());
+    expect(item).toHaveFocus();
+    expect(item).not.toHaveAttribute("disabled");
+  });
+
+  it("keeps Roll back disabled at Customer Review even if an older backend still lists it, and enables it with nothing pending", () => {
+    const { onAction } = renderBar(
+      { state: "customer_review", legalNextStates: ["closed", "rollback", "canceled"] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    openMenu();
+    // `closed` is never offered, listed or not: Roll back and Cancel change only.
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+    const blocked = screen.getByRole("menuitem", { name: /^Roll back: / });
+    expect(blocked).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(blocked);
+    expect(onAction).not.toHaveBeenCalled();
+    cleanup();
+    const second = renderBar(
+      { state: "customer_review", legalNextStates: ["rollback", "canceled"] },
+      { pendingCustomerReview: null },
+    );
+    openMenu();
+    const free = screen.getByRole("menuitem", { name: "Roll back" });
+    expect(free).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(free);
+    expect(second.onAction).toHaveBeenCalledWith("rollback");
+  });
+
+  it("never blocks Roll back out of Review, whatever customer review is passed as pending", () => {
+    renderBar(
+      { state: "review", customerReviewRequired: true, legalNextStates: ["customer_review", "rollback", "canceled"] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    openMenu();
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Roll back", "Cancel change"]);
+    expect(screen.getByRole("menuitem", { name: "Roll back" })).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("uses a generic sentence when the pending review names nobody", () => {
+    renderBar(
+      { state: "customer_review", legalNextStates: ["canceled"] },
+      { pendingCustomerReview: { contactNames: [] } },
+    );
+    openMenu();
+    expect(screen.getByRole("menuitem", { name: /^Roll back: / })).toHaveTextContent(
+      "Customer review is pending. A failed review is the customer's to give in the Customer Portal, so the change can't be rolled back from here.",
+    );
+  });
+
+  it("adds the disabled Roll back only alongside targets the backend offered", () => {
+    // No legal targets (a record the caller may not transition): nothing to render.
+    const { container } = renderBar(
+      { state: "customer_review", legalNextStates: [] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("never turns a pending customer review into a block on an ordinary Close out of Review", () => {
+    const { onAction } = renderBar(
+      { state: "review", customerReviewRequired: false, legalNextStates: ["closed", "rollback", "canceled"] },
+      { pendingCustomerReview: PENDING_REVIEW },
+    );
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close).toBeEnabled();
+    openMenu();
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Roll back", "Cancel change"]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.click(close);
+    expect(onAction).toHaveBeenCalledWith("closed");
+  });
+
+  it("adds no Roll back to states that are not Customer Review, whatever is passed as pending", () => {
+    for (const state of ["new", "assess", "authorize", "customer_approval", "scheduled", "implement"]) {
+      cleanup();
+      renderBar({ state, legalNextStates: ["canceled"] }, { pendingCustomerReview: PENDING_REVIEW });
+      openMenu();
+      expect(screen.getAllByRole("menuitem").map((i) => i.textContent), state).toEqual(["Cancel change"]);
+    }
+  });
+
+  it("disables the whole Change state menu while a transition is in flight, Roll back and Cancel change included", () => {
+    renderBar({ state: "customer_review", legalNextStates: ["rollback", "canceled"] }, { isPending: true });
+    expect(screen.getByRole("button", { name: /change state/i })).toBeDisabled();
+  });
+});
+
+/**
+ * How the gates look now that nobody answers for the customer: nothing in
+ * either gate is styled as a bypass (no warning colour, no skip icon), and
+ * nothing in any gate, for any `legalNextStates`, is a button named for one.
+ */
+describe("ChangeRequestActionBar — no bypass anywhere in either customer gate", () => {
+  it("renders no 'bypass' button, menu entry or skip icon in either gate, whatever else is legal", () => {
+    for (const [state, legal] of [
+      ["customer_approval", ["scheduled", "authorize", "canceled"]],
+      ["customer_approval", ["scheduled", "canceled"]],
+      ["customer_approval", ["authorize", "canceled"]],
+      ["customer_review", ["closed", "rollback", "canceled"]],
+      ["customer_review", ["closed", "canceled"]],
+      ["customer_review", ["rollback", "canceled"]],
+    ] as const) {
+      cleanup();
+      const { container } = renderBar({ state, legalNextStates: [...legal] });
+      for (const b of screen.getAllByRole("button")) {
+        expect(b.textContent, `${state} ${legal.join(",")}`).not.toMatch(/bypass/i);
+      }
+      openMenu();
+      for (const item of screen.getAllByRole("menuitem")) {
+        expect(item.textContent, `${state} ${legal.join(",")}`).not.toMatch(/bypass/i);
+      }
+      expect(container.querySelector(".lucide-skip-forward"), `${state} ${legal.join(",")}`).toBeNull();
+      expect(document.querySelector(".lucide-skip-forward"), `${state} ${legal.join(",")}`).toBeNull();
+    }
+  });
+
+  it("orders the menu forward moves, then Roll back, then Cancel change (the destructive ones last, in the error colour)", () => {
+    renderBar({ state: "review", customerReviewRequired: false, legalNextStates: ["canceled", "rollback", "closed"] });
+    openMenu();
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((i) => i.textContent)).toEqual(["Roll back", "Cancel change"]);
+    for (const item of items) expect(item.querySelector("span")).toHaveStyle({ color: "rgb(211, 47, 47)" });
+  });
+});
+
+/**
+ * The whole bar, state by state: which button is primary, which is the outlined
+ * secondary, and what sits behind "Change state" (in order). Each row is the
+ * legalNextStates the backend sends for that state with nothing blocking it.
+ */
+describe("ChangeRequestActionBar — what each state shows", () => {
+  const TABLE: Array<{
+    name: string;
+    cr: Partial<BeChangeRequestDetail>;
+    primary: string | null;
+    secondary: string[];
+    menu: string[];
+  }> = [
+    { name: "new", cr: { state: "new", legalNextStates: ["assess", "canceled"] }, primary: "Request Approval", secondary: [], menu: ["Cancel change"] },
+    { name: "assess", cr: { state: "assess", legalNextStates: ["authorize", "canceled"] }, primary: null, secondary: [], menu: ["Cancel change"] },
+    { name: "authorize", cr: { state: "authorize", legalNextStates: ["canceled"] }, primary: null, secondary: [], menu: ["Cancel change"] },
+    {
+      name: "customer_approval",
+      cr: { state: "customer_approval", legalNextStates: ["authorize", "canceled"] },
+      primary: null,
+      secondary: ["Re-schedule"],
+      menu: ["Cancel change"],
+    },
+    {
+      name: "customer_approval (an older backend that still lists scheduled)",
+      cr: { state: "customer_approval", legalNextStates: ["scheduled", "authorize", "canceled"] },
+      primary: null,
+      secondary: ["Re-schedule"],
+      menu: ["Cancel change"],
+    },
+    { name: "scheduled", cr: { state: "scheduled", legalNextStates: ["implement", "canceled"] }, primary: "Start implementation", secondary: [], menu: ["Cancel change"] },
+    { name: "implement", cr: { state: "implement", legalNextStates: ["review", "canceled"] }, primary: "Mark implemented", secondary: [], menu: ["Cancel change"] },
+    {
+      name: "review (customer review required)",
+      cr: { state: "review", customerReviewRequired: true, legalNextStates: ["customer_review", "rollback", "canceled"] },
+      primary: "Send for customer review",
+      secondary: [],
+      menu: ["Roll back", "Cancel change"],
+    },
+    {
+      name: "review (no customer review)",
+      cr: { state: "review", customerReviewRequired: false, legalNextStates: ["closed", "rollback", "canceled"] },
+      primary: "Close",
+      secondary: [],
+      menu: ["Roll back", "Cancel change"],
+    },
+    {
+      name: "customer_review (nobody being asked)",
+      cr: { state: "customer_review", legalNextStates: ["rollback", "canceled"] },
+      primary: null,
+      secondary: [],
+      menu: ["Roll back", "Cancel change"],
+    },
+    {
+      name: "customer_review (an older backend that still lists closed)",
+      cr: { state: "customer_review", legalNextStates: ["closed", "rollback", "canceled"] },
+      primary: null,
+      secondary: [],
+      menu: ["Roll back", "Cancel change"],
+    },
+  ];
+
+  it.each(TABLE)("$name", ({ cr, primary, secondary, menu }) => {
+    renderBar(cr);
+    const contained = screen.queryAllByRole("button").filter((b) => b.className.includes("MuiButton-contained"));
+    const outlined = screen
+      .getAllByRole("button")
+      .filter((b) => b.className.includes("MuiButton-outlined") && b.textContent !== "Change state");
+    // Exactly one contained button: the primary move, or "Change state" when there is none.
+    expect(contained.map((b) => b.textContent)).toEqual([primary ?? "Change state"]);
+    expect(outlined.map((b) => b.textContent)).toEqual(secondary);
+    openMenu();
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(menu);
+  });
+
+  it.each(["rollback", "closed", "canceled"])("%s is terminal and renders nothing", (state) => {
+    const { container } = renderBar({ state, legalNextStates: [] });
+    expect(container).toBeEmptyDOMElement();
   });
 });
 
 /** "Roll back": the failed-review off-ramp, offered from the two review states only. */
 describe("ChangeRequestActionBar — Roll back", () => {
   it.each([
-    ["review", ["closed", "rollback", "canceled"], /^close$/i],
-    ["review", ["customer_review", "rollback", "canceled"], /send for customer review/i],
-    ["customer_review", ["closed", "rollback", "canceled"], /^close$/i],
-  ])("from %s (%j) offers Roll back as a destructive menu item next to the forward move", (state, legal, forward) => {
+    ["review", ["closed", "rollback", "canceled"], /^close$/i, ["Roll back", "Cancel change"]],
+    ["review", ["customer_review", "rollback", "canceled"], /send for customer review/i, ["Roll back", "Cancel change"]],
+    // Out of Customer Review there is no forward move for staff (the customer's review is theirs to give): no primary at all.
+    ["customer_review", ["rollback", "canceled"], null, ["Roll back", "Cancel change"]],
+  ])("from %s (%j) offers Roll back as a destructive menu item next to the forward move", (state, legal, forward, expected) => {
     const { onAction } = renderBar({ state, legalNextStates: legal });
-    // Exactly one primary button: the forward move, never Roll back.
-    expect(screen.getByRole("button", { name: forward })).toBeInTheDocument();
+    // At most one primary button: the forward move, never Roll back.
+    if (forward) expect(screen.getByRole("button", { name: forward })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /roll back/i })).not.toBeInTheDocument();
     openMenu();
     const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
-    expect(items).toEqual(["Roll back", "Cancel change"]);
+    expect(items).toEqual(expected);
     const item = screen.getByRole("menuitem", { name: /roll back/i });
     // Error colour, same as Cancel change.
     expect(item.querySelector("span")).toHaveStyle({ color: "rgb(211, 47, 47)" });
@@ -556,14 +972,14 @@ describe("ChangeRequestActionBar — Roll back", () => {
  * button next to the primary move; offered from `customer_approval` only.
  */
 describe("ChangeRequestActionBar — Re-schedule", () => {
-  it("is an outlined button next to Record customer approval, with Cancel in the menu", () => {
+  it("is an outlined button beside 'Change state', which holds Cancel change", () => {
     const { onAction } = renderBar({
       state: "customer_approval",
-      legalNextStates: ["scheduled", "authorize", "canceled"],
+      legalNextStates: ["authorize", "canceled"],
     });
     const contained = screen.getAllByRole("button").filter((b) => b.className.includes("MuiButton-contained"));
     expect(contained).toHaveLength(1);
-    expect(contained[0]).toHaveTextContent("Record customer approval");
+    expect(contained[0]).toHaveTextContent("Change state");
     const reschedule = screen.getByRole("button", { name: "Re-schedule" });
     expect(reschedule.className).toContain("MuiButton-outlined");
     openMenu();
@@ -576,7 +992,7 @@ describe("ChangeRequestActionBar — Re-schedule", () => {
   it("stays on offer while a customer group's approval is pending (Cancel is the only other action)", () => {
     renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"] });
     expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Record customer approval" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
     openMenu();
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Cancel change"]);
   });
@@ -596,5 +1012,21 @@ describe("ChangeRequestActionBar — Re-schedule", () => {
       expect(screen.queryByRole("button", { name: /re-schedule/i }), state).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /authorize/i }), state).not.toBeInTheDocument();
     }
+  });
+});
+
+describe("ChangeRequestActionBar — the Change state button", () => {
+  it("says whether its menu is open, and which element the menu is", () => {
+    renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"] });
+    const button = screen.getByRole("button", { name: /change state/i });
+    expect(button).toHaveAttribute("aria-haspopup", "menu");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(button).not.toHaveAttribute("aria-controls");
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    const menuId = button.getAttribute("aria-controls");
+    expect(menuId).toBeTruthy();
+    expect(document.getElementById(menuId!)).toBe(screen.getByRole("menu"));
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   });
 });

@@ -117,6 +117,13 @@ const (
 	ActionRead   Action = "read"
 	ActionUpdate Action = "update"
 	ActionDelete Action = "delete"
+	// ActionDecide is the narrow "give the customer's own answer" grant: on a
+	// change request it covers approving or rejecting what is waiting on the
+	// customer (Customer Approval / Customer Review) and proposing a new
+	// implementation time, and nothing else. It is a distinct action, not a
+	// widening of ActionUpdate, so a role can hold it without being able to edit
+	// the change request. Only ModuleChangeRequests defines it.
+	ActionDecide Action = "decide"
 )
 
 // permissionMatrix maps each module and action to the set of canonical roles permitted.
@@ -151,6 +158,24 @@ var permissionMatrix = map[Module]map[Action][]CanonicalRole{
 		ActionRead:   {RoleAdmin, RoleAgent, RoleInternal, RoleCustomerAdmin, RoleCustomerUser, RolePartnerAdmin, RolePartnerUser},
 		ActionUpdate: {RoleAdmin, RoleAgent, RoleInternal},
 		ActionDelete: {RoleAdmin},
+		// ActionDecide: customers answer what is waiting on them (approve /
+		// reject a Customer Approval or Customer Review, propose a new
+		// implementation time) in this portal -- there is no other place they
+		// can. It is held by exactly the roles that can read a change request,
+		// because entity-service, not this matrix, decides who may actually
+		// answer: only a REGISTERED PORTAL_USER contact of the change request's
+		// own project (the Customer Group the approval was asked of) is
+		// accepted, whatever their role here. Granting it to every external
+		// reader therefore opens nothing the project's contact list does not,
+		// and withholding it from partner roles would strand a partner contact
+		// the approval was addressed to.
+		//
+		// It is deliberately NOT an ActionUpdate: a role holding only Decide may
+		// send the customer-outcome body (see handler.PatchChangeRequest) and
+		// nothing else, and still cannot create, edit or delete a change request.
+		// The WSO2-side roles hold it because the approvals/decision route is
+		// theirs too (internal stages are decided there).
+		ActionDecide: {RoleAdmin, RoleAgent, RoleInternal, RoleCustomerAdmin, RoleCustomerUser, RolePartnerAdmin, RolePartnerUser},
 		// Stakeholder has no access to Change Requests.
 	},
 	ModuleDeployments: {
@@ -290,22 +315,54 @@ func writeForbiddenError(w http.ResponseWriter, message string) {
 	_ = json.NewEncoder(w).Encode(authErrorBody{Message: message})
 }
 
+// grantedActionKey is the context key under which RequirePermissionOneOf
+// records the action that let a request through.
+type grantedActionKey struct{}
+
+// GrantedActionFromContext returns the action RequirePermissionOneOf matched for
+// this request, and false when the request did not pass through it. A handler
+// that serves two levels of access reads this to decide how much of the request
+// to honour, and must treat "not present" as the narrowest level (fail closed).
+func GrantedActionFromContext(ctx context.Context) (Action, bool) {
+	a, ok := ctx.Value(grantedActionKey{}).(Action)
+	return a, ok
+}
+
+// WithGrantedAction returns a copy of ctx recording action as the one that let
+// the request through. RequirePermissionOneOf is the only production caller; it
+// is exported so handler tests can put a request at a given level without
+// building the whole middleware chain.
+func WithGrantedAction(ctx context.Context, action Action) context.Context {
+	return context.WithValue(ctx, grantedActionKey{}, action)
+}
+
+// resolveRolesForRequest resolves the caller's roles, writing the 401 (no
+// authenticated user) or 502 (roles could not be resolved) response itself and
+// returning false when the request cannot go on.
+func resolveRolesForRequest(w http.ResponseWriter, r *http.Request, resolver RoleResolver) ([]CanonicalRole, bool) {
+	user := UserInfoFromContext(r.Context())
+	if user == nil {
+		writeAuthError(w, "You are not authorized to perform this action. Please try again.")
+		return nil, false
+	}
+
+	roles, err := resolver.GetRoles(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "rbac: failed to resolve roles", "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(authErrorBody{Message: "Failed to resolve user roles."})
+		return nil, false
+	}
+	return roles, true
+}
+
 // RequirePermission wraps next with authorization checking against the permission matrix.
 func RequirePermission(resolver RoleResolver, module Module, action Action) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user := UserInfoFromContext(r.Context())
-			if user == nil {
-				writeAuthError(w, "You are not authorized to perform this action. Please try again.")
-				return
-			}
-
-			roles, err := resolver.GetRoles(r.Context())
-			if err != nil {
-				slog.ErrorContext(r.Context(), "rbac: failed to resolve roles", "err", err)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadGateway)
-				_ = json.NewEncoder(w).Encode(authErrorBody{Message: "Failed to resolve user roles."})
+			roles, ok := resolveRolesForRequest(w, r, resolver)
+			if !ok {
 				return
 			}
 
@@ -315,6 +372,32 @@ func RequirePermission(resolver RoleResolver, module Module, action Action) func
 			}
 
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequirePermissionOneOf is RequirePermission for a route that serves more than
+// one level of access: it lets the request through when the caller holds ANY of
+// actions on module, and records the first one they hold (see
+// GrantedActionFromContext) so the handler can tell which level it is serving.
+// List actions broadest first -- the first match wins, so a caller who holds
+// both is served at the broader level.
+func RequirePermissionOneOf(resolver RoleResolver, module Module, actions ...Action) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			roles, ok := resolveRolesForRequest(w, r, resolver)
+			if !ok {
+				return
+			}
+
+			for _, action := range actions {
+				if HasPermission(roles, module, action) {
+					next.ServeHTTP(w, r.WithContext(WithGrantedAction(r.Context(), action)))
+					return
+				}
+			}
+
+			writeForbiddenError(w, "You do not have permission to perform this action.")
 		})
 	}
 }

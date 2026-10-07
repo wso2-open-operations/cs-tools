@@ -45,7 +45,9 @@ export default function ErrorBanner({
         position: "fixed",
         top: HEADER_HEIGHT_PX + BANNER_HEADER_GAP_PX,
         right: BANNER_RIGHT_GAP_PX,
-        width: 400,
+        // At most 400px, and never wider than the screen less its gutters: a fixed
+        // 400 was clipped on the left at 390px.
+        width: `min(400px, calc(100vw - ${2 * BANNER_RIGHT_GAP_PX}px))`,
         zIndex: 1500,
       }}
     >

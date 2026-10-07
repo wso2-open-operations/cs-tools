@@ -396,8 +396,26 @@ func (r *callRequestRepo) SearchAllCallRequests(ctx context.Context, f domain.Se
 		where += fmt.Sprintf(" AND "+clause, len(args))
 	}
 
+	// "Assigned to" means the PARENT CASE's assignee (the documented contract:
+	// csm-portal's SearchAllCallRequestsPayload.assignedUserIds), so a
+	// dashboard's "My Call Requests" lists the calls on the cases I own. The
+	// call's own assignee -- the engineer who agreed to attend, set only once
+	// the call is scheduled and optional even then -- is OR'd in so a call
+	// handed to someone other than the case owner still reaches them. Matching
+	// only cc.assigned_to_id (what this did before) left every
+	// pending_on_wso2 call out: nothing assigns one until it is scheduled.
+	// $%[1]d is reused for both columns so the array is bound once.
 	if len(f.AssignedUserIDs) > 0 {
-		add(`cc.assigned_to_id = ANY($%d::text[]::uuid[])`, f.AssignedUserIDs)
+		add(`(wi.assigned_to_id = ANY($%[1]d::text[]::uuid[]) OR cc.assigned_to_id = ANY($%[1]d::text[]::uuid[]))`, f.AssignedUserIDs)
+	}
+	// A case's team here is its account's CRE team (account.cre_team_id) -- the
+	// same path the case search's creTeam filter takes, and the id the
+	// dashboards' team selector hands over (BeTeam.creGroupId). The case's own
+	// work_item.assignment_group_id is not used: it is unpopulated on synced
+	// data (a case's assignedTeam comes back null). EXISTS rather than another
+	// JOIN keeps the shared FROM, and so the count/page query pair, unchanged.
+	if len(f.AssignmentTeamIDs) > 0 {
+		add(`EXISTS (SELECT 1 FROM account ta WHERE ta.id = wi.account_id AND ta.cre_team_id = ANY($%d::text[]::uuid[]))`, f.AssignmentTeamIDs)
 	}
 	if len(f.States) > 0 {
 		add(`cc.state = ANY($%d::text[]::customer_call_state_enum[])`, callRequestStatesToEnums(f.States))

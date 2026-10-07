@@ -2909,6 +2909,7 @@ func TestSNCaseService_PatchCaseFieldsBundle_SendsAllSupportedFieldsWhenPresent(
 	mostLikely := "2026-08-03"
 	worstCase := "2026-08-04"
 	workaroundProvided := true
+	holdUntil := time.Date(2026, 10, 22, 18, 29, 0, 0, time.UTC)
 
 	var gotBody map[string]any
 	requestCount := 0
@@ -2935,6 +2936,7 @@ func TestSNCaseService_PatchCaseFieldsBundle_SendsAllSupportedFieldsWhenPresent(
 		MostLikelyFixEta:   &mostLikely,
 		WorstCaseFixEta:    &worstCase,
 		WorkaroundProvided: &workaroundProvided,
+		AutocloseHoldUntil: &holdUntil,
 	}
 
 	if err := svc.patchCaseFieldsBundle(contextWithUserIDToken("token"), testDeploymentUUID, req); err != nil {
@@ -2953,6 +2955,9 @@ func TestSNCaseService_PatchCaseFieldsBundle_SendsAllSupportedFieldsWhenPresent(
 		"mostLikelyFixEta":   mostLikely,
 		"worstCaseFixEta":    worstCase,
 		"workaroundProvided": workaroundProvided,
+		// Date only, in UTC: the integration service constrains it to
+		// YYYY-MM-DD, the same shape UpdateCase's own hold sends.
+		"autocloseHoldUntil": "2026-10-22",
 	}
 	for field, wantVal := range want {
 		got, ok := gotBody[field]
@@ -2968,6 +2973,43 @@ func TestSNCaseService_PatchCaseFieldsBundle_SendsAllSupportedFieldsWhenPresent(
 	// own doc comment.
 	if _, ok := gotBody["description"]; ok {
 		t.Errorf("description must never be sent by patchCaseFieldsBundle, got %v", gotBody["description"])
+	}
+}
+
+// TestSNCaseService_PatchCaseFieldsBundle_HoldAloneIsEnoughToPatch proves a
+// request whose only mirrorable field is autocloseHoldUntil still reaches
+// ServiceNow: the early "nothing to mirror" return must not swallow the one
+// hold PATCH the CSM portal's "Hold auto-closure" action sends (digiops-cs#3318).
+func TestSNCaseService_PatchCaseFieldsBundle_HoldAloneIsEnoughToPatch(t *testing.T) {
+	holdUntil := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+
+	var gotBody map[string]any
+	requestCount := 0
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil).(*snCaseService)
+
+	req := domain.UpdateCaseRequest{ID: testDeploymentUUID, AutocloseHoldUntil: &holdUntil}
+	if err := svc.patchCaseFieldsBundle(contextWithUserIDToken("token"), testDeploymentUUID, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected exactly 1 PATCH, got %d", requestCount)
+	}
+	if got := gotBody["autocloseHoldUntil"]; got != "2026-10-22" {
+		t.Errorf("autocloseHoldUntil = %v, want 2026-10-22", got)
+	}
+	if len(gotBody) != 1 {
+		t.Errorf("only autocloseHoldUntil should be sent, got %v", gotBody)
 	}
 }
 
@@ -3001,7 +3043,7 @@ func TestSNCaseService_PatchCaseFieldsBundle_OmitsFieldsNotInRequest(t *testing.
 		t.Fatalf("title = %v (present=%v), want %q", got, ok, subject)
 	}
 	for _, field := range []string{"deploymentId", "deployedProductId", "relatedCaseId", "description",
-		"bestCaseFixEta", "mostLikelyFixEta", "worstCaseFixEta", "workaroundProvided"} {
+		"bestCaseFixEta", "mostLikelyFixEta", "worstCaseFixEta", "workaroundProvided", "autocloseHoldUntil"} {
 		if got, ok := gotBody[field]; ok {
 			t.Errorf("field %q must be omitted when not part of this update, got %v", field, got)
 		}

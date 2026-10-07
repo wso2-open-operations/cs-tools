@@ -88,6 +88,7 @@ import {
   getFinalMessageFromPayload,
   sanitizeStreamToken,
   splitTokenForTyping,
+  stripThinkingBlocks,
 } from "@features/support/utils/chat";
 import ChatInput from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatInput";
 import ChatMessageBubble from "@features/support/components/novera-ai-assistant/novera-chat-page/ChatMessageBubble";
@@ -248,7 +249,7 @@ function ConversationMsgBubble({
               components={markdownComponents}
               remarkPlugins={[remarkGfm]}
             >
-              {message.text ?? ""}
+              {stripThinkingBlocks(message.text ?? "")}
             </ReactMarkdown>
           ) : (
             <Typography

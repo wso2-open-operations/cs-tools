@@ -133,12 +133,12 @@ function CreateKBDialog({ open, onClose }: { open: boolean; onClose: () => void 
  * required before the toggle actually fires.
  */
 function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () => void }): JSX.Element {
-  const [name, setName] = useState(kb?.name ?? "");
+  const [name, setName] = useState(kb?.title ?? "");
   const [confirmingToggle, setConfirmingToggle] = useState(false);
   const update = useUpdateKnowledgeBaseName();
   const setActive = useSetKnowledgeBaseActive();
 
-  if (kb && name === "") setName(kb.name);
+  if (kb && name === "") setName(kb.title);
 
   const handleSave = (): void => {
     if (!kb || !name.trim()) return;
@@ -148,7 +148,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
   const handleConfirmToggle = (): void => {
     if (!kb) return;
     setActive.mutate(
-      { id: kb.id, isActive: !kb.isActive },
+      { id: kb.id, isActive: !kb.active },
       { onSuccess: () => setConfirmingToggle(false) },
     );
   };
@@ -160,7 +160,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
 
   return (
     <Dialog open={Boolean(kb)} onClose={handleClose} fullWidth maxWidth="sm">
-      <DialogTitle>Edit "{kb?.name}"</DialogTitle>
+      <DialogTitle>Edit "{kb?.title}"</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
         <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} fullWidth />
         {update.isError && (
@@ -174,15 +174,15 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
             <Button
               size="small"
               variant="outlined"
-              color={kb?.isActive ? "error" : "success"}
+              color={kb?.active ? "error" : "success"}
               onClick={() => setConfirmingToggle(true)}
             >
-              {kb?.isActive ? "Deactivate this knowledge base" : "Activate this knowledge base"}
+              {kb?.active ? "Deactivate this knowledge base" : "Activate this knowledge base"}
             </Button>
           ) : (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Alert severity="warning">
-                {kb?.isActive
+                {kb?.active
                   ? "Engineers will no longer be able to create new articles under this knowledge base. Existing articles are unaffected. Are you sure?"
                   : "This will let engineers create new articles under this knowledge base again. Are you sure?"}
               </Alert>
@@ -198,11 +198,11 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
                 <Button
                   size="small"
                   variant="contained"
-                  color={kb?.isActive ? "error" : "success"}
+                  color={kb?.active ? "error" : "success"}
                   onClick={handleConfirmToggle}
                   disabled={setActive.isPending}
                 >
-                  Yes, {kb?.isActive ? "deactivate" : "activate"}
+                  Yes, {kb?.active ? "deactivate" : "activate"}
                 </Button>
               </Box>
             </Box>
@@ -270,7 +270,7 @@ function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: (
 
   return (
     <Dialog open={Boolean(kb)} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Approvers for "{kb?.name}"</DialogTitle>
+      <DialogTitle>Approvers for "{kb?.title}"</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {hasNoManagers ? (
@@ -410,12 +410,12 @@ export default function CsmKBAdminPage(): JSX.Element {
               ) : (
                 kbs.map((kb) => (
                   <TableRow key={kb.id}>
-                    <TableCell>{kb.name}</TableCell>
+                    <TableCell>{kb.title}</TableCell>
                     <TableCell>
                       <Chip
                         size="small"
-                        label={kb.isActive ? "Active" : "Deactivated"}
-                        color={kb.isActive ? "success" : "default"}
+                        label={kb.active ? "Active" : "Deactivated"}
+                        color={kb.active ? "success" : "default"}
                         variant="outlined"
                       />
                     </TableCell>

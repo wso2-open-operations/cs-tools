@@ -81,6 +81,62 @@ func TestCaseFieldPredicates(t *testing.T) {
 	}
 }
 
+func TestCaseLikeStateLookupClause(t *testing.T) {
+	// Scoped to the types actually requested: only that type's own branch,
+	// matching the shape every dashboard widget's search sends (a {type}
+	// filter alongside a {state} filter).
+	got := caseLikeStateLookupClause([]string{"case"}, "$3::text[]", false)
+	want := `wi.id IN (SELECT id FROM "case" WHERE state::TEXT = ANY($3::text[]))`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// Several requested types each contribute their own branch, UNION ALL'd.
+	got = caseLikeStateLookupClause([]string{"case", "engagement"}, "$1::text[]", false)
+	for _, want := range []string{
+		`SELECT id FROM "case" WHERE state::TEXT = ANY($1::text[])`,
+		`SELECT id FROM engagement WHERE state::TEXT = ANY($1::text[])`,
+		" UNION ALL ",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+
+	// No types named: falls back to every case-like type (the DefaultTypes/
+	// no-constraint-branch case), covering the same ground the COALESCE it
+	// replaces always implicitly covered.
+	got = caseLikeStateLookupClause(nil, "$1::text[]", false)
+	for _, table := range caseLikeStateLookupAllTypes {
+		if !strings.Contains(got, table) {
+			t.Errorf("missing table %q in %s", table, got)
+		}
+	}
+
+	// announcement gets the same CLOSE->CLOSED normalization caseLikeStateColumn applies.
+	got = caseLikeStateLookupClause([]string{"announcement"}, "$1::text[]", false)
+	if !strings.Contains(got, `CASE WHEN state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE state::TEXT END`) {
+		t.Errorf("announcement branch missing CLOSE normalization: %s", got)
+	}
+
+	// negate=true renders NOT IN, for the ExcludeStates (notIn) filter.
+	got = caseLikeStateLookupClause([]string{"case"}, "$1::text[]", true)
+	if !strings.Contains(got, "wi.id NOT IN") {
+		t.Errorf("negate=true should render NOT IN: %s", got)
+	}
+
+	// A type with no case-like state branch (reachable only from an anyOf
+	// branch naming something like "incident") degrades to the same answer
+	// the COALESCE already gives: never matches for "in", always satisfies
+	// "not in" -- never invalid empty SQL.
+	if got := caseLikeStateLookupClause([]string{"incident"}, "$1::text[]", false); got != "FALSE" {
+		t.Errorf("non-case-like type (in) = %q, want FALSE", got)
+	}
+	if got := caseLikeStateLookupClause([]string{"incident"}, "$1::text[]", true); got != "TRUE" {
+		t.Errorf("non-case-like type (not in) = %q, want TRUE", got)
+	}
+}
+
 func TestCaseFieldSetFromGroup(t *testing.T) {
 	f := caseFieldSetFromGroup(domain.CaseFilterGroup{
 		Types: []string{"case"}, EscalationLevels: []string{"1"}, Tags: []string{"patch"}, ExcludeTags: []string{"s_dip"},

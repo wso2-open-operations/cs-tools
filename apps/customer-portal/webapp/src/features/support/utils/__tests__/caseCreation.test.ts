@@ -441,6 +441,19 @@ describe("caseCreation utils", () => {
       ]);
       expect(result).toBe(`Assistant: ${"b".repeat(150)}`);
     });
+
+    it("drops the assistant's thinking block but never edits a user message", () => {
+      const result = formatChatHistoryForClassification([
+        { text: "<thinking>typed by user</thinking>hi", sender: ChatSender.USER },
+        {
+          text: "<thinking>internal reasoning</thinking>\n\nWhich environment?",
+          sender: ChatSender.BOT,
+        },
+      ]);
+      expect(result).toBe(
+        "User: <thinking>typed by user</thinking>hi\nAssistant: Which environment?",
+      );
+    });
   });
 
   describe("getBaseDeploymentOptions", () => {

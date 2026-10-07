@@ -71,9 +71,15 @@ type googleChatSender interface {
 	SendCaseAcknowledgedAlert(ctx context.Context, audience, severityLabel, severityColor, caseNumber, wso2CaseID, caseLink, acknowledgerName string) error
 	SendSeverityChangedAlert(ctx context.Context, audience, oldSeverityLabel, oldSeverityColor, newSeverityLabel, newSeverityColor, caseNumber, wso2CaseID, title, team, caseLink string) error
 	SendFrustrationAlert(ctx context.Context, audience, caseNumber, wso2CaseID, productName, reason string, frustrationLevel float64, caseLink string) error
+	// The sr.* cards route to the SR's SRE team (sreTeamName) as the
+	// audience -- see handleSRCreated.
+	SendSRCreatedAlert(ctx context.Context, audience string, a notifications.SRCreatedAlert) error
+	SendSRAcknowledgedAlert(ctx context.Context, audience string, a notifications.SRAcknowledgedAlert) error
+	SendSRCustomerCommentAlert(ctx context.Context, audience string, a notifications.SRCustomerCommentAlert) error
 	// HasAudienceSpace answers "does this team have a configured Chat
 	// space" — checkFrustration's own chataudience.Resolve call needs it,
-	// same as internal/slaengine's identical use for SLA breach alerts.
+	// same as internal/slaengine's identical use for SLA breach alerts, and
+	// the sr.* handlers check it before claiming anything (srAudience).
 	HasAudienceSpace(audience string) bool
 }
 
@@ -110,6 +116,7 @@ type linkResolver interface {
 	CSMLink(caseID string) string
 	ChangeRequestLink(audience, changeRequestID, projectID string) string
 	OutageLink(outageID string) string
+	ServiceRequestLink(caseID string) string
 	// IsCustomer classifies a single email as external (customer) vs
 	// internal — handleCommentAdded's frustration-detection gate.
 	IsCustomer(ctx context.Context, email string) (bool, error)
@@ -527,6 +534,12 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeProjectContactRegistered:
 		return d.handleProjectContactRegistered(ctx, record, env.Payload)
+	case events.TypeSRCreated:
+		return d.handleSRCreated(ctx, record, env.Payload)
+	case events.TypeSRAcknowledged:
+		return d.handleSRAcknowledged(ctx, record, env.Payload)
+	case events.TypeSRCommentAdded:
+		return d.handleSRCommentAdded(ctx, record, env.Payload)
 	case events.TypeSLATierReached:
 		// Published by internal/slaengine's own Engine.Tick (a poller, not
 		// a consumer of this topic) — nothing here reacts to it yet; it

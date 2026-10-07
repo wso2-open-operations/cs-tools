@@ -51,6 +51,11 @@ login page or 2FA is driven locally. Capture a session once per role into
 
 Repeat per account for `lead.json`, `portal.json`, `security.json`.
 
+> **Local compose stack?** No capture needed — the mock identity provider signs in any email.
+> Mint a session for a seeded customer (dave, erin, mira, noel) with
+> `E2E_LOCAL_PERSONA=dave pnpm run test:e2e:local-auth`; see "Local stack" in
+> [`../README.md`](../README.md).
+
 ## What each account needs
 
 | Bundle | Account setup |

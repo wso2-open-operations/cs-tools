@@ -26,6 +26,8 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/servicenow"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
 
 // mockEntityScheduleClient stands in for entity-service, recording what the
@@ -351,4 +353,39 @@ func TestGetABTTeamSchedule_RejectsMissingSPLAccess(t *testing.T) {
 	h.GetABTTeamSchedule(w, req)
 
 	assertStatus(t, w, http.StatusForbidden)
+}
+
+// A refused edit keeps entity-service's reason -- the lead needs to know the
+// engineer is not on that team, or already holds an overlapping window -- and
+// anything else stays generic.
+func TestScheduleWriteKeepsTheRefusalReason(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		upstream   *apierror.Error
+		wantStatus int
+		wantMsg    string
+	}{
+		{"409 overlap", &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":"this person already has a window that overlaps this one on 2026-10-10"}`},
+			http.StatusConflict, "this person already has a window that overlaps this one on 2026-10-10"},
+		{"403 not on the team", &apierror.Error{StatusCode: http.StatusForbidden, Body: `{"code":403,"message":"that engineer is not on americas, so their rota is not yours to change"}`},
+			http.StatusForbidden, "that engineer is not on americas, so their rota is not yours to change"},
+		{"500 stays generic", &apierror.Error{StatusCode: http.StatusInternalServerError, Body: `{"message":"pq: relation does not exist"}`},
+			http.StatusInternalServerError, "Failed to change the rota."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := NewScheduleHandler(&mockEntityScheduleClient{
+				applyFn: func(context.Context, []byte) ([]byte, error) { return nil, c.upstream },
+			})
+			r := withUser(httptest.NewRequest(http.MethodPost, "/team-schedule/assignments/apply",
+				strings.NewReader(`{"userId":"u","teamKey":"vega","from":"2026-10-10","to":"2026-10-10"}`)))
+			w := httptest.NewRecorder()
+			h.ApplyScheduleRange(w, r)
+			if w.Code != c.wantStatus {
+				t.Fatalf("status = %d, want %d", w.Code, c.wantStatus)
+			}
+			if !strings.Contains(w.Body.String(), c.wantMsg) {
+				t.Fatalf("body = %s, want it to carry %q", w.Body.String(), c.wantMsg)
+			}
+		})
+	}
 }

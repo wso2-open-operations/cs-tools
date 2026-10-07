@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { postSkippingTotal } from "@api/backend/postSkippingTotal";
 import type {
   BeChangeRequestSearchPayload,
   BeChangeRequestSearchResponse,
@@ -91,10 +92,10 @@ export function useQuickChangeRequestSearch(
   return useQuery<QuickChangeRequestHit[], Error>({
     queryKey: [ApiQueryKeys.CHANGE_REQUESTS, "quick-search", q, scope],
     queryFn: async (): Promise<QuickChangeRequestHit[]> => {
-      const res = await api.post<
+      const res = await postSkippingTotal<
         BeChangeRequestSearchPayload,
         BeChangeRequestSearchResponse
-      >("/change-requests/search", {
+      >(api, "/change-requests/search", {
         pagination: { offset: 0, limit: QUICK_CHANGE_REQUEST_LIMIT },
         filters: scope === "number" ? { number: q } : { searchQuery: q },
       });

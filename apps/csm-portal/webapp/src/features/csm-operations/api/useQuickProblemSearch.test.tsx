@@ -47,6 +47,18 @@ describe("useQuickProblemSearch", () => {
     postMock.mockResolvedValue({ problems: [] });
   });
 
+  it("asks the server not to count every match: the palette never shows a total", async () => {
+    const { result } = renderHook(() => useQuickProblemSearch("recurring timeout"), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    expect(postMock).toHaveBeenCalledWith(
+      "/problems/search",
+      expect.objectContaining({ skipTotal: true }),
+    );
+  });
+
   it("sends free text as searchQuery for a non-number-shaped query", async () => {
     const { result } = renderHook(() => useQuickProblemSearch("disk full"), {
       wrapper,

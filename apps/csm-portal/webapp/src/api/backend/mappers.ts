@@ -34,6 +34,7 @@ import type {
   CsmCommentAuthorRole,
 } from "@features/csm-cases/types/csmCases";
 import type { UserReference } from "@/types/userReference";
+import { stripThinkingBlocks } from "@utils/stripThinkingBlocks";
 import type {
   CaseState,
   Severity,
@@ -197,8 +198,13 @@ export function uiCommentFromBe(
     authorEmail: commentAuthorEmail(comment),
     authorUser: userReferenceFromBe(comment.createdBy),
     // For a chatbot the body is Markdown; the bubble renders it as Markdown.
-    // Otherwise it is rich-text HTML, sanitised on render.
-    bodyHtml: comment.content ?? "",
+    // Otherwise it is rich-text HTML, sanitised on render. Novera's stored
+    // answer can still carry its own <thinking> reasoning — drop that here so
+    // every consumer of a chatbot body gets the answer alone.
+    bodyHtml:
+      role === "chatbot"
+        ? stripThinkingBlocks(comment.content ?? "")
+        : (comment.content ?? ""),
     authorRole: role,
     createdAt: comment.createdOn,
     internal: WORK_NOTE_TYPES.has(ty),

@@ -1177,7 +1177,7 @@ export default function CreateCasePage(): JSX.Element {
 
         let failedAttachmentNames: string[] = [];
         let attachmentsStillUploading = false;
-        if (!isSecurityReport && attachments.length > 0) {
+        if (attachments.length > 0) {
           setIsPreparingAttachments(true);
           const uploadPromise = uploadAttachments();
           const timedOut = await Promise.race([
