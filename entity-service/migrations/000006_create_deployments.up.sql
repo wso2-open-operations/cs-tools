@@ -11,12 +11,12 @@ CREATE SEQUENCE deployment_number_seq START 1;
 
 CREATE TABLE IF NOT EXISTS deployments (
     id          UUID                 PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id  UUID                 NOT NULL REFERENCES projects(id),
+    project_id  TEXT                 NOT NULL REFERENCES projects(id),
     number      VARCHAR              NOT NULL UNIQUE DEFAULT 'DEP-' || LPAD(NEXTVAL('deployment_number_seq')::TEXT, 5, '0'),
     name        TEXT                 NOT NULL,
     type        deployment_type_enum NOT NULL,
     description TEXT,
-    created_by  UUID                 NOT NULL REFERENCES users(id),
+    created_by  TEXT                 NOT NULL REFERENCES users(id),
     created_at  TIMESTAMPTZ          NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ          NOT NULL DEFAULT NOW(),
 
