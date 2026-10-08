@@ -208,18 +208,26 @@ different mechanisms, because the feature isn't backed by its own exclusive rout
 - **`/products/vulnerabilities/search` and `/products/vulnerabilities/{id}`** are genuinely
   Security-Center-exclusive, so they're gated the ordinary way: `route(..., handler.PermViewSecurityCenter, ...)`
   in `cmd/server/main.go`.
-- **`POST /cases/search`** is the shared, generic case-search endpoint every case-type tab uses
-  (Support, Operations sub-tabs, Engagements, Security reports) — it stays registered at `PermView`,
-  since narrowing that route-level permission would lock out every other tab too. Instead,
-  `CaseHandler.SearchCases` inspects the request body itself: `caseSearchTargetsSecurityReports`
+- **`POST /cases/search` and `POST /cases/aggregate`** are the shared, generic case endpoints every
+  case-type tab and dashboard widget uses (Support, Operations sub-tabs, Engagements, Security
+  reports) — both stay registered at `PermView`, since narrowing that route-level permission would
+  lock out every other tab and widget too. Instead, `CaseHandler.SearchCases` and
+  `CaseHandler.AggregateCases` inspect the request body themselves (via
+  `CaseHandler.securityReportAccessDenied`): `caseSearchTargetsSecurityReports`
   (`internal/handler/cases.go`) reads the generic filter expression (`filters.filters[]`, and each
-  `filters.anyOf[]` branch) for a `{field: "type", op: "in", values: [...]}` predicate naming
-  `security_report_analysis`, and if one is found, additionally requires `PermViewSecurityCenter` via
-  `CaseHandler.access` (wired with `WithAccessGuard`, the same pattern `UsersHandler` uses) —
-  a plain `PermView` caller gets 403 instead of the search running. This only catches an *explicit*
-  request for that type, the same way Security Center's own `caseTypes`-locked search
-  (`CsmIssuesView`, webapp) always sends one; a hypothetical unfiltered "every case type" search that
-  happens to also return security-report rows is a known, narrower gap, not handled here.
+  `filters.anyOf[]` branch — the two request bodies share the same `filters` object) for a
+  `{field: "type", op: "in", values: [...]}` predicate naming `security_report_analysis`, and if one
+  is found, additionally requires `PermViewSecurityCenter` via `CaseHandler.access` (wired with
+  `WithAccessGuard`, the same pattern `UsersHandler` uses) — a plain `PermView` caller gets 403
+  instead of the request running. This only catches an *explicit* request for that type, the same
+  way Security Center's own `caseTypes`-locked search (`CsmIssuesView`, webapp) always sends one; a
+  hypothetical unfiltered "every case type" search that happens to also return security-report rows
+  is a known, narrower gap, not handled here. For aggregate that includes `groupBy: "type"` with no
+  type filter, whose response then carries a `security_report_analysis` count bucket; that is
+  deliberately not special-cased either, since the same count can be had by subtracting the other
+  types' totals. Every dashboard `security_report_analysis` widget carries that type filter
+  (`injectImpliedTypeFilters`, `internal/dashboard/widgets.go`), so its search and its group-by
+  aggregate both need `PermViewSecurityCenter`, same as the Security reports tab itself.
 - **`GET /cases/{id}` has no equivalent check, deliberately.** `CaseView.type` (entity-service's own
   `openapi.yaml`) is only populated for ServiceNow cases — null on Postgres — so there is no reliable
   way for this handler to tell a security-report case apart from any other by inspecting the response

@@ -77,7 +77,7 @@ const (
 	// role should ever reach, such as creating a new platform user.
 	PermAdmin
 	// PermViewSecurityCenter is the Security Center area: security-report
-	// cases (POST /cases/search and GET /cases/{id}, type-checked inside
+	// cases (POST /cases/search and POST /cases/aggregate, type-checked inside
 	// CaseHandler itself — see its own doc comment for why a route-level
 	// permission alone can't express this) and both /products/vulnerabilities
 	// routes. Admin and cs_engineer only — every other role, including plain

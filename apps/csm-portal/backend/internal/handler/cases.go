@@ -133,8 +133,8 @@ type CaseHandler struct {
 	// engineering, when non-nil, files GitHub issues from a case instead of
 	// the entity service — see WithEngineeringClient.
 	engineering engineeringGitIssueClient
-	// access backs the security-report type check in SearchCases -- see
-	// WithAccessGuard. nil fails that check closed (denied), never open:
+	// access backs the security-report type check in SearchCases and
+	// AggregateCases -- see WithAccessGuard. nil fails that check closed (denied), never open:
 	// unlike UsersHandler's own optional use of this field (a display-only
 	// enrichment, harmless if skipped), this one gates real access to data.
 	access *AccessGuard
@@ -146,8 +146,9 @@ func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 }
 
 // WithAccessGuard wires the same guard that authorises every route into this
-// handler, so SearchCases can additionally require PermViewSecurityCenter for
-// a security_report_analysis-typed request — a restriction PermView alone
+// handler, so SearchCases and AggregateCases can additionally require
+// PermViewSecurityCenter for a security_report_analysis-typed request — a
+// restriction PermView alone
 // (the route-level permission it already carries, shared with every other
 // case-type view) cannot express. Returns h for chaining at the construction
 // site.
@@ -724,7 +725,9 @@ type caseFieldFilterFragment struct {
 
 // caseSearchTargetsSecurityReports reports whether body's type filter --
 // either the top-level filters.filters array or any filters.anyOf branch --
-// includes securityReportCaseType. Best-effort JSON inspection, not a full
+// includes securityReportCaseType. Used for both the search and the aggregate
+// request body, which carry the same "filters" object. Best-effort JSON
+// inspection, not a full
 // parse of the generic filter grammar (entity-service's own CaseFieldFilter):
 // a body this can't make sense of is treated as not targeting it, since a
 // genuinely malformed request is rejected by entity-service's own validation
@@ -732,7 +735,11 @@ type caseFieldFilterFragment struct {
 // explicitly ask for this type, the same way Security Center's own
 // caseTypes-locked search does (CsmIssuesView, webapp) -- a hypothetical
 // unfiltered "every case type" search that happens to also return
-// security-report rows is a known, narrower gap, not handled here.
+// security-report rows is a known, narrower gap, not handled here. The same
+// goes for an aggregate with no type filter, including one with groupBy "type",
+// whose response then carries a security_report_analysis bucket (and whose
+// totals include those rows). Refusing groupBy "type" on its own would not
+// close that: the same count falls out of subtracting the other types' totals.
 func caseSearchTargetsSecurityReports(body []byte) bool {
 	var req struct {
 		Filters struct {
@@ -754,6 +761,14 @@ func caseSearchTargetsSecurityReports(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// securityReportAccessDenied reports whether body asks for security-report
+// cases (caseSearchTargetsSecurityReports) from a caller whose roles do not
+// hold PermViewSecurityCenter. A nil access guard fails closed (denied), never
+// open -- see the access field.
+func (h *CaseHandler) securityReportAccessDenied(body []byte, roles []string) bool {
+	return caseSearchTargetsSecurityReports(body) && !(h.access != nil && h.access.Permits(PermViewSecurityCenter, roles))
 }
 
 func filtersNameSecurityReportType(filters []caseFieldFilterFragment) bool {
@@ -795,7 +810,7 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if caseSearchTargetsSecurityReports(body) && !(h.access != nil && h.access.Permits(PermViewSecurityCenter, user.Roles)) {
+	if h.securityReportAccessDenied(body, user.Roles) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
@@ -818,7 +833,8 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 // capped to the top maxGroups buckets with the remainder folded into
 // othersCount. The groupBy allowlist is validated upstream by the entity
 // service; this layer only forwards the request and passes the response
-// through as-is.
+// through as-is, apart from the same Security Center check SearchCases applies
+// to a request whose filters name the security_report_analysis type.
 func (h *CaseHandler) AggregateCases(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -839,6 +855,11 @@ func (h *CaseHandler) AggregateCases(w http.ResponseWriter, r *http.Request) {
 
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if h.securityReportAccessDenied(body, user.Roles) {
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
