@@ -133,4 +133,20 @@ describe("CaseDetailsSection", () => {
     expect(screen.getByText("Select Issue Type...")).toBeInTheDocument();
     expect(screen.getByText("Select Severity Level...")).toBeInTheDocument();
   });
+
+  it("should show the selected severity's own label in the read-only chip even when the dropdown is restricted to Low", () => {
+    renderSection({
+      isSeverityDisabled: true,
+      severity: "critical-id",
+      filters: {
+        issueTypes: [],
+        severities: [
+          { id: "low-id", label: "Low (P4)" },
+          { id: "critical-id", label: "Critical (P1)" },
+        ],
+      },
+    });
+    expect(screen.getByText("S1")).toBeInTheDocument();
+    expect(screen.queryByText("S4(Query)")).not.toBeInTheDocument();
+  });
 });
