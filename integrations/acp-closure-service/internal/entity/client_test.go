@@ -17,6 +17,7 @@
 package entity
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -190,6 +191,34 @@ func TestDoSuccess(t *testing.T) {
 	const want = `{"projects":[],"total":0}`
 	if string(body) != want {
 		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+// TestDoRejectsOversizedSuccessBody: a successful (2xx) response larger than
+// the client's limit is rejected with an error instead of being read into
+// memory. Error bodies were already capped; success bodies weren't, so a
+// buggy or compromised upstream could exhaust the task's memory (security
+// assessment 2026-10-08, CWE-400).
+func TestDoRejectsOversizedSuccessBody(t *testing.T) {
+	const limit = 10 << 20 // 10 MiB
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), limit+1))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client := mustNewClient(t, Config{
+		BaseURL:      upstream.URL,
+		TokenURL:     tokenSrv.URL,
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+		Scopes:       RequiredScopes,
+	})
+
+	body, err := client.SearchProjects(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatalf("SearchProjects() returned %d bytes and no error, want an error for a body over %d bytes", len(body), limit)
 	}
 }
 

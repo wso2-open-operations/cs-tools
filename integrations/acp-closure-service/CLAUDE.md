@@ -649,6 +649,16 @@ client through `internal/httpsec`, and must keep doing so:
   redirect). Guarding only the API client leaves the secret exposed; this
   exact mistake happened once in the email client.
 
+- `httpsec.ReadBounded` caps how much of a **successful** response either
+  client reads into memory: 10 MiB for csm-integration-service (a 50-item
+  page is a few hundred KB) and 1 MiB for the email service (a small JSON
+  acknowledgement). A larger body is an error, not buffered. Error bodies
+  were already capped at 256 bytes; success bodies weren't, which the
+  2026-10-08 security assessment flagged (CWE-400). The project-opportunity
+  link and invoice paging loops also stop once `total` rows are read, like
+  `Run`'s project paging, so an upstream that keeps answering `hasMore: true`
+  can't hold the run until the job timeout.
+
 These checks were first added to the email client alone (CodeRabbit, PR
 #1657). The entity client went without them until they were moved into the
 shared package, which is why they live in one place now. If you add a third

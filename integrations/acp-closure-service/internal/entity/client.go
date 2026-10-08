@@ -141,6 +141,11 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// maxResponseBody caps a successful response body (10 MiB):
+// a 50-item page of projects, contacts or invoices is a few hundred KB at most, so anything larger is treated as an error rather than read into
+// memory (see httpsec.ReadBounded).
+const maxResponseBody = 10 << 20
+
 // do executes an authenticated HTTP request against csm-integration-service
 // and returns the raw JSON response body. The caller owns the returned slice.
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
@@ -175,7 +180,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := httpsec.ReadBounded(resp.Body, maxResponseBody)
 	if err != nil {
 		return nil, fmt.Errorf("entity: read response body: %w", err)
 	}
