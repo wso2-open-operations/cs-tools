@@ -503,7 +503,16 @@ func (r *githubMutationRepository) CreateServiceRequestFromIssue(ctx context.Con
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1,
 			        next_github_service_request_number(),
 			        -- Required for SERVICE_REQUEST by work_item_wso2_id_required_by_type.
-			        next_github_service_request_wso2_id(),
+			        -- Project-scoped, as a portal-created record's is ("<key>-PORTAL-<n>",
+			        -- migration 0140), so the record reads as one of its project's cases.
+			        -- WSO2-GH-<n> only when there is no keyed project to scope it to: a
+			        -- repository on the account_github_repo fallback carries no project,
+			        -- and next_portal_wso2_id raises rather than return NULL for one.
+			        CASE WHEN EXISTS (SELECT 1 FROM project p
+			                          WHERE p.id = NULLIF($6, '')::uuid AND COALESCE(p.key, '') <> '')
+			             THEN next_portal_wso2_id(NULLIF($6, '')::uuid)
+			             ELSE next_github_service_request_wso2_id()
+			        END,
 			        $2, 'SERVICE_REQUEST', $3,
 			        NULLIF($4, '')::uuid, $5,
 			        NULLIF($6, '')::uuid, NULLIF($7, ''), NULLIF($8, ''))

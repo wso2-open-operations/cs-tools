@@ -94,7 +94,10 @@ SELECT indexname FROM pg_indexes
 SELECT proname FROM pg_proc WHERE proname LIKE 'next_github_service_request%';
 --   next_github_service_request_number     -> SR-GH-000001
 --   next_github_service_request_wso2_id    -> WSO2-GH-000001  (required by
---                                             work_item_wso2_id_required_by_type)
+--                                             work_item_wso2_id_required_by_type;
+--                                             only for a record with no project --
+--                                             one with a project gets
+--                                             next_portal_wso2_id, <key>-PORTAL-<n>)
 
 SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%github%';
 --   change_request_github_outbound          CR state and planned dates
@@ -255,6 +258,10 @@ Against a real repository and database, with GitHub delivering over a webhook:
 
 Keep this list current — it is how the next deploy knows what changed.
 
+- **2026-10-08** — A service request with a project gets a project-scoped
+  `wso2_id` (`<key>-PORTAL-<n>`, as a portal-created record does) instead of
+  `WSO2-GH-<n>`, so it lists with its project's cases. `number` stays
+  `SR-GH-<n>`. No migration. Existing records keep their ids.
 - **2026-09-25** — Identity rule split by event type (#2000): the validation
   label from `github-actions[bot]` is no longer discarded. Found on a live
   delivery; without it a validated issue never becomes a record.
