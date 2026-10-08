@@ -82,6 +82,13 @@ type OutageWrite struct {
 	// AffectedCIIDs are service offering ids, de-duplicated by the service.
 	AffectedCIIDs []string
 	Actor         string
+	// Number and ID are set together, only by the dual-write create that has
+	// already created the outage in the external system: that system is
+	// authoritative for both, so they are stored as given and
+	// outage_number_seq is never consulted. Both empty (every other caller)
+	// means generate natively.
+	Number string
+	ID     string
 }
 
 // OutagePatch carries an update whose timestamps are ALREADY PARSED.
@@ -283,11 +290,13 @@ func formatOutageInterval(d time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
-// Create inserts a natively-created outage and returns it in the same shape a
-// read does.
+// Create inserts an outage and returns it in the same shape a read does.
 //
-// The number comes from outage_number_seq, seeded at 10000 so OUT0010000 sits
-// above ServiceNow's current OUT0001887 and cannot collide with numbers
+// When in.Number and in.ID are set (the dual-write create, which has already
+// created the outage in the external system) they are stored as given.
+// Otherwise the number comes from outage_number_seq, seeded at 10000 so
+// OUT0010000 sits above
+// ServiceNow's current OUT0001887 and cannot collide with numbers
 // ServiceNow keeps allocating while dual-write is on.
 func (r *outageRepo) Create(ctx context.Context, in OutageWrite) (domain.Outage, error) {
 	// *** ONE TRANSACTION, BECAUSE A PARTIAL CREATE IS WHAT ACTUALLY
@@ -311,17 +320,24 @@ func (r *outageRepo) Create(ctx context.Context, in OutageWrite) (domain.Outage,
 	return detail.Outage, nil
 }
 
-// insertOutage is Create's transactional body: the outage row and its seeded
-// journal entries, run inside tx. It returns the new outage's id.
-func insertOutage(ctx context.Context, tx pgx.Tx, in OutageWrite) (string, error) {
-	const insertSQL = `
+// The outage insert is assembled from three constants so the native path
+// (id from gen_random_uuid(), number from outage_number_seq) stays textually
+// identical to what it was before the external-number path existed; only the
+// two id/number expressions differ between the variants.
+const (
+	outageInsertHead = `
 INSERT INTO outage (id, number, type, start_on, end_on, name,
                     service_offering_id, work_item_id,
                     external_outage_communications, internal_outage_communications,
                     notify_internal_stakeholders, outage_communication, impact, state, duration,
                     created_on, created_by, updated_on, updated_by)
-VALUES (gen_random_uuid(),
-        'OUT' || LPAD(nextval('outage_number_seq')::text, 7, '0'),
+VALUES (`
+	outageInsertNativeIDNumber = `gen_random_uuid(),
+        'OUT' || LPAD(nextval('outage_number_seq')::text, 7, '0'),`
+	// $14/$15 follow the thirteen shared parameters.
+	outageInsertExternalIDNumber = `$14::uuid,
+        $15,`
+	outageInsertTail = `
         $1::outage_type_enum, $2, $3, $4,
         $5::uuid, $6::uuid, $7, $8, $10, $11, $12, $13,
         -- ServiceNow's "Outage Calculations" business rule: duration is
@@ -331,14 +347,31 @@ VALUES (gen_random_uuid(),
         $3::timestamptz - $2::timestamptz,
         NOW(), $9, NOW(), $9)
 RETURNING id::text`
+)
+
+// outageInsertStatement picks the insert for in: the external id and number
+// when both are set, otherwise the native generators. It returns the extra
+// arguments (after the thirteen shared ones) the chosen statement binds.
+func outageInsertStatement(in OutageWrite) (string, []any) {
+	if in.ID != "" && in.Number != "" {
+		return outageInsertHead + outageInsertExternalIDNumber + outageInsertTail, []any{in.ID, in.Number}
+	}
+	return outageInsertHead + outageInsertNativeIDNumber + outageInsertTail, nil
+}
+
+// insertOutage is Create's transactional body: the outage row and its seeded
+// journal entries, run inside tx. It returns the new outage's id.
+func insertOutage(ctx context.Context, tx pgx.Tx, in OutageWrite) (string, error) {
+	insertSQL, idNumberArgs := outageInsertStatement(in)
 
 	var id string
-	if err := tx.QueryRow(ctx, insertSQL,
+	args := []any{
 		strings.ToUpper(in.Type), in.Begin, in.End, in.ShortDescription,
 		in.ServiceOfferingID, in.IncidentID,
 		in.ExternalCommunication, in.InternalCommunication, in.Actor,
 		in.NotifyInternalStakeholders, in.OutageCommunication, in.Impact, in.State,
-	).Scan(&id); err != nil {
+	}
+	if err := tx.QueryRow(ctx, insertSQL, append(args, idNumberArgs...)...).Scan(&id); err != nil {
 		return "", fmt.Errorf("create outage: %w", err)
 	}
 

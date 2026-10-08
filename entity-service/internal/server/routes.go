@@ -1268,6 +1268,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var outageHandler *handler.OutageHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		outageHandler = handler.NewOutageHandler(service.NewServiceNowOutageService(serviceNowIntegrationServiceClient))
+	} else if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
+		// Create is external-system-first here: the external system assigns the
+		// outage's number and id and Postgres stores them -- see
+		// outageSNFirstService.CreateOutage. Everything else is the plain
+		// Postgres service.
+		outageHandler = handler.NewOutageHandler(
+			service.NewOutageServiceWithSNFirstCreate(
+				repository.NewOutageRepository(repository.NewScoped(db)),
+				service.NewServiceNowOutageService(serviceNowIntegrationServiceClient)))
 	} else if cfg.HasDatabase() {
 		outageHandler = handler.NewOutageHandler(
 			service.NewOutageService(repository.NewOutageRepository(repository.NewScoped(db))))

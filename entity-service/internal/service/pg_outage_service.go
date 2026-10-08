@@ -94,70 +94,88 @@ func (s *pgOutageService) requirePublicationAck(ctx context.Context, offeringID 
 
 // CreateOutage implements OutageService for the Postgres data source.
 func (s *pgOutageService) CreateOutage(ctx context.Context, req domain.CreateOutageRequest) (domain.CreateOutageResponse, error) {
+	in, err := s.prepareCreate(ctx, req)
+	if err != nil {
+		return domain.CreateOutageResponse{}, err
+	}
+	out, err := s.repo.Create(ctx, in)
+	if err != nil {
+		return domain.CreateOutageResponse{}, err
+	}
+	return domain.CreateOutageResponse{Message: "Outage created successfully.", Outage: out}, nil
+}
+
+// prepareCreate validates req and resolves it into the repository's write
+// shape, touching nothing. It is CreateOutage's whole validation half, split
+// out so outageSNFirstService can run EXACTLY the same checks (same order,
+// same messages) before it calls the external system: a request Postgres
+// would reject must be rejected before anything is created upstream, or the
+// external record would be orphaned by a failure that was knowable up front.
+func (s *pgOutageService) prepareCreate(ctx context.Context, req domain.CreateOutageRequest) (repository.OutageWrite, error) {
 	// Validation is copied from sn_outage_service.go verbatim, messages
 	// included: a caller must not be able to tell the data sources apart.
 	if req.Type == "" {
-		return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "type is required"}
+		return repository.OutageWrite{}, &apierror.ValidationError{Msg: "type is required"}
 	}
 	if !validOutageType[req.Type] {
-		return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "invalid type: " + string(req.Type)}
+		return repository.OutageWrite{}, &apierror.ValidationError{Msg: "invalid type: " + string(req.Type)}
 	}
 	if strings.TrimSpace(req.Begin) == "" {
-		return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "begin is required"}
+		return repository.OutageWrite{}, &apierror.ValidationError{Msg: "begin is required"}
 	}
 	if strings.TrimSpace(req.ShortDescription) == "" {
-		return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "shortDescription is required"}
+		return repository.OutageWrite{}, &apierror.ValidationError{Msg: "shortDescription is required"}
 	}
 	if utf8.RuneCountInString(req.ShortDescription) > 160 {
-		return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "shortDescription must be 160 characters or fewer"}
+		return repository.OutageWrite{}, &apierror.ValidationError{Msg: "shortDescription must be 160 characters or fewer"}
 	}
 	if req.ConfigurationItemID != nil {
 		if err := validateUUIDs("configurationItemId", []string{*req.ConfigurationItemID}); err != nil {
-			return domain.CreateOutageResponse{}, err
+			return repository.OutageWrite{}, err
 		}
 	}
 	if req.IncidentID != nil {
 		if err := validateUUIDs("incidentId", []string{*req.IncidentID}); err != nil {
-			return domain.CreateOutageResponse{}, err
+			return repository.OutageWrite{}, err
 		}
 	}
 
 	begin, err := parseOutageTime(req.Begin, "begin")
 	if err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 	var end *time.Time
 	if req.End != nil && strings.TrimSpace(*req.End) != "" {
 		t, err := parseOutageTime(*req.End, "end")
 		if err != nil {
-			return domain.CreateOutageResponse{}, err
+			return repository.OutageWrite{}, err
 		}
 		if t.Before(begin) {
-			return domain.CreateOutageResponse{}, &apierror.ValidationError{Msg: "end must not be before begin"}
+			return repository.OutageWrite{}, &apierror.ValidationError{Msg: "end must not be before begin"}
 		}
 		end = &t
 	}
 
 	if err := s.requirePublicationAck(ctx, req.ConfigurationItemID, req.AcknowledgePublicPublication); err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 	affected, err := normaliseAffectedCIIDs(req.AffectedConfigurationItemIDs)
 	if err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 	if err := s.requireAffectedPublicationAck(ctx, affected, req.AcknowledgePublicPublication); err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 	impact, err := normaliseOutageLabel(req.Impact, "impact")
 	if err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 	state, err := normaliseOutageLabel(req.State, "state")
 	if err != nil {
-		return domain.CreateOutageResponse{}, err
+		return repository.OutageWrite{}, err
 	}
 
-	out, err := s.repo.Create(ctx, repository.OutageWrite{
+	return repository.OutageWrite{
 		Type:                  string(req.Type),
 		Begin:                 begin,
 		End:                   end,
@@ -173,11 +191,7 @@ func (s *pgOutageService) CreateOutage(ctx context.Context, req domain.CreateOut
 		State:                      nonEmpty(state),
 		AffectedCIIDs:              affected,
 		Actor:                      actorOf(ctx),
-	})
-	if err != nil {
-		return domain.CreateOutageResponse{}, err
-	}
-	return domain.CreateOutageResponse{Message: "Outage created successfully.", Outage: out}, nil
+	}, nil
 }
 
 // parseOutageTime accepts the two shapes the API documents: RFC3339 and the
