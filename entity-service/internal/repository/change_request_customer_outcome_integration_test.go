@@ -697,93 +697,138 @@ func TestChangeRequestCustomerOutcomeIntegration_ConcurrentAnswers(t *testing.T)
 	}
 }
 
-// "Propose new implementation time" is the customer starting the Re-schedule
-// loop: a new window, a fresh CAB approval, the customer asked again.
-func TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeReschedules(t *testing.T) {
-	f := newCustomerGroupFlow(t)
-	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
-	f.setPlanned(id, rsStart1, rsEnd1)
-	f.driveToCustomerApproval(id)
-	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,Customer Approval" {
-		t.Fatalf("stages in Customer Approval = %s", got)
-	}
+// "Propose new implementation time" is the customer's proposal of a START: it is
+// written to customer_updated_on (the column the previous system used for it) and the change
+// WAITS in Customer Approval for WSO2's answer -- no state move, no CAB stage, the
+// planned window and the customers' request untouched. WSO2 then accepts it (the
+// change is Scheduled with the proposal as its start, the planned length kept, no
+// CAB, no second ask) or proposes a different time (DISAGREE, the customers are asked
+// again), for every change type that reaches Customer Approval (an Emergency change never does).
+func TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeWaitsForWSO2(t *testing.T) {
+	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard} {
+		typ := typ
+		wantStages := map[domain.ChangeRequestType]string{
+			domain.ChangeRequestTypeNormal:   "Peer Approval,CAB Approval,Customer Approval",
+			domain.ChangeRequestTypeStandard: "Customer Approval",
+		}[typ]
+		t.Run(string(typ), func(t *testing.T) {
+			f := newCustomerGroupFlow(t)
+			id := f.reachCustomerApproval(typ)
+			if got := f.stageLabels(id); got != wantStages {
+				t.Fatalf("stages in Customer Approval = %s, want %s", got, wantStages)
+			}
 
-	// "Time Change = No": the stored start, an unparseable one, a start after the end.
-	_, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart1)})
-	f.wantValidationError("proposing the stored start", err, "re-scheduling requires a changed planned start or end")
-	_, err = f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp("next tuesday")})
-	f.wantValidationError("proposing garbage", err, "plannedStartOn must be a valid date-time")
-	_, err = f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart3)})
-	f.wantValidationError("proposing a start after the stored end", err, "planned start must not be after the planned end")
-	f.expect(id, "after the refused proposals", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	f.wantPlanned(id, "after the refused proposals", rsStart1, rsEnd1)
-	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,Customer Approval" {
-		t.Fatalf("a refused proposal changed the stages: %s", got)
-	}
+			// Refused: the planned start again, a window that changes the length, garbage.
+			_, err := f.proposeAs(id, crScopeUserA1, rsStart1)
+			f.wantValidationError("proposing the planned start", err, "plannedStartOn is the planned start already")
+			_, err = f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd3)})
+			f.wantValidationError("proposing a different length", err, "keeps the planned length of 2 hours")
+			_, err = f.proposeAs(id, crScopeUserA1, "next tuesday")
+			f.wantValidationError("proposing garbage", err, "plannedStartOn must be a valid date-time")
+			f.wantConversation(id, "after the refused proposals", "", "")
 
-	// Alice proposes a new window.
-	cr, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)})
-	if err != nil {
-		t.Fatalf("proposal: %v", err)
-	}
-	if cr.State == nil || *cr.State != "authorize" {
-		t.Fatalf("state in the response = %v, want authorize", cr.State)
-	}
-	f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
-	f.wantPlanned(id, "after the proposal", rsStart2, rsEnd2)
-	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,Customer Approval,CAB Approval" {
-		t.Fatalf("stages after the proposal = %s, want a fresh CAB stage after the customer's", got)
-	}
-	stages := f.stages(id)
-	assertApprovers(t, "the customer's superseded request", stages[2].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
-	assertApprovers(t, "fresh CAB stage", stages[3].approvers, map[string]string{crCABMemberUserID1: "REQUESTED", crCABMemberUserID2: "REQUESTED"})
-	if a, _ := f.customerOutcome(id); a {
-		t.Fatal("flag stamped by a proposal")
-	}
-	if got := f.updatedBy(id); got != crFlowEmail(crScopeUserA1) {
-		t.Fatalf("work_item.updated_by = %q, want the proposing contact", got)
-	}
+			// Alice proposes a new start.
+			cr, err := f.proposeAs(id, crScopeUserA1, rsStart2)
+			if err != nil {
+				t.Fatalf("proposal: %v", err)
+			}
+			if cr.State == nil || *cr.State != "customer_approval" {
+				t.Fatalf("state in the receipt = %v, want customer_approval (a proposal moves nothing)", cr.State)
+			}
+			if p := cr.CustomerProposal; p == nil || p.Answer != "pending" || p.StartOn != rsStart2 || p.EndOn == nil || *p.EndOn != endFor(rsStart2) ||
+				p.ProposedByViewer == nil || !*p.ProposedByViewer {
+				t.Fatalf("customerProposal in the proposer's receipt = %+v, want a pending proposal that is theirs", p)
+			}
+			if cr.CustomerCanAnswer == nil || !*cr.CustomerCanAnswer {
+				t.Fatalf("customerCanAnswer in the receipt = %v, want true (their request is still live)", cr.CustomerCanAnswer)
+			}
+			f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+			f.wantPlanned(id, "after the proposal", rsStart1, rsEnd1)
+			f.wantConversation(id, "after the proposal", rsStart2, "")
+			if got := f.stageLabels(id); got != wantStages {
+				t.Fatalf("stages after the proposal = %s, want them unchanged (%s)", got, wantStages)
+			}
+			custom := f.customerStages(id)
+			if len(custom) != 1 {
+				t.Fatalf("customer stages = %+v, want the one request", custom)
+			}
+			assertApprovers(t, "the customers' request is untouched", custom[0].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
+			if a, _ := f.customerOutcome(id); a {
+				t.Fatal("flag stamped by a proposal")
+			}
+			if got := f.updatedBy(id); got != crFlowEmail(crScopeUserA1) {
+				t.Fatalf("work_item.updated_by = %q, want the proposing contact", got)
+			}
 
-	// The CAB approves the new plan; the customer is asked again and answers.
-	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-		t.Fatalf("CAB approval of the new plan: %v", err)
+			// WSO2's side of the same read: the proposer and whether Accept would work.
+			p := f.proposalOf(id)
+			if p == nil || p.Answer != "pending" || p.ProposerRecorded == nil || !*p.ProposerRecorded ||
+				p.ProposedByEmail == nil || *p.ProposedByEmail != crFlowEmail(crScopeUserA1) || p.CanAccept == nil || !*p.CanAccept {
+				t.Fatalf("customerProposal for WSO2 = %+v", p)
+			}
+			// A colleague sees a proposal that is not theirs.
+			if other, err := f.getAsContact(id, crScopeUserA2); err != nil || other.CustomerProposal == nil ||
+				other.CustomerProposal.ProposedByViewer == nil || *other.CustomerProposal.ProposedByViewer || other.CustomerProposal.ProposedByEmail != nil {
+				t.Fatalf("a colleague's view of the proposal = %+v (%v)", other.CustomerProposal, err)
+			}
+			f.wantCanAnswer(id, "after the proposal", true, crScopeUserA1, crScopeUserA2)
+
+			// Accept proposed time: Scheduled, the proposal is the start, the length is kept,
+			// nothing goes through CAB, the customers' request is closed.
+			f.mustAccept(id)
+			f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
+			f.wantPlanned(id, "after Accept", rsStart2, endFor(rsStart2))
+			f.wantConversation(id, "after Accept", rsStart2, "AGREE")
+			f.wantAnswer(id, "after Accept", "agreed")
+			if got := f.stageLabels(id); got != wantStages {
+				t.Fatalf("stages after Accept = %s, want %s (no CAB, no second ask)", got, wantStages)
+			}
+			assertApprovers(t, "the customers' request after Accept", f.customerStages(id)[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
+			if a, _ := f.customerOutcome(id); a {
+				t.Fatal("Accept recorded the customer's approval: no staff action does")
+			}
+		})
 	}
-	f.expect(id, "after the new CAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	if got := f.stageLabels(id); got != "Peer Approval,CAB Approval,Customer Approval,CAB Approval,Customer Approval" {
-		t.Fatalf("stages after the new CAB approval = %s", got)
-	}
-	assertApprovers(t, "the customer asked again", f.stages(id)[4].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
-	if _, err := f.approveAs(id, crScopeUserA2, true); err != nil {
-		t.Fatalf("approval of the new plan: %v", err)
-	}
-	f.expect(id, "after approving the new plan", "SCHEDULED", "implement", "canceled")
-	f.wantPlanned(id, "after approving the new plan", rsStart2, rsEnd2)
-	assertApprovers(t, "the second customer request", f.stages(id)[4].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "APPROVED"})
 }
 
-// A Standard change has no internal approval to repeat: the dates are applied
-// and the customer is asked again, still in Customer Approval.
-func TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeStandard(t *testing.T) {
-	f := newCustomerGroupFlow(t)
-	id := f.createWithProject(domain.ChangeRequestTypeStandard, sp(crScopeProjectA), true, false)
-	f.setPlanned(id, rsStart1, rsEnd1)
-	f.requestApproval(id)
-	f.expect(id, "after Request Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
+// ... and WSO2 may answer a proposal with a different time instead: the customers
+// are asked again with a fresh request, nothing goes through CAB, the change stays
+// where it is.
+func TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeIsCounteredByWSO2(t *testing.T) {
+	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard} {
+		typ := typ
+		t.Run(string(typ), func(t *testing.T) {
+			f := newCustomerGroupFlow(t)
+			id := f.reachCustomerApproval(typ)
+			stages := f.stageLabels(id)
+			f.mustPropose(id, crScopeUserA2, rsStartEarly)
 
-	if _, err := f.patchAsContact(id, crScopeUserB1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStartEarly)}); err == nil {
-		t.Fatal("a contact of another project proposed a time")
+			if err := f.counter(id, sp(rsStart3), sp(rsEnd3)); err != nil {
+				t.Fatalf("Propose a different time: %v", err)
+			}
+			f.expect(id, "after the counter", "CUSTOMER_APPROVAL", "authorize", "canceled")
+			f.wantPlanned(id, "after the counter", rsStart3, rsEnd3)
+			f.wantConversation(id, "after the counter", rsStartEarly, "DISAGREE")
+			f.wantAnswer(id, "after the counter", "disagreed")
+			if got := f.stageLabels(id); got != stages+",Customer Approval" {
+				t.Fatalf("stages after the counter = %s, want %s and one fresh customer stage (no CAB)", got, stages)
+			}
+			custom := f.customerStages(id)
+			assertApprovers(t, "the superseded request", custom[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
+			assertApprovers(t, "the customers asked again", custom[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
+			f.wantCanAnswer(id, "after the counter", true, crScopeUserA1, crScopeUserA2)
+
+			// The customer answers WSO2's time; the window is WSO2's.
+			if _, err := f.approveAs(id, crScopeUserA1, true); err != nil {
+				t.Fatalf("approval of WSO2's time: %v", err)
+			}
+			f.expect(id, "after the customer's approval", "SCHEDULED", "implement", "canceled")
+			f.wantPlanned(id, "after the customer's approval", rsStart3, rsEnd3)
+			if a, _ := f.customerOutcome(id); !a {
+				t.Fatal("the customer's own approval was not recorded")
+			}
+		})
 	}
-	if _, err := f.patchAsContact(id, crScopeUserA2, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStartEarly)}); err != nil {
-		t.Fatalf("proposal: %v", err)
-	}
-	f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	f.wantPlanned(id, "after the proposal", rsStartEarly, rsEnd1)
-	custom := f.customerStages(id)
-	if len(custom) != 2 {
-		t.Fatalf("customer stages = %+v, want the superseded one and a fresh one", custom)
-	}
-	assertApprovers(t, "superseded request", custom[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
-	assertApprovers(t, "fresh request", custom[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
 }
 
 // A proposal is refused where it makes no sense, and by whom it may not come.

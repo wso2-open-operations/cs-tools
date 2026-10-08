@@ -608,9 +608,12 @@ func TestChangeRequestNobodyToAskIntegration_ResidualEdgeContactsLeaveAfterReque
 }
 
 // The legacy dead-end row (a change a migration or an older build left in a
-// customer state with nobody asked) is never re-judged: staff still have Cancel /
-// Re-schedule / Roll back, every PATCH that does not turn a box on goes through,
-// and the stage is still provisioned for a contact once there is one.
+// customer state with nobody asked) is not re-judged by an edit: staff still have
+// Cancel / Roll back, every PATCH that does not turn a box on goes through, and the
+// stage is still provisioned for a contact once there is one. A Re-schedule is the one
+// exception: it asks the customers again, so with nobody to ask it is refused, with the
+// words of Request Approval's refusal and nothing written (the user's "refuse" rule
+// reaches the Time Change loop too; before, it was accepted and left the change waiting).
 func TestChangeRequestNobodyToAskIntegration_ALegacyDeadEndRowIsNotRejudged(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	approval := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectC), true, false)
@@ -631,11 +634,16 @@ func TestChangeRequestNobodyToAskIntegration_ALegacyDeadEndRowIsNotRejudged(t *t
 	// A box that is turned on is judged, wherever the row is.
 	_, err := f.patch(approval, domain.PatchChangeRequestRequest{CustomerReviewRequired: boolp(true)})
 	f.wantExact("turning the review box on of a legacy row in Customer Approval", err, nobodyMsgReview)
-	// Re-schedule is what the rule never touches.
+	// Re-schedule asks the customers again: with nobody to ask it is refused, atomically.
 	f.setPlanned(approval, rsStart1, rsEnd1)
-	if err := f.reschedule(approval, sp(rsStart2), sp(rsEnd2)); err != nil {
-		t.Fatalf("Re-schedule of a legacy dead-end row: %v", err)
+	before := f.snap(approval)
+	f.wantExact("Re-schedule of a legacy dead-end row", f.reschedule(approval, sp(rsStart2), sp(rsEnd2)), nobodyMsgApproval)
+	f.wantExact("Re-schedule of a legacy dead-end row, a second time", f.reschedule(approval, sp(rsStart2), sp(rsEnd2)), nobodyMsgApproval)
+	if after := f.snap(approval); after != before {
+		t.Fatalf("a refused Re-schedule changed the change request:\n  before: %s\n  after:  %s", before, after)
 	}
+	// What staff keep: Cancel, and Roll back from Customer Review.
+	f.step(approval, domain.ChangeRequestStateCanceled, "CANCELED")
 	f.step(review, domain.ChangeRequestStateRollback, "ROLLBACK")
 }
 

@@ -81,12 +81,36 @@ var itServiceBusinessCriticalityFromEnum = map[string]domain.BusinessCriticality
 // approval_group_id/user_group_id from the same migration stay unselected:
 // domain.ITService has no field for them.
 func (r *itServiceRepo) SearchITServices(ctx context.Context, searchQuery string, limit, offset int) ([]domain.ITService, int, error) {
+	// Trimmed here so a padded query (" choreo") matches like the bare one for
+	// every caller, not only the ones that trim first.
+	searchQuery = strings.TrimSpace(searchQuery)
 	where := "WHERE 1=1"
 	args := []any{}
+	// rank orders the matches best first: the exact name, a name that starts
+	// with the query, a word that starts with it, anything else. Without it the
+	// page is the newest `limit` matches, and a service whose name is also the
+	// prefix of many newer ones (the "Choreo" service against its dozens of
+	// "Choreo EU - ... Service Offering" records) can never be reached. Its
+	// parameters are bound after the filter's, in the data query only: the count
+	// query has no use for them and Postgres rejects a bound parameter nothing
+	// references.
+	rank := ""
+	var rankArgs []any
 	if searchQuery != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(searchQuery)
 		args = append(args, "%"+escaped+"%")
 		where += fmt.Sprintf(" AND (s.name ILIKE $%d ESCAPE '\\' OR s.number ILIKE $%d ESCAPE '\\')", len(args), len(args))
+
+		// A raw string, so the escape character is one backslash in the SQL.
+		n := len(args)
+		rank = fmt.Sprintf(
+			`CASE WHEN LOWER(s.name) = LOWER($%d) THEN 0
+			      WHEN s.name ILIKE $%d ESCAPE '\' THEN 1
+			      WHEN s.name ILIKE $%d ESCAPE '\' OR s.name ILIKE $%d ESCAPE '\' THEN 2
+			      ELSE 3 END, `,
+			n+1, n+2, n+3, n+4,
+		)
+		rankArgs = []any{searchQuery, escaped + "%", "% " + escaped + "%", "%-" + escaped + "%"}
 	}
 
 	countQuery := "SELECT COUNT(*) FROM service s " + where
@@ -95,11 +119,11 @@ func (r *itServiceRepo) SearchITServices(ctx context.Context, searchQuery string
 		 FROM service s
 		 LEFT JOIN "group" sg ON sg.id = s.support_group_id
 		 %s
-		 ORDER BY s.created_on DESC, s.id
+		 ORDER BY %ss.created_on DESC, s.id
 		 LIMIT $%d OFFSET $%d`,
-		where, len(args)+1, len(args)+2,
+		where, rank, len(args)+len(rankArgs)+1, len(args)+len(rankArgs)+2,
 	)
-	dataArgs := append(append([]any{}, args...), limit, offset)
+	dataArgs := append(append(append([]any{}, args...), rankArgs...), limit, offset)
 
 	var total int
 	var services []domain.ITService

@@ -36,7 +36,7 @@ import (
 // promise to do: it answers every state it holds, whatever the request asked for,
 // so a test passes only when this service itself keeps the three states out.
 
-const snViewProject = "5aeff120-1b74-c210-2649-97a234bcb54a"
+const snViewProject = "00000000-0000-4000-8000-000000000001"
 
 // The request's scope is resolved once per request by callerIdentityMiddleware
 // (AccessService.ResolveScope) and carried in the context: unrestricted means WSO2
@@ -91,7 +91,7 @@ func (f *fakeServiceNowSearch) handler(t *testing.T) http.Handler {
 				"number":    fmt.Sprintf("CR-FAKE-%02d", i+1),
 				"title":     "Example change " + st.label,
 				"createdOn": "2026-01-01 00:00:00",
-				"project":   map[string]any{"id": "5aeff1201b74c210264997a234bcb54a", "name": "Example Corp Platform"},
+				"project":   map[string]any{"id": "00000000000040008000000000000001", "name": "Example Corp Platform"},
 				"state":     map[string]any{"label": st.label},
 			})
 		}

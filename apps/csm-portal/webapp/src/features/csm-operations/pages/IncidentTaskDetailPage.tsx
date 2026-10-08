@@ -35,18 +35,22 @@ import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 const OPERATIONS_PATH = "/operations";
 
 /**
- * Every incident task state, as ServiceNow's State dropdown offers them:
- * any state can be picked from any other -- incident_task has no state
- * model, buttons or rules of its own (discovery script 70).
+ * The State menu. Any state can be picked from any other, as in ServiceNow --
+ * incident_task has no state model, buttons or rules of its own (discovery
+ * script 70) -- but the three closed states sit behind one "Close" entry,
+ * whose dialog asks which outcome and for optional close notes.
  */
-const TASK_STATES: { value: BeIncidentTaskState; label: string }[] = [
+const OPEN_TASK_STATES: { value: BeIncidentTaskState; label: string }[] = [
   { value: "PENDING", label: "Pending" },
   { value: "OPEN", label: "Open" },
   { value: "WORK_IN_PROGRESS", label: "Work in Progress" },
-  { value: "CLOSED_COMPLETE", label: "Closed Complete" },
-  { value: "CLOSED_INCOMPLETE", label: "Closed Incomplete" },
-  { value: "CLOSED_SKIPPED", label: "Closed Skipped" },
 ];
+const CLOSE_OPTION = "CLOSE";
+const CLOSED_TASK_LABELS: Record<ClosedTaskState, string> = {
+  CLOSED_COMPLETE: "Closed Complete",
+  CLOSED_INCOMPLETE: "Closed Incomplete",
+  CLOSED_SKIPPED: "Closed Skipped",
+};
 
 function formatDateTime(value?: string | null): string {
   return (
@@ -151,16 +155,19 @@ export default function IncidentTaskDetailPage(): JSX.Element {
 
   const task = data;
 
-  // ServiceNow's State dropdown: an open state saves at once; a closed one
-  // goes through the close dialog for its optional close notes.
-  const onStateChange = (next: BeIncidentTaskState): void => {
+  const closedState =
+    task.state && CLOSED_INCIDENT_TASK_STATES.includes(task.state) ? (task.state as ClosedTaskState) : null;
+
+  // An open state saves at once; "Close" opens the close dialog, starting
+  // from the task's own outcome when it is already closed.
+  const onStateChange = (next: string): void => {
     if (next === task.state) return;
     patchTask.reset();
-    if (CLOSED_INCIDENT_TASK_STATES.includes(next)) {
-      setCloseAs(next as ClosedTaskState);
+    if (next === CLOSE_OPTION) {
+      setCloseAs(closedState ?? "CLOSED_COMPLETE");
       return;
     }
-    patchTask.mutate({ id: task.id as string, patch: { state: next } });
+    patchTask.mutate({ id: task.id as string, patch: { state: next as BeIncidentTaskState } });
   };
 
   return (
@@ -196,15 +203,22 @@ export default function IncidentTaskDetailPage(): JSX.Element {
             size="small"
             label="State"
             value={task.state ?? ""}
-            onChange={(e) => onStateChange(e.target.value as BeIncidentTaskState)}
+            onChange={(e) => onStateChange(e.target.value)}
             disabled={patchTask.isPending}
             sx={{ minWidth: 200 }}
           >
-            {TASK_STATES.map((s) => (
+            {OPEN_TASK_STATES.map((s) => (
               <MenuItem key={s.value} value={s.value}>
                 {s.label}
               </MenuItem>
             ))}
+            {/* A closed task shows its outcome; the menu itself offers only "Close". */}
+            {closedState && (
+              <MenuItem value={closedState} sx={{ display: "none" }}>
+                {CLOSED_TASK_LABELS[closedState]}
+              </MenuItem>
+            )}
+            <MenuItem value={CLOSE_OPTION}>Close</MenuItem>
           </TextField>
         </Box>
       </Box>

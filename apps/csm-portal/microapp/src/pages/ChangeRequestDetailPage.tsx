@@ -132,7 +132,10 @@ function ChangeRequestDetailContent({ id }: { id: string }) {
 
       <SectionCard title="Approval">
         <Stack gap={1}>
-          <DetailRow label="Customer Approved" value={cr.hasCustomerApproved ? "Yes" : "No"} />
+          <DetailRow
+            label="Customer Approved"
+            value={cr.hasCustomerApproved ? "Yes" : cr.proposedTimeAccepted ? "Proposed time accepted" : "No"}
+          />
           <DetailRow label="Customer Reviewed" value={cr.hasCustomerReviewed ? "Yes" : "No"} />
           <DetailRow label="Approved By" value={cr.approvedBy?.name} />
           <DetailRow label="Approved On" value={cr.approvedOn ? formatDate(cr.approvedOn) : undefined} />

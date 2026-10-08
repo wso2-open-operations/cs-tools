@@ -44,6 +44,12 @@ const (
 	// writes the outage and then its affected CIs, a sync batch -- arrive
 	// before the pass that reads them, so one pass handles them all.
 	defaultOutageNoticeSettle = 300 * time.Millisecond
+	// outageNoticeMaxUnlistenedBackoff caps how far a sustained run of
+	// consecutive Sweep failures (e.g. the database being down) stretches the
+	// unlistened fallback poll -- without this, a failure every 10s forever
+	// would keep hitting a broken dependency at that same fixed cadence
+	// indefinitely.
+	outageNoticeMaxUnlistenedBackoff = 10 * time.Minute
 )
 
 // outageNoticePublisher is the slice of EventPublisherService the drainer needs.
@@ -112,6 +118,7 @@ func (d *OutageNoticeDrainer) Run(ctx context.Context) {
 
 	listening := false
 	lastListenErr := ""
+	consecutiveFailures := 0
 	for {
 		if d.Listener != nil && !listening {
 			if err := d.Listener.Listen(ctx); err != nil {
@@ -127,10 +134,22 @@ func (d *OutageNoticeDrainer) Run(ctx context.Context) {
 			}
 		}
 
-		d.drainOnce(ctx)
+		_, failed := d.drainOnce(ctx)
 
 		if !listening {
-			if !sleepCtx(ctx, unlistened) {
+			// Back off the fixed unlistened poll once failures are sustained
+			// (e.g. the database is down) rather than retrying at the same
+			// fixed cadence forever; a single clean pass resets it to the
+			// plain unlistened interval immediately, not after one more
+			// inflated wait left over from before it recovered.
+			wait := unlistened
+			if failed {
+				wait = min(unlistened*time.Duration(1<<min(consecutiveFailures, 16)), outageNoticeMaxUnlistenedBackoff)
+				consecutiveFailures++
+			} else {
+				consecutiveFailures = 0
+			}
+			if !sleepCtx(ctx, wait) {
 				slog.InfoContext(ctx, "outagenotice: drainer stopped")
 				return
 			}
@@ -165,16 +184,20 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 }
 
 // drainOnce runs each enabled flow once and publishes what it decided.
+// failed is true when a Sweep call itself errored (a publish failure is kept
+// for replay separately and does not count here) -- used only to back off
+// the unlistened fallback poll on a sustained failure, see Run.
 //
 // One flow failing never stops the other, and one publish failing never stops
 // the rest: each decision is already recorded, so returning early would drop
 // the remainder silently. A failed publish is kept by EventPublisherService's
 // failure store for replay, and logged here with the outage it belongs to.
-func (d *OutageNoticeDrainer) drainOnce(ctx context.Context) (published int) {
+func (d *OutageNoticeDrainer) drainOnce(ctx context.Context) (published int, failed bool) {
 	if len(d.NotificationRecipients) > 0 {
 		res, err := d.Notifications.Sweep(ctx, 0)
 		if err != nil {
 			slog.ErrorContext(ctx, "outagenotice: internal-notification sweep failed", "err", err)
+			failed = true
 		} else {
 			for _, dec := range res.Decisions {
 				if d.publish(ctx, events.TypeOutageNotificationDue, events.OutageNoticePayload{
@@ -194,6 +217,7 @@ func (d *OutageNoticeDrainer) drainOnce(ctx context.Context) (published int) {
 		res, err := d.Communications.Sweep(ctx, 0)
 		if err != nil {
 			slog.ErrorContext(ctx, "outagenotice: outage-communication sweep failed", "err", err)
+			failed = true
 		} else {
 			for _, dec := range res.Decisions {
 				if d.publish(ctx, events.TypeOutageCommunicationDue, events.OutageNoticePayload{
@@ -205,7 +229,7 @@ func (d *OutageNoticeDrainer) drainOnce(ctx context.Context) (published int) {
 			}
 		}
 	}
-	return published
+	return published, failed
 }
 
 func (d *OutageNoticeDrainer) publish(ctx context.Context, t events.Type, p events.OutageNoticePayload) bool {

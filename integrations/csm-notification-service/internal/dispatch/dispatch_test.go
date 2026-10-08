@@ -984,6 +984,58 @@ func TestDispatcher_Handle_CommentAdded_InternalNote_UsesInternalNoteLayout(t *t
 	}
 }
 
+// TestDispatcher_Handle_CommentAdded_InternalNote_NeverEmailsACustomerRecipient
+// is the regression test for a real reported leak: a work note's email was
+// reaching customer-portal recipients. groupByLink already classifies every
+// recipient into its own portal-audience group (role-first, domain
+// fallback — recipientlinks.Resolver's own "roles with internal"
+// classification), so an internal note now keeps only the CSM-portal
+// group before sending, regardless of what entity-service's own Recipients
+// list contained.
+func TestDispatcher_Handle_CommentAdded_InternalNote_NeverEmailsACustomerRecipient(t *testing.T) {
+	mock := &mockEmailSender{}
+	links := &mockLinkResolver{linkFor: func(email string) string {
+		if email == "customer@acme.com" {
+			return "https://customer.example/projects/PROJ-1/support/cases/CASE-1"
+		}
+		return "https://csm.example/cases/CASE-1"
+	}}
+	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Agent","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","caseComment":"internal only","commentId":"C-1","isInternalNote":true,"recipients":["agent@wso2.com","customer@acme.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected exactly 1 email sent (the CSM-portal group only), got %d", len(mock.calls))
+	}
+	to := mock.calls[0].to
+	if len(to) != 1 || to[0] != "agent@wso2.com" {
+		t.Errorf("to = %v, want only [agent@wso2.com] — the customer-portal recipient must never be emailed an internal note", to)
+	}
+}
+
+// TestDispatcher_Handle_CommentAdded_InternalNote_SendsNothingWhenAllRecipientsAreCustomers
+// is the all-external edge case: sendPerGroup over an empty map is a
+// no-op, not an error.
+func TestDispatcher_Handle_CommentAdded_InternalNote_SendsNothingWhenAllRecipientsAreCustomers(t *testing.T) {
+	mock := &mockEmailSender{}
+	links := &mockLinkResolver{linkFor: func(email string) string {
+		return "https://customer.example/projects/PROJ-1/support/cases/CASE-1"
+	}}
+	d := NewDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}, links, true, false, nil, true, "", nil)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Agent","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","caseComment":"internal only","commentId":"C-1","isInternalNote":true,"recipients":["customer@acme.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 0 {
+		t.Fatalf("expected 0 emails sent when every recipient is a customer, got %d", len(mock.calls))
+	}
+}
+
 // TestDispatcher_Handle_CommentAdded_LinksToCommentFragment verifies
 // commentLinkFor's suffix actually reaches the rendered email: the "Add
 // Comment" CTA must link to <resolved case link>#<commentId>, matching the

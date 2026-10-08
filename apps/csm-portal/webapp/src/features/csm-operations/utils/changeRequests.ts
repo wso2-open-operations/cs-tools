@@ -17,12 +17,14 @@
 import type {
   BeChangeRequestApproval,
   BeChangeRequestCategory,
+  BeChangeRequestCustomerProposal,
   BeChangeRequestDetail,
   BeChangeRequestImpact,
   BeChangeRequestSearchPayload,
   BeChangeRequestState,
   BeChangeRequestType,
 } from "@api/backend/types";
+import { formatBackendTimestampForDisplay, parseBackendTimestamp } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 
 type ChipColor = "default" | "info" | "warning" | "success" | "error";
@@ -159,12 +161,18 @@ export function approvalStatusColor(status?: string | null): ChipColor {
 
 /**
  * Display labels for the approval stages of the change-request flow:
- * Normal changes go Peer Approval -> CAB Approval; Emergency changes have only
- * an ECAB Approval; Standard changes have neither. The backend decides which
- * stages exist -- this only maps a stage name it returned to its label, so
- * both the legacy ServiceNow-style names ("Assess", "Authorize") and the
- * explicit ones ("Peer Approval", "CAB Approval", "Emergency CAB") read the
- * same; the post-implementation "Review" stage keeps its own name. Matching is case/space/punctuation-insensitive.
+ * Normal changes go Peer Approval -> CAB Approval; Emergency changes have a
+ * single CAB Approval (there is no separate Emergency CAB: the previous system has none
+ * either); Standard changes have none. The backend decides which stages exist --
+ * this only maps a stage name it returned to its label, so both the legacy
+ * names of the previous system ("Assess", "Authorize") and the explicit ones ("Peer
+ * Approval", "CAB Approval") read the same; the post-implementation "Review"
+ * stage keeps its own name. Matching is case/space/punctuation-insensitive.
+ *
+ * "ECAB Approval" / "Emergency CAB" are HISTORY: an Emergency change raised
+ * before ECAB was retired still carries such a stage (possibly still waiting on
+ * approvers), and it keeps reading "ECAB Approval" so the record is shown as it
+ * is. Nothing creates one any more.
  */
 const KNOWN_APPROVAL_STAGE_LABELS: Record<string, string> = {
   assess: "Peer Approval",
@@ -173,9 +181,10 @@ const KNOWN_APPROVAL_STAGE_LABELS: Record<string, string> = {
   authorize: "CAB Approval",
   cab: "CAB Approval",
   cabapproval: "CAB Approval",
+  review: "Review",
+  // Historic only (see above): a stage an earlier version provisioned for an Emergency change.
   ecab: "ECAB Approval",
   ecabapproval: "ECAB Approval",
-  review: "Review",
   emergencycab: "ECAB Approval",
   emergencycabapproval: "ECAB Approval",
   // Stages the backend provisions for the CR's customer group (its members are
@@ -201,7 +210,9 @@ export function approvalStageLabel(stage?: string | null): string {
  * is the backend's `ChangeRequestType` enum value (entity-service
  * `domain.ChangeRequestType*`: "normal" / "standard" / "emergency"); the
  * create form requires exactly one of these. The type drives the approval
- * flow server-side: Normal = Peer -> CAB, Standard = none, Emergency = ECAB.
+ * flow server-side: Normal = Peer -> CAB, Standard = none, Emergency = a single
+ * CAB stage (and no customer approval or review: see
+ * {@link EMERGENCY_CUSTOMER_STEPS_HELPER}).
  */
 export const CHANGE_REQUEST_CREATE_TYPE_OPTIONS: ReadonlyArray<{
   value: Extract<BeChangeRequestType, "normal" | "standard" | "emergency">;
@@ -288,9 +299,49 @@ export function isCreatableChangeRequestType(value: string | null | undefined): 
   return CHANGE_REQUEST_CREATE_TYPE_OPTIONS.some((o) => o.value === value);
 }
 
+/** True when `type` is Emergency (the backend's enum value "emergency"; case and padding ignored). */
+export function isEmergencyChangeRequestType(type: string | null | undefined): boolean {
+  return type?.trim().toLowerCase() === "emergency";
+}
+
+/**
+ * The one line shown where an Emergency change's two customer boxes (Customer
+ * Approval, Customer Review) sit disabled and unticked. An Emergency change acts
+ * without customer consent: it is authorized by the CAB alone and never reaches
+ * a customer state, so there is nothing for the customer to be asked.
+ */
+export const EMERGENCY_CUSTOMER_STEPS_HELPER = "Emergency changes proceed without customer approval or review.";
+
+/** What the detail page reads where a customer step does not exist for the change. */
+export const CUSTOMER_STEP_NOT_APPLICABLE = "Not applicable";
+
+/**
+ * Whether a customer step -- Customer Approval or Customer Review: the requirement
+ * and what the customer confirmed -- is not applicable to this change: it is an
+ * Emergency change, which acts without customer consent (the flow ignores its two
+ * boxes), and nothing on the record shows it went through that gate. An Emergency
+ * change raised before the rule can still sit in a customer state, carry the
+ * customer's outcome or hold a stage row for the gate: then the step is shown as
+ * it is, never hidden.
+ *
+ * `approvals` is `GET /change-requests/{id}/approvals`; while it is not loaded the
+ * stage rows count for nothing, and the state and the customer's outcome speak.
+ */
+export function isCustomerStepNotApplicable(
+  cr: Pick<BeChangeRequestDetail, "type" | "state" | "hasCustomerApproved" | "hasCustomerReviewed">,
+  step: "approval" | "review",
+  approvals?: readonly Pick<BeChangeRequestApproval, "stage">[],
+): boolean {
+  if (!isEmergencyChangeRequestType(cr.type)) return false;
+  const stage = step === "approval" ? "Customer Approval" : "Customer Review";
+  const gateState = step === "approval" ? "customer_approval" : "customer_review";
+  const outcome = step === "approval" ? cr.hasCustomerApproved : cr.hasCustomerReviewed;
+  return !(cr.state === gateState || outcome === true || approvals?.some((a) => approvalStageLabel(a.stage) === stage));
+}
+
 /**
  * Whether the signed-in user is the creator/requester of this change request.
- * The backend refuses approvals from the creator (Peer, CAB and ECAB alike);
+ * The backend refuses approvals from the creator (Peer and CAB alike);
  * this lets the UI say so up front rather than offering a control that will
  * 403. Defensive on purpose: the detail only carries `requestedBy` (an entity
  * ref) and `createdBy` (a display string whose shape -- id, email or name --
@@ -311,6 +362,317 @@ export function isChangeRequestCreator(
   return candidates.some((c) => (!!id && c === id) || (!!email && c === email));
 }
 
+// ---------------------------------------------------------------------------
+// A time the customer proposed, and WSO2's answer to it
+//
+// The previous system's own mechanism, which our schema already carries: the customer's
+// proposal is written to `customer_updated_on` (a planned START) and the change
+// STAYS in Customer Approval, with the planned window untouched; WSO2 answers it
+// with "Agree" (Accept proposed time: the change goes straight to Scheduled, no
+// CAB, no new customer request) or "Disagree" (Propose a different time: the
+// customer is asked again, no CAB; or Decline, keeping the current time). The
+// backend derives the conversation (`customerProposal`) with an allowlist rule;
+// the page only ever reads `answer === "pending"` from it, never infers it.
+// ---------------------------------------------------------------------------
+
+/** What the header says while a proposed time waits for WSO2: the change is waiting for WSO2, not for the customer. */
+export const CUSTOMER_PROPOSAL_WAITING_REASON = "Waiting for WSO2 to respond to the customer's proposed time";
+
+/**
+ * The time stored on a change in Customer Approval that has not been answered, or `null`. Only the
+ * backend's own verdict counts (`answer: "pending"`: the allowlist that keeps a
+ * migrated change with a live CAB stage, a closed or a scheduled one out), and only
+ * in Customer Approval, where the conversation takes place.
+ *
+ * It is a customer's PROPOSAL only when somebody is recorded as having proposed it
+ * ({@link customerProposalProposer}); a stored time nobody is recorded as having proposed (written by
+ * someone at WSO2, or left over from an earlier cycle) is returned too, so the page can say it is there,
+ * but there is no proposal to answer: Accept is refused, and "Propose a different time" is a plain
+ * Re-schedule that asks the customer to approve the time WSO2 names.
+ */
+export function pendingCustomerProposal(
+  cr: Pick<BeChangeRequestDetail, "state" | "customerProposal">,
+): BeChangeRequestCustomerProposal | null {
+  return cr.state === "customer_approval" && cr.customerProposal?.answer === "pending" ? cr.customerProposal : null;
+}
+
+/** Who proposed the time and when, as far as the backend can still tell. */
+export interface CustomerProposalProposer {
+  name?: string;
+  email?: string;
+  /** When it was proposed (the change request's last write), as the backend sent it. */
+  on?: string;
+}
+
+/**
+ * The proposer of a stored time, or `null` when nobody is recorded as having proposed it. The backend
+ * names one only when a registered contact of the project is on record as having written the time
+ * (`proposerRecorded` says so); a date a user of the previous system wrote (WSO2 users do too), one
+ * left over from an earlier cycle, or a sync rewrite is nobody to name, and the page must not guess:
+ * it says nobody is recorded, and no answer is about it ({@link acceptProposedTimeBlockedReason}).
+ */
+export function customerProposalProposer(
+  proposal: Pick<BeChangeRequestCustomerProposal, "proposerRecorded" | "proposedByName" | "proposedByEmail" | "proposedOn">,
+): CustomerProposalProposer | null {
+  // The backend's own verdict first: with `proposerRecorded: false` nobody is named, whatever else came with it.
+  if (proposal.proposerRecorded === false) return null;
+  const name = proposal.proposedByName?.trim() || undefined;
+  const email = proposal.proposedByEmail?.trim() || undefined;
+  if (!name && !email) return null;
+  return { name, email, on: proposal.proposedOn?.trim() || undefined };
+}
+
+/** "Mia Member (mia@example.com)", the name alone, or the email alone. */
+export function customerProposalProposerLabel(proposer: CustomerProposalProposer): string {
+  if (proposer.name && proposer.email) return `${proposer.name} (${proposer.email})`;
+  return proposer.name ?? proposer.email ?? "";
+}
+
+/**
+ * The words the page uses for a stored time that waits for WSO2. They say "the customer" only when the
+ * proposer is on record ({@link customerProposalProposer}): the previous system lets WSO2 users write the
+ * date too, and one left over from an earlier round reads the same, so with nobody on record the page
+ * must not claim the customer proposed it, and nothing in it is "waiting for your answer": there is no
+ * proposal to answer.
+ */
+export interface CustomerProposalWording {
+  /** The banner's title (its region name). */
+  bannerTitle: string;
+  /** The label of the stored window in the banner and the Accept dialog. */
+  windowLabel: string;
+  /** The Re-schedule dialog's lead for the stored window: "<lead>." with the window formatted by the caller. */
+  counterLead: (window: string) => string;
+  /** The counter dialog's note when the window typed in is the very one the customer proposed (only said of a recorded proposal). */
+  isTheProposedTimeNote: string;
+}
+
+const CUSTOMER_PROPOSED_WORDING: CustomerProposalWording = {
+  bannerTitle: "The customer proposed a new time",
+  windowLabel: "Proposed by the customer",
+  counterLead: (window) => `The customer proposed ${window}.`,
+  isTheProposedTimeNote: "That is the time the customer proposed. Close this and use Accept proposed time instead.",
+};
+
+const STORED_TIME_WORDING: CustomerProposalWording = {
+  bannerTitle: "A time is stored on this change request",
+  windowLabel: "Stored time",
+  counterLead: (window) => `${storedTimeSentence(window)} There is no proposal to decline.`,
+  isTheProposedTimeNote: "",
+};
+
+/** "A time is stored (<window>) but nobody is recorded as having proposed it." */
+export function storedTimeSentence(window: string): string {
+  return `A time is stored (${window}) but nobody is recorded as having proposed it.`;
+}
+
+/** The page's words for a stored time: the customer-attributed ones only when `proposer` is on record. */
+export function customerProposalWording(proposer: CustomerProposalProposer | null): CustomerProposalWording {
+  return proposer ? CUSTOMER_PROPOSED_WORDING : STORED_TIME_WORDING;
+}
+
+/**
+ * Why Accept is unavailable when nobody is recorded as having proposed the stored time: the words of the
+ * backend's own refusal (`change_request_proposer_not_recorded`, and the `acceptBlockedReason` it sends with
+ * `canAccept: false`), for a backend that sends none. No staff action stands in for the customer's own
+ * answer, so a time no customer is recorded as having proposed is never accepted for them.
+ */
+export const PROPOSER_NOT_RECORDED_ACCEPT_REASON =
+  'Nobody is recorded as having proposed this time (it may have been written by someone at WSO2 or left over from an earlier cycle), so it cannot be accepted: use "Propose a different time" to ask the customer to approve a time.';
+
+/** What the banner adds for a stored time nobody is recorded as having proposed: what it may be, and what is still true. */
+export const STORED_TIME_ADVICE =
+  "It may have been written by someone at WSO2, be left over from an earlier cycle, or be a customer's time that this change request was edited after (only the last edit is on record), " +
+  "so there is no proposal to accept. " +
+  'The customer is still being asked to approve the planned time; use "Propose a different time" to ask them to approve another time, or this one.';
+
+/**
+ * The stable `errorCode`s of the refusals that mean "what this dialog showed is no longer what is
+ * stored, or the answer cannot be given now": the one machine-readable thing the page may branch
+ * on (the message is for people and can change). Each comes with a 409 from entity-service, through
+ * the BFF, on the two answers to a time: Accept proposed time and the Re-schedule / counter PATCH.
+ * A code this list does not name (a newer backend) is handled as no code at all.
+ */
+export const ChangeRequestErrorCode = {
+  /** The planned window is no longer the one the page showed. */
+  SCHEDULE_CHANGED: "change_request_schedule_changed",
+  /** The change is not in Customer Approval, or nobody has been asked for the customer's approval. */
+  NOT_PROPOSABLE: "change_request_not_proposable",
+  /** Another approval, not the customer's, is being asked at the same time. */
+  PROPOSAL_NOT_NOW: "change_request_proposal_not_now",
+  /** There is no planned window to keep the length of. */
+  NO_PLANNED_WINDOW: "change_request_no_planned_window",
+  /** The change is on hold. */
+  ON_HOLD: "change_request_on_hold",
+  /** Nobody is recorded as having proposed the stored time, so it cannot be accepted. */
+  PROPOSER_NOT_RECORDED: "change_request_proposer_not_recorded",
+} as const;
+
+const STALE_ANSWER_CODES: ReadonlySet<string> = new Set(Object.values(ChangeRequestErrorCode));
+
+/** The `errorCode` the backend named on a failed request, if it named one (a `BackendApiError`'s payload). */
+export function backendErrorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const code = (err as { payload?: { errorCode?: unknown } }).payload?.errorCode;
+  return typeof code === "string" && code ? code : undefined;
+}
+
+/**
+ * Whether a failed answer to a time (Accept proposed time, or the Re-schedule / counter PATCH) was
+ * refused because the change request is no longer what the dialog was opened on: a 409 that names one
+ * of the {@link ChangeRequestErrorCode}s. Sending the same request again would be refused the same way,
+ * so the page closes the dialog, says why and reads the change request again. Any other failure (a 400
+ * about the window, a refusal with no code or an unknown one, a server error) is the dialog's own to
+ * show: it stays open with its message.
+ */
+export function isStaleAnswerError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  if ((err as { status?: unknown }).status !== 409) return false;
+  const code = backendErrorCode(err);
+  return code !== undefined && STALE_ANSWER_CODES.has(code);
+}
+
+/** What an answer dialog was opened on, and what the page holds for the same change request. */
+export interface AnswerSnapshot {
+  cr: Pick<BeChangeRequestDetail, "state" | "plannedStartOn" | "plannedEndOn">;
+  proposal: Pick<
+    BeChangeRequestCustomerProposal,
+    "startOn" | "proposerRecorded" | "proposedByName" | "proposedByEmail" | "proposedOn"
+  > | null;
+}
+
+/**
+ * Whether the page now holds something other than what an answer dialog was opened on: another state,
+ * another planned window, a proposal that is gone, a different one, or one whose proposer is now (not)
+ * on record. The dialog keeps what its reader was shown (what they answer is what they read), so after
+ * a refused attempt this is what tells it to stop offering the same request again, whether or not the
+ * backend named the refusal with a code.
+ */
+export function answerSnapshotMoved(shown: AnswerSnapshot, now: AnswerSnapshot): boolean {
+  const instant = (value: string | null | undefined): number | null => parseBackendTimestamp(value)?.getTime() ?? null;
+  if ((shown.cr.state ?? null) !== (now.cr.state ?? null)) return true;
+  if (instant(shown.cr.plannedStartOn) !== instant(now.cr.plannedStartOn)) return true;
+  if (instant(shown.cr.plannedEndOn) !== instant(now.cr.plannedEndOn)) return true;
+  if (!shown.proposal || !now.proposal) return !!shown.proposal !== !!now.proposal;
+  if (instant(shown.proposal.startOn) !== instant(now.proposal.startOn)) return true;
+  return !customerProposalProposer(shown.proposal) !== !customerProposalProposer(now.proposal);
+}
+
+/** A window as two instants (epoch ms); `endMs` is `null` when the end is not known. */
+export interface WindowMs {
+  startMs: number;
+  endMs: number | null;
+}
+
+/** The planned window of a change, or `null` when it has none to move (no start or end, or an end that is not after the start). */
+export function plannedWindowMs(cr: Pick<BeChangeRequestDetail, "plannedStartOn" | "plannedEndOn">): { startMs: number; endMs: number } | null {
+  const start = parseBackendTimestamp(cr.plannedStartOn);
+  const end = parseBackendTimestamp(cr.plannedEndOn);
+  if (!start || !end || end.getTime() <= start.getTime()) return null;
+  return { startMs: start.getTime(), endMs: end.getTime() };
+}
+
+/**
+ * The window the customer proposed: their start, and the end the backend derived (start +
+ * the planned length: a customer proposes a START and the planned length is kept). When the
+ * backend sent no end, it is derived here the same way; `null` when there is no planned
+ * length to keep either, or the proposal's start cannot be read.
+ */
+export function proposedWindowMs(
+  cr: Pick<BeChangeRequestDetail, "plannedStartOn" | "plannedEndOn">,
+  proposal: Pick<BeChangeRequestCustomerProposal, "startOn" | "endOn">,
+): WindowMs | null {
+  const start = parseBackendTimestamp(proposal.startOn);
+  if (!start) return null;
+  const end = parseBackendTimestamp(proposal.endOn);
+  if (end) return { startMs: start.getTime(), endMs: end.getTime() };
+  const planned = plannedWindowMs(cr);
+  return { startMs: start.getTime(), endMs: planned ? start.getTime() + (planned.endMs - planned.startMs) : null };
+}
+
+/** An instant as the CSM pages show a change request's times (the viewer's time zone, "Mar 1, 2030, 9:00 AM"). */
+export function formatCrDateTime(value: string | number | null | undefined): string {
+  const raw = typeof value === "number" ? (Number.isFinite(value) ? new Date(value).toISOString() : null) : value;
+  return formatBackendTimestampForDisplay(raw, { dateStyle: "medium", timeStyle: "short" }) ?? "—";
+}
+
+/** A window as "<start> to <end>", or the one bound there is, or "—". */
+export function formatCrWindow(start: string | number | null | undefined, end: string | number | null | undefined): string {
+  const from = formatCrDateTime(start);
+  const to = formatCrDateTime(end);
+  if (from === "—") return to;
+  return to === "—" ? from : `${from} to ${to}`;
+}
+
+/** A window's length as words ("2 hours", "1 hour 30 minutes", "1 day"), or "" when it has none. */
+export function formatWindowLength(ms: number): string {
+  const totalMinutes = Math.round(ms / 60_000);
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return "";
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const unit = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return [days && unit(days, "day"), hours && unit(hours, "hour"), minutes && unit(minutes, "minute")]
+    .filter((part): part is string => !!part)
+    .join(" ");
+}
+
+/**
+ * Why "Accept proposed time" is unavailable, or `null` when it is on offer. The backend is the
+ * authority and refuses each of these in words (409 / 400); the page says so up front where it
+ * can know. First, nobody being recorded as having proposed the time: no staff action stands in for
+ * the customer's answer, so such a time is never accepted (the backend's own words when it sends
+ * them, else {@link PROPOSER_NOT_RECORDED_ACCEPT_REASON}). Then the change being on hold (a state change
+ * is refused), the proposed time having already passed (it was valid when made; accepting it
+ * would schedule the past), or there being no planned window whose length the proposal could keep. The
+ * page's own reading comes first (the proposed time can pass while the page is open, and its words are
+ * short); the backend's verdict (`canAccept: false`, with its own `acceptBlockedReason`) holds the
+ * button back for anything the page cannot tell.
+ */
+export function acceptProposedTimeBlockedReason(
+  cr: Pick<BeChangeRequestDetail, "onHold" | "plannedStartOn" | "plannedEndOn">,
+  proposal: Pick<
+    BeChangeRequestCustomerProposal,
+    "startOn" | "canAccept" | "acceptBlockedReason" | "proposerRecorded" | "proposedByName" | "proposedByEmail" | "proposedOn"
+  >,
+  nowMs: number = Date.now(),
+): string | null {
+  const said = proposal.acceptBlockedReason?.trim();
+  const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
+  if (!customerProposalProposer(proposal)) return said ? sentence(said) : PROPOSER_NOT_RECORDED_ACCEPT_REASON;
+  if (cr.onHold === true) return "This change request is on hold. Take it off hold first.";
+  const start = parseBackendTimestamp(proposal.startOn);
+  if (start && start.getTime() <= nowMs) return "The proposed time has passed. Propose a different time.";
+  if (!plannedWindowMs(cr)) return "This change request has no planned window whose length the proposed time could keep. Propose a different time.";
+  if (proposal.canAccept === false) {
+    return said ? sentence(said) : "The backend would refuse this right now. Propose a different time.";
+  }
+  return null;
+}
+
+/** The states a change request is in once it has moved on from Customer Approval (Scheduled, then every state after it). */
+const STATES_PAST_CUSTOMER_APPROVAL: readonly string[] = ["scheduled", "implement", "review", "customer_review", "rollback", "closed", "canceled"];
+
+/**
+ * What the Overview's "Customer approved" cell reads. The customer's own approval (`hasCustomerApproved`,
+ * stamped when they answer in the Customer Portal) reads Yes. A change that went to Scheduled because WSO2
+ * ACCEPTED the time the customer proposed was never stamped (no staff action records the customer's
+ * approval: the proposal is the customer's own consent), so a plain "No" there would be misleading: it
+ * reads "Proposed time accepted". Display only; nothing reads this to decide anything.
+ *
+ * It reads that only once the change has moved on from Customer Approval (Scheduled or later): the answer
+ * (`agreed` / the raw `agree`) stays on the row after it, nothing clears it when the customers are asked
+ * again, so a change that is (back) in Customer Approval with an Agree standing was NOT scheduled by it and
+ * is waiting for the customer's own answer: "Proposed time accepted" there would say there is nothing left
+ * to answer. The same gate is in the CSM microapp's model (`toChangeRequestDetail`).
+ */
+export function customerApprovedDisplay(
+  cr: Pick<BeChangeRequestDetail, "state" | "hasCustomerApproved" | "customerProposal" | "confirmCustomerUpdatedDate">,
+): "Yes" | "No" | "Proposed time accepted" {
+  if (cr.hasCustomerApproved) return "Yes";
+  const agreed = cr.customerProposal?.answer === "agreed" || cr.confirmCustomerUpdatedDate?.trim().toLowerCase() === "agree";
+  return agreed && !!cr.state && STATES_PAST_CUSTOMER_APPROVAL.includes(cr.state) ? "Proposed time accepted" : "No";
+}
+
 /** Stage-level statuses that mean the stage is actively waiting on someone. */
 const WAITING_APPROVAL_STATUSES = new Set(["PENDING", "REQUESTED"]);
 
@@ -326,16 +688,28 @@ const NO_LONGER_ASKED_APPROVER_STATUSES = new Set(["CANCELLED", "CANCELED", "NOT
  * group, "Awaiting Devops Approval". Returns `null` when nothing is currently
  * blocking on approval — no waiting stage, or the approvals haven't loaded
  * yet — so callers should treat `null` as "no reason to show", not an error.
+ *
+ * `pendingProposal` (see {@link pendingCustomerProposal}) is a customer's proposed time that nobody
+ * at WSO2 has answered: at Customer Approval the change is then waiting for WSO2, not for
+ * the customer ({@link CUSTOMER_PROPOSAL_WAITING_REASON}). A stored time that nobody is recorded as
+ * having proposed is not that: there is no proposal to answer, the customer is still being asked to
+ * approve the planned time, and the header says so ("Awaiting Customer Approval").
  */
 export function changeRequestBlockingReason(
   approvals: BeChangeRequestApproval[] | undefined,
   state?: string | null,
+  pendingProposal?: BeChangeRequestCustomerProposal | null,
 ): string | null {
   // The customer gates are named from the state: the CR is waiting on the
   // customer's own answer (given in the Customer Portal) whether or not the
   // backend provisioned a "Customer Approval" / "Customer Review" stage for
   // the customer group. Same wording the stage label gives, never doubled.
-  if (state === "customer_approval") return "Awaiting Customer Approval";
+  // The one exception is a proposed time nobody at WSO2 has answered: the change
+  // stays in Customer Approval, but what it is waiting for is WSO2.
+  if (state === "customer_approval") {
+    if (!pendingProposal || !customerProposalProposer(pendingProposal)) return "Awaiting Customer Approval";
+    return CUSTOMER_PROPOSAL_WAITING_REASON;
+  }
   if (state === "customer_review") return "Awaiting Customer Review";
   // A stage whose every approver was cancelled or marked not required (a
   // superseded customer stage after a Re-schedule, a group change) has nobody
@@ -349,7 +723,7 @@ export function changeRequestBlockingReason(
         a.approvers.some((p) => !NO_LONGER_ASKED_APPROVER_STATUSES.has(p.status.trim().toUpperCase()))),
   );
   if (!waiting) return null;
-  // A recognised stage (Peer / CAB / ECAB) is named by its stage label, which
+  // A recognised stage (Peer / CAB) is named by its stage label, which
   // already ends in "Approval" -- so this reads "Awaiting CAB Approval" and
   // never "Awaiting CAB approval approval".
   const stageLabel = knownApprovalStageLabel(waiting.stage);
@@ -387,14 +761,14 @@ export const NOBODY_ASKED_HELPER =
  * What staff are left with, per customer gate, when nobody is being asked.
  * Staff never record a customer's approval or review, so the only exits are the
  * ones staff always have there. Out of Customer Approval that is Cancel change:
- * Re-schedule only sends the change back through approval, to ask the same group
- * again, so it ends no wait. Out of Customer Review it is Roll back or Cancel
- * change.
+ * Re-schedule asks the project's registered contacts again at once, and is refused
+ * while nobody can be asked, so it ends no wait. Out of Customer Review it is
+ * Roll back or Cancel change.
  */
 export const NOBODY_ASKED_WAY_OUT: Readonly<Record<"customer_approval" | "customer_review", string>> = {
   customer_approval:
     "Staff never record a customer's approval, so there is nobody to answer here: Cancel change is the only way out. " +
-    "Re-schedule only sends the change back through approval, to ask the same group again.",
+    "Re-schedule would ask the same group again, and it is refused while nobody can be asked.",
   customer_review:
     "Staff never record a customer's review, so there is nobody to answer here: Roll back or Cancel change are the only ways out.",
 };
@@ -410,8 +784,8 @@ export const NOBODY_ASKED_WAY_OUT: Readonly<Record<"customer_approval" | "custom
  */
 export const NOBODY_ASKED_WAY_OUT_RESCHEDULE_MAY_HELP =
   "Staff never record a customer's approval, so there is nobody to answer here. " +
-  "Re-schedule sends the change back through approval and then asks the project's registered contacts again, " +
-  "which helps only if someone can be asked this time; if nobody can, Cancel change is the only way out.";
+  "Re-schedule asks the project's registered contacts again at once, which helps only if someone can be asked this time " +
+  "(it is refused when nobody can be); if nobody can, Cancel change is the only way out.";
 
 /**
  * Whether any approver of any stage is still being asked: an approver row in
@@ -489,8 +863,8 @@ export function noCustomerAskedHelper(
 //     Implement, and always within the frozen project.
 //
 // A change request cannot return to New, so none of this needs a record of what
-// it reached. It is also what closes the Re-schedule hole: a ticked box stays
-// ticked, so a change sent back to Authorize asks the same contacts again.
+// it reached. A ticked box stays ticked, so nothing can untick the customer's
+// part to skip it: a Re-schedule asks the same contacts again.
 // ---------------------------------------------------------------------------
 
 /** True while a change request is being created: state New, or none recorded yet. */
@@ -610,13 +984,18 @@ export const REQUEST_APPROVAL_NEEDS_PROJECT_REASON = "Select a Customer Project 
  * Project: it would reach a customer stage with nobody to ask, and the project can
  * no longer be set once it has left New. Offered up front as the reason the action
  * is disabled.
+ *
+ * Never for an Emergency change: the backend ignores its two customer boxes (it is
+ * authorized by the CAB alone and never reaches a customer state), so a stored
+ * tick on one neither needs a project nor blocks the request.
  */
 export function requestApprovalNeedsProjectReason(
-  cr: Pick<BeChangeRequestDetail, "state" | "project" | "customerApprovalRequired" | "customerReviewRequired">,
+  cr: Pick<BeChangeRequestDetail, "state" | "type" | "project" | "customerApprovalRequired" | "customerReviewRequired">,
 ): string | null {
   // Only the move out of New: a resent {state: "assess"} on a change request that
   // is already past it is the backend's idempotent no-op, not a request.
   if (!isChangeRequestCreationPhase(cr.state)) return null;
+  if (isEmergencyChangeRequestType(cr.type)) return null;
   const needsCustomer = cr.customerApprovalRequired === true || cr.customerReviewRequired === true;
   return needsCustomer && !cr.project?.id ? REQUEST_APPROVAL_NEEDS_PROJECT_REASON : null;
 }
@@ -642,14 +1021,18 @@ export const REQUEST_APPROVAL_NEEDS_CONTACT_REASON = "Register a contact for the
  * any other refusal. It never claims anything while `customerContacts` is
  * `undefined` (not in the payload: another data source). With no project the
  * missing-project reason (`requestApprovalNeedsProjectReason`) applies instead.
+ *
+ * Never for an Emergency change, whose stored customer boxes the backend ignores
+ * (see `requestApprovalNeedsProjectReason`): nobody is asked, so nobody is missing.
  */
 export function requestApprovalNeedsContactReason(
   cr: Pick<
     BeChangeRequestDetail,
-    "state" | "project" | "customerApprovalRequired" | "customerReviewRequired" | "customerContacts"
+    "state" | "type" | "project" | "customerApprovalRequired" | "customerReviewRequired" | "customerContacts"
   >,
 ): string | null {
   if (!isChangeRequestCreationPhase(cr.state)) return null;
+  if (isEmergencyChangeRequestType(cr.type)) return null;
   const needsCustomer = cr.customerApprovalRequired === true || cr.customerReviewRequired === true;
   if (!needsCustomer || !cr.project?.id) return null;
   return cr.customerContacts !== undefined && cr.customerContacts !== null && cr.customerContacts.length === 0
@@ -701,8 +1084,8 @@ export function changeRequestScopeLockedReason(state?: string | null): string | 
  */
 const TRANSITION_LABEL: Record<string, string> = {
   // New -> Assess is the "Request Approval" action: it sends the CR into its
-  // approval flow (Peer -> CAB for Normal, ECAB for Emergency, straight to
-  // Scheduled for Standard -- all the backend's call).
+  // approval flow (Peer -> CAB for Normal, a single CAB stage for Emergency,
+  // straight to Scheduled for Standard -- all the backend's call).
   assess: "Request Approval",
   // There is deliberately no entry for `scheduled`: a CR is moved to
   // Scheduled automatically when its approval is granted (the customer's own
@@ -733,11 +1116,18 @@ function sentenceCase(raw: string): string {
 }
 
 /** The action-phrased label for a transition target, curated or generic. */
-export function changeRequestTransitionLabel(target: string, fromState?: string | null): string {
-  // `authorize` is only ever an action from `customer_approval`: the
-  // planned time changed, so the change goes back through internal approval.
+export function changeRequestTransitionLabel(
+  target: string,
+  fromState?: string | null,
+  customerProposalPending = false,
+): string {
+  // `authorize` is only ever an action from `customer_approval`, and it does not
+  // move the state (the wire name of the Time Change loop): with a customer's
+  // proposal waiting it is WSO2's counter ("Propose a different time", or a decline
+  // that keeps the current time), otherwise a plain Re-schedule that asks the customer
+  // again.
   if (target === "authorize" && fromState === "customer_approval") {
-    return "Re-schedule";
+    return customerProposalPending ? "Propose a different time" : "Re-schedule";
   }
   return TRANSITION_LABEL[target] ?? sentenceCase(target);
 }

@@ -414,7 +414,7 @@ func TestBuildChangeRequestApprovals_PositionalLabelsAndFirstResponderWinsStatus
 		{id: "appr-4", stageID: nil, approverUserID: strPtrApproval("user-4"), approverName: "Orphan", rawStatus: strPtrApproval("REQUESTED"), updatedOn: updatedOn},
 	}
 
-	got := buildChangeRequestApprovals(stages, approvers)
+	got := buildChangeRequestApprovals(stages, approvers, "NORMAL")
 
 	if len(got.Approvals) != 3 {
 		t.Fatalf("got %d approvals, want 3", len(got.Approvals))
@@ -496,7 +496,7 @@ func TestBuildChangeRequestApprovals_AssignmentGroup(t *testing.T) {
 		{id: "s-cust", assignmentGroupName: nil, assignmentGroupID: nil, checkpointLabel: &customer},
 	}
 
-	got := buildChangeRequestApprovals(stages, nil)
+	got := buildChangeRequestApprovals(stages, nil, "NORMAL")
 
 	if len(got.Approvals) != 3 {
 		t.Fatalf("got %d approvals, want 3", len(got.Approvals))
@@ -543,7 +543,7 @@ func TestBuildChangeRequestApprovals_AssignmentGroup(t *testing.T) {
 // ChangeRequestApprovals when a change request has no approval_stage rows
 // yet.
 func TestBuildChangeRequestApprovals_NoStages(t *testing.T) {
-	got := buildChangeRequestApprovals(nil, nil)
+	got := buildChangeRequestApprovals(nil, nil, "")
 	if len(got.Approvals) != 0 {
 		t.Errorf("got %d approvals, want 0", len(got.Approvals))
 	}
@@ -570,8 +570,8 @@ func TestLegalChangeRequestNextStates(t *testing.T) {
 		// although the PATCH has always refused it.)
 		{string(domain.ChangeRequestStateAssess), false, []string{"canceled"}},
 		{string(domain.ChangeRequestStateAssess), true, []string{"canceled"}},
-		// Authorize is an approval wait (CAB/ECAB): it offers no forward move
-		// at all, only Cancel -- CAB/ECAB approval moves the change on by
+		// Authorize is an approval wait (CAB): it offers no forward move
+		// at all, only Cancel -- CAB approval moves the change on by
 		// itself (to Scheduled, or Customer Approval when the customer's
 		// approval is required).
 		{string(domain.ChangeRequestStateAuthorize), false, []string{"canceled"}},
@@ -615,7 +615,7 @@ func TestLegalChangeRequestNextStates(t *testing.T) {
 	}
 
 	// The customer's approval and review are the customer's alone: no state
-	// offers "scheduled" (the CAB / ECAB cascade, Request Approval on a Standard
+	// offers "scheduled" (the CAB cascade, Request Approval on a Standard
 	// change and the customer's own approval are the only ways in), and Customer
 	// Review does not offer "closed" (only the customer's review closes it).
 	t.Run("scheduled is never offered, from any state", func(t *testing.T) {
@@ -748,7 +748,7 @@ func TestLegalChangeRequestNextStates(t *testing.T) {
 }
 
 // TestCustomerGateHelpers pins the pure gate rules: where Request Approval and
-// CAB/ECAB approval land, and until which state each checkbox stays editable.
+// CAB approval land, and until which state each checkbox stays editable.
 func TestCustomerGateHelpers(t *testing.T) {
 	t.Run("Request Approval destination", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -759,7 +759,7 @@ func TestCustomerGateHelpers(t *testing.T) {
 			{"NORMAL", false, domain.ChangeRequestStateAssess},
 			{"NORMAL", true, domain.ChangeRequestStateAssess}, // the gate comes after CAB
 			{"EMERGENCY", false, domain.ChangeRequestStateAuthorize},
-			{"EMERGENCY", true, domain.ChangeRequestStateAuthorize}, // the gate comes after ECAB
+			{"EMERGENCY", true, domain.ChangeRequestStateAuthorize}, // an Emergency change has no customer gate at all
 			{"STANDARD", false, domain.ChangeRequestStateScheduled},
 			{"STANDARD", true, domain.ChangeRequestStateCustomerApproval}, // no approval to wait for: gate right away
 			{"", true, domain.ChangeRequestStateAssess},                   // legacy/unknown follows Normal
@@ -770,7 +770,7 @@ func TestCustomerGateHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("CAB/ECAB approval target", func(t *testing.T) {
+	t.Run("CAB approval target", func(t *testing.T) {
 		if got := approvalGateTarget(false); got != "SCHEDULED" {
 			t.Errorf("approvalGateTarget(false) = %q, want SCHEDULED", got)
 		}
@@ -819,9 +819,10 @@ func TestCustomerGateHelpers(t *testing.T) {
 }
 
 // TestChangeRequestFlowForModel pins what Request Approval does per change
-// type: Normal -> Assess + Peer Approval stage, Emergency -> Authorize + ECAB
-// stage only (no peer approval), Standard -> Scheduled with no stage at all.
-// A NULL/legacy type follows the Normal flow.
+// type: Normal -> Assess + Peer Approval stage, Emergency -> Authorize + the one
+// CAB Approval stage (no peer approval; the previous system has no Emergency CAB),
+// Standard -> Scheduled with no stage at all. A NULL/legacy type follows the
+// Normal flow.
 func TestChangeRequestFlowForModel(t *testing.T) {
 	tests := []struct {
 		model     string
@@ -829,7 +830,7 @@ func TestChangeRequestFlowForModel(t *testing.T) {
 		wantStage string // "" = no approval stage
 	}{
 		{"NORMAL", domain.ChangeRequestStateAssess, "Peer Approval"},
-		{"EMERGENCY", domain.ChangeRequestStateAuthorize, "ECAB Approval"},
+		{"EMERGENCY", domain.ChangeRequestStateAuthorize, "CAB Approval"},
 		{"STANDARD", domain.ChangeRequestStateScheduled, ""},
 		{"", domain.ChangeRequestStateAssess, "Peer Approval"},
 		{"AZURE", domain.ChangeRequestStateAssess, "Peer Approval"},
@@ -851,15 +852,21 @@ func TestChangeRequestFlowForModel(t *testing.T) {
 			}
 		})
 	}
-	// Emergency has no peer stage, so its ECAB stage sits first; Normal's CAB
+	// Emergency has no peer stage, so its CAB stage sits first; Normal's CAB
 	// stage sits right after the peer stage.
-	if changeRequestECABCheckpoint.Position != 0 || changeRequestPeerCheckpoint.Position != 0 || changeRequestCABCheckpoint.Position != 1 {
-		t.Fatalf("checkpoint positions: peer=%d cab=%d ecab=%d, want 0/1/0",
-			changeRequestPeerCheckpoint.Position, changeRequestCABCheckpoint.Position, changeRequestECABCheckpoint.Position)
+	if changeRequestEmergencyCABCheckpoint.Position != 0 || changeRequestPeerCheckpoint.Position != 0 || changeRequestCABCheckpoint.Position != 1 {
+		t.Fatalf("checkpoint positions: peer=%d cab=%d emergency cab=%d, want 0/1/0",
+			changeRequestPeerCheckpoint.Position, changeRequestCABCheckpoint.Position, changeRequestEmergencyCABCheckpoint.Position)
 	}
-	// CAB and ECAB are separate groups.
-	if changeRequestCABCheckpoint.GroupName == changeRequestECABCheckpoint.GroupName {
-		t.Fatal("CAB and ECAB checkpoints share a group; they must be separate")
+	// There is no Emergency CAB: both CAB checkpoints are the same stage of the same
+	// group (the label, the group and the pool), differing only in where they sit.
+	if changeRequestEmergencyCABCheckpoint.Label != changeRequestCABCheckpoint.Label ||
+		changeRequestEmergencyCABCheckpoint.GroupName != changeRequestCABCheckpoint.GroupName ||
+		changeRequestEmergencyCABCheckpoint.Pool != changeRequestCABCheckpoint.Pool {
+		t.Fatalf("Emergency CAB checkpoint %+v must be the CAB checkpoint %+v at position 0", changeRequestEmergencyCABCheckpoint, changeRequestCABCheckpoint)
+	}
+	if changeRequestCABCheckpoint.Label != "CAB Approval" || changeRequestCABCheckpoint.GroupName != domain.CABApprovalGroupName {
+		t.Fatalf("CAB checkpoint = %+v, want the CAB Approval label and group", changeRequestCABCheckpoint)
 	}
 }
 
@@ -872,7 +879,9 @@ func TestClassifyApprovalStage(t *testing.T) {
 	}{
 		{str("Peer Approval"), 0, stageKindPeer},
 		{str("CAB Approval"), 1, stageKindCAB},
-		{str("ECAB Approval"), 0, stageKindECAB},
+		// A stage an earlier build wrote for an Emergency change: no longer written, still
+		// recognised, and decided as the CAB stage.
+		{str("ECAB Approval"), 0, stageKindCAB},
 		{str("Review"), 2, stageKindReview},
 		// The customer group's stages are recognised by label, wherever they sit.
 		{str("Customer Approval"), 2, stageKindCustomerApproval},
@@ -1223,7 +1232,7 @@ func (f *fakeApproverQuerier) QueryRow(context.Context, string, ...any) pgx.Row 
 
 func TestStageKindNeedsInternalApprover(t *testing.T) {
 	for kind, want := range map[approvalStageKind]bool{
-		stageKindPeer: true, stageKindCAB: true, stageKindECAB: true, stageKindReview: true,
+		stageKindPeer: true, stageKindCAB: true, stageKindReview: true,
 		// The customer's stages are decided by the project's (external) contacts;
 		// an unclassified stage is not ours to judge.
 		stageKindCustomerApproval: false, stageKindCustomerReview: false, stageKindOther: false,
@@ -1271,13 +1280,13 @@ func TestApproverDecisionBlock_InternalOnly(t *testing.T) {
 	creators := map[string]bool{creator: true}
 
 	// An internal user decides every internal stage.
-	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindECAB, stageKindReview} {
+	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindReview} {
 		if err := approverDecisionBlock(ctx, q, internal, creators, kind); err != nil {
 			t.Errorf("internal user on %s: %v, want nil", stageKindName(kind), err)
 		}
 	}
 	// An external user is refused on every one of them, with a readable 403.
-	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindECAB, stageKindReview} {
+	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindReview} {
 		err := approverDecisionBlock(ctx, q, external, creators, kind)
 		var fe *apierror.ForbiddenError
 		if !errors.As(err, &fe) {
@@ -1325,7 +1334,6 @@ func TestApprovalStageDecidableState(t *testing.T) {
 	for kind, want := range map[approvalStageKind]string{
 		stageKindPeer:             "ASSESS",
 		stageKindCAB:              "AUTHORIZE",
-		stageKindECAB:             "AUTHORIZE",
 		stageKindReview:           "REVIEW",
 		stageKindCustomerApproval: "CUSTOMER_APPROVAL",
 		stageKindCustomerReview:   "CUSTOMER_REVIEW",
@@ -1337,7 +1345,7 @@ func TestApprovalStageDecidableState(t *testing.T) {
 	}
 	// Every decidable state is a state the enum has, and each customer stage's
 	// own spec agrees with the map.
-	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindECAB, stageKindReview, stageKindCustomerApproval, stageKindCustomerReview} {
+	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindReview, stageKindCustomerApproval, stageKindCustomerReview} {
 		if !knownChangeRequestStates[approvalStageDecidableState(kind)] {
 			t.Errorf("decidable state %q of kind %v is not a known change request state", approvalStageDecidableState(kind), kind)
 		}
@@ -1360,6 +1368,7 @@ func TestApprovalStageDecidableState_ThroughClassifier(t *testing.T) {
 		{str("Assess"), 0, "ASSESS"},
 		{str("CAB Approval"), 1, "AUTHORIZE"},
 		{str("Authorize"), 1, "AUTHORIZE"},
+		// The label an earlier build wrote for an Emergency change: decided as CAB.
 		{str("ECAB Approval"), 0, "AUTHORIZE"},
 		{str("Review"), 2, "REVIEW"},
 		{str("Customer Approval"), 2, "CUSTOMER_APPROVAL"},
@@ -1382,7 +1391,7 @@ func TestApprovalStageDecidableState_ThroughClassifier(t *testing.T) {
 // the kind has a state, the change's state is a known one, and they differ.
 func TestApprovalStageOutOfState(t *testing.T) {
 	states := []string{"NEW", "ASSESS", "AUTHORIZE", "CUSTOMER_APPROVAL", "SCHEDULED", "IMPLEMENT", "REVIEW", "CUSTOMER_REVIEW", "ROLLBACK", "CLOSED", "CANCELED"}
-	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindECAB, stageKindReview, stageKindCustomerApproval, stageKindCustomerReview} {
+	for _, kind := range []approvalStageKind{stageKindPeer, stageKindCAB, stageKindReview, stageKindCustomerApproval, stageKindCustomerReview} {
 		decidable := approvalStageDecidableState(kind)
 		for _, state := range states {
 			if got, want := approvalStageOutOfState(kind, state), state != decidable; got != want {
@@ -1464,7 +1473,6 @@ func TestStaleApprovalRefusal(t *testing.T) {
 		{stageKindReview, "CUSTOMER_REVIEW", "this approval is no longer pending: the change request is in Customer Review, but the Review stage can only be decided while it is in Review"},
 		{stageKindPeer, "AUTHORIZE", "this approval is no longer pending: the change request is in Authorize, but the Peer Approval stage can only be decided while it is in Assess"},
 		{stageKindCAB, "SCHEDULED", "this approval is no longer pending: the change request is in Scheduled, but the CAB Approval stage can only be decided while it is in Authorize"},
-		{stageKindECAB, "CANCELED", "this approval is no longer pending: the change request is in Canceled, but the ECAB Approval stage can only be decided while it is in Authorize"},
 		{stageKindCustomerApproval, "AUTHORIZE", "this approval is no longer pending: the change request is in Authorize, but the Customer Approval stage can only be decided while it is in Customer Approval"},
 		{stageKindCustomerReview, "ROLLBACK", "this approval is no longer pending: the change request is in Rollback, but the Customer Review stage can only be decided while it is in Customer Review"},
 	} {

@@ -64,7 +64,7 @@ export const FIXTURES = {
 
 export type FixtureChange = { id: string; number: string };
 
-/** The staff persona that decides internal stages (a CAB / ECAB / peer approver). */
+/** The staff persona that decides internal stages (a CAB / peer approver). */
 export const STAFF_APPROVERS = {
   alice: "alice.perera@example.com",
   bob: "bob.fernando@example.com",
@@ -216,6 +216,14 @@ export type CustomerChangeRequest = {
   startDate?: string | null;
   endDate?: string | null;
   title?: string;
+  /** The time a customer proposed and where WSO2's answer stands (no names or e-mails ever reach a customer). */
+  customerProposal?: {
+    startDate: string;
+    endDate?: string | null;
+    answer: "pending" | "agreed" | "disagreed" | "unanswered";
+    /** Whether the proposer is the person reading (only while pending, and only when it is knowable). */
+    proposedByViewer?: boolean;
+  } | null;
 };
 
 /**
@@ -458,6 +466,22 @@ export function staffApi(who: StaffPersona) {
   };
 }
 
+/**
+ * What WSO2 staff are told about a time a customer proposed (entity-service's `customerProposal`): the proposed start
+ * (RFC 3339), the end it implies (while pending), where WSO2's answer stands, and who proposed it when that is knowable.
+ */
+export type StaffProposal = {
+  startOn: string;
+  endOn?: string;
+  answer: "pending" | "agreed" | "disagreed" | "unanswered";
+  proposerRecorded?: boolean;
+  proposedByName?: string;
+  proposedByEmail?: string;
+  proposedOn?: string;
+  canAccept?: boolean;
+  acceptBlockedReason?: string;
+};
+
 /** The part of the staff view of a change request the specs read. */
 export type StaffChangeRequest = {
   id: string;
@@ -467,6 +491,12 @@ export type StaffChangeRequest = {
   customerReviewRequired?: boolean;
   project?: { id: string; name: string } | null;
   customerContacts?: { name?: string; email?: string }[];
+  /** The planned window, as the staff view prints it (what a staff answer names as the window it saw). */
+  plannedStartOn?: string | null;
+  plannedEndOn?: string | null;
+  /** The time a customer proposed and where WSO2's answer stands (absent when nothing was ever proposed). */
+  customerProposal?: StaffProposal | null;
+  legalNextStates?: string[];
   message?: string;
 };
 
@@ -527,6 +557,120 @@ export async function staffDecides(who: StaffPersona, id: string, decision: "app
 export async function staffMoves(who: StaffPersona, id: string, state: string): Promise<void> {
   const result = await staffApi(who).patch(id, { state });
   if (result.status !== 200) throw new Error(`${who} moving ${id} to ${state} answered ${result.status}: ${JSON.stringify(result.body)}`);
+}
+
+// --- WSO2's side of a customer's proposed time, through the CSM portal's backend -----------------------
+
+/**
+ * A time window as the staff API takes it: RFC 3339 instants in UTC (what {@link futureWindow} returns as
+ * `startUtc` / `endUtc`).
+ */
+export type StaffWindow = { startUtc: string; endUtc: string };
+
+/** What a staff answer to a proposal names as seen: the proposal's version and the planned window the page showed. */
+async function whatStaffSee(who: StaffPersona, id: string): Promise<{
+  proposal: StaffProposal | null;
+  expected: { expectedPlannedStartOn?: string; expectedPlannedEndOn?: string };
+  read: ApiResult<StaffChangeRequest>;
+}> {
+  const read = await staffApi(who).get(id);
+  if (read.status !== 200) throw new Error(`${who} reading ${id} answered ${read.status}: ${JSON.stringify(read.body)}`);
+  const body = read.body;
+  return {
+    read,
+    proposal: body.customerProposal ?? null,
+    expected: {
+      ...(body.plannedStartOn ? { expectedPlannedStartOn: body.plannedStartOn } : {}),
+      ...(body.plannedEndOn ? { expectedPlannedEndOn: body.plannedEndOn } : {}),
+    },
+  };
+}
+
+/**
+ * WSO2 ACCEPTS the proposed time (the CSM portal's "Accept proposed time"): `confirmCustomerUpdatedDate: "agree"` with the
+ * proposal's version and the planned window the page showed, which the service applies in one write -- the proposed start
+ * on the planned length, state Scheduled, no CAB, no second ask of the customer. Returns the raw result so a spec can also
+ * assert a refusal.
+ */
+export async function staffAcceptsProposal(who: StaffPersona, id: string): Promise<ApiResult<{ message?: string }>> {
+  const { proposal, expected } = await whatStaffSee(who, id);
+  return staffApi(who).patch(id, {
+    confirmCustomerUpdatedDate: "agree",
+    ...(proposal ? { expectedCustomerUpdatedOn: proposal.startOn } : {}),
+    ...expected,
+  });
+}
+
+/**
+ * WSO2 PROPOSES A DIFFERENT TIME (the CSM portal's counter): `{state: "authorize", window}` with the proposal's version and
+ * the planned window the page showed. The window is WSO2's; the customers are asked again, and no CAB is involved. (The wire
+ * name `authorize` is the Time Change loop's name: the state stays Customer Approval.)
+ */
+export async function staffCountersProposal(
+  who: StaffPersona,
+  id: string,
+  window: StaffWindow,
+): Promise<ApiResult<{ message?: string }>> {
+  const { proposal, expected } = await whatStaffSee(who, id);
+  return staffApi(who).patch(id, {
+    state: "authorize",
+    plannedStartOn: window.startUtc,
+    plannedEndOn: window.endUtc,
+    ...(proposal ? { expectedCustomerUpdatedOn: proposal.startOn } : {}),
+    ...expected,
+  });
+}
+
+/**
+ * WSO2 DECLINES the proposed time: "Propose a different time" with the window left as it is (the previous system's Disagree). The
+ * customers' live requests are untouched, and the planned window stays.
+ */
+export async function staffDeclinesProposal(who: StaffPersona, id: string): Promise<ApiResult<{ message?: string }>> {
+  const { proposal, expected, read } = await whatStaffSee(who, id);
+  return staffApi(who).patch(id, {
+    state: "authorize",
+    ...(read.body.plannedStartOn ? { plannedStartOn: read.body.plannedStartOn } : {}),
+    ...(read.body.plannedEndOn ? { plannedEndOn: read.body.plannedEndOn } : {}),
+    ...(proposal ? { expectedCustomerUpdatedOn: proposal.startOn } : {}),
+    ...expected,
+  });
+}
+
+/**
+ * A plain Re-schedule (nobody proposed anything): `{state: "authorize", window}` out of Customer Approval. The customers are
+ * asked again of the new window, no CAB is involved, and the state does not move.
+ */
+export async function staffReschedules(
+  who: StaffPersona,
+  id: string,
+  window: StaffWindow,
+): Promise<ApiResult<{ message?: string }>> {
+  const { expected } = await whatStaffSee(who, id);
+  return staffApi(who).patch(id, { state: "authorize", plannedStartOn: window.startUtc, plannedEndOn: window.endUtc, ...expected });
+}
+
+/** A proposal as the database holds it: the proposed start (UTC instant, "" when none) and WSO2's answer ("" none, AGREE, DISAGREE). */
+export async function proposalRow(id: string): Promise<{ proposedUtc: string; answer: string }> {
+  const out = await psql(
+    `select coalesce(to_char(customer_updated_on at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),''), ` +
+      `coalesce(customer_updated_date_confirmation::text,'') from change_request where id = '${id}'`,
+  );
+  const [proposedUtc, answer] = out.split("|");
+  return { proposedUtc, answer };
+}
+
+/** Plans a change request's window straight in the database (the seeded fixtures carry none), as UTC instants. */
+export async function planWindow(id: string, window: StaffWindow): Promise<void> {
+  await psql(`update change_request set start_on = '${window.startUtc}', end_on = '${window.endUtc}' where id = '${id}'`);
+}
+
+/**
+ * The window the Customer Approval fixture is given by {@link resetFixtures}: two hours, a month ahead, so a customer has a
+ * planned start to move (a proposal moves the START and keeps the length, and is refused on a change that has no window).
+ */
+export function plannedFixtureWindow(): StaffWindow {
+  const { startUtc, endUtc } = futureWindow("UTC", { daysAhead: 30, startHour: 10, hours: 2 });
+  return { startUtc, endUtc };
 }
 
 /** The stored state of a change request, as the stack's database holds it (UPPER_SNAKE). */
@@ -699,6 +843,8 @@ export const LEGACY = {
   customerApprovalToPropose: "CHG0039112",
   /** Customer Approval for the second contact (erin) to answer. */
   customerApprovalForErin: "CHG0039113",
+  /** Customer Approval with a window planned and the previous system's own unlabeled customer stage (dave and erin REQUESTED). */
+  customerApprovalAskedByPreviousSystem: "CHG0039114",
   /** Lumen Works Platform: the user's "Demo Test 1" shape, and a Scheduled one. */
   lumenDemoTest: "CHG0039201",
   lumenScheduled: "CHG0039202",
@@ -713,8 +859,8 @@ export const LEGACY = {
 /** The states in which a customer has always been shown a change request (everything past Authorize). */
 export const LEGACY_VISIBLE = [
   LEGACY.customerApproval, LEGACY.scheduled, LEGACY.implement, LEGACY.review, LEGACY.customerReview, LEGACY.rollback,
-  LEGACY.closed, LEGACY.canceled, LEGACY.customerApprovalToPropose, LEGACY.customerApprovalForErin, LEGACY.staleStageScheduled,
-  LEGACY.oneSecondBefore,
+  LEGACY.closed, LEGACY.canceled, LEGACY.customerApprovalToPropose, LEGACY.customerApprovalForErin, LEGACY.customerApprovalAskedByPreviousSystem,
+  LEGACY.staleStageScheduled, LEGACY.oneSecondBefore,
 ] as const;
 
 /** A legacy row's id: ServiceNow-style (md5 of the number rendered as a UUID), as the seed file writes it. */
@@ -901,12 +1047,15 @@ export function withFixtureStack(t: typeof test, alsoNeedsCsmBff = false): void 
 /**
  * Puts the CHG-FIXED-* fixtures back to their starting state by re-running the
  * (self-healing) seed in the stack's Postgres, then proves the stack under test
- * sees it: through the CUSTOMER backend, dave must be asked in 007 and 008. A
+ * sees it: through the CUSTOMER backend, dave must be asked in 007 and 008. (The
+ * Customer Approval fixture is then given a planned window, {@link plannedFixtureWindow}.) A
  * container that belongs to another stack fails here, with that said, rather
  * than as a puzzling assertion later.
  */
 export async function resetFixtures(): Promise<void> {
   await psql(fs.readFileSync(SEED_FILE, "utf8"));
+  // The seed plans no window; a customer's proposal moves the planned START, so the fixture gets one.
+  await planWindow(FIXTURES.approval.id, plannedFixtureWindow());
   const dave = customerApi("dave");
   const deadline = Date.now() + 15_000;
   let last = "";
@@ -1002,6 +1151,11 @@ export function wallTimeToUtc(local: string, zone: string): Date {
     instant -= Date.UTC(sy, smo - 1, sdd, sh, smi) - asUtc;
   }
   return new Date(instant);
+}
+
+/** `utc` (`YYYY-MM-DDTHH:MM:SSZ`) moved by `hours` of real time, in the same form: the end a proposed start implies. */
+export function addHours(utc: string, hours: number): string {
+  return new Date(Date.parse(utc) + hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /**

@@ -134,8 +134,14 @@ export default function ChangeDetailPage() {
                   data ? (
                     <Chip
                       size="small"
-                      color={data.hasCustomerApproved ? "success" : "default"}
-                      label={data.hasCustomerApproved ? "Approved" : "Pending"}
+                      color={data.hasCustomerApproved || data.isProposedTimeAccepted ? "success" : "default"}
+                      label={
+                        data.hasCustomerApproved
+                          ? "Approved"
+                          : data.isProposedTimeAccepted
+                            ? "Proposed time accepted"
+                            : "Pending"
+                      }
                     />
                   ) : (
                     <Skeleton variant="rounded" width={70} height={22} sx={{ borderRadius: "16px" }} />

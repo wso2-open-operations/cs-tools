@@ -46,7 +46,7 @@ func (f *crFlow) seedSyncedStage(id string, groupID *string, ageMinutes int, row
 	var stageID string
 	if err := f.scoped.QueryRow(f.sys,
 		`INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status)
-		 VALUES (gen_random_uuid(), now() - make_interval(mins => $2::int), now(), 'sn-sync', 'sn-sync', $1, $3::uuid, 'requested') RETURNING id::text`,
+		 VALUES (gen_random_uuid(), now() - make_interval(mins => $2::int), now(), 'sn-sync', 'sn-sync', $1, $3::uuid, 'REQUESTED') RETURNING id::text`,
 		id, ageMinutes, groupID).Scan(&stageID); err != nil {
 		f.t.Fatalf("seed a synced stage: %v", err)
 	}
@@ -70,23 +70,22 @@ func (f *crFlow) approverState(stageID, userID string) string {
 	return st
 }
 
-// Emergency in Authorize, one synced stage at position 0 and no label: the ECAB's
-// (an Emergency change has no peer stage and no CAB stage). Its approver can
-// decide, and approving cascades to Scheduled exactly as a native ECAB approval.
+// Emergency in Authorize, one synced stage at position 0 and no label and no group: the
+// only approval an Emergency change has (it has no peer stage), so the CAB's. Its approver can
+// decide, and approving cascades to Scheduled exactly as a native CAB approval. The label shown
+// is the positional one, unchanged: with no group there is nothing to name it by.
 func TestChangeRequestSyncedStagesIntegration_EmergencyInAuthorizeWithAStageAtPositionZero(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
 	id := f.createWithProject(domain.ChangeRequestTypeEmergency, nil, false, false)
 	f.setState(id, "AUTHORIZE")
-	stage := f.seedSyncedStage(id, nil, 30, map[string]string{crECABMemberUserID: "REQUESTED"})
+	stage := f.seedSyncedStage(id, nil, 30, map[string]string{crCABMemberUserID1: "REQUESTED"})
 
-	// The label shown is the display one, unchanged (position 0 = "Assess").
-	f.wantCanDecide(id, "in Authorize", map[string][]string{crECABMemberUserID: {"Assess"}})
-	if err := f.decide(id, crECABMemberUserID, "approved"); err != nil {
-		t.Fatalf("the ECAB approver's decision on the synced stage: %v", err)
+	f.wantCanDecide(id, "in Authorize", map[string][]string{crCABMemberUserID1: {"Assess"}})
+	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
+		t.Fatalf("the approver's decision on the synced stage: %v", err)
 	}
-	f.expect(id, "after the ECAB approver's decision", "SCHEDULED", "implement", "canceled")
-	if got := f.approverState(stage, crECABMemberUserID); got != "APPROVED" {
+	f.expect(id, "after the approver's decision", "SCHEDULED", "implement", "canceled")
+	if got := f.approverState(stage, crCABMemberUserID1); got != "APPROVED" {
 		t.Fatalf("approver row = %s, want APPROVED", got)
 	}
 }
@@ -94,24 +93,23 @@ func TestChangeRequestSyncedStagesIntegration_EmergencyInAuthorizeWithAStageAtPo
 // The creator rule and the internal-only rule still hold on a stage read this way.
 func TestChangeRequestSyncedStagesIntegration_TheApproverRulesStillHold(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
 	id := f.createWithProject(domain.ChangeRequestTypeEmergency, nil, false, false)
 	f.setState(id, "AUTHORIZE")
 	f.seedSyncedStage(id, nil, 30, map[string]string{
-		crFlowCreatorID: "REQUESTED", crECABMemberUserID: "REQUESTED", crScopeUserA1: "REQUESTED"})
+		crFlowCreatorID: "REQUESTED", crCABMemberUserID1: "REQUESTED", crScopeUserA1: "REQUESTED"})
 
 	// The creator never approves their own change, whatever stage it is.
-	f.wantForbidden("the creator on a synced ECAB stage", f.decide(id, crFlowCreatorID, "approved"), "creator of a change request cannot approve")
+	f.wantForbidden("the creator on a synced Emergency stage", f.decide(id, crFlowCreatorID, "approved"), "creator of a change request cannot approve")
 	// A customer holding a row on what is an internal stage is not let in either.
-	f.wantForbidden("a customer on a synced ECAB stage", f.decide(id, crScopeUserA1, "approved"), "only active internal")
+	f.wantForbidden("a customer on a synced Emergency stage", f.decide(id, crScopeUserA1, "approved"), "only active internal")
 	if got := f.canDecideStages(id, crFlowCreatorID); len(got) != 0 {
 		t.Fatalf("canDecide for the creator = %v", got)
 	}
 	if got := f.canDecideStages(id, crScopeUserA1); len(got) != 0 {
 		t.Fatalf("canDecide for a customer on an internal stage = %v", got)
 	}
-	if got := f.canDecideStages(id, crECABMemberUserID); len(got) != 1 {
-		t.Fatalf("canDecide for the ECAB member = %v, want the one stage", got)
+	if got := f.canDecideStages(id, crCABMemberUserID1); len(got) != 1 {
+		t.Fatalf("canDecide for the CAB member = %v, want the one stage", got)
 	}
 	f.expect(id, "after the refused decisions", "AUTHORIZE", "canceled")
 }
@@ -328,14 +326,14 @@ func TestChangeRequestSyncedStagesIntegration_NobodyEligibleIsDiagnosable(t *tes
 		}
 	})
 
-	t.Run("the ECAB group", func(t *testing.T) {
+	t.Run("the CAB group, asked by an Emergency change", func(t *testing.T) {
 		f := newCRFlow(t)
 		f.seedAssignedGroup()
-		members(f, crECABGroupID)
+		members(f, crCABGroupID)
 		id := f.create(domain.ChangeRequestTypeEmergency, crFlowGroupID)
 		_, err := f.patchState(id, domain.ChangeRequestStateAssess)
-		f.wantValidationError("Request Approval into an ECAB nobody can serve", err, `the "ECAB Approval" group has no active internal (WSO2) members`)
-		f.wantValidationError("Request Approval into an ECAB nobody can serve", err, `(the "ECAB Approval" group: 5 members, none eligible: `)
+		f.wantValidationError("Request Approval into a CAB nobody can serve", err, `the "CAB Approval" group has no active internal (WSO2) members`)
+		f.wantValidationError("Request Approval into a CAB nobody can serve", err, `(the "CAB Approval" group: 5 members, none eligible: `)
 		f.wantValidationError("the counts", err, "2 user_type NOT_AVAILABLE")
 		assertNoNames(t, err)
 	})

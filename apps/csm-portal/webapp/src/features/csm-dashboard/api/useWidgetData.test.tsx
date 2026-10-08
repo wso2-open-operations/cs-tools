@@ -76,6 +76,7 @@ describe("useWidgetData", () => {
       {
         filters: { states: ["open"] },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -322,6 +323,45 @@ describe("useWidgetData", () => {
       expect(events).toEqual(["attempt-1", "attempt-2"]);
       expect(result.current.isError).toBe(true);
     });
+  });
+
+  it("uses a separate cache entry for shape count vs. shape list at the same listLimit, so switching shape re-fetches instead of reusing an empty cached item list", async () => {
+    // Both shapes resolve limit to 1 here (count always does; list via
+    // listLimit: 1), so without `shape` in the queryKey the two would
+    // collide on an identical key. Mirrors the real entity service: a
+    // countOnly request gets back `cases: []`, a plain one gets real rows.
+    postMock.mockImplementation((_path: string, body: { countOnly?: boolean }) =>
+      Promise.resolve(
+        body.countOnly
+          ? { total: 3, cases: [] }
+          : { total: 3, cases: [{ id: "c1" }, { id: "c2" }, { id: "c3" }] },
+      ),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const sharedWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result, rerender } = renderHook(
+      (props: { shape: "count" | "list" }) =>
+        useWidgetData({
+          widgetId: "w1",
+          resourceType: "case",
+          filters: {},
+          shape: props.shape,
+          listLimit: 1,
+        }),
+      { wrapper: sharedWrapper, initialProps: { shape: "count" } },
+    );
+
+    await waitFor(() => expect(result.current.data?.total).toBe(3));
+    expect(result.current.data?.items).toEqual([]);
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    rerender({ shape: "list" });
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
   });
 });
 

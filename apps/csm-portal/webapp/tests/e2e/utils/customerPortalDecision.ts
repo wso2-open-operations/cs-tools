@@ -92,3 +92,24 @@ export async function decideAsCustomer(
   });
   return { status: response.status, body: await response.text() };
 }
+
+/**
+ * The customer `email` PROPOSES a new implementation time for change request `crId`, as the customer portal would
+ * send it: `PATCH {plannedStartOn, plannedEndOn?}` to entity-service with the customer's own ID token. A proposal is a START
+ * (the previous system's own `customer_updated_on`): the change STAYS in Customer Approval and the planned window is untouched until
+ * WSO2 answers; `plannedEndOn`, when sent, must be the start plus the planned length. Resolves with the status and body
+ * entity-service answered; the caller then reloads the CSM page to see the banner.
+ */
+export async function proposeAsCustomer(
+  crId: string,
+  email: string,
+  proposal: { plannedStartOn: string; plannedEndOn?: string },
+): Promise<{ status: number; body: string }> {
+  const idToken = await customerIdToken(email);
+  const response = await fetch(`${ENTITY_SERVICE_URL}/change-requests/${crId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id-token": idToken },
+    body: JSON.stringify(proposal),
+  });
+  return { status: response.status, body: await response.text() };
+}

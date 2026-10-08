@@ -95,6 +95,7 @@ describe("useCaseActivityStream", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("does not connect when caseId is unset", async () => {
@@ -211,6 +212,42 @@ describe("useCaseActivityStream", () => {
       await vi.advanceTimersByTimeAsync(2);
     });
     await waitFor(() => expect(mockInstances).toHaveLength(4));
+
+    randomSpy.mockRestore();
+  });
+
+  it("falls back to a slow idle retry after sustained consecutive failures, instead of hammering the backend every 30s forever", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Math.random() fixed at 1 makes reconnectDelay's jitter deterministic.
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(1);
+
+    renderHook(() => useCaseActivityStream("case-1"), { wrapper });
+    await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+    // 10 consecutive failures (no successful "open" in between) — delay
+    // grows 3s/6s/12s/24s then caps at 30s for the remainder, same as the
+    // exponential-backoff test above, just carried further.
+    const backoffDelaysMs = [3_000, 6_000, 12_000, 24_000, 30_000, 30_000, 30_000, 30_000, 30_000, 30_000];
+    for (const delay of backoffDelaysMs) {
+      act(() => mockInstances[mockInstances.length - 1].dispatchEvent(new Event("error")));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay);
+      });
+    }
+    expect(mockInstances).toHaveLength(11);
+
+    // The 11th consecutive failure (attempt index 10, past MAX_BACKOFF_ATTEMPTS)
+    // must NOT reconnect after another 30s — only after the slow idle delay.
+    act(() => mockInstances[mockInstances.length - 1].dispatchEvent(new Event("error")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockInstances).toHaveLength(11);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 30_000);
+    });
+    await waitFor(() => expect(mockInstances).toHaveLength(12));
 
     randomSpy.mockRestore();
   });

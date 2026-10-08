@@ -34,15 +34,23 @@ import (
 // PostgreSQL data source. The three change types behave as follows
 // (ServiceNow's own semantics: Normal "requires one or more approvals",
 // Standard "does not require approval", Emergency "must be implemented as
-// soon as possible"):
+// soon as possible").
+//
+// The previous system has no Emergency CAB. An Emergency change is approved by the same
+// "CAB Approval" group a Normal change's second stage is, and an Emergency change
+// migrated from the previous system has exactly that one stage (no Peer stage). An earlier
+// build wrote a stage labelled "ECAB Approval" for Emergency changes; that label
+// is no longer written, but a stage that still carries it is shown under it and is
+// decided as the CAB stage (approvalStageLabelHistoricECAB):
 //
 //	Normal:    New --(Request Approval)--> Assess [Peer Approval stage]
 //	               --> Authorize [CAB Approval stage]
 //	               --> Scheduled (automatically, on CAB approval)
 //	               --> Implement --> Review --> Closed
-//	Emergency: New --(Request Approval)--> Authorize [ECAB Approval stage only,
-//	               no peer approval] --> Scheduled (automatically, on ECAB
-//	               approval) --> Implement --> Review --> Closed
+//	Emergency: New --(Request Approval)--> Authorize [ONE stage, in the existing
+//	               "CAB Approval" group: no Peer stage, no Assess stage]
+//	               --> Scheduled (automatically, on that CAB approval)
+//	               --> Implement --> Review --> Closed
 //	Standard:  New --(Request Approval)--> Scheduled (no approval stages at
 //	               all) --> Implement --> Review --> Closed
 //
@@ -50,7 +58,7 @@ import (
 // {state: "assess"} -- the contract the webapp already has (legalNextStates of
 // a New change request is ["assess", "canceled"] for every type). The
 // resulting state is chosen here from the change's type, never by the caller.
-// Scheduled is never a manual transition: it is reached only by the CAB/ECAB
+// Scheduled is never a manual transition: it is reached only by the CAB
 // approval cascade in DecideChangeRequestApproval, or by Request Approval on
 // a Standard change, which has nothing to wait for.
 //
@@ -62,7 +70,7 @@ import (
 // customer_review_required, migration 0189):
 //
 //	approval gate: wherever the flow above would move the change to Scheduled
-//	    (CAB / ECAB approval, or Request Approval on a Standard change -- an
+//	    (CAB approval, or Request Approval on a Standard change -- an
 //	    assumption, Standard has no internal approvals to put the gate after) it
 //	    moves it to Customer Approval instead when customer_approval_required.
 //	    Only the CUSTOMER's own approval, given in the Customer Portal, then
@@ -80,8 +88,20 @@ import (
 // state), Re-schedule (out of Customer Approval: the customer is asked again)
 // and Rollback (out of Customer Review, while nobody is being asked). See
 // refuseStaffExitFromCustomerState, refuseStaffCustomerOutcomeFlags and
-// changeRequestForwardNextStates. (Emergency changes do not tick the customer
-// boxes: they are acted on without the customer's consent.)
+// changeRequestForwardNextStates.
+//
+// EMERGENCY changes are acted on without the customer's consent: they never ENTER
+// Customer Approval or Customer Review. The two boxes cannot be set on one (a create
+// or a PATCH that would is a 400: checkEmergencyCustomerConsent,
+// ValidateCreateChangeRequestCustomerGates), and the flow ignores whatever the stored
+// boxes say for a change whose type is Emergency (effectiveCustomerGates), so a row
+// that already carries one -- an Emergency change from before the rule, or a
+// migrated one -- still goes CAB approval -> Scheduled and Review ->
+// Closed. Reads of the stored values are untouched. An Emergency change that is
+// ALREADY waiting in a customer state (the same two kinds of row) is not taken out of
+// the customer's hands: the customer stage logic below does not look at the type, so
+// its contacts are asked, can answer, and are asked again by a Re-schedule exactly as
+// on any other change.
 //
 // Who gives the customer's answer depends on the change's Customer Project. The
 // Customer Group is not stored or picked: it is the project's registered
@@ -118,9 +138,9 @@ import (
 // project contacts) and is the one place that provisions, replaces or cancels it.
 
 // A stage can only be decided while the change request is in the state it
-// belongs to (approvalStageDecidableState): Peer in Assess, CAB / ECAB in
-// Authorize, Review in Review, Customer Approval in Customer Approval, Customer
-// Review in Customer Review. Three things keep an approver row from outliving
+// belongs to (approvalStageDecidableState): Peer in Assess, CAB in Authorize,
+// Review in Review, Customer Approval in Customer Approval, Customer Review in
+// Customer Review. Three things keep an approver row from outliving
 // that state, and a fourth repairs the ones that already did:
 //
 //   - reconcileStaleApprovers runs at the end of every transaction that can
@@ -143,11 +163,11 @@ import (
 // its position alone is a guess, and a guess never cancels, hides or refuses an
 // approval.
 
-// Approver pools are INTERNAL-only. Every internal stage (Peer, CAB, ECAB,
-// Review) is decided in the portal by WSO2 staff, who see every project; an
-// external (customer) user sees only the projects they are a registered
-// contact of, so an approver row for one could never be found, let alone
-// decided. A pool is therefore filtered to users who are active
+// Approver pools are INTERNAL-only. Every internal stage (Peer, CAB, Review) is
+// decided in the portal by WSO2 staff, who see every project; an external
+// (customer) user sees only the projects they are a registered contact of, so
+// an approver row for one could never be found, let alone decided. A pool is
+// therefore filtered to users who are active
 // ("user".is_active, NULL counting as active) and "user".user_type = 'INTERNAL'
 // -- the type recompute_user_type() derives from the internal/admin roles --
 // when it is resolved (internalApproverIDs), and the same test is applied
@@ -162,8 +182,14 @@ import (
 const (
 	approvalStageLabelPeer   = "Peer Approval"
 	approvalStageLabelCAB    = "CAB Approval"
-	approvalStageLabelECAB   = "ECAB Approval"
 	approvalStageLabelReview = "Review"
+	// approvalStageLabelHistoricECAB is the label an earlier build wrote on an
+	// Emergency change's only stage ("ECAB Approval", in a group of its own).
+	// The previous system has no Emergency CAB, so nothing writes it any more: it is only
+	// RECOGNISED, so an in-flight Emergency change that already holds such a stage
+	// keeps showing it under that name and its approvers (the REQUESTED rows that
+	// were written for it) can still decide it, as the CAB stage -- classifyApprovalStage.
+	approvalStageLabelHistoricECAB = "ECAB Approval"
 	// The customer's own stages (see provisionCustomerStage): not part of the
 	// internal checkpoint ordinals, so they are written and recognised by label.
 	approvalStageLabelCustomerApproval = "Customer Approval"
@@ -182,7 +208,7 @@ const (
 	// poolPeer: the peer approval pool -- see resolvePeerPool.
 	poolPeer
 	// poolNamedGroup: members of the group named checkpoint.GroupName (the
-	// CAB / ECAB groups).
+	// CAB group).
 	poolNamedGroup
 )
 
@@ -200,7 +226,7 @@ type changeRequestFlow struct {
 func changeRequestFlowForModel(model string) changeRequestFlow {
 	switch strings.ToUpper(model) {
 	case "EMERGENCY":
-		return changeRequestFlow{requestState: domain.ChangeRequestStateAuthorize, checkpoint: &changeRequestECABCheckpoint}
+		return changeRequestFlow{requestState: domain.ChangeRequestStateAuthorize, checkpoint: &changeRequestEmergencyCABCheckpoint}
 	case "STANDARD":
 		return changeRequestFlow{requestState: domain.ChangeRequestStateScheduled}
 	default:
@@ -222,7 +248,6 @@ const (
 	stageKindOther approvalStageKind = iota
 	stageKindPeer
 	stageKindCAB
-	stageKindECAB
 	stageKindReview
 	// stageKindCustomerApproval / stageKindCustomerReview are the customer
 	// group's stages, entered with the Customer Approval / Customer Review
@@ -240,10 +265,8 @@ func classifyApprovalStage(label *string, position int) approvalStageKind {
 		switch *label {
 		case approvalStageLabelPeer, approvalStageLabelLegacyAss:
 			return stageKindPeer
-		case approvalStageLabelCAB, approvalStageLabelLegacyAut:
+		case approvalStageLabelCAB, approvalStageLabelLegacyAut, approvalStageLabelHistoricECAB:
 			return stageKindCAB
-		case approvalStageLabelECAB:
-			return stageKindECAB
 		case approvalStageLabelReview:
 			return stageKindReview
 		case approvalStageLabelCustomerApproval:
@@ -272,10 +295,12 @@ func classifyApprovalStage(label *string, position int) approvalStageKind {
 // classified only as far as the data it does carry makes provable, and never as a
 // customer stage:
 //
-//  1. the stage's own assignment group names it: the "ECAB Approval" group makes
-//     it an ECAB stage, the "CAB Approval" group a CAB stage;
-//  2. failing that, an Emergency change in Authorize has no peer stage and no CAB
-//     stage, so a stage on it can only be the ECAB's;
+//  1. the stage's own assignment group names it: the "CAB Approval" group makes
+//     it a CAB stage -- whatever the change's type and whatever its position, which
+//     is how a migrated Emergency change's one stage (no Peer stage, in
+//     the CAB group, at position 0) reads;
+//  2. failing that, an Emergency change in Authorize has no peer stage, so a stage
+//     on it can only be the CAB's;
 //  3. failing that, the historical positional guess (0 = Peer, 1 = CAB; see
 //     classifyApprovalStage);
 //
@@ -300,13 +325,11 @@ func runtimeApprovalStageKind(label *string, position int, groupName *string, mo
 	}
 	candidate := stageKindOther
 	switch strings.TrimSpace(stringOrEmpty(groupName)) {
-	case domain.ECABApprovalGroupName:
-		candidate = stageKindECAB
 	case domain.CABApprovalGroupName:
 		candidate = stageKindCAB
 	default:
-		if strings.EqualFold(strings.TrimSpace(model), "EMERGENCY") && strings.EqualFold(strings.TrimSpace(state), crStateAuthorize) {
-			candidate = stageKindECAB
+		if isEmergencyModel(model) && strings.EqualFold(strings.TrimSpace(state), crStateAuthorize) {
+			candidate = stageKindCAB
 		} else {
 			candidate = classifyApprovalStage(nil, position)
 		}
@@ -350,6 +373,16 @@ func approvalStageInfo(ctx context.Context, q crQuerier, workItemID, stageID str
 // who raised the change here. An unreadable/missing change request yields an
 // empty set, not an error.
 func changeRequestCreatorUserIDs(ctx context.Context, q crQuerier, workItemID string) (map[string]bool, error) {
+	return changeRequestCreatorUserIDsWith(ctx, q, workItemID, nil)
+}
+
+// changeRequestCreatorUserIDsWith is changeRequestCreatorUserIDs judged AS IF a
+// PATCH's own requestedById had already been written: a non-nil requestedBy (the
+// request's field, a pointer to pointer exactly like domain.PatchChangeRequestRequest's)
+// replaces the stored requested_by_user_id -- with nobody when it clears the field --
+// while the creator named by work_item.created_by stays. It is how the nobody-to-ask
+// refusal judges a request that changes the requester in the same PATCH.
+func changeRequestCreatorUserIDsWith(ctx context.Context, q crQuerier, workItemID string, requestedByOverride **string) (map[string]bool, error) {
 	ids := map[string]bool{}
 	var requestedBy, createdBy *string
 	err := q.QueryRow(ctx, `
@@ -362,6 +395,9 @@ func changeRequestCreatorUserIDs(ctx context.Context, q crQuerier, workItemID st
 			return ids, nil
 		}
 		return nil, fmt.Errorf("read change request creator: %w", err)
+	}
+	if requestedByOverride != nil {
+		requestedBy = *requestedByOverride
 	}
 	if requestedBy != nil && *requestedBy != "" {
 		ids[strings.ToLower(*requestedBy)] = true
@@ -451,12 +487,12 @@ func onlyInternalApprovers(ctx context.Context, q crQuerier, members []string) (
 }
 
 // stageKindNeedsInternalApprover reports whether the stage kind is an
-// INTERNAL one (Peer, CAB, ECAB, Review) whose approvers must be internal
+// INTERNAL one (Peer, CAB, Review) whose approvers must be internal
 // users. The customer stages and unclassified (ServiceNow-synced) stages are
 // not: customer contacts are external by nature.
 func stageKindNeedsInternalApprover(kind approvalStageKind) bool {
 	switch kind {
-	case stageKindPeer, stageKindCAB, stageKindECAB, stageKindReview:
+	case stageKindPeer, stageKindCAB, stageKindReview:
 		return true
 	}
 	return false
@@ -469,8 +505,6 @@ func stageKindName(kind approvalStageKind) string {
 		return approvalStageLabelPeer
 	case stageKindCAB:
 		return approvalStageLabelCAB
-	case stageKindECAB:
-		return approvalStageLabelECAB
 	case stageKindReview:
 		return approvalStageLabelReview
 	case stageKindCustomerApproval:
@@ -481,7 +515,7 @@ func stageKindName(kind approvalStageKind) string {
 	return "this"
 }
 
-// noInternalMembersMessage is the ValidationError for a CAB / ECAB / Review
+// noInternalMembersMessage is the ValidationError for a CAB / Review
 // pool that has members but none who is an active internal user, so the
 // operator can see that the people are there and why they do not count.
 func noInternalMembersMessage(poolDescription, label string) string {
@@ -505,6 +539,15 @@ func noInternalMembersError(ctx context.Context, q crQuerier, poolDescription, l
 		slog.WarnContext(ctx, "could not describe the excluded group members", "pool", poolDescription, "error", err)
 	}
 	return &apierror.ValidationError{Msg: msg}
+}
+
+// notMirroredGroupNote is what a refusal about an approver group that has no members adds,
+// for the groups the approval flow resolves by name (CAB Approval, Devops Approval): a group
+// may have no members, which is an operations matter -- their membership is maintained in the
+// portal database itself (no admin screen, no schema of its own), and until somebody has done
+// that a stage that needs the group cannot be created, so the refusal names the group.
+func notMirroredGroupNote(groupName string) string {
+	return fmt.Sprintf("the sync from the previous system does not mirror the membership of the %q group: it is maintained in the portal database (one team_member row per approver, with group_id set to that group)", groupName)
 }
 
 // namedGroup resolves a group by name: its id (preferring, when the mirror
@@ -619,6 +662,11 @@ func resolvePeerPool(ctx context.Context, q crQuerier, assignedTeamID *string, c
 		domain.PeerApprovalFallbackGroupName)
 	if len(why) > 0 {
 		msg += " (" + strings.Join(why, "; ") + ")"
+	}
+	// A fallback group nobody has put members in is the usual reason on a synced
+	// environment: say whose job that is.
+	if !exists || len(members) == 0 {
+		msg += ": " + notMirroredGroupNote(domain.PeerApprovalFallbackGroupName)
 	}
 	return approvalPool{}, &apierror.ValidationError{Msg: msg}
 }
@@ -768,10 +816,10 @@ func resolveApprovalPool(ctx context.Context, q crQuerier, cp changeRequestAppro
 			return approvalPool{}, err
 		}
 		if !exists {
-			return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group does not exist, so a %s stage cannot be provisioned", cp.GroupName, cp.Label)}
+			return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group does not exist, so a %s stage cannot be provisioned: %s", cp.GroupName, cp.Label, notMirroredGroupNote(cp.GroupName))}
 		}
 		if len(members) == 0 {
-			return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group has no members to provision as %s approvers", cp.GroupName, cp.Label)}
+			return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group has no members to provision as %s approvers: %s", cp.GroupName, cp.Label, notMirroredGroupNote(cp.GroupName))}
 		}
 		all := members
 		if members, err = onlyInternalApprovers(ctx, q, members); err != nil {
@@ -832,7 +880,7 @@ func resolveApprovalPool(ctx context.Context, q crQuerier, cp changeRequestAppro
 //   - The creator of a change request (see changeRequestCreatorUserIDs) may
 //     not approve it at any stage. They may still cancel it.
 //   - Only an active INTERNAL user may decide an internal stage (Peer, CAB,
-//     ECAB, Review), even if a row for them exists (a row can predate the
+//     Review), even if a row for them exists (a row can predate the
 //     rule, or the user's type can change after provisioning). The customer
 //     stages are not subject to it.
 //
@@ -867,6 +915,11 @@ type changeRequestGateSnapshot struct {
 	// projectID is the stored Customer Project (work_item.project_id), nil when
 	// the change has none.
 	projectID *string
+	// priorWriter is work_item.updated_by as the PATCH found it, before its own write
+	// replaced it (set by lockChangeRequestForPatch only; read=false from every other reader
+	// of the snapshot, which run after a write of their own). A staff time response reads
+	// the proposer of a waiting time from it, never from the column afterwards.
+	priorWriter lastWriter
 }
 
 // lockChangeRequestGateSnapshot reads (and locks, FOR UPDATE) the fields the
@@ -904,9 +957,8 @@ func lockChangeRequestGateSnapshot(ctx context.Context, tx pgx.Tx, id string) (c
 // requestApprovalDestination is the state Request Approval writes: the flow's
 // own (Assess / Authorize / Scheduled), except that a flow with no internal
 // approval to wait for (Standard) goes to Customer Approval instead of
-// Scheduled when the customer's approval is required. Normal and Emergency
-// reach the customer gate later, when CAB / ECAB approves
-// (approvalGateTarget).
+// Scheduled when the customer's approval is required. Normal reaches the customer
+// gate later, when CAB approves (approvalGateTarget); Emergency never reaches it.
 func requestApprovalDestination(flow changeRequestFlow, customerApprovalRequired bool) domain.ChangeRequestState {
 	if flow.checkpoint == nil && flow.requestState == domain.ChangeRequestStateScheduled && customerApprovalRequired {
 		return domain.ChangeRequestStateCustomerApproval
@@ -914,9 +966,10 @@ func requestApprovalDestination(flow changeRequestFlow, customerApprovalRequired
 	return flow.requestState
 }
 
-// approvalGateTarget is the upper-case state a CAB / ECAB approval moves the
-// change to: Customer Approval when the customer's approval is required,
-// Scheduled otherwise.
+// approvalGateTarget is the upper-case state a CAB approval moves the change to:
+// Customer Approval when the customer's approval is required, Scheduled otherwise.
+// The caller passes the requirement in effect (effectiveCustomerGates): false for
+// an Emergency change, whatever its stored box says.
 func approvalGateTarget(customerApprovalRequired bool) string {
 	if customerApprovalRequired {
 		return "CUSTOMER_APPROVAL"
@@ -1093,6 +1146,14 @@ func anyContactToAsk(members []string, creatorIDs map[string]bool) bool {
 // what provisionCustomerStage reads. Nothing is written. A blank project has
 // nobody (the caller says that in its own words).
 func customerGroupCanBeAsked(ctx context.Context, q crQuerier, workItemID, projectID string) (bool, error) {
+	return customerGroupCanBeAskedWith(ctx, q, workItemID, projectID, nil)
+}
+
+// customerGroupCanBeAskedWith is customerGroupCanBeAsked with the creators judged as
+// if a PATCH's own requestedById were already written (changeRequestCreatorUserIDsWith):
+// the refusal of a request that changes the requester must predict the provisioning
+// that follows the write, not the one before it.
+func customerGroupCanBeAskedWith(ctx context.Context, q crQuerier, workItemID, projectID string, requestedBy **string) (bool, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return false, nil
 	}
@@ -1103,7 +1164,7 @@ func customerGroupCanBeAsked(ctx context.Context, q crQuerier, workItemID, proje
 	if len(members) == 0 {
 		return false, nil
 	}
-	creatorIDs, err := changeRequestCreatorUserIDs(ctx, q, workItemID)
+	creatorIDs, err := changeRequestCreatorUserIDsWith(ctx, q, workItemID, requestedBy)
 	if err != nil {
 		return false, err
 	}
@@ -1227,7 +1288,8 @@ func customerStageManualRefusal(target string, spec *customerStageSpec, live *li
 // made for the customer and stored as theirs would be a compliance problem.
 // What staff keep: Cancel (any state), Re-schedule from Customer Approval (the
 // customer is asked again), Rollback from Customer Review (while nobody is
-// being asked). Emergency changes simply do not tick the customer boxes.
+// being asked). Emergency changes are acted on without the customer's consent and
+// never get here (effectiveCustomerGates).
 
 // staffCustomerOutcomeFlagRefusal is the 400 a request that carries
 // isCustomerApproved / isCustomerReviewed from anyone but the customer is
@@ -1359,40 +1421,6 @@ func checkRescheduleWindow(ctx context.Context, tx pgx.Tx, id string, start, end
 	return nil
 }
 
-// provisionReauthorizationStage opens a FRESH stage for a checkpoint that has
-// already run (CAB / ECAB after a Re-schedule): the same group, the same
-// creator exclusion, a new approval_stage row (the earlier stage stays as a
-// record). Idempotent: a stage of this label that still has a requested
-// approver is left alone. Unlike provisionApprovalStage it does not test the
-// checkpoint's ordinal position -- repeating a checkpoint is the point. A group
-// with nobody eligible is a ValidationError, so a change is never re-scheduled
-// into an approval nobody can give.
-func provisionReauthorizationStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail string, cp changeRequestApprovalCheckpoint) error {
-	if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
-		return fmt.Errorf("re-schedule: escalate identity: %w", err)
-	}
-	var live bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM approval_stage ast
-		                 WHERE ast.work_item_id = $1 AND ast.checkpoint_label = $2
-		                   AND EXISTS (SELECT 1 FROM approval_stage_approver asa WHERE asa.stage_id = ast.id AND asa.state = 'REQUESTED'))`,
-		workItemID, cp.Label).Scan(&live); err != nil {
-		return fmt.Errorf("re-schedule: check live %s stage: %w", cp.Label, err)
-	}
-	if live {
-		return nil
-	}
-	creatorIDs, err := changeRequestCreatorUserIDs(ctx, tx, workItemID)
-	if err != nil {
-		return fmt.Errorf("re-schedule: %w", err)
-	}
-	pool, err := resolveApprovalPool(ctx, tx, cp, nil, creatorIDs)
-	if err != nil {
-		return err
-	}
-	return insertApprovalStage(ctx, tx, workItemID, actorEmail, cp.Label, pool, creatorIDs)
-}
-
 // cancelLiveCustomerStages cancels the requested approvers of every live
 // customer stage (the stages stay, as a record).
 func cancelLiveCustomerStages(ctx context.Context, tx pgx.Tx, workItemID, actorEmail string) error {
@@ -1472,7 +1500,7 @@ func terminalChangeRequestState(state string) bool {
 }
 
 // approvalStageDecidableState is the one change request state in which a stage
-// of the given kind can be decided: Peer in Assess, CAB / ECAB in Authorize,
+// of the given kind can be decided: Peer in Assess, CAB in Authorize,
 // Review in Review, Customer Approval in Customer Approval, Customer Review in
 // Customer Review. "" for a stage of unknown kind (stageKindOther -- a
 // ServiceNow-synced stage with no recognisable label): it is not tied to any
@@ -1481,7 +1509,7 @@ func approvalStageDecidableState(kind approvalStageKind) string {
 	switch kind {
 	case stageKindPeer:
 		return crStateAssess
-	case stageKindCAB, stageKindECAB:
+	case stageKindCAB:
 		return crStateAuthorize
 	case stageKindReview:
 		return crStateReview
@@ -1539,7 +1567,7 @@ func staleApprovalRefusal(kind approvalStageKind, currentState string) error {
 //   - any other known state: the requested rows of every stage whose decidable
 //     state (approvalStageDecidableState) is not the current one -- e.g. the
 //     Review stage's approvers once the change has left Review for Customer
-//     Review, the customer's once it was re-scheduled back to Authorize.
+//     Review, the customer's once an old-flow Re-schedule sent it back to Authorize.
 //
 // The stages stay as a record; only the approver rows move to `CANCELLED`
 // (updated_by = actorEmail, like every other cancel helper). A stage is
@@ -1646,6 +1674,15 @@ func reconcileStaleApprovers(ctx context.Context, tx pgx.Tx, workItemID, actorEm
 //     -- has its REQUESTED approvers cancelled, so there are never two live
 //     customer stages and nobody is asked a question that no longer applies. A
 //     changed project gets a fresh stage for its own contacts (first bullet);
+//   - an Emergency change is treated like any other. The Emergency rule keeps it from
+//     ENTERING a customer state (effectiveCustomerGates: CAB approval schedules it,
+//     Review closes it), so a state that has a customer stage is only ever one it is
+//     already waiting in -- a row from before the rule, or a migrated one --
+//     and the question the customer was given there stands: it is asked, replaced
+//     on a Re-schedule and answered like the same question on any other change.
+//     Nothing here may leave such a change waiting in a customer state with nobody to
+//     answer, which is all a guard on the model would do (it would cancel the live
+//     request on a Re-schedule and put no fresh one in its place);
 //   - no project, or no eligible contact: no stage and nobody is asked. There is
 //     no staff path that answers for the customer: the change can be cancelled
 //     or re-scheduled, or wait for a contact to register (a PATCH that restates
@@ -1657,7 +1694,7 @@ func reconcileStaleApprovers(ctx context.Context, tx pgx.Tx, workItemID, actorEm
 // The stage's assignment group is NULL (the Customer Group is not a "group"
 // row); the approvals read response names it "Customer Group".
 //
-// Returns whether a stage was provisioned. Callers: the CAB / ECAB approval
+// Returns whether a stage was provisioned. Callers: the CAB approval
 // cascade and Request Approval on a Standard change (entering Customer
 // Approval), a {state: customer_review} PATCH, and any PATCH that sets or
 // changes the state or the project.
@@ -1672,6 +1709,10 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 		}
 		return false, fmt.Errorf("provision customer stage: read change request: %w", err)
 	}
+	// No check of the change's type here, on purpose: an Emergency change is kept from
+	// ENTERING a customer state elsewhere (effectiveCustomerGates), and the only way
+	// it is in one is that it was already waiting there. Its customer's question
+	// is then answered, replaced and cancelled like anybody's.
 	spec := customerStageSpecForState(strings.ToUpper(stringOrEmpty(state)))
 	live, err := liveCustomerStages(ctx, tx, workItemID)
 	if err != nil {

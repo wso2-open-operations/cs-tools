@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
@@ -245,6 +246,61 @@ func TestPlanDate_Turns(t *testing.T) {
 				t.Errorf("turn = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A Decline (WSO2 keeps the plan) and a different time (WSO2 proposes another window) both write the
+// answer DISAGREE -- the previous system's own Disagree -- so they are ONE turn and send ONE notice, the
+// Disagree notice: "Reject the proposed plan start date" / "WSO2 Team request to change the plan
+// start date". There is no notice kind of its own for a Decline, and the mail names NO time at all:
+// the new window of a different time is not in it (the customer reads it on the change request), and
+// neither is "your time was declined, the plan stands". entity-service/CLAUDE.md says so.
+func TestPlanDate_ADeclineSendsTheSameNoticeAsADifferentTime(t *testing.T) {
+	inCustomerApproval := map[string]any{crColState: crStateCustomerApproval}
+	answer := map[string]any{"from": nil, "to": "DISAGREE"}
+	decline := crChange(map[string]map[string]any{crColConfirmation: answer}, inCustomerApproval)
+	differentTime := crChange(map[string]map[string]any{
+		crColConfirmation: answer,
+		"start_on":        {"from": "2026-11-01T09:00:00Z", "to": "2026-11-09T09:00:00Z"},
+		"end_on":          {"from": "2026-11-01T11:00:00Z", "to": "2026-11-09T11:00:00Z"},
+	}, inCustomerApproval)
+
+	if got, want := crPlanDateTurnOf(decline), crTurnWSO2Rejected; got != want {
+		t.Fatalf("a decline's turn = %v, want the Disagree turn %v", got, want)
+	}
+	if got, want := crPlanDateTurnOf(differentTime), crTurnWSO2Rejected; got != want {
+		t.Fatalf("a different time's turn = %v, want the Disagree turn %v", got, want)
+	}
+
+	send := func(change repository.OutboxChange) json.RawMessage {
+		t.Helper()
+		repo := &fakeCRRepo{details: baseDetails(), contacts: []string{"c@acme.example"}}
+		pub := &fakePublisher{}
+		if err := newCRService(repo, pub).HandleChange(context.Background(), change); err != nil {
+			t.Fatalf("HandleChange: %v", err)
+		}
+		if len(pub.sent) != 1 || pub.sent[0].Type != events.TypeCRPlanDateNotice {
+			t.Fatalf("want exactly 1 plan-date notice, got %#v", pub.sent)
+		}
+		return pub.sent[0].Payload
+	}
+	fromDecline, fromDifferentTime := send(decline), send(differentTime)
+	if string(fromDecline) != string(fromDifferentTime) {
+		t.Fatalf("a decline and a different time send different notices:\n decline:        %s\n different time: %s", fromDecline, fromDifferentTime)
+	}
+	var got events.CRPlanDateNoticePayload
+	if err := json.Unmarshal(fromDecline, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Kind != events.CRPlanDateRejected || got.Audience != events.CRAudienceCustomer {
+		t.Errorf("kind / audience = %q / %q, want the customers' Disagree notice (%q)", got.Kind, got.Audience, events.CRPlanDateRejected)
+	}
+	if got.Subject != "[WSO2 Support] [CR] (CHG0031234) Reject the proposed plan start date" {
+		t.Errorf("subject = %q", got.Subject)
+	}
+	// No time of the conversation is in what is sent, whatever the row change said.
+	if strings.Contains(string(fromDifferentTime), "2026-11") {
+		t.Errorf("the notice carries a date of the change: %s", fromDifferentTime)
 	}
 }
 

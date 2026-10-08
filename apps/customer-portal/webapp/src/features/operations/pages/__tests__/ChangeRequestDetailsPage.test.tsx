@@ -83,8 +83,8 @@ function makeChangeRequest(overrides: Record<string, unknown> = {}) {
     product: null,
     assignedEngineer: null,
     assignedTeam: null,
-    startDate: "2026-06-10T04:30:00Z",
-    endDate: "2026-06-10T06:30:00Z",
+    startDate: "2026-06-10T10:00:00Z",
+    endDate: "2026-06-10T12:00:00Z",
     createdOn: "2026-01-01",
     updatedOn: "2026-01-02",
     hasCustomerApproved: false,
@@ -109,7 +109,7 @@ function renderPage() {
 const button = (name: string) => screen.queryByRole("button", { name });
 
 /** The window makeChangeRequest shows, as an answer names it (the schedule the customer saw). */
-const SHOWN = { expectedPlannedStartOn: "2026-06-10T04:30:00Z", expectedPlannedEndOn: "2026-06-10T06:30:00Z" };
+const SHOWN = { expectedPlannedStartOn: "2026-06-10T10:00:00Z", expectedPlannedEndOn: "2026-06-10T12:00:00Z" };
 
 describe("ChangeRequestDetailsPage", () => {
   beforeEach(() => {
@@ -127,7 +127,10 @@ describe("ChangeRequestDetailsPage", () => {
     expect(screen.getByText("CHG001")).toBeInTheDocument();
   });
 
-  describe("a change request in Authorize after the customer proposed a new time", () => {
+  // What a customer sees only for a proposal made before a proposed time waited in
+  // Customer Approval: it went back through WSO2's internal approval and finishes
+  // through it (no data fix), and the customer is then asked again.
+  describe("a change request in Authorize after a proposal that went back through WSO2's internal approval", () => {
     beforeEach(() => {
       mocks.changeRequest.value = makeChangeRequest({
         state: STATES.authorize,
@@ -152,6 +155,192 @@ describe("ChangeRequestDetailsPage", () => {
       renderPage();
       for (const name of ["Propose New Time", "Approve", "Reject", "Successful", "Unsuccessful"]) {
         expect(button(name), name).not.toBeInTheDocument();
+      }
+    });
+  });
+
+  describe("a time the customer proposed", () => {
+    const proposal = (answer: string, extra: object = {}) => ({
+      startDate: "2026-06-12T10:00:00Z",
+      answer,
+      ...extra,
+    });
+    const asked = (customerProposal: unknown, extra: object = {}) =>
+      makeChangeRequest({ state: STATES.approval, customerCanAnswer: true, customerProposal, ...extra });
+    const note = (id: string) => document.getElementById(id);
+
+    describe("waiting for WSO2", () => {
+      it("says so, with the proposed start, to the customer who proposed it, and keeps every answer on offer", () => {
+        mocks.changeRequest.value = asked(proposal("pending", { endDate: "2026-06-12T12:00:00Z", proposedByViewer: true }));
+        renderPage();
+        const waiting = screen.getByRole("status");
+        expect(waiting).toHaveAttribute("id", "cr-proposal-waiting-note");
+        expect(waiting).toHaveTextContent(/^Waiting for WSO2 to respond to your proposed time \(.*June 12, 2026.*\)\./);
+        // The planned window is still the one WSO2 planned: the proposal moved nothing.
+        expect(waiting).toHaveTextContent(/Approving now approves the current schedule \(.*June 10, 2026.*\), not the proposed time\./);
+        for (const name of ["Propose New Time", "Approve", "Reject"]) {
+          expect(screen.getByRole("button", { name }), name).toBeEnabled();
+        }
+        // The change is still in Customer Approval, not Authorize, and nothing says it is reviewed internally.
+        const current = screen.getAllByText("Current");
+        expect(current).toHaveLength(1);
+        expect(current[0].parentElement?.parentElement?.querySelector("p")?.textContent).toBe("Customer Approval");
+        expect(screen.queryByText(/reviewing this change request internally/)).not.toBeInTheDocument();
+      });
+
+      it("says it neutrally for a colleague's proposal (and for a pending one an older backend sends with nothing about who proposed it)", () => {
+        for (const extra of [{ proposedByViewer: false }, {}]) {
+          mocks.changeRequest.value = asked(proposal("pending", extra));
+          const view = renderPage();
+          expect(note("cr-proposal-waiting-note")).toHaveTextContent(
+            /^A new time \(.*June 12, 2026.*\) was proposed for this change request and is waiting for WSO2's response\./,
+          );
+          expect(note("cr-proposal-waiting-note")).not.toHaveTextContent(/your proposed time/);
+          view.unmount();
+        }
+      });
+
+      it("shows the proposed start under the planned start and the stepper's caption", () => {
+        mocks.changeRequest.value = asked(proposal("pending", { proposedByViewer: true }));
+        renderPage();
+        expect(note("cr-window-proposed-start")).toHaveTextContent(/^Proposed start: .*June 12, 2026.* \(waiting for WSO2\)$/);
+        expect(screen.getByText("Waiting for WSO2 to respond to your proposed time")).toBeInTheDocument();
+      });
+
+      it("does not tell a customer with nothing to answer that Approve exists", () => {
+        mocks.changeRequest.value = asked(proposal("pending"), { customerCanAnswer: false });
+        renderPage();
+        expect(note("cr-proposal-waiting-note")).toBeInTheDocument();
+        expect(note("cr-proposal-waiting-note")).not.toHaveTextContent(/Approving now/);
+        expect(button("Approve")).not.toBeInTheDocument();
+      });
+
+      it("is not shown for a pending answer on a change request that is not in Customer Approval", () => {
+        mocks.changeRequest.value = makeChangeRequest({ state: STATES.scheduled, customerProposal: proposal("pending") });
+        renderPage();
+        expect(note("cr-proposal-waiting-note")).not.toBeInTheDocument();
+        expect(note("cr-window-proposed-start")).not.toBeInTheDocument();
+      });
+
+      it("opens the dialog with the proposal beside the current schedule", () => {
+        mocks.changeRequest.value = asked(proposal("pending", { proposedByViewer: true }));
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Propose New Time" }));
+        const dialog = screen.getByRole("dialog", { name: "Propose New Implementation Time" });
+        expect(within(dialog).getByText("Proposed start waiting for WSO2")).toBeInTheDocument();
+      });
+
+      it("keeps the buttons, and shows the proposal, when the refetch after proposing comes back", () => {
+        mocks.changeRequest.value = asked(undefined);
+        const view = renderPage();
+        for (const name of ["Propose New Time", "Approve", "Reject"]) expect(button(name), name).toBeInTheDocument();
+        expect(note("cr-proposal-waiting-note")).not.toBeInTheDocument();
+
+        mocks.changeRequest.value = asked(proposal("pending", { proposedByViewer: true }));
+        view.rerender(
+          <MemoryRouter initialEntries={["/projects/p1/operations/change-requests/cr-1"]}>
+            <Routes>
+              <Route
+                path="/projects/:projectId/operations/change-requests/:changeRequestId"
+                element={<ChangeRequestDetailsPage />}
+              />
+            </Routes>
+          </MemoryRouter>,
+        );
+        for (const name of ["Propose New Time", "Approve", "Reject"]) expect(button(name), name).toBeInTheDocument();
+        expect(note("cr-proposal-waiting-note")).toBeInTheDocument();
+      });
+
+      it("approves the CURRENT window, naming it, not the proposed time", async () => {
+        mocks.changeRequest.value = asked(proposal("pending", { proposedByViewer: true }));
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+        await waitFor(() => expect(mocks.showSuccess).toHaveBeenCalledTimes(1));
+        expect(mocks.mutateAsync).toHaveBeenCalledWith({ isCustomerApproved: true, ...SHOWN });
+      });
+    });
+
+    describe("not accepted by WSO2", () => {
+      it("says so, points at the current window, and asks again: approve, reject or propose another start", () => {
+        mocks.changeRequest.value = asked(proposal("disagreed"));
+        renderPage();
+        const notAccepted = note("cr-proposal-not-accepted-note");
+        expect(notAccepted).toHaveTextContent(/^WSO2 did not accept the proposed time \(.*June 12, 2026.*\)\./);
+        expect(notAccepted).toHaveTextContent(
+          "The current planned window is shown below: approve it, reject it, or propose another start.",
+        );
+        expect(notAccepted).not.toHaveTextContent(/new planned window/i);
+        for (const name of ["Propose New Time", "Approve", "Reject"]) {
+          expect(screen.getByRole("button", { name }), name).toBeEnabled();
+        }
+        expect(note("cr-proposal-waiting-note")).not.toBeInTheDocument();
+        expect(note("cr-window-proposed-start")).not.toBeInTheDocument();
+      });
+
+      it("is a plain statement for a customer with nothing to answer", () => {
+        mocks.changeRequest.value = asked(proposal("disagreed"), { customerCanAnswer: false });
+        renderPage();
+        expect(note("cr-proposal-not-accepted-note")).toHaveTextContent(/The current planned window is shown below\.$/);
+      });
+
+      it("goes once the customer answers and the change moves on", () => {
+        mocks.changeRequest.value = makeChangeRequest({ state: STATES.scheduled, customerProposal: proposal("disagreed") });
+        renderPage();
+        expect(note("cr-proposal-not-accepted-note")).not.toBeInTheDocument();
+      });
+    });
+
+    describe("accepted by WSO2", () => {
+      beforeEach(() => {
+        mocks.changeRequest.value = makeChangeRequest({
+          state: STATES.scheduled,
+          startDate: "2026-06-12T10:00:00Z",
+          endDate: "2026-06-12T12:00:00Z",
+          customerCanAnswer: false,
+          hasCustomerApproved: false,
+          customerProposal: proposal("agreed"),
+        });
+      });
+
+      it("shows Scheduled with the accepted window and says WSO2 accepted the proposed start", () => {
+        renderPage();
+        expect(screen.getByText("Scheduled Maintenance Window")).toBeInTheDocument();
+        expect(note("cr-window-proposal-accepted")).toHaveTextContent(
+          /^WSO2 accepted the proposed start, .*June 12, 2026.*\.$/,
+        );
+        for (const name of ["Propose New Time", "Approve", "Reject"]) expect(button(name), name).not.toBeInTheDocument();
+      });
+
+      // The `agreed` answer stays on the row when a later Re-schedule asks the customers again: the buttons are live, nothing is accepted.
+      it("is NOT shown once the change request is back in Customer Approval with Approve and Reject live", () => {
+        mocks.changeRequest.value = asked(proposal("agreed"));
+        renderPage();
+        expect(note("cr-window-proposal-accepted")).not.toBeInTheDocument();
+        expect(screen.queryByText("Proposed time accepted by WSO2")).not.toBeInTheDocument();
+        expect(screen.getByText("Planned Maintenance Window")).toBeInTheDocument();
+        for (const name of ["Propose New Time", "Approve", "Reject"]) expect(screen.getByRole("button", { name }), name).toBeEnabled();
+      });
+
+      it("shows the Customer Approval step done, though the approval flag stays false", () => {
+        renderPage();
+        expect(screen.getByText("Proposed time accepted by WSO2")).toBeInTheDocument();
+        // The marker beside the step's caption: the nearest ancestor of the caption
+        // that holds any marker at all is that step's own row.
+        let row: HTMLElement | null = screen.getByText("Proposed time accepted by WSO2");
+        while (row && !row.querySelector("svg.lucide")) row = row.parentElement;
+        expect(row?.querySelectorAll("svg.lucide")).toHaveLength(1);
+        expect(row?.querySelector("svg.lucide-circle-check-big"), "the step shows the completed marker").toBeTruthy();
+      });
+    });
+
+    it("shows nothing about a proposal that was never answered, or when nothing was proposed", () => {
+      for (const customerProposal of [undefined, null, proposal("unanswered")]) {
+        mocks.changeRequest.value = asked(customerProposal);
+        const view = renderPage();
+        expect(note("cr-proposal-waiting-note")).not.toBeInTheDocument();
+        expect(note("cr-proposal-not-accepted-note")).not.toBeInTheDocument();
+        expect(note("cr-window-proposed-start")).not.toBeInTheDocument();
+        view.unmount();
       }
     });
   });
@@ -254,7 +443,7 @@ describe("ChangeRequestDetailsPage", () => {
       mocks.changeRequest.value = makeChangeRequest({
         state: STATES.approval,
         customerCanAnswer: true,
-        startDate: "2026-06-10T04:30:00Z",
+        startDate: "2026-06-10T10:00:00Z",
         endDate: undefined,
       });
       renderPage();
@@ -262,7 +451,7 @@ describe("ChangeRequestDetailsPage", () => {
       await waitFor(() => expect(mocks.showSuccess).toHaveBeenCalledTimes(1));
       expect(mocks.mutateAsync).toHaveBeenCalledWith({
         isCustomerApproved: true,
-        expectedPlannedStartOn: "2026-06-10T04:30:00Z",
+        expectedPlannedStartOn: "2026-06-10T10:00:00Z",
       });
     });
 
@@ -462,7 +651,7 @@ describe("ChangeRequestDetailsPage", () => {
       expect(screen.queryByText(/Was it successful/)).not.toBeInTheDocument();
     });
 
-    it("says, for as long as the page is open, that WSO2 is reviewing a proposed time", () => {
+    it("says, for as long as the page is open, that WSO2 is reviewing a proposal from before proposals waited in Customer Approval", () => {
       mocks.changeRequest.value = makeChangeRequest({ state: STATES.authorize, customerCanAnswer: false });
       renderPage();
       const note = screen.getByRole("status");
@@ -511,6 +700,49 @@ describe("ChangeRequestDetailsPage", () => {
       expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
       fireEvent.click(propose);
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    describe("a change request with no window to move", () => {
+      it.each([
+        ["no start and no end", { startDate: "", endDate: "" }],
+        ["no end", { startDate: "2026-06-10T10:00:00Z", endDate: "" }],
+        ["an end that is not after the start", { startDate: "2026-06-10T12:00:00Z", endDate: "2026-06-10T10:00:00Z" }],
+      ])("switches Propose New Time off, and says why, with %s; answering stays possible", (_name, window) => {
+        mocks.changeRequest.value = makeChangeRequest({ state: STATES.approval, customerCanAnswer: true, ...window });
+        renderPage();
+        const propose = screen.getByRole("button", { name: "Propose New Time" });
+        expect(propose).toBeDisabled();
+        const note = screen.getByText(/has no planned time yet, so a new time cannot be proposed/);
+        expect(note.id).toBe("cr-propose-nowindow-note");
+        expect(propose).toHaveAttribute("aria-describedby", note.id);
+        expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+        fireEvent.click(propose);
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      it("gives the hold as the reason when both apply, not two notes", () => {
+        mocks.changeRequest.value = makeChangeRequest({
+          state: STATES.approval,
+          customerCanAnswer: true,
+          isOnHold: true,
+          startDate: "",
+          endDate: "",
+        });
+        renderPage();
+        expect(screen.getByText(/WSO2 has this change request on hold/)).toBeInTheDocument();
+        expect(screen.queryByText(/has no planned time yet/)).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Propose New Time" })).toHaveAttribute(
+          "aria-describedby",
+          "cr-propose-hold-note",
+        );
+      });
+
+      it("offers no such note when the customer has nothing to propose with (no answer to give)", () => {
+        mocks.changeRequest.value = makeChangeRequest({ state: STATES.approval, customerCanAnswer: false, startDate: "", endDate: "" });
+        renderPage();
+        expect(screen.queryByText(/has no planned time yet/)).not.toBeInTheDocument();
+      });
     });
 
     it.each([[false], [undefined]])("keeps Propose New Time on when the hold flag is %s", (isOnHold) => {

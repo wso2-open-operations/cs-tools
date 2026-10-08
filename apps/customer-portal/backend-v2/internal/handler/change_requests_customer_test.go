@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
 )
@@ -45,6 +46,8 @@ type fakeEntityChangeRequestClient struct {
 	gotDecision string
 	// canAnswer is the customerCanAnswer the fake's detail carries.
 	canAnswer *bool
+	// proposal is the customerProposal the fake's detail carries.
+	proposal *entity.ChangeRequestCustomerProposal
 }
 
 func (f *fakeEntityChangeRequestClient) GetChangeRequest(_ context.Context, id string) (entity.ChangeRequest, error) {
@@ -54,6 +57,7 @@ func (f *fakeEntityChangeRequestClient) GetChangeRequest(_ context.Context, id s
 	out.CreatedOn = "2026-10-06T00:00:00Z"
 	out.UpdatedOn = "2026-10-06T00:00:00Z"
 	out.CustomerCanAnswer = f.canAnswer
+	out.CustomerProposal = f.proposal
 	return out, nil
 }
 
@@ -331,6 +335,56 @@ func TestPatchChangeRequest_CustomerUpstreamErrors(t *testing.T) {
 		}
 		wantMessage(t, rec, "no longer pending")
 	})
+	t.Run("a proposed time's 400 and 409 reasons pass through", func(t *testing.T) {
+		for status, msgs := range map[int][]string{
+			http.StatusBadRequest: {
+				"a proposed implementation time needs a new start: send plannedStartOn",
+				"a proposed time moves the start and keeps the planned length of 2 hours: plannedEndOn must be 2030-03-08T11:00:00Z, or be left out",
+				"plannedStartOn is the planned start already: propose a different start",
+				"that time is already proposed and is waiting for WSO2's response",
+				"WSO2 asked for a different time than that one: propose another start",
+			},
+			http.StatusConflict: {
+				"this change request has no planned window to move, so a new time cannot be proposed for it",
+				"this change request is on hold, so a new implementation time cannot be proposed now",
+			},
+		} {
+			for _, msg := range msgs {
+				fake := &fakeEntityChangeRequestClient{patchErr: &apierror.Error{StatusCode: status, Body: msg}}
+				rec := patchAs(t, fake, middleware.ActionDecide, `{"plannedStartOn":"2026-12-01 09:00:00","plannedEndOn":"2026-12-01 11:00:00"}`)
+				if rec.Code != status {
+					t.Fatalf("%q: status = %d, want %d", msg, rec.Code, status)
+				}
+				wantMessage(t, rec, msg)
+			}
+		}
+	})
+	t.Run("a start with the end that keeps the planned length is forwarded as typed", func(t *testing.T) {
+		fake := &fakeEntityChangeRequestClient{}
+		rec := patchAs(t, fake, middleware.ActionDecide, `{"plannedStartOn":"2026-12-01 09:00:00","plannedEndOn":"2026-12-01 11:00:00"}`)
+		if rec.Code != http.StatusOK || fake.patchCalls != 1 {
+			t.Fatalf("status %d, upstream calls %d; want 200 and 1", rec.Code, fake.patchCalls)
+		}
+		if fake.gotPatch.PlannedStartOn == nil || *fake.gotPatch.PlannedStartOn != "2026-12-01 09:00:00" ||
+			fake.gotPatch.PlannedEndOn == nil || *fake.gotPatch.PlannedEndOn != "2026-12-01 11:00:00" {
+			t.Errorf("forwarded %+v, want the start and the derived end exactly as the customer sent them", fake.gotPatch)
+		}
+	})
+	t.Run("a customer cannot answer for WSO2", func(t *testing.T) {
+		// confirmCustomerUpdatedDate / expectedCustomerUpdatedOn are not among the customer's six fields:
+		// unknown to the strict decoder, so a 403 and nothing forwarded.
+		for _, body := range []string{
+			`{"confirmCustomerUpdatedDate":"agree"}`,
+			`{"plannedStartOn":"2026-12-01 09:00:00","expectedCustomerUpdatedOn":"2026-12-01T09:00:00Z"}`,
+			`{"state":"authorize","plannedStartOn":"2026-12-01 09:00:00"}`,
+		} {
+			fake := &fakeEntityChangeRequestClient{}
+			rec := patchAs(t, fake, middleware.ActionDecide, body)
+			if rec.Code != http.StatusForbidden || fake.patchCalls != 0 {
+				t.Errorf("%s: status %d, upstream calls %d; want 403 and none", body, rec.Code, fake.patchCalls)
+			}
+		}
+	})
 	t.Run("403 from a registered contact of another project is the generic message", func(t *testing.T) {
 		fake := &fakeEntityChangeRequestClient{patchErr: &apierror.Error{StatusCode: http.StatusForbidden, Body: "only an internal user or a registered PORTAL_USER contact ..."}}
 		rec := patchAs(t, fake, middleware.ActionDecide, `{"isCustomerApproved":true}`)
@@ -394,6 +448,79 @@ func TestGetChangeRequest_CarriesCustomerCanAnswer(t *testing.T) {
 	}
 }
 
+// GET /change-requests/{id} hands the portal the conversation about a time a customer proposed as it
+// came from entity-service, renamed to the portal's own words (startDate / endDate), and only the
+// customer's part of it: whether the proposal is theirs, never who proposed it.
+func TestGetChangeRequest_CarriesTheCustomerProposal(t *testing.T) {
+	yes, no := true, false
+	end := "2030-03-08T11:00:00Z"
+	for name, tc := range map[string]struct {
+		in   *entity.ChangeRequestCustomerProposal
+		want map[string]any // nil = the key must be absent
+	}{
+		"none": {nil, nil},
+		"pending and theirs": {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", EndOn: &end, Answer: "pending", ProposerRecorded: &yes, ProposedByViewer: &yes},
+			map[string]any{"startDate": "2030-03-08T09:00:00Z", "endDate": end, "answer": "pending", "proposerRecorded": true, "proposedByViewer": true}},
+		"pending, a colleague's": {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", EndOn: &end, Answer: "pending", ProposerRecorded: &yes, ProposedByViewer: &no},
+			map[string]any{"startDate": "2030-03-08T09:00:00Z", "endDate": end, "answer": "pending", "proposerRecorded": true, "proposedByViewer": false}},
+		"pending, nobody can say who (an older entity-service)": {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", EndOn: &end, Answer: "pending", ProposerRecorded: &no, ProposedByViewer: &no},
+			map[string]any{"startDate": "2030-03-08T09:00:00Z", "endDate": end, "answer": "pending", "proposerRecorded": false, "proposedByViewer": false}},
+		// entity-service tells a customer a time waits for WSO2 only when somebody is recorded as having proposed it; a
+		// stored time nobody proposed comes as history, with nothing that says it is waiting.
+		"unanswered, a stored time nobody is recorded as having proposed": {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", Answer: "unanswered"},
+			map[string]any{"startDate": "2030-03-08T09:00:00Z", "answer": "unanswered"}},
+		"agreed":    {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", Answer: "agreed"}, map[string]any{"startDate": "2030-03-08T09:00:00Z", "answer": "agreed"}},
+		"disagreed": {&entity.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", Answer: "disagreed"}, map[string]any{"startDate": "2030-03-08T09:00:00Z", "answer": "disagreed"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeEntityChangeRequestClient{proposal: tc.in}
+			req := authedRequest(http.MethodGet, "/change-requests/"+testChangeRequestID, "")
+			req.SetPathValue("id", testChangeRequestID)
+			rec := httptest.NewRecorder()
+			NewChangeRequestHandler(fake).GetChangeRequest(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200. body: %s", rec.Code, rec.Body.String())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("body is not JSON: %v (%s)", err, rec.Body.String())
+			}
+			v, present := got["customerProposal"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("customerProposal = %v, want it absent", v)
+				}
+				return
+			}
+			if !present || !reflect.DeepEqual(v, tc.want) {
+				t.Fatalf("customerProposal = %v (present %v), want %v", v, present, tc.want)
+			}
+		})
+	}
+}
+
+// What WSO2 knows about a proposal and a customer must not -- the proposer, whether Accept would
+// work and why not -- never reaches the portal, even if entity-service's payload carried it: the
+// portal's entity type has no field for any of it.
+func TestMapChangeRequestDetails_NeverPassesOnWhoProposedOrWSO2sOwnFacts(t *testing.T) {
+	var cr entity.ChangeRequest
+	if err := json.Unmarshal([]byte(`{"id":"cr-1","state":"customer_approval","customerProposal":{
+		"startOn":"2030-03-08T09:00:00Z","endOn":"2030-03-08T11:00:00Z","answer":"pending","proposerRecorded":true,
+		"proposedByName":"Alice Example","proposedByEmail":"alice@example.com","proposedOn":"2030-03-05T10:00:00Z",
+		"proposedByViewer":false,"canAccept":true,"acceptBlockedReason":"change request is on hold"}}`), &cr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	raw, err := json.Marshal(dto.MapChangeRequestDetails(cr))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, leaked := range []string{"Alice", "alice@example.com", "proposedByName", "proposedByEmail", "proposedOn", "canAccept", "acceptBlockedReason", "on hold"} {
+		if strings.Contains(string(raw), leaked) {
+			t.Fatalf("the customer's detail carries %q: %s", leaked, raw)
+		}
+	}
+}
+
 // A proposed implementation time is checked before anything is sent to
 // entity-service: the Postgres values that used to ride through `::timestamptz`
 // (tomorrow, now, infinity, a bare date), a time that has passed, an inverted or
@@ -437,6 +564,28 @@ func TestPatchChangeRequest_CustomerProposalIsValidatedBeforeItIsSent(t *testing
 		}
 		if fake.gotPatch.PlannedStartOn == nil || *fake.gotPatch.PlannedStartOn != "2026-10-06 00:00:01" {
 			t.Errorf("forwarded %+v, want the start exactly as the customer sent it", fake.gotPatch)
+		}
+	})
+
+	t.Run("a proposal is a start: the start alone, or with the end that keeps the planned length, is forwarded as typed", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"the start alone":                    `{"plannedStartOn":"2026-12-01 10:00:00"}`,
+			"the start and the derived end":      `{"plannedStartOn":"2026-12-01 10:00:00","plannedEndOn":"2026-12-01 12:00:00"}`,
+			"RFC 3339 with an offset, both ways": `{"plannedStartOn":"2026-12-01T15:30:00+05:30","plannedEndOn":"2026-12-01T17:30:00+05:30"}`,
+		} {
+			fake := &fakeEntityChangeRequestClient{}
+			rec := patchAs(t, fake, middleware.ActionDecide, body)
+			if rec.Code != http.StatusOK || fake.patchCalls != 1 {
+				t.Fatalf("%s: status %d, upstream calls %d; want 200 and 1", name, rec.Code, fake.patchCalls)
+			}
+			var sent map[string]any
+			raw, _ := json.Marshal(fake.gotPatch)
+			if err := json.Unmarshal(raw, &sent); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if len(sent) > 2 {
+				t.Errorf("%s: forwarded more than the window: %s", name, raw)
+			}
 		}
 	})
 

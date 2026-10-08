@@ -234,6 +234,29 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(stale.filters?.stateKeys).toEqual([5]);
   });
 
+  it("with the filters the previous system's data source sends (no New, Assess or Authorize) no view ever names one of the three", () => {
+    // The page no longer hides New / Assess / Authorize itself: the API's filter options
+    // leave them out wherever a customer is never shown them (every change request is
+    // visible there except in those three states), so what the page asks for is what the
+    // server may return. The server applies the same line to a request that names or
+    // omits a state differently (entity-service, the section on the previous system's data source).
+    const offered = allStates.filter((s) => !["New", "Assess", "Authorize"].includes(s.label));
+    const hidden = [-5, -4, -3];
+    const views: Array<[string, boolean, boolean, boolean]> = [
+      ["default", false, false, false],
+      ["outstanding", true, false, false],
+      ["action required", false, true, false],
+      ["scheduled", false, false, true],
+    ];
+    for (const [name, outstanding, actionRequired, scheduled] of views) {
+      const req = buildChangeRequestSearchRequest({}, "", outstanding, actionRequired, scheduled, offered);
+      expect(req.filters?.stateKeys?.some((k) => hidden.includes(k)), name).toBe(false);
+    }
+    // A stale selection of Authorize (kept from a deployment that offered it) is dropped, not sent.
+    const stale = buildChangeRequestSearchRequest({ stateIds: ["-3", "5"] }, "", false, false, false, offered);
+    expect(stale.filters?.stateKeys).toEqual([5]);
+  });
+
   it("sorts by updatedOn descending by default", () => {
     const req = buildChangeRequestSearchRequest({}, "", false, false, false, allStates);
     expect(req.sortBy?.field).toBe("updatedOn");

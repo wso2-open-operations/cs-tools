@@ -17,12 +17,10 @@
 package repository
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -124,18 +122,75 @@ func NormalizeCreatePlannedWindow(req domain.CreateChangeRequestRequest) (domain
 }
 
 // PlannedTimestampForServiceNow re-writes a planned start / end the repository
-// accepted (see parsePlannedTimestamp) in the one layout ServiceNow's change
+// accepted (see parsePlannedTimestamp) in the one layout the previous system's change
 // request API takes, "YYYY-MM-DD HH:MM:SS" in UTC, for the dual-write mirror:
 // the PostgreSQL data source accepts RFC 3339 with a zone as well, which the
-// ServiceNow service refuses ("must follow the format"), so an RFC 3339 PATCH
-// used to commit in PostgreSQL and then fail every mirror write. A value that
-// does not parse is returned unchanged (the repository has already judged it).
+// service in front of that system refuses ("must follow the format"), so an RFC 3339
+// PATCH used to commit in PostgreSQL and then fail every mirror write. A value that
+// does not parse is returned unchanged (the repository has already judged it):
+// that is right for the mirror, whose input was judged, and wrong for a value
+// nobody has judged -- the data source that talks to the previous system directly
+// uses StrictMirrorPlannedTimestamp, which refuses it instead.
 func PlannedTimestampForServiceNow(value string) string {
 	t, err := parsePlannedTimestamp("plannedStartOn", value)
 	if err != nil {
 		return value
 	}
 	return t.Format(plannedTimestampZoneless)
+}
+
+// Why StrictMirrorPlannedTimestamp refused a value. A caller tells them apart with
+// errors.Is; the text of the last two is what the message to the caller says.
+var (
+	// ErrPlannedTimestampFormat: neither RFC 3339 with a zone designator nor
+	// "YYYY-MM-DD HH:MM:SS".
+	ErrPlannedTimestampFormat = errors.New("not a planned date-time")
+	// ErrPlannedTimestampFraction: a zoneless value with a fractional second.
+	ErrPlannedTimestampFraction = errors.New("whole seconds only, no fractional second")
+	// ErrPlannedTimestampYear: a year outside the range every planned window is
+	// held to.
+	ErrPlannedTimestampYear = fmt.Errorf("the year must be in %d to %d", plannedYearMin, plannedYearMax)
+)
+
+// StrictMirrorPlannedTimestamp is the mirror's conversion above for a value NOBODY
+// HAS JUDGED YET -- what the data source that talks to the previous system directly
+// is sent -- and it refuses what that function would hand back as typed:
+//
+//   - a value that is neither RFC 3339 with a zone nor "YYYY-MM-DD HH:MM:SS":
+//     ErrPlannedTimestampFormat;
+//   - a ZONELESS value with a fractional second: ErrPlannedTimestampFraction.
+//     Go's parser takes one after the seconds although the layout has none and
+//     that system's pattern does not, so such a value used to travel as typed and
+//     fail downstream with an opaque pattern error; rounding it off in silence is
+//     not this API's call either. (An RFC 3339 value with a fraction is an
+//     instant, read as the PostgreSQL data source reads it, and keeps being
+//     converted to whole seconds.) Only a REAL fraction is refused: the parser
+//     takes other forms that are not spelled as the layout is but say a whole
+//     second all the same ("2030-03-01 9:00:00", one digit of hour; two spaces
+//     between the date and the time), and those are read, and written back in
+//     the layout, as the PostgreSQL data source reads them;
+//   - a year outside 2000 to 2100, in either layout (the range the PostgreSQL
+//     data source holds every planned window to): ErrPlannedTimestampYear.
+//
+// Otherwise the value, in the previous system's layout in UTC.
+func StrictMirrorPlannedTimestamp(value string) (string, error) {
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		if t, err = time.Parse(plannedTimestampZoneless, value); err != nil {
+			return "", ErrPlannedTimestampFormat
+		}
+		// The layout has no '.' and no ',', so one in a value that parsed is the
+		// separator of a fraction (which the parser takes, ".000" included). A value
+		// that merely is not spelled as the layout is ("9:00:00") is no fraction:
+		// it is read, and written back below in the layout.
+		if strings.ContainsAny(value, ".,") {
+			return "", ErrPlannedTimestampFraction
+		}
+	}
+	if y := t.UTC().Year(); y < plannedYearMin || y > plannedYearMax {
+		return "", ErrPlannedTimestampYear
+	}
+	return t.UTC().Format(plannedTimestampZoneless), nil
 }
 
 // normalizeCreatePlannedWindow is normalizePatchPlannedWindow for the create
@@ -172,32 +227,4 @@ func requireFutureWindow(now time.Time, start, end *string) error {
 		}
 	}
 	return nil
-}
-
-// requireFutureEffectiveStart is requireFutureWindow's complement for a proposal
-// that does not carry a start: requireFutureWindow only judges the bounds that
-// were SENT, so an end-only proposal left the stored start in place even when it
-// had already passed. The start the change will have is the proposed one, else
-// the stored one, and it must be still to come. A change with no stored start (or
-// one the database holds as infinity) has nothing to judge.
-func requireFutureEffectiveStart(ctx context.Context, q interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}, id string, now time.Time, proposedStart *string) error {
-	if proposedStart != nil {
-		return nil
-	}
-	var stored *time.Time
-	err := q.QueryRow(ctx, `SELECT CASE WHEN isfinite(start_on) THEN start_on END FROM change_request WHERE id = $1`, id).Scan(&stored)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("propose implementation time: read the planned start: %w", err)
-	}
-	if stored == nil || stored.After(now) {
-		return nil
-	}
-	return &apierror.ValidationError{Msg: fmt.Sprintf(
-		"plannedStartOn is in the past: the current planned start (%s) has passed; propose a new start as well",
-		stored.UTC().Format(time.RFC3339))}
 }

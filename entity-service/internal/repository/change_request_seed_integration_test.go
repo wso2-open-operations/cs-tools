@@ -150,8 +150,10 @@ func TestChangeRequestSeedIntegration_Personas(t *testing.T) {
 	}
 
 	// Group membership: the internal personas sit in the assigned group and in
-	// the three approval groups; the customers in none of them.
-	const internalGroups = "CAB Approval,Devops Approval,ECAB Approval,Example Corp ABT"
+	// the two approval groups that are resolved (CAB, which an Emergency change uses
+	// too, and the Devops Approval peer fallback); the customers in none of them. The
+	// ECAB group (unused: the previous system has no Emergency CAB) is seeded empty.
+	const internalGroups = "CAB Approval,Devops Approval,Example Corp ABT"
 	for _, id := range []string{seedAliceID, seedBobID, seedCarolID} {
 		if got := f.groupNamesOf(id); got != internalGroups {
 			t.Errorf("groups of %s = %q, want %q", id, got, internalGroups)
@@ -253,8 +255,9 @@ func TestChangeRequestSeedIntegration_FixtureApprovers(t *testing.T) {
 // The seeded assigned group (Example Corp ABT, which holds john.smith, a
 // customer, alongside the three internal personas): Request Approval on a
 // change assigned to it provisions exactly alice, bob and carol, never john;
-// and the CAB / ECAB groups seeded with the personas carry the change on to
-// Scheduled. Driven end to end on the real seed.
+// and the CAB group seeded with the personas carries the change on to
+// Scheduled, for a Normal change and for an Emergency one alike. Driven end to
+// end on the real seed.
 func TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPersonas(t *testing.T) {
 	f := newSeededFlow(t)
 	create := func(typ domain.ChangeRequestType) string {
@@ -293,14 +296,21 @@ func TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPers
 	}
 	f.expect(id, "after bob approved", "SCHEDULED", "implement", "canceled")
 
-	// Emergency: the seeded ECAB group.
+	// Emergency: the same seeded CAB group, one stage and no peer stage.
 	eid := create(domain.ChangeRequestTypeEmergency)
 	if _, err := f.repo.PatchChangeRequest(f.sys, eid, domain.PatchChangeRequestRequest{State: stateptr(domain.ChangeRequestStateAssess)}, "jane.doe@example.com"); err != nil {
 		t.Fatalf("Emergency Request Approval: %v", err)
 	}
-	assertApprovers(t, "ECAB", f.stage(eid, "ECAB Approval").approvers, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
+	if got := f.labels(eid); strings.Join(got, ",") != "CAB Approval" {
+		t.Fatalf("Emergency stages = %v, want the one CAB Approval stage", got)
+	}
+	ecab := f.stage(eid, "CAB Approval")
+	if ecab.groupID != crCABGroupID {
+		t.Fatalf("Emergency CAB stage group = %s, want the CAB group", ecab.groupID)
+	}
+	assertApprovers(t, "Emergency CAB", ecab.approvers, map[string]string{seedAliceID: "REQUESTED", seedBobID: "REQUESTED", seedCarolID: "REQUESTED"})
 	if err := f.decide(eid, seedCarolID, "approved"); err != nil {
-		t.Fatalf("carol ECAB approval: %v", err)
+		t.Fatalf("carol Emergency CAB approval: %v", err)
 	}
 	f.expect(eid, "after carol approved", "SCHEDULED", "implement", "canceled")
 }

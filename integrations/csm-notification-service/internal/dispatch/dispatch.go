@@ -738,6 +738,29 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	if err != nil {
 		return err
 	}
+	if p.IsInternalNote {
+		// An internal note (a work note — never meant for a customer's
+		// eyes) must never be emailed to a customer-portal recipient,
+		// however they ended up on this event's Recipients — entity-service
+		// is one layer of that (see its own CLAUDE.md), but this must hold
+		// regardless of what it published. groupByLink has already
+		// classified every recipient into its own portal-audience group via
+		// recipientlinks.Resolver's role-first/domain-fallback check (the
+		// same "roles with internal" classification this repo uses
+		// everywhere else), so keeping only the CSM-portal group is enough
+		// — CSMLink is deterministic (no customer-facing equivalent, see
+		// its own doc comment), so no further per-recipient lookup is
+		// needed here. A work note with no internal recipients left after
+		// this (e.g. entity-service only resolved external watchers) simply
+		// sends nothing — sendPerGroup is a no-op over an empty map.
+		csmLink := d.links.CSMLink(p.CaseID)
+		for link := range groups {
+			if link != csmLink {
+				delete(groups, link)
+				delete(groupUserIDs, link)
+			}
+		}
+	}
 	baseKey := recordBaseKey(record)
 	subject := subjectLine(p.WSO2CaseID, p.CaseNumber, p.CaseID, p.CaseTitle)
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {

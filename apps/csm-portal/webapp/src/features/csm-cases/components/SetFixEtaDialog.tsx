@@ -44,6 +44,17 @@ export interface FixEtaSavePayload {
 }
 
 interface SetFixEtaDialogProps {
+  /**
+   * Reason the "Share fix ETA with customer" toggle is currently unavailable
+   * — the share now posts through the same `POST /cases/{id}/comments`
+   * endpoint (and the identical work_in_progress + ongoing + assignee gate)
+   * as the case's own public-reply composer (`CsmCaseCommentInput`'s
+   * `publicCommentDisabledReason`), so a share attempt that doesn't satisfy
+   * it is guaranteed to fail after the ETA has already saved. `null`/absent
+   * means sharing is currently available. Never applies to the ETA dates
+   * themselves — those save regardless of this gate.
+   */
+  publicCommentDisabledReason?: string | null;
   /** Current internal-only best-case estimate, if any (date-only "YYYY-MM-DD"). */
   currentBestCaseFixEta?: string | null;
   /** Current internal-only most-likely estimate, if any (date-only "YYYY-MM-DD"). */
@@ -108,13 +119,16 @@ function FixEtaDatePicker({
 /**
  * Set the case's three independent internal-only fix-ETA estimates
  * (`bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta`) and, optionally,
- * post a customer-visible comment summarizing them in the same `PATCH`
- * (`addPublicComment` + `product` + `publicTicket`; see `BeCaseUpdatePayload`).
- * The three dates remain independently optional — saving one doesn't require
- * the others — but they now share a single Save action instead of three.
- * ServiceNow-source only; the caller surfaces a rejection on another source.
+ * share them with the customer as a real comment (the caller posts this via
+ * `POST /cases/{id}/comments`, not a PATCH field — see `onSave`'s own
+ * `FixEtaSavePayload`). The three dates remain independently optional —
+ * saving one doesn't require the others — but they now share a single Save
+ * action instead of three. Sharing itself is gated by
+ * `publicCommentDisabledReason`, the same work_in_progress + ongoing +
+ * assignee rule the comment endpoint enforces for any public comment.
  */
 export default function SetFixEtaDialog({
+  publicCommentDisabledReason = null,
   currentBestCaseFixEta,
   currentMostLikelyFixEta,
   currentWorstCaseFixEta,
@@ -122,6 +136,7 @@ export default function SetFixEtaDialog({
   onClose,
   onSave,
 }: SetFixEtaDialogProps): JSX.Element {
+  const canShareWithCustomer = publicCommentDisabledReason === null;
   const [bestCaseFixEta, setBestCaseFixEta] = useState(
     currentBestCaseFixEta ?? "",
   );
@@ -139,17 +154,24 @@ export default function SetFixEtaDialog({
   const hasProduct = product.trim().length > 0;
   const hasPublicTicket = publicTicket.trim().length > 0;
 
-  // Mirrors the backend's validation for `addPublicComment: true`: a public
-  // comment must summarize at least one estimate, and needs a product +
-  // ticket reference to be meaningful to the customer.
+  // Checked first: sharing posts a real customer-visible comment, gated by
+  // the same work_in_progress + ongoing + assignee rule as the case's own
+  // public-reply composer — a share attempt that doesn't satisfy it is
+  // guaranteed to fail (after the ETA has already saved), so this is caught
+  // here rather than only discovered from the resulting error toast. The
+  // rest mirrors the backend's own validation for the share fields
+  // themselves: a public comment must summarize at least one estimate, and
+  // needs a product + ticket reference to be meaningful to the customer.
   const shareValidationError = shareWithCustomer
-    ? !hasAnyEta
-      ? "Pick at least one fix ETA to share with the customer."
-      : !hasProduct
-        ? "Product is required to share with the customer."
-        : !hasPublicTicket
-          ? "Public ticket is required to share with the customer."
-          : undefined
+    ? !canShareWithCustomer
+      ? publicCommentDisabledReason
+      : !hasAnyEta
+        ? "Pick at least one fix ETA to share with the customer."
+        : !hasProduct
+          ? "Product is required to share with the customer."
+          : !hasPublicTicket
+            ? "Public ticket is required to share with the customer."
+            : undefined
     : undefined;
 
   const canSubmit =
@@ -203,11 +225,16 @@ export default function SetFixEtaDialog({
               <Switch
                 checked={shareWithCustomer}
                 onChange={(e) => setShareWithCustomer(e.target.checked)}
-                disabled={isSaving}
+                disabled={isSaving || !canShareWithCustomer}
               />
             }
             label="Share fix ETA with customer"
           />
+          {!canShareWithCustomer && (
+            <Typography variant="caption" color="text.secondary">
+              {publicCommentDisabledReason}
+            </Typography>
+          )}
 
           {shareWithCustomer && (
             <>

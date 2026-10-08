@@ -166,6 +166,25 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 	}
 
+	// Incident events go to their own topic when IncidentEventHubTopic is set
+	// (incidents are SRE work; case-events keeps the customer cases), and to
+	// the shared one otherwise -- the same publisher as eventPublisher then.
+	// Every incident.* event uses this one, so an incident's stop signals
+	// always travel on the topic its trigger did.
+	incidentEventPublisher := eventPublisher
+	if cfg.EventHubBroker != "" && cfg.EventPublishingEnabled &&
+		cfg.IncidentEventHubTopic != "" && cfg.IncidentEventHubTopic != cfg.EventHubTopic {
+		incidentEventPublisher = service.NewEventPublisherService(
+			eventbus.NewProducer(eventbus.Config{
+				Broker:           cfg.EventHubBroker,
+				ConnectionString: cfg.EventHubConnectionString,
+				Topic:            cfg.IncidentEventHubTopic,
+			}),
+			eventPublishFailureSvc,
+		)
+		slog.Info("incident events have their own topic", "topic", cfg.IncidentEventHubTopic)
+	}
+
 	// sla-status reads the "sla" table directly (ServiceNow's own SLA data,
 	// synced in) — no ServiceNow equivalent of its own, gated on the pool for
 	// the same reason as event_publish_failures above. Replaces the old
@@ -228,6 +247,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				cfg.GithubIntegrationLogin,
 				githubLabels,
 			)
+			// Each repository declares its own account and project in a file
+			// it carries; account_github_repo is the fallback for one that
+			// does not.
+			githubSyncSvc = service.WithGithubRepoConfig(githubSyncSvc, githubClient, cfg.GithubRepoConfigPath)
 			githubDeliveryHandler = handler.NewGithubDeliveryHandler(githubSyncSvc, cfg.M2MClientIDs)
 			githubServiceRequestHandler = handler.NewGithubServiceRequestHandler(githubSyncSvc, cfg.M2MClientIDs)
 		}
@@ -1093,7 +1116,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var activeIncidentSvc service.IncidentService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
-		activeIncidentSvc = service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient, eventPublisher)
+		activeIncidentSvc = service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient, incidentEventPublisher)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		// Pilot extension: incident CREATE only, same ServiceNow-first,
 		// synchronous shape as the case pilot above -- see
@@ -1121,11 +1144,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// case-specific about it, so a second instance would only mean a
 		// second, redundant worker pool.
 		snIncidentMirrorSvc := service.NewServiceNowIncidentMirrorService(serviceNowIntegrationServiceClient)
-		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, userRepo, snIncidentMirrorSvc, eventPublisher, snWritebackDispatcher)
+		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, userRepo, snIncidentMirrorSvc, incidentEventPublisher, snWritebackDispatcher)
 	default:
 		// DATA_SOURCE=postgres: the platform creates incidents itself, so it publishes incident.created
 		// (what the call-escalation ladders start from) and takes work notes, with no ServiceNow behind it.
-		activeIncidentSvc = service.NewIncidentServiceWithPublisher(incidentRepo, userRepo, eventPublisher)
+		activeIncidentSvc = service.NewIncidentServiceWithPublisher(incidentRepo, userRepo, incidentEventPublisher)
 	}
 	// Which Special Ops team a handoff goes to, and which GitHub repository
 	// its internal issue goes to, is configuration. A value that does not
@@ -1371,7 +1394,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var activeCommentSvc service.CommentService
 	switch cfg.DataSource {
 	case config.DataSourceServiceNow:
-		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
+		// Its only event is incident.comment_added, so it takes the incident
+		// publisher.
+		activeCommentSvc = service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, incidentEventPublisher)
 	case config.DataSourcePostgresServiceNowDualWrite:
 		// CreateComment mirrors to ServiceNow, asynchronously, after
 		// Postgres -- see commentService's own doc comment. This is separate
@@ -1384,7 +1409,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// dual-write mode would emit no incident.comment_added, and an
 		// elevation-triggered escalation ladder would lose its only stop
 		// signal. There is no double-publish risk for the same reason.
-		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, eventPublisher)
+		snCommentMirrorSvc := service.NewServiceNowCommentService(serviceNowIntegrationServiceClient, incidentEventPublisher)
 		activeCommentSvc = service.NewCommentServiceWithSNWriteback(commentRepo, userRepo, snWritebackDispatcher, snCommentMirrorSvc)
 	default:
 		activeCommentSvc = service.NewCommentService(commentRepo, userRepo)
@@ -1883,6 +1908,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		}
 		if projectEventPublisher != nil {
 			projectEventPublisher.Close()
+		}
+		if incidentEventPublisher != nil && incidentEventPublisher != eventPublisher {
+			incidentEventPublisher.Close()
 		}
 		if srEventPublisher != nil {
 			srEventPublisher.Close()

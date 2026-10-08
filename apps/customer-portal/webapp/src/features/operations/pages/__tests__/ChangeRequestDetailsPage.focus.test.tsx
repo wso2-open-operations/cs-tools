@@ -15,7 +15,7 @@
 // under the License.
 
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChangeRequestDetailsPage from "@features/operations/pages/ChangeRequestDetailsPage";
@@ -25,6 +25,7 @@ import {
   CHANGE_REQUEST_ACTION_FAILED_MESSAGE,
   CHANGE_REQUEST_ANSWER_STALE_MESSAGE,
   CHANGE_REQUEST_NOT_A_CONTACT_MESSAGE,
+  CHANGE_REQUEST_NOT_FOUND_MESSAGE,
   CHANGE_REQUEST_ON_HOLD_MESSAGE,
   CHANGE_REQUEST_SCHEDULE_CHANGED_MESSAGE,
   ChangeRequestErrorCode,
@@ -43,6 +44,8 @@ import { ApiError } from "@utils/ApiError";
 
 const mocks = vi.hoisted(() => ({
   changeRequest: { value: null as Record<string, unknown> | null },
+  // What the detail query reports as its error (null = none). A re-read that fails keeps the data it had.
+  error: { value: null as unknown },
   mutateAsync: vi.fn(),
   isPending: { value: false },
 }));
@@ -50,7 +53,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@features/operations/api/useGetChangeRequestDetails", () => ({
   default: () => ({
     data: mocks.changeRequest.value,
-    error: null,
+    error: mocks.error.value,
     isLoading: false,
     isFetching: false,
     isError: false,
@@ -159,6 +162,7 @@ const refusals: Array<[string, ApiError, string]> = [
 describe("ChangeRequestDetailsPage: where focus goes after an answer", () => {
   beforeEach(() => {
     mocks.changeRequest.value = makeChangeRequest();
+    mocks.error.value = null;
     mocks.mutateAsync.mockReset();
     mocks.mutateAsync.mockResolvedValue({ id: "cr-1" });
     mocks.isPending.value = false;
@@ -294,13 +298,30 @@ describe("ChangeRequestDetailsPage: where focus goes after an answer", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Submit Proposal" }));
     };
 
-    it("moves focus to the heading once the proposal is accepted", async () => {
+    it("returns focus to Propose New Time once the proposal is made: the change stays in Customer Approval with every answer on offer", async () => {
+      // What the refetch brings back: the proposal waits for WSO2, and nothing else moved.
       mocks.mutateAsync.mockImplementationOnce(async () => {
-        mocks.changeRequest.value = makeChangeRequest({ state: { id: "-3", label: "Authorize" }, customerCanAnswer: false });
+        mocks.changeRequest.value = makeChangeRequest({
+          customerProposal: { startDate: "2099-06-11T15:30:00Z", answer: "pending", proposedByViewer: true },
+        });
       });
       render(tree());
       sendProposal(openPropose());
-      await alertText("New time proposed. We'll ask for your approval again once it's confirmed internally.");
+      await alertText("New time proposed. WSO2 will accept it or suggest a different time, and the answer will appear on this page.");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // The buttons did not go (the customer's request stays live), so the heading is not the
+      // place to land: the button that opened the dialog is.
+      expect(button("Approve")).toBeEnabled();
+      await waitFor(() => expect(document.activeElement).toBe(button("Propose New Time")));
+    });
+
+    it("falls back to the heading when a proposal ends the customer's question (the change moved on behind the page)", async () => {
+      mocks.mutateAsync.mockImplementationOnce(async () => {
+        answerIsOver();
+      });
+      render(tree());
+      sendProposal(openPropose());
+      await alertText("New time proposed. WSO2 will accept it or suggest a different time, and the answer will appear on this page.");
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       await waitFor(() => expect(document.activeElement).toBe(heading()));
     });
@@ -359,6 +380,72 @@ describe("ChangeRequestDetailsPage: where focus goes after an answer", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(button("Propose New Time")).toBeDisabled();
       await waitFor(() => expect(document.activeElement).toBe(heading()));
+    });
+  });
+  // A refused answer re-reads the change request. When that read fails too (the contact was
+  // deregistered meanwhile: the change request is a 404 to them now) the page is replaced by the
+  // error state, and the heading focus was moved to would be gone with it.
+  describe("when the re-read after a refusal fails and the error state replaces the page", () => {
+    const notFound = () => new ApiError(404, "Not Found", "The change request was not found.");
+    const errorGroup = () => screen.getByRole("group", { name: CHANGE_REQUEST_NOT_FOUND_MESSAGE });
+
+    it.each(refusals)("moves focus to the error state, not the document body, when %s", async (_name, error, message) => {
+      mocks.mutateAsync.mockImplementationOnce(async () => {
+        // The refusal invalidates the detail query; the refetch fails.
+        mocks.error.value = notFound();
+        throw error;
+      });
+      render(tree());
+      press("Approve");
+      await alertText(message);
+      // The page, its heading and its buttons are gone: this is the error state.
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Deploy patch" })).not.toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      await waitFor(() => expect(document.activeElement).toBe(errorGroup()));
+      expect(document.activeElement).not.toBe(document.body);
+    });
+
+    it("does the same after a refused rejection, whose dialog had focus", async () => {
+      mocks.mutateAsync.mockImplementationOnce(async () => {
+        mocks.error.value = notFound();
+        throw new ApiError(403, "Forbidden", "any wording", undefined, ChangeRequestErrorCode.NOT_ASKED);
+      });
+      render(tree());
+      press("Reject");
+      const dialog = screen.getByRole("dialog", { name: "Reject this change request?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Reject change request" }));
+      await alertText(CHANGE_REQUEST_NOT_A_CONTACT_MESSAGE);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(errorGroup()));
+    });
+
+    it("names the error state after what happened, and keeps the error page inside it", async () => {
+      mocks.error.value = notFound();
+      render(tree());
+      expect(errorGroup()).toHaveAttribute("tabindex", "-1");
+      expect(errorGroup()).toHaveTextContent(CHANGE_REQUEST_NOT_FOUND_MESSAGE);
+      // Any other failure of the read is named for what it is.
+      cleanup();
+      mocks.error.value = new ApiError(500, "Internal Server Error", "boom");
+      render(tree());
+      expect(screen.getByRole("group", { name: "Could not load change request details." })).toHaveTextContent(
+        "Could not load change request details.",
+      );
+    });
+
+    it("never takes focus from a control the customer has moved to", async () => {
+      const elsewhere = document.createElement("button");
+      elsewhere.textContent = "Elsewhere";
+      document.body.appendChild(elsewhere);
+      try {
+        elsewhere.focus();
+        mocks.error.value = notFound();
+        render(tree());
+        expect(errorGroup()).toBeInTheDocument();
+        expect(document.activeElement).toBe(elsewhere);
+      } finally {
+        elsewhere.remove();
+      }
     });
   });
 });

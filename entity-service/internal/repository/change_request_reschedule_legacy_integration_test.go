@@ -27,12 +27,13 @@ import (
 // change_request.customer_approval_required with a default of false, so a row that
 // already sat in Customer Approval -- one that was migrated from ServiceNow, or one
 // created before the column existed -- has the box false although the customer IS
-// being asked. A Re-schedule on it used to go back through the CAB approval and
-// then straight to Scheduled, because the cascade reads that very column
-// (approvalGateTarget): the new plan was never put to the customer. The Re-schedule
-// now writes OUR requirement column true with the new window; the sync-owned
-// is_customer_approval_required (ServiceNow's record of the customer's answer) is
-// never written.
+// being asked. Re-schedule used to go back through the CAB approval and then straight to
+// Scheduled on such a row (the cascade reads that very column, approvalGateTarget), which
+// is why it had to write the column. It no longer goes through CAB at all (the change
+// itself has not changed, only its time): it replaces the customers' request with a fresh
+// one in Customer Approval, writes NO requirement flag -- not our own column, never the
+// sync-owned is_customer_approval_required (the previous system's record of the customer's answer)
+// -- and is refused when nobody can be asked, as Request Approval is.
 //
 // Same harness as TestChangeRequestFlowIntegration_* (crFlow, DSN-gated by
 // CHANGE_REQUEST_TEST_DSN, run as a superuser and as the non-superuser csm_app).
@@ -76,7 +77,10 @@ func (f *crFlow) legacyInCustomerApproval(typ domain.ChangeRequestType, project 
 	return id
 }
 
-func TestChangeRequestRescheduleLegacyIntegration_NormalAsksTheCustomerAgain(t *testing.T) {
+// legacyRescheduleCase runs the Re-schedule matrix for one change type: every shape a
+// legacy row can have (native with no stages, migrated with synced stages and the sync
+// flag false / true) against every project situation.
+func legacyRescheduleCase(t *testing.T, typ domain.ChangeRequestType) {
 	for _, shape := range []struct {
 		name       string
 		syncShape  bool
@@ -89,53 +93,53 @@ func TestChangeRequestRescheduleLegacyIntegration_NormalAsksTheCustomerAgain(t *
 		for _, proj := range []struct {
 			name    string
 			project func(f *crFlow) *string
-			asked   bool
+			// refused: nobody can be asked (a project with no contacts); asked: somebody
+			// can; neither: no project at all, where nothing is judged and nobody is asked.
+			refused, asked bool
 		}{
-			{"project with registered contacts", func(f *crFlow) *string { return sp(crScopeProjectA) }, true},
-			{"project with no contacts", func(f *crFlow) *string { return f.noContactProject() }, false},
-			{"no project at all", func(f *crFlow) *string { return nil }, false},
+			{"project with registered contacts", func(f *crFlow) *string { return sp(crScopeProjectA) }, false, true},
+			{"project with no contacts", func(f *crFlow) *string { return f.noContactProject() }, true, false},
+			{"no project at all", func(f *crFlow) *string { return nil }, false, false},
 		} {
 			shape, proj := shape, proj
 			t.Run(shape.name+"/"+proj.name, func(t *testing.T) {
 				f := newCustomerGroupFlow(t)
-				id := f.legacyInCustomerApproval(domain.ChangeRequestTypeNormal, proj.project(f), shape.syncAnswer, shape.syncShape)
+				id := f.legacyInCustomerApproval(typ, proj.project(f), shape.syncAnswer, shape.syncShape)
 				f.expect(id, "in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 				before := len(f.stages(id))
+				snapBefore := f.snap(id)
 
-				if err := f.reschedule(id, sp(rsStart2), sp(rsEnd2)); err != nil {
+				err := f.reschedule(id, sp(rsStart2), sp(rsEnd2))
+				if proj.refused {
+					// Nobody to ask: refused with Request Approval's words, nothing written.
+					f.wantExact("Re-schedule with nobody to ask", err, nobodyMsgApproval)
+					if after := f.snap(id); after != snapBefore {
+						t.Fatalf("a refused Re-schedule changed the change request:\n  before: %s\n  after:  %s", snapBefore, after)
+					}
+					return
+				}
+				if err != nil {
 					t.Fatalf("Re-schedule: %v", err)
 				}
-				f.expect(id, "after Re-schedule", "AUTHORIZE", "canceled")
+				f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
 				f.wantPlanned(id, "after Re-schedule", rsStart2, rsEnd2)
 				required, synced := f.legacyRequirement(id)
-				if !required {
-					t.Fatal("customer_approval_required is still false after the Re-schedule: the CAB approval would schedule the change without the customer")
+				if required {
+					t.Fatal("customer_approval_required was written by the Re-schedule: it goes through no CAB, so it needs no flag")
 				}
 				if fmtBoolPtr(synced) != fmtBoolPtr(shape.syncAnswer) {
 					t.Fatalf("the sync-owned is_customer_approval_required was written: %s, want %s", fmtBoolPtr(synced), fmtBoolPtr(shape.syncAnswer))
 				}
-				if got := len(f.stages(id)); got != before+1 {
-					t.Fatalf("stages after the Re-schedule = %d, want %d (one fresh CAB stage)", got, before+1)
-				}
-
-				// The CAB approves the new plan: back to Customer Approval, never Scheduled.
-				if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-					t.Fatalf("CAB approval of the new plan: %v", err)
-				}
-				f.expect(id, "after the new CAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				// (A row whose sync-owned answer flag is already true shows it: that is
-				// ServiceNow's record, which nothing here writes -- checked above.)
-				if a, _ := f.customerOutcome(id); a && (shape.syncAnswer == nil || !*shape.syncAnswer) {
-					t.Fatal("the customer's approval is recorded although nobody answered")
-				}
 				stages := f.customerStages(id)
 				if !proj.asked {
-					// Nobody to ask: the change waits in Customer Approval (cancel or
-					// re-schedule are the only ways out), it is not scheduled.
-					if len(stages) != 0 {
-						t.Fatalf("customer stages with nobody to ask = %+v", stages)
+					// No project: nobody to ask, no stage (a legacy row keeps its exits).
+					if len(stages) != 0 || len(f.stages(id)) != before {
+						t.Fatalf("stages with nobody to ask = %+v (was %d)", f.stages(id), before)
 					}
 					return
+				}
+				if got := len(f.stages(id)); got != before+1 {
+					t.Fatalf("stages after the Re-schedule = %d, want %d (one fresh customer stage, no CAB)", got, before+1)
 				}
 				if len(stages) != 1 {
 					t.Fatalf("customer stages = %+v, want the one fresh request", stages)
@@ -152,84 +156,67 @@ func TestChangeRequestRescheduleLegacyIntegration_NormalAsksTheCustomerAgain(t *
 	}
 }
 
-// Standard has no internal approval to repeat: the change stays in Customer
-// Approval and the customer is asked again -- on a row with the box false too.
-func TestChangeRequestRescheduleLegacyIntegration_StandardAsksTheCustomerAgain(t *testing.T) {
-	for _, syncShape := range []bool{false, true} {
-		for _, withContacts := range []bool{true, false} {
-			t.Run(fmt.Sprintf("syncShape=%v/contacts=%v", syncShape, withContacts), func(t *testing.T) {
-				f := newCustomerGroupFlow(t)
-				var project *string
-				if withContacts {
-					project = sp(crScopeProjectA)
-				}
-				id := f.legacyInCustomerApproval(domain.ChangeRequestTypeStandard, project, boolp(false), syncShape)
-				if withContacts {
-					// The change reached Customer Approval before the requirement column
-					// existed: nobody has been asked yet. A restated project asks them.
-					f.setProject(id, crScopeProjectA)
-					if got := liveStages(f.customerStages(id)); got != 1 {
-						t.Fatalf("live customer stages before the Re-schedule = %d, want 1", got)
-					}
-				}
-				if err := f.reschedule(id, sp(rsStart2), sp(rsEnd2)); err != nil {
-					t.Fatalf("Re-schedule: %v", err)
-				}
-				f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				f.wantPlanned(id, "after Re-schedule", rsStart2, rsEnd2)
-				if required, _ := f.legacyRequirement(id); !required {
-					t.Fatal("customer_approval_required is still false after the Re-schedule")
-				}
-				stages := f.customerStages(id)
-				if !withContacts {
-					if len(stages) != 0 {
-						t.Fatalf("customer stages with nobody to ask = %+v", stages)
-					}
-					return
-				}
-				if len(stages) != 2 {
-					t.Fatalf("customer stages after the Re-schedule = %+v, want the superseded request and a fresh one", stages)
-				}
-				assertApprovers(t, "the superseded request", stages[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
-				assertApprovers(t, "the customer asked again", stages[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
-				if _, err := f.approveAs(id, crScopeUserA1, true); err != nil {
-					t.Fatalf("the customer's approval: %v", err)
-				}
-				f.expect(id, "after the customer's approval", "SCHEDULED", "implement", "canceled")
-			})
-		}
-	}
+func TestChangeRequestRescheduleLegacyIntegration_NormalAsksTheCustomerAgain(t *testing.T) {
+	legacyRescheduleCase(t, domain.ChangeRequestTypeNormal)
 }
 
-// The customer's own proposed time is the same Re-schedule: on a row with the box
-// false the new plan goes back to the customer as well.
+// Standard has no internal approval either way: the same Re-schedule, the same row shapes.
+func TestChangeRequestRescheduleLegacyIntegration_StandardAsksTheCustomerAgain(t *testing.T) {
+	legacyRescheduleCase(t, domain.ChangeRequestTypeStandard)
+}
+
+// The customer's own proposed time on a row with the box false: it gives the row the
+// request it lacked (the customer's first act does), and then WAITS for WSO2 -- nothing
+// else is written, no flag, no CAB. WSO2 answers it like any other: Accept schedules it
+// (the box stays false, no approval is recorded) or a different time asks the customers
+// again.
 func TestChangeRequestRescheduleLegacyIntegration_ACustomersProposalAsksThemAgain(t *testing.T) {
-	f := newCustomerGroupFlow(t)
-	id := f.legacyInCustomerApproval(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), nil, true)
-	// The legacy change reached Customer Approval with nobody asked; the customer's
-	// proposal gives it its request first (ensureCustomerStageForLegacy).
-	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
-		t.Fatalf("the customer's proposal: %v", err)
-	}
-	f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
-	if required, _ := f.legacyRequirement(id); !required {
-		t.Fatal("customer_approval_required is still false after the customer's proposal")
-	}
-	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-		t.Fatalf("CAB approval of the proposed plan: %v", err)
-	}
-	f.expect(id, "after the CAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	live := 0
-	for _, st := range f.customerStages(id) {
-		for uid, status := range st.approvers {
-			if status == "REQUESTED" && (uid == crScopeUserA1 || uid == crScopeUserA2) {
-				live++
+	t.Run("accepted", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.legacyInCustomerApproval(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), nil, true)
+		// The legacy change reached Customer Approval with nobody asked; the customer's
+		// proposal gives it its request first (ensureCustomerStageForLegacy).
+		if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
+			t.Fatalf("the customer's proposal: %v", err)
+		}
+		f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+		f.wantPlanned(id, "after the proposal", rsStart1, rsEnd1)
+		f.wantConversation(id, "after the proposal", rsStart2, "")
+		if required, _ := f.legacyRequirement(id); required {
+			t.Fatal("customer_approval_required was written by the customer's proposal")
+		}
+		live := 0
+		for _, st := range f.customerStages(id) {
+			for uid, status := range st.approvers {
+				if status == "REQUESTED" && (uid == crScopeUserA1 || uid == crScopeUserA2) {
+					live++
+				}
 			}
 		}
-	}
-	if live != 2 {
-		t.Fatalf("customer rows asked again = %d, want both registered contacts", live)
-	}
+		if live != 2 {
+			t.Fatalf("customer rows asked = %d, want both registered contacts", live)
+		}
+		f.mustAccept(id)
+		f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
+		f.wantPlanned(id, "after Accept", rsStart2, rsEnd2)
+		if required, _ := f.legacyRequirement(id); required {
+			t.Fatal("customer_approval_required was written by Accept")
+		}
+	})
+	t.Run("answered with a different time", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.legacyInCustomerApproval(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), nil, true)
+		f.mustPropose(id, crScopeUserA1, rsStart2)
+		if err := f.counter(id, sp(rsStart3), sp(rsEnd3)); err != nil {
+			t.Fatalf("WSO2's different time: %v", err)
+		}
+		f.expect(id, "after the counter", "CUSTOMER_APPROVAL", "authorize", "canceled")
+		f.wantPlanned(id, "after the counter", rsStart3, rsEnd3)
+		f.wantConversation(id, "after the counter", rsStart2, "DISAGREE")
+		if n := f.liveStageRows(id, stageCustApproval); n != 2 {
+			t.Fatalf("customer rows asked again = %d, want both registered contacts", n)
+		}
+	})
 }
 
 // Whatever else the request says about the box, a Re-schedule leaves the row
@@ -244,8 +231,14 @@ func TestChangeRequestRescheduleLegacyIntegration_BoxInTheRequestAndRefusals(t *
 			CustomerApprovalRequired: boolp(false)}); err != nil {
 			t.Fatalf("Re-schedule carrying customerApprovalRequired: false: %v", err)
 		}
-		if required, _ := f.legacyRequirement(id); !required {
-			t.Fatal("customer_approval_required = false after a Re-schedule that resent the stored false")
+		// The stored false is a no-op write: the Re-schedule asks the customer again anyway,
+		// whatever the box says (it goes through no CAB), and writes no flag.
+		if required, _ := f.legacyRequirement(id); required {
+			t.Fatal("customer_approval_required = true after a Re-schedule that resent the stored false: nothing writes it")
+		}
+		f.expect(id, "after the Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
+		if n := f.liveStageRows(id, stageCustApproval); n != 2 {
+			t.Fatalf("customer request has %d live rows after the Re-schedule, want 2 (asked again)", n)
 		}
 	})
 	t.Run("a refused re-schedule leaves the column alone", func(t *testing.T) {

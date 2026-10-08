@@ -116,7 +116,7 @@ export class ChangeRequestsPage {
    * The number each row of the list carries, in render order.
    *
    * The number is read off each card as the first token shaped like one —
-   * `CHG0038759`, `CHG-FIXED-007` or `CR-1013` — so a row whose number has none of
+   * `CHG0001234`, `CHG-FIXED-007` or `CR-1013` — so a row whose number has none of
    * those shapes is skipped here but still counted by {@link allRows}.
    */
   async listedNumbers(): Promise<string[]> {

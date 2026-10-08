@@ -25,6 +25,7 @@ import type {
   ChangeRequestsStatsDto,
 } from "@src/types";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { isProposedTimeAccepted } from "@src/utils/changeRequestProgress";
 
 import {
   CHANGE_REQUEST_DETAILS_ENDPOINT,
@@ -92,6 +93,7 @@ function toChangeRequest(dto: ChangeRequestDto): ChangeRequest {
     approvedBy: dto.approvedBy?.label ?? undefined,
     duration: dto.duration ?? undefined,
     hasCustomerApproved: dto.hasCustomerApproved,
+    isProposedTimeAccepted: isProposedTimeAccepted(dto.customerProposal?.answer, dto.state?.id),
     hasCustomerReviewed: dto.hasCustomerReviewed,
     assignedTeam: dto.assignedTeam?.label,
     serviceOutage: dto.serviceOutage ?? undefined,

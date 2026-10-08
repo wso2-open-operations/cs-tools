@@ -37,6 +37,7 @@ import {
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
+  customerApprovedDisplay,
 } from "@features/csm-operations/utils/changeRequests";
 import {
   hasDisplayableContent,
@@ -113,7 +114,9 @@ export function generateChangeRequestReportPdf(
     rows.push({ label: "Affected components", value: cr.affectedComponentsText });
   }
   if (cr.hasCustomerApproved !== undefined) {
-    rows.push({ label: "Customer approved", value: cr.hasCustomerApproved ? "Yes" : "No" });
+    // "Proposed time accepted" for a change WSO2 scheduled by accepting the time the customer proposed
+    // (nothing is stamped as the customer's approval then, so a plain "No" would mislead).
+    rows.push({ label: "Customer approved", value: customerApprovedDisplay(cr) });
   }
   if (cr.approvedBy?.name) {
     rows.push({

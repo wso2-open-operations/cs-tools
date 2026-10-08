@@ -398,7 +398,7 @@ export function CreateGithubIssueDialog({
                 : repoOptionsLoading
                   ? "Looking up the GitHub repository for this product…"
                   : selectedRepoOption
-                    ? `Repository: ${selectedRepoOption.owner}/${selectedRepoOption.repo} (${selectedRepoOption.displayLabel})`
+                    ? `This issue will be created in: ${selectedRepoOption.owner}/${selectedRepoOption.repo} (${selectedRepoOption.displayLabel})`
                     : "No GitHub repository is mapped for this product."}
             </Typography>
           )}

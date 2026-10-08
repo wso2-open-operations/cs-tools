@@ -38,14 +38,14 @@
 //      listed, not answerable (404, not a refusal that admits it exists). And moving
 //      one on, to Customer Approval, does not designate anybody: the state alone never
 //      shows a change request to a customer.
-//   3. A designated change request STAYS visible, in every later state: Authorize (after
-//      a proposed time), Scheduled, Implement, Review, Customer Review, Rollback, Closed,
-//      Canceled. And a contact whose OWN request was cancelled (a colleague answered, or
+//   3. A designated change request STAYS visible, in every later state: Authorize (where a
+//      proposal made before proposals waited in Customer Approval leaves a change request),
+//      Scheduled, Implement, Review, Customer Review, Rollback, Closed, Canceled. And a contact whose OWN request was cancelled (a colleague answered, or
 //      the change was re-scheduled) still sees it, with nothing to answer: her answer is
 //      refused.
 //   4. A direct PATCH from a customer's token that carries anything but an answer, or a
-//      proposed time, is refused (403), and the two mixed forms are refused (400);
-//      nothing about the change moves.
+//      proposed time, is refused (403) -- WSO2's own answer to a proposal included -- and the
+//      two mixed forms are refused (400); nothing about the change moves.
 //
 // ⚠️ STATE-CHANGING in the small (it re-seeds first, and some tests move a fixture on or
 // cancel erin's request in the database), so it needs E2E_POSTGRES_CONTAINER and SKIPS
@@ -62,6 +62,7 @@ import {
   approverRows,
   changeRequestRow,
   customerApi,
+  proposalRow,
   psql,
   resetFixtures,
   withFixtureStack,
@@ -88,6 +89,7 @@ test.describe("Local stack — who may not answer a change request", () => {
     baseURL,
   }) => {
     const mira = customerApi("mira");
+    const planned = await changeRequestRow(approval.id);
     const lumenId = await mira.projectIdByName(LUMEN_PROJECT);
     expect(lumenId, `${LUMEN_PROJECT} is not one of mira's projects: is the stack seeded?`).toBeTruthy();
 
@@ -121,7 +123,8 @@ test.describe("Local stack — who may not answer a change request", () => {
       expect(result.status, `mira's "${what}" answered ${result.status}: ${JSON.stringify(result.body)}`).toBe(404);
     }
     const untouched = await changeRequestRow(approval.id);
-    expect([untouched.state, untouched.startUtc, untouched.endUtc]).toEqual(["CUSTOMER_APPROVAL", "", ""]);
+    expect([untouched.state, untouched.startUtc, untouched.endUtc]).toEqual(["CUSTOMER_APPROVAL", planned.startUtc, planned.endUtc]);
+    expect(await proposalRow(approval.id), "no proposal was recorded").toEqual({ proposedUtc: "", answer: "" });
     expect(
       (await approverRows(approval.id)).map((r) => `${r.email}|${r.state}`),
       "the two contacts' requests are untouched",
@@ -323,6 +326,7 @@ test.describe("Local stack — who may not answer a change request", () => {
   test(`a direct PATCH from dave's token with anything but an answer or a proposed time is refused, and nothing about ${approval.number} moves`, async () => {
     const dave = customerApi("dave");
     const window = { plannedStartOn: "2027-03-01 10:00:00", plannedEndOn: "2027-03-01 12:00:00" };
+    const planned = await changeRequestRow(approval.id);
 
     const forbidden: [string, unknown][] = [
       ["an answer with a title change", { isCustomerApproved: true, title: "hijacked" }],
@@ -332,6 +336,9 @@ test.describe("Local stack — who may not answer a change request", () => {
       ["a proposed window with a title change", { ...window, title: "hijacked" }],
       ["a proposed window with a state", { ...window, state: "authorize" }],
       ["a description change", { description: "hijacked" }],
+      // WSO2's answer to a proposal is not the customer's to give: the field is outside what a customer may send.
+      ["WSO2's acceptance of a proposed time", { confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn: "2030-03-01T10:00:00Z" }],
+      ["a proposed window with WSO2's acceptance", { ...window, confirmCustomerUpdatedDate: "agree" }],
     ];
     for (const [what, body] of forbidden) {
       const result = await dave.patch(approval.id, body);
@@ -348,14 +355,15 @@ test.describe("Local stack — who may not answer a change request", () => {
     const wrongStage = await dave.patch(approval.id, { isCustomerReviewed: true });
     expect(wrongStage.status, JSON.stringify(wrongStage.body)).toBe(409);
 
-    // Nothing moved.
+    // Nothing moved: the planned window is the one the fixture was given, and no proposal was recorded.
     const row = await changeRequestRow(approval.id);
     expect([row.state, row.startUtc, row.endUtc, row.title]).toEqual([
       "CUSTOMER_APPROVAL",
-      "",
-      "",
+      planned.startUtc,
+      planned.endUtc,
       "E2E fixture: change in Customer Approval with a pending customer group approval",
     ]);
+    expect(await proposalRow(approval.id)).toEqual({ proposedUtc: "", answer: "" });
     expect(
       (await approverRows(approval.id)).map((r) => `${r.email}|${r.state}`),
       "no request was answered or cancelled",

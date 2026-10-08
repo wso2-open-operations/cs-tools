@@ -27,9 +27,10 @@ import "strconv"
 // is needed here — just a direct enum lookup, both directions.
 //
 // Authorize ("-3") is in the vocabulary on purpose: a change request a customer
-// was asked about goes back to Authorize when the customer proposes a new
-// implementation time (it is re-approved internally before the customer is asked
-// again), and it stays visible to that customer while it is there. New and
+// was asked about can be back in Authorize -- a time proposed or a Re-schedule made
+// before a proposal started waiting for WSO2 in Customer Approval (change requests
+// of that older flow finish through the CAB and ask the customer again) -- and it
+// stays visible to that customer while it is there. New and
 // Assess are not: no change request that is visible to a customer is ever in
 // either (it left New when approval was requested and a designated one never
 // returns to Assess), so they have no id or label to show.

@@ -325,23 +325,25 @@ func TestChangeRequestFlowIntegration_CustomerGroupStandardRequestApproval(t *te
 	f.expect(id, "after approval", "SCHEDULED", "implement", "canceled")
 }
 
-// Emergency + Customer Approval: ECAB approval enters Customer Approval and
-// provisions the customer stage.
-func TestChangeRequestFlowIntegration_CustomerGroupEmergencyECABCascade(t *testing.T) {
+// Emergency on a project whose contacts could answer, with the customer box stored as ticked
+// (a row from before the rule, or a migrated one): the CAB approval SCHEDULES it -- the customer
+// is never asked, and no customer stage is provisioned. (Replaces the test in which an ECAB
+// approval entered Customer Approval and provisioned the customer stage.)
+func TestChangeRequestFlowIntegration_CustomerGroupEmergencyNeverAsksTheCustomer(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
-	id := f.createWithProject(domain.ChangeRequestTypeEmergency, sp(crScopeProjectA), true, false)
+	id := f.createWithProject(domain.ChangeRequestTypeEmergency, sp(crScopeProjectA), false, false)
+	f.execSQL(`UPDATE change_request SET customer_approval_required = true WHERE id = $1`, id)
 	f.requestApproval(id)
 	f.expect(id, "after Request Approval", "AUTHORIZE", "canceled")
-	if n := len(f.customerStages(id)); n != 0 {
-		t.Fatalf("customer stage provisioned before ECAB approved: %d", n)
+	if got := f.labels(id); strings.Join(got, ",") != "CAB Approval" {
+		t.Fatalf("stages after Request Approval = %v, want the one CAB stage", got)
 	}
-	if err := f.decide(id, crECABMemberUserID, "approved"); err != nil {
-		t.Fatalf("ECAB approval: %v", err)
+	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
+		t.Fatalf("CAB approval: %v", err)
 	}
-	f.expect(id, "after ECAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	if st := f.customerStages(id); len(st) != 1 || st[0].label != stageCustApproval || liveStages(st) != 1 {
-		t.Fatalf("customer stages = %+v", st)
+	f.expect(id, "after the CAB approval", "SCHEDULED", "implement", "canceled")
+	if st := f.customerStages(id); len(st) != 0 {
+		t.Fatalf("customer stages = %+v, want none", st)
 	}
 }
 

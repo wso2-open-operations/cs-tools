@@ -401,10 +401,10 @@ func MapCaseDetails(c entity.CaseView) CaseDetails {
 	changeRequests := make([]IDLabelRef, 0, len(c.LinkedChangeRequests))
 	for _, cr := range c.LinkedChangeRequests {
 		label := cr.Number
-		if cr.Name != nil {
+		if cr.Name != nil && *cr.Name != "" {
 			label = *cr.Name
 		}
-		changeRequests = append(changeRequests, IDLabelRef{ID: cr.ID, Label: label})
+		changeRequests = append(changeRequests, IDLabelRef{ID: cr.ID, Label: label, Number: cr.Number})
 	}
 
 	var watchList []CaseWatchListUser

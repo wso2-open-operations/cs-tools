@@ -172,9 +172,52 @@ export class ChangeRequestDetailsPage {
     return this.page.getByText(notes.onHold, { exact: true });
   }
 
-  /** The note that stays on the page while a proposed time waits for WSO2's review. */
+  /**
+   * The note that stays on the page for a proposal made before proposals waited in Customer Approval (the change
+   * went back to Authorize for a fresh CAB approval): a proposal made now never shows it.
+   */
   internalReviewNote(): Locator {
     return this.page.getByRole("status").filter({ hasText: notes.internalReview });
+  }
+
+  /** The status note while a proposed time waits for WSO2 (the viewer's own, or a colleague's). */
+  proposalWaitingNote(): Locator {
+    return this.page.locator(`#${notes.waitingNoteId}`);
+  }
+
+  /** The status note once WSO2 did not accept the proposed time (it asked for another, or kept its own). */
+  proposalNotAcceptedNote(): Locator {
+    return this.page.locator(`#${notes.notAcceptedNoteId}`);
+  }
+
+  /** "Proposed start: ... (waiting for WSO2)" under the window card's planned start. */
+  windowProposedStart(): Locator {
+    return this.page.locator(`#${notes.windowProposedStartId}`);
+  }
+
+  /** "WSO2 accepted the proposed start, ..." on the window card. */
+  windowAcceptedNote(): Locator {
+    return this.page.locator(`#${notes.windowAcceptedId}`);
+  }
+
+  /** The window card's title ("Planned Maintenance Window" until the change is scheduled, then "Scheduled ..."). */
+  windowCardTitle(title: string): Locator {
+    return this.page.getByText(title, { exact: true });
+  }
+
+  /** The note beside a Propose New Time that is off because the change has no planned window to move. */
+  noWindowNote(): Locator {
+    return this.page.getByText(notes.noWindow, { exact: true });
+  }
+
+  /**
+   * The caption the lifecycle panel prints under a step (the same name is also in the panel as the step's own
+   * name; a caption is the paragraph-less small text beside it).
+   *
+   * @param text - The caption, one of {@link CHANGE_REQUEST_DETAILS}.stageCaptions.
+   */
+  stageCaption(text: string): Locator {
+    return this.page.getByText(text, { exact: true });
   }
 
   /** "Back to Change Requests": the way back to the list. */
@@ -205,7 +248,7 @@ export class ChangeRequestDetailsPage {
     return this.proposeDialog().getByLabel(propose.startLabel);
   }
 
-  /** The Proposed end field of the Propose dialog. */
+  /** The Proposed end field of the Propose dialog: read-only, the end the start implies. */
   proposedEnd(): Locator {
     return this.proposeDialog().getByLabel(propose.endLabel);
   }
@@ -234,19 +277,13 @@ export class ChangeRequestDetailsPage {
   }
 
   /**
-   * Types a window into the open Propose dialog.
-   *
-   * The end is typed AFTER the start on purpose: while the customer has not
-   * edited the end, the dialog moves it with every start change (keeping the
-   * current duration); typing the end last is what makes the window the one the
-   * caller asked for.
+   * Types a start into the open Propose dialog. The end is not typed: it is shown, read-only, and follows the start
+   * (a proposal moves the START and keeps the planned length).
    *
    * @param start - `YYYY-MM-DDTHH:mm`, in the dialog's time zone.
-   * @param end - `YYYY-MM-DDTHH:mm`, in the dialog's time zone.
    */
-  async fillProposedWindow(start: string, end: string): Promise<void> {
+  async fillProposedStart(start: string): Promise<void> {
     await this.proposedStart().fill(start);
-    await this.proposedEnd().fill(end);
   }
 
   /** The confirmation's title for the button label it carries. */

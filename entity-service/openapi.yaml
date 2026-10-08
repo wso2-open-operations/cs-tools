@@ -5833,10 +5833,11 @@ paths:
         move) or a state it may move to from there -- the same table legalNextStates is
         rendered from, so what the portal offers is exactly what is accepted: new ->
         assess (Request Approval; where it lands depends on the type), canceled; assess
-        and authorize -> canceled only (the peer approval and the CAB / ECAB approval
-        move them on by themselves); customer_approval -> authorize (Re-schedule),
-        canceled; scheduled -> implement, canceled; implement -> review, canceled; review
-        -> closed (or customer_review when customerReviewRequired), rollback, canceled;
+        and authorize -> canceled only (the peer approval and the CAB approval
+        move them on by themselves); customer_approval -> authorize (Re-schedule /
+        Propose a different time: the state does not move), canceled; scheduled -> implement, canceled; implement -> review, canceled; review
+        -> closed (or customer_review when customerReviewRequired and the change is not an
+        Emergency change, which never asks the customer), rollback, canceled;
         customer_review -> rollback, canceled. closed, canceled and rollback are FINAL:
         every request to move one is a 400 that names both states (`state "implement"
         cannot be set manually from canceled: a change request that is canceled cannot be
@@ -5853,11 +5854,44 @@ paths:
         rollback outside review keep the refusals of their own described below, also when
         the change request is already in that state.)
 
-        Re-schedule re-asks the customer on every row: it writes customer_approval_required
-        = true with the new window (never the ServiceNow-owned is_customer_approval_required),
-        so that the CAB / ECAB approval that follows ends in customer_approval again also
-        for a change request whose box is false because it was created or synced before
-        that column existed. With nobody to ask the change request waits there.
+        Re-schedule ({state: "authorize"} out of customer_approval) asks the customer again
+        on every row, for every change type, and the change request STAYS in customer_approval:
+        the new window is applied, the pending customer request is cancelled (kept as a record)
+        and a fresh one is provisioned for the project's registered contacts. Nothing goes
+        through CAB again (the change itself has not changed, only its time) and no
+        requirement flag is written (neither customer_approval_required nor the
+        is_customer_approval_required flag the sync owns). It is refused with the words of Request Approval's
+        refusal ("customer approval is required but nobody on this project can be asked ...")
+        when nobody can be asked.
+
+        A customer's proposed time (see the customerProposal read model). A customer proposes a
+        START in the Customer Portal: it is written to customer_updated_on (a column the
+        previous system also fills) and nothing else; the change request stays in customer_approval with its planned
+        window and the customers' request untouched, and waits for WSO2. WSO2 answers with this
+        PATCH, naming the proposal (expectedCustomerUpdatedOn) and, for Accept, the planned window
+        the page showed (expectedPlannedStartOn / expectedPlannedEndOn): ACCEPT PROPOSED TIME is
+        {confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn, expectedPlannedStartOn,
+        expectedPlannedEndOn} and nothing else -- one write that applies the proposed start to the
+        planned window (the planned length is kept), writes AGREE and moves the change request to
+        scheduled, with no CAB approval, no second ask of the customer and no customer approval
+        recorded ({state: "scheduled"} stays a 400 from every state); PROPOSE A DIFFERENT TIME is
+        {state: "authorize", plannedStartOn?, plannedEndOn?, expectedCustomerUpdatedOn, ...} -- the
+        window WSO2 proposes instead and DISAGREE, the customers asked again; with no window (or the
+        planned window restated) it is a decline: only DISAGREE is written and the customers keep
+        their request. A staff {state: "authorize"} that finds a proposal waiting must name it
+        (409 otherwise); Accept / the answer is refused with a 409 when no proposal waits, the
+        proposal or the planned window is not the one named, or the proposed start has passed, is
+        too far ahead (the window it gives would end after the year 2100) or the planned window has
+        no length, and with a 400 when the change request is on hold. A proposal is a CUSTOMER's
+        only when a registered contact of the project is recorded as having proposed it (see
+        customerProposal.proposerRecorded): Accept of any other stored time is refused with a 409
+        (errorCode change_request_proposer_not_recorded), and a staff {state: "authorize"} over it
+        is a plain re-schedule that writes no answer and is a 400 when it carries no window. These
+        are PostgreSQL-only: the previous system's API has no field for them, so the dual-write mirror carries
+        only what PostgreSQL committed (Accept: scheduled and the window; a counter: the window, not
+        the state; a customer's proposal: nothing), the sync may rewrite the columns while it runs, and
+        the data source that talks to the previous system directly refuses confirmCustomerUpdatedDate /
+        expectedCustomerUpdatedOn.
 
         Compliance rule: no staff action records the customer's approval or review on
         the customer's behalf. The customer's answer is the customer's decision and
@@ -5866,8 +5900,9 @@ paths:
         customer_approval / customer_review moves on ONLY through the customer's own
         answer (given in the Customer Portal, below); the staff exits that stay are
         Cancel (any state that is not final), Re-schedule ({state: "authorize"} with a
-        changed window, out of customer_approval: the customer is asked again) and
-        Rollback (out of customer_review, while nobody is being asked). So, from an
+        changed window, out of customer_approval: the customer is asked again, the state
+        does not move), Accept proposed time (only while the customer's own proposal
+        waits, see above) and Rollback (out of customer_review, while nobody is being asked). So, from an
         internal caller: {state: "scheduled"} is a 400 from EVERY state, out of
         customer_approval included (`state "scheduled" cannot be set manually from
         customer_approval: the customer's approval can only be given by the customer in
@@ -5916,13 +5951,17 @@ paths:
         A proposed window, from a registered contact the customer's approval has been
         asked of (the same test as customerCanAnswer: a REQUESTED approval on the live
         Customer Approval stage) while the change request is in customer_approval, is the
-        Re-schedule: the new window is applied, the pending customer request is cancelled,
-        and the change goes back through CAB / ECAB approval (a Standard change stays in
-        customer_approval and the customer is asked again). The window must be a date-time
-        still to come, must have a duration (the end after the start; a start sent alone is
-        held against the stored end), and must differ from the stored one (400 otherwise).
-        Anywhere else, with nobody asked, or while on hold, it is a 409; a registered
-        contact who was not asked is a 403.
+        a PROPOSAL: it writes the proposed START to customer_updated_on and nothing else (the
+        change request stays in customer_approval, its planned window and the customers' request
+        untouched) and waits for WSO2's answer. The planned LENGTH is kept: the portal sends the
+        start plus the end that keeps it, and any other end is a 400 ("a proposed time moves the start
+        and keeps the planned length of 2 hours: plannedEndOn must be ..., or be left out"); a start
+        alone is accepted, an end alone is a 400 ("a proposed implementation time needs a new start").
+        The start must be a date-time still to come, differ from the planned start (400 "plannedStartOn
+        is the planned start already") and from a proposal already waiting (400) or one WSO2 declined
+        (400). Anywhere else, with nobody asked, on hold, over a window with no length to keep, or while
+        an approval that is not the customer's is still being asked, it is a 409; a registered contact who
+        was not asked is a 403.
 
         plannedStartOn / plannedEndOn, from any caller, are RFC 3339 with a zone designator
         or "YYYY-MM-DD HH:MM:SS" (UTC), in the years 2000 to 2100: anything else
@@ -5930,12 +5969,11 @@ paths:
         Both layouts are accepted on every data source. The pure ServiceNow data source
         takes ServiceNow's own layout, "YYYY-MM-DD HH:MM:SS" in UTC, and converts an RFC
         3339 value to it before forwarding (the dual-write mirror does the same); there the
-        years 2000 to 2100 bound applies to an RFC 3339 value only (a "YYYY-MM-DD HH:MM:SS"
-        value is forwarded as sent) and a refusal reads "plannedStartOn must follow the
-        format: YYYY-MM-DD HH:mm:ss".
-        A customer's proposal that names only an end keeps the stored start, which must
-        then still be to come (400 "plannedStartOn is in the past: the current planned
-        start (...) has passed; propose a new start as well").
+        years 2000 to 2100 bound applies to both layouts, a "YYYY-MM-DD HH:MM:SS" value with a
+        fractional second is refused (whole seconds only), and a refusal reads "plannedStartOn
+        must follow the format: YYYY-MM-DD HH:mm:ss", followed by "(the year must be in 2000 to
+        2100)" or "(whole seconds only, no fractional second)" for those two.
+        A customer's proposal is a start (an end alone is a 400).
 
         Customer requirements lock. The Customer Project (projectId) and the two
         creation-form boxes (customerApprovalRequired, customerReviewRequired) are free
@@ -6041,7 +6079,8 @@ paths:
             A customer sent a field other than the customer's answer or a proposed
             window, or is not a registered PORTAL_USER contact of the change
             request's own project, or is its creator, or was not asked (a contact
-            holding no REQUESTED customer approval can neither answer nor propose).
+            holding no REQUESTED row on the live customer stage can neither answer
+            nor propose).
             The body's `errorCode` tells the two kinds apart: `change_request_not_asked`
             for a contact who was not asked, `change_request_forbidden` for the rest.
           content:
@@ -6065,8 +6104,17 @@ paths:
             changed. The body's `errorCode` says which: `change_request_approval_not_pending`
             (already answered, or nothing waits for an answer), `change_request_schedule_changed`
             (the window the answer names is no longer the change request's),
-            `change_request_not_proposable` (a proposed time where none can be proposed) or
-            `change_request_on_hold` (a proposed time while WSO2 has the change on hold).
+            `change_request_not_proposable` (a proposed time where none can be proposed),
+            `change_request_on_hold` (a proposed time while WSO2 has the change on hold),
+            `change_request_proposal_not_now` (a proposed time while an approval that is not
+            the customer's is also being asked), `change_request_no_planned_window` (a
+            proposed time on a change request with no planned window to move) or
+            `change_request_proposer_not_recorded` (WSO2's acceptance of a stored time that no
+            registered contact of the project is recorded as having proposed: no staff action
+            stands in for the customer's consent, so it is never accepted; proposing a different
+            time still works). The schedule code also names a WSO2 response (Accept proposed
+            time, propose a different time) whose expected planned window is no longer the
+            change request's.
           content:
             application/json:
               schema:
@@ -6139,8 +6187,8 @@ paths:
       description: >-
         The approval stages of the change request and who sits on each. For a CUSTOMER
         (an external caller) only the customer's own stages (Customer Approval /
-        Customer Review) are given whole; every internal stage (Peer, CAB, ECAB,
-        Review) is reduced to its stage label and status, with no approver names, no
+        Customer Review) are given whole; every internal stage (Peer, CAB, Review,
+        and a historic "ECAB Approval") is reduced to its stage label and status, with no approver names, no
         internal user ids and no group.
 
         A CUSTOMER (any caller that is not unrestricted) sees a change request only when
@@ -6203,7 +6251,7 @@ paths:
         -> closed (is_customer_review_required), rejected -> rollback.
 
         A stage can only be decided while the change request is in the state it belongs
-        to: Peer Approval in assess, CAB / ECAB Approval in authorize, Review in review,
+        to: Peer Approval in assess, CAB Approval (and a historic ECAB Approval) in authorize, Review in review,
         Customer Approval in customer_approval, Customer Review in customer_review. The
         approvers of a stage the change has left are cancelled when it moves on (all of
         them once it is closed, canceled or rolled back), and a decision on one that was
@@ -6253,10 +6301,10 @@ paths:
           description: >-
             The caller may not decide: the change request's creator, a user who
             is not an active internal user on an internal stage (peer, CAB,
-            ECAB, review), or -- while the change waits on its customer group's
+            review), or -- while the change waits on its customer group's
             Customer Approval / Customer Review -- anyone not in that group.
             The message says which; the body's `errorCode` is `change_request_not_asked`
-            for a caller who is not (or no longer) asked on the customer group's stage and
+            for a caller who holds no REQUESTED row on the customer group's live stage and
             `change_request_forbidden` for the rest.
           content:
             application/json:
@@ -7344,7 +7392,7 @@ paths:
         group email and manager, and its active members in name order.
         `id` is a `"group"` id, NOT a `team` id (POST /groups/search lists
         teams). Members are the users the approval pools provision from: for the
-        CAB Approval / ECAB Approval / Devops Approval groups, which the pools
+        CAB Approval / Devops Approval groups, which the pools
         resolve by name, a `team_member` whose `group_id` is any group of that
         name or whose `team_id` is a team of that name; for any other group (a
         change's assigned group) a `team_member` whose `group_id` is this group.
@@ -7440,7 +7488,7 @@ paths:
 
   /services/search:
     post:
-      summary: Search CMDB IT services (ServiceNow data source only).
+      summary: Search CMDB IT services.
       operationId: searchITServices
       requestBody:
         required: true
@@ -15337,6 +15385,15 @@ components:
             hits). Defaults to false, which returns the exact total as before.
             Ignored on the ServiceNow data source, which always reports one,
             and for a search that sets groupBy (its totals are the bucket counts).
+        countOnly:
+          type: boolean
+          description: >-
+            The mirror image of skipTotal: when true, the search skips the
+            page query entirely and returns `cases: []`, reading only `total`.
+            For a count or pie/bar dashboard widget, whose only use for this
+            search is `total`. Defaults to false. Rejected (400) together with
+            skipTotal -- there would be nothing left to compute. Postgres data
+            source only.
         filters:
           $ref: '#/components/schemas/SearchCasesFilters'
         sortBy:
@@ -16832,9 +16889,14 @@ components:
         plannedStartOn:
           type: string
           nullable: true
+          description: >-
+            The planned start, RFC 3339 in UTC. Printed with the fractional seconds the stored value
+            has (and none when it holds whole seconds, as every migrated row does), so that what is
+            read goes back unchanged as expectedPlannedStartOn: those compare the instants exactly.
         plannedEndOn:
           type: string
           nullable: true
+          description: The planned end, printed like plannedStartOn.
         duration:
           type: string
           nullable: true
@@ -16874,6 +16936,71 @@ components:
           type: integer
         limit:
           type: integer
+
+    ChangeRequestCustomerProposal:
+      type: object
+      required: [startOn, answer]
+      description: >-
+        What the change request says about a time the customer proposed for it, derived on every
+        read from two columns of the change request (customer_updated_on: the customer's proposed plan START;
+        customer_updated_date_confirmation: WSO2's answer, AGREE / DISAGREE) and the approver rows;
+        nothing extra is stored. Present on the PostgreSQL data source when customer_updated_on is
+        set. While `answer` is "pending" the planned window (plannedStartOn / plannedEndOn) is still
+        the one WSO2 planned: a proposal changes nothing until WSO2 answers.
+      properties:
+        startOn:
+          type: string
+          format: date-time
+          description: The proposed plan start (RFC 3339 UTC), to be sent back as expectedCustomerUpdatedOn.
+        endOn:
+          type: string
+          format: date-time
+          description: The proposed end, startOn plus the length of the planned window. Only while pending and the planned window has a length.
+        answer:
+          type: string
+          enum: [pending, agreed, disagreed, unanswered]
+          description: >-
+            pending: the change request is in customer_approval, the proposed start differs from the
+            planned start, WSO2 has not answered and no approval but the customer's own is still asked
+            -- the only state WSO2 can act on. agreed / disagreed: WSO2's answer. unanswered: history.
+            For an external reader (a customer) a stored time that nobody is recorded as having
+            proposed is also "unanswered": nothing waits for WSO2 on their account, and no
+            pending-only field is present.
+        proposerRecorded:
+          type: boolean
+          description: >-
+            While pending: true when the last writer of the change request (work_item.updated_by) is
+            a registered contact of the change request's project, who is then recorded as having
+            proposed the time. Nothing else names a proposer: no comment, audit or other log is read,
+            and nothing is added to record one. False when nobody is recorded -- a date a WSO2 user
+            wrote in the previous system, one left from an older cycle, or a genuine proposal that a
+            later write to the change request replaced as last writer -- and the page must say the
+            proposer is not recorded. Then canAccept is false: Accept proposed time is refused (409
+            change_request_proposer_not_recorded) and proposing a different time is a plain
+            re-schedule that writes no answer, which the customers then approve. Present only for a
+            staff reader or for a customer reading a recorded proposal.
+        proposedByName:
+          type: string
+          description: Staff readers only, while pending and proposerRecorded.
+        proposedByEmail:
+          type: string
+          description: Staff readers only, while pending and proposerRecorded.
+        proposedOn:
+          type: string
+          format: date-time
+          description: Staff readers only, while pending and proposerRecorded.
+        proposedByViewer:
+          type: boolean
+          description: External readers only, while pending - whether the proposal is the reader's own. No names reach a customer.
+        canAccept:
+          type: boolean
+          description: Staff readers only, while pending - whether Accept proposed time would be accepted right now (the server re-checks under its row lock).
+        acceptBlockedReason:
+          type: string
+          description: >-
+            Staff readers only, when canAccept is false: why, in the words of the refusal (nobody is
+            recorded as having proposed the time, on hold, the proposed start has passed or would end
+            beyond the year 2100, the planned window has no length to keep).
 
     ChangeRequest:
       allOf:
@@ -16919,16 +17046,24 @@ components:
               description: >-
                 The creation form's "Customer Approval" checkbox: the change
                 needs the customer's approval before it is scheduled. When
-                true, CAB / ECAB approval (or Request Approval on a Standard
+                true, CAB approval (or Request Approval on a Standard
                 change) moves the change to customer_approval instead of
-                scheduled. PostgreSQL data source only (always false on the
+                scheduled. Cannot be true on an Emergency change (a 400:
+                "Emergency changes proceed without customer consent, so
+                customer approval and customer review cannot be required"):
+                an Emergency change never asks the customer, and the flow
+                ignores the stored value of a row that already has one.
+                PostgreSQL data source only (always false on the
                 ServiceNow data source).
             customerReviewRequired:
               type: boolean
               description: >-
                 The creation form's "Customer Review" checkbox: the change
                 needs the customer's review before it is closed. When true,
-                review offers customer_review instead of closed.
+                review offers customer_review instead of closed -- except on an
+                Emergency change, which never asks the customer (the stored
+                value of a row that already has it ticked is shown as it is
+                and ignored by the flow).
             customerCanAnswer:
               type: boolean
               description: >-
@@ -16953,6 +17088,8 @@ components:
                 PostgreSQL data source; ABSENT for staff and internal callers, for
                 the ServiceNow data source and when the check could not be made.
                 Absent means unknown, which is not false. Never on search rows.
+            customerProposal:
+              $ref: '#/components/schemas/ChangeRequestCustomerProposal'
             approvedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
@@ -16966,28 +17103,39 @@ components:
               description: >-
                 Next states a human may move the change request to, per state
                 (the single source of truth the portal renders).
+                Wherever this text names customerApprovalRequired or
+                customerReviewRequired it means the flag IN EFFECT: for an Emergency
+                change both are false whatever value is stored (an Emergency change is
+                acted on without the customer's consent, so a row that already has a box
+                ticked still never offers or enters a customer step).
                 new: [assess, canceled] -- "assess" is the "Request Approval"
                 action for every type; the state it lands in depends on the
                 type (Assess for Normal, Authorize for Emergency, Scheduled for
                 Standard -- customer_approval instead when
-                customerApprovalRequired).
+                customerApprovalRequired, which an Emergency change never has in effect).
                 assess: [canceled] (the peer approval moves the change on by
                 itself, to authorize -- Assess -> Authorize was listed here
                 before although no PATCH ever took it); authorize: [canceled]
-                (CAB/ECAB approval moves the change on by itself: to scheduled,
-                or to customer_approval when customerApprovalRequired).
+                (CAB approval moves the change on by itself: to scheduled,
+                or to customer_approval when customerApprovalRequired -- never for an
+                Emergency change, whose CAB approval always schedules it).
                 customer_approval: [authorize, canceled] -- never "scheduled":
                 only the CUSTOMER's own approval (Customer Portal) schedules the
                 change, and no staff action stands in for it, whether or not
-                anybody was asked; "authorize" here means Re-schedule (PATCH
-                {state: authorize} with a changed plannedStartOn and/or
-                plannedEndOn sends the change back through CAB/ECAB approval and
-                asks the customer again; it is accepted from this state only
-                and refused when the window does not change).
+                anybody was asked; "authorize" here is the wire name of the Time
+                Change loop: Re-schedule / Propose a different time (PATCH
+                {state: authorize}); the state does NOT move, nothing goes
+                through CAB again, and the customer is asked again when the
+                planned window changes (it is accepted from this state only,
+                and with no proposal waiting it is refused when the window does
+                not change). WSO2's acceptance of a time the customer proposed
+                is its own request (confirmCustomerUpdatedDate), not a state.
                 scheduled: [implement, canceled]; implement: [review,
                 canceled].
                 review: [customer_review, rollback, canceled] when
-                customerReviewRequired, else [closed, rollback, canceled].
+                customerReviewRequired, else [closed, rollback, canceled] (always the
+                else branch for an Emergency change: its review offers closed whatever
+                the stored flag says).
                 customer_review: [rollback, canceled] -- never "closed": only
                 the CUSTOMER's own review closes the change -- or [canceled]
                 while a customer group's "Customer Review" stage is pending (a
@@ -17063,6 +17211,10 @@ components:
             customerUpdatedOn:
               type: string
               nullable: true
+              description: >-
+                The customer's proposed plan start, RFC 3339 in UTC, printed with the fractional
+                seconds it has (as customerProposal.startOn, so the two read alike). workStart /
+                workEnd are printed the same way.
             labels:
               type: array
               items:
@@ -17107,9 +17259,9 @@ components:
           description: >-
             True only on the calling user's own REQUESTED row, when they may
             actually decide it (they are not the change request's creator, and
-            on an internal stage -- peer, CAB, ECAB, review -- are an active
+            on an internal stage -- peer, CAB, review -- are an active
             internal user) and the change request is in the state the row's
-            stage belongs to (peer: assess, CAB / ECAB: authorize, review:
+            stage belongs to (peer: assess, CAB: authorize, review:
             review, customer approval / review: customer_approval /
             customer_review) -- a REQUESTED row left on a stage the change has
             moved past is false. Advisory --
@@ -17139,8 +17291,11 @@ components:
         stage:
           type: string
           description: >-
-            Approval stage name: "Peer Approval", "CAB Approval", "ECAB Approval",
-            "Review", and -- for the change's customer group, while it is in
+            Approval stage name: "Peer Approval", "CAB Approval" (a Normal change's second
+            stage and an Emergency change's only one; a migrated Emergency
+            change's one unlabeled stage in the CAB group reads this way too), "Review",
+            "ECAB Approval" (only on an Emergency change an earlier build created: no
+            longer written, still shown and decided as the CAB stage), and -- for the change's customer group, while it is in
             customer_approval / customer_review -- "Customer Approval" /
             "Customer Review" (approverName is then the customer group's name),
             for stages provisioned by this service; legacy/synced stages may be
@@ -17589,7 +17744,11 @@ components:
           description: >-
             Required. Decides the approval flow: Standard needs no approval
             (Request Approval goes straight to Scheduled); Normal needs peer
-            approval then CAB approval; Emergency needs ECAB approval only.
+            approval then CAB approval; Emergency needs CAB approval only (one
+            stage in the CAB Approval group: the previous system has no Emergency CAB). An
+            Emergency change takes no customer step: creating one with
+            customerApprovalRequired or customerReviewRequired true, or re-typing
+            a change that has one ticked into Emergency, is a 400.
         category:
           type: string
           enum:
@@ -17673,12 +17832,13 @@ components:
           type: string
           description: >-
             Planned start date and time (format YYYY-MM-DD HH:MM:SS, UTC, or RFC 3339 with
-            a zone designator, on every data source: the ServiceNow service converts an RFC
-            3339 value to the layout ServiceNow takes before it forwards it). Years 2000
-            to 2100 only (on the ServiceNow data source for RFC 3339 values); anything
-            else ("infinity", "now", a date alone, a zone name) is a 400 that names the
-            field, on both create paths (the ServiceNow-first one before ServiceNow is
-            called).
+            a zone designator, on every data source: the service that talks to the previous
+            system converts an RFC 3339 value to the layout that system takes before it
+            forwards it). Years 2000 to 2100 only (on every data source); anything else
+            ("infinity", "now", a date alone, a zone name) is a 400 that names the field, on
+            both create paths (the one that writes the previous system first refuses it before
+            that system is called), and on the data source that talks to the previous system
+            directly so is a "YYYY-MM-DD HH:MM:SS" value with a fractional second.
         plannedEndDate:
           type: string
           description: Planned end date and time, as plannedStartDate.
@@ -17718,7 +17878,8 @@ components:
             Request Approval is refused when customerApprovalRequired or
             customerReviewRequired is set and no project was chosen, and when it is set and
             the project has nobody who can be asked (no registered portal-user contact other
-            than the requester).
+            than the requester). An Emergency change is never refused for either reason: its
+            boxes are ignored by the flow.
         deploymentIds:
           type: array
           maxItems: 100
@@ -17770,19 +17931,22 @@ components:
           type: boolean
           description: >-
             The "Customer Approval" checkbox: the change needs the customer's
-            approval before it is scheduled (CAB / ECAB approval, or Request
+            approval before it is scheduled (CAB approval, or Request
             Approval on a Standard change, then moves it to customer_approval
             instead of scheduled). Defaults to false. A change request is created in
             new, where it can still be edited freely; Request Approval is refused when a
             box is set and no projectId was chosen, or the project has nobody who can be
-            asked (see PATCH). PostgreSQL data source only.
+            asked (see PATCH). Cannot be true when type is emergency (400: an
+            Emergency change proceeds without customer consent). PostgreSQL data
+            source only.
         customerReviewRequired:
           type: boolean
           description: >-
             The "Customer Review" checkbox: the change needs the customer's
             review before it is closed (review offers customer_review instead
             of closed). Defaults to false. As customerApprovalRequired for Request
-            Approval. PostgreSQL data source only.
+            Approval. Cannot be true when type is emergency (the same 400).
+            PostgreSQL data source only.
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -17925,24 +18089,49 @@ components:
           type: string
           description: >-
             Planned start date and time: "YYYY-MM-DD HH:MM:SS" (UTC), or RFC 3339
-            with a zone designator ("2030-03-01T09:00:00Z"), on every data source (the
-            ServiceNow one converts RFC 3339 to UTC "YYYY-MM-DD HH:MM:SS" before it
-            forwards the value). Years 2000 to 2100 only (on the ServiceNow data source
-            for RFC 3339 values; a "YYYY-MM-DD HH:MM:SS" value is forwarded as sent); any
-            other text (Postgres' "infinity", "now", a date alone, a zone name) is a 400.
+            with a zone designator ("2030-03-01T09:00:00Z"), on every data source (the one
+            that talks to the previous system converts RFC 3339 to UTC "YYYY-MM-DD HH:MM:SS"
+            before it forwards the value). Years 2000 to 2100 only (on every data source); any
+            other text (Postgres' "infinity", "now", a date alone, a zone name) is a 400,
+            and on the data source that talks to the previous system directly so is a
+            "YYYY-MM-DD HH:MM:SS" value with a fractional second.
         plannedEndOn:
           type: string
           description: >-
             Planned end date and time, in the same formats as plannedStartOn.
+        confirmCustomerUpdatedDate:
+          type: string
+          enum: [agree]
+          description: >-
+            ACCEPT PROPOSED TIME: WSO2's acceptance of the time the customer proposed
+            (the confirmation of the proposed date, customer_updated_date_confirmation). "agree"
+            is the only value (to decline, propose a different time). Sent by staff alone, with only
+            expectedCustomerUpdatedOn, expectedPlannedStartOn and expectedPlannedEndOn (all
+            three required): applies the proposed start to the planned window (the planned
+            length is kept), writes AGREE and moves customer_approval to scheduled in one write.
+            403 for an external caller, 409 when no proposal waits, the page is stale or no
+            registered contact of the project is recorded as having proposed the time
+            (errorCode change_request_proposer_not_recorded), 400 when the change request is
+            on hold. PostgreSQL data source only.
+        expectedCustomerUpdatedOn:
+          type: string
+          format: date-time
+          description: >-
+            The proposal a staff answer is about (customerProposal.startOn, RFC 3339).
+            Required with confirmCustomerUpdatedDate and, on a staff state "authorize", while a
+            proposal waits (refused with a 409 when none does). Over a stored time that nobody is
+            recorded as having proposed it is optional on "authorize" (no proposal waits), and
+            must be the stored time when sent (409 otherwise). Anywhere else a 400.
         expectedPlannedStartOn:
           type: string
           description: >-
-            Goes with a CUSTOMER's isCustomerApproved / isCustomerReviewed and
-            nothing else (400 otherwise, a staff request included): the planned start
-            the customer was shown (RFC 3339, as the change request reads). The answer
-            is recorded only while it is still the stored planned start, else 409.
-            Omitted: no check. PostgreSQL data source only; the ServiceNow data source
-            makes no such check and ignores the field.
+            Goes with a CUSTOMER's isCustomerApproved / isCustomerReviewed, WSO2's
+            confirmCustomerUpdatedDate, or a staff state "authorize" and nothing else (400
+            otherwise): the planned start the caller was shown (RFC 3339, as the change
+            request reads). The answer is recorded only while it is still the stored planned
+            start, else 409. Omitted: no check (required with confirmCustomerUpdatedDate).
+            PostgreSQL data source only; the data source that talks to the previous system
+            directly makes no such check and ignores the field.
         expectedPlannedEndOn:
           type: string
           description: >-
@@ -17964,7 +18153,8 @@ components:
             (400). "scheduled" is never accepted from an internal caller (it is reached by
             the approval flow, or by the customer's own approval out of customer_approval);
             out of customer_approval / customer_review only canceled, authorize
-            (Re-schedule, customer_approval) and rollback (customer_review) are accepted.
+            (Re-schedule / Propose a different time, customer_approval: the state does not
+            move) and rollback (customer_review) are accepted.
           enum:
             - new
             - assess
@@ -17979,6 +18169,12 @@ components:
             - canceled
         type:
           type: string
+          description: >-
+            The change type. Frozen once approval has been requested. Changing a change
+            INTO emergency while customerApprovalRequired or customerReviewRequired would
+            stay true is a 400 ("Emergency changes proceed without customer consent, so
+            customer approval and customer review cannot be required: turn off ... before
+            changing the type to emergency"); send the boxes as false in the same request.
           enum:
             - standard
             - normal
@@ -18033,8 +18229,11 @@ components:
             stage") and only when the change request has a Customer Project ("cannot be
             turned on: this change request has no Customer Project ...") with somebody who
             can be asked ("customer approval is required but nobody on this project can be
-            asked ..."). Resending the stored value is always accepted. PostgreSQL data
-            source only.
+            asked ..."). Resending the stored value is always accepted. Cannot be turned
+            ON for an Emergency change, in any state (400: "Emergency changes proceed
+            without customer consent, so customer approval and customer review cannot be
+            required (customerApprovalRequired must be false for an Emergency change)").
+            PostgreSQL data source only.
         customerReviewRequired:
           type: boolean
           description: >-
@@ -18045,7 +18244,8 @@ components:
             longer be changed ...: the change request has already left the review stage")
             and only when the change request has a Customer Project with somebody who can
             be asked ("customer review is required but nobody on this project can be asked
-            ..."). PostgreSQL data source only.
+            ..."). Cannot be turned ON for an Emergency change, in any state (the same 400
+            as customerApprovalRequired). PostgreSQL data source only.
         implementationPlan:
           type: string
           nullable: true
@@ -19685,7 +19885,22 @@ components:
       properties:
         searchQuery:
           type: string
-          description: Free-text search query.
+          description: |
+            Free-text search query, matched against the service name (and, on the
+            PostgreSQL data source, its number). Leading and trailing whitespace is
+            ignored.
+
+            With a query, results are ranked best match first: the exact name, then
+            a name that starts with the query, then a name with a word that starts
+            with it, then any other match; on the ServiceNow data source a service
+            ranks ahead of a service offering within each of those. Equally ranked
+            services keep the order of the underlying source (newest first). Without
+            a query the order is that of the underlying source.
+
+            On the ServiceNow data source the ranking covers the first 250 matches;
+            a page that starts past them continues in the source's own order, and the
+            page that crosses the 250th match is completed from the rows after it, so
+            pages are always full. A whitespace-only query is the same as no query.
 
     SearchITServicesRequest:
       type: object
@@ -20008,8 +20223,16 @@ components:
             request has left the state the answer belongs to, or no request for it is open),
             `change_request_not_proposable` (409: a proposed time on a change request that
             is not in Customer Approval or that nobody has been asked to approve),
-            `change_request_not_asked` (403: a contact of the project whom the customer's
-            request was never sent to, or whose request was withdrawn), and
+            `change_request_proposal_not_now` (409: a proposed time while an approval that is
+            not the customer's is also being asked; the customer's own answer is still
+            possible), `change_request_no_planned_window` (409: a proposed time on a change
+            request with no planned window to move; the customer's answer is still possible),
+            `change_request_proposer_not_recorded` (409: WSO2's acceptance of a stored time that
+            no registered contact of the project is recorded as having proposed; it is never
+            accepted on the customer's behalf), `change_request_not_asked` (403: a contact of the
+            project who holds no REQUESTED row on the live customer stage: registered after the
+            request went out, or a row of theirs cancelled directly; a withdrawn request is a
+            409), and
             `change_request_forbidden` (403: not a registered contact of the change
             request's project, its own creator, a user who may not decide an internal
             stage, or a field a customer may not set). The list grows, so this is

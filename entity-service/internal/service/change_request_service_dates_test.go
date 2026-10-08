@@ -90,8 +90,9 @@ func TestChangeRequestService_PatchChangeRequest_MirrorGetsTheWindowInServiceNow
 // The ServiceNow-first create validates the planned window BEFORE ServiceNow is
 // called -- a refusal after it would leave a ServiceNow record with no PostgreSQL
 // row -- as the plain Postgres create does, so 'tomorrow' / 'infinity' / a year
-// in the thousands never reach either; and what ServiceNow is given is the
-// original, validated text.
+// in the thousands never reach either; and what the previous system is given is the window
+// in the layout its service takes ("YYYY-MM-DD HH:MM:SS" in UTC, whole seconds,
+// as the PATCH mirror gives it), whichever layout PostgreSQL accepted.
 func TestChangeRequestService_CreateChangeRequest_SNFirstValidatesTheWindowBeforeServiceNow(t *testing.T) {
 	mirror := &stubMirrorChangeRequestService{createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
 		t.Fatal("ServiceNow was called although the planned window is invalid")
@@ -143,5 +144,31 @@ func TestChangeRequestService_CreateChangeRequest_SNFirstValidatesTheWindowBefor
 	}
 	if toPG.PlannedStartDate == nil || toPG.PlannedEndDate == nil {
 		t.Errorf("PostgreSQL did not get the window: %+v", toPG)
+	}
+
+	// What PostgreSQL accepts but the previous system's service takes only converted (RFC 3339, a zoneless
+	// value with a fractional second) reaches that system in its layout, in whole seconds: never as
+	// typed, never refused there for a form PostgreSQL took. PostgreSQL still gets the request as sent.
+	for name, tc := range map[string]struct{ start, end string }{
+		"RFC 3339 with Z":      {"2030-03-01T09:00:00Z", "2030-03-01T11:00:00Z"},
+		"RFC 3339 with offset": {"2030-03-01T14:30:00+05:30", "2030-03-01T16:30:00+05:30"},
+		"a zoneless fraction":  {"2030-03-01 09:00:00.5", "2030-03-01 11:00:00.25"},
+	} {
+		toSN, toPG = domain.CreateChangeRequestRequest{}, domain.CreateChangeRequestRequest{}
+		req := validCreateChangeRequestRequest()
+		sIn, eIn := tc.start, tc.end
+		req.PlannedStartDate, req.PlannedEndDate = &sIn, &eIn
+		if _, err := svc.CreateChangeRequest(context.Background(), req); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if toSN.PlannedStartDate == nil || *toSN.PlannedStartDate != start || toSN.PlannedEndDate == nil || *toSN.PlannedEndDate != end {
+			t.Errorf("%s: the previous system got the window %v .. %v, want %q .. %q", name, toSN.PlannedStartDate, toSN.PlannedEndDate, start, end)
+		}
+		if toPG.PlannedStartDate == nil || *toPG.PlannedStartDate != tc.start || toPG.PlannedEndDate == nil || *toPG.PlannedEndDate != tc.end {
+			t.Errorf("%s: PostgreSQL got the window %v .. %v, want it as sent (%q .. %q)", name, toPG.PlannedStartDate, toPG.PlannedEndDate, tc.start, tc.end)
+		}
+		if sIn != tc.start || eIn != tc.end {
+			t.Errorf("%s: the caller's request was rewritten to %q .. %q", name, sIn, eIn)
+		}
 	}
 }

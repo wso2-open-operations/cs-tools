@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareByCreatedOnThenId,
   convertCodeTagsToHtml,
+  deriveFilterLabels,
   extractInlineImageRefId,
   isInlineImageRefSrc,
   hasSingleCodeWrapper,
@@ -207,5 +208,41 @@ describe("bare attachment-id srcs (migrated content)", () => {
       { id: "ffffffffffffffffffffffffffffffff", previewUrl: "data:x" },
     ]);
     expect(out).toContain(`src="/${UUID}"`);
+  });
+});
+
+describe("deriveFilterLabels", () => {
+  it("words the state filter as Status, like every other list page", () => {
+    expect(deriveFilterLabels("state")).toEqual({
+      label: "Status",
+      allLabel: "All Statuses",
+    });
+  });
+
+  it("matches the label and all-option of the status filter", () => {
+    expect(deriveFilterLabels("state")).toEqual(deriveFilterLabels("status"));
+  });
+
+  it("keeps capitalising and pluralising other ids", () => {
+    expect(deriveFilterLabels("severity")).toEqual({
+      label: "Severity",
+      allLabel: "All Severities",
+    });
+    expect(deriveFilterLabels("impact")).toEqual({
+      label: "Impact",
+      allLabel: "All Impacts",
+    });
+    expect(deriveFilterLabels("caseType")).toEqual({
+      label: "Case Type",
+      allLabel: "All Case Types",
+    });
+    expect(deriveFilterLabels("createdBy")).toEqual({
+      label: "Created By",
+      allLabel: "All Users",
+    });
+    expect(deriveFilterLabels("status")).toEqual({
+      label: "Status",
+      allLabel: "All Statuses",
+    });
   });
 });

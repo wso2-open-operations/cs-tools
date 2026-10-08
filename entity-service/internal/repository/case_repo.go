@@ -683,6 +683,31 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 	if err != nil {
 		return domain.Case{}, err
 	}
+	// req.ConversationID is caller-supplied and otherwise unauthorized: without
+	// this check, a caller could point conversation_id at any other work_item
+	// (including a conversation -- or anything else -- belonging to a project
+	// they have no access to), and GetCaseByID's own conv join would then
+	// happily surface that other record's subject back through their own
+	// case's Conversation field, a real cross-tenant disclosure. A genuine
+	// conversation always shares its project with the case it was created
+	// from (POST /projects/{id}/conversations), so requiring an exact
+	// project_id match, not just "this id exists somewhere", is both
+	// sufficient and never rejects a legitimate caller. One message for
+	// "doesn't exist" and "exists but wrong project" alike -- never two,
+	// which would let a caller use the error to probe for other projects'
+	// conversation ids.
+	if req.ConversationID != "" {
+		var ok bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM work_item WHERE id = $1::uuid AND type = 'CONVERSATION'::work_item_type_enum AND project_id = $2::uuid)`,
+			req.ConversationID, req.ProjectID,
+		).Scan(&ok); err != nil {
+			return domain.Case{}, fmt.Errorf("check conversation ownership: %w", err)
+		}
+		if !ok {
+			return domain.Case{}, &apierror.ValidationError{Msg: "conversationId must reference an existing conversation in this project"}
+		}
+	}
 	var row pgx.Row
 	switch req.Type {
 	case "announcement":
@@ -690,28 +715,33 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 			req.CreatedBy, req.ProjectID,
 			req.Subject, req.Description,
 			announcementTypeEnumValue(req.IsSecurityAnnouncement),
+			req.ConversationID,
 		)
 	case "service_request":
 		row = tx.QueryRow(ctx, createServiceRequestPortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
+			req.ConversationID,
 		)
 	case "engagement":
 		row = tx.QueryRow(ctx, createEngagementPortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
 			strings.ToUpper(string(req.EngagementType)), strings.ToUpper(string(req.EngagementPaymentType)),
+			req.ConversationID,
 		)
 	case "security_report_analysis":
 		row = tx.QueryRow(ctx, createSecurityReportAnalysisPortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
+			req.ConversationID,
 		)
 	default: // "case"
 		row = tx.QueryRow(ctx, createCasePortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
 			caseSeverityToEnum[req.Severity], strings.ToUpper(string(req.IssueType)),
+			req.ConversationID,
 		)
 	}
 	c, err := scanUpdatedCase(row)
@@ -804,11 +834,13 @@ const createCasePortalQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
+			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id,
+			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
 		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
-		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
+		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
+		       NULLIF($9, '')::uuid
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -838,11 +870,13 @@ const createAnnouncementPortalQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
+			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id,
+			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
 		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
-		       $2::uuid, NULL, NULL, creator.id, p.account_id
+		       $2::uuid, NULL, NULL, creator.id, p.account_id,
+		       NULLIF($6, '')::uuid
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -875,11 +909,13 @@ const createServiceRequestPortalQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
+			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id,
+			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
 		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
-		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
+		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
+		       NULLIF($7, '')::uuid
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -913,11 +949,13 @@ const createEngagementPortalQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
+			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id,
+			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
 		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
-		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
+		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
+		       NULLIF($9, '')::uuid
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -948,11 +986,13 @@ const createSecurityReportAnalysisPortalQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id
+			project_id, deployment_id, deployed_product_id, opened_by_user_id, account_id,
+			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
 		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
-		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id
+		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
+		       NULLIF($7, '')::uuid
 		FROM creator
 		LEFT JOIN project p ON p.id = $2::uuid
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
@@ -1019,12 +1059,14 @@ const createCaseFromServiceNowQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, account_id
+			project_id, deployment_id, deployed_product_id, account_id,
+			conversation_id
 		)
 		VALUES (
 			$1, NOW(), NOW(), $2, $2,
 			$3, $4, $5, $6, 'CASE'::work_item_type_enum,
-			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7)
+			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7),
+			$12
 		)
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
 		          subject, description, created_on, updated_on
@@ -1071,12 +1113,14 @@ const createAnnouncementFromServiceNowQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, account_id
+			project_id, deployment_id, deployed_product_id, account_id,
+			conversation_id
 		)
 		VALUES (
 			$1, NOW(), NOW(), $2, $2,
 			$3, $4, $5, $6, 'ANNOUNCEMENT'::work_item_type_enum,
-			$7, NULL, NULL, (SELECT account_id FROM project WHERE id = $7)
+			$7, NULL, NULL, (SELECT account_id FROM project WHERE id = $7),
+			$10
 		)
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
 		          subject, description, created_on, updated_on
@@ -1120,12 +1164,14 @@ const createServiceRequestFromServiceNowQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, account_id
+			project_id, deployment_id, deployed_product_id, account_id,
+			conversation_id
 		)
 		VALUES (
 			$1, NOW(), NOW(), $2, $2,
 			$3, $4, $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
-			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7)
+			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7),
+			$11
 		)
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
 		          subject, description, created_on, updated_on
@@ -1170,12 +1216,14 @@ const createEngagementFromServiceNowQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, account_id
+			project_id, deployment_id, deployed_product_id, account_id,
+			conversation_id
 		)
 		VALUES (
 			$1, NOW(), NOW(), $2, $2,
 			$3, $4, $5, $6, 'ENGAGEMENT'::work_item_type_enum,
-			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7)
+			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7),
+			$13
 		)
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
 		          subject, description, created_on, updated_on
@@ -1213,12 +1261,14 @@ const createSecurityReportAnalysisFromServiceNowQuery = `
 		INSERT INTO work_item (
 			id, created_on, updated_on, created_by, updated_by,
 			number, wso2_id, subject, description, type,
-			project_id, deployment_id, deployed_product_id, account_id
+			project_id, deployment_id, deployed_product_id, account_id,
+			conversation_id
 		)
 		VALUES (
 			$1, NOW(), NOW(), $2, $2,
 			$3, $4, $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
-			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7)
+			$7, $8, $9, (SELECT account_id FROM project WHERE id = $7),
+			$11
 		)
 		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
 		          subject, description, created_on, updated_on
@@ -1240,7 +1290,12 @@ const createSecurityReportAnalysisFromServiceNowQuery = `
 // (only "deployment" or "deployed_product" -- table selects a fixed literal
 // query, never interpolated), or nil (SQL NULL) if id is empty or the row
 // doesn't exist. See CreateCaseFromServiceNow's own call site comment for
-// why this exists.
+// why this exists. req.ConversationID is resolved separately, by
+// conversationRefOrNil below -- unlike deployment/deployed_product, a
+// mismatch there is a cross-tenant authorization concern (the referenced
+// work_item existing somewhere is not enough; it must be a conversation
+// belonging to this same case's project), not a "hasn't been mirrored yet"
+// one, so it needs its own, stricter check.
 func (r *caseRepo) existingRefOrNil(ctx context.Context, table, id string) (any, error) {
 	if id == "" {
 		return nil, nil
@@ -1262,6 +1317,39 @@ func (r *caseRepo) existingRefOrNil(ctx context.Context, table, id string) (any,
 		return nil, nil
 	}
 	return id, nil
+}
+
+// conversationRefOrNil resolves conversationID to itself only if it is a real
+// CONVERSATION-type work_item belonging to the same projectID as the case
+// being created, or nil (SQL NULL) if conversationID is empty or the row
+// doesn't match. This is an authorization check, not a "has this been
+// mirrored into Postgres yet" one (see existingRefOrNil's own doc comment
+// for that distinction): without it, a caller could set conversationId to
+// any other work_item -- including a real conversation belonging to a
+// project they have no access to -- and have GetCaseByID's own conv join
+// surface that other record's subject back through their own case, a
+// cross-tenant disclosure. Resolving a mismatch to nil (silently not
+// linking it) rather than failing the whole create mirrors this method's
+// own established posture for deployment/deployed_product: by the time this
+// runs, ServiceNow already has the case committed, so refusing the
+// Postgres insert outright over a bad/foreign conversation id would orphan
+// it. The plain-Postgres path (createCaseTx) can and does refuse up front
+// instead, since nothing has been committed anywhere yet there.
+func (r *caseRepo) conversationRefOrNil(ctx context.Context, conversationID, projectID string) (any, error) {
+	if conversationID == "" {
+		return nil, nil
+	}
+	var ok bool
+	if err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM work_item WHERE id = $1::uuid AND type = 'CONVERSATION'::work_item_type_enum AND project_id = $2::uuid)`,
+		conversationID, projectID,
+	).Scan(&ok); err != nil {
+		return nil, fmt.Errorf("check conversation ownership: %w", err)
+	}
+	if !ok {
+		return nil, nil
+	}
+	return conversationID, nil
 }
 
 // CreateCaseFromServiceNow implements CaseRepository.
@@ -1307,6 +1395,14 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 		slog.WarnContext(ctx, "sn create case: deployment/deployed product not yet mirrored in postgres, creating case without that link",
 			"caseId", id, "snNumber", number, "type", req.Type, "deploymentId", req.DeploymentID, "deployedProductId", req.DeployedProductID)
 	}
+	conversationIDArg, err := r.conversationRefOrNil(ctx, req.ConversationID, req.ProjectID)
+	if err != nil {
+		return domain.Case{}, err
+	}
+	if conversationIDArg == nil && req.ConversationID != "" {
+		slog.WarnContext(ctx, "sn create case: conversation not found or not in this project, creating case without that link",
+			"caseId", id, "snNumber", number, "type", req.Type, "conversationId", req.ConversationID, "projectId", req.ProjectID)
+	}
 
 	var row pgx.Row
 	switch req.Type {
@@ -1315,6 +1411,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			id, createdBy,
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, state, announcementTypeEnumValue(req.IsSecurityAnnouncement),
+			conversationIDArg,
 		)
 	case "service_request":
 		row = r.db.QueryRow(ctx, createServiceRequestFromServiceNowQuery,
@@ -1322,6 +1419,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			state,
+			conversationIDArg,
 		)
 	case "engagement":
 		row = r.db.QueryRow(ctx, createEngagementFromServiceNowQuery,
@@ -1329,6 +1427,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			state, strings.ToUpper(string(req.EngagementType)), strings.ToUpper(string(req.EngagementPaymentType)),
+			conversationIDArg,
 		)
 	case "security_report_analysis":
 		row = r.db.QueryRow(ctx, createSecurityReportAnalysisFromServiceNowQuery,
@@ -1336,6 +1435,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			state,
+			conversationIDArg,
 		)
 	default:
 		row = r.db.QueryRow(ctx, createCaseFromServiceNowQuery,
@@ -1343,6 +1443,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			caseSeverityToEnum[req.Severity], strings.ToUpper(string(req.IssueType)),
+			conversationIDArg,
 		)
 	}
 	c, err := scanUpdatedCase(row)
@@ -1408,6 +1509,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		closerID, closerName                     *string
 		pcID, pcNum, pcType                      *string
 		rcID, rcNum                              *string
+		convID, convSubject                      *string
 		accountID, accountName, accountTier      *string
 		severity, issueType, workState, caseType *string
 		announcementType                         *string
@@ -1459,7 +1561,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        ack.id, COALESCE(ack.name, NULLIF(TRIM(CONCAT_WS(' ', ack.first_name, ack.last_name)), '')), ack.email,
 		        closer.id, COALESCE(closer.name, NULLIF(TRIM(CONCAT_WS(' ', closer.first_name, closer.last_name)), '')),
 		        pw.id, pw.number, pw.type::TEXT,
-		        rc_wi.id, rc_wi.number
+		        rc_wi.id, rc_wi.number,
+		        conv.id, conv.subject
 		 FROM work_item wi
 		 LEFT JOIN "case" c ON c.id = wi.id
 		 `+caseLikeJoins+`
@@ -1478,6 +1581,8 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 LEFT JOIN work_item pw ON pw.id = wi.parent_id
 		 LEFT JOIN "case" rc ON rc.id = c.related_case_id
 		 LEFT JOIN work_item rc_wi ON rc_wi.id = rc.id
+		 LEFT JOIN work_item conv ON conv.id = wi.conversation_id
+		     AND conv.type = 'CONVERSATION'::work_item_type_enum AND conv.project_id = wi.project_id
 		 WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
 		   AND `+announcementVisibilityLeakGuard+``, scopeArgs...,
 	).Scan(
@@ -1501,6 +1606,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&closerID, &closerName,
 		&pcID, &pcNum, &pcType,
 		&rcID, &rcNum,
+		&convID, &convSubject,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.CaseView{}, &apierror.NotFoundError{Msg: "case not found"}
@@ -1699,6 +1805,15 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		// another case.
 		cv.RelatedCase = &domain.CaseNumberRef{ID: *rcID, Number: *rcNum, Type: &parentRefTypeCase}
 	}
+	// work_item.conversation_id (migration 0021) links a case back to the
+	// Novera chat it was created from -- a real, indexed column that was
+	// simply never written or read on this data source (the ServiceNow path
+	// has always round-tripped this through its own API; see
+	// snCaseService.CreateCase/GetCaseByID). conv.subject is the chat's own
+	// title, the same column CreateConversation stores it under.
+	if convID != nil {
+		cv.Conversation = &domain.EntityRef{ID: *convID, Name: stringOrEmpty(convSubject)}
+	}
 	watchers, err := fetchCaseWatchers(ctx, r.db, id)
 	if err != nil {
 		return domain.CaseView{}, err
@@ -1714,7 +1829,96 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 	} else {
 		cv.Tags = tags
 	}
+
+	linkedCRs, err := r.fetchCaseLinkedChangeRequests(ctx, r.db, id)
+	if err != nil {
+		return domain.CaseView{}, err
+	}
+	cv.LinkedChangeRequests = linkedCRs
+
+	linkedSRs, err := fetchCaseLinkedServiceRequests(ctx, r.db, id)
+	if err != nil {
+		return domain.CaseView{}, err
+	}
+	cv.LinkedServiceRequests = linkedSRs
+
 	return cv, nil
+}
+
+// fetchCaseLinkedChangeRequests reads the change requests linked to the case
+// (work_item.parent_id = caseID and work_item.type = 'CHANGE_REQUEST').
+// The change request customer-visibility policy (CRVisibility) is applied so
+// that restricted callers only receive customer-visible change requests.
+func (r *caseRepo) fetchCaseLinkedChangeRequests(ctx context.Context, q rowsQuerier, caseID string) ([]domain.LinkedChangeRequestRef, error) {
+	// crvis: guarded by r.vis.andClause below
+	baseQuery := `
+		SELECT wi.id, wi.number, wi.subject
+		FROM work_item wi
+		JOIN change_request cr ON cr.id = wi.id
+		WHERE wi.parent_id = $1::uuid
+		  AND wi.type = 'CHANGE_REQUEST'`
+	args := []any{caseID}
+	visClause, args := r.vis.andClause(ctx, "wi", "cr", args)
+	query := baseQuery + visClause + ` ORDER BY wi.created_on ASC, wi.number ASC`
+
+	rows, err := q.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch case linked change requests: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]domain.LinkedChangeRequestRef, 0)
+	for rows.Next() {
+		var id, number, subject string
+		if err := rows.Scan(&id, &number, &subject); err != nil {
+			return nil, fmt.Errorf("fetch case linked change requests: scan: %w", err)
+		}
+		var name *string
+		if subject != "" {
+			name = &subject
+		}
+		result = append(result, domain.LinkedChangeRequestRef{
+			ID:     id,
+			Number: number,
+			Name:   name,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetch case linked change requests: %w", err)
+	}
+	return result, nil
+}
+
+// fetchCaseLinkedServiceRequests reads any service-request cases linked to this
+// case as their parent (work_item.parent_id = caseID and work_item.type = 'SERVICE_REQUEST').
+func fetchCaseLinkedServiceRequests(ctx context.Context, q rowsQuerier, caseID string) ([]domain.LinkedServiceRequestRef, error) {
+	rows, err := q.Query(ctx, `
+		SELECT wi.id, wi.number, wi.subject
+		FROM work_item wi
+		WHERE wi.parent_id = $1::uuid
+		  AND wi.type = 'SERVICE_REQUEST'
+		ORDER BY wi.created_on ASC, wi.number ASC`, caseID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch case linked service requests: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]domain.LinkedServiceRequestRef, 0)
+	for rows.Next() {
+		var id, number, subject string
+		if err := rows.Scan(&id, &number, &subject); err != nil {
+			return nil, fmt.Errorf("fetch case linked service requests: scan: %w", err)
+		}
+		result = append(result, domain.LinkedServiceRequestRef{
+			ID:     id,
+			Number: number,
+			Name:   subject,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fetch case linked service requests: %w", err)
+	}
+	return result, nil
 }
 
 // fetchCaseTags reads the tags currently attached to the case (== work_item)
@@ -2999,23 +3203,40 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	// the LEFT JOIN below). A case whose project has no status set (NULL)
 	// satisfies notIn -- "not in progress" is true of it -- but never in.
 	//
-	// Deliberately NOT rewritten as a targeted id lookup against "project"
-	// the way caseLikeStateLookupClause rewrites the state filter, despite
-	// the superficial similarity: measured directly against production-
-	// volume data that doing so brings no benefit here and can be slower.
-	// The state lookup wins because a case search's state filter is
-	// typically highly selective (e.g. "open" is a small fraction of all
-	// cases); projectOnboardingStatus filters in practice are usually the
-	// opposite -- a widget excluding only a couple of terminal statuses
-	// matches nearly every project -- so building an array of almost every
-	// project id and checking per-row membership against it costs more than
-	// the simple indexed nested-loop join this already was.
+	// The `in` branch below is rewritten as an exclusion-list id lookup
+	// against "project", the same `caseLikeStateLookupClause` technique the
+	// state filter already uses, superseding an earlier version of this
+	// comment that argued against it: that reasoning assumed an `in` filter
+	// is usually highly selective, matching only a couple of statuses out of
+	// the full set -- true in general, but not the actual shape every
+	// dashboard widget sends. Every widget's own `in` list names 6 of the 7
+	// statuses ("every project except the in-progress ones"), so it matches
+	// nearly every project (~1,950 of ~1,966 measured), the opposite of a
+	// selective filter. Checking that per case row via the `p.onboarding_status`
+	// column keeps the LEFT JOIN project alive for every case row even in a
+	// COUNT(*)-only query that reads no other column of p -- the lookup into
+	// ~1,966 projects this filter alone cost about 10,200 of a widget's
+	// 21,000-55,000 total data pages (measured). Building a short exclusion
+	// list instead (here, the handful of projects that do NOT match) and
+	// checking wi.project_id against that list directly is both a cheaper
+	// check and, with no remaining WHERE-clause reference to the p alias at
+	// all, lets the planner drop the dead LEFT JOIN from a COUNT(*) query
+	// entirely -- measured as a 12% database-CPU reduction for this filter
+	// alone. The `notIn` branch below is left as the simple join check: it
+	// already satisfies both the no-project and null-status cases via the OR,
+	// and nothing here claims it is a bottleneck on real traffic the way
+	// `in` is -- rewriting it the same way would need its own extra `OR
+	// wi.project_id IS NULL` term to keep that same behaviour and was not
+	// worth the added risk without a measured case for it.
 	if len(req.Parsed.ProjectOnboardingStatuses) > 0 {
 		labels, err := onboardingStatusEnumLabels("projectOnboardingStatus", req.Parsed.ProjectOnboardingStatuses)
 		if err != nil {
 			return "", nil, argIdx, err
 		}
-		where += fmt.Sprintf(" AND p.onboarding_status = ANY($%d::text[]::onboarding_status_enum[])", argIdx)
+		where += fmt.Sprintf(
+			" AND wi.project_id IS NOT NULL AND wi.project_id <> ALL(ARRAY(SELECT id FROM project WHERE onboarding_status IS NULL OR onboarding_status <> ALL($%d::text[]::onboarding_status_enum[])))",
+			argIdx,
+		)
 		filterArgs = append(filterArgs, labels)
 		argIdx++
 	}
@@ -3143,6 +3364,47 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 
 	countQuery := "SELECT COUNT(*) FROM work_item wi " + joins + " " + where
 
+	var total int
+	cases := []domain.SearchCaseView{}
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	// COUNT and SELECT each go through Scoped independently (rather than
+	// sharing one transaction) specifically so they can still run
+	// concurrently on separate pool connections, same as before this change
+	// -- a pgx.Tx is bound to a single connection, so one shared transaction
+	// across both goroutines would have serialized them. Scoped.QueryRow/
+	// Query each set the caller's identity (read from egCtx, stamped above)
+	// as their own implicit one-statement transaction, so there is no
+	// explicit tx/setCallerIdentity call needed here any more.
+
+	// SkipTotal: the caller does not show a total (global search shows a handful
+	// of hits), so the COUNT is not run at all -- it is as costly as the page
+	// query and holds a second pool connection while it runs.
+	if req.SkipTotal {
+		total = domain.TotalNotComputed
+	} else {
+		eg.Go(func() error {
+			if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
+				return fmt.Errorf("count cases: %w", err)
+			}
+			return nil
+		})
+	}
+
+	// CountOnly: the mirror image of SkipTotal -- a count/pie dashboard widget
+	// only ever reads Total off this response, so the page query below (as
+	// costly as the COUNT, and its one row is thrown away unread) is never
+	// built or run at all. cases stays the empty slice declared above,
+	// matching skipTotal/countOnly being rejected together in the service
+	// layer (there would be nothing left for this branch to skip).
+	if req.CountOnly {
+		if err := eg.Wait(); err != nil {
+			return nil, 0, err
+		}
+		return cases, total, nil
+	}
+
 	// The page is chosen first, by an inner query that selects only wi.id,
 	// and the display columns are joined onto just those rows afterwards.
 	// Every join in caseSearchJoins is on a primary key, so the inner query
@@ -3172,34 +3434,6 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		joins, sortCol, sortDir,
 	)
 	dataArgs := append(append([]any{}, filterArgs...), req.Pagination.Limit, req.Pagination.Offset)
-
-	var total int
-	var cases []domain.SearchCaseView
-
-	eg, egCtx := errgroup.WithContext(ctx)
-
-	// COUNT and SELECT each go through Scoped independently (rather than
-	// sharing one transaction) specifically so they can still run
-	// concurrently on separate pool connections, same as before this change
-	// -- a pgx.Tx is bound to a single connection, so one shared transaction
-	// across both goroutines would have serialized them. Scoped.QueryRow/
-	// Query each set the caller's identity (read from egCtx, stamped above)
-	// as their own implicit one-statement transaction, so there is no
-	// explicit tx/setCallerIdentity call needed here any more.
-
-	// SkipTotal: the caller does not show a total (global search shows a handful
-	// of hits), so the COUNT is not run at all -- it is as costly as the page
-	// query and holds a second pool connection while it runs.
-	if req.SkipTotal {
-		total = domain.TotalNotComputed
-	} else {
-		eg.Go(func() error {
-			if err := r.db.QueryRow(egCtx, countQuery, filterArgs...).Scan(&total); err != nil {
-				return fmt.Errorf("count cases: %w", err)
-			}
-			return nil
-		})
-	}
 
 	eg.Go(func() error {
 		rows, err := r.db.Query(egCtx, dataQuery, dataArgs...)
@@ -4297,10 +4531,22 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	}
 
 	includeFieldChanges := req.IncludeFieldChanges != nil && *req.IncludeFieldChanges
+	excludeWorkNotes := req.ExcludeWorkNotes != nil && *req.ExcludeWorkNotes
+
+	// IS DISTINCT FROM, not <>: a comment with no type at all (NULL) must
+	// still count/show -- a plain <> comparison against NULL evaluates to
+	// NULL (neither true nor false in a WHERE clause), which would silently
+	// exclude it too.
+	commentWorkNoteFilter := ""
+	commentWorkNoteDataFilter := ""
+	if excludeWorkNotes {
+		commentWorkNoteFilter = ` AND type IS DISTINCT FROM 'WORK_NOTE'::comment_type_enum`
+		commentWorkNoteDataFilter = ` AND cm.type IS DISTINCT FROM 'WORK_NOTE'::comment_type_enum`
+	}
 
 	countQuery := `
 		SELECT
-			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1) +
+			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1` + commentWorkNoteFilter + `) +
 			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete')`
 	if includeFieldChanges {
 		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
@@ -4333,7 +4579,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 					cm.type
 				FROM comment cm
 				LEFT JOIN "user" u1 ON LOWER(u1.email) = LOWER(cm.created_by)
-				WHERE cm.work_item_id = $1
+				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
 				ORDER BY cm.id, u1.id
 			) c
 

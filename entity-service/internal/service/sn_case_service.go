@@ -1256,6 +1256,15 @@ func publishCaseCreatedEvent(
 		return
 	}
 
+	// A case with no project (on the Postgres data source, a service request
+	// raised from a GitHub issue) has no projectId, which every case.* payload
+	// requires -- csm-notification-service rejects the event (validate.go)
+	// and it would only be retried into the dead-letter topic.
+	if cv.ProjectDetails == nil {
+		slog.InfoContext(ctx, "create case: case.created not published, case has no project", "caseId", caseID)
+		return
+	}
+
 	if req.Type == "case" && cv.Severity == nil {
 		slog.InfoContext(ctx, "create case: case.created not published, case has no severity", "caseId", caseID)
 		return
@@ -1455,6 +1464,15 @@ func publishCommentAddedEvent(ctx context.Context, publisher EventPublisherServi
 	}
 	ctx, cancel := context.WithTimeout(ctx, publishCommentAddedTimeout)
 	defer cancel()
+
+	// A case with no project (on the Postgres data source, a service request
+	// raised from a GitHub issue) has no projectId, which every case.* payload
+	// requires -- csm-notification-service rejects the event (validate.go)
+	// and it would only be retried into the dead-letter topic.
+	if cv.ProjectDetails == nil {
+		slog.InfoContext(ctx, "create comment: case.comment_added not published, case has no project", "caseId", req.CaseID)
+		return
+	}
 
 	defaultWatchers := resolveCaseDefaultWatcherEmails(ctx, resolveAccountDefaultWatcherEmails, cv, "create comment")
 	recipients := mergeUnique(watchListUserEmails(cv.WatchList), defaultWatchers)
@@ -1780,6 +1798,15 @@ func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherServ
 	}
 	ctx, cancel := context.WithTimeout(ctx, publishStatusChangedTimeout)
 	defer cancel()
+
+	// A case with no project (on the Postgres data source, a service request
+	// raised from a GitHub issue) has no projectId, which every case.* payload
+	// requires -- csm-notification-service rejects the event (validate.go)
+	// and it would only be retried into the dead-letter topic.
+	if before.ProjectDetails == nil {
+		slog.InfoContext(ctx, "update case: case.status_changed not published, case has no project", "caseId", caseID)
+		return
+	}
 
 	defaultWatchers := resolveCaseDefaultWatcherEmails(ctx, resolveAccountDefaultWatcherEmails, before, "update case")
 	recipients := mergeUnique(watchListUserEmails(before.WatchList), defaultWatchers)

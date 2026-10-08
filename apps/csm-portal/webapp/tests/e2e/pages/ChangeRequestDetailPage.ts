@@ -23,9 +23,9 @@ import { type Locator, type Page, expect } from "@playwright/test";
  * `ChangeRequestActionBar`'s own `legalNextStates` filtering); it will be
  * absent for a CR already past that stage. It is a plain, direct state PATCH
  * (`{state: "assess"}`) that starts the CR's approval flow (Peer -> CAB for
- * Normal, ECAB for Emergency, straight to Scheduled for Standard).
+ * Normal, one CAB approval for Emergency, straight to Scheduled for Standard).
  * There is deliberately no "Schedule" button: a CR is moved to Scheduled
- * automatically by its CAB/ECAB approval (or, when it requires customer
+ * automatically by its CAB approval (or, when it requires customer
  * approval, by the customer answering in the customer portal) -- see
  * `scheduleButton()`, which exists only so specs can assert its absence.
  * Staff never record a customer's approval or review, so there is no action for
@@ -132,12 +132,13 @@ export class ChangeRequestDetailPage {
   }
 
   /** Read-only Yes/No on the Approval tab beside a label such as
-   * "Customer approval required" / "Customer review required". */
+   * "Customer approval required" / "Customer review required" ("Not applicable" on an Emergency
+   * change, which acts without customer consent). */
   flagValue(label: string): Locator {
     return this.page
       .getByText(label, { exact: true })
       .locator("xpath=..")
-      .getByText(/^(Yes|No)$/);
+      .getByText(/^(Yes|No|Not applicable)$/);
   }
 
   /**
@@ -184,7 +185,7 @@ export class ChangeRequestDetailPage {
   }
 
   /** The "Stage" cell of the approvals table row for a named approver
-   * ("Peer Approval" | "CAB Approval" | "ECAB Approval"). */
+   * ("Peer Approval" | "CAB Approval"; "ECAB Approval" only on an older Emergency change). */
   approverStage(approverName: string): Locator {
     return this.approverRow(approverName).getByRole("cell").first();
   }
@@ -208,12 +209,89 @@ export class ChangeRequestDetailPage {
     return this.page.getByRole("dialog");
   }
 
+  /**
+   * Header note while a proposed time waits for WSO2's answer: the change is waiting for WSO2, so the "Awaiting ..."
+   * note of `blockingReason()` is not shown. The note exists only when a customer is recorded as the proposer
+   * ("Waiting for WSO2 to respond to the customer's proposed time"); a stored time nobody is recorded as having proposed
+   * leaves the header at "Awaiting Customer Approval", since there is no proposal to respond to. This locator matches
+   * the one wording there is, and `neutralProposalWaitingReason()` the wording that must never appear.
+   */
+  proposalWaitingReason(): Locator {
+    return this.page.getByText(/^Waiting for WSO2 to respond to the (customer's )?proposed time$/);
+  }
+
+  /** The header note when the proposer is recorded. */
+  customerProposalWaitingReason(): Locator {
+    return this.page.getByText(/^Waiting for WSO2 to respond to the customer's proposed time$/);
+  }
+
+  /** The header note that no page says any more: "Waiting for WSO2 to respond to the proposed time" (nobody proposed it). */
+  neutralProposalWaitingReason(): Locator {
+    return this.page.getByText(/^Waiting for WSO2 to respond to the proposed time$/);
+  }
+
+  /**
+   * The banner under the stepper (a named region): "The customer proposed a new time" when the proposer is recorded,
+   * "A time is stored on this change request" when nobody is. This locator matches either.
+   */
+  proposalBanner(): Locator {
+    return this.page.getByRole("region", { name: /^(The customer proposed a new time|A time is stored on this change request)$/ });
+  }
+
+  /** The banner when the proposer is recorded. */
+  customerProposalBanner(): Locator {
+    return this.page.getByRole("region", { name: "The customer proposed a new time", exact: true });
+  }
+
+  /** The banner when nobody is recorded as the proposer: a time is stored, nothing waits for an answer, the window is labelled "Stored time". */
+  neutralProposalBanner(): Locator {
+    return this.page.getByRole("region", { name: "A time is stored on this change request", exact: true });
+  }
+
+  /** The banner's primary answer (never the bar's: Accept lives only in the banner). */
+  acceptProposedTimeButton(): Locator {
+    return this.proposalBanner().getByRole("button", { name: "Accept proposed time" });
+  }
+
+  /** The banner's other answer; the action bar carries a button of the same name (the outlined `authorize`). */
+  proposeDifferentTimeButton(): Locator {
+    return this.proposalBanner().getByRole("button", { name: "Propose a different time" });
+  }
+
+  /** The confirmation behind Accept ("Accept the proposed time?"). */
+  acceptDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ has: this.page.getByRole("heading", { name: "Accept the proposed time?" }) });
+  }
+
+  acceptDialogConfirm(): Locator {
+    return this.acceptDialog().getByRole("button", { name: "Accept proposed time", exact: true });
+  }
+
+  /** The Re-schedule dialog in counter mode (its heading is "Propose a different time"). */
+  counterDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ has: this.page.getByRole("heading", { name: "Propose a different time" }) });
+  }
+
+  /** The counter dialog's submit: "Propose this time" (a different window) or "Decline proposed time" (the current time kept). */
+  counterSubmit(label: "Propose this time" | "Decline proposed time"): Locator {
+    return this.counterDialog().getByRole("button", { name: label, exact: true });
+  }
+
+  /**
+   * The page's own alert for an answer dialog that was closed for the engineer because the change is no longer what it showed
+   * (a refusal with one of the stale-answer codes): the backend's words, then "The page now shows the current state." It takes
+   * focus once the dialog is gone.
+   */
+  staleAnswerNotice(): Locator {
+    return this.page.getByRole("alert").filter({ hasText: "The page now shows the current state." });
+  }
+
   /** "Re-schedule" -- the outlined button beside the primary action in Customer Approval. */
   rescheduleButton(): Locator {
     return this.page.getByRole("button", { name: "Re-schedule", exact: true });
   }
 
-  /** The Re-schedule dialog (its heading is "Re-schedule this change?"). */
+  /** The Re-schedule dialog (its heading is "Re-schedule this change?"; with a customer's proposal waiting it is `counterDialog()`). */
   rescheduleDialog(): Locator {
     return this.page.getByRole("dialog").filter({ has: this.page.getByRole("heading", { name: "Re-schedule this change?" }) });
   }
@@ -228,9 +306,13 @@ export class ChangeRequestDetailPage {
    * shows it) into one of the Re-schedule dialog's MUI date-time pickers
    * ("Planned start" | "Planned end"): focuses the Month section, then types `MMDDYYYYhhmm` + AM/PM, which the field auto-advances through.
    */
-  async fillRescheduleWindow(label: "Planned start" | "Planned end", value: { month: number; day: number; year: number; hour12: number; minute: number; pm: boolean }): Promise<void> {
+  async fillRescheduleWindow(
+    label: "Planned start" | "Planned end",
+    value: { month: number; day: number; year: number; hour12: number; minute: number; pm: boolean },
+    dialog: Locator = this.rescheduleDialog(),
+  ): Promise<void> {
     const two = (n: number): string => String(n).padStart(2, "0");
-    const group = this.rescheduleDialog().getByRole("group", { name: new RegExp(`^${label}`) });
+    const group = dialog.getByRole("group", { name: new RegExp(`^${label}`) });
     // Focus the first section (Month) explicitly: a click on the group's centre
     // would land on the Year section and shift every typed digit.
     await group.getByRole("spinbutton", { name: "Month" }).click();
@@ -324,7 +406,7 @@ export class ChangeRequestDetailPage {
   /** The approvals table row for a named approver (e.g. "Jane Doe"). The
    * same person can sit on more than one stage (Peer Approval and CAB
    * Approval both list the seeded users), so pass `stage` ("Peer Approval" |
-   * "CAB Approval" | "ECAB Approval") to pick one stage's row. */
+   * "CAB Approval") to pick one stage's row. */
   approverRow(approverName: string, stage?: string): Locator {
     const rows = this.page.getByRole("row", { name: approverName });
     return stage ? rows.filter({ has: this.page.getByRole("cell", { name: stage, exact: true }) }) : rows;

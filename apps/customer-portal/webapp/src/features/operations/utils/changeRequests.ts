@@ -22,7 +22,13 @@ import {
   type ChangeRequestState,
 } from "@features/operations/constants/operationsConstants";
 import { resolveChangeRequestCanonicalState } from "@features/operations/utils/changeRequestUi";
-import type { ChangeRequestDetails, ChangeRequestStats, ChangeRequestStatsResponse, ProposeNewTimeAvailability } from "@features/operations/types/changeRequests";
+import type {
+  ChangeRequestCustomerProposal,
+  ChangeRequestDetails,
+  ChangeRequestStats,
+  ChangeRequestStatsResponse,
+  ProposeNewTimeAvailability,
+} from "@features/operations/types/changeRequests";
 import type { CaseComment } from "@features/support/types/cases";
 import { ChangeRequestDecisionMode } from "@features/operations/types/changeRequests";
 import type { ChangeRequestWorkflowStage } from "@features/operations/types/changeRequests";
@@ -313,9 +319,13 @@ export function getAnsweredWindow(
 }
 
 /**
- * True while the change request waits on WSO2 alone: it is in Authorize, which
- * a customer sees only after proposing a new time (the proposal sends the change
- * back through WSO2's internal approval before the customer is asked again).
+ * True while the change request waits on WSO2 alone in Authorize.
+ *
+ * A time the customer proposes now never puts the change there (it stays in
+ * Customer Approval and WSO2 answers the proposal itself: see
+ * {@link getCustomerProposal}). Authorize is what a customer sees only for a
+ * proposal made before that: it was sent back through WSO2's internal approval
+ * and finishes through it, and the customer is then asked again.
  */
 export function isAwaitingInternalReview(
   changeRequest?: Pick<ChangeRequestDetails, "state"> | null,
@@ -324,6 +334,145 @@ export function isAwaitingInternalReview(
     resolveChangeRequestCanonicalState(changeRequest?.state) ===
     ChangeRequestStates.AUTHORIZE
   );
+}
+
+// --- A customer's proposed time ------------------------------------------------
+
+const PROPOSAL_ANSWERS: ReadonlySet<string> = new Set([
+  "pending",
+  "agreed",
+  "disagreed",
+  "unanswered",
+]);
+
+/**
+ * The customer-proposed time of a change request, when the backend sent a usable
+ * one (a start and a known answer); null otherwise (nothing was ever proposed,
+ * or the data source cannot say).
+ */
+export function getCustomerProposal(
+  changeRequest?: Pick<ChangeRequestDetails, "customerProposal"> | null,
+): ChangeRequestCustomerProposal | null {
+  const proposal = changeRequest?.customerProposal;
+  if (
+    !proposal ||
+    typeof proposal.startDate !== "string" ||
+    !proposal.startDate.trim() ||
+    !PROPOSAL_ANSWERS.has(proposal.answer)
+  ) {
+    return null;
+  }
+  return proposal;
+}
+
+/**
+ * True while a proposed time waits for WSO2 to accept it or suggest another: the
+ * change request is in Customer Approval, where the whole conversation happens,
+ * and WSO2 has not answered. (The backend decides what is pending; the state is
+ * checked here too so a stale `pending` can never show on a change that moved on.)
+ */
+export function isProposalPending(
+  changeRequest?: Pick<ChangeRequestDetails, "state" | "customerProposal"> | null,
+): boolean {
+  return (
+    getCustomerProposal(changeRequest)?.answer === "pending" &&
+    resolveChangeRequestCanonicalState(changeRequest?.state) ===
+      ChangeRequestStates.CUSTOMER_APPROVAL
+  );
+}
+
+/**
+ * True when WSO2 accepted a proposed time and the change request has moved on from
+ * Customer Approval (Scheduled or later): accepting schedules the change, so that is
+ * where it stands. Customer Approval is then done even though `hasCustomerApproved`
+ * stays false: no staff action records a customer's approval, and the proposal itself
+ * was the customer's consent (display only).
+ *
+ * An `agreed` answer is only the answer WSO2 once gave: nothing clears it when the
+ * change is asked again. A change request that sits in Customer Approval (or earlier,
+ * or in a state this page cannot place) with `agreed` standing was NOT scheduled by
+ * that acceptance (a later Re-schedule asked the customers again, or the answer is one
+ * the previous system wrote), and its Approve and Reject buttons are live: reading it
+ * as accepted would tell the customer there is nothing left to answer.
+ */
+export function isProposalAccepted(
+  changeRequest?: Pick<ChangeRequestDetails, "state" | "customerProposal"> | null,
+): boolean {
+  if (getCustomerProposal(changeRequest)?.answer !== "agreed") return false;
+  const state = resolveChangeRequestCanonicalState(changeRequest?.state);
+  if (!state) return false;
+  return (
+    CHANGE_REQUEST_STATE_ORDER.indexOf(state) >
+    CHANGE_REQUEST_STATE_ORDER.indexOf(ChangeRequestStates.CUSTOMER_APPROVAL)
+  );
+}
+
+/**
+ * True when WSO2 did not accept the proposed time and the customers were asked
+ * again: still in Customer Approval, with the answer `disagreed`.
+ */
+export function isProposalNotAccepted(
+  changeRequest?: Pick<ChangeRequestDetails, "state" | "customerProposal"> | null,
+): boolean {
+  return (
+    getCustomerProposal(changeRequest)?.answer === "disagreed" &&
+    resolveChangeRequestCanonicalState(changeRequest?.state) ===
+      ChangeRequestStates.CUSTOMER_APPROVAL
+  );
+}
+
+/** What the page says about a proposed time, for the viewer, and which kind of note it is. */
+export type ProposalNote = {
+  kind: "waiting" | "not-accepted";
+  text: string;
+};
+
+/**
+ * The note the details page keeps on screen while a proposed time is in play.
+ *
+ * - Waiting: the proposed time waits for WSO2 (the viewer's own, or a colleague's,
+ *   which is said neutrally; a stored time nobody is recorded as having proposed
+ *   is never sent to a customer as waiting: the backend reads it `unanswered`). When the
+ *   viewer can still answer, it also says that Approve approves the CURRENT
+ *   schedule, not the proposed time: the customer must not approve the wrong one.
+ * - Not accepted: WSO2 did not accept it. The current window shown on the page is
+ *   whatever WSO2 decided on (it may be the one the customers already had), so
+ *   the text says "current", never "new".
+ *
+ * @param changeRequest - The change request as returned by the details API.
+ * @param canAnswer - Whether the viewer has an answer to give right now.
+ * @returns The note, or null when no proposed time is in play.
+ */
+export function getProposalNote(
+  changeRequest: ChangeRequestDetails | null | undefined,
+  canAnswer: boolean,
+): ProposalNote | null {
+  const proposal = getCustomerProposal(changeRequest);
+  if (!changeRequest || !proposal) return null;
+  const proposed = formatChangeRequestDisplayDate(proposal.startDate);
+
+  if (isProposalPending(changeRequest)) {
+    const lead =
+      proposal.proposedByViewer === true
+        ? `Waiting for WSO2 to respond to your proposed time (${proposed}).`
+        : `A new time (${proposed}) was proposed for this change request and is waiting for WSO2's response.`;
+    const caution = canAnswer
+      ? ` Approving now approves the current schedule (${formatChangeRequestDisplayDate(changeRequest.startDate)}), not the proposed time.`
+      : "";
+    return { kind: "waiting", text: `${lead}${caution}` };
+  }
+
+  if (isProposalNotAccepted(changeRequest)) {
+    const lead = `WSO2 did not accept the proposed time (${proposed}).`;
+    return {
+      kind: "not-accepted",
+      text: canAnswer
+        ? `${lead} The current planned window is shown below: approve it, reject it, or propose another start.`
+        : `${lead} The current planned window is shown below.`,
+    };
+  }
+
+  return null;
 }
 
 /** Labels of the two answer buttons for a decision mode. */
@@ -430,6 +579,16 @@ export const ChangeRequestErrorCode = {
   APPROVAL_NOT_PENDING: "change_request_approval_not_pending",
   /** 409: a proposed time where none can be proposed (not in Customer Approval, nobody asked). */
   NOT_PROPOSABLE: "change_request_not_proposable",
+  /**
+   * 409: a proposed time while an approval that is not the customer's is also
+   * being asked. Answering still works.
+   */
+  PROPOSAL_NOT_NOW: "change_request_proposal_not_now",
+  /**
+   * 409: a proposed time on a change request with no planned window to move.
+   * Answering still works.
+   */
+  NO_PLANNED_WINDOW: "change_request_no_planned_window",
   /** 403: a contact of the project whom the customer's request was never sent to. */
   NOT_ASKED: "change_request_not_asked",
   /** 403: not a registered contact of the project, its creator, or a field a customer may not set. */
@@ -443,6 +602,18 @@ export const CHANGE_REQUEST_ANSWER_STALE_MESSAGE =
 /** A refusal (403): the caller is not a contact who may answer this change. */
 export const CHANGE_REQUEST_NOT_A_CONTACT_MESSAGE =
   "You are not one of the contacts who can answer this change request.";
+
+/** A conflict (409) on a proposal: the change request has no planned window to move. */
+export const CHANGE_REQUEST_NO_WINDOW_MESSAGE =
+  "This change request has no planned time yet, so a new time cannot be proposed for it.";
+
+/**
+ * A conflict (409) on a proposal while an approval that is not the customer's is
+ * still being asked. The customer is never told which, or that there is one: only
+ * that a new time cannot be proposed right now.
+ */
+export const CHANGE_REQUEST_PROPOSAL_NOT_NOW_MESSAGE =
+  "A new time cannot be proposed for this change request right now. Please try again later.";
 
 /** A conflict (409) on a proposal because WSO2 has the change on hold. */
 export const CHANGE_REQUEST_ON_HOLD_MESSAGE =
@@ -474,11 +645,39 @@ const BAD_REQUEST_MESSAGES: ReadonlyArray<readonly [needle: string, message: str
   ],
   [
     "requires a changed planned start or end",
-    "This is the same as the current schedule. Change the start or the end to propose a different time.",
+    "This is the same as the current schedule. Choose a different start.",
   ],
   [
     "must not be the same as the planned end",
     "The proposed end must be after the proposed start.",
+  ],
+  // A proposal moves the START and keeps the planned length. The dialog derives
+  // the end, so these are for a stale page or a hand-made request.
+  [
+    "needs a new start",
+    "Enter the proposed start date and time.",
+  ],
+  [
+    "keeps the planned length",
+    "A proposed time moves the start and keeps the planned length. Choose a different start.",
+  ],
+  [
+    "is the planned start already",
+    "This is the same as the current schedule. Choose a different start.",
+  ],
+  [
+    "is already proposed and is waiting",
+    "That time is already proposed and is waiting for WSO2's response. Choose a different start.",
+  ],
+  [
+    "WSO2 asked for a different time than that one",
+    "WSO2 asked for a different time than that one. Choose another start.",
+  ],
+  // The end the proposal implies (start + the planned length) would pass the last
+  // year the service accepts: a start that far ahead is not a real proposal.
+  [
+    "is too far ahead",
+    "That start is too far ahead. Choose an earlier start.",
   ],
   [
     "is in the past",
@@ -504,8 +703,9 @@ const BAD_REQUEST_MESSAGES: ReadonlyArray<readonly [needle: string, message: str
  * `BAD_REQUEST_MESSAGES` knows it) because it is the display text of a mistake in
  * what was typed, and decides nothing.
  *
- *   - a 409 with a known code says what it is: a hold, a moved schedule, an
- *     answer already given (or a proposal where none can be made);
+ *   - a 409 with a known code says what it is: a hold, another approval being
+ *     asked, no planned window to move, a moved schedule, an answer already
+ *     given (or a proposal where none can be made);
  *   - a 409 with no code (an older backend) or one this webapp does not know
  *     (a newer backend) is `CHANGE_REQUEST_ACTION_FAILED_MESSAGE`: never claimed
  *     to be "already answered", which could be wrong;
@@ -515,8 +715,9 @@ const BAD_REQUEST_MESSAGES: ReadonlyArray<readonly [needle: string, message: str
  * `terminal` is true when retrying or editing cannot help because the change
  * request no longer waits on this customer: the caller should close the form
  * and move on to the refreshed page rather than leave the customer in a form
- * that cannot succeed. A hold is not terminal (the proposal can be tried again
- * once WSO2 takes it off hold, and the customer can still answer), and neither is
+ * that cannot succeed. A hold (and the other two refusals that are only about the
+ * proposal: another approval being asked, no planned window) is not terminal (the
+ * proposal can be tried again later, and the customer can still answer), and neither is
  * a failure that is no refusal of the change request's state (a 400, a 500).
  *
  * @param error - What the mutation rejected with.
@@ -534,6 +735,14 @@ export function describeChangeRequestActionError(
           // A hold is the one conflict that is about neither the answer nor the
           // state: the customer is still being asked, a proposal just cannot go in.
           return { message: CHANGE_REQUEST_ON_HOLD_MESSAGE, terminal: false };
+        case ChangeRequestErrorCode.PROPOSAL_NOT_NOW:
+          // Another approval is being asked too: only the proposal is refused, the
+          // customer is still being asked and can answer. Not terminal, like a hold.
+          return { message: CHANGE_REQUEST_PROPOSAL_NOT_NOW_MESSAGE, terminal: false };
+        case ChangeRequestErrorCode.NO_PLANNED_WINDOW:
+          // Nothing to move: only a proposed time is refused, the customer is
+          // still being asked.
+          return { message: CHANGE_REQUEST_NO_WINDOW_MESSAGE, terminal: false };
         case ChangeRequestErrorCode.SCHEDULE_CHANGED:
           // The schedule moved: the answer was given for a time its reader never saw.
           return { message: CHANGE_REQUEST_SCHEDULE_CHANGED_MESSAGE, terminal: true };
@@ -576,6 +785,17 @@ export function describeChangeRequestActionError(
   return { message: fallback, terminal: false };
 }
 
+/** The Customer Approval step's caption: what is going on there, in the customer's words. */
+function describeCustomerApprovalStage(changeRequest: ChangeRequestDetails): string {
+  if (isProposalPending(changeRequest)) {
+    return getCustomerProposal(changeRequest)?.proposedByViewer === true
+      ? "Waiting for WSO2 to respond to your proposed time"
+      : "A proposed time is waiting for WSO2's response";
+  }
+  if (isProposalAccepted(changeRequest)) return "Proposed time accepted by WSO2";
+  return "Customer approval received";
+}
+
 export function buildChangeRequestWorkflowStages(
   changeRequest?: ChangeRequestDetails | null,
 ): { workflowStages: ChangeRequestWorkflowStage[]; currentStateIndex: number } {
@@ -586,7 +806,11 @@ export function buildChangeRequestWorkflowStages(
   const currentState: ChangeRequestState =
     resolveChangeRequestCanonicalState(changeRequest.state) ??
     ChangeRequestStates.NEW;
-  const { hasCustomerApproved, hasCustomerReviewed } = changeRequest;
+  const { hasCustomerReviewed } = changeRequest;
+  // A time WSO2 accepted counts as the customer's approval for what the stepper
+  // shows: the flag itself stays false (no staff action records an approval).
+  const hasCustomerApproved =
+    changeRequest.hasCustomerApproved || isProposalAccepted(changeRequest);
   const currentIndex = CHANGE_REQUEST_STATE_ORDER.indexOf(currentState);
   const isCanceled = currentState === ChangeRequestStates.CANCELED;
   const allowIndexProgress = !isCanceled && currentIndex >= 0;
@@ -617,7 +841,7 @@ export function buildChangeRequestWorkflowStages(
       },
       {
         name: ChangeRequestStates.CUSTOMER_APPROVAL,
-        description: "Customer approval received",
+        description: describeCustomerApprovalStage(changeRequest),
         completed:
           allowIndexProgress && currentIndex > 3 && hasCustomerApproved,
         current: currentState === ChangeRequestStates.CUSTOMER_APPROVAL,

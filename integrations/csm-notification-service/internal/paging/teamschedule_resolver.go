@@ -401,7 +401,11 @@ func (r TeamScheduleResolver) RuleForCtx(ctx context.Context, rc RoutingContext)
 		// of its rows.
 		return Rule{}, false
 	}
-	key := teamKeyFor(rc.AssignedCRETeam)
+	// keyOf, not teamKeyFor: a case carries its team's NAME ("Rigel") and a
+	// deployment whose keys are not slugs of it (DEV: rigel_abt_cre_team)
+	// maps it through teams.aliases. Without the alias every ABT case read
+	// as "not on an ABT" and routed by R3.
+	key := r.keyOf(rc.AssignedCRETeam)
 	// An incident with no team is a DEFINITE "not assigned to an ABT team",
 	// not an unknown. Treating it as unknown left every ABTYes/ABTNo row
 	// unmatchable, and LK and LK_EVENING have only those two rows each -- so
@@ -447,10 +451,10 @@ func (r TeamScheduleResolver) fromSource(ctx context.Context, src LevelSource, r
 		return r.rotaMembers(ctx, rc.At, rc.Shift)
 
 	case SourceRotaPair:
-		return r.rotaPair(ctx, rc.At, teamKeyFor(rc.AssignedCRETeam))
+		return r.rotaPair(ctx, rc.At, r.keyOf(rc.AssignedCRETeam))
 
 	case SourceAlertDutyOwnABT:
-		key := teamKeyFor(rc.AssignedCRETeam)
+		key := r.keyOf(rc.AssignedCRETeam)
 		if key == "" {
 			return nil, nil
 		}
@@ -488,7 +492,7 @@ func (r TeamScheduleResolver) fromSource(ctx context.Context, src LevelSource, r
 		// non-empty key that simply belongs to no ABT -- which is the common
 		// shape of an unassigned incident in practice, and the one an
 		// emptiness check silently missed.
-		if r.unassignedTeamLead != unassignedLeadNone && !r.isABT(ctx, teamKeyFor(rc.AssignedCRETeam)) {
+		if r.unassignedTeamLead != unassignedLeadNone && !r.isABT(ctx, r.keyOf(rc.AssignedCRETeam)) {
 			pool, err := r.teamLeadPool(ctx)
 			if err != nil {
 				return nil, err
@@ -1014,7 +1018,7 @@ func dedupeRecipients(rs []Recipient) []Recipient {
 }
 
 func (r TeamScheduleResolver) abtMembers(ctx context.Context, team, role string) ([]Recipient, error) {
-	key := teamKeyFor(team)
+	key := r.keyOf(team)
 	if key == "" {
 		// An incident with no team is a real, reported state, not a failure:
 		// the rule table routes it to a shift-wide pool. There is no pool to

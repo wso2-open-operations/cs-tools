@@ -40,6 +40,9 @@ type fakeGhRepo struct {
 	linkErr    error
 	mapping    *repository.RepoMapping
 	cr         *repository.GithubChangeRequest
+	// accountProjects is "accountID/projectID" -> account name for the pairs
+	// AccountProject confirms.
+	accountProjects map[string]string
 }
 
 func (f *fakeGhRepo) RepoMapping(context.Context, string, string) (*repository.RepoMapping, error) {
@@ -55,8 +58,12 @@ func (f *fakeGhRepo) ChangeRequestByGitReference(context.Context, string) (*repo
 func (f *fakeGhRepo) RepoForAccount(context.Context, string) (*repository.RepoMapping, error) {
 	return f.mapping, f.mappingErr
 }
-func (f *fakeGhRepo) CaseByIssueNumber(context.Context, string, int) (string, error) {
+func (f *fakeGhRepo) CaseByIssue(context.Context, string, string, string, int) (string, error) {
 	return f.caseID, nil
+}
+func (f *fakeGhRepo) AccountProject(_ context.Context, accountID, projectID string) (string, bool, error) {
+	name, ok := f.accountProjects[accountID+"/"+projectID]
+	return name, ok, nil
 }
 func (f *fakeGhRepo) AccountForCase(context.Context, string) (string, error) {
 	return f.accountID, nil

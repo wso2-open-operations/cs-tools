@@ -734,6 +734,24 @@ func TestUpstreamErrorCodesPassThrough(t *testing.T) {
 			t.Errorf("body = %v", body)
 		}
 	})
+	t.Run("PATCH: Accept of a time nobody is recorded as having proposed keeps its words and its own code", func(t *testing.T) {
+		const refusal = `nobody is recorded as having proposed this time (it may have been written by someone at WSO2 or left over from an earlier cycle), so it cannot be accepted: use "Propose a different time" to ask the customer to approve a time`
+		client := &mockEntityChangeRequestClient{
+			patchChangeRequestFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: envelope(409, refusal, `"change_request_proposer_not_recorded"`)}
+			},
+		}
+		accept := `{"confirmCustomerUpdatedDate":"agree","expectedCustomerUpdatedOn":"2030-03-08T09:00:00Z","expectedPlannedStartOn":"2030-03-01T09:00:00Z","expectedPlannedEndOn":"2030-03-01T11:00:00Z"}`
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(accept)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).PatchChangeRequest(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		body := assertErrorBodyKeys(t, w)
+		if body["message"] != refusal || body["errorCode"] != "change_request_proposer_not_recorded" {
+			t.Errorf("body = %v", body)
+		}
+	})
 	t.Run("PATCH: a 403 keeps the fixed message and the code", func(t *testing.T) {
 		w := patch(&apierror.Error{StatusCode: http.StatusForbidden, Body: envelope(403, "only members asked may answer", `"change_request_not_asked"`)})
 		assertStatus(t, w, http.StatusForbidden)
@@ -880,6 +898,103 @@ func TestPatchChangeRequestRefusesTheCustomersAnswer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// WSO2's answer to a time the customer proposed is an ordinary PATCH body to the BFF: it is forwarded
+// to the entity service byte for byte -- the BFF has no change request data and decides nothing about it
+// -- and only the SHAPE of its string fields is checked here, in any spelling of the key, so that a page
+// that sends the wrong type is told which field, not a generic decode failure.
+func TestPatchChangeRequest_TimeAnswerFields(t *testing.T) {
+	accept := `{"confirmCustomerUpdatedDate":"agree","expectedCustomerUpdatedOn":"2030-03-08T09:00:00Z","expectedPlannedStartOn":"2030-03-01T09:00:00Z","expectedPlannedEndOn":"2030-03-01T11:00:00Z"}`
+	counter := `{"state":"authorize","plannedStartOn":"2030-03-15 09:00:00","plannedEndOn":"2030-03-15 11:00:00","expectedCustomerUpdatedOn":"2030-03-08T09:00:00Z","expectedPlannedStartOn":"2030-03-01T09:00:00Z","expectedPlannedEndOn":"2030-03-01T11:00:00Z"}`
+	for name, body := range map[string]string{
+		"Accept proposed time":     accept,
+		"Propose a different time": counter,
+		"a decline":                `{"state":"authorize","expectedCustomerUpdatedOn":"2030-03-08T09:00:00Z"}`,
+		"nulls are absent":         `{"title":"x","confirmCustomerUpdatedDate":null,"EXPECTEDCUSTOMERUPDATEDON":null}`,
+		// Not an object: the entity service's to refuse, in its own words.
+		"a body that is no object": `[1]`,
+		"an empty body":            ``,
+	} {
+		t.Run("forwards "+name, func(t *testing.T) {
+			var got []byte
+			client := &mockEntityChangeRequestClient{
+				patchChangeRequestFn: func(_ context.Context, _ string, b []byte) ([]byte, error) {
+					got = b
+					return []byte(`{"message":"ok"}`), nil
+				},
+			}
+			h := NewChangeRequestHandler(client)
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(body)))
+			r.SetPathValue("id", testCRID)
+			w := httptest.NewRecorder()
+			h.PatchChangeRequest(w, r)
+			assertStatus(t, w, http.StatusOK)
+			if string(got) != body {
+				t.Fatalf("the entity service got %s, want the body unchanged: %s", got, body)
+			}
+		})
+	}
+	for name, tc := range map[string]struct{ body, want string }{
+		"a boolean answer":                  {`{"confirmCustomerUpdatedDate":true}`, "confirmCustomerUpdatedDate must be a string"},
+		"a number for the proposal":         {`{"confirmCustomerUpdatedDate":"agree","expectedCustomerUpdatedOn":20300308}`, "expectedCustomerUpdatedOn must be a string"},
+		"an object for the planned start":   {`{"state":"authorize","expectedPlannedStartOn":{}}`, "expectedPlannedStartOn must be a string"},
+		"an array for the planned end":      {`{"state":"authorize","expectedPlannedEndOn":["x"]}`, "expectedPlannedEndOn must be a string"},
+		"in capitals, as the decoder reads": {`{"CONFIRMCUSTOMERUPDATEDDATE":false}`, "confirmCustomerUpdatedDate must be a string"},
+		"a null then a number":              {`{"expectedCustomerUpdatedOn":null,"EXPECTEDCUSTOMERUPDATEDON":1}`, "expectedCustomerUpdatedOn must be a string"},
+	} {
+		t.Run("refuses "+name, func(t *testing.T) {
+			called := false
+			client := &mockEntityChangeRequestClient{
+				patchChangeRequestFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					called = true
+					return []byte(`{}`), nil
+				},
+			}
+			h := NewChangeRequestHandler(client)
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(tc.body)))
+			r.SetPathValue("id", testCRID)
+			w := httptest.NewRecorder()
+			h.PatchChangeRequest(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, tc.want)
+			if called {
+				t.Fatal("the entity service was called for a request the BFF refuses")
+			}
+		})
+	}
+	// The customer-flag guard is untouched: an acceptance that also carries the customer's answer is
+	// refused as the answer, whatever else it says.
+	t.Run("the customer's answer stays refused beside it", func(t *testing.T) {
+		client := &mockEntityChangeRequestClient{
+			patchChangeRequestFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				t.Fatal("the entity service was called")
+				return nil, nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(`{"confirmCustomerUpdatedDate":"agree","isCustomerApproved":true}`)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.PatchChangeRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, "isCustomerApproved cannot be set on the customer's behalf: the customer's approval can only be given by the customer in the Customer Portal")
+	})
+	// The entity service's refusals (409 stale proposal, 400 on hold, ...) reach the page verbatim.
+	t.Run("the entity service's refusal text comes back", func(t *testing.T) {
+		client := &mockEntityChangeRequestClient{
+			patchChangeRequestFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"message":"the customer's proposed time changed after you opened this change request (it is now 2030-03-08T09:00:00Z); read it again before responding"}`}
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(accept)))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.PatchChangeRequest(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, "the customer's proposed time changed after you opened this change request (it is now 2030-03-08T09:00:00Z); read it again before responding")
+	})
 }
 
 func TestSearchChangeRequests(t *testing.T) {
@@ -1196,6 +1311,30 @@ func TestCreateChangeRequest_CustomerGateFlags(t *testing.T) {
 		}
 	})
 
+	// An Emergency change takes no customer step; the entity service refuses a create that
+	// ticks a box on one and the form is shown its reason verbatim (the BFF does not
+	// second-guess the rule: the type and the boxes are the entity service's to judge).
+	t.Run("surfaces the refusal of a customer box on an Emergency change verbatim", func(t *testing.T) {
+		const msg = "Emergency changes proceed without customer consent, so customer approval and customer review cannot be required (customerApprovalRequired must be false for an Emergency change)"
+		body, _ := json.Marshal(map[string]any{"code": 400, "message": msg})
+		var forwarded []byte
+		client := &mockEntityChangeRequestClient{
+			createChangeRequestFn: func(_ context.Context, b []byte) ([]byte, error) {
+				forwarded = b
+				return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: string(body)}
+			},
+		}
+		const payload = `{"subject":"Restart the gateway","type":"emergency","customerApprovalRequired":true}`
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(payload)))
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).CreateChangeRequest(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, msg)
+		if string(forwarded) != payload {
+			t.Errorf("upstream received %q, want the body untouched (%q)", forwarded, payload)
+		}
+	})
+
 	t.Run("rejects a checkbox that is not a boolean", func(t *testing.T) {
 		for name, payload := range map[string]string{
 			"approval as string":  `{"subject":"x","type":"normal","customerApprovalRequired":"yes"}`,
@@ -1372,6 +1511,18 @@ func TestPatchChangeRequest_CustomerGateFlags(t *testing.T) {
 			"rollback outside the review states": {
 				`{"state":"rollback"}`,
 				`state "rollback" can only be set from review or customer_review`,
+			},
+			"a box turned on on an Emergency change": {
+				`{"customerApprovalRequired":true}`,
+				"Emergency changes proceed without customer consent, so customer approval and customer review cannot be required (customerApprovalRequired must be false for an Emergency change)",
+			},
+			"an Emergency change re-typed with a box ticked": {
+				`{"type":"emergency"}`,
+				"Emergency changes proceed without customer consent, so customer approval and customer review cannot be required: turn off customerReviewRequired before changing the type to emergency",
+			},
+			"customer_review on an Emergency change": {
+				`{"state":"customer_review"}`,
+				`state "customer_review" cannot be set: Emergency changes proceed without customer consent, so customer approval and customer review cannot be required; close it from review instead`,
 			},
 			"scheduled outside customer_approval": {
 				`{"state":"scheduled"}`,

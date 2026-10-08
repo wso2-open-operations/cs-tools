@@ -446,6 +446,55 @@ func TestCaseService_SearchCases_RejectsUnsupportedPostgresFields(t *testing.T) 
 	}
 }
 
+// TestCaseService_SearchCases_RejectsCountOnlyWithSkipTotal is the
+// regression guard: countOnly and skipTotal are mirror-image flags (skip the
+// page query vs. skip the count), and combining them would leave nothing for
+// the search to actually compute.
+func TestCaseService_SearchCases_RejectsCountOnlyWithSkipTotal(t *testing.T) {
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	req := domain.SearchCasesRequest{CountOnly: true, SkipTotal: true}
+	_, err := svc.SearchCases(ctx, req)
+	var ve *apierror.ValidationError
+	if !asValidationError(err, &ve) {
+		t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+	}
+}
+
+// TestCaseService_SearchCases_CountOnlyReachesRepository proves a plain
+// countOnly request (no skipTotal) passes validation and reaches the
+// repository with the flag intact -- the repository itself owns skipping the
+// page query (see TestSearchCasesIntegration_CountOnly for the real-database
+// proof of that).
+func TestCaseService_SearchCases_CountOnlyReachesRepository(t *testing.T) {
+	var gotReq domain.SearchCasesRequest
+	called := false
+	repo := &stubCaseRepo{
+		searchCases: func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
+			called = true
+			gotReq = req
+			return nil, 42, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	resp, err := svc.SearchCases(ctx, domain.SearchCasesRequest{CountOnly: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected repo.SearchCases to be called")
+	}
+	if !gotReq.CountOnly {
+		t.Fatal("expected CountOnly to reach the repository")
+	}
+	if resp.Total != 42 {
+		t.Fatalf("expected Total 42, got %d", resp.Total)
+	}
+}
+
 // TestCaseService_SearchCases_SupportedFieldsStillReachRepository proves the
 // fields the Postgres repository does support are not caught by the
 // unsupported-field rejection: each reaches repo.SearchCases unchanged.

@@ -47,15 +47,26 @@ func TestRuntimeApprovalStageKind(t *testing.T) {
 		{"position 3 in Customer Review is never the customer's", nil, nil, 3, "NORMAL", "CUSTOMER_REVIEW", stageKindOther},
 		{"an empty label is no label", str(""), nil, 1, "NORMAL", "AUTHORIZE", stageKindCAB},
 		// The group the stage is assigned to says what it is.
-		{"ECAB group in Authorize", nil, str("ECAB Approval"), 3, "NORMAL", "AUTHORIZE", stageKindECAB},
+		// "ECAB Approval" names no stage any more (the previous system has no Emergency CAB): a stage
+		// in a group of that name is read like one in any other group, by position.
+		{"a group named ECAB Approval is not special, position 3", nil, str("ECAB Approval"), 3, "NORMAL", "AUTHORIZE", stageKindOther},
+		{"a group named ECAB Approval is not special, position 1", nil, str("ECAB Approval"), 1, "NORMAL", "AUTHORIZE", stageKindCAB},
 		{"CAB group in Authorize, any position", nil, str("CAB Approval"), 4, "NORMAL", "AUTHORIZE", stageKindCAB},
 		{"CAB group in Scheduled is not cancelled for it", nil, str("CAB Approval"), 1, "NORMAL", "SCHEDULED", stageKindOther},
 		{"CAB group name is exact", nil, str("CAB Approval Board"), 5, "NORMAL", "AUTHORIZE", stageKindOther},
 		{"another group falls back to the position", nil, str("Devops"), 1, "NORMAL", "AUTHORIZE", stageKindCAB},
-		// An Emergency change in Authorize has only the ECAB's stage.
-		{"Emergency in Authorize, position 0, no label", nil, nil, 0, "EMERGENCY", "AUTHORIZE", stageKindECAB},
-		{"Emergency in Authorize, position 2, no label", nil, nil, 2, "EMERGENCY", "AUTHORIZE", stageKindECAB},
+		// An Emergency change in Authorize has no peer stage, so a stage on it can only be the
+		// CAB's -- and the migrated shape is that one stage in the CAB group at position 0.
+		{"Emergency in Authorize, CAB group, position 0 (the migrated shape)", nil, str("CAB Approval"), 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		{"Emergency in Authorize, CAB group, any position", nil, str("CAB Approval"), 3, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		{"Emergency in Authorize, position 0, no label", nil, nil, 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		{"Emergency in Authorize, position 2, no label", nil, nil, 2, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		{"Emergency in Authorize, an ECAB-named group is no different", nil, str("ECAB Approval"), 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
 		{"Emergency in Scheduled", nil, nil, 0, "EMERGENCY", "SCHEDULED", stageKindOther},
+		{"Emergency in Scheduled, CAB group: a finished stage is left alone", nil, str("CAB Approval"), 0, "EMERGENCY", "SCHEDULED", stageKindOther},
+		{"Emergency in Assess, CAB group: not decidable there", nil, str("CAB Approval"), 0, "EMERGENCY", "ASSESS", stageKindOther},
+		{"a labelled historic ECAB stage is the CAB's, in Authorize", str("ECAB Approval"), nil, 0, "EMERGENCY", "AUTHORIZE", stageKindCAB},
+		{"a labelled historic ECAB stage, the change has moved on", str("ECAB Approval"), nil, 0, "EMERGENCY", "SCHEDULED", stageKindCAB},
 		{"Normal in Authorize, position 0", nil, nil, 0, "NORMAL", "AUTHORIZE", stageKindOther},
 		{"no model, position 0, Authorize", nil, nil, 0, "", "AUTHORIZE", stageKindOther},
 		// No state: nothing to match the guess against.

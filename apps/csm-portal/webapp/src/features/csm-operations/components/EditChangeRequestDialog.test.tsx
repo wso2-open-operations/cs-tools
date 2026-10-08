@@ -600,6 +600,80 @@ describe("EditChangeRequestDialog — Customer Approval / Customer Review checkb
     });
   });
 
+  describe("an Emergency change acts without customer consent: both boxes are disabled and unticked, with one line saying so", () => {
+    const EMERGENCY_LINE = "Emergency changes proceed without customer approval or review.";
+
+    it.each(["new", "assess", "authorize", "scheduled", "implement", "review", "closed", "canceled"])(
+      "in %s, with a project: both boxes are disabled and unticked, with nothing to save",
+      (state) => {
+        const { onSave } = renderDialog({ type: "emergency", state, project: ACME });
+        for (const box of [approvalBox(), reviewBox()]) {
+          expect(box).toBeDisabled();
+          expect(box).not.toBeChecked();
+          expect(box).toHaveAccessibleDescription(new RegExp(EMERGENCY_LINE.replace(/\./g, "\\.")));
+        }
+        expect(screen.getAllByText(EMERGENCY_LINE)).toHaveLength(1);
+        // Nothing differs from the record, so there is nothing to save.
+        expect(saveButton()).toBeDisabled();
+        expect(onSave).not.toHaveBeenCalled();
+      },
+    );
+
+    it("never offers the add-only note, the gate lock or the missing-project lock on the boxes it turns off", () => {
+      renderDialog({ type: "emergency", state: "assess" });
+      expect(screen.queryByText(/can't be removed/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Needs a Customer Project/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Locked: the change request has already reached/i)).not.toBeInTheDocument();
+    });
+
+    it("an Emergency change in New that still has a box ticked from before the rule opens with it off, and saving clears it", () => {
+      const { onSave } = renderDialog({
+        type: "emergency",
+        state: "new",
+        customerApprovalRequired: true,
+        customerReviewRequired: true,
+      });
+      expect(approvalBox()).not.toBeChecked();
+      expect(reviewBox()).not.toBeChecked();
+      expect(approvalBox()).toBeDisabled();
+      // The form differs from the record, so there is something to save.
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledWith({ customerApprovalRequired: false, customerReviewRequired: false });
+    });
+
+    it("an Emergency change past New that still has a box ticked shows it as stored, disabled, with the add-only reason (nothing can take it back)", () => {
+      const { onSave } = renderDialog({
+        type: "emergency",
+        state: "customer_approval",
+        project: ACME,
+        customerApprovalRequired: true,
+      });
+      expect(approvalBox()).toBeChecked();
+      expect(approvalBox()).toBeDisabled();
+      expect(approvalBox()).toHaveAccessibleDescription(/added but never removed/);
+      expect(reviewBox()).not.toBeChecked();
+      expect(saveButton()).toBeDisabled();
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it("leaves the other fields editable: a planned-window change still saves, with no customer flag in the patch", () => {
+      const { onSave } = renderDialog({ type: "emergency", state: "new" });
+      fireEvent.change(screen.getByLabelText(/rollback duration/i), { target: { value: "15 mins" } });
+      fireEvent.click(saveButton());
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const patch = onSave.mock.calls[0]![0];
+      expect(patch).not.toHaveProperty("customerApprovalRequired");
+      expect(patch).not.toHaveProperty("customerReviewRequired");
+    });
+
+    it.each(["normal", "standard"])("says nothing about Emergency on a %s change, whose boxes stay live", (type) => {
+      renderDialog({ type, state: "new" });
+      expect(screen.queryByText(EMERGENCY_LINE)).not.toBeInTheDocument();
+      expect(approvalBox()).toBeEnabled();
+      expect(reviewBox()).toBeEnabled();
+    });
+  });
+
   describe("after New a ticked box is read-only: a customer requirement can be added but never removed", () => {
     it.each(["assess", "authorize", "customer_approval", "scheduled", "implement", "review", "customer_review", "closed", "rollback", "canceled"])(
       "Customer Approval, ticked, in %s",

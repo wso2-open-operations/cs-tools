@@ -260,6 +260,42 @@ type ChangeRequestDetails struct {
 	// Time off, and says why, instead of letting a customer type a window only to
 	// be refused. Omitted when entity-service did not say, which is not "not held".
 	IsOnHold *bool `json:"isOnHold,omitempty"`
+
+	// CustomerProposal is the conversation about a time a customer proposed: present when one was
+	// (entity-service derives it from the proposed start and its confirmation, customer_updated_on /
+	// customer_updated_date_confirmation). While it is pending the planned window (startDate /
+	// endDate) is still the one WSO2 planned and a customer who approves approves THAT; once WSO2
+	// answers, the window is either the proposal
+	// (agreed: the change is scheduled for it) or WSO2's different time (disagreed). No names or
+	// emails are passed on, only whether the proposal is the signed-in customer's own.
+	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
+}
+
+// ChangeRequestCustomerProposal is the customer's view of a proposed time.
+type ChangeRequestCustomerProposal struct {
+	StartDate string  `json:"startDate"`
+	EndDate   *string `json:"endDate,omitempty"`
+	// Answer is "pending", "agreed", "disagreed" or "unanswered".
+	Answer string `json:"answer"`
+	// ProposerRecorded is true when the proposer can be named at all while pending (a registered
+	// contact wrote it); false for a date a WSO2 user wrote or one left over from an older cycle.
+	ProposerRecorded *bool `json:"proposerRecorded,omitempty"`
+	// ProposedByViewer is true when the pending proposal is the signed-in customer's own, false for
+	// a colleague's (or an unknown proposer's).
+	ProposedByViewer *bool `json:"proposedByViewer,omitempty"`
+}
+
+func mapChangeRequestCustomerProposal(p *entity.ChangeRequestCustomerProposal) *ChangeRequestCustomerProposal {
+	if p == nil {
+		return nil
+	}
+	return &ChangeRequestCustomerProposal{
+		StartDate:        p.StartOn,
+		EndDate:          p.EndOn,
+		Answer:           p.Answer,
+		ProposerRecorded: p.ProposerRecorded,
+		ProposedByViewer: p.ProposedByViewer,
+	}
 }
 
 // MapChangeRequestDetails builds the portal response from entity-service's ChangeRequest.
@@ -279,6 +315,7 @@ func MapChangeRequestDetails(r entity.ChangeRequest) ChangeRequestDetails {
 		ApprovedOn:           r.ApprovedOn,
 		CustomerCanAnswer:    r.CustomerCanAnswer,
 		IsOnHold:             r.OnHold,
+		CustomerProposal:     mapChangeRequestCustomerProposal(r.CustomerProposal),
 	}
 }
 
@@ -385,8 +422,12 @@ func BuildEntityPatchChangeRequestRequest(req ChangeRequestUpdateRequest) entity
 //     is recorded only while that is still the change's window, so a page opened
 //     before the change was re-scheduled cannot approve a time its reader never
 //     saw. Optional; the webapp sends them.
-//   - PlannedStartOn / PlannedEndOn: "propose new implementation time". The
-//     webapp sends both: a customer proposes a whole window.
+//   - PlannedStartOn / PlannedEndOn: "propose new implementation time". A proposal
+//     is a START: the change request keeps its planned length, so the webapp sends the
+//     start plus the end that keeps it (the derived end, start + planned length) and
+//     entity-service refuses any other end; a start alone is accepted as well, an end
+//     alone is not. The proposal waits for WSO2's answer (it moves nothing by itself);
+//     see ChangeRequestDetails.CustomerProposal.
 //
 // It is a struct of exactly these six fields on purpose: the handler decodes the
 // body into it with unknown fields refused, so a field that is not here cannot

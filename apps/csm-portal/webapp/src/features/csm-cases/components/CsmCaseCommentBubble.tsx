@@ -52,6 +52,7 @@ import {
   convertCodeTagsToHtml,
   hasDisplayableContent,
   hasSingleCodeWrapper,
+  isMarkdownComment,
   linkifyBareUrls,
   stripAllCodeBlocks,
   stripCodeWrapper,
@@ -144,13 +145,15 @@ export default function CsmCaseCommentBubble({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isBot = comment.authorRole === "chatbot";
-  // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
+  const isMarkdown = isMarkdownComment(comment);
+  // A chatbot (Novera) message body is Markdown, and so is the description of
+  // a record raised from a GitHub issue; render those to HTML first. Every
   // other comment body is already rich-text HTML and goes through the same
-  // code-wrapper/label-stripping pipeline the customer portal uses, since bot
-  // replies never carry ServiceNow's [code] wrapper tags or the "Customer
-  // comment added" label.
+  // code-wrapper/label-stripping pipeline the customer portal uses, since
+  // Markdown bodies never carry ServiceNow's [code] wrapper tags or the
+  // "Customer comment added" label.
   const preprocessed = useMemo(() => {
-    if (isBot) return markdownToHtml(comment.bodyHtml);
+    if (isMarkdown) return markdownToHtml(comment.bodyHtml);
     const raw = comment.bodyHtml ?? "";
     const isFullCodeWrap = hasSingleCodeWrapper(raw);
     const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
@@ -160,7 +163,7 @@ export default function CsmCaseCommentBubble({
         ? stripAllCodeBlocks(raw)
         : convertCodeTagsToHtml(raw);
     return stripCustomerCommentAddedLabel(afterCode);
-  }, [comment.bodyHtml, isBot]);
+  }, [comment.bodyHtml, isMarkdown]);
   const darkModeHtml = isDarkMode
     ? stripLightModeInlineStyles(preprocessed)
     : preprocessed;

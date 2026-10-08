@@ -43,8 +43,8 @@ func TestIsExternalCaller(t *testing.T) {
 		{"staff who also hold an external record", ctxWith(SearchScope{ViewerEmail: "alice@example.com", HasInternalAccess: true}), false},
 		{"no identity at all", context.Background(), false},
 	} {
-		if got := isExternalCaller(tc.ctx); got != tc.want {
-			t.Errorf("%s: isExternalCaller = %v, want %v", tc.name, got, tc.want)
+		if got := IsExternalCaller(tc.ctx); got != tc.want {
+			t.Errorf("%s: IsExternalCaller = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
@@ -124,6 +124,9 @@ func TestClassifyExternalPatch(t *testing.T) {
 			"customerApprovalRequired": func(r *domain.PatchChangeRequestRequest) { r.CustomerApprovalRequired = &no },
 			"deploymentIds":            func(r *domain.PatchChangeRequestRequest) { r.DeploymentIDs = &[]string{} },
 			"implementationPlan":       func(r *domain.PatchChangeRequestRequest) { r.ImplementationPlan = new(*string) },
+			// WSO2's answer to a proposed time is never a customer's to send.
+			"confirmCustomerUpdatedDate": func(r *domain.PatchChangeRequestRequest) { r.ConfirmCustomerUpdatedDate = &start },
+			"expectedCustomerUpdatedOn":  func(r *domain.PatchChangeRequestRequest) { r.ExpectedCustomerUpdatedOn = &start },
 		}
 		for field, set := range extra {
 			for name, base := range map[string]domain.PatchChangeRequestRequest{
@@ -154,6 +157,7 @@ func TestClassifyExternalPatch(t *testing.T) {
 			"Title": true, "Description": true, "ProjectID": true, "State": true, "Impact": true, "AssignedTeamID": true,
 			"RequestApproval": true, "OnHold": true, "Comment": true, "WorkNote": true, "CustomerApprovalRequired": true,
 			"DeploymentIDs": true, "ImplementationPlan": true,
+			"ConfirmCustomerUpdatedDate": true, "ExpectedCustomerUpdatedOn": true,
 		}
 		typ := reflect.TypeOf(domain.PatchChangeRequestRequest{})
 		for i := 0; i < typ.NumField(); i++ {

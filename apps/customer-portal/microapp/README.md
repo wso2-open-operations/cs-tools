@@ -13,3 +13,8 @@
      IS_MICROAPP: true,
    };
    ```
+
+## Tests
+
+`npm test` runs the unit tests (Vitest). They cover the rules that are kept free of React and of any component, such as
+what the change request pages read of the customer's part of the process (`src/utils/changeRequestProgress.ts`).

@@ -135,6 +135,32 @@ export function hasDisplayableContent(comment: CsmCaseComment): boolean {
 }
 
 /**
+ * Records raised from a GitHub issue are numbered by entity-service's own
+ * sequences (`next_github_service_request_number` → `SR-GH-000001`, the
+ * change-request one → `CHG-GH-000001`), so the prefix is how the frontend
+ * tells them apart — the case API carries no other GitHub marker.
+ */
+const GITHUB_RAISED_NUMBER = /^(SR|CHG)-GH-/i;
+
+/**
+ * True when a record was raised from a GitHub issue, whose description is the
+ * issue body verbatim: GitHub Markdown (`### Heading` sections from the issue
+ * template), not rich-text HTML.
+ */
+export function isGithubRaisedCaseNumber(caseNumber: string | undefined | null): boolean {
+  return GITHUB_RAISED_NUMBER.test(caseNumber ?? "");
+}
+
+/**
+ * True when a comment's body is Markdown rather than rich-text HTML: chatbot
+ * (Novera) messages, and entries explicitly marked `bodyFormat: "markdown"`
+ * (the description of a GitHub-raised record).
+ */
+export function isMarkdownComment(comment: CsmCaseComment): boolean {
+  return comment.authorRole === "chatbot" || comment.bodyFormat === "markdown";
+}
+
+/**
  * Cleans a comment's raw `bodyHtml` the same way `CsmCaseCommentBubble`'s own
  * `preprocessed` memo does before rendering it — unwraps `[code]` wrapper
  * tags into real HTML (or renders bot/chatbot Markdown to HTML) and strips
@@ -146,7 +172,7 @@ export function hasDisplayableContent(comment: CsmCaseComment): boolean {
  * added" label as if it were the comment's actual content.
  */
 export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
-  if (comment.authorRole === "chatbot") return markdownToHtml(comment.bodyHtml);
+  if (isMarkdownComment(comment)) return markdownToHtml(comment.bodyHtml);
   const raw = comment.bodyHtml ?? "";
   const isFullCodeWrap = hasSingleCodeWrapper(raw);
   const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;

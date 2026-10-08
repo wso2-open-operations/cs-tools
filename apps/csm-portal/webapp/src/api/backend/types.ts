@@ -40,7 +40,9 @@ export interface BeErrorPayload {
    * The stable machine-readable name of the refusal, when the backend names it
    * (e.g. `change_request_approval_not_pending`): what a client may branch on.
    * Absent for a refusal that has none, and for an older backend. Kept on
-   * {@link BackendApiError.payload}; today's callers key on the status.
+   * {@link BackendApiError.payload}. The change request page branches on the codes of the
+   * answers to a proposed time (`ChangeRequestErrorCode` in `csm-operations/utils/changeRequests.ts`);
+   * every other caller keys on the status.
    */
   errorCode?: string;
 }
@@ -1135,6 +1137,15 @@ export interface BeCaseSearchPayload {
    * that declares the field; it rejects unknown request fields.
    */
   skipTotal?: boolean;
+  /**
+   * The mirror image of `skipTotal`: skip the page query entirely and return
+   * `cases: []`, reading only `total`. For a count or pie/bar dashboard
+   * widget, whose only use for a search is `total` -- the page it would
+   * otherwise also pay for is never read. Rejected together with `skipTotal`.
+   * Needs an entity service that declares the field; it rejects unknown
+   * request fields.
+   */
+  countOnly?: boolean;
 }
 
 /**
@@ -2720,12 +2731,14 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   hasCustomerReviewed?: boolean;
   /**
    * The two ServiceNow-style creation checkboxes. `customerApprovalRequired`
-   * adds a `customer_approval` step after internal (CAB/ECAB/Standard)
+   * adds a `customer_approval` step after internal (CAB/Standard)
    * approval and before `scheduled`; `customerReviewRequired` adds a
    * `customer_review` step after `review` and before `closed`. Distinct from
    * `hasCustomerApproved` / `hasCustomerReviewed`, which are the customer's
    * confirmation outcome. Optional so a response from a backend that
-   * predates them still type-checks; absent is treated as `false`.
+   * predates them still type-checks; absent is treated as `false`. An Emergency
+   * change acts without customer consent: both are `false` on it (a change of
+   * that type raised before the rule can still carry one set).
    */
   customerApprovalRequired?: boolean;
   customerReviewRequired?: boolean;
@@ -2797,8 +2810,26 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * `likelihood` above, this one has a write path all the way down.
    */
   isPlanningVisibleToCustomers?: boolean;
+  /**
+   * WSO2's answer to the customer's proposed time (the confirmation of the proposed
+   * date, entity-service `change_request.customer_updated_date_confirmation`):
+   * `"agree"` or `"disagree"`, absent while
+   * nothing was answered. Read-through; the answer is given by the two actions
+   * of {@link BePatchChangeRequestPayload} (`confirmCustomerUpdatedDate`, or a
+   * Re-schedule that names a time), never by writing this field.
+   */
   confirmCustomerUpdatedDate?: string | null;
+  /** The customer's proposed planned START (the proposed date, entity-service `change_request.customer_updated_on`), when there is one. */
   customerUpdatedOn?: string | null;
+  /**
+   * The conversation about a time the customer proposed, derived by the backend
+   * from `customerUpdatedOn` and the answer: omitted when nobody proposed
+   * anything. `answer: "pending"` is the one that needs WSO2 (see
+   * {@link BeChangeRequestCustomerProposal}).
+   */
+  customerProposal?: BeChangeRequestCustomerProposal | null;
+  /** On hold: a change that is on hold cannot change state, Accept proposed time included. */
+  onHold?: boolean | null;
   /** `read_only` in the ServiceNow dictionary — inherently read-only. */
   labels?: string[];
   deployments?: BeEntityRef[];
@@ -2809,11 +2840,59 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   gitReference?: string | null;
 }
 
+/**
+ * Where the conversation about a customer's proposed time stands. Only
+ * `pending` is actionable by WSO2: the customer proposed a time (their own
+ * answer is outstanding too: the change stays in Customer Approval) and nobody
+ * at WSO2 has answered it. `agreed` / `disagreed` are WSO2's answers; `unanswered`
+ * is a proposal the change moved on without (the customer approved the planned
+ * time anyway, or a user of the previous system changed the date): history, no action.
+ */
+export type BeCustomerProposalAnswer = "pending" | "agreed" | "disagreed" | "unanswered";
+
+/**
+ * A time the customer proposed, as `GET /change-requests/{id}` derives it from
+ * the proposed date and its confirmation (`customer_updated_on` /
+ * `customer_updated_date_confirmation`, no extra table or column): the proposal
+ * waits in Customer Approval, the planned window stays what WSO2 planned until
+ * WSO2 answers.
+ */
+export interface BeChangeRequestCustomerProposal {
+  /** The proposed planned START, RFC 3339 (the customer proposes a start and keeps the planned length). */
+  startOn: string;
+  /** The proposed END (start + the planned length); present only while `answer` is `pending`. */
+  endOn?: string | null;
+  answer: BeCustomerProposalAnswer | string;
+  /**
+   * Whether the backend can name the proposer (present only while `answer` is `pending`): `true` while
+   * the change request's last writer is still a registered contact of its project (then that writer is
+   * the proposer); `false` when it is not knowable -- a date a WSO2 user wrote in the previous system, one left
+   * over from an older cycle, a proposal edited over since, or a sync rewrite. The page must then say
+   * the proposer is not recorded rather than guess. Absent on a backend that predates it: the page
+   * falls back to whether a name or an email came with it.
+   */
+  proposerRecorded?: boolean | null;
+  /** Who proposed it and when: only while `pending` and `proposerRecorded` is true (never an empty guess). */
+  proposedByName?: string | null;
+  proposedByEmail?: string | null;
+  proposedOn?: string | null;
+  /**
+   * Whether "Accept proposed time" would be accepted right now, while `pending`; when it would not,
+   * `acceptBlockedReason` says why in the words of the refusal the PATCH would give (the proposed
+   * start has passed, the change is on hold, the planned window has no length to keep). The server
+   * stays the authority: every act re-checks under the row lock.
+   */
+  canAccept?: boolean | null;
+  acceptBlockedReason?: string | null;
+}
+
 /** An approval stage seen on a change request, e.g. Assess, Authorize. */
 export type BeChangeRequestApprovalStage = "Assess" | "Authorize" | "Customer Approval";
 // Stage names are an open, backend-owned string (`BeChangeRequestApproval.stage`):
-// beyond the above, the Peer / CAB / ECAB stages may arrive as "Peer Approval",
-// "CAB Approval", "ECAB Approval" or "Emergency CAB". Labelled by
+// beyond the above, the Peer / CAB stages may arrive as "Peer Approval" or
+// "CAB Approval". An Emergency change has a single CAB stage; "ECAB Approval" /
+// "Emergency CAB" only remain on Emergency changes raised before ECAB was retired,
+// and are still tolerated (and shown as "ECAB Approval"). Labelled by
 // `approvalStageLabel` in `changeRequests.ts`.
 
 /** Who a change-request approval stage is assigned to. */
@@ -2951,7 +3030,8 @@ export interface BeCreateChangeRequestPayload {
   priority?: BeChangeRequestPriority;
   impact?: BeChangeRequestImpact;
   /** Required: one of "normal" | "standard" | "emergency" (the create form
-   * offers exactly these three). Drives the approval flow server-side. */
+   * offers exactly these three). Drives the approval flow server-side: Normal =
+   * Peer then CAB, Standard = none, Emergency = a single CAB stage. */
   type: BeChangeRequestType;
   state?: BeChangeRequestState;
   groupId?: string;
@@ -2980,10 +3060,12 @@ export interface BeCreateChangeRequestPayload {
   /** "Implementation Plan visible to customers" in this portal's UI. */
   isPlanningVisibleToCustomers?: boolean;
   /** "Customer Approval" checkbox: adds a customer approval step after
-   * internal approval, before scheduling. The create form always sends it. */
+   * internal approval, before scheduling. The create form always sends it
+   * (`false` for an Emergency change, which proceeds without customer consent). */
   customerApprovalRequired?: boolean;
   /** "Customer Review" checkbox: adds a customer review step after Review,
-   * before closing. The create form always sends it. */
+   * before closing. The create form always sends it (`false` for an Emergency
+   * change, which proceeds without customer consent). */
   customerReviewRequired?: boolean;
 }
 
@@ -3275,6 +3357,26 @@ export interface BePatchChangeRequestPayload {
   /** Customer Review checkbox. The backend refuses (400) a change once the CR
    * has reached `customer_review`, `closed`, `rollback` or `canceled`. */
   customerReviewRequired?: boolean;
+  /**
+   * ACCEPT the customer's proposed time (WSO2's answer, the previous system's "Agree"):
+   * the proposal is applied to the planned window (the planned length kept) and the
+   * change goes straight to Scheduled in one step. No CAB approval, no new customer
+   * request: the change itself has not changed. Only `"agree"` exists (to decline a
+   * proposal, Re-schedule with `state: "authorize"`: the previous system's "Disagree"), and it
+   * cannot be combined with any field but the three `expected*` ones below, which
+   * are REQUIRED here (`expectedCustomerUpdatedOn`) or expected (the planned
+   * window: stale = 409). Staff only; never a state, so the no-Bypass rule is untouched.
+   */
+  confirmCustomerUpdatedDate?: "agree";
+  /**
+   * The customer's proposal the page is showing (`customerProposal.startOn`,
+   * as received): the version check of every staff answer to it (Accept, or a
+   * Re-schedule that counters or declines). Required with `confirmCustomerUpdatedDate`.
+   */
+  expectedCustomerUpdatedOn?: string;
+  /** The planned window the page is showing (as received); a changed window is a 409, never an answer to a time its reader did not see. */
+  expectedPlannedStartOn?: string;
+  expectedPlannedEndOn?: string;
 }
 
 /** `PATCH /change-requests/{id}` response — the touched identifiers. */

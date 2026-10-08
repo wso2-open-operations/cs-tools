@@ -88,7 +88,7 @@ session per role. Mint both against the running local stack (webapp on
 | Role (`storageState/<role>.json`) | `E2E_AUTH_EMAIL` | Who |
 |---|---|---|
 | `crApprover` | `jane.doe@example.com` | internal; the requester persona (in no approval group) |
-| `crInternalApprover` | `alice.perera@example.com` | internal; peer / CAB / ECAB approver (Bob Fernando and Carol Silva hold the same seats) |
+| `crInternalApprover` | `alice.perera@example.com` | internal; peer / CAB approver (Bob Fernando and Carol Silva hold the same seats) |
 
 ```bash
 mint() { # mint <role> <email local part>
@@ -120,6 +120,12 @@ CSM page as an internal user:
   `E2E_ENTITY_SERVICE_URL` and `E2E_CUSTOMER_PORTAL_URL` override its `http://localhost:9100`
   / `:8081` / `:3000` defaults);
 - against the fake API, it is `api.customerDecides(contact, decision)`.
+
+A customer's PROPOSED TIME (a new start; the change then waits in Customer Approval for WSO2's answer) is applied the same
+way: `proposeAsCustomer(crId, email, { plannedStartOn })` in `utils/customerPortalDecision.ts` on the real stack
+(`PATCH /change-requests/{id}` to entity-service with the contact's own ID token, as the customer portal's backend sends it),
+`api.customerProposes(contact, startOn)` against the fake API. `api.seedProposal(...)` seeds the shapes that must NOT read as a
+proposal ("a customer's proposed time (mocked backend)" in the lifecycle spec).
 
 Staff never record a customer's approval or review, so there is nothing for a spec to drive on the CSM side
 either: no "Bypass customer approval" / "Bypass customer review" entry exists in the "Change state" menu, enabled or

@@ -71,6 +71,92 @@ func TestNormalizePlannedTimestamp_RefusesWhatPostgresWouldHaveAccepted(t *testi
 	}
 }
 
+// The mirror's conversion hands back what it cannot read exactly as it
+// was typed -- right for a window the repository has already judged. The data source that talks to the
+// previous system directly forwards what nobody has judged, so it has its own, which refuses instead
+// (TestStrictMirrorPlannedTimestamp).
+func TestMirrorPlannedTimestamp_HandsBackWhatItCannotRead(t *testing.T) {
+	for in, want := range map[string]string{
+		"2030-03-01T14:30:00+05:30": "2030-03-01 09:00:00",
+		"2030-03-01 09:00:00":       "2030-03-01 09:00:00",
+		"2030-03-01 09:00:00.5":     "2030-03-01 09:00:00", // PostgreSQL accepted it: whole seconds
+		"2030-03-01 9:00:00":        "2030-03-01 09:00:00", // PostgreSQL accepted it: one digit of hour
+		"1999-01-01 00:00:00.5":     "1999-01-01 00:00:00.5",
+		"infinity":                  "infinity",
+	} {
+		if got := PlannedTimestampForServiceNow(in); got != want {
+			t.Errorf("the mirror's conversion of %q = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestStrictMirrorPlannedTimestamp(t *testing.T) {
+	for in, want := range map[string]string{
+		"2030-03-01 09:00:00":       "2030-03-01 09:00:00",
+		"2030-03-01T09:00:00Z":      "2030-03-01 09:00:00",
+		"2030-03-01T14:30:00+05:30": "2030-03-01 09:00:00",
+		"2030-03-01T04:00:00-05:00": "2030-03-01 09:00:00",
+		// An RFC 3339 value is an instant, whatever its fraction: converted to whole seconds.
+		"2030-03-01T09:00:00.5Z": "2030-03-01 09:00:00",
+		"2000-01-01 00:00:00":    "2000-01-01 00:00:00",
+		"2100-12-31 23:59:59":    "2100-12-31 23:59:59",
+		"2100-12-31T23:59:59Z":   "2100-12-31 23:59:59",
+		// A zoneless value the parser takes although it is not spelled as the layout is, and that has NO
+		// fraction: accepted and written back in the layout, as the PostgreSQL data source reads it (it
+		// was refused as "no fractional second" when any difference in the spelling counted as one).
+		"2030-03-01 9:00:00":   "2030-03-01 09:00:00", // one digit of hour
+		"2030-03-01 0:00:00":   "2030-03-01 00:00:00", // ...midnight
+		"2030-03-01  09:00:00": "2030-03-01 09:00:00", // two spaces between the date and the time
+		"2030-03-01   9:05:07": "2030-03-01 09:05:07", // both
+	} {
+		got, err := StrictMirrorPlannedTimestamp(in)
+		if err != nil || got != want {
+			t.Errorf("StrictMirrorPlannedTimestamp(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+
+	for in, want := range map[string]error{
+		// A zoneless value with a fractional second: Go's parser takes it, the previous system's layout has none.
+		"2030-03-01 09:00:00.5":         ErrPlannedTimestampFraction,
+		"2030-03-01 09:00:00.000":       ErrPlannedTimestampFraction,
+		"2030-03-01 09:00:00,5":         ErrPlannedTimestampFraction,
+		"1999-01-01 00:00:00.5":         ErrPlannedTimestampFraction, // the fraction is named before the year: it is the first thing wrong
+		"2030-03-01 09:00:00.123456789": ErrPlannedTimestampFraction,
+		"2030-03-01 9:00:00.5":          ErrPlannedTimestampFraction, // an odd spelling does not hide a real fraction
+		"2030-03-01  09:00:00,000":      ErrPlannedTimestampFraction,
+		// A year outside 2000 to 2100, in either layout (the instant's year, in UTC).
+		"1999-01-01 00:00:00":       ErrPlannedTimestampYear,
+		"2101-01-01 00:00:00":       ErrPlannedTimestampYear,
+		"1999-12-31T23:59:59Z":      ErrPlannedTimestampYear,
+		"2101-01-01T00:00:00Z":      ErrPlannedTimestampYear,
+		"2000-01-01T00:00:00+14:00": ErrPlannedTimestampYear, // 1999-12-31T10:00Z
+		// Not a planned date-time at all.
+		"infinity": ErrPlannedTimestampFormat, "-infinity": ErrPlannedTimestampFormat, "now": ErrPlannedTimestampFormat,
+		"today": ErrPlannedTimestampFormat, "tomorrow": ErrPlannedTimestampFormat, "epoch": ErrPlannedTimestampFormat,
+		"2030-03-01":                ErrPlannedTimestampFormat,
+		"2030-03-01T09:00:00":       ErrPlannedTimestampFormat,
+		"2030-03-01 09:00:00 UTC":   ErrPlannedTimestampFormat,
+		"2030-03-01 09:00:00+05:30": ErrPlannedTimestampFormat,
+		" 2030-03-01T09:00:00Z":     ErrPlannedTimestampFormat,
+		"2030-02-30 09:00:00":       ErrPlannedTimestampFormat,
+		"":                          ErrPlannedTimestampFormat,
+		// What the parser does NOT take in the layout's other fields, so there is no odd spelling of those
+		// to accept: a one-digit month, day, minute or second, a two-digit year, a trailing space or dot.
+		"2030-3-01 09:00:00":   ErrPlannedTimestampFormat,
+		"2030-03-1 09:00:00":   ErrPlannedTimestampFormat,
+		"2030-03-01 09:0:00":   ErrPlannedTimestampFormat,
+		"2030-03-01 09:00:0":   ErrPlannedTimestampFormat,
+		"30-03-01 09:00:00":    ErrPlannedTimestampFormat,
+		"2030-03-01 09:00:00 ": ErrPlannedTimestampFormat,
+		"2030-03-01 09:00:00.": ErrPlannedTimestampFormat,
+	} {
+		got, err := StrictMirrorPlannedTimestamp(in)
+		if !errors.Is(err, want) || got != "" {
+			t.Errorf("StrictMirrorPlannedTimestamp(%q) = %q, %v; want %v", in, got, err, want)
+		}
+	}
+}
+
 func TestNormalizePatchAndCreateWindows(t *testing.T) {
 	req, err := normalizePatchPlannedWindow(domain.PatchChangeRequestRequest{PlannedStartOn: strp("2030-03-01 09:00:00"), PlannedEndOn: strp("2030-03-01T16:30:00+05:30")})
 	if err != nil || *req.PlannedStartOn != "2030-03-01T09:00:00Z" || *req.PlannedEndOn != "2030-03-01T11:00:00Z" {
@@ -132,7 +218,7 @@ func TestRedactInternalApprovalStages(t *testing.T) {
 	stages := []changeRequestApprovalStageRow{
 		{checkpointLabel: label(approvalStageLabelPeer)},
 		{checkpointLabel: label(approvalStageLabelCAB)},
-		{checkpointLabel: label(approvalStageLabelECAB)},
+		{checkpointLabel: label(approvalStageLabelHistoricECAB)}, // no longer written; still shown to a customer as an internal stage
 		{checkpointLabel: label(approvalStageLabelReview)},
 		{checkpointLabel: label(approvalStageLabelCustomerApproval)},
 		{checkpointLabel: label(approvalStageLabelCustomerReview)},

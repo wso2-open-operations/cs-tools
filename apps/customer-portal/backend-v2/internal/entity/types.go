@@ -1474,10 +1474,16 @@ type CaseActivity struct {
 
 // SearchCaseActivitiesRequest is the input for POST /cases/{id}/activities/search.
 // CaseID is populated from the URL path parameter and is not part of the JSON body.
+// ExcludeWorkNotes is always forced true by the handler (CaseHandler.SearchCaseActivities),
+// never left to the caller's own request body: an internal WORK_NOTE comment must never
+// reach the customer portal, in the Total count or the page itself -- see that handler's
+// own comment for why this can't be left as a client-side array filter alone (it used to
+// filter work notes out of the array but still forward entity-service's unfiltered Total).
 type SearchCaseActivitiesRequest struct {
 	CaseID              string     `json:"-"`
 	Pagination          Pagination `json:"pagination"`
 	IncludeFieldChanges *bool      `json:"includeFieldChanges,omitempty"`
+	ExcludeWorkNotes    *bool      `json:"excludeWorkNotes,omitempty"`
 }
 
 // SearchCaseActivitiesResponse is entity-service's response for POST /cases/{id}/activities/search.
@@ -1984,6 +1990,33 @@ type ChangeRequest struct {
 	// compute it (the ServiceNow data source, a staff caller, a failed check).
 	// Passed through unchanged -- see dto.ChangeRequestDetails.
 	CustomerCanAnswer *bool `json:"customerCanAnswer,omitempty"`
+
+	// CustomerProposal is entity-service's view of a time a customer proposed for the change
+	// request (kept as the proposed start and its confirmation, customer_updated_on /
+	// customer_updated_date_confirmation): the proposed start, whether WSO2 has answered, and -- for
+	// the signed-in customer only -- whether the proposal is theirs. Only the fields a customer may
+	// see are decoded here: the proposer's name and email, whether WSO2 could accept it and why not
+	// are staff facts that entity-service withholds from a customer and that this type has no field
+	// for, so they cannot reach the portal whatever the payload says. Absent when no time was
+	// proposed.
+	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
+}
+
+// ChangeRequestCustomerProposal is the customer-visible part of entity-service's
+// customerProposal (see ChangeRequest.CustomerProposal).
+type ChangeRequestCustomerProposal struct {
+	// StartOn is the proposed plan start (RFC 3339); EndOn the proposed end, the start plus the
+	// planned length, present only while the proposal waits for WSO2.
+	StartOn string  `json:"startOn"`
+	EndOn   *string `json:"endOn,omitempty"`
+	// Answer is "pending" (waits for WSO2), "agreed" (WSO2 accepted it: the change is scheduled
+	// for it), "disagreed" (WSO2 asked for another time: the planned window is the new one) or
+	// "unanswered" (history).
+	Answer string `json:"answer"`
+	// ProposerRecorded / ProposedByViewer: while pending, whether the proposer can be named at
+	// all, and whether it is the signed-in customer.
+	ProposerRecorded *bool `json:"proposerRecorded,omitempty"`
+	ProposedByViewer *bool `json:"proposedByViewer,omitempty"`
 }
 
 // PatchChangeRequestRequest is the full field set entity-service accepts for

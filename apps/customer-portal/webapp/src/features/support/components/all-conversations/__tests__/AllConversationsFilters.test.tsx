@@ -36,7 +36,7 @@ describe("AllConversationsFilters", () => {
       </ThemeProvider>,
     );
 
-    fireEvent.mouseDown(screen.getByLabelText(/state/i));
+    fireEvent.mouseDown(screen.getByLabelText(/status/i));
     fireEvent.click(screen.getByText("Open"));
     expect(onFilterChange).toHaveBeenCalledWith("stateId", "open");
   });

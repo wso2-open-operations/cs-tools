@@ -1,8 +1,9 @@
 # GitHub integration — deployment and post-deploy test
 
 What to configure, what to point where, and how to prove it works after a
-deploy. Replaces ServiceNow's `[GitHub Integration]` flows and the per-repository
-`servicenow-config.yml` that hardcoded an account sys_id in each customer repo.
+deploy. Replaces ServiceNow's `[GitHub Integration]` flows. Each repository still
+declares its own account and project in `.github/servicenow-config.yml`, the
+file ServiceNow's integration reads (§6).
 
 **Status:** code merged (#1827, #1918, #1919). One fix outstanding — see
 "Before production". Not yet reachable from GitHub in any deployed environment.
@@ -43,7 +44,8 @@ an error, which is the single most confusing failure mode here.
 |---|---|---|
 | `GITHUB_INTEGRATION_ENABLED` | yes | Exactly `true`. |
 | `GITHUB_WEBHOOK_SECRET` | yes | `openssl rand -hex 32`. This *is* the endpoint's authentication. The same value goes in every repository's webhook settings. |
-| `GITHUB_TOKEN` | yes | Needs **`repo` scope** — outbound calls `POST /repos/{owner}/{repo}/dispatches`. |
+| `GITHUB_TOKEN` | yes | Needs **`repo` scope** — outbound calls `POST /repos/{owner}/{repo}/dispatches`, and inbound reads each repository's mapping file (fine-grained: **Contents: read**). |
+| `GITHUB_REPO_CONFIG_PATH` | no | The mapping file in each repository, default **`.github/servicenow-config.yml`** (§6). |
 | `GITHUB_INTEGRATION_LOGIN` | yes | The login this service raises issues under, from a case. **Not** `github-actions[bot]` — see §3. |
 | `CSM_PORTAL_BASE_URL` | yes | **Must be the Postgres-backed portal.** Every outbound comment embeds a link built from this; a host backed by another database cannot resolve the record id. |
 | `M2M_CLIENT_IDS` | yes* | Must include any client calling `POST /github/service-requests`; that endpoint rejects everything else. |
@@ -83,8 +85,10 @@ cleanly says nothing about what a migration contained:
 SELECT 1 FROM information_schema.columns
  WHERE table_name='work_item' AND column_name='github_issue_number';
 
--- one record per issue, per account (0114)
-SELECT 1 FROM pg_indexes WHERE indexname='work_item_account_github_issue_uniq';
+-- one record per issue: per repository for a record that carries its
+-- repository (0206), per account for one that does not (0116)
+SELECT indexname FROM pg_indexes
+ WHERE indexname IN ('work_item_repo_github_issue_uniq', 'work_item_account_github_issue_uniq');
 
 -- numbering for issue-raised records (0113)
 SELECT proname FROM pg_proc WHERE proname LIKE 'next_github_service_request%';
@@ -110,27 +114,37 @@ against a column that no longer exists.
 
 Nothing reaches GitHub until **both** are open:
 
-1. the account has an **active row** in `account_github_repo`, and
+1. the work item knows its repository — its own `github_owner`/`github_repository`
+   (set when it was raised from an issue, 0206), else an **active row** in
+   `account_github_repo` for its account — and
 2. the work item carries a **`github_issue_number`**.
 
-So deploying with an empty `account_github_repo` is inert, however many records
-exist. Seeding is what turns it on, one account at a time.
+A record raised from an issue always carries its repository, so for those gate 1
+is open from creation. Records from before 0206 have none and still need the row.
 
-Nothing about the repository, account, project or team is hardcoded anywhere in
-the service. The account is resolved from the database on **every delivery**,
-case-insensitively, honouring `is_active` — so repointing a repository is one
-`UPDATE`, with no redeploy and no change in the customer's repository.
+Nothing about the repository, account, project or team is hardcoded in the
+service. A repository's account and project come from **its own file**, read on
+delivery (cached five minutes); a repository without the file falls back to
+`account_github_repo`, case-insensitively, honouring `is_active`.
 
 ## 6. Per-repository setup
 
-1. Insert the mapping:
-   ```sql
-   INSERT INTO account_github_repo (id, created_on, updated_on, created_by,
-                                    updated_by, account_id, owner, repository, is_active)
-   SELECT gen_random_uuid(), NOW(), NOW(), 'onboarding', 'onboarding',
-          a.id, '<owner>', '<repo>', TRUE
-     FROM account a WHERE a.name = '<account name>';
+1. Add (or keep) `.github/servicenow-config.yml` in the repository — the file
+   ServiceNow's `servicenow_create_case.yml` already requires:
+   ```yaml
+   case:
+     account: "3587f161c3ba8f10af2f404599013160"   # account sys_id or CSM UUID
+     project: "01b7f961c3ba8f10af2f40459901313d"   # project sys_id or CSM UUID
    ```
+   Both are required. A sys_id is the migrated record's UUID with the dashes
+   removed, so the existing files work as they are. The project must belong to
+   the account, or the issue is skipped with that reason. Records raised from the
+   repository get both, so their comment emails and portal visibility work like
+   any other service request's. `wso2-enterprise/choreo` and
+   `wso2-enterprise/wso2cloud` already carry it.
+
+   A repository without the file can still be mapped by an `account_github_repo`
+   row, as before — but its records get **no project**.
 2. Install in the customer's repository: `csm_validate_issue.yml`,
    `sn_case_updates.yml`, `sn_comment_to_github.yml`, `sn_cr_notifier.yml`,
    `labels.yml`, and the issue templates.
@@ -186,6 +200,11 @@ routes unmount. To stop pushes without a deploy:
 ```sql
 UPDATE account_github_repo SET is_active = FALSE;   -- closes gate 1
 ```
+
+That closes gate 1 only for records **without** their own repository. A record
+raised from an issue after 0206 carries its repository and keeps pushing; to stop
+one repository without a deploy, remove its webhook (inbound) and its
+`repository_dispatch` workflows (outbound).
 
 Queued rows stay queued and resume when re-enabled. Schema rollback is a new
 forward migration under this repo's current convention (single forward-only

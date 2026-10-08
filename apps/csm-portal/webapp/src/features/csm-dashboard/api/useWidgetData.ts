@@ -17,6 +17,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
+import { postCountingOnly } from "@api/backend/postCountingOnly";
 import type { BeWidgetResourceType, BeWidgetShape } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import {
@@ -188,6 +189,14 @@ export function useWidgetData({
       ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA,
       widgetId,
       resourceType,
+      // `shape` is part of the key, not just `limit`/`effectiveOffset`: a
+      // shape: "count" search and a shape: "list" one with listLimit: 1
+      // otherwise collide on an identical key (both resolve limit to 1,
+      // offset to 0) -- the count search's response caches `items: []`
+      // (count tiles never read it), so a widget switched from count to
+      // list in the Dashboard Builder editor would render an empty table
+      // until that cache entry went stale, despite real rows existing.
+      shape,
       resolvedFilters,
       limit,
       effectiveOffset,
@@ -237,11 +246,27 @@ export function useWidgetData({
               pagination: { offset: effectiveOffset, limit },
               ...(effectiveSortBy ? { sortBy: effectiveSortBy } : {}),
             };
-        const res = await api.post<Record<string, unknown>, Record<string, unknown>>(
-          config.searchEndpoint,
-          body,
-          { signal },
-        );
+        // A shape: "count" widget only ever reads `total` off this response
+        // (`WidgetData.items` is only rendered for shape: "list"), so for the
+        // one search endpoint that supports it (the case-family endpoint,
+        // `/cases/search` -- never a `buildSearchRequestBody` override, whose
+        // contract this flag was never designed against), skip the page
+        // query entirely via `countOnly`. `postCountingOnly` falls back to
+        // the plain search itself if the entity service predates the field.
+        const canSkipPage =
+          shape !== "list" && config.searchEndpoint === "/cases/search" && !config.buildSearchRequestBody;
+        const res = canSkipPage
+          ? await postCountingOnly<Record<string, unknown>, Record<string, unknown>>(
+              api,
+              config.searchEndpoint,
+              body,
+              { signal },
+            )
+          : await api.post<Record<string, unknown>, Record<string, unknown>>(
+              config.searchEndpoint,
+              body,
+              { signal },
+            );
         if (config.parseSearchResponse) {
           return config.parseSearchResponse(res);
         }

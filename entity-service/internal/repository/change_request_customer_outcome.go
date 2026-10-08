@@ -57,7 +57,7 @@ import (
 //   - PATCH {plannedStartOn, plannedEndOn} in Customer Approval is the process
 //     diagram's "Time Change" loop started by the customer: the same Re-schedule
 //     a WSO2 user triggers with {state: authorize, ...} (new window applied, a
-//     fresh CAB / ECAB approval, the customer asked again once it is given). Only
+//     fresh CAB approval, the customer asked again once it is given). Only
 //     a contact the customer's approval has been asked of (a REQUESTED row on the
 //     live stage -- the same test as customerCanAnswer) may propose; the proposed
 //     time must be a date-time still to come.
@@ -76,7 +76,7 @@ import (
 // anything but the customer's own answer or a proposed window.
 const externalPatchRefusal = "customers can only record the customer's approval or review (isCustomerApproved / isCustomerReviewed, optionally with the expectedPlannedStartOn / expectedPlannedEndOn they were shown) or propose a new implementation time (plannedStartOn / plannedEndOn) on a change request; no other field can be changed"
 
-// isExternalCaller reports whether ctx carries the identity of a customer or
+// IsExternalCaller reports whether ctx carries the identity of a customer or
 // partner: an identity was resolved for the request and it is neither
 // unrestricted (internal staff, an internal client credential) nor staff who
 // also hold an external record (SearchScope.HasInternalAccess -- "external wins"
@@ -84,7 +84,13 @@ const externalPatchRefusal = "customers can only record the customer's approval 
 // no identity is not external: Scoped refuses such a context outright, and the
 // callers that legitimately have none (tests, background jobs) stamp the system
 // identity.
-func isExternalCaller(ctx context.Context) bool {
+//
+// Exported because the service layer asks the SAME question: the best-effort
+// mirror of a PATCH to the previous system is decided from who sent it (an external caller's
+// window is a proposal and is never mirrored) and not from a read of the committed
+// row, which runs after the commit, in another transaction, and may fail
+// (changeRequestService.PatchChangeRequest, mirrorOfTheTimeConversation).
+func IsExternalCaller(ctx context.Context) bool {
 	scope, ok := CallerIdentityFromContext(ctx)
 	return ok && !scope.Unrestricted && !scope.HasInternalAccess
 }
@@ -169,17 +175,71 @@ func answerPatch(spec *customerStageSpec, approved bool, flag string, req domain
 // security a caller who is not a member of the project updates no row, which is
 // reported as not found, exactly as the ordinary PATCH reports it.
 func lockCustomerAnswerRow(ctx context.Context, tx pgx.Tx, id, actorEmail string) (*string, error) {
-	var projectID *string
+	locked, err := lockWorkItemKeepingWriter(ctx, tx, id, actorEmail)
+	if err != nil {
+		return nil, err
+	}
+	return locked.projectID, nil
+}
+
+// lastWriter is work_item.updated_by of a change request as an act found it, before its own
+// write replaced it with the caller. read says the column was read at all: a NULL or blank
+// column is a writer who is nobody (email ""), which must never be mistaken for "not looked"
+// (a migrated row may carry no updated_by).
+type lastWriter struct {
+	email string
+	read  bool
+}
+
+// newLastWriter is a writer that was read (a NULL column reads as nobody).
+func newLastWriter(updatedBy *string) lastWriter {
+	return lastWriter{email: strings.TrimSpace(stringOrEmpty(updatedBy)), read: true}
+}
+
+// lockedWorkItem is what lockWorkItemKeepingWriter hands back.
+type lockedWorkItem struct {
+	// projectID is the change request's project (work_item.project_id), nil when it has none.
+	projectID *string
+	// priorWriter is work_item.updated_by as it stood BEFORE this transaction's own
+	// write, i.e. the last writer the caller found. The write below replaces it with the
+	// caller, so a reader that needs "who wrote the change before me" has to take it from
+	// here: after the call the column only ever says the caller (see resolveProposer).
+	priorWriter lastWriter
+}
+
+// lockWorkItemKeepingWriter is lockCustomerAnswerRow that also returns the writer it
+// found: it locks the work_item row (FOR NO KEY UPDATE, the strength every PATCH's own
+// UPDATE takes), reads who wrote it last, then bumps updated_on / updated_by as the
+// caller. The read and the bump are two statements on purpose: a statement that both
+// locks and rewrites the row cannot hand back the value it replaced on every supported
+// server version, and the lock makes the pair atomic against every other writer.
+// Under row-level security a caller who may not update the row locks none, which is
+// reported as not found like everywhere else.
+func lockWorkItemKeepingWriter(ctx context.Context, tx pgx.Tx, id, actorEmail string) (lockedWorkItem, error) {
+	var locked lockedWorkItem
+	var updatedBy *string
 	err := tx.QueryRow(ctx,
-		`UPDATE work_item SET updated_on = NOW(), updated_by = $2
-		 WHERE id = $1 AND type = 'CHANGE_REQUEST' RETURNING project_id::text`, id, actorEmail).Scan(&projectID)
+		`SELECT project_id::text, updated_by FROM work_item
+		 WHERE id = $1 AND type = 'CHANGE_REQUEST' FOR NO KEY UPDATE`, id).Scan(&locked.projectID, &updatedBy)
 	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {
-		return nil, &apierror.NotFoundError{Msg: "change request not found"}
+		return lockedWorkItem{}, &apierror.NotFoundError{Msg: "change request not found"}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("answer change request: lock work item: %w", err)
+		return lockedWorkItem{}, fmt.Errorf("answer change request: lock work item: %w", err)
 	}
-	return projectID, nil
+	locked.priorWriter = newLastWriter(updatedBy)
+	// The write is the proof of access the callers rely on: a row the caller may read
+	// but not update (row-level security) updates nothing here.
+	err = tx.QueryRow(ctx,
+		`UPDATE work_item SET updated_on = NOW(), updated_by = $2
+		 WHERE id = $1 AND type = 'CHANGE_REQUEST' RETURNING project_id::text`, id, actorEmail).Scan(&locked.projectID)
+	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {
+		return lockedWorkItem{}, &apierror.NotFoundError{Msg: "change request not found"}
+	}
+	if err != nil {
+		return lockedWorkItem{}, fmt.Errorf("answer change request: lock work item: %w", err)
+	}
+	return locked, nil
 }
 
 // requireRegisteredContact refuses (403) a caller who is not a REGISTERED
@@ -337,7 +397,9 @@ func customerHasRequestedRow(ctx context.Context, q crQuerier, stageID, userID s
 //   - the change request is legacy (created before the cutover instant, or no
 //     cutover is configured): a change request created after it was asked
 //     through our flow, or was never meant to be seen;
-//   - it is in Customer Approval or Customer Review right now;
+//   - it is in Customer Approval or Customer Review right now (whatever its type: an
+//     Emergency change is never taken there by this flow, but one that is there is
+//     waiting for the customer like any other);
 //   - no live customer stage exists for that state (an existing live stage is
 //     never touched: provisionCustomerStage would cancel one whose contacts
 //     changed, which is not this function's business);
@@ -349,7 +411,7 @@ func customerHasRequestedRow(ctx context.Context, q crQuerier, stageID, userID s
 // ServiceNow data source never reaches it, and nothing of csm-sync-service's
 // own rows is changed.
 func ensureCustomerStageForLegacy(ctx context.Context, tx pgx.Tx, id, actorEmail string) error {
-	if !isExternalCaller(ctx) {
+	if !IsExternalCaller(ctx) {
 		return nil
 	}
 	legacy, state, projectID, ok, err := crVisibilityFromContext(ctx).legacyAndState(ctx, tx, id)
@@ -384,8 +446,9 @@ func ensureCustomerStageForLegacy(ctx context.Context, tx pgx.Tx, id, actorEmail
 // stage created and would be one of the people asked in it. It checks what
 // provisionCustomerStage checks, in the same terms, and never writes:
 //
-//   - the change request is legacy and waiting in the state spec belongs to
-//     (the caller has already seen there is no live stage);
+//   - the change request is legacy and waits in the state spec belongs to (the caller
+//     has already seen there is no live stage); its type does not matter -- an Emergency
+//     change that is waiting for the customer is asked like any other;
 //   - no answer was ever given on a customer stage of that kind (a decided stage
 //     is never reopened);
 //   - the viewer is one of the project's registered contacts a stage would ask
@@ -493,24 +556,7 @@ func checkExpectedSchedule(ctx context.Context, tx pgx.Tx, id string, expectedSt
 		`SELECT CASE WHEN isfinite(start_on) THEN start_on END, CASE WHEN isfinite(end_on) THEN end_on END FROM change_request WHERE id = $1`, id).Scan(&start, &end); err != nil {
 		return fmt.Errorf("answer change request: read the planned window: %w", err)
 	}
-	same := func(want, got *time.Time) bool {
-		return want == nil || (got != nil && got.UTC().Truncate(time.Microsecond).Equal(*want))
-	}
-	if same(expectedStart, start) && same(expectedEnd, end) {
-		return nil
-	}
-	show := func(t *time.Time) string {
-		if t == nil {
-			return "not set"
-		}
-		return t.UTC().Format(time.RFC3339)
-	}
-	now := "no planned time is set"
-	if start != nil || end != nil {
-		now = fmt.Sprintf("%s to %s", show(start), show(end))
-	}
-	return &apierror.ConflictError{Code: apierror.CodeChangeRequestScheduleChanged, Msg: fmt.Sprintf(
-		"the planned implementation time of this change request changed after you opened it (it is now %s); read it again before giving your answer", now)}
+	return expectedScheduleConflict(start, end, expectedStart, expectedEnd, "read it again before giving your answer")
 }
 
 // markCustomerCanAnswer sets domain.ChangeRequest.CustomerCanAnswer for the
@@ -521,7 +567,7 @@ func checkExpectedSchedule(ctx context.Context, tx pgx.Tx, id string, expectedSt
 // when the check itself fails: the detail read is not worth failing for it, and
 // an absent field tells the client the answer is unknown rather than "no".
 func (r *changeRequestRepo) markCustomerCanAnswer(ctx context.Context, cr *domain.ChangeRequest) {
-	if !isExternalCaller(ctx) {
+	if !IsExternalCaller(ctx) {
 		return
 	}
 	scope, _ := CallerIdentityFromContext(ctx)
@@ -640,95 +686,4 @@ func answerCustomerStageViaPatch(ctx context.Context, tx pgx.Tx, id string, p cu
 		return "", err
 	}
 	return id, nil
-}
-
-// prepareCustomerProposal checks an external caller's proposed implementation
-// window and turns the request into the Re-schedule it is: patchChangeRequestTx
-// carries on with {state: authorize, plannedStartOn?, plannedEndOn?}, the exact
-// request a WSO2 user sends to re-plan a change in Customer Approval, so the new
-// window, the fresh CAB / ECAB stage (or, for a Standard change, the customer
-// asked again) and the "Time Change = Yes" check all come from the one
-// implementation.
-//
-// Refused before anything is written: a change request that is not visible
-// (404), a caller who is not a registered contact of its project (403), one who
-// is the change's creator (403), a change not in Customer Approval (409 -- the
-// customer's approval is the only place a new time can be proposed), a change
-// nobody has been asked to approve (409), a registered contact the approval was
-// not asked of (403: proposing cancels the asked contacts' pending approvals, so
-// it is open to exactly those who could answer -- customerCanAnswer's test), a
-// window that is not still to come (400), and a change on hold (409).
-func prepareCustomerProposal(ctx context.Context, tx pgx.Tx, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.PatchChangeRequestRequest, error) {
-	projectID, err := lockCustomerAnswerRow(ctx, tx, id, actorEmail)
-	if err != nil {
-		return req, err
-	}
-	if err := requireRegisteredContact(ctx, tx, projectID, actorEmail); err != nil {
-		return req, err
-	}
-	gates, err := lockChangeRequestGateSnapshot(ctx, tx, id)
-	if err != nil {
-		return req, err
-	}
-	if gates.state != crStateCustomerApproval {
-		return req, &apierror.ConflictError{Code: apierror.CodeChangeRequestNotProposable, Msg: fmt.Sprintf(
-			"a new implementation time can only be proposed while the change request is in Customer Approval, but it is in %s",
-			changeRequestStateDisplayName(stateForMessage(gates.state)))}
-	}
-
-	userID, err := customerApproverUserID(ctx, tx, id, actorEmail)
-	if err != nil {
-		return req, err
-	}
-	creatorIDs, err := changeRequestCreatorsForApprover(ctx, tx, id, userID, actorEmail)
-	if err != nil {
-		return req, fmt.Errorf("propose implementation time: %w", err)
-	}
-	if err := approverDecisionBlock(ctx, tx, userID, creatorIDs, stageKindCustomerApproval); err != nil {
-		return req, err
-	}
-
-	// See answerCustomerStageViaPatch: a legacy change request waiting in
-	// Customer Approval with nobody asked is given its live stage first, so the
-	// proposal (which is also the one act that records the proposer as asked,
-	// and so keeps the change request visible to them in Authorize) has someone
-	// to be proposed to.
-	if err := ensureCustomerStageForLegacy(ctx, tx, id, actorEmail); err != nil {
-		return req, err
-	}
-	live, err := liveCustomerStageForState(ctx, tx, id, gates.state)
-	if err != nil {
-		return req, fmt.Errorf("propose implementation time: %w", err)
-	}
-	if live == nil {
-		return req, &apierror.ConflictError{Code: apierror.CodeChangeRequestNotProposable, Msg: "no customer approval is pending on this change request: it has not been requested from the project's registered contacts, so there is nobody for a new implementation time to be proposed to here"}
-	}
-	asked, err := customerHasRequestedRow(ctx, tx, live.stageID, userID)
-	if err != nil {
-		return req, fmt.Errorf("propose implementation time: %w", err)
-	}
-	if !asked {
-		return req, &apierror.ForbiddenError{Code: apierror.CodeChangeRequestNotAsked, Msg: "only members of the customer group (the registered contacts of this change request's project) who have been asked for the customer's approval of this change request can propose a new implementation time for it"}
-	}
-	now := time.Now()
-	if err := requireFutureWindow(now, req.PlannedStartOn, req.PlannedEndOn); err != nil {
-		return req, err
-	}
-	// A proposal that names only an end keeps the stored start: if that has gone
-	// the window would still begin in the past, so the start must be proposed too.
-	if err := requireFutureEffectiveStart(ctx, tx, id, now, req.PlannedStartOn); err != nil {
-		return req, err
-	}
-
-	var onHold *bool
-	if err := tx.QueryRow(ctx, `SELECT is_on_hold FROM change_request WHERE id = $1`, id).Scan(&onHold); err != nil {
-		return req, fmt.Errorf("propose implementation time: read on-hold state: %w", err)
-	}
-	if onHold != nil && *onHold {
-		return req, &apierror.ConflictError{Code: apierror.CodeChangeRequestOnHold, Msg: "this change request is on hold, so a new implementation time cannot be proposed now"}
-	}
-
-	reschedule := domain.ChangeRequestStateAuthorize
-	req.State = &reschedule
-	return req, nil
 }

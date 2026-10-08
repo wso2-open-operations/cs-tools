@@ -77,6 +77,7 @@ const (
 	schedOtherTeam     = "schedother"
 	schedSreTeamKey    = "schedsrefixture"
 	schedLeadershipKey = "schedleadership"
+	schedBoardKey      = "schedboard"
 
 	// A Monday, so the weekday/weekend arithmetic below reads plainly.
 	schedMonday = "2026-09-21"
@@ -200,7 +201,7 @@ func newScheduleIntegrationRepo(t *testing.T) (ScheduleRepository, *pgxpool.Pool
 // teams, children first.
 func removeScheduleFixtures(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	teams := []string{schedTeamKey, schedOtherTeam, schedSreTeamKey, schedLeadershipKey}
+	teams := []string{schedTeamKey, schedOtherTeam, schedSreTeamKey, schedLeadershipKey, schedBoardKey}
 	users := []string{schedLeadID, schedMemberID, schedOtherID, schedAdminID, schedOutsiderID}
 	for _, stmt := range []string{
 		`DELETE FROM team_schedule_assignment_activity WHERE team_key = ANY($1) OR user_id = ANY($2::uuid[])`,
@@ -611,6 +612,45 @@ func TestScheduleIntegration_ManagementIsNotOnTheRota(t *testing.T) {
 	}
 	if len(own) != 1 {
 		t.Errorf("their own rota read = %d rows, want 1", len(own))
+	}
+}
+
+// A CRE-typed team that works no rota -- a change-request approval board the
+// directory sync brought in as a team -- is no team of the schedule's, so its
+// members are not listed on the roster under it. Given an ordinary-weekday
+// window it is one, which is how a new team is put on the rota.
+func TestScheduleIntegration_OnlyTeamsThatWorkARotaAreInTheCatalogue(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	mustExec(t, pool, `
+		INSERT INTO team (id, created_on, updated_on, created_by, updated_by, name, key, type)
+		VALUES (gen_random_uuid(), NOW(), NOW(), 'fixture', 'fixture', 'Sched Approval Board', $1, 'cre')
+		ON CONFLICT DO NOTHING`, schedBoardKey)
+	mustExec(t, pool, `
+		INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, role)
+		SELECT gen_random_uuid(), NOW(), NOW(), 'fixture', 'fixture', t.id, $2, 'engineer' FROM team t WHERE t.key = $1`,
+		schedBoardKey, schedOtherID)
+
+	listed := func() (board, abt bool) {
+		t.Helper()
+		cat, err := repo.Catalogue(ctx)
+		if err != nil {
+			t.Fatalf("Catalogue: %v", err)
+		}
+		for _, team := range cat.Teams {
+			board = board || team.Key == schedBoardKey
+			abt = abt || team.Key == schedTeamKey
+		}
+		return board, abt
+	}
+	if board, abt := listed(); board || !abt {
+		t.Fatalf("board listed=%v (want false), ABT listed=%v (want true)", board, abt)
+	}
+
+	mustExec(t, pool, `INSERT INTO team_schedule_team_default_shift (team_key, shift_code, created_by)
+		VALUES ($1, $2, 'fixture')`, schedBoardKey, shiftWithScope(t, pool, "CRE", "WEEKDAY"))
+	if board, _ := listed(); !board {
+		t.Fatal("a team given an ordinary-weekday window is still not listed")
 	}
 }
 

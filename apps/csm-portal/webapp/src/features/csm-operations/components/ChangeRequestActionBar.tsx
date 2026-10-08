@@ -31,6 +31,7 @@ import {
   changeRequestTransitionLabel,
   customerGateWithheldTargets,
   isDestructiveChangeRequestTransition,
+  pendingCustomerProposal,
   requestApprovalNeedsContactReason,
   requestApprovalNeedsProjectReason,
   rollbackPendingReviewReason,
@@ -56,7 +57,8 @@ const TARGET_CONFIG: Record<string, TargetConfig> = {
   // Plain Close, out of Review when no customer review is required. Out of
   // `customer_review` it is never offered: see `NEVER_OFFERED_TARGETS`.
   closed: { color: "primary", icon: <CheckCircle size={16} /> },
-  // Only ever rendered from `customer_approval` ("Re-schedule").
+  // Only ever rendered from `customer_approval`: "Re-schedule", or "Propose a different
+  // time" while a customer's proposed time waits for WSO2's answer.
   authorize: { color: "primary", icon: <CalendarClock size={16} /> },
   rollback: { color: "error", icon: <Undo2 size={16} /> },
   canceled: { color: "error", icon: <Ban size={16} /> },
@@ -97,8 +99,9 @@ const FORWARD_ORDER: readonly string[] = [
 
 /**
  * Actions shown as an outlined (secondary) button beside the primary one
- * rather than inside the overflow menu: `authorize` is "Re-schedule", the
- * non-destructive loop back from `customer_approval` (see `isOfferedTarget`).
+ * rather than inside the overflow menu: `authorize` is "Re-schedule" (or, with a
+ * customer's proposed time waiting, "Propose a different time"), the
+ * non-destructive Time Change loop out of `customer_approval` (see `isOfferedTarget`).
  */
 const SECONDARY_ORDER: readonly string[] = ["authorize"];
 
@@ -123,8 +126,13 @@ const MENU_ORDER: readonly string[] = [...FORWARD_ORDER, ...SECONDARY_ORDER, "ro
  * and Customer Review) and Cancel change. `scheduled` and `closed` below carry
  * the rule; the rest are older exclusions, kept for their own reasons.
  *
+ * "Accept proposed time" is not an exception to it and is not in this bar at all:
+ * it is the banner's own action, it applies the time the customer PROPOSED (the
+ * customer's own consent, kept in `customer_updated_on`), it is never a `state` in
+ * a PATCH, and nothing here records the customer's approval or review.
+ *
  * `scheduled` is never offered. A CR is moved to Scheduled automatically the
- * moment its approval is granted (CAB/ECAB, Standard's Request Approval, or the
+ * moment its approval is granted (CAB, Standard's Request Approval, or the
  * customer's own approval at Customer Approval). There is no manual "Schedule"
  * action anywhere, and none out of `customer_approval` either: that move is
  * the customer's approval.
@@ -150,8 +158,11 @@ const MENU_ORDER: readonly string[] = [...FORWARD_ORDER, ...SECONDARY_ORDER, "ro
  * Authorize with no approval behind it — the same audit hole as above, by a
  * different route. The one exception is keyed on the record's own state: from
  * `customer_approval` it means "Re-schedule" (the planned time changed, so the
- * change goes back through internal approval -- more approval, not less), and
- * the page collects the new planned window before sending it.
+ * customer is asked to approve the new time -- the change stays in Customer
+ * Approval and never goes back through CAB: the change itself has not changed),
+ * and the page collects the new planned window before sending it. The wire name
+ * stays `authorize` although nothing moves to Authorize any more: it is the
+ * contract of the CSM page, the BFF and the fakes, and renaming it breaks them for nothing.
  *
  * `rollback` is the failed-review off-ramp of the process diagram: a human
  * action ("Roll back"), but only from the two review states, `review` and
@@ -171,7 +182,7 @@ const NEVER_OFFERED_TARGETS: readonly string[] = ["customer_approval", "schedule
 const ROLLBACK_FROM_STATES: readonly string[] = ["review", "customer_review"];
 
 /**
- * `authorize` ("Re-schedule") is a manual action only from `customer_approval`;
+ * `authorize` ("Re-schedule" / "Propose a different time") is a manual action only from `customer_approval`;
  * `rollback` only from the two review states; `closed` anywhere but
  * `customer_review` (see `NEVER_OFFERED_TARGETS` for the rule behind it).
  * Everywhere else they are not offered.
@@ -230,6 +241,8 @@ interface BlockedReasonContext {
  * Project (`requestApprovalNeedsProjectReason`) with at least one registered contact
  * (`requestApprovalNeedsContactReason`, only where the page knows the project has
  * none: a requester-only project is the backend's refusal, shown in the error banner).
+ * Neither applies to an Emergency change: the backend ignores its customer boxes, so a
+ * stored tick there asks nobody and blocks nothing.
  *
  * `rollback` is blocked out of Customer Review only (out of Review it is never
  * blocked): while the customer group's review is pending the backend refuses
@@ -335,12 +348,16 @@ export default function ChangeRequestActionBar({
 
   const configFor = (target: string): TargetConfig => TARGET_CONFIG[target] ?? DEFAULT_TARGET_CONFIG;
 
+  // With the customer's proposed time waiting for WSO2, the one `authorize` button reads
+  // "Propose a different time" (the counter) instead of "Re-schedule"; the banner carries Accept.
+  const proposalPending = !!pendingCustomerProposal(cr);
+
   const blockedReason = (target: string): string | null =>
     TARGET_BLOCKED_REASON[target]?.(cr, { pendingCustomerReview }) ?? null;
 
   const renderPrimary = (target: string): JSX.Element => {
     const { color, icon } = configFor(target);
-    const label = changeRequestTransitionLabel(target, cr.state);
+    const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
     const reason = blockedReason(target);
     if (reason) {
       return (
@@ -399,7 +416,7 @@ export default function ChangeRequestActionBar({
             onClick={() => dispatch(target)}
             sx={{ flexShrink: 0 }}
           >
-            {changeRequestTransitionLabel(target, cr.state)}
+            {changeRequestTransitionLabel(target, cr.state, proposalPending)}
           </Button>
         );
       })}
@@ -433,7 +450,7 @@ export default function ChangeRequestActionBar({
           >
             {menuTargets.map((target) => {
               const { color, icon } = configFor(target);
-              const label = changeRequestTransitionLabel(target, cr.state);
+              const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
               const reason = blockedReason(target);
               const destructive = isDestructiveChangeRequestTransition(target);
               const disabled = isPending || !!reason;

@@ -274,6 +274,13 @@ reached the browser; this is what stops them being sent at all to a caller who s
 to the entity service as-is (no field allow-list), with two checks on top:
 
 * `POST` requires `type` of `standard`, `normal` or `emergency` (`validateChangeRequestCreateType`).
+* **An Emergency change takes no customer step** (the previous system has no Emergency CAB and acts on an Emergency
+  change without the customer's consent): a `POST` with `type: emergency` and either box true, a `PATCH` that
+  turns a box on of an Emergency change, and a `PATCH {type: emergency}` that leaves a box ticked are refused by
+  the entity service with a 400 ("Emergency changes proceed without customer consent, so customer approval and
+  customer review cannot be required ..."), which reaches the form verbatim -- the BFF does not repeat the rule
+  (`TestCreateChangeRequest_CustomerGateFlags`, `TestPatchChangeRequest_CustomerGateFlags`). An Emergency
+  change's approvals are one `CAB Approval` stage (an in-flight one from an earlier build may read `ECAB Approval`).
 * **Every body guard of the change request handlers reads keys the way the entity service's decoder
   does -- without regard to case.** The entity service decodes with `encoding/json`, which matches a
   key to a field case-insensitively, so `ISCUSTOMERAPPROVED`, `iscustomerreviewed` and
@@ -298,6 +305,21 @@ to the entity service as-is (no field allow-list), with two checks on top:
   no `{state: "closed"}` out of Customer Review -- needs the change request's state, so it is the
   entity service's refusal, echoed verbatim (below). There is no "Bypass customer approval" /
   "Bypass customer review".
+* **A customer's proposed time is answered through the same `PATCH`.** The customer proposes a start in
+  the Customer Portal; the change request stays in `customer_approval` and its detail carries
+  `customerProposal` (`answer: "pending"`, the proposed `startOn` / `endOn`, `proposerRecorded` and the
+  proposer when it is knowable, `canAccept` / `acceptBlockedReason`), passed through untouched. WSO2
+  answers with `{confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn, expectedPlannedStartOn,
+  expectedPlannedEndOn}` ("Accept proposed time": the change request is Scheduled with the proposal as
+  its start, no CAB, no second ask) or `{state: "authorize", plannedStartOn?, plannedEndOn?,
+  expectedCustomerUpdatedOn, ...}` ("Propose a different time" / a decline: DISAGREE, the customers
+  asked again). The BFF forwards both unchanged and checks only that `confirmCustomerUpdatedDate`,
+  `expectedCustomerUpdatedOn`, `expectedPlannedStartOn` and `expectedPlannedEndOn` are strings, in any
+  spelling of the key (`validateChangeRequestTimeAnswerFields`: `<field> must be a string`, no upstream
+  call); the route is `PermWrite` like every other PATCH, so there is no new permission. The entity
+  service's refusals (409 stale proposal / window, 400 on hold, 409 the proposed start has passed, ...)
+  are echoed verbatim; the compliance guard above is untouched (an Accept that also carries
+  `isCustomerApproved` is refused as the customer's answer). `TestPatchChangeRequest_TimeAnswerFields`.
 * Both accept the creation form's two checkboxes, **`customerApprovalRequired`**
   and **`customerReviewRequired`**, and refuse (400, "… must be a boolean (true
   or false)") any value that is not a JSON boolean, `null` included
@@ -353,7 +375,7 @@ to the entity service as-is (no field allow-list), with two checks on top:
   Review" still appear in `GET .../approvals` (see the entity service's CLAUDE.md,
   "Customer Group") so the Approvals tab can show who was asked and the outcome. While such a
   stage is live `legalNextStates` for Customer Review is just `["canceled"]` (Customer Approval
-  keeps Re-schedule: `["authorize", "canceled"]`; Assess and Authorize offer `["canceled"]` only --
+  keeps Re-schedule / Propose a different time: `["authorize", "canceled"]` -- the state does not move; Assess and Authorize offer `["canceled"]` only --
   the peer / CAB approval moves them on -- and the entity service accepts exactly the states
   `legalNextStates` offers, see its CLAUDE.md, "The transition graph of `PATCH {state}`": a change
   that is closed, canceled or rolled back cannot be moved by any request, and no request skips a
@@ -384,8 +406,10 @@ to the entity service as-is (no field allow-list), with two checks on top:
 **The refusals' machine-readable `errorCode`.** entity-service names the refusals a client has
 to tell apart with a stable `errorCode` string in its error body (`change_request_approval_not_pending`
 for the 409 above, `change_request_not_asked` / `change_request_forbidden` for its 403s,
-`change_request_on_hold`, `change_request_schedule_changed`, `change_request_not_proposable`; the table is in
-its CLAUDE.md, "Error types"). The BFF passes it through, beside the message, with the status it
+`change_request_on_hold`, `change_request_schedule_changed`, `change_request_not_proposable`,
+`change_request_proposal_not_now`, `change_request_no_planned_window`, and for staff
+`change_request_proposer_not_recorded` (Accept proposed time on a stored time nobody is recorded as having
+proposed); the table is in its CLAUDE.md, "Error types"). The BFF passes it through, beside the message, with the status it
 gives it: `mapUpstreamError` (the PATCH handlers) on the 400, 403, 409 and 422, and
 `mapApprovalDecisionError` on the decision route's 403 and 409 (`errorBody.ErrorCode`, `writeErrorCode`,
 `upstreamErrorCode`). The code is read from the upstream envelope (`apierror.Error.Body` holds it whole,

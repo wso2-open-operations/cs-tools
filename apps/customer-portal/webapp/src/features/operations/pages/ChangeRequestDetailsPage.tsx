@@ -67,9 +67,11 @@ import {
   getAnsweredWindow,
   getCustomerDecisionLabels,
   getCustomerDecisionMessages,
+  getProposalNote,
   isAwaitingInternalReview,
   resolveCustomerDecisionMode,
 } from "@features/operations/utils/changeRequests";
+import { getChangeRequestWindow } from "@features/operations/utils/changeRequestSchedule";
 import { formatDateTime } from "@features/support/utils/support";
 import {
   formatImpactLabel,
@@ -114,7 +116,9 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   // offers any), so a keyboard or screen reader user would otherwise land on the
   // document body and start again from the top. The page heading is always
   // there; the answer button used last is where a customer who can still answer
-  // belongs. The outcome itself is announced by the banner (an alert).
+  // belongs (after a proposal that is the Propose New Time button: the change
+  // request stays in Customer Approval with its buttons). The outcome itself is
+  // announced by the banner (an alert).
   const headingRef = useRef<HTMLElement | null>(null);
   const answerTriggerRef = useRef<HTMLElement | null>(null);
   const [pendingFocus, setPendingFocus] = useState<FocusAfterAnswer | null>(null);
@@ -145,15 +149,34 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   // switched off, with the reason beside it, rather than let a customer type a
   // whole window and be refused.
   const proposeBlockedByHold = canShowProposeNewTime && changeRequest?.isOnHold === true;
+  // A proposal moves the start and keeps the planned length, so a change request
+  // with no window (no start, no end, or an end that is not after the start) has
+  // nothing to move: the button is switched off with the reason beside it.
+  const proposeBlockedByNoWindow =
+    canShowProposeNewTime &&
+    !proposeBlockedByHold &&
+    changeRequest != null &&
+    getChangeRequestWindow(changeRequest).durationMs == null;
+  const proposeNoteId = proposeBlockedByHold
+    ? "cr-propose-hold-note"
+    : proposeBlockedByNoWindow
+      ? "cr-propose-nowindow-note"
+      : undefined;
   // What the reject confirmation may say about proposing a different time: only
-  // what is true of the button beside it.
+  // what is true of the button beside it. A button that is switched off for want
+  // of a window to move is not pointed at, and the hold is the one reason that is
+  // worth saying (it passes).
   const proposeNewTime: ProposeNewTimeAvailability = !canShowProposeNewTime
     ? "unavailable"
     : proposeBlockedByHold
       ? "on_hold"
-      : "available";
+      : proposeBlockedByNoWindow
+        ? "unavailable"
+        : "available";
   const proposeDialogOpen = proposeTimeOpen && canShowProposeNewTime;
   const rejectDialogOpen = rejectConfirmOpen && canShowApprovalActions;
+  // What the customer is told about a proposed time that waits for WSO2 or was not accepted.
+  const proposalNote = getProposalNote(changeRequest, canShowApprovalActions);
   const { approve: approveLabel, reject: rejectLabel } =
     getCustomerDecisionLabels(decisionMode);
 
@@ -189,6 +212,21 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
       !(trigger as HTMLButtonElement).disabled;
     (triggerUsable ? trigger : headingRef.current)?.focus();
   }, [pendingFocus, proposeDialogOpen, rejectDialogOpen, patchChangeRequest.isPending]);
+
+  // The error state replaces the whole page. A refused answer re-reads the change
+  // request, and that read can fail (the contact was deregistered meanwhile, the
+  // change request is gone: a 404): the heading or the button that had focus is then
+  // unmounted and focus would drop to the document body. So the error state takes it,
+  // but only when focus has nowhere else to be -- never from a control the customer
+  // has moved to since.
+  const errorStateShown = !!error && !isLoading && !isFetching;
+  const errorStateRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!errorStateShown) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    errorStateRef.current?.focus();
+  }, [errorStateShown]);
 
   const impactColor = getChangeRequestImpactColorShades(
     changeRequest?.impact?.label,
@@ -254,7 +292,10 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
   }
 
   // Error state - only show error if we have an actual error and not loading
-  if (error && !isLoading && !isFetching) {
+  if (errorStateShown) {
+    const errorMessage = isNotFoundError(error)
+      ? CHANGE_REQUEST_NOT_FOUND_MESSAGE
+      : "Could not load change request details.";
     return (
       <Stack spacing={3}>
         <Button
@@ -269,14 +310,16 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
         >
           Back to Change Requests
         </Button>
-        <ApiErrorState
-          error={error}
-          fallbackMessage={
-            isNotFoundError(error)
-              ? CHANGE_REQUEST_NOT_FOUND_MESSAGE
-              : "Could not load change request details."
-          }
-        />
+        {/* The focus target of the error state (see `errorStateShown`): named after the message so a screen reader says what happened. */}
+        <Box
+          ref={errorStateRef}
+          tabIndex={-1}
+          role="group"
+          aria-label={errorMessage}
+          sx={{ outline: "none" }}
+        >
+          <ApiErrorState error={error} fallbackMessage={errorMessage} />
+        </Box>
       </Stack>
     );
   }
@@ -537,10 +580,12 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                             answerTriggerRef.current = event.currentTarget;
                             setProposeTimeOpen(true);
                           }}
-                          disabled={patchChangeRequest.isPending || proposeBlockedByHold}
-                          aria-describedby={
-                            proposeBlockedByHold ? "cr-propose-hold-note" : undefined
+                          disabled={
+                            patchChangeRequest.isPending ||
+                            proposeBlockedByHold ||
+                            proposeBlockedByNoWindow
                           }
+                          aria-describedby={proposeNoteId}
                           sx={answerButtonSx("blue")}
                         >
                           Propose New Time
@@ -585,6 +630,19 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
                         be proposed right now. You can still approve or reject it.
                       </Typography>
                     )}
+                    {proposeBlockedByNoWindow && (
+                      <Typography
+                        id="cr-propose-nowindow-note"
+                        variant="caption"
+                        color="text.secondary"
+                        role="note"
+                        sx={{ maxWidth: 360, textAlign: { sm: "right" } }}
+                      >
+                        This change request has no planned time yet, so a new
+                        time cannot be proposed for it. You can still approve or
+                        reject it.
+                      </Typography>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -593,6 +651,23 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
         </Paper>
       </Box>
 
+      {proposalNote && (
+        <Alert
+          severity="info"
+          role="status"
+          id={
+            proposalNote.kind === "waiting"
+              ? "cr-proposal-waiting-note"
+              : "cr-proposal-not-accepted-note"
+          }
+        >
+          {proposalNote.text}
+        </Alert>
+      )}
+
+      {/* Only a proposal made before a proposed time waited in Customer Approval
+          can leave a change request here: it goes back through WSO2's internal
+          approval and the customer is then asked again. */}
       {isAwaitingInternalReview(changeRequest) && (
         <Alert severity="info" role="status" id="cr-internal-review-note">
           WSO2 is reviewing this change request internally. You will be asked to
@@ -1032,7 +1107,10 @@ export default function ChangeRequestDetailsPage(): JSX.Element {
           setProposeTimeOpen(false);
           requestFocus("trigger");
         }}
-        onProposed={() => requestFocus("heading")}
+        // A proposal leaves the change request in Customer Approval with its
+        // buttons, so focus goes back to the one that opened the dialog (the
+        // heading only when that button is gone: see the focus effect).
+        onProposed={() => requestFocus("trigger")}
         onRefused={() => requestFocus("heading")}
         changeRequest={changeRequest}
       />

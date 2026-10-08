@@ -341,14 +341,14 @@ describe("ChangeRequestApprovals", () => {
   });
 });
 
-describe("ChangeRequestApprovals — Peer / CAB / ECAB stages", () => {
+describe("ChangeRequestApprovals — Peer / CAB stages (and a historic ECAB one)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCurrentUser(undefined);
     mockDecideMutation();
   });
 
-  it("labels each stage Peer Approval, CAB Approval, ECAB Approval, whichever name the backend uses", () => {
+  it("labels each stage Peer Approval, CAB Approval, whichever name the backend uses, and a stage named for the retired ECAB keeps reading ECAB Approval", () => {
     mockQueryResult({
       data: {
         approvals: [
@@ -372,18 +372,36 @@ describe("ChangeRequestApprovals — Peer / CAB / ECAB stages", () => {
     expect(screen.getByText(/no approval stages recorded/i)).toBeInTheDocument();
   });
 
-  it("renders an Emergency change as a lone ECAB stage with no Peer or CAB rows", () => {
+  it("renders an Emergency change as a lone CAB Approval stage with no Peer rows and no ECAB label", () => {
     mockQueryResult({
       data: {
         approvals: [
-          { stage: "ECAB Approval", approverType: "STATIC_GROUP", approverName: "ECAB", status: "REQUESTED", approvers: [{ id: "e", name: "Ecab One", status: "REQUESTED" }] },
+          { stage: "CAB Approval", approverType: "STATIC_GROUP", approverName: "CAB Approval", status: "REQUESTED", approvers: [{ id: "c", name: "Cab One", status: "REQUESTED" }] },
         ],
       },
     });
     render(<ChangeRequestApprovals id="chg-1" />);
-    expect(screen.getAllByText("ECAB Approval")).toHaveLength(1);
+    expect(screen.getByText("Cab One").closest("tr")).toHaveTextContent("CAB Approval");
     expect(screen.queryByText("Peer Approval")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ECAB/)).not.toBeInTheDocument();
+  });
+
+  it("still shows a stage an Emergency change was given before ECAB was retired, and its asked approvers can still decide it", () => {
+    mockCurrentUser("e");
+    mockQueryResult({
+      data: {
+        approvals: [
+          { stage: "ECAB Approval", approverType: "STATIC_GROUP", approverName: "ECAB", status: "REQUESTED", approvers: [{ id: "e", name: "Ecab One", status: "REQUESTED", canDecide: true }] },
+        ],
+      },
+    });
+    render(<ChangeRequestApprovals id="chg-1" />);
+    expect(screen.getByText("Ecab One").closest("tr")).toHaveTextContent("ECAB Approval");
     expect(screen.queryByText("CAB Approval")).not.toBeInTheDocument();
+    const row = screen.getByText("Ecab One").closest("tr") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Approve" })).toBeEnabled();
+    fireEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    expect(decideMutateMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -471,7 +489,7 @@ describe("ChangeRequestApprovals — the creator cannot approve", () => {
     expect(decideMutateMock).not.toHaveBeenCalled();
   });
 
-  it("renders no controls at all for a creator who has no pending row (e.g. ECAB excludes them)", () => {
+  it("renders no controls at all for a creator who has no pending row (e.g. the approving group excludes them)", () => {
     mockQueryResult({ data: stages("someone-else-entirely") });
     mockCurrentUser("me-id");
     render(<ChangeRequestApprovals id="chg-1" isCreator />);

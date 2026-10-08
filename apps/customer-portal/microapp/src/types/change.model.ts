@@ -31,6 +31,14 @@ export interface ChangeRequest {
   approvedOn?: Date;
   duration?: string;
   hasCustomerApproved: boolean;
+  /**
+   * True when WSO2 accepted a time the customer proposed AND the change request has moved on from Customer
+   * Approval because of it (Scheduled or later). `hasCustomerApproved` stays false then (no staff action records a
+   * customer's approval: the proposal was the customer's own consent), so readers of `hasCustomerApproved` show
+   * "Proposed time accepted" instead of "not approved". False while the change is in Customer Approval, whatever
+   * answer is standing: the customers are asked again there and Approve and Reject are live.
+   */
+  isProposedTimeAccepted: boolean;
   hasCustomerReviewed: boolean;
   assignedTeam?: string;
   serviceOutage?: string;

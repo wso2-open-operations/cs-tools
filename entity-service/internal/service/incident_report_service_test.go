@@ -42,6 +42,13 @@ type fakeIncidentReportTx struct {
 	tasks    []repository.NewIncidentTask
 	problems []repository.NewIncidentProblem
 	links    map[string]string // incident id -> problem id
+
+	alertSrc    repository.SpecialOpsAlertSource
+	alertSrcErr error
+}
+
+func (f *fakeIncidentReportTx) SpecialOpsAlertSource(context.Context, string, string, string) (repository.SpecialOpsAlertSource, error) {
+	return f.alertSrc, f.alertSrcErr
 }
 
 func (f *fakeIncidentReportTx) CreateIncidentTask(_ context.Context, t repository.NewIncidentTask) (string, string, error) {

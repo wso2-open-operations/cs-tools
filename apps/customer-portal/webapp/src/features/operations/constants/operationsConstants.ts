@@ -401,8 +401,9 @@ export const OPERATIONS_HUB_FOOTER_VIEW_ALL_CR = "View all change requests";
  * Legend row order in the calendar view (matches `ChangeRequestStates`). Used
  * until the project's filters arrive (the legend is normally the filters' own
  * state list). Authorize is in it: a change request the customer proposed a new
- * time for waits there and is on their calendar; New and Assess are not, since no
- * change request a customer can see is ever in either.
+ * time for before a proposal waited in Customer Approval is there, and stays on
+ * their calendar; New and Assess are not, since no change request a customer can
+ * see is ever in either.
  */
 export const CHANGE_REQUEST_CALENDAR_LEGEND_STATES: ChangeRequestState[] = [
   ChangeRequestStates.AUTHORIZE,

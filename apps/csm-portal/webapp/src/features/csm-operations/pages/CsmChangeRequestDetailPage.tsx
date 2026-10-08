@@ -44,6 +44,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useLocation } from "react-router";
@@ -68,9 +69,11 @@ import {
   useDeleteComment,
   usePatchComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
+import ChangeRequestAcceptProposedTimeDialog from "@features/csm-operations/components/ChangeRequestAcceptProposedTimeDialog";
 import ChangeRequestActionBar from "@features/csm-operations/components/ChangeRequestActionBar";
 import ChangeRequestApprovals from "@features/csm-operations/components/ChangeRequestApprovals";
 import ChangeRequestLifecycleStepper from "@features/csm-operations/components/ChangeRequestLifecycleStepper";
+import ChangeRequestProposedTimeBanner from "@features/csm-operations/components/ChangeRequestProposedTimeBanner";
 import ChangeRequestRescheduleDialog from "@features/csm-operations/components/ChangeRequestRescheduleDialog";
 import ChangeRequestTransitionReasonDialog from "@features/csm-operations/components/ChangeRequestTransitionReasonDialog";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
@@ -88,6 +91,13 @@ import {
   changeRequestImpactLabel,
   changeRequestStateColor,
   changeRequestStateLabel,
+  CUSTOMER_STEP_NOT_APPLICABLE,
+  customerApprovedDisplay,
+  isCustomerStepNotApplicable,
+  customerProposalProposer,
+  answerSnapshotMoved,
+  isStaleAnswerError,
+  pendingCustomerProposal,
 } from "@features/csm-operations/utils/changeRequests";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -97,7 +107,12 @@ import {
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
-import type { BeEntityRef, BePatchChangeRequestPayload } from "@api/backend/types";
+import type {
+  BeChangeRequestCustomerProposal,
+  BeChangeRequestDetail,
+  BeEntityRef,
+  BePatchChangeRequestPayload,
+} from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
@@ -144,6 +159,13 @@ function transitionFallbackMessage(target: string): string {
   return `Could not move this change request to ${changeRequestStateLabel(target)}.`;
 }
 
+/** A refusal's words as one sentence of the page's own notice: first letter up, a full stop at the end. */
+function asSentence(message: string): string {
+  const text = message.trim();
+  if (!text) return text;
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
+}
+
 function formatDateTime(value?: string | null): string {
   return (
     formatBackendTimestampForDisplay(value, {
@@ -168,6 +190,12 @@ function MetaCell({ label, children }: { label: string; children: ReactNode }): 
   );
 }
 
+/** WSO2's answer to a time the customer proposed (the previous system's Agree / Disagree), "—" while unanswered. */
+function wso2AnswerLabel(raw?: string | null): string {
+  const answer = raw?.trim().toLowerCase();
+  return answer === "agree" ? "Agree" : answer === "disagree" ? "Disagree" : "—";
+}
+
 function RefText({ value }: { value?: BeEntityRef | null }): JSX.Element {
   return <Typography variant="body2">{value?.name || "—"}</Typography>;
 }
@@ -184,13 +212,43 @@ function RefChips({ values }: { values?: BeEntityRef[] | null }): JSX.Element {
   );
 }
 
-function YesNo({ value }: { value?: boolean }): JSX.Element {
+/**
+ * Yes / No, or "Not applicable" for a customer step an Emergency change does not
+ * have (it acts without customer consent: it never reaches a customer state). A
+ * step such a change still carries from before that rule reads as it is stored.
+ */
+function YesNo({ value, notApplicable = false }: { value?: boolean; notApplicable?: boolean }): JSX.Element {
+  if (notApplicable) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        {CUSTOMER_STEP_NOT_APPLICABLE}
+      </Typography>
+    );
+  }
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
       {value ? <Check size={14} /> : <X size={14} />}
       <Typography variant="body2">{value ? "Yes" : "No"}</Typography>
     </Box>
   );
+}
+
+/**
+ * The "Customer approved" cell: Yes / No, or "Proposed time accepted" for a change that went to Scheduled
+ * because WSO2 accepted the time the customer proposed (nothing is stamped as the customer's approval
+ * then: a plain "No" would mislead).
+ */
+function CustomerApprovedValue({ cr, notApplicable }: { cr: BeChangeRequestDetail; notApplicable: boolean }): JSX.Element {
+  const display = customerApprovedDisplay(cr);
+  if (display === "Proposed time accepted") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+        <Check size={14} />
+        <Typography variant="body2">{display}</Typography>
+      </Box>
+    );
+  }
+  return <YesNo value={display === "Yes"} notApplicable={notApplicable} />;
 }
 
 /**
@@ -274,7 +332,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     | { from?: string }
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_CR_PATH;
-  const { data, isLoading, isError } = useGetChangeRequest(id);
+  const { data, isLoading, isError, refetch } = useGetChangeRequest(id);
   // Same label computation this page's own `recordView` call below uses —
   // The CR number as the short chip label (matching `CsmCaseDetailPage`'s
   // own `caseNumber`-only report); change requests have no separate
@@ -346,11 +404,38 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const [reasonTransition, setReasonTransition] = useState<{ target: string } | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [reasonRecorded, setReasonRecorded] = useState(false);
-  // Re-schedule (Customer Approval -> Authorize) collects the new planned
-  // window first; same shape as the reason dialog above.
-  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  // Re-schedule / counter-proposal (`{state: "authorize"}` out of Customer Approval,
+  // which never moves the state) collects the new planned window first; same
+  // shape as the reason dialog above. The change request and the proposal the
+  // dialog was opened on are kept as they were when it opened (a snapshot):
+  // what the engineer answers is what they were shown, and the page refetching
+  // behind the dialog (after a refusal, say) neither moves its pickers nor
+  // swaps the proposal under their hands. The backend refuses a moved proposal or
+  // window in words, and the dialog shows them. A refusal that names one of the
+  // stale-answer codes (see `isStaleAnswerError`) closes the dialog instead, and the
+  // page says why (`staleNotice`): the same request would be refused again. The optional
+  // reason is recorded only after the change has been updated, so no attempt, retry or
+  // reopened dialog can leave a duplicate note.
+  const [reschedule, setReschedule] = useState<{
+    cr: BeChangeRequestDetail;
+    proposal: BeChangeRequestCustomerProposal | null;
+  } | null>(null);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
-  const [rescheduleReasonRecorded, setRescheduleReasonRecorded] = useState(false);
+  // "Accept proposed time": its confirmation, on the same kind of snapshot.
+  const [accept, setAccept] = useState<{
+    cr: BeChangeRequestDetail;
+    proposal: BeChangeRequestCustomerProposal;
+  } | null>(null);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  // Why an answer dialog was closed for the engineer (what it showed is no longer what is stored). It is
+  // an alert on the page, and takes focus once the dialog is gone: the button that opened the dialog is
+  // often not there any more (the proposal was answered, or it moved), and focus would otherwise drop
+  // to the document body.
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  const staleNoticeRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (staleNotice) staleNoticeRef.current?.focus();
+  }, [staleNotice]);
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
@@ -440,6 +525,12 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   }
 
   const cr = data;
+  // The customer's proposed time while it waits for WSO2's answer (the backend's own verdict).
+  const proposal = pendingCustomerProposal(cr);
+  // An Emergency change acts without customer consent: its customer part reads "Not applicable" (a record that
+  // shows it went through a customer gate, from before that rule, is shown as it is).
+  const approvalNotApplicable = isCustomerStepNotApplicable(cr, "approval", approvalsData?.approvals);
+  const reviewNotApplicable = isCustomerStepNotApplicable(cr, "review", approvalsData?.approvals);
   // The creator can't approve/reject any stage (backend-enforced); they can
   // still cancel, which the action bar offers via `legalNextStates` as usual.
   const isCreator = isChangeRequestCreator(cr, user);
@@ -460,7 +551,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const blockingReason =
     cr.state === "closed" || cr.state === "canceled" || cr.state === "rollback"
       ? null
-      : changeRequestBlockingReason(approvalsData?.approvals, cr.state);
+      : changeRequestBlockingReason(approvalsData?.approvals, cr.state, proposal);
   // At a customer gate nobody is being asked to answer when the project has no
   // registered contacts (the backend had no one to assign the stage to), and
   // also when it has some but none has a request waiting: only the requester,
@@ -486,17 +577,51 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   // fire two transitions.
   const transitionPending = patchCr.isPending || postComment.isPending;
 
+  const openReschedule = (): void => {
+    setRescheduleError(null);
+    setStaleNotice(null);
+    setReschedule({ cr, proposal });
+  };
+
+  const openAccept = (): void => {
+    // Only a time a customer is recorded as having proposed can be accepted (the banner disables the button otherwise).
+    if (!proposal || !customerProposalProposer(proposal)) return;
+    setAcceptError(null);
+    setStaleNotice(null);
+    setAccept({ cr, proposal });
+  };
+
+  // After a refused attempt, whether the page now holds something other than what each dialog was opened on:
+  // the same request would be refused again, so the dialog holds submit back (see its `stale` prop).
+  const rescheduleStale =
+    !!reschedule && !!rescheduleError && answerSnapshotMoved(reschedule, { cr, proposal });
+  const acceptStale = !!accept && !!acceptError && answerSnapshotMoved(accept, { cr, proposal });
+
+  /**
+   * The dialog's own refusal was one of the stale-answer codes: what it showed is no longer what is stored,
+   * and the same request would be refused again. Closes both answer dialogs, says why on the page and reads
+   * the change request again so the page shows the truth (the patch hook invalidates the detail and the
+   * approvals when it settles; this read joins that one rather than starting another).
+   */
+  const closeAnswerDialogsAsStale = (err: unknown, fallback: string): void => {
+    setReschedule(null);
+    setRescheduleError(null);
+    setAccept(null);
+    setAcceptError(null);
+    setStaleNotice(`${asSentence(backendErrorMessage(err, fallback))} The page now shows the current state.`);
+    void refetch({ cancelRefetch: false });
+  };
+
   /**
    * Apply `target` to this change request. Targets that need a reason (the
    * destructive ones) are diverted into the confirmation dialog first — see `confirmReasonTransition` for the
    * comment-then-patch ordering they then follow.
    */
   const onTransition = (target: string): void => {
-    // `authorize` is only offered as Re-schedule, which needs the new window.
+    // `authorize` is only offered as Re-schedule (or, with a customer's proposal waiting, as
+    // "Propose a different time"), which needs the new window.
     if (target === "authorize") {
-      setRescheduleError(null);
-      setRescheduleReasonRecorded(false);
-      setRescheduleOpen(true);
+      openReschedule();
       return;
     }
     if (changeRequestTransitionRequiresReason(target)) {
@@ -579,33 +704,72 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   };
 
   /**
-   * Confirmed Re-schedule: the optional reason is recorded as an internal
-   * comment first (once, even across retries), then the state + new planned
-   * window are patched. The backend's refusal (e.g. "re-scheduling requires a
-   * changed planned start or end") is shown in the dialog as returned.
+   * Confirmed Re-schedule (or counter, or decline): the state + new planned window are patched, and the
+   * optional reason is recorded as an internal comment once that has gone through. After, not before: a
+   * refused attempt leaves no note behind, so a retry, or a dialog closed and opened again, can never post
+   * it twice. If the note then cannot be saved the change is already updated: the page says so, and the
+   * reason can be added as a comment. The backend's refusal (e.g. "re-scheduling requires a changed planned
+   * start or end") is shown in the dialog as returned, except one that means the change is no longer what the
+   * dialog showed: that closes it (see `closeAnswerDialogsAsStale`).
    */
   const confirmReschedule = async (
     patch: BePatchChangeRequestPayload,
     reason: string,
   ): Promise<void> => {
     setRescheduleError(null);
-    if (reason && !rescheduleReasonRecorded) {
-      try {
-        await postComment.mutateAsync({ changeRequestId: cr.id, bodyHtml: reason, internal: true });
-        setRescheduleReasonRecorded(true);
-      } catch (err) {
-        setRescheduleError(
-          backendErrorMessage(err, "Could not record the reason, so the change was not re-scheduled. Try again."),
-        );
-        return;
-      }
-    }
+    const answeredProposal = !!reschedule?.proposal;
     try {
       await patchCr.mutateAsync({ id: cr.id, patch });
-      setRescheduleOpen(false);
-      setRescheduleReasonRecorded(false);
     } catch (err) {
-      setRescheduleError(backendErrorMessage(err, "Could not re-schedule this change request."));
+      const fallback = answeredProposal
+        ? "Could not answer the proposed time."
+        : "Could not re-schedule this change request.";
+      if (isStaleAnswerError(err)) closeAnswerDialogsAsStale(err, fallback);
+      else setRescheduleError(backendErrorMessage(err, fallback));
+      return;
+    }
+    if (reason) {
+      try {
+        await postComment.mutateAsync({ changeRequestId: cr.id, bodyHtml: reason, internal: true });
+      } catch (err) {
+        showError(
+          `The change request was updated, but your reason could not be recorded as an internal note (${backendErrorMessage(
+            err,
+            "the request failed",
+          )}). Add it as a comment instead.`,
+          err,
+        );
+      }
+    }
+    setReschedule(null);
+  };
+
+  /**
+   * Accept the customer's proposed time (the previous system's "Agree"): the backend applies the proposal to
+   * the planned window and moves the change straight to Scheduled in one step. What is sent is the
+   * proposal and the planned window the dialog showed, so a proposal or window that moved behind it
+   * is refused in words instead of accepting a time its reader never saw: shown in the dialog, or, when
+   * the refusal means the change is no longer what the dialog showed, on the page after the dialog closes.
+   */
+  const confirmAccept = async (): Promise<void> => {
+    if (!accept) return;
+    setAcceptError(null);
+    const { cr: shown, proposal: proposed } = accept;
+    try {
+      await patchCr.mutateAsync({
+        id: cr.id,
+        patch: {
+          confirmCustomerUpdatedDate: "agree",
+          expectedCustomerUpdatedOn: proposed.startOn,
+          ...(shown.plannedStartOn ? { expectedPlannedStartOn: shown.plannedStartOn } : {}),
+          ...(shown.plannedEndOn ? { expectedPlannedEndOn: shown.plannedEndOn } : {}),
+        },
+      });
+      setAccept(null);
+    } catch (err) {
+      const fallback = "Could not accept the proposed time.";
+      if (isStaleAnswerError(err)) closeAnswerDialogsAsStale(err, fallback);
+      else setAcceptError(backendErrorMessage(err, fallback));
     }
   };
 
@@ -730,16 +894,42 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
         </Box>
       </Box>
 
+      {staleNotice && (
+        <Alert
+          ref={staleNoticeRef}
+          severity="warning"
+          role="alert"
+          tabIndex={-1}
+          className="csm-print-hide"
+          onClose={() => setStaleNotice(null)}
+        >
+          {staleNotice}
+        </Alert>
+      )}
+
       {/* Full width, under the header: eleven stages need more room than the
           header's left block leaves beside the action bar. */}
       <ChangeRequestLifecycleStepper
         state={cr.state}
         customerApprovalRequired={cr.customerApprovalRequired}
         customerReviewRequired={cr.customerReviewRequired}
+        type={cr.type}
         approvals={approvalsData?.approvals}
         customerApproved={cr.hasCustomerApproved}
         hasCustomerContacts={cr.customerContacts ? cr.customerContacts.length > 0 : undefined}
       />
+
+      {proposal && (
+        <Box className="csm-print-hide">
+          <ChangeRequestProposedTimeBanner
+            cr={cr}
+            proposal={proposal}
+            isPending={transitionPending}
+            onAccept={openAccept}
+            onProposeDifferent={openReschedule}
+          />
+        </Box>
+      )}
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Overview</Typography>
@@ -869,13 +1059,17 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 }}
               >
                 <MetaCell label="Customer approval required">
-                  <YesNo value={cr.customerApprovalRequired} />
+                  <YesNo value={cr.customerApprovalRequired} notApplicable={approvalNotApplicable} />
                 </MetaCell>
                 <MetaCell label="Customer review required">
-                  <YesNo value={cr.customerReviewRequired} />
+                  <YesNo value={cr.customerReviewRequired} notApplicable={reviewNotApplicable} />
                 </MetaCell>
-                <MetaCell label="Customer approved"><YesNo value={cr.hasCustomerApproved} /></MetaCell>
-                <MetaCell label="Customer reviewed"><YesNo value={cr.hasCustomerReviewed} /></MetaCell>
+                <MetaCell label="Customer approved">
+                  <CustomerApprovedValue cr={cr} notApplicable={approvalNotApplicable} />
+                </MetaCell>
+                <MetaCell label="Customer reviewed">
+                  <YesNo value={cr.hasCustomerReviewed} notApplicable={reviewNotApplicable} />
+                </MetaCell>
                 <MetaCell label="Approved by"><RefText value={cr.approvedBy} /></MetaCell>
                 <MetaCell label="Approved on">
                   <Typography variant="body2">{formatDateTime(cr.approvedOn)}</Typography>
@@ -987,6 +1181,9 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               </MetaCell>
               <MetaCell label="Customer updated">
                 <Typography variant="body2">{formatDateTime(cr.customerUpdatedOn)}</Typography>
+              </MetaCell>
+              <MetaCell label="WSO2 answer to the customer's time">
+                <Typography variant="body2">{wso2AnswerLabel(cr.confirmCustomerUpdatedDate)}</Typography>
               </MetaCell>
               <MetaCell label="Work start">
                 <Typography variant="body2">{formatDateTime(cr.workStart)}</Typography>
@@ -1119,19 +1316,35 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
         />
       )}
 
-      {rescheduleOpen && (
+      {reschedule && (
         <ChangeRequestRescheduleDialog
-          cr={cr}
+          cr={reschedule.cr}
+          proposal={reschedule.proposal}
           isSubmitting={transitionPending}
           error={rescheduleError}
-          reasonRecorded={rescheduleReasonRecorded}
+          stale={rescheduleStale}
           onClose={() => {
             if (transitionPending) return;
-            setRescheduleOpen(false);
+            setReschedule(null);
             setRescheduleError(null);
-            setRescheduleReasonRecorded(false);
           }}
           onSubmit={(patch, reason) => void confirmReschedule(patch, reason)}
+        />
+      )}
+
+      {accept && (
+        <ChangeRequestAcceptProposedTimeDialog
+          cr={accept.cr}
+          proposal={accept.proposal}
+          isSubmitting={transitionPending}
+          error={acceptError}
+          stale={acceptStale}
+          onClose={() => {
+            if (transitionPending) return;
+            setAccept(null);
+            setAcceptError(null);
+          }}
+          onConfirm={() => void confirmAccept()}
         />
       )}
 

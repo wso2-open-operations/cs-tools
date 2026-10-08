@@ -398,7 +398,7 @@ func TestGroupDetailIntegration_GroupWithoutANameHasOnlyItsOwnMembers(t *testing
 // (onlyInternalApprovers) so a customer or inactive user in the group is neither
 // provisioned nor shown.
 //
-// A group resolved by NAME (CAB / ECAB / Devops Approval) is exactly namedGroup's
+// A group resolved by NAME (CAB / Devops Approval) is exactly namedGroup's
 // member set: group_id of any group of that name, or team_id of a team of that
 // name.
 func TestGroupDetailIntegration_NamedPoolGroupMatchesTheApprovalPool(t *testing.T) {

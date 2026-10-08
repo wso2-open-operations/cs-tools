@@ -28,13 +28,18 @@
 //     it exactly as customers always have, in every state but New / Assess / Authorize;
 //   * one created at or after it follows the strict, designated-only rule;
 //   * a legacy change request a customer ACTS on (answers, or proposes a new time) records
-//     the designation in the same transaction, so it stays visible afterwards, Authorize
-//     included;
+//     the designation in the same transaction, so it stays visible afterwards;
 //   * a legacy one in Customer Approval / Customer Review that has no live stage ("Demo Test 1":
 //     asked under an older build) used to answer 409 "nobody asked": the first customer act
 //     provisions the stage, once, and a plain read never writes;
 //   * a stage the sync mirrored has no label: its pending approver stays pending across state
-//     changes, is never shown to a customer by name, and a decision on it still works.
+//     changes, is never shown to a customer by name, and a decision on it still works;
+//   * a time a customer PROPOSES waits in Customer Approval (the proposed start and its confirmation,
+//     customer_updated_on / customer_updated_date_confirmation, which a migrated row already carries) and WSO2
+//     answers it: on a migrated row too, whether it has no stage at all, or the previous system's own unlabeled
+//     customer stage (the proposal then provisions the one labelled stage a contact's act always did, and the
+//     previous system's own rows are left as they were). A stale proposal on a migrated change that waits on a
+//     live approval of WSO2's is never a proposal to answer.
 //
 // The rows (fixtures/legacy-change-requests.sql) are written the way the sync writes them, with
 // ServiceNow-style ids and numbers, created in 1999, i.e. before the local cutover. They are put
@@ -60,13 +65,19 @@ import {
   futureWindow,
   legacyId,
   lumenProjectId,
+  planWindow,
+  proposalRow,
   psql,
   raiseChange,
   requestApproval,
   resetFixtures,
   seedLegacyChangeRequests,
   shot,
+  addHours,
+  changeRequestRow,
+  staffAcceptsProposal,
   staffApi,
+  staffCountersProposal,
   staffDecides,
   staffMoves,
   stageRows,
@@ -99,6 +110,7 @@ const LABEL_OF: Record<string, string> = {
   [LEGACY.canceled]: "Canceled",
   [LEGACY.customerApprovalToPropose]: "Customer Approval",
   [LEGACY.customerApprovalForErin]: "Customer Approval",
+  [LEGACY.customerApprovalAskedByPreviousSystem]: "Customer Approval",
   [LEGACY.emergencyInAuthorize]: "Authorize",
   [LEGACY.staleStageScheduled]: "Scheduled",
   [LEGACY.oneSecondBefore]: "Scheduled",
@@ -184,7 +196,7 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
         await expect(list.rowByNumber(number), `${number} (${LABEL_OF[number]}) in dave's list`).toHaveCount(0);
       }
       await list.searchFor("CHG0039");
-      await expect(page.getByText(/Showing \d+ of 12 change requests/), "the list says how many legacy rows it holds").toBeVisible();
+      await expect(page.getByText(/Showing \d+ of 13 change requests/), "the list says how many legacy rows it holds").toBeVisible();
       await shot(page, "10-legacy-dave-list");
       const details = new ChangeRequestDetailsPage(page);
       await details.open(projectId, id(LEGACY.closed), LEGACY.closed);
@@ -291,7 +303,7 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
     expect((await customerApi("erin").get(crId)).body.customerCanAnswer).toBe(false);
   });
 
-  test(`a legacy change request dave PROPOSES a new time on goes to Authorize, a state a legacy one is hidden in, and STAYS visible to dave and erin: the loop through CAB and erin's approval keeps it theirs, while an untouched legacy one in Authorize is never shown`, async ({
+  test(`a legacy change request dave PROPOSES a start on stays in Customer Approval, a state a legacy one is shown in, with the one stage the proposal needed provisioned for both contacts; WSO2 accepts it and it is Scheduled at that start; an untouched legacy one in Authorize is never shown`, async ({
     page,
     browser,
     baseURL,
@@ -306,6 +318,9 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
       const details = new ChangeRequestDetailsPage(page);
       const erinPage = await erinContext.newPage();
       const erinDetails = new ChangeRequestDetailsPage(erinPage);
+      // The migrated row's planned window (fixtures/legacy-change-requests.sql): two hours in 2031.
+      const planned = await changeRequestRow(crId);
+      expect([planned.startUtc, planned.endUtc]).toEqual(["2031-03-01T10:00:00Z", "2031-03-01T12:00:00Z"]);
 
       expect(await stageRows(crId)).toEqual([]);
       await details.open(projectId, crId, number);
@@ -313,24 +328,30 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
       await details.button(UI.buttons.proposeNewTime).click();
       await expect(details.proposeDialog()).toBeVisible();
       const zone = await details.proposeTimeZone();
-      const window = futureWindow(zone, { daysAhead: 6, startHour: 10, hours: 3 });
-      await details.fillProposedWindow(window.start, window.end);
+      const proposal = futureWindow(zone, { daysAhead: 6, startHour: 10, hours: 2 });
+      await details.fillProposedStart(proposal.start);
       await details.submitProposalButton().click();
-      await expect(details.banner(UI.banners.proposedNormal)).toBeVisible();
-      await expect(details.currentStage()).toHaveText(UI.stages.authorize);
-      expect(await storedState(crId)).toBe("AUTHORIZE");
+      await expect(details.banner(UI.banners.proposed)).toBeVisible({ timeout: 20_000 });
 
-      // The proposal needed a stage, so the contacts were asked and then cancelled: that is the designation.
+      // The change STAYS in Customer Approval: nothing moved but the proposal, and the window is WSO2's.
+      await expect(details.currentStage()).toHaveText(UI.stages.customerApproval);
+      await expect(details.proposalWaitingNote()).toContainText(UI.notes.waitingOwn);
+      expect(await storedState(crId)).toBe("CUSTOMER_APPROVAL");
+      expect(await changeRequestRow(crId)).toMatchObject({ startUtc: planned.startUtc, endUtc: planned.endUtc });
+      expect(await proposalRow(crId)).toEqual({ proposedUtc: proposal.startUtc, answer: "" });
+
+      // The migrated row had no stage, so the proposal needed one (as any customer act on it always did): ONE labelled stage,
+      // every registered contact asked, their requests standing. Nothing is cancelled and no CAB stage appears.
       const afterProposal = await stageRows(crId);
-      expect(
-        afterProposal.filter((r) => r.startsWith("Customer Approval")),
-        "the stage the proposal provisioned, superseded by the proposal itself",
-      ).toEqual(["Customer Approval|dave.mendis@example.com|CANCELLED", "Customer Approval|erin.jayawardena@example.com|CANCELLED"]);
-      expect(afterProposal.filter((r) => r.startsWith("CAB Approval")).map((r) => r.split("|")[2]), "the CAB is asked about the new time").toEqual(["REQUESTED", "REQUESTED", "REQUESTED"]);
+      expect(afterProposal, "the one stage the first customer act provisions, written once").toEqual([
+        "Customer Approval|dave.mendis@example.com|REQUESTED",
+        "Customer Approval|erin.jayawardena@example.com|REQUESTED",
+      ]);
       for (const [who, label] of [[dave, "dave"], [erin, "erin"]] as const) {
         const listed = await who.listed(projectId);
-        expect(listed.find((c) => c.number === number)?.state?.label, `${label}: legacy row in Authorize after the proposal`).toBe("Authorize");
+        expect(listed.find((c) => c.number === number)?.state?.label, `${label}: legacy row after the proposal`).toBe("Customer Approval");
         expect((await who.get(crId)).status).toBe(200);
+        expect((await who.get(crId)).body.customerCanAnswer, `${label} is asked`).toBe(true);
         // ...whereas the legacy row that sits in Authorize and was never acted on is not theirs
         expect(listed.map((c) => c.number)).not.toContain(LEGACY.authorize);
         expect((await who.get(id(LEGACY.authorize))).status).toBe(404);
@@ -338,85 +359,140 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
       await list.open(projectId);
       await list.waitForList();
       await expect(list.rowByNumber(number)).toHaveCount(1);
-      await expect(list.rowByNumber(number)).toContainText("Authorize");
+      await expect(list.rowByNumber(number)).toContainText("Customer Approval");
       await expect(list.rowByNumber(LEGACY.authorize)).toHaveCount(0);
-      await shot(page, "14-legacy-list-authorize-after-proposal");
-      await erinDetails.open(projectId, crId, number);
-      await expect(erinDetails.currentStage()).toHaveText(UI.stages.authorize);
-      await expect(erinDetails.answerButtons()).toHaveCount(0);
-      const stats = (await customerCounts(LOCAL_PERSONAS.dave.email, projectId))!;
-      expect(stats.byState.Authorize, "the Authorize card counts the one they proposed on").toBe(1);
-
-      // WSO2's CAB approves the new time. A migrated change request has customer_approval_required = false (that column
-      // is ours, and the sync never set it), but a proposal IS a Re-schedule and a Re-schedule writes the requirement
-      // (true) with the new window: the new plan goes back to the customers, as it does for a native change request.
-      // It used to end in Scheduled with nobody asked about the window, a gap of migration 0189's default, not a rule.
-      await staffDecides("alice", crId);
-      expect(await storedState(crId)).toBe("CUSTOMER_APPROVAL");
-      expect((await stageRows(crId)).filter((r) => r.startsWith("Customer Approval")), "both contacts are asked a second time").toEqual([
-        "Customer Approval|dave.mendis@example.com|CANCELLED",
-        "Customer Approval|erin.jayawardena@example.com|CANCELLED",
-        "Customer Approval|dave.mendis@example.com|REQUESTED",
-        "Customer Approval|erin.jayawardena@example.com|REQUESTED",
-      ]);
-      for (const who of [dave, erin]) {
-        expect((await who.listed(projectId)).find((c) => c.number === number)?.state?.label).toBe("Customer Approval");
-        const seen = await who.get(crId);
-        expect(seen.status).toBe(200);
-        expect(seen.body.customerCanAnswer, "asked afresh").toBe(true);
-      }
+      await shot(page, "14-legacy-list-customer-approval-after-proposal");
       await erinDetails.open(projectId, crId, number);
       await expect(erinDetails.currentStage()).toHaveText(UI.stages.customerApproval);
+      await expect(erinDetails.proposalWaitingNote()).toContainText(UI.notes.waitingOther);
       await expect(erinDetails.approvalButtons().first()).toBeVisible();
       await shot(erinPage, "15-legacy-erin-detail-customer-approval-after-proposal");
-      const done = await psql(`select to_char(start_on at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') from change_request where id = '${crId}'`);
-      expect(done.trim(), "the window dave proposed is the one put to them").toBe(window.startUtc);
-      // erin approves the new window: Scheduled for it, and a legacy Scheduled is a state customers see.
-      const approved = await erin.patch(crId, { isCustomerApproved: true });
-      expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-      expect(await storedState(crId)).toBe("SCHEDULED");
+
+      // WSO2 accepts it: Scheduled at the proposed start with the planned length, the two requests the proposal's stage
+      // needed closed, no CAB, and no flag of the customer's approval written (no staff action records one).
+      const flagsBefore = await psql(`select customer_approval_required, is_customer_approval_required from change_request where id = '${crId}'`);
+      const accepted = await staffAcceptsProposal("alice", crId);
+      expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+      const done = await changeRequestRow(crId);
+      expect([done.state, done.startUtc, done.endUtc]).toEqual(["SCHEDULED", proposal.startUtc, addHours(proposal.startUtc, 2)]);
+      expect(await stageRows(crId)).toEqual([
+        "Customer Approval|dave.mendis@example.com|CANCELLED",
+        "Customer Approval|erin.jayawardena@example.com|CANCELLED",
+      ]);
+      expect(await psql(`select customer_approval_required, is_customer_approval_required from change_request where id = '${crId}'`), "no flag written").toBe(flagsBefore);
       for (const who of [dave, erin]) {
         expect((await who.listed(projectId)).find((c) => c.number === number)?.state?.label).toBe("Scheduled");
         expect((await who.get(crId)).status).toBe(200);
+        expect((await who.get(crId)).body.customerProposal).toMatchObject({ answer: "agreed" });
       }
+      await erinDetails.open(projectId, crId, number);
+      await expect(erinDetails.currentStage()).toHaveText(UI.stages.scheduled);
+      await expect(erinDetails.windowAcceptedNote()).toContainText(UI.notes.windowAccepted);
     } finally {
       await erinContext.close();
     }
   });
 
-  test("WSO2 can ask a legacy change request's customers again after a proposal: the box is ticked in Authorize (add-only is allowed there, the project is stored), the CAB approves, and both contacts are asked afresh", async () => {
+  test("WSO2 answers a legacy change request's proposal with a window of its own: both contacts are asked afresh (the stage the proposal provisioned is superseded), no CAB, and the second contact's approval schedules WSO2's window", async () => {
     const number = LEGACY.customerApprovalForErin;
     const crId = id(number);
     const dave = customerApi("dave");
     const erin = customerApi("erin");
-    const window = futureWindow("America/New_York", { daysAhead: 8, startHour: 9, hours: 2 });
-    const proposed = await erin.patch(crId, {
-      plannedStartOn: window.startUtc.replace("T", " ").replace("Z", ""),
-      plannedEndOn: window.endUtc.replace("T", " ").replace("Z", ""),
-    });
+    // This migrated row has no planned window (a proposal moves the planned start, so give it one the way the previous system plans one).
+    await planWindow(crId, { startUtc: "2031-04-01T10:00:00Z", endUtc: "2031-04-01T12:00:00Z" });
+    const proposal = futureWindow("America/New_York", { daysAhead: 8, startHour: 9, hours: 2 });
+    const proposed = await erin.patch(crId, { plannedStartOn: proposal.startUtc.replace("T", " ").replace("Z", "") });
     expect(proposed.status, JSON.stringify(proposed.body)).toBe(200);
-    expect(await storedState(crId)).toBe("AUTHORIZE");
-    for (const who of [dave, erin]) expect((await who.get(crId)).status, "visible in Authorize").toBe(200);
+    expect(await storedState(crId), "a proposal never moves the state").toBe("CUSTOMER_APPROVAL");
+    for (const who of [dave, erin]) expect((await who.get(crId)).status, "visible").toBe(200);
 
-    // Authorize: unticked -> ticked is allowed (the Customer Project is stored); the lock only ever forbids taking it away.
-    const ticked = await staffApi("alice").patch(crId, { customerApprovalRequired: true });
-    expect(ticked.status, JSON.stringify(ticked.body)).toBe(200);
-    const unticked = await staffApi("alice").patch(crId, { customerApprovalRequired: false });
-    expect(unticked.status, "once ticked it cannot be removed").toBe(400);
-    expect(JSON.stringify(unticked.body)).toContain("can no longer be turned off");
-
-    await staffDecides("bob", crId);
+    // WSO2's window: the customers are asked again, exactly as for any re-ask, and nothing goes through the CAB.
+    const wso2 = futureWindow("UTC", { daysAhead: 9, startHour: 14, hours: 3 });
+    const countered = await staffCountersProposal("bob", crId, wso2);
+    expect(countered.status, JSON.stringify(countered.body)).toBe(200);
     expect(await storedState(crId)).toBe("CUSTOMER_APPROVAL");
-    expect((await stageRows(crId)).filter((r) => r.startsWith("Customer Approval"))).toEqual([
+    expect(await stageRows(crId)).toEqual([
       "Customer Approval|dave.mendis@example.com|CANCELLED",
       "Customer Approval|erin.jayawardena@example.com|CANCELLED",
       "Customer Approval|dave.mendis@example.com|REQUESTED",
       "Customer Approval|erin.jayawardena@example.com|REQUESTED",
     ]);
+    expect(await proposalRow(crId)).toEqual({ proposedUtc: proposal.startUtc, answer: "DISAGREE" });
     expect((await dave.get(crId)).body.customerCanAnswer).toBe(true);
+    expect((await dave.get(crId)).body.customerProposal).toMatchObject({ answer: "disagreed" });
+
     expect((await dave.patch(crId, { isCustomerApproved: true })).status).toBe(200);
-    expect(await storedState(crId)).toBe("SCHEDULED");
+    const done = await changeRequestRow(crId);
+    expect([done.state, done.startUtc, done.endUtc], "WSO2's window is the one scheduled").toEqual(["SCHEDULED", wso2.startUtc, wso2.endUtc]);
     for (const who of [dave, erin]) expect((await who.get(crId)).status).toBe(200);
+  });
+
+  test(`a migrated change request the previous system itself put to its customers (an UNLABELED customer stage on the customer group): a proposal waits, the one labelled stage a contact's act always provisioned is added beside the previous system's own rows, and WSO2's acceptance schedules it and leaves those rows alone`, async () => {
+    const number = LEGACY.customerApprovalAskedByPreviousSystem;
+    const crId = id(number);
+    const dave = customerApi("dave");
+    const erin = customerApi("erin");
+    const syncedRows = ["(no label)|dave.mendis@example.com|REQUESTED", "(no label)|erin.jayawardena@example.com|REQUESTED"];
+    expect(await stageRows(crId), "the shape the sync wrote").toEqual(syncedRows);
+    const planned = await changeRequestRow(crId);
+
+    const proposal = futureWindow("UTC", { daysAhead: 12, startHour: 8, hours: 2 });
+    const proposed = await dave.patch(crId, { plannedStartOn: proposal.startUtc, plannedEndOn: addHours(proposal.startUtc, 2) });
+    expect(proposed.status, JSON.stringify(proposed.body)).toBe(200);
+    expect(await storedState(crId)).toBe("CUSTOMER_APPROVAL");
+    expect(await changeRequestRow(crId)).toMatchObject({ startUtc: planned.startUtc, endUtc: planned.endUtc });
+    expect(await proposalRow(crId)).toEqual({ proposedUtc: proposal.startUtc, answer: "" });
+    // The ONE existing write on this shape: the previous system's stage carries no label, so the proposal needs the labelled stage a
+    // contact's first act has always provisioned (one stage, one REQUESTED row per registered contact). Its rows stay.
+    expect(await stageRows(crId), "the synced rows, then the one labelled stage the proposal needed").toEqual([
+      ...syncedRows,
+      "Customer Approval|dave.mendis@example.com|REQUESTED",
+      "Customer Approval|erin.jayawardena@example.com|REQUESTED",
+    ]);
+
+    // It is a proposal to answer (the only REQUESTED rows are the customers', on the customer group's stage).
+    const staffView = (await staffApi("alice").get(crId)).body;
+    expect(staffView.customerProposal).toMatchObject({ answer: "pending", startOn: proposal.startUtc, canAccept: true });
+
+    const accepted = await staffAcceptsProposal("alice", crId);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+    const done = await changeRequestRow(crId);
+    expect([done.state, done.startUtc, done.endUtc]).toEqual(["SCHEDULED", proposal.startUtc, addHours(proposal.startUtc, 2)]);
+    expect(await stageRows(crId), "the labelled rows are closed; the previous system's own rows are left exactly as the sync wrote them").toEqual([
+      ...syncedRows,
+      "Customer Approval|dave.mendis@example.com|CANCELLED",
+      "Customer Approval|erin.jayawardena@example.com|CANCELLED",
+    ]);
+    for (const who of [dave, erin]) expect((await who.get(crId)).body.customerProposal).toMatchObject({ answer: "agreed" });
+  });
+
+  test("a stale proposal on a migrated change request that waits on a live approval of WSO2's is never a proposal to answer: Authorize with the previous system's unlabeled stage and a customer_updated_on left over from an old cycle reads as history, and every answer is refused in words", async () => {
+    // CHG0039301: Emergency, Authorize, ONE synced stage with no label (alice and bob REQUESTED). A date left in
+    // customer_updated_on (a WSO2 user in the previous system writes it too, and an old cycle leaves one behind) must not read
+    // as "the customer proposed": the change is not in Customer Approval and an internal approval is still asked.
+    const crId = id(LEGACY.emergencyInAuthorize);
+    await psql(`update change_request set customer_updated_on = now() + interval '40 days', start_on = now() + interval '30 days', end_on = now() + interval '30 days 2 hours' where id = '${crId}'`);
+    const alice = staffApi("alice");
+    const view = (await alice.get(crId)).body;
+    expect(view.state).toBe("authorize");
+    expect(view.customerProposal?.answer, "a date on a change waiting on a live approval is history, not a proposal").not.toBe("pending");
+    expect(view.customerProposal?.canAccept ?? false).toBe(false);
+    const before = { row: await changeRequestRow(crId), proposal: await proposalRow(crId), rows: await stageRows(crId) };
+
+    const proposedOn = (await alice.get(crId)).body.customerProposal?.startOn ?? "2031-01-01T00:00:00Z";
+    const acceptBody = (await alice.get(crId)).body;
+    const accept = await alice.patch(crId, {
+      confirmCustomerUpdatedDate: "agree",
+      expectedCustomerUpdatedOn: proposedOn,
+      expectedPlannedStartOn: acceptBody.plannedStartOn,
+      expectedPlannedEndOn: acceptBody.plannedEndOn,
+    });
+    expect(accept.status, JSON.stringify(accept.body)).toBe(409);
+    expect(JSON.stringify(accept.body)).toMatch(/a proposed time can only be accepted while the change request is in Customer Approval, but it is in Authorize/);
+    // A Re-schedule out of Authorize is no door either: the only way out of Authorize is the approvals.
+    const reschedule = await alice.patch(crId, { state: "authorize", plannedStartOn: "2032-01-01T10:00:00Z", plannedEndOn: "2032-01-01T12:00:00Z" });
+    expect(reschedule.status, JSON.stringify(reschedule.body)).toBeGreaterThanOrEqual(400);
+    expect({ row: await changeRequestRow(crId), proposal: await proposalRow(crId), rows: await stageRows(crId) }, "nothing any refusal said changed anything").toEqual(before);
   });
 
   test("a stage the sync mirrored with no label: an Emergency change in Authorize is decided by its pending approver (it used to be refused as stale); a stale position-0 stage on a Scheduled one keeps its pending approver through every state move, and customers are shown its label and status only", async () => {
@@ -429,7 +505,7 @@ test.describe("Local stack — legacy (migrated) change requests", () => {
     expect(stage, "the synced stage is read").toBeTruthy();
     const aliceRow = stage!.approvers?.find((a) => a.name === "Alice Perera");
     expect(aliceRow?.status).toBe("REQUESTED");
-    expect(aliceRow?.canDecide, "the pending approver of the synced ECAB stage can decide").toBe(true);
+    expect(aliceRow?.canDecide, "the pending approver of the synced Emergency stage can decide").toBe(true);
     // A customer is shown none of this while it is in Authorize: legacy Authorize is hidden.
     expect((await customerApi("dave").get(emergency)).status).toBe(404);
     const decided = await alice.decide(emergency, "approved");

@@ -189,14 +189,17 @@ WHERE id = '00000000-0000-0000-0000-000000000903';
 -- seed data use them).
 --
 --   WSO2 staff (INTERNAL, role 'internal') -- the approvers of the internal
---   stages (Peer, CAB, ECAB, Review):
+--   stages (Peer, CAB, Review; an Emergency change has the one CAB stage):
 --     alice.perera@example.com    Alice Perera
 --     bob.fernando@example.com    Bob Fernando
 --     carol.silva@example.com     Carol Silva
 --   They are members of "Example Corp ABT" (group 901, the assigned group of
---   every fixture below), of "CAB Approval", of "ECAB Approval" and of
---   "Devops Approval" (the peer approval fallback group, seeded here so the
---   fallback can be exercised locally).
+--   every fixture below), of "CAB Approval" and of "Devops Approval" (the peer
+--   approval fallback group, seeded here so the fallback can be exercised
+--   locally). The membership of those two groups is a data matter (an operations
+--   matter: there is no screen for it): without rows like these, Request Approval on a
+--   Normal change (its CAB stage) or an Emergency change (its only stage, also the
+--   CAB's) is refused with "the \"CAB Approval\" group has no members ...".
 --
 --   Customers (EXTERNAL, role 'customer') -- registered contacts of project 401
 --   "Example Corp Production", i.e. the Customer Group asked at Customer
@@ -240,24 +243,27 @@ INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, tea
   ('00000000-0000-0000-0000-000000000906', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000901')
 ON CONFLICT (id) DO UPDATE SET team_id = EXCLUDED.team_id, user_id = EXCLUDED.user_id, group_id = EXCLUDED.group_id;
 
--- CAB Approval / ECAB Approval membership (migration 0188 creates the two
--- groups, empty). A Normal change cannot be sent for approval, and its peer
--- approval cannot cascade to CAB, unless the CAB group has an eligible (active,
--- internal) member -- so the three internal personas sit in both groups, which
--- lets the fixtures run the full Request Approval -> Peer -> CAB -> Scheduled
--- (Normal) and Request Approval -> ECAB -> Scheduled (Emergency) flows locally.
+-- CAB Approval membership (migration 0188 creates the group, empty). A Normal
+-- change cannot be sent for approval, and its peer approval cannot cascade to CAB,
+-- unless the CAB group has an eligible (active, internal) member -- and an Emergency
+-- change, whose ONE stage is the CAB's too (the previous system has no Emergency CAB), cannot
+-- be sent for approval at all -- so the three internal personas sit in the group,
+-- which lets the fixtures run the full Request Approval -> Peer -> CAB -> Scheduled
+-- (Normal) and Request Approval -> CAB -> Scheduled (Emergency) flows locally.
 -- (jane.doe and john.smith held these seats before; their rows 1101-1104 are
--- removed so an already-seeded database converges.)
+-- removed so an already-seeded database converges. Rows 1121-1123 seated the same
+-- three personas in the "ECAB Approval" group migration 0188 also created; nothing
+-- resolves that group any more, so they are removed too, and the group is left
+-- as it is.)
 DELETE FROM team_member WHERE id IN (
   '00000000-0000-0000-0000-000000001101', '00000000-0000-0000-0000-000000001102',
-  '00000000-0000-0000-0000-000000001103', '00000000-0000-0000-0000-000000001104');
+  '00000000-0000-0000-0000-000000001103', '00000000-0000-0000-0000-000000001104',
+  '00000000-0000-0000-0000-000000001121', '00000000-0000-0000-0000-000000001122',
+  '00000000-0000-0000-0000-000000001123');
 INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, group_id) VALUES
   ('00000000-0000-0000-0000-000000001111', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000011', '00000000-0000-4000-8000-00000000ca01'),
   ('00000000-0000-0000-0000-000000001112', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000012', '00000000-0000-4000-8000-00000000ca01'),
-  ('00000000-0000-0000-0000-000000001113', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000013', '00000000-0000-4000-8000-00000000ca01'),
-  ('00000000-0000-0000-0000-000000001121', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000011', '00000000-0000-4000-8000-00000000eca1'),
-  ('00000000-0000-0000-0000-000000001122', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000012', '00000000-0000-4000-8000-00000000eca1'),
-  ('00000000-0000-0000-0000-000000001123', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000013', '00000000-0000-4000-8000-00000000eca1')
+  ('00000000-0000-0000-0000-000000001113', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000000901', '00000000-0000-0000-0000-000000000013', '00000000-0000-4000-8000-00000000ca01')
 ON CONFLICT (id) DO UPDATE SET team_id = EXCLUDED.team_id, user_id = EXCLUDED.user_id, group_id = EXCLUDED.group_id;
 
 -- Devops Approval: the peer approval fallback group (domain.PeerApprovalFallbackGroupName),
@@ -558,16 +564,17 @@ ON CONFLICT (id) DO UPDATE SET
   requested_by_user_id = EXCLUDED.requested_by_user_id, justification = EXCLUDED.justification,
   customer_approval_required = EXCLUDED.customer_approval_required,
   customer_review_required = EXCLUDED.customer_review_required,
-  -- whatever a spec or a manual walk-through stamped on the way
+  -- whatever a spec or a manual walk-through stamped on the way (a customer's proposed time and WSO2's answer to it included)
   approval = NULL, is_customer_approval_required = NULL, is_customer_review_required = NULL,
   start_on = NULL, end_on = NULL, closed_by_user_id = NULL, closed_on = NULL,
-  is_on_hold = NULL, on_hold_reason = NULL, customer_group_id = NULL;
+  is_on_hold = NULL, on_hold_reason = NULL, customer_group_id = NULL,
+  customer_updated_on = NULL, customer_updated_date_confirmation = NULL;
 
 INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status, checkpoint_label) VALUES
-  ('00000000-0000-0000-0000-000000001005', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000901', 'requested', 'Peer Approval'),
-  ('00000000-0000-0000-0000-000000001008', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001004', '00000000-0000-0000-0000-000000000901', 'approved', 'Peer Approval'),
-  ('00000000-0000-0000-0000-000000001305', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001303', NULL, 'requested', 'Customer Approval'),
-  ('00000000-0000-0000-0000-000000001306', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001304', NULL, 'requested', 'Customer Review');
+  ('00000000-0000-0000-0000-000000001005', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001003', '00000000-0000-0000-0000-000000000901', 'REQUESTED', 'Peer Approval'),
+  ('00000000-0000-0000-0000-000000001008', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001004', '00000000-0000-0000-0000-000000000901', 'APPROVED', 'Peer Approval'),
+  ('00000000-0000-0000-0000-000000001305', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001303', NULL, 'REQUESTED', 'Customer Approval'),
+  ('00000000-0000-0000-0000-000000001306', now(), now(), 'seed', 'seed', '00000000-0000-0000-0000-000000001304', NULL, 'REQUESTED', 'Customer Review');
 
 -- approval_stage_approver.state stores UPPER_SNAKE_CASE values after migration
 -- 0138 renamed the column from status and normalised existing rows.

@@ -656,6 +656,18 @@ func main() {
 			"dlqTopic", plan.SREDLQ.Topic, "dlqGroup", plan.SREDLQ.Group,
 			"replacesCRConsumer", !plan.StartCR, "replacesOutageConsumer", !plan.StartOutage)
 	}
+	// Incidents on their own topic (INCIDENT_EVENT_HUB_TOPIC) still reach the
+	// dispatcher. A record that exhausts its retries goes to the case DLQ,
+	// where it went while incidents shared the case topic.
+	var incidentConsumers []*eventbus.Consumer
+	if topic, group, ok := incidentDispatchConsumer(eventBusCfg.Topic, os.Getenv("INCIDENT_EVENT_HUB_TOPIC"),
+		os.Getenv("INCIDENT_CONSUMER_GROUP"), consumerGroup, plan); ok {
+		incidentCfg := eventBusCfg
+		incidentCfg.Topic = topic
+		incidentConsumers = startConsumers(ctx, "incidents", incidentCfg, group,
+			envInt("INCIDENT_CONSUMER_COUNT", 1), dispatcher.HandleShared, toDeadLetter)
+		slog.Info("incident consumer enabled", "topic", topic, "group", group)
+	}
 	// And the same for project_contact.invited: the one dispatcher routes
 	// on the envelope's Type already, and these two only ever receive the
 	// onboarding events since that is all their topic carries.
@@ -885,6 +897,20 @@ func main() {
 				escalationConsumers = append(escalationConsumers,
 					startConsumers(ctx, l.name, eventBusCfg, l.group, escalationCount, escalationEngine.Handle, escalationToDeadLetter)...)
 
+				// SRE incidents on their own topic (entity-service's
+				// INCIDENT_EVENT_HUB_TOPIC): the SRE ladder reads it as well as
+				// the shared one, which still carries the customer cases -- a
+				// case S0 pages SRE. Reading both through a switch-over is
+				// harmless: a redelivered trigger is a no-op (create-if-absent).
+				if topic, group, ok := sreIncidentConsumer(l.kind, eventBusCfg.Topic,
+					os.Getenv("INCIDENT_EVENT_HUB_TOPIC"), os.Getenv("PAGING_SRE_INCIDENT_CONSUMER_GROUP")); ok {
+					incidentCfg := eventBusCfg
+					incidentCfg.Topic = topic
+					escalationConsumers = append(escalationConsumers,
+						startConsumers(ctx, "paging-sre-incidents", incidentCfg, group, escalationCount, escalationEngine.Handle, escalationToDeadLetter)...)
+					slog.Info("case paging: the SRE chain reads incidents from their own topic", "topic", topic, "group", group)
+				}
+
 				// And a consumer for that DLQ running THIS ladder's handler, so
 				// a dead-lettered record gets a retry pass from the ladder that
 				// failed it. Both ladders dead-letter onto the one topic, each
@@ -956,6 +982,9 @@ func main() {
 		c.Close()
 	}
 	for _, c := range sreDLQConsumers {
+		c.Close()
+	}
+	for _, c := range incidentConsumers {
 		c.Close()
 	}
 	for _, c := range projectConsumers {
@@ -1047,6 +1076,45 @@ func loadOnboardingConfig(steps *entity.CustomerEntityClient, emailClient *notif
 		EmailFrom:       emailFrom,
 		ReplyTo:         emailClient.ReplyTo(),
 	}
+}
+
+// defaultPagingSREIncidentConsumerGroup is the SRE chain's group on the
+// incident topic. A new group, so it takes the Case Paging name; the ladders'
+// existing groups keep their names, since renaming a group drops its offsets.
+const defaultPagingSREIncidentConsumerGroup = "csm-notification-service-paging-sre-incidents"
+
+// sreIncidentConsumer decides whether a ladder also reads a separate incident
+// topic, and under which consumer group. Only the SRE ladder does: incidents
+// are SRE work, and the CRE ladder pages from customer cases on the shared
+// topic. An unset topic, or one equal to the shared topic, adds nothing.
+func sreIncidentConsumer(kind paging.Ladder, mainTopic, incidentTopic, groupOverride string) (topic, group string, ok bool) {
+	topic = strings.TrimSpace(incidentTopic)
+	if kind != paging.LadderSRE || topic == "" || topic == mainTopic {
+		return "", "", false
+	}
+	group = strings.TrimSpace(groupOverride)
+	if group == "" {
+		group = defaultPagingSREIncidentConsumerGroup
+	}
+	return topic, group, true
+}
+
+// incidentDispatchConsumer decides whether the dispatcher needs its own
+// consumer on a separate incident topic. incident.created still has a
+// dispatcher reaction (the default on-call call), so moving incidents off the
+// shared topic must not move them out of the dispatcher's reach. Nothing extra
+// when the topic is unset or the shared one, or when the sre-events consumer
+// already reads it.
+func incidentDispatchConsumer(mainTopic, incidentTopic, groupOverride, mainGroup string, plan srePlan) (topic, group string, ok bool) {
+	topic = strings.TrimSpace(incidentTopic)
+	if topic == "" || topic == mainTopic || (plan.Enabled && plan.SRE.Topic == topic) {
+		return "", "", false
+	}
+	group = strings.TrimSpace(groupOverride)
+	if group == "" {
+		group = mainGroup + "-incidents"
+	}
+	return topic, group, true
 }
 
 // startConsumers starts count independent eventbus.Consumer instances, all

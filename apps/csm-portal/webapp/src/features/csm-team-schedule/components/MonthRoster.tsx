@@ -900,6 +900,7 @@ export default function MonthRoster({
                     {d.getDate() === 1 || d.getTime() === days[0].getTime() ? (
                       <span className="mo">{d.toLocaleDateString(undefined, { month: "short" })}</span>
                     ) : null}
+                    <span className="w">{d.toLocaleDateString(undefined, { weekday: "short" })}</span>
                   </th>
                 );
               })}

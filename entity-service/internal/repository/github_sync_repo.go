@@ -42,6 +42,10 @@ type RepoMapping struct {
 	// but RepoForAccount starts from a case and has to be told.
 	Owner      string
 	Repository string
+	// ProjectID is the project the repository's records belong to. Only a
+	// repository-declared mapping (.github/servicenow-config.yml, case.project)
+	// has one; account_github_repo never did, so it is empty for that source.
+	ProjectID string
 }
 
 // GithubChangeRequest is the slice of a change request the sync reads.
@@ -71,7 +75,14 @@ type GithubSyncRepository interface {
 	// trigger only watches case comments -- attaching them to the change
 	// request instead left a conversation nobody could reply to.
 	// Not found is ("", nil).
-	CaseByIssueNumber(ctx context.Context, accountID string, issueNumber int) (string, error)
+	//
+	// Matched by repository for a record that knows its own (migration 0206),
+	// and by account for one created before records did.
+	CaseByIssue(ctx context.Context, accountID, owner, repository string, issueNumber int) (string, error)
+	// AccountProject reports whether projectID is a project of accountID, and
+	// the account's name when it is. A repository declares both in its own
+	// file, so nothing else stops it naming a project of another account.
+	AccountProject(ctx context.Context, accountID, projectID string) (accountName string, ok bool, err error)
 	// AccountForCase resolves the case's owning account.
 	AccountForCase(ctx context.Context, caseID string) (string, error)
 	// SetCaseGithubIssueNumber links a case to the issue filed for it.
@@ -127,6 +138,25 @@ func (r *githubSyncRepository) RepoMapping(ctx context.Context, owner, repositor
 		return nil, fmt.Errorf("github: repo mapping for %s/%s: %w", owner, repository, err)
 	}
 	return &m, nil
+}
+
+// AccountProject implements GithubSyncRepository.
+func (r *githubSyncRepository) AccountProject(ctx context.Context, accountID, projectID string) (string, bool, error) {
+	ctx = withGithubSystemIdentity(ctx)
+	const query = `
+		SELECT a.name
+		FROM project p
+		JOIN account a ON a.id = p.account_id
+		WHERE a.id = $1::uuid AND p.id = $2::uuid`
+	var name string
+	err := r.db.QueryRow(ctx, query, accountID, projectID).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("github: project %s of account %s: %w", projectID, accountID, err)
+	}
+	return name, true, nil
 }
 
 // crvis: GitHub inbound sync under the system identity (M2M-only webhook handlers); no customer identity reaches it
@@ -248,17 +278,23 @@ func (r *githubSyncRepository) SetCaseGithubIssueNumber(ctx context.Context, cas
 	return tag.RowsAffected() > 0, nil
 }
 
-// CaseByIssueNumber implements GithubSyncRepository.
-func (r *githubSyncRepository) CaseByIssueNumber(ctx context.Context, accountID string, issueNumber int) (string, error) {
+// CaseByIssue implements GithubSyncRepository.
+func (r *githubSyncRepository) CaseByIssue(ctx context.Context, accountID, owner, repository string, issueNumber int) (string, error) {
 	ctx = withGithubSystemIdentity(ctx)
-	// Scoped to the account as well as the issue number: two accounts can each
-	// have an issue #23, in different repositories.
+	// An issue number is only unique within a repository. A record that carries
+	// its repository is matched on it; an older one, which does not, on its
+	// account -- two accounts can each have an issue #23. The repository match
+	// is preferred should both exist.
 	const query = `
 		SELECT wi.id::text
 		FROM work_item wi
-		WHERE wi.github_issue_number = $2 AND wi.account_id = $1::uuid`
+		WHERE wi.github_issue_number = $4
+		  AND ((lower(wi.github_owner) = lower($2) AND lower(wi.github_repository) = lower($3))
+		       OR (wi.github_owner IS NULL AND wi.account_id = NULLIF($1, '')::uuid))
+		ORDER BY (wi.github_owner IS NULL)
+		LIMIT 1`
 	var id string
-	err := r.db.QueryRow(ctx, query, accountID, issueNumber).Scan(&id)
+	err := r.db.QueryRow(ctx, query, accountID, owner, repository, issueNumber).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

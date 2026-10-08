@@ -53,6 +53,12 @@ export interface ChangeRequestDetail extends ChangeRequestSummary {
   testPlan: string | null;
   hasCustomerApproved: boolean;
   hasCustomerReviewed: boolean;
+  /**
+   * WSO2 accepted the time the customer proposed and scheduled the change by it (see {@link isProposedTimeAccepted}).
+   * `hasCustomerApproved` stays false then (no staff action records the customer's approval), so "Customer Approved: No" would
+   * mislead: the page reads "Proposed time accepted". False while the change is in Customer Approval, whatever answer stands.
+   */
+  proposedTimeAccepted: boolean;
   approvedBy: EntityRefDto | null;
   approvedOn: Date | null;
 }
@@ -78,6 +84,32 @@ export function toChangeRequestSummary(dto: ChangeRequestSearchViewDto): ChangeR
   };
 }
 
+/** The states a change request is in once it has moved on from Customer Approval (Scheduled, then every state after it). */
+const STATES_PAST_CUSTOMER_APPROVAL: readonly string[] = [
+  "scheduled",
+  "implement",
+  "review",
+  "customer_review",
+  "rollback",
+  "closed",
+  "canceled",
+];
+
+/**
+ * Whether WSO2 accepted a time the customer proposed AND the change request has moved on from Customer Approval because
+ * of it (Scheduled or later). The answer (`agreed`, or the raw `agree`) is only what WSO2 once said: nothing clears it when
+ * the customers are asked again, so a change that is (back) in Customer Approval, or in a state not known here, with an
+ * Agree standing was NOT scheduled by it and is waiting for the customer's own answer. Reading it as accepted there would
+ * tell staff there is nothing left to answer. The CSM webapp's `customerApprovedDisplay` applies the same gate.
+ */
+export function isProposedTimeAccepted(
+  dto: Pick<ChangeRequestDetailDto, "state" | "customerProposal" | "confirmCustomerUpdatedDate">,
+): boolean {
+  const agreed =
+    dto.customerProposal?.answer === "agreed" || dto.confirmCustomerUpdatedDate?.trim().toLowerCase() === "agree";
+  return agreed && !!dto.state && STATES_PAST_CUSTOMER_APPROVAL.includes(dto.state);
+}
+
 export function toChangeRequestDetail(dto: ChangeRequestDetailDto): ChangeRequestDetail {
   return {
     ...toChangeRequestSummary(dto),
@@ -91,6 +123,7 @@ export function toChangeRequestDetail(dto: ChangeRequestDetailDto): ChangeReques
     testPlan: dto.testPlan,
     hasCustomerApproved: dto.hasCustomerApproved,
     hasCustomerReviewed: dto.hasCustomerReviewed,
+    proposedTimeAccepted: isProposedTimeAccepted(dto),
     approvedBy: dto.approvedBy,
     approvedOn: parseOptionalBackendTimestamp(dto.approvedOn),
   };

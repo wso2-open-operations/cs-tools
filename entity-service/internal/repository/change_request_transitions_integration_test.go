@@ -126,7 +126,7 @@ func (f *crFlow) wantValidationRefusal(what, id string, requested string, wantMs
 func TestChangeRequestTransitionsIntegration_EveryStateByEveryRequest(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	lands := map[string]string{
-		"assess": "ASSESS", "authorize": "AUTHORIZE", "implement": "IMPLEMENT", "review": "REVIEW",
+		"assess": "ASSESS", "implement": "IMPLEMENT", "review": "REVIEW",
 		"closed": "CLOSED", "customer_review": "CUSTOMER_REVIEW", "rollback": "ROLLBACK", "canceled": "CANCELED",
 	}
 	for _, approval := range []bool{false, true} {
@@ -161,8 +161,23 @@ func TestChangeRequestTransitionsIntegration_EveryStateByEveryRequest(t *testing
 					err := f.attemptState(id, requested)
 					if err == nil {
 						accepted = append(accepted, requested)
-						if got := f.state(id); got != lands[requested] {
-							t.Fatalf("%s: accepted, but the change is now %s, want %s", what, got, lands[requested])
+						// "authorize" is the wire name of Re-schedule, which does not move the
+						// state: the change stays in Customer Approval, nothing goes through CAB
+						// again, and the customers are asked again with exactly one new stage.
+						wantLand := lands[requested]
+						if requested == "authorize" {
+							wantLand = "CUSTOMER_APPROVAL"
+						}
+						if got := f.state(id); got != wantLand {
+							t.Fatalf("%s: accepted, but the change is now %s, want %s", what, got, wantLand)
+						}
+						if requested == "authorize" {
+							if got := f.stageLabels(id); got != stageCustApproval {
+								t.Fatalf("%s: stages after the Re-schedule = %q, want exactly one new customer stage and no CAB", what, got)
+							}
+							if n := f.liveStageRows(id, stageCustApproval); n != 2 {
+								t.Fatalf("%s: %d customer rows asked, want both contacts", what, n)
+							}
 						}
 						continue
 					}

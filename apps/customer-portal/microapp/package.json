@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview",
     "prettier": "prettier --write .",
     "prettier:check": "prettier --check ."
@@ -56,7 +57,8 @@
     "typescript": "5.8.3",
     "typescript-eslint": "8.46.4",
     "vite": "7.1.7",
-    "vite-tsconfig-paths": "5.1.4"
+    "vite-tsconfig-paths": "5.1.4",
+    "vitest": "4.0.18"
   },
   "overrides": {
     "lodash": "4.18.1",

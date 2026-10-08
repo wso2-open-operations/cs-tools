@@ -24,6 +24,7 @@ import {
 import { Calendar } from "@wso2/oxygen-ui-icons-react";
 import { format } from "date-fns";
 import type { JSX } from "react";
+import { useControlledDatePickerValue, isPastOrPresentDate } from "@hooks/useControlledDatePickerValue";
 import {
   USAGE_METRICS_CUSTOM_RANGE_APPLY,
   USAGE_METRICS_CUSTOM_RANGE_BUTTON,
@@ -80,6 +81,24 @@ export default function UsageMetricsTimeRangeSelector({
   rightAction,
 }: UsageMetricsTimeRangeSelectorProps): JSX.Element {
   const timeLabel = USAGE_TIME_RANGE_LABELS[timeRange];
+
+  // isComplete: isPastOrPresentDate -- both pickers below are `disableFuture`,
+  // but MUI's own `disableFuture` only disables the calendar popup's future
+  // days; it doesn't stop a hand-typed future date from reaching onChange.
+  const customStartPicker = useControlledDatePickerValue({
+    value: customStart,
+    onChange: onCustomStartChange,
+    parse: parseDateOnly,
+    format: formatDateOnly,
+    isComplete: isPastOrPresentDate,
+  });
+  const customEndPicker = useControlledDatePickerValue({
+    value: customEnd,
+    onChange: onCustomEndChange,
+    parse: parseDateOnly,
+    format: formatDateOnly,
+    isComplete: isPastOrPresentDate,
+  });
 
   const customRangeError = (() => {
     if (!customStart || !customEnd) return null;
@@ -156,12 +175,10 @@ export default function UsageMetricsTimeRangeSelector({
                 <LocalizationProvider dateAdapter={AdapterDateFns}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                     <DatePicker
-                      value={parseDateOnly(customStart)}
+                      value={customStartPicker.localDate}
                       disableFuture
-                      maxDate={parseDateOnly(customEnd) ?? undefined}
-                      onChange={(date) => {
-                        onCustomStartChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-                      }}
+                      maxDate={customEndPicker.localDate ?? undefined}
+                      onChange={customStartPicker.handleChange}
                       slotProps={{
                         textField: {
                           size: "small",
@@ -169,7 +186,7 @@ export default function UsageMetricsTimeRangeSelector({
                           sx: { minWidth: 160, maxWidth: "100%" },
                           slotProps: { htmlInput: { "aria-label": "Custom range start date" } },
                         },
-                        field: { clearable: true },
+                        field: { clearable: true, onClear: customStartPicker.handleClear },
                       }}
                     />
                     <Typography
@@ -180,12 +197,10 @@ export default function UsageMetricsTimeRangeSelector({
                       {USAGE_METRICS_CUSTOM_RANGE_TO}
                     </Typography>
                     <DatePicker
-                      value={parseDateOnly(customEnd)}
+                      value={customEndPicker.localDate}
                       disableFuture
-                      minDate={parseDateOnly(customStart) ?? undefined}
-                      onChange={(date) => {
-                        onCustomEndChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-                      }}
+                      minDate={customStartPicker.localDate ?? undefined}
+                      onChange={customEndPicker.handleChange}
                       slotProps={{
                         textField: {
                           size: "small",
@@ -193,7 +208,7 @@ export default function UsageMetricsTimeRangeSelector({
                           sx: { minWidth: 160, maxWidth: "100%" },
                           slotProps: { htmlInput: { "aria-label": "Custom range end date" } },
                         },
-                        field: { clearable: true },
+                        field: { clearable: true, onClear: customEndPicker.handleClear },
                       }}
                     />
                   </Box>

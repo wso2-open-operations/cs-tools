@@ -24,17 +24,30 @@ import { useLogger } from "@hooks/useLogger";
 
 /** Base delay before the first reconnect attempt after the stream errors out or drops. */
 const RECONNECT_BASE_DELAY_MS = 3_000;
-/** Reconnect delay never grows past this, no matter how many consecutive failures. */
+/** Reconnect delay never grows past this while still within MAX_BACKOFF_ATTEMPTS. */
 const RECONNECT_MAX_DELAY_MS = 30_000;
+/**
+ * After this many consecutive failures (the backoff curve has long since
+ * maxed out at RECONNECT_MAX_DELAY_MS by then), stop retrying every ≤30s —
+ * a sustained outage/misconfiguration (e.g. the backend rejecting every
+ * caller) would otherwise have every open case tab call the backend
+ * roughly twice a minute forever.
+ */
+const MAX_BACKOFF_ATTEMPTS = 10;
+/** Retry interval once MAX_BACKOFF_ATTEMPTS is exceeded — still eventually recovers once the backend does, at a fraction of the call volume. */
+const RECONNECT_IDLE_DELAY_MS = 5 * 60_000;
 
 /**
  * Exponential backoff with full jitter (attempt 0 is a random delay in
  * [0, base), attempt 1 in [0, base*2), ... capped at max) — a sustained
  * backend outage or misconfiguration would otherwise have every open
  * case-detail tab retry in lockstep every RECONNECT_BASE_DELAY_MS forever,
- * hammering the endpoint indefinitely instead of backing off.
+ * hammering the endpoint indefinitely instead of backing off. Past
+ * MAX_BACKOFF_ATTEMPTS consecutive failures, falls back to a slow idle
+ * retry instead of continuing to hammer the endpoint every ≤30s.
  */
 function reconnectDelay(attempt: number): number {
+  if (attempt >= MAX_BACKOFF_ATTEMPTS) return RECONNECT_IDLE_DELAY_MS;
   const capped = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** attempt);
   return Math.random() * capped;
 }

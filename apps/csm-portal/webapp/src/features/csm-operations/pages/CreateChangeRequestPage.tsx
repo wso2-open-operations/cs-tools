@@ -50,6 +50,7 @@ import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import { useGetUsersMe } from "@features/settings/api/useGetUsersMe";
 import { useSearchGroups } from "@api/useSearchGroups";
 import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
+import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useSearchParentRecordsForSelect } from "@features/csm-operations/api/useSearchParentRecordsForSelect";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import ChangeRequestScopeFields, {
@@ -65,9 +66,11 @@ import {
   CLONE_SOURCE_GAP_MESSAGE,
   DEFAULT_CHANGE_REQUEST_CATEGORY,
   decodeParentRecordValue,
+  EMERGENCY_CUSTOMER_STEPS_HELPER,
   encodeParentRecordValue,
   isChangeRequestCategory,
   isCreatableChangeRequestType,
+  isEmergencyChangeRequestType,
   loadChangeRequestDraft,
   parentRecordLabel,
   saveChangeRequestDraft,
@@ -112,6 +115,11 @@ const PRIORITY_OPTIONS: Array<{ value: BeChangeRequestPriority; label: string }>
   { value: "low", label: "Low" },
 ];
 
+
+/** What describes a customer-step checkbox: its own helper line, and (for Emergency) the line saying why it is off. */
+function customerStepsDescribedBy(ownId: string, isEmergency: boolean): string {
+  return isEmergency ? `${ownId} cr-customer-steps-emergency-note` : ownId;
+}
 
 /** "YYYY-MM-DDTHH:MM" (the wire format this form's state still uses) to a
  * local Date, avoiding the UTC-parse day/hour shift a plain `new Date(value)`
@@ -231,8 +239,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // isn't a field on the real ServiceNow CR form. `category` is, defaulting
   // to "Other" like the ServiceNow form (see the Category state below).
   // Type has NO default: it decides which approval flow the change goes
-  // through (Normal: Peer then CAB; Standard: none; Emergency: ECAB), so the
-  // user must choose one of the three deliberately. A clone / restored draft
+  // through (Normal: Peer then CAB; Standard: none; Emergency: a single CAB
+  // stage), so the user must choose one of the three deliberately. A clone / restored draft
   // pre-selects only when its type is one of those three (a legacy
   // model/azure/... source falls back to "nothing selected").
   const initialType = draft?.type ?? cloneState?.type ?? "";
@@ -255,12 +263,18 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // The two ServiceNow "Customer Approval" / "Customer Review" checkboxes.
   // Unchecked by default; a clone carries the source's settings over (they
   // configure the flow, unlike the customer's actual confirmation).
+  // An Emergency change acts without customer consent, so both boxes are
+  // disabled and unticked while the type is Emergency, whatever a clone's source
+  // or a draft saved before that rule says. Switching to Emergency clears them;
+  // switching away leaves them off for the user to tick again.
+  const initialIsEmergency = isEmergencyChangeRequestType(initialType);
   const [customerApprovalRequired, setCustomerApprovalRequired] = useState(
-    draft?.customerApprovalRequired ?? cloneState?.customerApprovalRequired ?? false,
+    !initialIsEmergency && (draft?.customerApprovalRequired ?? cloneState?.customerApprovalRequired ?? false),
   );
   const [customerReviewRequired, setCustomerReviewRequired] = useState(
-    draft?.customerReviewRequired ?? cloneState?.customerReviewRequired ?? false,
+    !initialIsEmergency && (draft?.customerReviewRequired ?? cloneState?.customerReviewRequired ?? false),
   );
+  const isEmergency = isEmergencyChangeRequestType(type);
   // Customer Project / Deployments / Deployment products (and the read-only
   // Customer Group, the project's registered contacts). The hook owns the
   // cascade (project -> deployments + derived products and contacts); a
@@ -339,6 +353,36 @@ export default function CreateChangeRequestPage(): JSX.Element {
         subject: fromIncidentState.incidentSubject,
       })
     : undefined;
+
+  // Infer fields from the originating service request. Runs for whichever way
+  // the request got selected (the case page's "Create change request…" action
+  // or picking one in the field above), once per selected request, and only
+  // fills what is still blank — it never overwrites something the user typed
+  // or restored from a draft. The case detail is already cached when coming
+  // from the case page, so this costs no extra request there.
+  const sourceCaseId = parentSelection?.kind === "service_request" ? parentSelection.id : undefined;
+  const { data: sourceCase } = useGetCsmCaseDetail(sourceCaseId);
+  const [inferredFromCaseId, setInferredFromCaseId] = useState<string | undefined>(
+    // A restored draft already reflects what the user did with these fields.
+    draft ? sourceCaseId : undefined,
+  );
+  if (sourceCase && sourceCase.id === sourceCaseId && inferredFromCaseId !== sourceCaseId) {
+    setInferredFromCaseId(sourceCaseId);
+    const caseProjectId = sourceCase.projectId;
+    // A different project already chosen wins: the case's deployment would not
+    // belong to it.
+    if (caseProjectId && (!scope.projectId || scope.projectId === caseProjectId)) {
+      if (!scope.projectId) scope.setProject(caseProjectId, sourceCase.projectName);
+      const deploymentId = sourceCase.productContext.deploymentId;
+      if (deploymentId && scope.deploymentIds.length === 0) {
+        scope.setDeployments([deploymentId]);
+      }
+    }
+    if (!subject.trim() && sourceCase.subject) setSubject(sourceCase.subject.slice(0, SUBJECT_MAX));
+    if (isBlankHtml(description) && !isBlankHtml(sourceCase.description)) {
+      setDescription(sourceCase.description);
+    }
+  }
 
   // Defaults "Requested by" to the signed-in user, matching the legacy
   // ServiceNow form's own behaviour (usePostChangeRequest.ts/BE doesn't do
@@ -473,8 +517,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
     payload.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
     // Always sent, true or false, so the backend never has to guess the intent.
-    payload.customerApprovalRequired = customerApprovalRequired;
-    payload.customerReviewRequired = customerReviewRequired;
+    // An Emergency change never asks the customer: both are off whatever the state holds.
+    payload.customerApprovalRequired = !isEmergency && customerApprovalRequired;
+    payload.customerReviewRequired = !isEmergency && customerReviewRequired;
     if (groupId.trim()) payload.groupId = groupId.trim();
     if (assignedEngineerId.trim()) payload.assignedEngineerId = assignedEngineerId.trim();
     if (requestedById.trim()) payload.requestedById = requestedById.trim();
@@ -679,7 +724,13 @@ export default function CreateChangeRequestPage(): JSX.Element {
             <RadioGroup
               name="cr-type"
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => {
+                setType(e.target.value);
+                if (isEmergencyChangeRequestType(e.target.value)) {
+                  setCustomerApprovalRequired(false);
+                  setCustomerReviewRequired(false);
+                }
+              }}
               sx={{ gap: 1 }}
             >
               {CHANGE_REQUEST_CREATE_TYPE_OPTIONS.map((o) => (
@@ -847,18 +898,28 @@ export default function CreateChangeRequestPage(): JSX.Element {
             >
               Customer steps
             </Typography>
+            {isEmergency && (
+              <Typography
+                id="cr-customer-steps-emergency-note"
+                variant="body2"
+                color="text.secondary"
+                sx={{ mb: 1 }}
+              >
+                {EMERGENCY_CUSTOMER_STEPS_HELPER}
+              </Typography>
+            )}
             <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
               <FormControlLabel
                 sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isEmergency}
                 control={
                   <Checkbox
                     size="small"
-                    checked={customerApprovalRequired}
+                    checked={!isEmergency && customerApprovalRequired}
                     onChange={(e) => setCustomerApprovalRequired(e.target.checked)}
                     inputProps={{
                       "aria-label": "Customer Approval",
-                      "aria-describedby": "cr-customer-approval-desc",
+                      "aria-describedby": customerStepsDescribedBy("cr-customer-approval-desc", isEmergency),
                     }}
                   />
                 }
@@ -877,15 +938,15 @@ export default function CreateChangeRequestPage(): JSX.Element {
               />
               <FormControlLabel
                 sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isEmergency}
                 control={
                   <Checkbox
                     size="small"
-                    checked={customerReviewRequired}
+                    checked={!isEmergency && customerReviewRequired}
                     onChange={(e) => setCustomerReviewRequired(e.target.checked)}
                     inputProps={{
                       "aria-label": "Customer Review",
-                      "aria-describedby": "cr-customer-review-desc",
+                      "aria-describedby": customerStepsDescribedBy("cr-customer-review-desc", isEmergency),
                     }}
                   />
                 }

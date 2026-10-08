@@ -70,13 +70,12 @@ func TestChangeRequestCustomerPrivacyIntegration_AnswerIsBoundToTheWindowSeen(t 
 	f.wantConflictContaining("a window that is gone", err, changedMsg, "(it is now no planned time is set)")
 	f.setPlanned(id, rsStart1, rsEnd1)
 
-	// The window moves: Alice proposes, the CAB approves it, the customer is asked
-	// again. Bob's page still shows the old window.
-	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
-		t.Fatalf("proposal: %v", err)
-	}
-	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-		t.Fatalf("CAB approval of the new plan: %v", err)
+	// The window moves: Alice proposes a time, WSO2 proposes a different one instead
+	// and the customer is asked again (no CAB in between). Bob's page still shows the
+	// old window.
+	f.mustPropose(id, crScopeUserA1, rsStart3)
+	if err := f.counter(id, sp(rsStart2), sp(rsEnd2)); err != nil {
+		t.Fatalf("WSO2's different time: %v", err)
 	}
 	f.expect(id, "asked again", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	f.wantCanAnswer(id, "asked again", true, crScopeUserA1, crScopeUserA2)
@@ -109,6 +108,13 @@ func TestChangeRequestCustomerPrivacyIntegration_ExpectedWindowOnlyAccompaniesAn
 	f.wantValidationError("the expected window beside a proposal", err, "go with the customer's approval or review")
 	_, err = f.patch(id, domain.PatchChangeRequestRequest{Description: sp("x"), ExpectedPlannedStartOn: sp(rsStart1)})
 	f.wantValidationError("a WSO2 user's PATCH", err, "can only accompany a customer's approval or review")
+	// Neither may the version of a proposal ride along with anything but WSO2's answer to it.
+	_, err = f.patch(id, domain.PatchChangeRequestRequest{Description: sp("x"), ExpectedCustomerUpdatedOn: sp(rsStart2)})
+	f.wantValidationError("a proposal version beside an edit", err, "expectedCustomerUpdatedOn can only accompany WSO2's acceptance")
+	_, err = f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{ExpectedCustomerUpdatedOn: sp(rsStart2)})
+	f.wantForbidden("a customer sending a proposal version", err, "customers can only record the customer's approval")
+	_, err = f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{ConfirmCustomerUpdatedDate: sp("agree"), ExpectedCustomerUpdatedOn: sp(rsStart2)})
+	f.wantForbidden("a customer answering for WSO2", err, "customers can only record the customer's approval")
 	f.wantPlanned(id, "after the refused requests", rsStart1, rsEnd1)
 	f.expect(id, "after the refused requests", "CUSTOMER_APPROVAL", "authorize", "canceled")
 }

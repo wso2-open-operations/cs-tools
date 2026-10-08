@@ -35,6 +35,7 @@ const patchMutateMock = vi.fn();
 const patchMutateAsyncMock = vi.fn<(input: unknown) => Promise<unknown>>();
 const postCommentMutateAsyncMock = vi.fn<(input: unknown) => Promise<unknown>>();
 const patchResetMock = vi.fn();
+const refetchMock = vi.fn();
 const showErrorMock = vi.fn();
 const editChangeRequestDialogMock = vi.fn();
 let patchIsPending = false;
@@ -53,9 +54,11 @@ let patchError: Error | null = null;
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
-    constructor(status: number, message: string) {
+    payload?: { message?: string; errorCode?: string };
+    constructor(status: number, message: string, payload?: { message?: string; errorCode?: string }) {
       super(message);
       this.status = status;
+      this.payload = payload;
     }
   },
   useBackendApi: () => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }),
@@ -106,7 +109,8 @@ function useFakeBackendTick(): void {
 vi.mock("@features/csm-operations/api/useGetChangeRequest", () => ({
   useGetChangeRequest: () => {
     useFakeBackendTick();
-    return useGetChangeRequestMock();
+    // `refetch` is the query result's own: the page reads the change request again after a stale answer.
+    return { refetch: refetchMock, ...useGetChangeRequestMock() };
   },
 }));
 const useGetChangeRequestApprovalsMock = vi.fn();
@@ -218,6 +222,7 @@ beforeEach(() => {
   patchIsError = false;
   patchError = null;
   patchResetMock.mockClear();
+  refetchMock.mockReset();
   editChangeRequestDialogMock.mockClear();
   approvalsPanelMock.mockClear();
   useGroupDetailMock.mockReset();
@@ -1365,7 +1370,7 @@ describe("CsmChangeRequestDetailPage — reports its own draft state to the tab 
 //   Normal    New -> Request Approval -> Assess [Peer Approval]
 //                 -> Authorize [CAB Approval] -> (auto) Scheduled
 //                 -> Implement -> Review -> Closed
-//   Emergency New -> Request Approval -> Authorize [ECAB Approval only]
+//   Emergency New -> Request Approval -> Authorize [one CAB Approval stage, no Peer, no customer steps]
 //                 -> (auto) Scheduled
 //   Standard  New -> Request Approval -> (auto) Scheduled, no approvals
 //
@@ -1376,7 +1381,7 @@ describe("CsmChangeRequestDetailPage — reports its own draft state to the tab 
 // `authorize`, and lists `scheduled` only from `customer_approval` (where it
 // records the customer's approval); Request Approval is
 // `PATCH {state:"assess"}`; approving Peer adds a CAB stage; approving
-// CAB/ECAB (or Standard's Request Approval) moves the CR to `customer_approval`
+// CAB (or Standard's Request Approval) moves the CR to `customer_approval`
 // when `customerApprovalRequired`, else straight to `scheduled`; Review offers
 // `customer_review` when `customerReviewRequired`, else `closed`;
 // `customer_review` -> `closed`.
@@ -1386,6 +1391,8 @@ const LC_CREATOR = { id: "u-creator", email: "casey@example.com", name: "Casey C
 const LC_PEER = { id: "u-peer", email: "pat@example.com", name: "Pat Peer" };
 const LC_PEER_TWO = { id: "u-peer2", email: "quinn@example.com", name: "Quinn Peer" };
 const LC_CAB = { id: "u-cab", email: "cam@example.com", name: "Cam Cab" };
+// The approver of a stage an OLDER Emergency change still carries: ECAB was retired, nothing creates such a stage any more,
+// but the ones already provisioned keep showing and keep being decidable by the approvers they asked.
 const LC_ECAB = { id: "u-ecab", email: "eli@example.com", name: "Eli Ecab" };
 
 const LC_CUST_ONE = { id: "u-cust1", email: "mia@acme.example", name: "Mia Member" };
@@ -1396,8 +1403,90 @@ interface LcFake {
   approvals: BeChangeRequestApproval[];
   /** Approvers the backend would provision from the CR's project contacts (empty = no eligible contact). */
   customerMembers: Array<{ id: string; name: string }>;
+  /**
+   * The previous system's own proposal pair, as the backend holds it (`customer_updated_on` as an RFC 3339 instant, and WSO2's
+   * answer): the customer's proposed START and the Agree / Disagree. `proposer` is who the backend could still name
+   * (the change's last writer, a registered contact); null = not recorded.
+   */
+  customerUpdatedOn: string | null;
+  confirmation: "agree" | "disagree" | null;
+  proposer: { id: string; name: string; email: string } | null;
+  /** The change is on hold (a state change is refused). */
+  onHold: boolean;
 }
 let lc: LcFake;
+
+/** "2030-03-01 09:00:00" (UTC, as the planned window is held and sent) as an instant. */
+function lcMs(planned: string | null | undefined): number | null {
+  if (!planned) return null;
+  const ms = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(planned) ? planned : `${planned.replace(" ", "T")}Z`);
+  return Number.isNaN(ms) ? null : ms;
+}
+/** An instant as the planned window is held and sent. */
+function lcPlanned(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+}
+/** An instant as the backend sends the proposal (RFC 3339). */
+function lcRfc3339(ms: number): string {
+  return new Date(ms).toISOString().replace(".000Z", "Z");
+}
+/**
+ * The refusal of an Accept whose window would end after the last year every planned window is held to (entity-service
+ * `msgAcceptTooFarAhead`: `customer_updated_on` is a column the previous system writes too, so a date left far ahead can sit there).
+ */
+function lcTooFarAheadMessage(proposedMs: number, endMs: number): string {
+  return `the time the customer proposed (${lcRfc3339(proposedMs)}) is too far ahead to be accepted: the window would end after the year 2100 (${lcRfc3339(endMs)}), so use "Propose a different time" to ask the customer to approve another time`;
+}
+
+/**
+ * The backend's allowlist for "a customer proposal is waiting for WSO2": in Customer Approval, a proposed start that differs
+ * from the planned one, no answer yet, and the ONLY approver rows still REQUESTED are on a customer stage (any other
+ * REQUESTED row, an unknown group included, blocks it).
+ */
+function lcProposalPending(): boolean {
+  if (lc.cr.state !== "customer_approval" || !lc.customerUpdatedOn || lc.confirmation) return false;
+  if (lcMs(lc.customerUpdatedOn) === lcMs(lc.cr.plannedStartOn)) return false;
+  return !lc.approvals.some((a) => !lcIsCustomerStage(a.stage) && a.approvers.some((p) => p.status === "REQUESTED"));
+}
+
+/** The read model the detail carries for the proposal (omitted when nobody proposed anything). */
+function lcCustomerProposal(): BeChangeRequestDetail["customerProposal"] {
+  if (!lc.customerUpdatedOn) return undefined;
+  const pending = lcProposalPending();
+  const answer = pending ? "pending" : lc.confirmation === "agree" ? "agreed" : lc.confirmation === "disagree" ? "disagreed" : "unanswered";
+  const start = lcMs(lc.customerUpdatedOn)!;
+  const plannedStart = lcMs(lc.cr.plannedStartOn);
+  const plannedEnd = lcMs(lc.cr.plannedEndOn);
+  // What the backend says of Accept while the proposal waits: the words of the refusal the PATCH would give. Nobody recorded as
+  // the proposer comes first: no staff action stands in for the customer's own answer.
+  const blocked = !lc.proposer
+    ? LC_PROPOSER_NOT_RECORDED
+    : lc.onHold
+    ? "change request is on hold; take it off hold (onHold: false) before changing its state"
+    : start <= Date.now()
+      ? `the time the customer proposed (${lcRfc3339(start)}) has already passed, so it cannot be accepted: use "Propose a different time" to ask the customer to approve another time`
+      : plannedStart === null || plannedEnd === null || plannedEnd <= plannedStart
+        ? `the planned window has no length, so the customer's proposed start cannot be applied to it: use "Propose a different time"`
+        : new Date(start + (plannedEnd - plannedStart)).getUTCFullYear() > 2100
+          ? lcTooFarAheadMessage(start, start + (plannedEnd - plannedStart))
+          : "";
+  return {
+    startOn: lc.customerUpdatedOn,
+    ...(pending && plannedStart !== null && plannedEnd !== null && plannedEnd > plannedStart
+      ? { endOn: lcRfc3339(start + (plannedEnd - plannedStart)) }
+      : {}),
+    answer,
+    ...(pending ? { proposerRecorded: !!lc.proposer } : {}),
+    ...(pending && lc.proposer
+      ? { proposedByName: lc.proposer.name, proposedByEmail: lc.proposer.email, proposedOn: "2030-02-01T10:00:00Z" }
+      : {}),
+    ...(pending ? { canAccept: blocked === "", ...(blocked ? { acceptBlockedReason: blocked } : {}) } : {}),
+  };
+}
+
+/** The backend's refusal of an Accept of a stored time nobody is recorded as having proposed (and the `acceptBlockedReason` it sends with `canAccept: false`). */
+const LC_PROPOSER_NOT_RECORDED =
+  'nobody is recorded as having proposed this time (it may have been written by someone at WSO2 or left over from an earlier cycle), so it cannot be accepted: use "Propose a different time" to ask the customer to approve a time';
 
 /** True for the stages the backend provisions for the customer group. */
 function lcIsCustomerStage(name: string): boolean {
@@ -1449,7 +1538,8 @@ function lcLegalNextStates(
 
 /** Where a CR lands once its internal approval is granted. */
 function lcAfterInternalApproval(): string {
-  return lc.cr.customerApprovalRequired ? "customer_approval" : "scheduled";
+  // An Emergency change ignores a stored customer box (the backend's effective gates): the CAB's approval schedules it.
+  return lc.cr.type !== "emergency" && lc.cr.customerApprovalRequired ? "customer_approval" : "scheduled";
 }
 
 /**
@@ -1560,6 +1650,13 @@ function lcSetState(state: string): void {
 }
 
 function lcPublish(): void {
+  lc.cr = {
+    ...lc.cr,
+    customerUpdatedOn: lc.customerUpdatedOn,
+    confirmCustomerUpdatedDate: lc.confirmation,
+    customerProposal: lcCustomerProposal(),
+    onHold: lc.onHold,
+  };
   useGetChangeRequestMock.mockReturnValue({ data: lc.cr, isLoading: false, isError: false, error: null });
   useGetChangeRequestApprovalsMock.mockReturnValue({
     data: {
@@ -1586,6 +1683,199 @@ function lcPublish(): void {
     error: null,
   });
   notifyFakeBackendChanged();
+}
+
+/** The "Customer Approval" -> "customer approval" for a refusal message, as the backend words a state. */
+const lcStateWord = (state: string | null | undefined): string => lcStateName(state ?? "");
+
+/** A refusal with the stable `errorCode` the backend names it by (entity-service `apierror` codes, passed through by the BFF). */
+function lcCoded(status: number, message: string, errorCode: string): BackendApiError {
+  return new BackendApiError(status, message, { message, errorCode });
+}
+
+/** The version check on the planned window both answers carry: a window that moved is a 409 with its own code, nothing is written. */
+function lcCheckExpectedWindow(patch: Record<string, unknown>): void {
+  const expectedStart = typeof patch.expectedPlannedStartOn === "string" ? lcMs(patch.expectedPlannedStartOn) : null;
+  const expectedEnd = typeof patch.expectedPlannedEndOn === "string" ? lcMs(patch.expectedPlannedEndOn) : null;
+  if ((expectedStart !== null && expectedStart !== lcMs(lc.cr.plannedStartOn)) || (expectedEnd !== null && expectedEnd !== lcMs(lc.cr.plannedEndOn))) {
+    throw lcCoded(
+      409,
+      `the planned implementation time of this change request changed after you opened it (it is now ${lcRfc3339(lcMs(lc.cr.plannedStartOn)!)} to ${lcRfc3339(lcMs(lc.cr.plannedEndOn)!)}); read it again before responding`,
+      "change_request_schedule_changed",
+    );
+  }
+}
+
+/** The staff's whole answer to the customer: both refusals and writes of `acceptCustomerProposal`, in the backend's order. */
+function lcAcceptProposal(patch: Record<string, unknown>): void {
+  if (patch.confirmCustomerUpdatedDate !== "agree") {
+    throw new BackendApiError(
+      400,
+      'confirmCustomerUpdatedDate must be "agree": to decline a proposal, propose a different time (state "authorize" with the new planned window)',
+    );
+  }
+  const allowed = ["confirmCustomerUpdatedDate", "expectedCustomerUpdatedOn", "expectedPlannedStartOn", "expectedPlannedEndOn"];
+  if (Object.keys(patch).some((k) => !allowed.includes(k))) {
+    throw new BackendApiError(
+      400,
+      "confirmCustomerUpdatedDate cannot be combined with other fields; only expectedCustomerUpdatedOn, expectedPlannedStartOn and expectedPlannedEndOn go with it",
+    );
+  }
+  if (typeof patch.expectedCustomerUpdatedOn !== "string") {
+    throw new BackendApiError(400, "expectedCustomerUpdatedOn is required with confirmCustomerUpdatedDate: it names the proposed time you are accepting");
+  }
+  // The planned window the page showed is REQUIRED (the CSM page always has it): a stale one is a 409, never a blind accept.
+  if (typeof patch.expectedPlannedStartOn !== "string" || typeof patch.expectedPlannedEndOn !== "string") {
+    throw new BackendApiError(
+      400,
+      "expectedPlannedStartOn and expectedPlannedEndOn are required with confirmCustomerUpdatedDate: they name the planned time the proposal replaces",
+    );
+  }
+  if (lc.cr.state !== "customer_approval") {
+    throw lcCoded(
+      409,
+      `a proposed time can only be accepted while the change request is in Customer Approval, but it is in ${lcStateWord(lc.cr.state)}`,
+      "change_request_not_proposable",
+    );
+  }
+  if (!lcProposalPending()) {
+    throw new BackendApiError(409, "no new time proposed by the customer is waiting for a response on this change request");
+  }
+  if (lcMs(patch.expectedCustomerUpdatedOn) !== lcMs(lc.customerUpdatedOn)) {
+    throw new BackendApiError(
+      409,
+      `the customer's proposed time changed after you opened this change request (it is now ${lc.customerUpdatedOn}); read it again before responding`,
+    );
+  }
+  lcCheckExpectedWindow(patch);
+  // A registered contact must be recorded as the proposer: nobody else's date is accepted for them.
+  if (!lc.proposer) throw lcCoded(409, LC_PROPOSER_NOT_RECORDED, "change_request_proposer_not_recorded");
+  if (lc.onHold) {
+    throw new BackendApiError(400, "change request is on hold; take it off hold (onHold: false) before changing its state");
+  }
+  const start = lcMs(lc.customerUpdatedOn)!;
+  if (start <= Date.now()) {
+    throw new BackendApiError(
+      409,
+      `the time the customer proposed (${lc.customerUpdatedOn}) has already passed, so it cannot be accepted: use "Propose a different time" to ask the customer to approve another time`,
+    );
+  }
+  const plannedStart = lcMs(lc.cr.plannedStartOn);
+  const plannedEnd = lcMs(lc.cr.plannedEndOn);
+  if (plannedStart === null || plannedEnd === null || plannedEnd <= plannedStart) {
+    throw new BackendApiError(409, 'the planned window has no length, so the customer\'s proposed start cannot be applied to it: use "Propose a different time"');
+  }
+  if (new Date(start + (plannedEnd - plannedStart)).getUTCFullYear() > 2100) {
+    throw new BackendApiError(409, lcTooFarAheadMessage(start, start + (plannedEnd - plannedStart)));
+  }
+  lc.confirmation = "agree";
+  lc.cr = {
+    ...lc.cr,
+    plannedStartOn: lcPlanned(start),
+    plannedEndOn: lcPlanned(start + (plannedEnd - plannedStart)),
+    state: "scheduled",
+    legalNextStates: lcLegalNextStates("scheduled"),
+  };
+}
+
+/** The customer is asked again: the live request is superseded (rows cancelled, the stage kept as a record) and a fresh one is provisioned. */
+function lcAskCustomersAgain(): void {
+  lc.approvals = lc.approvals.map((a) =>
+    lcIsCustomerStage(a.stage) && a.status === "REQUESTED"
+      ? { ...a, status: "PENDING", approvers: a.approvers.map((ap) => ({ ...ap, status: "CANCELLED" })) }
+      : a,
+  );
+  if (lc.customerMembers.length > 0) {
+    lc.approvals = [
+      ...lc.approvals,
+      {
+        stage: "Customer Approval",
+        approverType: "STATIC_GROUP",
+        approverName: "Customer Group",
+        status: "REQUESTED",
+        approvers: lc.customerMembers.map((m) => ({ id: m.id, name: m.name, status: "REQUESTED" })),
+      },
+    ];
+  }
+}
+
+/**
+ * `{state: "authorize"}` out of Customer Approval, the wire name of the Time Change loop: the state NEVER moves and no CAB stage is
+ * opened, whatever the type. Without a proposal waiting it is a plain Re-schedule (a changed window, the customer asked again); with
+ * one it answers it -- Disagree, with the proposal's version in `expectedCustomerUpdatedOn`: a different window asks the customer
+ * again, the window as it is declines (the customer keeps their live request). Both are refused when nobody can be asked.
+ */
+function lcRescheduleOrCounter(patch: Record<string, unknown>): void {
+  if (lc.cr.state !== "customer_approval") {
+    throw new BackendApiError(
+      400,
+      'state "authorize" cannot be set manually: it is reached automatically through the approval flow (Request Approval, then peer approval); it can only be set by hand to re-schedule a change from customer_approval',
+    );
+  }
+  // A time is stored and unanswered (the allowlist) ...
+  const stored = lcProposalPending();
+  // ... and it is a PROPOSAL waiting for WSO2 only when a registered contact is recorded as having proposed it. A stored time nobody
+  // is recorded as having proposed (a WSO2 user's, or left over) is never answered: a plain Re-schedule stays a plain Re-schedule.
+  const pending = stored && !!lc.proposer;
+  const expected = typeof patch.expectedCustomerUpdatedOn === "string" ? patch.expectedCustomerUpdatedOn : null;
+  if (pending && expected === null) {
+    throw new BackendApiError(
+      409,
+      `the customer proposed a new time (${lc.customerUpdatedOn}) after you opened this change request; read it again to accept it or propose a different time`,
+    );
+  }
+  if (expected !== null && !stored) {
+    throw new BackendApiError(409, "the customer's proposed time is no longer waiting for a response; read the change request again");
+  }
+  if (expected !== null && stored && !pending && lcMs(expected) !== lcMs(lc.customerUpdatedOn)) {
+    // A page that showed the stored time may name it; the name must be the stored time.
+    throw new BackendApiError(
+      409,
+      `the time stored on this change request changed after you opened it (it is now ${lc.customerUpdatedOn}); read it again before responding`,
+    );
+  }
+  if (expected !== null && pending && lcMs(expected) !== lcMs(lc.customerUpdatedOn)) {
+    throw new BackendApiError(
+      409,
+      `the customer's proposed time changed after you opened this change request (it is now ${lc.customerUpdatedOn}); read it again before responding`,
+    );
+  }
+  lcCheckExpectedWindow(patch);
+  const win = patch as { plannedStartOn?: string; plannedEndOn?: string };
+  const newStart = win.plannedStartOn ? lcMs(win.plannedStartOn) : lcMs(lc.cr.plannedStartOn);
+  const newEnd = win.plannedEndOn ? lcMs(win.plannedEndOn) : lcMs(lc.cr.plannedEndOn);
+  const changed =
+    (!!win.plannedStartOn && lcMs(win.plannedStartOn) !== lcMs(lc.cr.plannedStartOn)) ||
+    (!!win.plannedEndOn && lcMs(win.plannedEndOn) !== lcMs(lc.cr.plannedEndOn));
+  if (pending) {
+    // A window that cannot be one is refused first; then "Time Change = Yes" becomes "differs from the proposal": the window MAY equal
+    // the plan (a decline), never the customer's own time (that is Accept).
+    if (win.plannedStartOn || win.plannedEndOn) {
+      if ((newStart ?? 0) > (newEnd ?? 0)) throw new BackendApiError(400, "the planned start must not be after the planned end");
+      if (newStart === newEnd) throw new BackendApiError(400, "the planned start must not be the same as the planned end: the window must have a duration");
+      const proposalEnd = lcMs(lcCustomerProposal()?.endOn);
+      if (newStart === lcMs(lc.customerUpdatedOn) && (proposalEnd === null || newEnd === proposalEnd)) {
+        throw new BackendApiError(400, 'the time you are proposing is the one the customer proposed: use "Accept proposed time" instead');
+      }
+    }
+  } else if (stored && !win.plannedStartOn && !win.plannedEndOn) {
+    // Nothing to decline: nobody is recorded as having proposed the stored time, so a request with no window is refused, never a silent Disagree.
+    throw new BackendApiError(
+      400,
+      "no customer is recorded as having proposed the time stored on this change request, so there is no proposal to decline: send the new planned window to re-schedule it",
+    );
+  } else if (!changed) {
+    throw new BackendApiError(400, "re-scheduling requires a changed planned start or end");
+  }
+  // Nobody can be asked (the project's registered contacts but the requester): refused before anything is written, as Request Approval is.
+  if (lc.customerMembers.length === 0 && (changed || !pending)) {
+    throw new BackendApiError(400, lcNobodyToAsk(true, false));
+  }
+  if (changed) {
+    lc.cr = { ...lc.cr, plannedStartOn: win.plannedStartOn ?? lc.cr.plannedStartOn, plannedEndOn: win.plannedEndOn ?? lc.cr.plannedEndOn };
+    lcAskCustomersAgain();
+  }
+  if (pending) lc.confirmation = "disagree";
 }
 
 function lcSeed(
@@ -1622,11 +1912,25 @@ function lcSeed(
     },
     approvals: [],
     customerMembers: customerGroup?.members ?? [],
+    customerUpdatedOn: null,
+    confirmation: null,
+    proposer: null,
+    onHold: false,
   };
   // The page's own PATCH (Request Approval, Start implementation, ...) drives the fake.
   const applyPatch = (input: { patch: { state?: string } }): void => {
     const target = input.patch.state;
     const from = lc.cr.state ?? "new";
+    // ACCEPT the customer's proposed time (the previous system's "Agree"): the backend's `acceptCustomerProposal`, in its order. One step:
+    // the proposal becomes the planned window (the planned length kept), the answer is Agree and the change is Scheduled. No CAB,
+    // no new customer request; the customer's own request is closed as any state change closes it; the customer's approval
+    // outcome is NOT stamped (no staff action records it).
+    if ((input.patch as { confirmCustomerUpdatedDate?: unknown }).confirmCustomerUpdatedDate !== undefined) {
+      lcAcceptProposal(input.patch as Record<string, unknown>);
+      lcReconcile();
+      lcPublish();
+      return;
+    }
     // The backend's transition graph: a FINAL state has no exit (naming the state it is in is a resend, no move), and a
     // target that is not a next state of the current one would skip a state and every approval gate on the way. The
     // targets with a refusal of their own below (new, assess, authorize, customer_approval, scheduled, rollback) and the
@@ -1648,6 +1952,7 @@ function lcSeed(
     if (
       target === "assess" &&
       from === "new" &&
+      lc.cr.type !== "emergency" && // an Emergency change ignores its stored customer boxes: nobody is asked
       (lc.cr.customerApprovalRequired || lc.cr.customerReviewRequired) &&
       lc.customerMembers.length === 0
     ) {
@@ -1656,8 +1961,9 @@ function lcSeed(
     if (target === "assess") {
       if (lc.cr.type === "standard") lcSetState(lcAfterInternalApproval());
       else if (lc.cr.type === "emergency") {
+        // One stage, in the existing CAB group: there is no ECAB, no Peer stage and no Assess.
         lcSetState("authorize");
-        lc.approvals = [lcStage("ECAB Approval", "ECAB", LC_ECAB)];
+        lc.approvals = [lcStage("CAB Approval", "CAB", LC_CAB)];
       } else {
         lcSetState("assess");
         lc.approvals = [lcStage("Peer Approval", "Peers", LC_PEER)];
@@ -1668,44 +1974,7 @@ function lcSeed(
     } else if (target === "closed" && lc.cr.state === "customer_review") {
       throw new BackendApiError(400, LC_ANSWER_REFUSAL.closed(lcHasLiveCustomerStage()));
     } else if (target === "authorize") {
-      // Re-schedule: only from Customer Approval, only with a changed window.
-      if (lc.cr.state !== "customer_approval") {
-        throw new BackendApiError(
-          400,
-          'state "authorize" cannot be set manually: it is reached automatically through the approval flow (Request Approval, then peer approval); it can only be set by hand to re-schedule a change from customer_approval',
-        );
-      }
-      const win = input.patch as { plannedStartOn?: string; plannedEndOn?: string };
-      const changed =
-        (!!win.plannedStartOn && win.plannedStartOn !== lc.cr.plannedStartOn) ||
-        (!!win.plannedEndOn && win.plannedEndOn !== lc.cr.plannedEndOn);
-      if (!changed) {
-        throw new BackendApiError(400, "re-scheduling requires a changed planned start or end");
-      }
-      lc.cr = {
-        ...lc.cr,
-        plannedStartOn: win.plannedStartOn ?? lc.cr.plannedStartOn,
-        plannedEndOn: win.plannedEndOn ?? lc.cr.plannedEndOn,
-        // The customer was being asked: the Re-schedule writes the requirement true, so even a row that never had its box
-        // ticked (a migrated one) is asked again after the CAB's new approval.
-        customerApprovalRequired: true,
-      };
-      // The customer's pending request is superseded: its rows are cancelled
-      // (the stage stays as a record; the backend reports it PENDING).
-      lc.approvals = lc.approvals.map((a) =>
-        lcIsCustomerStage(a.stage) && a.status === "REQUESTED"
-          ? { ...a, status: "PENDING", approvers: a.approvers.map((ap) => ({ ...ap, status: "CANCELLED" })) }
-          : a,
-      );
-      if (lc.cr.type === "standard") {
-        lcSetState("customer_approval"); // nothing internal to repeat: ask the customer again
-      } else {
-        lcSetState("authorize");
-        lc.approvals = [
-          ...lc.approvals,
-          lc.cr.type === "emergency" ? lcStage("ECAB Approval", "ECAB", LC_ECAB) : lcStage("CAB Approval", "CAB", LC_CAB),
-        ];
-      }
+      lcRescheduleOrCounter(input.patch as Record<string, unknown>);
     } else if (target === "rollback") {
       // Backend rule: only from the review states, and the customer group
       // decides while its review request is live.
@@ -1775,7 +2044,7 @@ function lcSeed(
         lcSetState("authorize");
         lc.approvals = [...lc.approvals, lcStage("CAB Approval", "CAB", LC_CAB)];
       } else if (current.stage === "CAB Approval" || current.stage === "ECAB Approval") {
-        lcSetState(lcAfterInternalApproval()); // CAB / ECAB approval moves the CR on itself
+        lcSetState(lcAfterInternalApproval()); // CAB approval (an older Emergency change's ECAB one too) moves the CR on itself
       }
       // Review: the answer is recorded and the CR stays in review.
     }
@@ -1804,6 +2073,8 @@ function lcSeedAtGate(
     status: "APPROVED",
     approvers: [{ id: who.id, name: who.name, status: "APPROVED" }],
   });
+  // An Emergency change sitting at a customer gate is an OLDER row (raised before Emergency changes stopped asking the
+  // customer), whose one internal stage was still named ECAB.
   lc.approvals =
     type === "normal" ? [settled("Peer Approval", "Peers", LC_PEER), settled("CAB Approval", "CAB", LC_CAB)] : type === "emergency" ? [settled("ECAB Approval", "ECAB", LC_ECAB)] : [];
   lcSetState(gate); // provisions nothing: nobody on the project can be asked
@@ -1846,6 +2117,29 @@ function lcCustomerDecides(contact: { id: string; name: string }, decision: "app
   if (decision === "approved") lcSetState(current.stage === "Customer Approval" ? "scheduled" : "closed");
   else lcSetState(current.stage === "Customer Approval" ? "canceled" : "rollback");
   lcReconcile();
+  lcPublish();
+}
+
+/**
+ * The customer's PROPOSAL, applied server-side (the customer proposes in the customer portal): the backend's `proposeCustomerTime`.
+ * It writes the proposed START to `customer_updated_on` and clears the standing answer -- and NOTHING else: the change stays in
+ * Customer Approval, the planned window stays what WSO2 planned, no stage and no approver row is touched, and the proposer's own
+ * request stays live. Whatever page is mounted re-renders with it.
+ */
+function lcCustomerProposes(contact: { id: string; name: string; email: string }, startOn: string): void {
+  if (lc.cr.state !== "customer_approval") {
+    throw new BackendApiError(409, "this change request is no longer in Customer Approval");
+  }
+  const asked = lc.approvals.some(
+    (a) => lcIsCustomerStage(a.stage) && a.status === "REQUESTED" && a.approvers.some((p) => p.id === contact.id && p.status === "REQUESTED"),
+  );
+  if (!asked) throw new BackendApiError(403, `${contact.name} has not been asked to answer this change request`);
+  const start = lcMs(startOn);
+  if (start === null || start <= Date.now()) throw new BackendApiError(400, "a proposed time must be in the future");
+  if (start === lcMs(lc.cr.plannedStartOn)) throw new BackendApiError(400, "plannedStartOn is the planned start already: propose a different start");
+  lc.customerUpdatedOn = lcRfc3339(start);
+  lc.confirmation = null;
+  lc.proposer = contact;
   lcPublish();
 }
 
@@ -2350,10 +2644,11 @@ describe("CsmChangeRequestDetailPage — lifecycle: Roll back", () => {
 });
 
 /**
- * Re-schedule: the diagram's Time Change loop. In Customer Approval the creator
- * can re-plan the change -- a dialog collects the new window (at least one end
- * must change) and an optional reason; the change goes back to Authorize for
- * CAB / ECAB approval again, then the customer is asked again.
+ * Re-schedule and the customer's proposed time: the Time Change loop, the previous system's own mechanism. The wire name is
+ * `{state: "authorize"}` but the change NEVER leaves Customer Approval and never goes back through CAB: the change itself has not
+ * changed. A Re-schedule asks the customer to approve the new time. A customer's PROPOSED time waits in Customer Approval (the
+ * planned window untouched) until WSO2 answers it: "Accept proposed time" (the proposal becomes the planned window and the change
+ * goes straight to Scheduled), or "Propose a different time" (the customer is asked again; keeping the current time declines).
  */
 describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
   beforeEach(() => setUserPreferredTimeZone("UTC"));
@@ -2369,7 +2664,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
   /** Normal change with Customer Approval, driven by clicks to Customer Approval. */
   function runToCustomerApproval(
     customerGroup: { members: Array<{ id: string; name: string }> } | null,
-    type: "normal" | "emergency" | "standard" = "normal",
+    type: "normal" | "standard" = "normal",
   ): ReturnType<typeof render> {
     lcSeed(type, { approval: true, review: false }, customerGroup);
     let view = lcOpenAs(LC_CREATOR);
@@ -2379,7 +2674,7 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
       fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
     }
     if (type !== "standard") {
-      view = lcOpenAs(type === "emergency" ? LC_ECAB : LC_CAB, view);
+      view = lcOpenAs(LC_CAB, view);
       fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
     }
     view = lcOpenAs(LC_CREATOR, view);
@@ -2387,124 +2682,145 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
     return view;
   }
 
-  it("Normal with a customer group: Customer Approval -> Re-schedule -> Authorize (CAB again) -> CAB approves -> Customer Approval (asked again) -> a member approves (in the customer portal) -> Scheduled", async () => {
-    let view = runToCustomerApproval({ members: LC_MEMBERS });
-    expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
-    // Re-schedule sits next to nothing primary (the customer group decides); the menu holds Cancel only.
-    expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /bypass/i })).not.toBeInTheDocument();
-    expectOnlyCancelOffered("approval");
+  /** The approval stage names, in order: Re-schedule must never add a CAB one. */
+  const stageNames = (): string[] => lc.approvals.map((a) => a.stage);
 
-    // The dialog starts on the current window and will not submit without a change.
-    fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
-    expect(screen.getByRole("heading", { name: /re-schedule this change/i })).toBeInTheDocument();
-    expect(windowPicker("Planned start").value).toBe("03/01/2030 09:00 AM");
-    expect(windowPicker("Planned end").value).toBe("03/01/2030 11:00 AM");
-    expect(dialogSubmit()).toBeDisabled();
-    expect(patchMutateAsyncMock).not.toHaveBeenCalled();
+  it.each(["normal", "standard"] as const)(
+    "%s with a customer group: Re-schedule asks the customer again and stays in Customer Approval: no Authorize, no CAB, no second approval",
+    async (type) => {
+      const view = runToCustomerApproval({ members: LC_MEMBERS }, type);
+      const stagesBefore = stageNames();
+      expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+      // Re-schedule sits next to nothing primary (the customer group decides); the menu holds Cancel only.
+      expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /bypass/i })).not.toBeInTheDocument();
+      expectOnlyCancelOffered("approval");
 
-    fireEvent.change(windowPicker("Planned start"), { target: { value: "03/08/2030 09:00 AM" } });
-    fireEvent.change(windowPicker("Planned end"), { target: { value: "03/08/2030 11:00 AM" } });
-    fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: "Customer freeze next week." } });
-    fireEvent.click(dialogSubmit());
-    await waitFor(() => expect(lc.cr.state).toBe("authorize"));
+      // The dialog starts on the current window, says the customer is asked (and that no CAB is involved), and will not submit unchanged.
+      fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
+      expect(screen.getByRole("heading", { name: /re-schedule this change/i })).toBeInTheDocument();
+      expect(screen.getByText(/The customer is asked to approve it\. No further internal approval is needed/)).toBeInTheDocument();
+      expect(within(screen.getByRole("dialog")).queryByText(/Authorize|CAB approval|goes back/)).not.toBeInTheDocument();
+      expect(windowPicker("Planned start").value).toBe("03/01/2030 09:00 AM");
+      expect(windowPicker("Planned end").value).toBe("03/01/2030 11:00 AM");
+      expect(dialogSubmit()).toBeDisabled();
+      expect(patchMutateAsyncMock).not.toHaveBeenCalled();
 
-    // The reason is recorded first, then the state + window are patched.
-    expect(postCommentMutateAsyncMock).toHaveBeenCalledWith({
-      changeRequestId: "chg-1",
-      bodyHtml: "Customer freeze next week.",
-      internal: true,
-    });
-    expect(patchMutateAsyncMock).toHaveBeenCalledWith({
-      id: "chg-1",
-      patch: { state: "authorize", plannedStartOn: "2030-03-08 09:00:00", plannedEndOn: "2030-03-08 11:00:00" },
-    });
-    expect(postCommentMutateAsyncMock.mock.invocationCallOrder[0]).toBeLessThan(
-      patchMutateAsyncMock.mock.invocationCallOrder[0],
-    );
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      fireEvent.change(windowPicker("Planned start"), { target: { value: "03/08/2030 09:00 AM" } });
+      fireEvent.change(windowPicker("Planned end"), { target: { value: "03/08/2030 11:00 AM" } });
+      fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: "Customer freeze next week." } });
+      fireEvent.click(dialogSubmit());
+      await waitFor(() => expect(lc.cr.plannedStartOn).toBe("2030-03-08 09:00:00"));
 
-    // Back at Authorize, waiting on a fresh CAB stage -- not on the superseded customer stage.
-    expect(currentStep()).toBe("Authorize");
-    expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
-    expect(screen.queryByText("Awaiting Customer Approval")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Re-schedule" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText("CAB Approval", { selector: "td" })).toHaveLength(2);
-    expect(within(approvalsRowInStage("Mia Member", "Customer Approval")).getByText("Cancelled")).toBeInTheDocument();
+      // The state + window are patched first (a plain Re-schedule carries no proposal version), and the reason is recorded
+      // once that has gone through: a refused attempt leaves no note behind.
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(patchMutateAsyncMock).toHaveBeenCalledWith({
+        id: "chg-1",
+        patch: { state: "authorize", plannedStartOn: "2030-03-08 09:00:00", plannedEndOn: "2030-03-08 11:00:00" },
+      });
+      expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
+      expect(postCommentMutateAsyncMock).toHaveBeenCalledWith({
+        changeRequestId: "chg-1",
+        bodyHtml: "Customer freeze next week.",
+        internal: true,
+      });
+      expect(patchMutateAsyncMock.mock.invocationCallOrder[0]).toBeLessThan(
+        postCommentMutateAsyncMock.mock.invocationCallOrder[0],
+      );
 
-    // The new CAB approval asks the customer group again.
-    view = lcOpenAs(LC_CAB, view);
-    expect(screen.getAllByRole("button", { name: /^approve$/i })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
-    expect(lc.cr.state).toBe("customer_approval");
-    view = lcOpenAs(LC_CREATOR, view);
+      // Still Customer Approval, waiting on the customer: the superseded request is a record, the fresh one is live, nothing else was opened.
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(currentStep()).toBe("Customer Approval");
+      expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+      expect(screen.queryByText(/Awaiting E?CAB/)).not.toBeInTheDocument();
+      expect(stageNames()).toEqual([...stagesBefore, "Customer Approval"]);
+      expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
+      expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
+      expect(screen.getAllByText("Customer Approval", { selector: "td" })).toHaveLength(4); // 2 cancelled + 2 fresh member rows
+      expect(within(approvalsRowInStage("Mia Member", "Customer Approval")).getAllByText(/Cancelled|Requested/)).toHaveLength(1);
+      // No approval is requested of anyone but the customer: no pending internal row, so no Approve for the CAB.
+      expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
+
+      // The customer answers in the customer portal, and the CSM page shows Scheduled.
+      lcCustomerDecides(LC_CUST_ONE, "approved");
+      expect(lc.cr.state).toBe("scheduled");
+      expect(currentStep()).toBe("Scheduled");
+      view.unmount();
+    },
+  );
+
+  it("an OLDER Emergency change sitting in Customer Approval (raised before Emergency changes stopped asking the customer; its approval stage is still named ECAB): Re-schedule stays in Customer Approval too, with no Authorize and no CAB", async () => {
+    lcSeed("emergency", { approval: true, review: false }, { members: LC_MEMBERS });
+    lc.approvals = [
+      {
+        ...lcStage("ECAB Approval", "ECAB", LC_ECAB),
+        status: "APPROVED",
+        approvers: [{ id: LC_ECAB.id, name: LC_ECAB.name, status: "APPROVED" }],
+      },
+    ];
+    lcSetState("customer_approval"); // asks the project's contacts, as it did when the change got here
+    lcPublish();
+    const view = lcOpenAs(LC_CREATOR);
     expect(currentStep()).toBe("Customer Approval");
     expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
-    expect(screen.getAllByText("Customer Approval", { selector: "td" })).toHaveLength(4); // 2 cancelled + 2 fresh member rows
+    // The record is shown as it is: the ECAB stage keeps its name, and there is still no Assess on the line.
+    expect(within(approvalsRow("Eli Ecab")).getByText("ECAB Approval")).toBeInTheDocument();
+    expect(stepReading("Assess")).toBe("Assess, not taken");
+    // The customer gate it is in is real: shown as it is, while the review it never reached reads Not applicable.
+    expect(stepLabels()).toContain("Customer Approval");
+    expect(stepLabels()).not.toContain("Customer Review");
+    expect(metaValue("Customer approval required")).toBe("Yes");
+    expect(within(screen.getByText("Customer review required").parentElement!).getByText("Not applicable")).toBeInTheDocument();
+    const stagesBefore = stageNames();
 
-    // The customer answers in the customer portal; the CSM page shows Scheduled.
-    lcCustomerDecides(LC_CUST_ONE, "approved");
-    expect(lc.cr.state).toBe("scheduled");
-    expect(currentStep()).toBe("Scheduled");
+    fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
+    expect(within(screen.getByRole("dialog")).queryByText(/Authorize|CAB|goes back/)).not.toBeInTheDocument();
+    fireEvent.change(windowPicker("Planned start"), { target: { value: "03/08/2030 09:00 AM" } });
+    fireEvent.change(windowPicker("Planned end"), { target: { value: "03/08/2030 11:00 AM" } });
+    fireEvent.click(dialogSubmit());
+    await waitFor(() => expect(lc.cr.plannedStartOn).toBe("2030-03-08 09:00:00"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    expect(lc.cr.state).toBe("customer_approval");
+    expect(currentStep()).toBe("Customer Approval");
+    expect(stageNames()).toEqual([...stagesBefore, "Customer Approval"]);
+    expect(screen.queryByText(/Awaiting E?CAB/)).not.toBeInTheDocument();
     view.unmount();
   });
 
-  it("an older Normal change at Customer Approval with nobody asked: Re-schedule sits next to the Change state menu, which holds only Cancel change; the loop repeats and nobody can answer for the customer", { timeout: 30000 }, async () => {
-    // Request Approval is refused for such a project now, so the change starts at the gate (see lcSeedAtGate).
+  it("an older change at Customer Approval with nobody to ask: a Re-schedule is REFUSED in the words Request Approval uses, writes nothing, and can be tried again", { timeout: 30000 }, async () => {
+    // Request Approval is refused for such a project, so the change starts at the gate (see lcSeedAtGate).
     lcSeedAtGate("customer_approval");
-    let view = lcOpenAs(LC_CREATOR);
+    const view = lcOpenAs(LC_CREATOR);
     expect(currentStep()).toBe("Customer Approval");
     expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /change state/i }));
     expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Cancel change"]);
     expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    const before = structuredClone({ cr: lc.cr, approvals: lc.approvals });
     for (const [start, end] of [["03/08/2030 09:00 AM", "03/08/2030 11:00 AM"], ["03/15/2030 09:00 AM", "03/15/2030 11:00 AM"]]) {
       fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
       fireEvent.change(windowPicker("Planned start"), { target: { value: start } });
       fireEvent.change(windowPicker("Planned end"), { target: { value: end } });
       fireEvent.click(dialogSubmit());
-      await waitFor(() => expect(lc.cr.state).toBe("authorize"));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(currentStep()).toBe("Authorize");
-      expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
-      expect(postCommentMutateAsyncMock).not.toHaveBeenCalled(); // no reason given, none recorded
-
-      view = lcOpenAs(LC_CAB, view);
-      fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
-      view = lcOpenAs(LC_CREATOR, view);
-      expect(currentStep()).toBe("Customer Approval");
-      expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
+      await waitFor(() =>
+        expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+          "customer approval is required but nobody on this project can be asked (no registered contact other than the requester): register a contact for the project first",
+        ),
+      );
+      // Nothing was written: the window, the state and the approvals are what they were; the dialog stays for a retry or a Close.
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(lc.cr.plannedStartOn).toBe(before.cr.plannedStartOn);
+      expect(lc.cr.plannedEndOn).toBe(before.cr.plannedEndOn);
+      expect(lc.approvals).toEqual(before.approvals);
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     }
-    // Nobody was asked, so nobody can answer: still Customer Approval, and the way on is Re-schedule or Cancel change.
+    // Nobody was asked, so nobody can answer: still Customer Approval, and the way on is Cancel change (or a contact registered on the project).
     expect(currentStep()).toBe("Customer Approval");
     expect(patchMutateAsyncMock.mock.calls.every(([input]) => (input as { patch: { state?: string } }).patch.state !== "scheduled")).toBe(true);
-    view.unmount();
-  });
-
-  it("Emergency goes back to Authorize for ECAB approval", async () => {
-    const view = runToCustomerApproval({ members: LC_MEMBERS }, "emergency");
-    fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
-    expect(screen.getByText(/ECAB approval again/i)).toBeInTheDocument();
-    fireEvent.change(windowPicker("Planned end"), { target: { value: "03/01/2030 01:00 PM" } });
-    fireEvent.click(dialogSubmit());
-    await waitFor(() => expect(lc.cr.state).toBe("authorize"));
-    expect(screen.getByText("Awaiting ECAB Approval")).toBeInTheDocument();
-    view.unmount();
-  });
-
-  it("Standard stays in Customer Approval and the customer is asked again", async () => {
-    const view = runToCustomerApproval({ members: LC_MEMBERS }, "standard");
-    fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
-    expect(screen.getByText(/stays in Customer Approval/i)).toBeInTheDocument();
-    fireEvent.change(windowPicker("Planned start"), { target: { value: "02/28/2030 09:00 AM" } });
-    fireEvent.click(dialogSubmit());
-    await waitFor(() => expect(lc.cr.plannedStartOn).toBe("2030-02-28 09:00:00"));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(currentStep()).toBe("Customer Approval");
-    expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
     view.unmount();
   });
 
@@ -2529,28 +2845,45 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
     view.unmount();
   });
 
-  it("after a failed re-schedule the recorded reason is locked and a retry never posts it twice", async () => {
+  it("after a refused re-schedule nothing was recorded: the reason stays editable and a retry posts it once, after the change went through", async () => {
     const view = runToCustomerApproval({ members: LC_MEMBERS });
     fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
     fireEvent.change(windowPicker("Planned start"), { target: { value: "03/08/2030 09:00 AM" } });
     fireEvent.change(windowPicker("Planned end"), { target: { value: "03/08/2030 11:00 AM" } });
     fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: "Customer freeze next week." } });
 
+    // A refusal with no code (here) is the dialog's own: it stays open, with the words, and the reason is not locked
+    // (no note was posted: the PATCH came first).
     patchMutateAsyncMock.mockRejectedValueOnce(new BackendApiError(409, "Rejected"));
     fireEvent.click(dialogSubmit());
-    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("alert")).toBeInTheDocument());
-    expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
-
-    // The reason is now recorded: the field is locked so an edit can't be silently dropped.
-    expect(screen.getByLabelText(/reason \(optional\)/i)).toBeDisabled();
-    expect(
-      screen.getByText("Already recorded as a work note — retrying will only re-schedule."),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("Rejected"));
+    expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/reason \(optional\)/i)).toBeEnabled();
+    expect(screen.getByLabelText(/reason \(optional\)/i)).toHaveValue("Customer freeze next week.");
 
     fireEvent.click(dialogSubmit());
-    await waitFor(() => expect(lc.cr.state).toBe("authorize"));
+    await waitFor(() => expect(lc.cr.plannedStartOn).toBe("2030-03-08 09:00:00"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(patchMutateAsyncMock).toHaveBeenCalledTimes(2);
     expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(lc.cr.state).toBe("customer_approval");
+    view.unmount();
+  });
+
+  it("a reason that cannot be recorded after the change went through closes the dialog and says so; the change stays updated", async () => {
+    const view = runToCustomerApproval({ members: LC_MEMBERS });
+    fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
+    fireEvent.change(windowPicker("Planned start"), { target: { value: "03/08/2030 09:00 AM" } });
+    fireEvent.change(windowPicker("Planned end"), { target: { value: "03/08/2030 11:00 AM" } });
+    fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: "Customer freeze next week." } });
+    postCommentMutateAsyncMock.mockRejectedValueOnce(new BackendApiError(403, "not allowed to comment"));
+    fireEvent.click(dialogSubmit());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(lc.cr.plannedStartOn).toBe("2030-03-08 09:00:00");
+    expect(showErrorMock).toHaveBeenCalledTimes(1);
+    expect(showErrorMock.mock.calls[0][0]).toBe(
+      "The change request was updated, but your reason could not be recorded as an internal note (not allowed to comment). Add it as a comment instead.",
+    );
     view.unmount();
   });
 
@@ -2562,13 +2895,639 @@ describe("CsmChangeRequestDetailPage — lifecycle: Re-schedule", () => {
       lc.cr = { ...lc.cr, legalNextStates: [...(lc.cr.legalNextStates ?? []), "authorize"] };
       lcPublish();
       const view = lcOpenAs(LC_CREATOR);
-      expect(screen.queryByRole("button", { name: /re-schedule/i }), state).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /re-schedule|propose a different time/i }), state).not.toBeInTheDocument();
       if (screen.queryByRole("button", { name: /change state/i })) {
         fireEvent.click(screen.getByRole("button", { name: /change state/i }));
         expect(screen.queryByRole("menuitem", { name: /re-schedule|authorize/i }), state).not.toBeInTheDocument();
       }
       view.unmount();
     }
+  });
+
+  /**
+   * The customer proposes a time. The previous system's own mechanism: the proposal waits in Customer Approval (the planned window is
+   * untouched, nothing else is written) until WSO2 answers it.
+   */
+  describe("the customer proposes a time", () => {
+    const PROPOSED_START = "2030-03-08T09:00:00Z"; // the planned window is 2030-03-01 09:00 - 11:00 (2 hours)
+    // The banner says the customer proposed the time only when the proposer is on record; otherwise it says a time is stored.
+    const CUSTOMER_TITLE = "The customer proposed a new time";
+    const NEUTRAL_TITLE = "A time is stored on this change request";
+    const EITHER_TITLE = new RegExp(`^(${CUSTOMER_TITLE}|${NEUTRAL_TITLE})$`);
+    const CUSTOMER_REASON = "Waiting for WSO2 to respond to the customer's proposed time";
+    // The header never says WSO2 is waiting to respond to a time nobody is recorded as having proposed: the customer is still being asked.
+    const NEUTRAL_REASON = "Waiting for WSO2 to respond to the proposed time";
+    const banner = (): HTMLElement => screen.getByRole("region", { name: EITHER_TITLE });
+    const queryBanner = (): HTMLElement | null => screen.queryByRole("region", { name: EITHER_TITLE });
+    const accept = (): HTMLElement => within(banner()).getByRole("button", { name: "Accept proposed time" });
+    const counter = (): HTMLElement => within(banner()).getByRole("button", { name: "Propose a different time" });
+    const dialogButton = (name: string): HTMLElement => within(screen.getByRole("dialog")).getByRole("button", { name });
+
+    /** A Normal change at Customer Approval whose project's contacts were asked, and Mia proposed a time; the proposer is on record. */
+    function seedProposal(proposerKnown = true): ReturnType<typeof render> {
+      const view = runToCustomerApproval({ members: LC_MEMBERS });
+      lcCustomerProposes(LC_CUST_ONE, PROPOSED_START);
+      if (!proposerKnown) {
+        lc.proposer = null;
+        lcPublish();
+      }
+      return view;
+    }
+
+    it("the page shows the proposal beside the planned time, says the change waits for WSO2, and nothing else changed", () => {
+      const view = seedProposal();
+      const stagesBefore = stageNames();
+      // The change stays in Customer Approval, the window is what WSO2 planned, the customer's own request is still live.
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(lc.cr.plannedStartOn).toBe("2030-03-01 09:00:00");
+      expect(currentStep()).toBe("Customer Approval");
+      expect(screen.getByText(CUSTOMER_REASON)).toBeInTheDocument();
+      expect(screen.queryByText(NEUTRAL_REASON)).not.toBeInTheDocument();
+      expect(screen.queryByText("Awaiting Customer Approval")).not.toBeInTheDocument();
+      // The banner: both windows, who proposed it, Accept the one primary action. The proposer is recorded, so it says the customer proposed it.
+      expect(screen.getByRole("region", { name: CUSTOMER_TITLE })).toBe(banner());
+      expect(within(banner()).getByText("Proposed by the customer")).toBeInTheDocument();
+      expect(within(banner()).getByText("Mar 1, 2030, 9:00 AM to Mar 1, 2030, 11:00 AM")).toBeInTheDocument();
+      expect(within(banner()).getByText("Mar 8, 2030, 9:00 AM to Mar 8, 2030, 11:00 AM")).toBeInTheDocument();
+      expect(within(banner()).getByText("Same length as the planned window (2 hours)")).toBeInTheDocument();
+      expect(screen.getByTestId("cr-proposal-proposer")).toHaveTextContent("Proposed by Mia Member (mia@acme.example) on Feb 1, 2030, 10:00 AM.");
+      expect(accept().className).toContain("MuiButton-contained");
+      // The bar's own outlined action is the counter now; there is no Re-schedule and no bypass.
+      expect(screen.queryByRole("button", { name: "Re-schedule" })).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Propose a different time" })).toHaveLength(2); // the bar's and the banner's
+      expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
+      // The Approvals tab: Mia's request is live, nothing was added.
+      expect(stageNames()).toEqual(stagesBefore);
+      expect(within(approvalsRowInStage("Mia Member", "Customer Approval")).getByText("Requested")).toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("ACCEPT: one confirmation, the proposal becomes the planned window, the change is Scheduled; no CAB, no new customer request, nothing stamped as the customer's approval", async () => {
+      const view = seedProposal();
+      const stagesBefore = stageNames();
+      fireEvent.click(accept());
+      // The confirmation shows what will be scheduled and what does not follow; nothing is sent yet.
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Accept the proposed time?" })).toBeInTheDocument();
+      expect(within(dialog).getByText(/The change will be scheduled for Mar 8, 2030, 9:00 AM to Mar 8, 2030, 11:00 AM\./)).toBeInTheDocument();
+      expect(within(dialog).getByText(/is not asked again\. No CAB approval is needed\./)).toBeInTheDocument();
+      expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument(); // the proposer is on record: no extra confirmation
+      expect(patchMutateAsyncMock).not.toHaveBeenCalled();
+
+      fireEvent.click(dialogButton("Accept proposed time"));
+      await waitFor(() => expect(lc.cr.state).toBe("scheduled"));
+      // Exactly the Accept contract: the answer, the proposal it accepts and the window the page showed; never a `state`.
+      expect(patchMutateAsyncMock).toHaveBeenCalledTimes(1);
+      expect(patchMutateAsyncMock).toHaveBeenCalledWith({
+        id: "chg-1",
+        patch: {
+          confirmCustomerUpdatedDate: "agree",
+          expectedCustomerUpdatedOn: PROPOSED_START,
+          expectedPlannedStartOn: "2030-03-01 09:00:00",
+          expectedPlannedEndOn: "2030-03-01 11:00:00",
+        },
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // Scheduled, the window is the proposal with the planned length kept, no banner, nothing awaited.
+      expect(currentStep()).toBe("Scheduled");
+      expect(lc.cr.plannedStartOn).toBe("2030-03-08 09:00:00");
+      expect(lc.cr.plannedEndOn).toBe("2030-03-08 11:00:00");
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.queryByText(/awaiting|waiting for wso2/i)).not.toBeInTheDocument();
+      // No CAB, no second request: the stages are what they were, and the customer's request is closed as any state change closes it.
+      expect(stageNames()).toEqual(stagesBefore);
+      expect(lc.approvals.every((a) => a.approvers.every((p) => p.status !== "REQUESTED"))).toBe(true);
+      // The Customer approved cell does not read a misleading No: it is the customer's proposal WSO2 accepted, not an approval stamped by staff.
+      expect(lc.cr.hasCustomerApproved).toBeFalsy();
+      expect(screen.getByText("Proposed time accepted")).toBeInTheDocument();
+      expect(screen.queryByText("Customer approved", { selector: "p, span" })?.parentElement).not.toHaveTextContent(/^Customer approved\s*No$/);
+      view.unmount();
+    });
+
+    // The Agree stays on the row when the customers are asked again; the cell reads it only once the change has moved on.
+    it("an Agree left standing on a change that is back in Customer Approval does not read 'Proposed time accepted': the customers are being asked, so the cell says No", () => {
+      const view = seedProposal();
+      lc.confirmation = "agree"; // an answer the previous system wrote, or one that outlived a later Re-schedule
+      lcPublish();
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(screen.queryByText("Proposed time accepted")).not.toBeInTheDocument();
+      expect(metaValue("Customer approved")).toBe("No");
+      view.unmount();
+    });
+
+    it("COUNTER with a different window: the customer is asked again, no CAB, the proposal is answered Disagree and the banner is gone", async () => {
+      const view = seedProposal();
+      const stagesBefore = stageNames();
+      fireEvent.click(counter());
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Propose a different time" })).toBeInTheDocument();
+      expect(within(dialog).getByText(/No CAB approval is needed\./)).toBeInTheDocument();
+      // Prefilled with the PLANNED window.
+      expect(windowPicker("Planned start").value).toBe("03/01/2030 09:00 AM");
+      fireEvent.change(windowPicker("Planned start"), { target: { value: "03/15/2030 09:00 AM" } });
+      fireEvent.change(windowPicker("Planned end"), { target: { value: "03/15/2030 12:00 PM" } });
+      fireEvent.click(dialogButton("Propose this time"));
+      await waitFor(() => expect(lc.confirmation).toBe("disagree"));
+      expect(patchMutateAsyncMock).toHaveBeenCalledWith({
+        id: "chg-1",
+        patch: {
+          state: "authorize",
+          plannedStartOn: "2030-03-15 09:00:00",
+          plannedEndOn: "2030-03-15 12:00:00",
+          expectedCustomerUpdatedOn: PROPOSED_START,
+          expectedPlannedStartOn: "2030-03-01 09:00:00",
+          expectedPlannedEndOn: "2030-03-01 11:00:00",
+        },
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // Still Customer Approval: WSO2's window, the customer asked again in a fresh request, nothing else opened.
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(lc.cr.plannedStartOn).toBe("2030-03-15 09:00:00");
+      expect(stageNames()).toEqual([...stagesBefore, "Customer Approval"]);
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("DECLINE (keep the current time): only the answer is written; the customer keeps their live request, no new stage", async () => {
+      const view = seedProposal();
+      const stagesBefore = structuredClone(lc.approvals);
+      fireEvent.click(counter());
+      expect(screen.getByText(/The current time stays, so the proposal is declined\./)).toBeInTheDocument();
+      fireEvent.click(dialogButton("Decline proposed time"));
+      await waitFor(() => expect(lc.confirmation).toBe("disagree"));
+      // No window is sent: the plan is not touched.
+      expect(patchMutateAsyncMock).toHaveBeenCalledWith({
+        id: "chg-1",
+        patch: {
+          state: "authorize",
+          expectedCustomerUpdatedOn: PROPOSED_START,
+          expectedPlannedStartOn: "2030-03-01 09:00:00",
+          expectedPlannedEndOn: "2030-03-01 11:00:00",
+        },
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(lc.cr.plannedStartOn).toBe("2030-03-01 09:00:00");
+      expect(lc.approvals).toEqual(stagesBefore);
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("the loop repeats: counter, the customer proposes again, WSO2 accepts the new one", async () => {
+      const view = seedProposal();
+      fireEvent.click(counter());
+      fireEvent.click(dialogButton("Decline proposed time"));
+      await waitFor(() => expect(lc.confirmation).toBe("disagree"));
+      await waitFor(() => expect(queryBanner()).not.toBeInTheDocument());
+      // The customer proposes another time (a re-proposal clears the standing answer): the banner is back, with the new time.
+      lcCustomerProposes(LC_CUST_TWO, "2030-03-20T10:00:00Z");
+      expect(within(banner()).getByText("Mar 20, 2030, 10:00 AM to Mar 20, 2030, 12:00 PM")).toBeInTheDocument();
+      expect(screen.getByTestId("cr-proposal-proposer")).toHaveTextContent("Proposed by Max Member (max@acme.example)");
+      fireEvent.click(accept());
+      fireEvent.click(dialogButton("Accept proposed time"));
+      await waitFor(() => expect(lc.cr.state).toBe("scheduled"));
+      expect(lc.cr.plannedStartOn).toBe("2030-03-20 10:00:00");
+      expect(patchMutateAsyncMock).toHaveBeenLastCalledWith({
+        id: "chg-1",
+        patch: expect.objectContaining({ confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn: "2030-03-20T10:00:00Z" }),
+      });
+      view.unmount();
+    });
+
+    describe("nobody is recorded as having proposed the stored time (a date WSO2 users write too, or one left over from an earlier cycle)", () => {
+      const STORED_SENTENCE = "A time is stored (Mar 8, 2030, 9:00 AM to Mar 8, 2030, 11:00 AM) but nobody is recorded as having proposed it.";
+      const NOT_RECORDED_REASON = new RegExp(`^Accept proposed time: Nobody is recorded as having proposed this time`);
+
+      it("the banner says a time is stored and nobody is recorded as having proposed it; Accept is disabled with the server's reason and cannot be opened; Propose a different time stays", () => {
+        const view = seedProposal(false);
+        expect(screen.getByRole("region", { name: NEUTRAL_TITLE })).toBe(banner());
+        expect(screen.getByTestId("cr-proposal-proposer")).toHaveTextContent(STORED_SENTENCE);
+        expect(banner()).not.toHaveTextContent(/The customer proposed|Proposed by|waiting for your answer/);
+        expect(accept()).toBeDisabled();
+        expect(within(banner()).getByLabelText(NOT_RECORDED_REASON)).toHaveAttribute("tabindex", "0");
+        // The reason is the backend's own (acceptBlockedReason), capitalised into a sentence.
+        expect(within(banner()).getByLabelText(NOT_RECORDED_REASON).getAttribute("aria-label")).toBe(
+          `Accept proposed time: ${LC_PROPOSER_NOT_RECORDED.charAt(0).toUpperCase()}${LC_PROPOSER_NOT_RECORDED.slice(1)}.`,
+        );
+        fireEvent.click(accept());
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        expect(counter()).toBeEnabled();
+        expect(patchMutateAsyncMock).not.toHaveBeenCalled();
+        view.unmount();
+      });
+
+      it("the header is not 'waiting for WSO2 to respond': nothing was proposed, the customer is still being asked", () => {
+        const view = seedProposal(false);
+        expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+        expect(screen.queryByText(NEUTRAL_REASON)).not.toBeInTheDocument();
+        expect(screen.queryByText(CUSTOMER_REASON)).not.toBeInTheDocument();
+        view.unmount();
+      });
+
+      it("Propose a different time is a plain Re-schedule: no decline, a changed window is required, the customer is asked again and NO answer is written on the stored time", async () => {
+        const view = seedProposal(false);
+        const stagesBefore = stageNames();
+        fireEvent.click(counter());
+        const dialog = screen.getByRole("dialog");
+        expect(within(dialog).getByRole("heading", { name: "Propose a different time" })).toBeInTheDocument();
+        expect(within(dialog).getByText(new RegExp(`${STORED_SENTENCE.replace(/[()]/g, "\\$&")} There is no proposal to decline\\.`))).toBeInTheDocument();
+        expect(within(dialog).queryByRole("button", { name: "Decline proposed time" })).not.toBeInTheDocument();
+        expect(dialogButton("Propose this time")).toBeDisabled(); // the window must change
+
+        fireEvent.change(windowPicker("Planned start"), { target: { value: "03/15/2030 09:00 AM" } });
+        fireEvent.change(windowPicker("Planned end"), { target: { value: "03/15/2030 12:00 PM" } });
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(lc.cr.plannedStartOn).toBe("2030-03-15 09:00:00"));
+        // The stored time and the planned window it was shown go with it; nothing of a proposal's answer.
+        expect(patchMutateAsyncMock).toHaveBeenCalledWith({
+          id: "chg-1",
+          patch: {
+            state: "authorize",
+            plannedStartOn: "2030-03-15 09:00:00",
+            plannedEndOn: "2030-03-15 12:00:00",
+            expectedCustomerUpdatedOn: PROPOSED_START,
+            expectedPlannedStartOn: "2030-03-01 09:00:00",
+            expectedPlannedEndOn: "2030-03-01 11:00:00",
+          },
+        });
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(lc.confirmation).toBeNull(); // no DISAGREE against a date nobody proposed
+        expect(lc.cr.state).toBe("customer_approval");
+        expect(stageNames()).toEqual([...stagesBefore, "Customer Approval"]); // the customer is asked again; no CAB
+        view.unmount();
+      });
+
+      it("a request with no window is refused with a clear 400, never a silent Disagree; an Accept sent anyway is a 409 with its code", async () => {
+        const view = seedProposal(false);
+        const before = structuredClone({ cr: lc.cr, approvals: lc.approvals, confirmation: lc.confirmation, customerUpdatedOn: lc.customerUpdatedOn });
+        await expect(patchMutateAsyncMock({ id: "chg-1", patch: { state: "authorize" } })).rejects.toMatchObject({
+          status: 400,
+          message: expect.stringMatching(/no customer is recorded as having proposed the time stored on this change request, so there is no proposal to decline: send the new planned window/),
+        });
+        await expect(
+          patchMutateAsyncMock({
+            id: "chg-1",
+            patch: {
+              confirmCustomerUpdatedDate: "agree",
+              expectedCustomerUpdatedOn: PROPOSED_START,
+              expectedPlannedStartOn: "2030-03-01 09:00:00",
+              expectedPlannedEndOn: "2030-03-01 11:00:00",
+            },
+          }),
+        ).rejects.toMatchObject({ status: 409, payload: { errorCode: "change_request_proposer_not_recorded" } });
+        expect({ cr: lc.cr, approvals: lc.approvals, confirmation: lc.confirmation, customerUpdatedOn: lc.customerUpdatedOn }).toEqual(before);
+        view.unmount();
+      });
+
+      it("a proposer that is on record again (the customer proposes once more) brings the recorded-proposer banner and Accept back", () => {
+        const view = seedProposal(false);
+        expect(accept()).toBeDisabled();
+        lcCustomerProposes(LC_CUST_TWO, "2030-03-20T10:00:00Z");
+        expect(screen.getByRole("region", { name: CUSTOMER_TITLE })).toBe(banner());
+        expect(accept()).toBeEnabled();
+        expect(accept().className).toContain("MuiButton-contained");
+        view.unmount();
+      });
+    });
+
+    // The page does not say the customer proposed a time it cannot attribute to them.
+    it("the stored time nobody proposed: the counter dialog does not say the customer proposed it", () => {
+      const view = seedProposal(false);
+      fireEvent.click(counter());
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Propose a different time" })).toBeInTheDocument();
+      expect(within(dialog).queryByText(/The customer proposed/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("the proposer is recorded: the counter dialog says the customer proposed it", () => {
+      const view = seedProposal();
+      fireEvent.click(counter());
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText(/The customer proposed Mar 8, 2030, 9:00 AM to Mar 8, 2030, 11:00 AM\./)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/A time is stored/)).not.toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("Accept is disabled with the reason when the change is on hold or the proposed time has passed, and the backend's refusal is the authority", async () => {
+      const view = seedProposal();
+      lc.onHold = true;
+      lcPublish();
+      expect(accept()).toBeDisabled();
+      expect(screen.getByLabelText("Accept proposed time: This change request is on hold. Take it off hold first.")).toBeInTheDocument();
+      expect(counter()).toBeEnabled();
+      lc.onHold = false;
+      lcPublish();
+      expect(accept()).toBeEnabled();
+      view.unmount();
+    });
+
+    // customer_updated_on is a column the previous system writes too: a date left far ahead must not become the planned window of a change.
+    it("a proposed date whose window would end after the year 2100 holds Accept back in the backend's own words; proposing a different time stays open", () => {
+      const view = seedProposal();
+      lc.customerUpdatedOn = "2100-12-31T22:30:00Z"; // + the 2-hour planned length = 2101-01-01T00:30:00Z
+      lcPublish();
+      expect(accept()).toBeDisabled();
+      expect(
+        screen.getByLabelText(
+          'Accept proposed time: The time the customer proposed (2100-12-31T22:30:00Z) is too far ahead to be accepted: the window would end after the year 2100 (2101-01-01T00:30:00Z), so use "Propose a different time" to ask the customer to approve another time.',
+        ),
+      ).toBeInTheDocument();
+      expect(counter()).toBeEnabled();
+      view.unmount();
+    });
+
+    it("the last window that fits the range is accepted: Accept is on offer and schedules it", async () => {
+      const view = seedProposal();
+      lc.customerUpdatedOn = "2100-12-31T21:30:00Z"; // + 2 hours = 2100-12-31T23:30:00Z, still year 2100
+      lcPublish();
+      expect(accept()).toBeEnabled();
+      fireEvent.click(accept());
+      fireEvent.click(dialogButton("Accept proposed time"));
+      await waitFor(() => expect(lc.cr.state).toBe("scheduled"));
+      expect(lc.cr.plannedStartOn).toBe("2100-12-31 21:30:00");
+      expect(lc.cr.plannedEndOn).toBe("2100-12-31 23:30:00");
+      view.unmount();
+    });
+
+    it("a time the customer re-proposed behind an open dialog is refused in the backend's words, the dialog keeps what the engineer was shown, and nothing is accepted", async () => {
+      const view = seedProposal();
+      fireEvent.click(accept());
+      // The customer proposes another time while the confirmation is open.
+      lcCustomerProposes(LC_CUST_TWO, "2030-03-20T10:00:00Z");
+      fireEvent.click(dialogButton("Accept proposed time"));
+      await waitFor(() =>
+        expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+          "the customer's proposed time changed after you opened this change request (it is now 2030-03-20T10:00:00Z); read it again before responding",
+        ),
+      );
+      // Still showing the time it was opened on, not silently the new one; the change is untouched.
+      expect(within(screen.getByRole("dialog")).getByText(/The change will be scheduled for Mar 8, 2030, 9:00 AM/)).toBeInTheDocument();
+      expect(lc.cr.state).toBe("customer_approval");
+      expect(lc.cr.plannedStartOn).toBe("2030-03-01 09:00:00");
+      expect(lc.confirmation).toBeNull();
+      // This refusal names no code, but the page now holds another proposal than the one the dialog was opened on: the same
+      // request would be refused again, so Accept is held back (no retry loop) and Close is the way on.
+      expect(dialogButton("Accept proposed time")).toBeDisabled();
+      expect(within(screen.getByRole("dialog")).getByRole("status")).toHaveTextContent(/changed while this dialog was open/);
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+      // Closing it, the banner now shows the new proposal to read.
+      expect(within(banner()).getByText("Mar 20, 2030, 10:00 AM to Mar 20, 2030, 12:00 PM")).toBeInTheDocument();
+      view.unmount();
+    });
+
+    // What the backend names with a code means the change is no longer what the dialog showed; see `isStaleAnswerError`.
+    describe("a refusal that means the change moved on", () => {
+      const NOTICE_TAIL = "The page now shows the current state.";
+      // The page's own alert (the Approvals panel has its own notices, so the role alone does not say which).
+      const notice = (): HTMLElement => screen.getByText(/The page now shows the current state\./).closest('[role="alert"]') as HTMLElement;
+      /** Somebody else re-schedules behind an open dialog: the planned window moves, the proposal still waits. */
+      function moveThePlannedWindow(): void {
+        lc.cr = { ...lc.cr, plannedStartOn: "2030-03-02 09:00:00", plannedEndOn: "2030-03-02 11:00:00" };
+        lcPublish();
+      }
+      const MOVED =
+        "The planned implementation time of this change request changed after you opened it (it is now 2030-03-02T09:00:00Z to 2030-03-02T11:00:00Z); read it again before responding.";
+
+      it("ACCEPT: closes the dialog, says why on the page with focus on it, reads the change again, accepts nothing, and Accept works on the new state", async () => {
+        const view = seedProposal();
+        fireEvent.click(accept());
+        moveThePlannedWindow();
+        fireEvent.click(dialogButton("Accept proposed time"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(notice()).toHaveTextContent(`${MOVED} ${NOTICE_TAIL}`);
+        expect(notice()).toHaveFocus();
+        expect(refetchMock).toHaveBeenCalledTimes(1);
+        expect(refetchMock).toHaveBeenCalledWith({ cancelRefetch: false });
+        // Nothing was accepted; the banner shows the planned window as it is now.
+        expect(lc.cr.state).toBe("customer_approval");
+        expect(lc.confirmation).toBeNull();
+        expect(within(banner()).getByText("Mar 2, 2030, 9:00 AM to Mar 2, 2030, 11:00 AM")).toBeInTheDocument();
+
+        // On the current state it goes through, and the notice is gone once a dialog is opened again.
+        fireEvent.click(accept());
+        expect(screen.queryByText(new RegExp(NOTICE_TAIL))).not.toBeInTheDocument();
+        fireEvent.click(dialogButton("Accept proposed time"));
+        await waitFor(() => expect(lc.cr.state).toBe("scheduled"));
+        expect(patchMutateAsyncMock).toHaveBeenCalledTimes(2);
+        expect(patchMutateAsyncMock).toHaveBeenLastCalledWith({
+          id: "chg-1",
+          patch: expect.objectContaining({ expectedPlannedStartOn: "2030-03-02 09:00:00", expectedPlannedEndOn: "2030-03-02 11:00:00" }),
+        });
+        view.unmount();
+      });
+
+      it("COUNTER: closes the dialog and posts NO note; opened again and sent, the reason is recorded exactly once, after the change went through", async () => {
+        const view = seedProposal();
+        const typeCounter = (reason: string): void => {
+          fireEvent.change(windowPicker("Planned start"), { target: { value: "03/15/2030 09:00 AM" } });
+          fireEvent.change(windowPicker("Planned end"), { target: { value: "03/15/2030 12:00 PM" } });
+          fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: reason } });
+        };
+        fireEvent.click(counter());
+        typeCounter("Freeze that week.");
+        moveThePlannedWindow();
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(notice()).toHaveTextContent(`${MOVED} ${NOTICE_TAIL}`);
+        expect(notice()).toHaveFocus();
+        expect(refetchMock).toHaveBeenCalledTimes(1);
+        expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
+        expect(lc.confirmation).toBeNull();
+
+        // Opened again from the banner: a fresh dialog on the current state, the reason empty and editable. Typed again and sent.
+        fireEvent.click(counter());
+        expect(screen.getByLabelText(/reason \(optional\)/i)).toHaveValue("");
+        expect(screen.getByLabelText(/reason \(optional\)/i)).toBeEnabled();
+        typeCounter("Freeze that week.");
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(lc.confirmation).toBe("disagree"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(patchMutateAsyncMock).toHaveBeenCalledTimes(2);
+        expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
+        expect(postCommentMutateAsyncMock).toHaveBeenCalledWith({ changeRequestId: "chg-1", bodyHtml: "Freeze that week.", internal: true });
+        expect(patchMutateAsyncMock.mock.invocationCallOrder[1]).toBeLessThan(postCommentMutateAsyncMock.mock.invocationCallOrder[0]);
+        view.unmount();
+      });
+
+      it.each([
+        ["not proposable (the change left Customer Approval)", "change_request_not_proposable"],
+        ["no planned window", "change_request_no_planned_window"],
+        ["another approval is being asked", "change_request_proposal_not_now"],
+        ["on hold", "change_request_on_hold"],
+        ["nobody is recorded as having proposed the time", "change_request_proposer_not_recorded"],
+      ])("%s (%s) closes the Accept dialog too", async (_what, code) => {
+        const view = seedProposal();
+        fireEvent.click(accept());
+        patchMutateAsyncMock.mockRejectedValueOnce(lcCoded(409, `refused: ${code}`, code));
+        fireEvent.click(dialogButton("Accept proposed time"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(notice()).toHaveTextContent(`Refused: ${code}. ${NOTICE_TAIL}`);
+        expect(notice()).toHaveFocus();
+        expect(refetchMock).toHaveBeenCalledTimes(1);
+        view.unmount();
+      });
+
+      it("the notice can be dismissed, and a refusal with no message of its own says it in the page's words", async () => {
+        const view = seedProposal();
+        fireEvent.click(counter());
+        patchMutateAsyncMock.mockRejectedValueOnce(
+          Object.assign(new BackendApiError(409, ""), { payload: { errorCode: "change_request_schedule_changed" } }),
+        );
+        fireEvent.change(windowPicker("Planned start"), { target: { value: "03/15/2030 09:00 AM" } });
+        fireEvent.change(windowPicker("Planned end"), { target: { value: "03/15/2030 12:00 PM" } });
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(notice()).toHaveTextContent(`Could not answer the proposed time. ${NOTICE_TAIL}`);
+        fireEvent.click(within(notice()).getByRole("button", { name: /close/i }));
+        expect(screen.queryByText(/The page now shows the current state\./)).not.toBeInTheDocument();
+        view.unmount();
+      });
+    });
+
+    // Everything else is the dialog's own: it stays open, with the words, so the engineer can fix the request or close it.
+    describe("a refusal the dialog keeps", () => {
+      it.each([
+        ["a 409 with a code this page does not know", new BackendApiError(409, "something newer", { errorCode: "change_request_from_the_future" })],
+        ["a 409 with no code", new BackendApiError(409, "something newer")],
+        ["a 400 even with a stale-answer code", new BackendApiError(400, "something newer", { errorCode: "change_request_schedule_changed" })],
+        ["a server error", new BackendApiError(500, "boom")],
+      ])("%s: the Accept dialog stays open with the words, Accept stays on offer, nothing is refetched", async (_what, failure) => {
+        const view = seedProposal();
+        fireEvent.click(accept());
+        patchMutateAsyncMock.mockRejectedValueOnce(failure);
+        fireEvent.click(dialogButton("Accept proposed time"));
+        await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("alert")).toBeInTheDocument());
+        expect(refetchMock).not.toHaveBeenCalled();
+        expect(dialogButton("Accept proposed time")).toBeEnabled();
+        expect(screen.queryByText(/The page now shows the current state/)).not.toBeInTheDocument();
+        view.unmount();
+      });
+
+      it("the counter dialog too: it stays open with the words, nothing is refetched, no note is posted, and a retry goes through once", async () => {
+        const view = seedProposal();
+        fireEvent.click(counter());
+        patchMutateAsyncMock.mockRejectedValueOnce(new BackendApiError(409, "something newer", { errorCode: "change_request_from_the_future" }));
+        fireEvent.change(windowPicker("Planned start"), { target: { value: "03/15/2030 09:00 AM" } });
+        fireEvent.change(windowPicker("Planned end"), { target: { value: "03/15/2030 12:00 PM" } });
+        fireEvent.change(screen.getByLabelText(/reason \(optional\)/i), { target: { value: "Freeze that week." } });
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("something newer"));
+        expect(refetchMock).not.toHaveBeenCalled();
+        expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
+        fireEvent.click(dialogButton("Propose this time"));
+        await waitFor(() => expect(lc.confirmation).toBe("disagree"));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
+        view.unmount();
+      });
+    });
+
+    describe("focus", () => {
+      const clickClose = (): void => {
+        fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+      };
+      const pressEscape = (): void => {
+        fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      };
+      it.each([
+        ["Accept", (): HTMLElement => accept(), clickClose],
+        ["the counter", (): HTMLElement => counter(), clickClose],
+        ["Accept (Escape)", (): HTMLElement => accept(), pressEscape],
+      ])("closing the %s dialog without answering gives focus back to the button that opened it", async (_which, trigger, close) => {
+        const view = seedProposal();
+        const opener = trigger();
+        act(() => opener.focus());
+        fireEvent.click(opener);
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+        close();
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        await waitFor(() => expect(opener).toHaveFocus());
+        view.unmount();
+      });
+    });
+
+    it("a plain Re-schedule opened before the customer proposed is refused in words: it never answers a proposal it did not see", async () => {
+      const view = runToCustomerApproval({ members: LC_MEMBERS });
+      fireEvent.click(screen.getByRole("button", { name: "Re-schedule" }));
+      lcCustomerProposes(LC_CUST_ONE, PROPOSED_START); // behind the open dialog
+      fireEvent.change(windowPicker("Planned end"), { target: { value: "03/01/2030 01:00 PM" } });
+      fireEvent.click(dialogSubmit());
+      await waitFor(() =>
+        expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+          "the customer proposed a new time (2030-03-08T09:00:00Z) after you opened this change request; read it again to accept it or propose a different time",
+        ),
+      );
+      expect(lc.cr.plannedEndOn).toBe("2030-03-01 11:00:00");
+      expect(lc.confirmation).toBeNull();
+      view.unmount();
+    });
+
+    // WSO2 already answered (Agree/Disagree), the change moved on, or an internal approval is still being asked.
+    // One case each: every one renders the whole page, so together they would outlast a single test's time limit on a busy machine.
+    it.each([
+      ["WSO2 already disagreed", () => { lc.confirmation = "disagree"; }],
+      ["WSO2 agreed and the change is Scheduled", () => { lc.confirmation = "agree"; lcSetState("scheduled"); }],
+      ["the change is Canceled", () => { lcSetState("canceled"); }],
+      ["a CAB stage is still being asked", () => { lc.approvals = [...lc.approvals, lcStage("CAB Approval", "CAB", LC_CAB)]; }],
+    ] as const)("a proposal that is not waiting for WSO2 shows no banner: %s", (_name, setup) => {
+      const view = seedProposal();
+      setup();
+      lcPublish();
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.queryByText(CUSTOMER_REASON)).not.toBeInTheDocument();
+      expect(screen.queryByText(NEUTRAL_REASON)).not.toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("a stale proposed date left over from an earlier cycle (equal to the planned start) is not a proposal waiting", () => {
+      const view = runToCustomerApproval({ members: LC_MEMBERS });
+      lc.customerUpdatedOn = "2030-03-01T09:00:00Z"; // the planned start, written by someone else long ago
+      lcPublish();
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-schedule" })).toBeInTheDocument();
+      view.unmount();
+    });
+
+    it("an OLD proposal still in flight (Authorize, a fresh CAB live) keeps its own wording and finishes through the CAB: no banner", () => {
+      // The old flow sent a proposal back through the CAB; a change caught there is not touched by the new mechanism.
+      let view = runToCustomerApproval({ members: LC_MEMBERS });
+      lcSetState("authorize");
+      lcReconcile(); // the customer's request is superseded (cancelled), as the old Re-schedule left it
+      lc.approvals = [...lc.approvals, lcStage("CAB Approval", "CAB", LC_CAB)];
+      lc.customerUpdatedOn = PROPOSED_START; // a stale proposed date on the row
+      lcPublish();
+      view.unmount();
+      view = lcOpenAs(LC_CREATOR);
+      expect(currentStep()).toBe("Authorize");
+      expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
+      expect(queryBanner()).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /re-schedule|propose a different time|accept proposed time/i })).not.toBeInTheDocument();
+      view = lcOpenAs(LC_CAB, view);
+      fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+      expect(lc.cr.state).toBe("customer_approval"); // the CAB's approval asks the customer again, as it always did
+      view.unmount();
+    });
+
+    it("the SRE details show WSO2's answer beside the customer's date", () => {
+      const view = seedProposal();
+      fireEvent.click(screen.getByRole("tab", { name: /^plan$/i }));
+      const cell = (label: string): HTMLElement => screen.getByText(label).parentElement!;
+      expect(cell("Customer updated")).toHaveTextContent("Mar 8, 2030, 9:00 AM");
+      expect(cell("WSO2 answer to the customer's time")).toHaveTextContent("—");
+      lc.confirmation = "disagree";
+      lcPublish();
+      expect(cell("WSO2 answer to the customer's time")).toHaveTextContent("Disagree");
+      lc.confirmation = "agree";
+      lcPublish();
+      expect(cell("WSO2 answer to the customer's time")).toHaveTextContent("Agree");
+      view.unmount();
+    });
   });
 });
 
@@ -2605,8 +3564,8 @@ describe("CsmChangeRequestDetailPage — lifecycle: backend canDecide on approve
   });
 });
 
-describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval -> ECAB only -> auto Scheduled)", () => {
-  it("has no Peer or CAB stage and lands on Scheduled when ECAB approves", () => {
+describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval -> one CAB Approval -> auto Scheduled)", () => {
+  it("has a single CAB Approval stage, no Peer stage and no ECAB, and lands on Scheduled when the CAB approves", () => {
     lcSeed("emergency");
 
     let view = lcOpenAs(LC_CREATOR);
@@ -2614,14 +3573,15 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
 
     expect(currentStep()).toBe("Authorize");
-    expect(screen.getByText("Awaiting ECAB Approval")).toBeInTheDocument();
-    expect(within(approvalsRow("Eli Ecab")).getByText("ECAB Approval")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
+    expect(within(approvalsRow("Cam Cab")).getByText("CAB Approval")).toBeInTheDocument();
     expect(screen.queryByText("Peer Approval")).not.toBeInTheDocument();
-    expect(screen.queryByText("CAB Approval")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ECAB/)).not.toBeInTheDocument();
+    expect(lc.approvals.map((a) => a.stage)).toEqual(["CAB Approval"]);
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument(); // creator
     expectNoManualSchedule();
 
-    view = lcOpenAs(LC_ECAB, view);
+    view = lcOpenAs(LC_CAB, view);
     fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
     expect(currentStep()).toBe("Scheduled");
     expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
@@ -2629,36 +3589,197 @@ describe("CsmChangeRequestDetailPage — lifecycle: Emergency (Request Approval 
     expect(screen.getByRole("button", { name: /^start implementation$/i })).toBeInTheDocument();
     view.unmount();
   });
+
+  it("draws the line New, Assess (not taken), Authorize, Scheduled, ... at every step, with no customer stage on it", () => {
+    lcSeed("emergency");
+    let view = lcOpenAs(LC_CREATOR);
+    const line = (): string[] => stepLabels().map((l) => `${l}=${stepReading(l).slice(l.length + 2)}`);
+
+    expect(line()).toEqual([
+      "New=current",
+      "Assess=not taken",
+      "Authorize=upcoming",
+      "Scheduled=upcoming",
+      "Implement=upcoming",
+      "Review=upcoming",
+      "Rollback=not taken",
+      "Closed=upcoming",
+      "Canceled=not taken",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    expect(line()).toEqual([
+      "New=done",
+      "Assess=not taken",
+      "Authorize=current",
+      "Scheduled=upcoming",
+      "Implement=upcoming",
+      "Review=upcoming",
+      "Rollback=not taken",
+      "Closed=upcoming",
+      "Canceled=not taken",
+    ]);
+    view = lcOpenAs(LC_CAB, view);
+    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(line()).toEqual([
+      "New=done",
+      "Assess=not taken",
+      "Authorize=done",
+      "Scheduled=current",
+      "Implement=upcoming",
+      "Review=upcoming",
+      "Rollback=not taken",
+      "Closed=upcoming",
+      "Canceled=not taken",
+    ]);
+    view.unmount();
+  });
+
+  it("a Normal change of the same shape still passes through Assess (the line differs by type, nothing else)", () => {
+    lcSeed("normal");
+    const view = lcOpenAs(LC_CREATOR);
+    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    expect(stepReading("Assess")).toBe("Assess, current");
+    view.unmount();
+  });
+
+  it("shows the customer's part as Not applicable on the Approval tab, from New to Scheduled", () => {
+    lcSeed("emergency", { approval: false, review: false }, { members: LC_MEMBERS });
+    let view = lcOpenAs(LC_CREATOR);
+    const notApplicable = (label: string): string => within(screen.getByText(label).parentElement!).getByText(/^(Yes|No|Not applicable)$/).textContent ?? "";
+    for (const label of ["Customer approval required", "Customer review required", "Customer approved", "Customer reviewed"]) {
+      expect(notApplicable(label), label).toBe("Not applicable");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    view = lcOpenAs(LC_CAB, view);
+    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(currentStep()).toBe("Scheduled");
+    expect(notApplicable("Customer approval required")).toBe("Not applicable");
+    view.unmount();
+  });
+
+  it("a Normal change on the same page still reads Yes / No there", () => {
+    lcSeed("normal");
+    const view = lcOpenAs(LC_CREATOR);
+    expect(metaValue("Customer approval required")).toBe("No");
+    expect(metaValue("Customer review required")).toBe("No");
+    view.unmount();
+  });
 });
 
-describe("CsmChangeRequestDetailPage — lifecycle: Emergency with Customer Approval (ECAB -> Customer Approval -> Scheduled)", () => {
-  it("waits in Customer Approval after ECAB approves, and only the customer's own answer moves it on", () => {
-    lcSeed("emergency", { approval: true, review: false }, { members: LC_MEMBERS });
+describe("CsmChangeRequestDetailPage — lifecycle: an Emergency change never reaches a customer state (Request Approval -> CAB -> Scheduled, whoever the project's contacts are)", () => {
+  // Retired: "Emergency with Customer Approval (ECAB -> Customer Approval -> Scheduled)". An Emergency change acts without
+  // customer consent: its two customer boxes are off, the CAB's approval schedules it, and nobody is asked.
+  it("goes from the CAB's approval straight to Scheduled, even on a project with registered contacts, and never asks them", () => {
+    lcSeed("emergency", { approval: false, review: false }, { members: LC_MEMBERS });
 
     let view = lcOpenAs(LC_CREATOR);
     fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
     expect(currentStep()).toBe("Authorize");
-    expect(screen.getByText("Awaiting ECAB Approval")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting CAB Approval")).toBeInTheDocument();
     expectNoManualSchedule();
+
+    view = lcOpenAs(LC_CAB, view);
+    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(currentStep()).toBe("Scheduled");
+    expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Awaiting Customer Approval")).not.toBeInTheDocument();
+    expect(lc.approvals.some((a) => lcIsCustomerStage(a.stage))).toBe(false);
+    expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^start implementation$/i })).toBeInTheDocument();
+    expectNoManualSchedule();
+    view.unmount();
+  });
+
+  it("an Emergency change on a project with NO registered contact is not held back: Request Approval stays enabled (nobody is to be asked)", () => {
+    lcSeed("emergency", { approval: false, review: false }, null);
+    const view = lcOpenAs(LC_CREATOR);
+    expect(screen.getByRole("button", { name: "Request Approval" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    expect(currentStep()).toBe("Authorize");
+    expect(showErrorMock).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  // An older row (or one the sync wrote) can still carry a customer box ticked. The backend ignores it for an Emergency change,
+  // so Request Approval must not be held back for want of a project or of a registered contact, nor say it is.
+  it.each([
+    ["no Customer Project", { project: undefined, customerContacts: undefined }],
+    ["a Customer Project with no registered contact", { customerContacts: [] }],
+  ])("an Emergency change in New with a stored customer box ticked and %s has Request Approval enabled, with no reason, and goes through the CAB alone", (_name, patch) => {
+    lcSeed("emergency", { approval: false, review: false }, null);
+    lc.cr = { ...lc.cr, customerApprovalRequired: true, customerReviewRequired: true, ...patch };
+    lcPublish();
+
+    let view = lcOpenAs(LC_CREATOR);
+    const button = screen.getByRole("button", { name: "Request Approval" });
+    expect(button).toBeEnabled();
+    expect(screen.queryByLabelText(/before requesting approval/i)).not.toBeInTheDocument();
+    fireEvent.click(button);
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(currentStep()).toBe("Authorize");
+    expect(lc.approvals.map((a) => a.stage)).toEqual(["CAB Approval"]);
+
+    view = lcOpenAs(LC_CAB, view);
+    fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(currentStep()).toBe("Scheduled");
+    expect(lc.approvals.some((a) => lcIsCustomerStage(a.stage))).toBe(false);
+    view.unmount();
+  });
+
+  it("a NORMAL change with the same stored boxes and no project keeps its reason: Request Approval is disabled", () => {
+    lcSeed("normal", { approval: false, review: false }, null);
+    lc.cr = { ...lc.cr, customerApprovalRequired: true, project: undefined, customerContacts: undefined };
+    lcPublish();
+
+    const view = lcOpenAs(LC_CREATOR);
+    const button = screen.getByRole("button", { name: "Request Approval" });
+    expect(button).toBeDisabled();
+    expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", "Request Approval: Select a Customer Project before requesting approval");
+    view.unmount();
+  });
+
+  it("Request Approval on a database where nobody maintains the CAB group: the backend's readable refusal (which group, and that the sync does not mirror it) shows verbatim in the error banner, and the change stays in New", () => {
+    // A group may have no members ("CAB Approval" here), so a stage that needs it cannot be provisioned until somebody
+    // maintains the group: an ops / data matter, answered in words that name the group.
+    const refusal =
+      'the "CAB Approval" group has no members to provision as CAB Approval approvers: the sync from the previous system does not mirror the membership of the "CAB Approval" group: it is maintained in the portal database (one team_member row per approver, with group_id set to that group)';
+    lcSeed("emergency", { approval: false, review: false }, null);
+    patchMutateMock.mockImplementationOnce((_input: unknown, options?: { onError?: (err: Error) => void }) => {
+      options?.onError?.(new BackendApiError(400, refusal));
+    });
+    const view = lcOpenAs(LC_CREATOR);
+    expect(screen.getByRole("button", { name: "Request Approval" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    expect(showErrorMock).toHaveBeenCalledTimes(1);
+    expect(showErrorMock.mock.calls[0]![0]).toBe(refusal);
+    expect(showErrorMock.mock.calls[0]![0]).toContain('"CAB Approval" group');
+    expect(showErrorMock.mock.calls[0]![0]).toContain("does not mirror the membership");
+    expect(lc.cr.state).toBe("new");
+    expect(lc.approvals).toEqual([]);
+    expect(currentStep()).toBe("New");
+    expect(screen.getByRole("button", { name: "Request Approval" })).toBeEnabled();
+    view.unmount();
+  });
+
+  it("an OLDER Emergency change with a live ECAB stage still shows it, and the approvers it asked can still decide it", () => {
+    lcSeed("emergency");
+    // As an older version of the portal left it: Authorize, with one REQUESTED stage named ECAB.
+    lcSetState("authorize");
+    lc.approvals = [lcStage("ECAB Approval", "ECAB", LC_ECAB)];
+    lcPublish();
+
+    let view = lcOpenAs(LC_CREATOR);
+    expect(currentStep()).toBe("Authorize");
+    expect(screen.getByText("Awaiting ECAB Approval")).toBeInTheDocument();
+    expect(within(approvalsRow("Eli Ecab")).getByText("ECAB Approval")).toBeInTheDocument();
+    expect(stepReading("Assess")).toBe("Assess, not taken");
+    // Only the approver the stage asked has the controls: the creator has none.
+    expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
 
     view = lcOpenAs(LC_ECAB, view);
     fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
-    expect(currentStep()).toBe("Customer Approval");
-    expect(screen.getByText("Awaiting Customer Approval")).toBeInTheDocument();
-    expect(screen.queryByText("Peer Approval")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /start implementation/i })).not.toBeInTheDocument();
-    expectNoManualSchedule();
-
-    // The ECAB approver is staff like any other: no way to answer for the customer.
-    expect(screen.queryByText(/bypass/i)).not.toBeInTheDocument();
-    view = lcOpenAs(LC_CREATOR, view);
-    expectOnlyCancelOffered("approval");
-
-    lcCustomerDecides(LC_CUST_ONE, "approved");
     expect(currentStep()).toBe("Scheduled");
     expect(screen.queryByText(/awaiting/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^start implementation$/i })).toBeInTheDocument();
-    expectNoManualSchedule();
     view.unmount();
   });
 });
@@ -3076,7 +4197,6 @@ describe("CsmChangeRequestDetailPage — customer group: Request Approval is ref
   it.each([
     ["normal", { approval: false, review: true }],
     ["standard", { approval: true, review: false }],
-    ["emergency", { approval: true, review: true }],
   ] as const)("the same for a %s change with the customer part ticked as %j", (type, flags) => {
     lcSeed(type, flags, null);
     const view = lcOpenAs(LC_CREATOR);

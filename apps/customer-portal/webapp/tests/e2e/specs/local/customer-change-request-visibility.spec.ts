@@ -29,7 +29,8 @@
 // Every change request here is RAISED THROUGH THE CSM PORTAL'S BACKEND by WSO2 staff
 // (jane raises, alice and bob approve in the CAB's seats) and walked through the real
 // approval flow, so the rows the rule reads are the ones the product writes, not seeded ones.
-// The customers act in the customer portal's own UI (mira proposes and approves, noel reviews).
+// The customers act in the customer portal's own UI (mira proposes and approves, noel reviews); WSO2 answers a
+// proposal through the CSM portal's backend (bob counters it).
 // What is asserted, at every step of the life, is what mira, noel and dave (another project)
 // really get: the list, the stat cards' counts (the numbers themselves, against what the
 // project showed before the change request was raised), the dashboard's Outstanding count,
@@ -38,12 +39,14 @@
 //
 //   1. Both boxes ticked, on Lumen Works Platform (mira, noel): invisible in New, Assess and
 //      Authorize; visible to BOTH contacts the moment it reaches Customer Approval; mira
-//      proposes a new time and it goes back to Authorize, where it STAYS visible to mira AND
-//      noel (list, detail, with the right state label); CAB approves again, mira approves,
-//      and it is Scheduled, Implement, Review, Customer Review (noel answers), Closed: visible
-//      all the way. dave (project 401) never sees it, by API or by the address he would type.
+//      proposes a new start and the change STAYS in Customer Approval, visible to mira AND
+//      noel (list, detail, the counts: nothing about the change moved); WSO2 answers with a
+//      window of its own, the contacts are asked again, mira approves, and it is Scheduled,
+//      Implement, Review, Customer Review (noel answers), Closed: visible all the way. dave
+//      (project 401) never sees it, by API or by the address he would type.
 //   2. A change request that never needs the customer is never visible, in any state through
-//      Closed (Normal and Standard); one that needs only the customer's REVIEW is invisible
+//      Closed (Normal and Standard; an Emergency change never asks the customer at all, and a
+//      customer box cannot even be ticked on it); one that needs only the customer's REVIEW is invisible
 //      until Customer Review and visible from there on.
 //   3. A contact registered AFTER the stage was provisioned was never asked: they see nothing,
 //      in any state of that change request, though they are a registered contact of the project.
@@ -59,8 +62,10 @@ import { LOCAL_PERSONAS, openLocalContext, withLocalSession } from "../../auth/l
 import { ChangeRequestDetailsPage } from "../../pages/ChangeRequestDetailsPage";
 import { ChangeRequestsPage } from "../../pages/ChangeRequestsPage";
 import {
+  EXAMPLE_CORP_ABT_GROUP_ID,
   FIXTURES,
   LATE_CONTACT,
+  RAISED_PREFIX,
   approverRows,
   customerApi,
   countsWith,
@@ -71,6 +76,8 @@ import {
   entityServiceUrl,
   futureWindow,
   lumenProjectId,
+  planWindow,
+  proposalRow,
   psql,
   raiseChange,
   registerLateContact,
@@ -79,6 +86,7 @@ import {
   resetFixtures,
   shot,
   staffApi,
+  staffCountersProposal,
   staffDecides,
   staffMoves,
   storedState,
@@ -187,7 +195,7 @@ test.describe("Local stack — who sees a change request, over its whole life", 
     await removeLateContact();
   });
 
-  test(`both boxes ticked on Lumen Works Platform: invisible in New, Assess and Authorize; visible to ${LOCAL_PERSONAS.mira.email} AND ${LOCAL_PERSONAS.noel.email} at Customer Approval; still visible in Authorize after mira proposes a new time, and in every state through Closed; never to dave`, async ({
+  test(`both boxes ticked on Lumen Works Platform: invisible in New, Assess and Authorize; visible to ${LOCAL_PERSONAS.mira.email} AND ${LOCAL_PERSONAS.noel.email} at Customer Approval; still visible, in Customer Approval, after mira proposes a new start and WSO2 answers it, and in every state through Closed; never to dave`, async ({
     page,
     browser,
     baseURL,
@@ -204,6 +212,9 @@ test.describe("Local stack — who sees a change request, over its whole life", 
     });
     try {
       const change = await raiseChange({ title: "Lumen, both boxes", projectId: lumen, approval: true, review: true });
+      // A proposal moves the planned START, so the change needs a planned window (a raised one has none).
+      const planned = futureWindow("UTC", { daysAhead: 20, startHour: 10, hours: 2 });
+      await planWindow(change.id, planned);
       const miraPage = new ChangeRequestDetailsPage(page);
       const noelBrowserPage = await noelContext.newPage();
       const noelPage = new ChangeRequestDetailsPage(noelBrowserPage);
@@ -287,59 +298,62 @@ test.describe("Local stack — who sees a change request, over its whole life", 
       await expect(daveBrowserPage.getByText(change.number, { exact: true })).toHaveCount(0);
       await shot(daveBrowserPage, "03-dave-lumen-address-refused");
 
-      // ---- mira proposes a new time: back to Authorize, for a fresh CAB approval. STILL visible to both.
+      // ---- mira proposes a new START: the change STAYS in Customer Approval, visible to both, and nothing about it moved.
       await miraPage.open(lumen, change.id, change.number);
       await miraPage.button(UI.buttons.proposeNewTime).click();
       await expect(miraPage.proposeDialog()).toBeVisible();
       const zone = await miraPage.proposeTimeZone();
-      const window = futureWindow(zone, { daysAhead: 3, startHour: 16, hours: 4 });
-      await miraPage.fillProposedWindow(window.start, window.end);
+      const proposal = futureWindow(zone, { daysAhead: 24, startHour: 16, hours: 2 });
+      await miraPage.fillProposedStart(proposal.start);
       await miraPage.submitProposalButton().click();
-      await expect(miraPage.banner(UI.banners.proposedNormal)).toBeVisible();
-      await expect(miraPage.currentStage()).toHaveText(UI.stages.authorize);
-      expect(await storedState(change.id)).toBe("AUTHORIZE");
+      await expect(miraPage.banner(UI.banners.proposed)).toBeVisible({ timeout: 20_000 });
+      await expect(miraPage.currentStage()).toHaveText(UI.stages.customerApproval);
+      await expect(miraPage.proposalWaitingNote()).toContainText(UI.notes.waitingOwn);
+      expect(await storedState(change.id)).toBe("CUSTOMER_APPROVAL");
+      expect(await proposalRow(change.id)).toEqual({ proposedUtc: proposal.startUtc, answer: "" });
       expect(
         (await approverRows(change.id)).filter((r) => r.stage === "Customer Approval").map((r) => `${r.email}|${r.state}`),
-        "the customers' requests are cancelled, not deleted: that is what keeps it theirs",
-      ).toEqual([`${LOCAL_PERSONAS.mira.email}|CANCELLED`, `${LOCAL_PERSONAS.noel.email}|CANCELLED`]);
-      await expectSeenBy(change, lumen, [...both], "Authorize", bases, "Authorize after mira's proposal");
+        "the customers' requests stand: a proposal answers nothing and cancels nothing",
+      ).toEqual([`${LOCAL_PERSONAS.mira.email}|REQUESTED`, `${LOCAL_PERSONAS.noel.email}|REQUESTED`]);
+      await expectSeenBy(change, lumen, [...both], "Customer Approval", bases, "Customer Approval after mira's proposal");
       await miraList.open(lumen);
       await miraList.waitForList();
-      await expect(miraList.rowByNumber(change.number), "mira lost it from her list in Authorize").toHaveCount(1);
-      await expect(miraList.rowByNumber(change.number)).toContainText("Authorize");
-      await shot(page, "04-mira-list-authorize-after-proposal");
-      // The State filter offers Authorize (and never New or Assess), and filtering by it lists exactly the designated change request.
+      await expect(miraList.rowByNumber(change.number), "mira lost it from her list after proposing").toHaveCount(1);
+      await expect(miraList.rowByNumber(change.number)).toContainText("Customer Approval");
+      await shot(page, "04-mira-list-customer-approval-after-proposal");
+      // The State filter offers Authorize (and never New or Assess), and filtering by Customer Approval lists exactly the designated change request.
       await miraList.openFilters();
       const stateOptions = await miraList.stateFilterOptions();
       expect(stateOptions, "the State filter").toContain("Authorize");
       expect(stateOptions).not.toContain("New");
       expect(stateOptions).not.toContain("Assess");
-      await miraList.filterByState("Authorize");
-      await expect(miraList.rowByNumber(change.number), "mira's Authorize filter").toHaveCount(1);
-      await expect(miraList.allRows()).toHaveCount(1);
-      await shot(page, "04a-mira-list-state-filter-authorize");
+      await miraList.filterByState("Customer Approval");
+      await expect(miraList.rowByNumber(change.number), "mira's Customer Approval filter").toHaveCount(1);
+      await shot(page, "04a-mira-list-state-filter-customer-approval");
       await miraList.clearFilters(); // the list remembers its filters: the later phases look at the whole list
-      // The Calendar view is the same list in a month grid: the designated change request's window (Authorize, proposed) is on it.
+      // The Calendar view is the same list in a month grid: the designated change request's window (the planned one) is on it.
       await miraList.openView("Calendar View");
-      await expect(page.getByText(change.title, { exact: false }).first(), "the proposed window on the calendar").toBeVisible({ timeout: 30_000 });
-      await shot(page, "04c-mira-calendar-view-authorize-after-proposal");
+      await expect(page.getByText(change.title, { exact: false }).first(), "the planned window on the calendar").toBeVisible({ timeout: 30_000 });
+      await shot(page, "04c-mira-calendar-view-customer-approval-after-proposal");
       await miraList.openView("List View");
-      await expectOnHub(page, lumen, change, true, "Authorize after the proposal (outstanding for a customer)");
-      await shot(page, "04b-mira-operations-hub-authorize-after-proposal");
+      await expectOnHub(page, lumen, change, true, "Customer Approval after the proposal (outstanding for a customer)");
+      await shot(page, "04b-mira-operations-hub-customer-approval-after-proposal");
+      // noel did not propose: he is told neutrally, and may still answer.
       await noelPage.open(lumen, change.id, change.number);
-      await expect(noelPage.currentStage()).toHaveText(UI.stages.authorize);
-      await expect(noelPage.answerButtons(), "noel offered an answer in Authorize").toHaveCount(0);
-      await shot(noelBrowserPage, "05-noel-detail-authorize-after-proposal");
-      expect((await customerApi("noel").get(change.id)).body.customerCanAnswer).toBe(false);
-      // Visible does not mean answerable: in Authorize an answer and a second proposal are refused in words, and move nothing.
-      for (const body of [{ isCustomerApproved: true }, { plannedStartOn: window.startUtc.replace("T", " ").replace("Z", ""), plannedEndOn: window.endUtc.replace("T", " ").replace("Z", "") }]) {
-        const refused = await customerApi("mira").patch(change.id, body);
-        expect(refused.status, `an answer in Authorize: ${JSON.stringify(refused.body)}`).toBe(409);
-      }
-      expect(await storedState(change.id)).toBe("AUTHORIZE");
+      await expect(noelPage.currentStage()).toHaveText(UI.stages.customerApproval);
+      await expect(noelPage.proposalWaitingNote()).toContainText(UI.notes.waitingOther);
+      await expect(noelPage.button(UI.buttons.approve), "noel offered Approve while the proposal waits").toBeVisible();
+      await shot(noelBrowserPage, "05-noel-detail-customer-approval-after-proposal");
+      expect((await customerApi("noel").get(change.id)).body.customerCanAnswer).toBe(true);
+      // The same time proposed again is refused in words (it already waits), and moves nothing.
+      const refused = await customerApi("mira").patch(change.id, { plannedStartOn: proposal.startUtc });
+      expect(refused.status, `a second proposal of the same time: ${JSON.stringify(refused.body)}`).toBe(400);
+      expect(await storedState(change.id)).toBe("CUSTOMER_APPROVAL");
 
-      // ---- CAB approves the new time (bob this time): Customer Approval again, a FRESH stage for both.
-      await staffDecides("bob", change.id);
+      // ---- WSO2 (bob) answers with a window of its own: still Customer Approval, a FRESH stage asked of both. Still visible to both.
+      const wso2 = futureWindow("UTC", { daysAhead: 26, startHour: 9, hours: 3 });
+      const countered = await staffCountersProposal("bob", change.id, wso2);
+      expect(countered.status, JSON.stringify(countered.body)).toBe(200);
       expect(await storedState(change.id)).toBe("CUSTOMER_APPROVAL");
       expect((await approverRows(change.id)).filter((r) => r.stage === "Customer Approval").map((r) => `${r.email}|${r.state}`)).toEqual([
         `${LOCAL_PERSONAS.mira.email}|CANCELLED`,
@@ -349,6 +363,7 @@ test.describe("Local stack — who sees a change request, over its whole life", 
       ]);
       await expectSeenBy(change, lumen, [...both], "Customer Approval", bases, "Customer Approval again");
       await noelPage.open(lumen, change.id, change.number);
+      await expect(noelPage.proposalNotAcceptedNote(), "noel is told the proposal was not accepted").toBeVisible();
       await expect(noelPage.button(UI.buttons.approve), "noel asked again").toBeVisible();
 
       // ---- mira approves in the UI: Scheduled, and both still see it.
@@ -451,7 +466,7 @@ test.describe("Local stack — who sees a change request, over its whole life", 
     expect(await customerApi("dave").listedNumbers(FIXTURES.projectId)).not.toContain(noProject.number);
   });
 
-  test("a Standard change with Customer Approval ticked goes straight to Customer Approval at Request Approval, where both contacts see it (and a proposal keeps it there); an Emergency one is invisible through its ECAB approval", async () => {
+  test("a Standard change with Customer Approval ticked goes straight to Customer Approval at Request Approval, where both contacts see it (and a proposal keeps it there, as it does every change); an Emergency change never asks the customer: a ticked box is refused at create, and one raised without is invisible through its CAB approval", async () => {
     const lumen = await lumenProjectId();
     const bases = { mira: (await customerCounts(LOCAL_PERSONAS.mira.email, lumen))!, noel: (await customerCounts(LOCAL_PERSONAS.noel.email, lumen))! };
 
@@ -460,28 +475,44 @@ test.describe("Local stack — who sees a change request, over its whole life", 
     expect((await requestApproval(standard.id)).status).toBe(200);
     expect(await storedState(standard.id), "a Standard change has no internal approval").toBe("CUSTOMER_APPROVAL");
     await expectSeenBy(standard, lumen, ["mira", "noel"], "Customer Approval", bases, "Standard, Customer Approval");
-    // mira proposes a new time: a Standard change stays in Customer Approval and both are asked again
+    // mira proposes a new start: like every change, a Standard one stays in Customer Approval and nobody is asked again
+    // (a proposal answers nothing, and WSO2 answers it)
     const window = futureWindow("UTC", { daysAhead: 7, startHour: 11, hours: 2 });
-    const proposed = await customerApi("mira").patch(standard.id, { plannedStartOn: window.startUtc, plannedEndOn: window.endUtc });
+    await planWindow(standard.id, window);
+    const rowsBefore = await approverRows(standard.id);
+    const proposed = await customerApi("mira").patch(standard.id, { plannedStartOn: futureWindow("UTC", { daysAhead: 9, startHour: 11, hours: 2 }).startUtc });
     expect(proposed.status, JSON.stringify(proposed.body)).toBe(200);
     expect(await storedState(standard.id)).toBe("CUSTOMER_APPROVAL");
+    expect(await approverRows(standard.id), "no request was touched").toEqual(rowsBefore);
     await expectSeenBy(standard, lumen, ["mira", "noel"], "Customer Approval", bases, "Standard, after a proposal");
     expect((await customerApi("noel").patch(standard.id, { isCustomerApproved: true })).status).toBe(200);
     expect(await storedState(standard.id)).toBe("SCHEDULED");
     await expectSeenBy(standard, lumen, ["mira", "noel"], "Scheduled", bases, "Standard, Scheduled");
 
-    const emergency = await raiseChange({ title: "Lumen, Emergency with approval", projectId: lumen, approval: true, review: false, type: "emergency" });
-    expect((await requestApproval(emergency.id)).status).toBe(200);
-    expect(await storedState(emergency.id), "an Emergency change goes straight to its ECAB").toBe("AUTHORIZE");
+    // An Emergency change acts without the customer's consent: neither box can be ticked on it (the backend refuses the create),
+    // so nobody is ever designated and it is invisible to the project's contacts in every state.
+    const refused = await staffApi("jane").create({
+      subject: `${RAISED_PREFIX}Lumen, Emergency with approval`,
+      type: "emergency",
+      groupId: EXAMPLE_CORP_ABT_GROUP_ID,
+      projectId: lumen,
+      customerApprovalRequired: true,
+      customerReviewRequired: false,
+    });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(JSON.stringify(refused.body)).toContain("Emergency changes proceed without customer consent");
     // (bases already hold the Standard one: its two states are what the counts now carry)
     const basesWithStandard = {
       mira: countsWith(bases.mira, "Scheduled"),
       noel: countsWith(bases.noel, "Scheduled"),
     };
-    await expectSeenBy(emergency, lumen, [], null, basesWithStandard, "Emergency, Authorize (ECAB asked)");
+    const emergency = await raiseChange({ title: "Lumen, Emergency", projectId: lumen, approval: false, review: false, type: "emergency" });
+    expect((await requestApproval(emergency.id)).status).toBe(200);
+    expect(await storedState(emergency.id), "an Emergency change goes straight to the CAB (there is no ECAB)").toBe("AUTHORIZE");
+    await expectSeenBy(emergency, lumen, [], null, basesWithStandard, "Emergency, Authorize (the CAB asked)");
     await staffDecides("bob", emergency.id);
-    expect(await storedState(emergency.id)).toBe("CUSTOMER_APPROVAL");
-    await expectSeenBy(emergency, lumen, ["mira", "noel"], "Customer Approval", basesWithStandard, "Emergency, Customer Approval");
+    expect(await storedState(emergency.id), "the CAB's approval schedules it: the customer is never asked").toBe("SCHEDULED");
+    await expectSeenBy(emergency, lumen, [], null, basesWithStandard, "Emergency, Scheduled: nobody was ever asked");
   });
 
   test("only the customer's REVIEW ticked: invisible through Scheduled, Implement and Review (the box alone shows nothing), visible to both contacts from Customer Review on, and kept after Closed", async () => {

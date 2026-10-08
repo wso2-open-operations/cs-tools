@@ -2193,3 +2193,21 @@
 .csm-ts .pk-remove .pkrm-b.back:hover:not(:disabled) {
   background: var(--accent-soft);
 }
+
+/* The weekday under each date ("7" over "Wed"), so a reader need not count
+   from the weekend shading. A split (SRE/SME) day keeps its date row at the
+   height the zone row is pinned beneath, so there it sits beside the date. */
+.csm-ts .tw.roster thead th.day .w {
+  margin-top: 1px;
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--muted);
+}
+.csm-ts .tw.roster.split thead tr:first-child th.day .w {
+  display: inline;
+  margin: 0 0 0 4px;
+}
+.csm-ts .tw.roster.split thead tr:first-child th.day:not(.today) .d {
+  display: inline;
+}

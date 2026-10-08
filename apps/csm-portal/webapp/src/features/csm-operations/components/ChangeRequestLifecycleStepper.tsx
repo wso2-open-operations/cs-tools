@@ -255,7 +255,9 @@ function labelColorSx(
  * Rollback / Canceled — the two exits off the path, which most changes never
  * take — are plotted in the customer portal's place for them but read as "not
  * taken" (faint, dashed) until the change actually ends in one, when that stage
- * turns error-coloured with its icon. When the customer's rejection is what
+ * turns error-coloured with its icon. An Emergency change never takes Assess (it
+ * goes from New straight to Authorize, for the CAB alone), so that stage reads
+ * "not taken" too. When the customer's rejection is what
  * ended the change (Customer Approval -> Canceled, Customer Review -> Rollback)
  * the rejected stage shows a cross in the error colour, and the stages after it
  * on a canceled change read "not taken": the record proves they were never reached.
@@ -276,6 +278,7 @@ export default function ChangeRequestLifecycleStepper({
   state,
   customerApprovalRequired,
   customerReviewRequired,
+  type,
   approvals,
   customerApproved,
   hasCustomerContacts,
@@ -283,6 +286,8 @@ export default function ChangeRequestLifecycleStepper({
   state?: string | null;
   customerApprovalRequired?: boolean;
   customerReviewRequired?: boolean;
+  /** The change's type: an Emergency change has no Assess step, so that stage reads "not taken". */
+  type?: string | null;
   /** `GET /change-requests/{id}/approvals`, when loaded: evidence for a rolled-back or canceled change. */
   approvals?: readonly Pick<BeChangeRequestApproval, "stage" | "status">[];
   /** The change's `hasCustomerApproved`: more evidence for a canceled change. */
@@ -294,6 +299,7 @@ export default function ChangeRequestLifecycleStepper({
     state,
     customerApprovalRequired,
     customerReviewRequired,
+    type,
     approvals,
     customerApproved,
     hasCustomerContacts,

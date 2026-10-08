@@ -135,6 +135,51 @@ test.describe("change request creation — Customer Approval / Customer Review c
   }
 });
 
+test.describe("change request creation — an Emergency change proceeds without customer approval or review (mocked backend)", () => {
+  test("choosing Emergency disables and unticks both boxes with one line saying why; choosing another type leaves them off, tickable again", async ({ page }) => {
+    await installFakeChangeRequestApi(page, "emergency", FAKE_CREATOR);
+    const cr = new ChangeRequestCreatePage(page);
+    await cr.goto();
+    await expect(cr.emergencyCustomerStepsNote()).toHaveCount(0);
+
+    // Ticked on another type first: switching to Emergency clears them.
+    await cr.selectType("Normal");
+    await cr.customerApprovalCheckbox().check();
+    await cr.customerReviewCheckbox().check();
+    await cr.selectType("Emergency");
+    for (const box of [cr.customerApprovalCheckbox(), cr.customerReviewCheckbox()]) {
+      await expect(box).toBeDisabled();
+      await expect(box).not.toBeChecked();
+    }
+    await expect(cr.emergencyCustomerStepsNote()).toHaveCount(1);
+    await expect(cr.emergencyCustomerStepsNote()).toBeVisible();
+
+    // Switching away leaves them off, for the user to tick again.
+    await cr.selectType("Standard");
+    await expect(cr.emergencyCustomerStepsNote()).toHaveCount(0);
+    for (const box of [cr.customerApprovalCheckbox(), cr.customerReviewCheckbox()]) {
+      await expect(box).toBeEnabled();
+      await expect(box).not.toBeChecked();
+    }
+    await cr.customerApprovalCheckbox().check();
+    await expect(cr.customerApprovalCheckbox()).toBeChecked();
+  });
+
+  test("the create carries type emergency with both flags false, whatever was ticked before the type was chosen", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "emergency", FAKE_CREATOR);
+    const cr = new ChangeRequestCreatePage(page);
+    await cr.goto();
+    await cr.selectType("Normal");
+    await cr.customerApprovalCheckbox().check();
+    await cr.customerReviewCheckbox().check();
+    await cr.fillSubjectAndSubmit(e2eChangeRequestSubject("emergency without customer steps"), "Emergency");
+
+    const body = api.requestBodies().find((r) => r.request === "POST /change-requests")?.body ?? {};
+    expect(body).toMatchObject({ type: "emergency", customerApprovalRequired: false, customerReviewRequired: false });
+    expect(api.flags()).toEqual({ customerApprovalRequired: false, customerReviewRequired: false });
+  });
+});
+
 test.describe("change request creation — happy path", () => {
   test("creates a real change request and lands on its detail page", async ({ page }) => {
     // Real network round trip to create, then a navigation and a second

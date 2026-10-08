@@ -16,8 +16,12 @@
 
 /**
  * Pure helpers for the customer's "Propose New Time" dialog: reading the change
- * request's current window, keeping its duration when the start moves, checking
- * the proposed window, and building the PATCH body.
+ * request's current window, working out the end a proposed start implies,
+ * checking the proposed start, and building the PATCH body.
+ *
+ * A proposal is a new START. The planned length stays (the record of a customer's
+ * proposed time holds one instant, and WSO2 answers it by accepting
+ * it or suggesting another time), so the end is derived, never typed.
  *
  * Every `datetime-local` value here is a civil time in the viewer's IANA time
  * zone; every API value is UTC (`YYYY-MM-DD HH:MM:SS`).
@@ -149,13 +153,14 @@ export function getChangeRequestWindow(
 }
 
 /**
- * The end that keeps `durationMs` after a new start.
+ * The end that keeps `durationMs` after a new start, as the instant the server
+ * derives (start + the planned length on the timeline, not on the wall clock).
  *
  * @param startLocal - The new start (`datetime-local`).
  * @param durationMs - Duration to keep; null when the current window has none.
  * @param timeZone - The viewer's zone.
  * @returns The end as `datetime-local`, or "" when it cannot be worked out
- *   (no duration, empty or non-existent start), so the caller keeps what it has.
+ *   (no duration, empty or non-existent start).
  */
 export function shiftEndKeepingDuration(
   startLocal: string,
@@ -175,125 +180,134 @@ export const PROPOSED_WINDOW_MESSAGES = {
   startRequired: "Enter the proposed start date and time.",
   startInvalid: "Enter a valid start date and time.",
   startPast: "The proposed start must be in the future.",
-  endRequired: "Enter the proposed end date and time.",
-  endInvalid: "Enter a valid end date and time.",
-  endNotAfterStart: "The proposed end must be after the proposed start.",
   unchanged:
-    "This is the same as the current schedule. Change the start or the end to propose a different time.",
+    "This is the same as the current schedule. Choose a different start.",
+  alreadyProposed:
+    "That time is already proposed and is waiting for WSO2's response. Choose a different start.",
+  noWindow:
+    "This change request has no planned time yet, so a new time cannot be proposed for it.",
 } as const;
 
-export type ProposedWindowInput = {
+export type ProposedStartInput = {
   /** Proposed start, `datetime-local` in `timeZone`. */
   start: string;
-  /** Proposed end, `datetime-local` in `timeZone`. */
-  end: string;
-  /** Current start in the same form; "" when the change request has none. */
+  /** Current planned start in the same form; "" when the change request has none. */
   currentStart: string;
-  /** Current end in the same form; "" when the change request has none. */
-  currentEnd: string;
+  /** The standing proposal's start in the same form, when one waits for WSO2. */
+  standingStart?: string;
+  /** The planned length to keep; null when the change request has no window. */
+  durationMs: number | null;
   timeZone: string;
   /** Clock override for tests. */
   nowMs?: number;
 };
 
-export type ProposedWindowErrors = {
+export type ProposedStartErrors = {
   start?: string;
-  end?: string;
-  /** About the window as a whole (the same as today's), not one field. */
+  /** About the proposal as a whole (the same as today's, no window to move), not the field. */
   window?: string;
 };
 
 /**
- * Checks a proposed window before it is sent: both ends present and real, the
- * start in the future, the end after the start, and something actually
- * different from the current window (the backend refuses an unchanged one).
+ * Checks a proposed start before it is sent: the change request has a window to
+ * move, the start is real and in the future, and it is not the planned start
+ * already or the time that already waits for WSO2 (the backend refuses both).
  *
- * @param input - The two fields, the current window and the viewer's zone.
- * @returns Errors by field; empty when the proposal can be sent.
+ * @param input - The field, the current window, the standing proposal and the viewer's zone.
+ * @returns Errors; empty when the proposal can be sent.
  */
-export function validateProposedWindow(
-  input: ProposedWindowInput,
-): ProposedWindowErrors {
-  const { start, end, currentStart, currentEnd, timeZone } = input;
+export function validateProposedStart(
+  input: ProposedStartInput,
+): ProposedStartErrors {
+  const { start, currentStart, standingStart, durationMs, timeZone } = input;
   const nowMs = input.nowMs ?? Date.now();
-  const errors: ProposedWindowErrors = {};
+  const errors: ProposedStartErrors = {};
+
+  if (durationMs == null) {
+    errors.window = PROPOSED_WINDOW_MESSAGES.noWindow;
+    return errors;
+  }
 
   const startMs = datetimeLocalToUtcMs(start, timeZone);
-  const endMs = datetimeLocalToUtcMs(end, timeZone);
-
   if (!start.trim()) errors.start = PROPOSED_WINDOW_MESSAGES.startRequired;
   else if (startMs == null) errors.start = PROPOSED_WINDOW_MESSAGES.startInvalid;
   else if (startMs <= nowMs) errors.start = PROPOSED_WINDOW_MESSAGES.startPast;
-
-  if (!end.trim()) errors.end = PROPOSED_WINDOW_MESSAGES.endRequired;
-  else if (endMs == null) errors.end = PROPOSED_WINDOW_MESSAGES.endInvalid;
-  else if (startMs != null && endMs <= startMs) {
-    errors.end = PROPOSED_WINDOW_MESSAGES.endNotAfterStart;
-  }
-
-  if (
-    !errors.start &&
-    !errors.end &&
-    start === currentStart &&
-    end === currentEnd
-  ) {
+  else if (start === currentStart) {
     errors.window = PROPOSED_WINDOW_MESSAGES.unchanged;
+  } else if (standingStart && start === standingStart) {
+    errors.window = PROPOSED_WINDOW_MESSAGES.alreadyProposed;
   }
 
   return errors;
 }
 
-/** True when {@link validateProposedWindow} found nothing wrong. */
-export function hasProposedWindowErrors(errors: ProposedWindowErrors): boolean {
-  return Boolean(errors.start || errors.end || errors.window);
+/** True when {@link validateProposedStart} found nothing wrong. */
+export function hasProposedStartErrors(errors: ProposedStartErrors): boolean {
+  return Boolean(errors.start || errors.window);
 }
 
 /**
- * The PATCH body for a proposal: both ends, in UTC.
+ * The PATCH body for a proposal: the proposed start and the end that keeps the
+ * planned length, both in UTC. The service accepts the start alone or the start
+ * with exactly that end; the end is sent so the previous system's data source, which
+ * takes a whole window, keeps working.
  *
  * @param start - Proposed start (`datetime-local`).
- * @param end - Proposed end (`datetime-local`).
- * @param timeZone - The viewer's zone, which both values are in.
- * @returns The body, or null when either value is not a real time in that zone.
+ * @param durationMs - The planned length to keep.
+ * @param timeZone - The viewer's zone, which `start` is in.
+ * @returns The body, or null when the start is not a real time in that zone or
+ *   there is no length to keep.
  */
 export function buildProposedWindowPayload(
   start: string,
-  end: string,
+  durationMs: number | null,
   timeZone: string,
 ): { plannedStartOn: string; plannedEndOn: string } | null {
+  if (durationMs == null || durationMs <= 0) return null;
   const startMs = datetimeLocalToUtcMs(start, timeZone);
-  const endMs = datetimeLocalToUtcMs(end, timeZone);
-  if (startMs == null || endMs == null) return null;
+  if (startMs == null) return null;
   return {
     plannedStartOn: formatUtcMsAsApiDatetime(startMs),
-    plannedEndOn: formatUtcMsAsApiDatetime(endMs),
+    plannedEndOn: formatUtcMsAsApiDatetime(startMs + durationMs),
   };
 }
 
 /**
- * What a proposal does depends on the change type: a Standard change stays in
- * Customer Approval and the customer is asked again straight away; a Normal or
- * Emergency change goes back to WSO2's internal approval first. The words
- * promised to the customer follow that.
+ * A planned length in words: "2 hours", "1 hour 30 minutes", "45 minutes".
  *
- * @param changeRequest - The change request being re-scheduled.
+ * @param durationMs - A positive length.
+ * @returns The text, rounded to the minute ("less than a minute" below that).
+ */
+export function formatPlannedLength(durationMs: number): string {
+  const totalMinutes = Math.round(durationMs / MINUTE_MS);
+  if (totalMinutes < 1) return "less than a minute";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+  if (minutes > 0) parts.push(`${minutes} minute${minutes === 1 ? "" : "s"}`);
+  return parts.join(" ");
+}
+
+/**
+ * What a proposal does, in the customer's words. The same for every change type:
+ * the change request stays in Customer Approval, and WSO2 answers the proposal
+ * by accepting the time or suggesting another one (no further internal approval
+ * is involved, which is why none is promised).
+ *
+ * @param durationMs - The planned length that stays, when the change has one.
  * @returns The dialog notice and the success message.
  */
 export function getProposalCopy(
-  changeRequest: Pick<ChangeRequestDetails, "type">,
+  durationMs: number | null,
 ): { notice: string; success: string } {
-  const isStandard = changeRequest.type?.label?.trim().toLowerCase() === "standard";
-  return isStandard
-    ? {
-        notice:
-          "You are proposing a new time. It replaces the current schedule, and you will then be asked to approve it.",
-        success:
-          "New time proposed. Review the updated schedule and approve it when you are ready.",
-      }
-    : {
-        notice:
-          "You are proposing a new time, not approving one. WSO2 will review it internally first, and you will then be asked to approve the new time.",
-        success:
-          "New time proposed. We'll ask for your approval again once it's confirmed internally.",
-      };
+  const lengthText =
+    durationMs != null
+      ? `The planned length of ${formatPlannedLength(durationMs)} stays the same. `
+      : "";
+  return {
+    notice: `You are proposing a new start time, not approving one. WSO2 will either accept it or suggest a different time. ${lengthText}To ask for a different length, contact WSO2.`,
+    success:
+      "New time proposed. WSO2 will accept it or suggest a different time, and the answer will appear on this page.",
+  };
 }

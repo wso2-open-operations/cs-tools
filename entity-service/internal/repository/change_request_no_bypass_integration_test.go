@@ -174,6 +174,16 @@ func customerApprovalScenarios() []bypassScenario {
 			f.driveToCustomerApproval(id)
 			return id
 		}, true},
+		// Accept proposed time is a door of its own (confirmCustomerUpdatedDate, only while
+		// the customer's own proposal waits): a staff-named {state: scheduled} stays refused
+		// even then, with every wording it had.
+		{"a customer's proposed time waits for WSO2", func(f *crFlow) string {
+			id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
+			f.setPlanned(id, rsStart1, rsEnd1)
+			f.driveToCustomerApproval(id)
+			f.mustPropose(id, crScopeUserA1, rsStart2)
+			return id
+		}, true},
 		{"the stage was already decided", func(f *crFlow) string {
 			id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
 			f.driveToCustomerApproval(id)
@@ -427,30 +437,30 @@ func TestChangeRequestNoBypassIntegration_TheCustomersOwnWaysStillWork(t *testin
 			typ := typ
 			t.Run(string(typ), func(t *testing.T) {
 				f := newCustomerGroupFlow(t)
-				id := f.createWithProject(typ, sp(crScopeProjectA), true, false)
-				f.setPlanned(id, rsStart1, rsEnd1)
-				if typ == domain.ChangeRequestTypeStandard {
-					f.requestApproval(id)
-					f.expect(id, "after Request Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				} else {
-					f.driveToCustomerApproval(id)
-				}
+				id := f.reachCustomerApproval(typ)
 				if err := f.reschedule(id, sp(rsStart2), sp(rsEnd2)); err != nil {
 					t.Fatalf("Re-schedule: %v", err)
 				}
 				f.wantPlanned(id, "after Re-schedule", rsStart2, rsEnd2)
-				if typ == domain.ChangeRequestTypeStandard {
-					f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
-					if n := f.liveStageRows(id, stageCustApproval); n != 2 {
-						t.Fatalf("customer request has %d live rows after the Re-schedule, want 2 (asked again)", n)
-					}
-				} else {
-					f.expect(id, "after Re-schedule", "AUTHORIZE", "canceled")
+				f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
+				if n := f.liveStageRows(id, stageCustApproval); n != 2 {
+					t.Fatalf("customer request has %d live rows after the Re-schedule, want 2 (asked again)", n)
 				}
 				if approved, _ := f.customerOutcome(id); approved {
 					t.Fatal("a Re-schedule stamped the customer's approval")
 				}
 			})
+		}
+	})
+	t.Run("Accept proposed time applies the customer's own proposal and records no approval", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
+		f.mustPropose(id, crScopeUserA2, rsStart2)
+		f.mustAccept(id)
+		f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
+		f.wantPlanned(id, "after Accept", rsStart2, rsEnd2)
+		if approved, _ := f.customerOutcome(id); approved {
+			t.Fatal("Accept stamped the customer's approval: no staff action records it")
 		}
 	})
 	t.Run("Roll back from Review and from Customer Review (nobody asked) is unchanged", func(t *testing.T) {
@@ -585,11 +595,19 @@ func TestChangeRequestNoBypassIntegration_LegalNextStatesExactTable(t *testing.T
 	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeEmergency} {
 		for _, approval := range []bool{false, true} {
 			for _, review := range []bool{false, true} {
-				id := f.createWithProject(typ, sp(crScopeProjectC), approval, review)
+				// An Emergency change cannot be CREATED with a box (it takes no customer step), but a
+				// row can carry one -- from before the rule, or migrated -- so the boxes
+				// are written to it directly. The flow reads them as off: its table is the one of a
+				// change with no review box, whatever the stored value says.
+				emergency := typ == domain.ChangeRequestTypeEmergency
+				id := f.createWithProject(typ, sp(crScopeProjectC), approval && !emergency, review && !emergency)
+				if emergency {
+					f.execSQL(`UPDATE change_request SET customer_approval_required = $2, customer_review_required = $3 WHERE id = $1`, id, approval, review)
+				}
 				for _, st := range states {
 					f.setState(id, st)
 					got := f.legal(id)
-					w := want(st, review)
+					w := want(st, review && !emergency)
 					if strings.Join(got, ",") != strings.Join(w, ",") || (got == nil) != (w == nil) {
 						t.Errorf("%s approval=%v review=%v in %s: legalNextStates = %v, want %v", typ, approval, review, st, got, w)
 					}
@@ -669,6 +687,80 @@ func TestChangeRequestNoBypassIntegration_OtherDoorsAreClosedToo(t *testing.T) {
 		f.setState(id, "SCHEDULED")
 		if changed, err := gh.SetState(f.sys, id, "IMPLEMENT"); err != nil || !changed {
 			t.Fatalf("SetState(SCHEDULED -> IMPLEMENT) = %v, %v, want true, nil", changed, err)
+		}
+	})
+	// SetState runs the transition graph a staff PATCH obeys, before any caller is wired: a final change
+	// has no exit, no step is jumped, no approval gate is skipped. Every state by every target, with the
+	// review box ticked and not: the moves it makes are exactly the plain moves of the graph (implement,
+	// closed, canceled, rollback) that legalNextStates offers from the state, nothing else changes, and a
+	// refused write leaves the change request exactly as it was.
+	t.Run("the GitHub sync obeys the transition graph", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		gh := repository.NewGithubMutationRepository(f.scoped)
+		plain := map[string]bool{"IMPLEMENT": true, "CLOSED": true, "CANCELED": true, "ROLLBACK": true}
+		for _, review := range []bool{false, true} {
+			for _, state := range append([]string{""}, allChangeRequestStates...) {
+				if state == "CUSTOMER_APPROVAL" || state == "CUSTOMER_REVIEW" {
+					continue // the customer states are the row above
+				}
+				label := state
+				if label == "" {
+					label = "NULL"
+				}
+				want := map[string]bool{}
+				// (NULL counts as New, which offers no plain move.)
+				for _, next := range wantStaffMoves(state, review) {
+					if plain[strings.ToUpper(next)] {
+						want[strings.ToUpper(next)] = true
+					}
+				}
+				for _, target := range allChangeRequestStates {
+					if target == state || (state == "" && target == "NEW") {
+						continue
+					}
+					id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, review)
+					f.setState(id, state)
+					before := f.bypassSnapshot(id)
+					changed, err := gh.SetState(f.sys, id, target)
+					what := fmt.Sprintf("review=%v SetState(%s -> %s)", review, label, target)
+					if want[target] {
+						if err != nil || !changed {
+							t.Fatalf("%s = %v, %v, want an accepted move", what, changed, err)
+						}
+						if got := f.state(id); got != target {
+							t.Fatalf("%s: the change is now %s", what, got)
+						}
+						continue
+					}
+					var ve *apierror.ValidationError
+					if !errors.As(err, &ve) || changed {
+						t.Fatalf("%s = %v, %v, want a refusal (a 400) and no change", what, changed, err)
+					}
+					if after := f.bypassSnapshot(id); after != before {
+						t.Fatalf("%s: a refused write changed the change request:\n  before: %s\n  after:  %s", what, before, after)
+					}
+				}
+			}
+		}
+		// A value that is no state is refused before it reaches the enum cast.
+		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, false)
+		var ve *apierror.ValidationError
+		if _, err := gh.SetState(f.sys, id, "closed; DROP TABLE change_request"); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "is not a change request state") {
+			t.Fatalf("SetState with a hostile state = %v, want the 400 that it is no state", err)
+		}
+		// The two refusals the issue named: no exit from a final state, no skipped approval gate.
+		f.setState(id, "CLOSED")
+		if _, err := gh.SetState(f.sys, id, "IMPLEMENT"); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "a change request that is closed cannot be moved") {
+			t.Fatalf("SetState(CLOSED -> IMPLEMENT) = %v, want the final-state refusal", err)
+		}
+		f.setState(id, "NEW")
+		if _, err := gh.SetState(f.sys, id, "ASSESS"); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "approval flow") {
+			t.Fatalf("SetState(NEW -> ASSESS) = %v, want the approval-flow refusal", err)
+		}
+		f.setState(id, "REVIEW")
+		f.execSQL(`UPDATE change_request SET customer_review_required = true WHERE id = $1`, id)
+		if _, err := gh.SetState(f.sys, id, "CLOSED"); !errors.As(err, &ve) {
+			t.Fatalf("SetState(REVIEW -> CLOSED) with the customer's review required = %v, want a refusal", err)
 		}
 	})
 }

@@ -830,6 +830,87 @@ func TestChangeRequestService_PatchChangeRequest_CustomerGateFlagsStayOutOfTheMi
 	})
 }
 
+// TestChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefusedBeforeAnyWrite:
+// an Emergency change takes no customer step, so a create that ticks either box is a 400 --
+// on the plain path before the repository is called, and on the dual-write path BEFORE
+// the previous system is called (a refusal after it accepted the create would strand a
+// record there with no PostgreSQL row). The same create with the boxes off, and a Normal
+// change with them on, go through.
+func TestChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefusedBeforeAnyWrite(t *testing.T) {
+	yes, no := true, false
+	emergency := domain.ChangeRequestTypeEmergency
+	build := func(approval, review *bool) domain.CreateChangeRequestRequest {
+		req := validCreateChangeRequestRequest()
+		req.Type = &emergency
+		req.CustomerApprovalRequired, req.CustomerReviewRequired = approval, review
+		return req
+	}
+	ok := func() domain.CreateChangeRequestResponse {
+		resp := domain.CreateChangeRequestResponse{Message: "ok"}
+		resp.ChangeRequest.ID = testUUID
+		return resp
+	}
+	const reason = "Emergency changes proceed without customer consent, so customer approval and customer review cannot be required"
+	for name, boxes := range map[string][2]*bool{"approval": {&yes, nil}, "review": {nil, &yes}, "both": {&yes, &yes}} {
+		boxes := boxes
+		t.Run("plain/"+name, func(t *testing.T) {
+			repo := &stubChangeRequestRepo{
+				createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest, string) (domain.CreateChangeRequestResponse, error) {
+					t.Fatal("the repository must not be called for an Emergency change with a customer box")
+					return domain.CreateChangeRequestResponse{}, nil
+				},
+			}
+			svc := NewChangeRequestService(repo, stubUserRepo{})
+			ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+			_, err := svc.CreateChangeRequest(ctx, build(boxes[0], boxes[1]))
+			var ve *apierror.ValidationError
+			if !asValidationError(err, &ve) || !strings.HasPrefix(ve.Msg, reason) {
+				t.Fatalf("err = %v (%T), want a ValidationError that gives the reason", err, err)
+			}
+		})
+		t.Run("previous-system-first/"+name, func(t *testing.T) {
+			mirror := &stubMirrorChangeRequestService{
+				createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+					t.Fatal("the previous system must never be called for an Emergency change with a customer box")
+					return domain.CreateChangeRequestResponse{}, nil
+				},
+			}
+			repo := &stubChangeRequestRepo{
+				createChangeRequestFromServiceNow: func(context.Context, domain.CreateChangeRequestRequest, string, string, string) (domain.CreateChangeRequestResponse, error) {
+					t.Fatal("the repository must not be called for an Emergency change with a customer box")
+					return domain.CreateChangeRequestResponse{}, nil
+				},
+			}
+			svc := NewChangeRequestServiceWithSNMirror(repo, stubUserRepo{}, mirror)
+			_, err := svc.CreateChangeRequest(context.Background(), build(boxes[0], boxes[1]))
+			var ve *apierror.ValidationError
+			if !asValidationError(err, &ve) || !strings.HasPrefix(ve.Msg, reason) {
+				t.Fatalf("err = %v (%T), want a ValidationError that gives the reason", err, err)
+			}
+		})
+	}
+	t.Run("an Emergency change with the boxes off, and a Normal one with them on, are created", func(t *testing.T) {
+		repo := &stubChangeRequestRepo{
+			createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest, string) (domain.CreateChangeRequestResponse, error) {
+				return ok(), nil
+			},
+		}
+		svc := NewChangeRequestService(repo, stubUserRepo{})
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+		if _, err := svc.CreateChangeRequest(ctx, build(&no, &no)); err != nil {
+			t.Fatalf("an Emergency change with both boxes off: %v", err)
+		}
+		if _, err := svc.CreateChangeRequest(ctx, build(nil, nil)); err != nil {
+			t.Fatalf("an Emergency change with no box: %v", err)
+		}
+		normal := validCreateChangeRequestRequest()
+		normal.CustomerApprovalRequired, normal.CustomerReviewRequired = &yes, &yes
+		if _, err := svc.CreateChangeRequest(ctx, normal); err != nil {
+			t.Fatalf("a Normal change with both boxes: %v", err)
+		}
+	})
+}
+
 // TestChangeRequestService_CreateChangeRequest_PassesCustomerGateFlags: both
 // Postgres create paths (plain and ServiceNow-first) hand the checkboxes to the
 // repository untouched.

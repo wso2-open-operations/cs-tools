@@ -62,6 +62,11 @@ export class ChangeRequestCreatePage {
     return this.page.getByRole("checkbox", { name: "Customer Review" });
   }
 
+  /** The one line saying why an Emergency change's two customer boxes are disabled and unticked. */
+  emergencyCustomerStepsNote(): Locator {
+    return this.page.getByText("Emergency changes proceed without customer approval or review.");
+  }
+
   /** MUI's required-field asterisk (a thin-space + `*` folded into the
    * computed accessible name) makes an exact "Subject" match find nothing —
    * this anchored, marker-tolerant regex matches either way. */

@@ -150,6 +150,50 @@ describe("SetFixEtaDialog — single combined save", () => {
     });
   });
 
+  // CodeRabbit catch: sharing posts through the same comment endpoint as the
+  // case's own public-reply composer, gated by the identical
+  // work_in_progress + ongoing + assignee rule -- a share attempt that
+  // doesn't satisfy it is guaranteed to fail after the ETA has already
+  // saved, so it must be caught here rather than only in the resulting error.
+  describe("gated by publicCommentDisabledReason", () => {
+    const GATE_REASON =
+      "Replies are locked until the case is resumed and assigned to you.";
+
+    it("disables the share toggle and shows the reason when sharing is unavailable", () => {
+      render(
+        <SetFixEtaDialog
+          publicCommentDisabledReason={GATE_REASON}
+          currentBestCaseFixEta="2099-06-16"
+          isSaving={false}
+          onClose={() => {}}
+          onSave={() => {}}
+        />,
+      );
+      expect(
+        screen.getByRole("switch", { name: /share fix eta with customer/i }),
+      ).toBeDisabled();
+      expect(screen.getByText(GATE_REASON)).toBeInTheDocument();
+      // The ETA itself is unaffected -- Save stays enabled on the seeded estimate.
+      expect(screen.getByRole("button", { name: /^save$/i })).toBeEnabled();
+    });
+
+    it("leaves the share toggle enabled and shows no reason when sharing is available", () => {
+      render(
+        <SetFixEtaDialog
+          publicCommentDisabledReason={null}
+          currentBestCaseFixEta="2099-06-16"
+          isSaving={false}
+          onClose={() => {}}
+          onSave={() => {}}
+        />,
+      );
+      expect(
+        screen.getByRole("switch", { name: /share fix eta with customer/i }),
+      ).toBeEnabled();
+      expect(screen.queryByText(GATE_REASON)).not.toBeInTheDocument();
+    });
+  });
+
   it("calls onClose on Close without calling onSave", () => {
     const onSave = vi.fn();
     const onClose = vi.fn();

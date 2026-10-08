@@ -34,14 +34,17 @@ import (
 // read.
 //
 // THE GRAPH, for a staff request (the customer's own answers are not PATCHes of
-// the state at all: answerCustomerStageViaPatch; the customer's proposed time is
-// the Re-schedule below, sent by the service itself):
+// the state at all: answerCustomerStageViaPatch; the customer's proposed time is a
+// start written to customer_updated_on that waits for WSO2, change_request_customer_proposal.go):
 //
 //	from              staff may request
 //	new               assess (Request Approval), canceled
 //	assess            canceled                      (waits for the peer approval)
 //	authorize         canceled                      (waits for the CAB approval)
 //	customer_approval authorize (Re-schedule), canceled   (waits for the customer)
+//	                  "authorize" is the wire name of the Time Change loop, NOT a destination:
+//	                  the change stays in customer_approval, the customers are asked again and
+//	                  nothing goes through CAB again.
 //	scheduled         implement, canceled
 //	implement         review, canceled
 //	review            closed | customer_review (by customer_review_required), rollback, canceled
@@ -50,7 +53,10 @@ import (
 //
 // The states a change request reaches only through an approval are not edges:
 // Assess -> Authorize (peer approval), Authorize -> Scheduled | Customer Approval
-// (CAB approval), Customer Approval -> Scheduled (the customer's approval) and
+// (CAB approval), Customer Approval -> Scheduled (the customer's approval, OR WSO2's
+// acceptance of the customer's own proposed time: "Accept proposed time" is its own
+// request, confirmCustomerUpdatedDate, only while that proposal waits -- never a staff-named
+// {state: "scheduled"}, which stays refused whatever is pending) and
 // Customer Review -> Closed | Rollback (the customer's review). A request may
 // also name the state the change is already in (a resend: no move).
 //

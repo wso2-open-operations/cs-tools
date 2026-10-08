@@ -312,3 +312,13 @@ describe("DayLadder: a stint worked on another team's rota", () => {
     expect(screen.getByText("1 not available")).toBeInTheDocument();
   });
 });
+
+describe("DayLadder: a crowded card's team pane", () => {
+  it("heads the team by name, not by its directory key", () => {
+    const people = Array.from({ length: 14 }, (_, i) => nineToFive(`Reg${i}`, REGULAR.code, "orion_abt_cre_team"));
+    const { container } = renderLadder(people);
+    const heading = container.querySelector(".teampane .tlph");
+    expect(heading).toHaveTextContent("Orion team");
+    expect(heading).not.toHaveTextContent("orion_abt_cre_team");
+  });
+});

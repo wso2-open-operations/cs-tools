@@ -154,9 +154,11 @@ func TestChangeRequestDatesIntegration_BothCreatesStoreTheParsedWindow(t *testin
 	}
 }
 
-// A customer's proposal that names only an end keeps the stored start. When that
-// start has already passed the proposed window would begin in the past, so the
-// start has to be proposed with it; with both, it goes through.
+// A customer's proposal is a START (customer_updated_on holds one instant): an end
+// alone is no proposal -- the window the change has keeps its length, so there is nothing
+// to move with it -- however far in the future that end is, and whatever has become of
+// the stored start. A start still to come is a proposal, with or without the end that
+// keeps the length.
 func TestChangeRequestDatesIntegration_AnEndOnlyProposalCannotKeepAStartThatHasPassed(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
@@ -166,19 +168,32 @@ func TestChangeRequestDatesIntegration_AnEndOnlyProposalCannotKeepAStartThatHasP
 
 	future := time.Now().UTC().AddDate(0, 6, 0).Truncate(time.Second)
 	_, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedEndOn: sp(future.Add(2 * time.Hour).Format(time.RFC3339))})
-	f.wantValidationError("an end-only proposal over a start that has passed", err,
-		"plannedStartOn is in the past: the current planned start (2025-01-01T09:00:00Z) has passed; propose a new start as well")
+	f.wantValidationError("an end-only proposal over a start that has passed", err, "a proposed implementation time needs a new start: send plannedStartOn")
 	f.expect(id, "after the refused proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	f.wantPlanned(id, "after the refused proposal", "2025-01-01T09:00:00Z", "2031-01-01T11:00:00Z")
+	f.wantConversation(id, "after the refused proposal", "", "")
 	if got := f.stageLabels(id); got != stages {
 		t.Fatalf("a refused proposal changed the stages: %s, was %s", got, stages)
 	}
-	// A start that is still to come is a plain start-only or window proposal, as before.
-	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{
+	// A start that is still to come is a start-only proposal: the planned length is kept.
+	cr, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(future.Format(time.RFC3339))})
+	if err != nil {
+		t.Fatalf("a start-only proposal: %v", err)
+	}
+	f.expect(id, "after the accepted proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	f.wantConversation(id, "after the accepted proposal", future.Format(time.RFC3339), "")
+	f.wantPlanned(id, "after the accepted proposal", "2025-01-01T09:00:00Z", "2031-01-01T11:00:00Z")
+	if p := cr.CustomerProposal; p == nil || p.Answer != "pending" || p.EndOn == nil {
+		t.Fatalf("customerProposal after the proposal = %+v, want a pending proposal with the derived end", p)
+	}
+	// The end that keeps the length may ride with the start; any other end is refused.
+	f2 := newCustomerGroupFlow(t)
+	id2 := f2.reachCustomerApproval(domain.ChangeRequestTypeNormal)
+	if _, err := f2.patchAsContact(id2, crScopeUserA1, domain.PatchChangeRequestRequest{
 		PlannedStartOn: sp(future.Format(time.RFC3339)), PlannedEndOn: sp(future.Add(2 * time.Hour).Format(time.RFC3339))}); err != nil {
 		t.Fatalf("a proposal naming both bounds: %v", err)
 	}
-	f.expect(id, "after the accepted proposal", "AUTHORIZE", "canceled")
+	f2.wantConversation(id2, "after the proposal naming both bounds", future.Format(time.RFC3339), "")
 }
 
 // ... and a start in the past is refused for a customer whichever bounds ride

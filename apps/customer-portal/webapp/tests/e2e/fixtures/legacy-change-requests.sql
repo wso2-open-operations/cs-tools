@@ -47,6 +47,9 @@
 --   CHG0039106 Implement         CHG0039111 Canceled
 --   CHG0039112 Customer Approval, a second one for the proposal scenario (a window already planned)
 --   CHG0039113 Customer Approval, a third one for the second contact's answer (erin)
+--   CHG0039114 Customer Approval, a window already planned, and the PREVIOUS SYSTEM's own customer stage: a stage with
+--              no label whose group is the change request's customer_group_id, asking dave and erin (REQUESTED) --
+--              the shape a change request the previous system put to its customers is synced in
 -- Rows on "Lumen Works Platform" (mira, noel; found by name, the id is random per database):
 --   CHG0039201 Customer Approval  (no live stage: the user's "Demo Test 1")
 --   CHG0039202 Scheduled
@@ -80,6 +83,7 @@ INSERT INTO legacy_cr VALUES
   ('CHG0039111','CANCELED',          'NORMAL',   'Legacy: Canceled',                                           'Example Corp Production', '1999-12-20 09:00:00+00', NULL, NULL, false),
   ('CHG0039112','CUSTOMER_APPROVAL', 'NORMAL',   'Legacy: Customer Approval to propose a time on',             'Example Corp Production', '1999-12-20 09:00:00+00', NULL, NULL, true),
   ('CHG0039113','CUSTOMER_APPROVAL', 'NORMAL',   'Legacy: Customer Approval for the second contact',           'Example Corp Production', '1999-12-20 09:00:00+00', NULL, NULL, false),
+  ('CHG0039114','CUSTOMER_APPROVAL', 'NORMAL',   'Legacy: Customer Approval, the previous system asked the customer group', 'Example Corp Production', '1999-12-20 09:00:00+00', NULL, NULL, true),
   ('CHG0039201','CUSTOMER_APPROVAL', 'NORMAL',   'Demo Test 1 (legacy, Customer Approval, no live stage)',     'Lumen Works Platform',    '1999-12-20 09:00:00+00', NULL, NULL, false),
   ('CHG0039202','SCHEDULED',         'NORMAL',   'Legacy: Scheduled on Lumen',                                 'Lumen Works Platform',    '1999-12-20 09:00:00+00', NULL, NULL, false),
   ('CHG0039301','AUTHORIZE',         'EMERGENCY','Legacy: Emergency in Authorize, synced stage with no label','Example Corp Production', '1999-12-20 09:00:00+00', NULL, NULL, false),
@@ -111,7 +115,7 @@ FROM legacy_cr l
 WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = md5('legacy-' || l.number)::uuid);
 
 -- The synced stages: NO checkpoint_label, no assignment group (an unsynced ServiceNow group also yields NULL).
--- CHG0039301: the single stage of an Emergency change in Authorize (the ECAB's, read from state and type).
+-- CHG0039301: the single stage of an Emergency change in Authorize (the CAB's: the previous system has no ECAB; read from state and type).
 -- CHG0039302: a stale stage of a Normal change that has moved on to Scheduled.
 INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status, checkpoint_label)
 SELECT md5('legacy-stage-' || n)::uuid, '1999-12-20 09:30:00+00', '1999-12-20 09:30:00+00', 'sn-sync', 'sn-sync',
@@ -129,5 +133,26 @@ FROM (VALUES
   ('CHG0039302', 'nobody', NULL)
 ) a(n, who, user_id)
 WHERE EXISTS (SELECT 1 FROM approval_stage s WHERE s.id = md5('legacy-stage-' || a.n)::uuid);
+
+-- CHG0039114: the previous system's own customer stage. It has NO label (the sync never wrote one) and its group is the change
+-- request's customer_group_id, which is how a stage the previous system asked of the customers is told from an internal one;
+-- the approvers are the customers it asked (dave and erin), REQUESTED. (The group is the seeded "Example Corp ABT":
+-- any group row does, what matters is that the stage's group IS the customer group of the change request.)
+UPDATE change_request SET customer_group_id = '00000000-0000-0000-0000-000000000901'
+ WHERE id = md5('legacy-CHG0039114')::uuid;
+
+INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status, checkpoint_label)
+SELECT md5('legacy-stage-CHG0039114')::uuid, '1999-12-20 09:30:00+00', '1999-12-20 09:30:00+00', 'sn-sync', 'sn-sync',
+       md5('legacy-CHG0039114')::uuid, '00000000-0000-0000-0000-000000000901', 'requested', NULL
+WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = md5('legacy-CHG0039114')::uuid);
+
+INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, stage_id, work_item_id, approver_user_id, state)
+SELECT md5('legacy-approver-CHG0039114-' || a.who)::uuid, '1999-12-20 09:30:00+00', '1999-12-20 09:30:00+00', 'sn-sync', 'sn-sync',
+       md5('legacy-stage-CHG0039114')::uuid, md5('legacy-CHG0039114')::uuid, a.user_id::uuid, 'REQUESTED'
+FROM (VALUES
+  ('dave', '00000000-0000-0000-0000-000000000021'),
+  ('erin', '00000000-0000-0000-0000-000000000022')
+) a(who, user_id)
+WHERE EXISTS (SELECT 1 FROM approval_stage s WHERE s.id = md5('legacy-stage-CHG0039114')::uuid);
 
 COMMIT;

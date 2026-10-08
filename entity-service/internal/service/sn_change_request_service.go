@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -743,21 +744,29 @@ const snUTCDateTimeLayout = "2006-01-02T15:04:05Z"
 // one, and RFC 3339 with a zone designator ("2030-03-01T09:00:00Z",
 // "...+05:30"), which the PostgreSQL data source reads as an instant. An RFC 3339
 // value is therefore converted to the zoneless UTC layout here, the same
-// conversion the dual-write mirror makes
-// (repository.PlannedTimestampForServiceNow, so both read an instant the same way
-// and in the years 2000 to 2100 only); a value already in the zoneless layout is
-// forwarded as it was sent. Anything else -- "infinity", "now", "tomorrow", a date
-// alone, a zone name, an RFC 3339 value outside those years -- is a
-// ValidationError naming the field, exactly as before, rather than an opaque
-// downstream pattern failure.
+// conversion the dual-write mirror makes (repository.StrictMirrorPlannedTimestamp,
+// which reads an instant as PlannedTimestampForServiceNow does); a value already
+// in the zoneless layout is forwarded as it was sent (one spelled a little
+// differently, "2030-03-01 9:00:00", is written back in the layout). Anything
+// else is a ValidationError naming the field, never an opaque downstream pattern
+// failure: "infinity", "now", "tomorrow", a date alone, a zone name; a year
+// outside 2000 to 2100 in either layout (the range the PostgreSQL data source
+// holds every planned window to); a zoneless value with a fractional second,
+// which Go's parser takes but ServiceNow's layout has none (an RFC 3339 value
+// with one is an instant and is converted to whole seconds).
 func snPlannedTimestamp(field, value string) (string, error) {
-	converted := repository.PlannedTimestampForServiceNow(value)
-	if _, err := time.Parse(snCreatedOnLayout, converted); err != nil {
+	converted, err := repository.StrictMirrorPlannedTimestamp(value)
+	switch {
+	case err == nil:
+		return converted, nil
+	case errors.Is(err, repository.ErrPlannedTimestampFraction), errors.Is(err, repository.ErrPlannedTimestampYear):
 		return "", &apierror.ValidationError{
-			Msg: fmt.Sprintf("%s must follow the format: YYYY-MM-DD HH:mm:ss", field),
+			Msg: fmt.Sprintf("%s must follow the format: YYYY-MM-DD HH:mm:ss (%s)", field, err.Error()),
 		}
 	}
-	return converted, nil
+	return "", &apierror.ValidationError{
+		Msg: fmt.Sprintf("%s must follow the format: YYYY-MM-DD HH:mm:ss", field),
+	}
 }
 
 // toDownstreamUTCDateTime parses a planned date-time (see snPlannedTimestamp:
@@ -808,6 +817,12 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	}
 	if _, ok := snCRCreateTypeIDMap[*req.Type]; !ok {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+	}
+	// An Emergency change takes no customer step. The two customer boxes are not part of
+	// ServiceNow's create payload (this data source would drop them), but the refusal is
+	// the same on every create path rather than a request that is accepted and ignored.
+	if err := repository.ValidateCreateChangeRequestCustomerGates(req.Type, req.CustomerApprovalRequired, req.CustomerReviewRequired); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
 	}
 	// A change request can only ever be created at New -- see
 	// snCreateChangeRequestPayload's own doc comment for why. req.State is
@@ -1071,6 +1086,12 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	}
 	if req.DeploymentIDs != nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "deploymentIds is not supported on the ServiceNow data source"}
+	}
+	// WSO2's answer to a time the customer proposed lives in PostgreSQL (customer_updated_on /
+	// customer_updated_date_confirmation): ServiceNow is the authority on this data source, and
+	// its own flow answers it there.
+	if req.ConfirmCustomerUpdatedDate != nil || req.ExpectedCustomerUpdatedOn != nil {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "confirmCustomerUpdatedDate is not supported on the ServiceNow data source: answer the customer's proposed date in ServiceNow"}
 	}
 
 	if req.Title == nil && req.Description == nil && req.ProjectID == nil && req.CaseID == nil &&
@@ -1644,7 +1665,7 @@ func mapSNChangeRequestDetailToView(cr snChangeRequestDetail) domain.ChangeReque
 // legalNextStates answer is the one the PostgreSQL data source gives
 // (repository.changeRequestForwardNextStates): "scheduled" is never offered,
 // from any state -- there is no Schedule action, a change becomes Scheduled when
-// its CAB (or, for Emergency, ECAB) approval is granted or, out of Customer
+// its CAB approval is granted or, out of Customer
 // Approval, when the customer approves -- and "closed" is never offered from
 // Customer Review, which only the customer's own review closes. No staff action
 // records the customer's approval or review on their behalf (a compliance rule:

@@ -176,3 +176,47 @@ func TestMapCaseDetails_OmitsAbsentFields(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestMapCaseDetails_MapsLinkedChangeRequestsWithNumber(t *testing.T) {
+	subject := "Test Change Request Subject"
+	cv := entity.CaseView{
+		LinkedChangeRequests: []entity.LinkedChangeRequestRef{
+			{
+				ID:     "cr-uuid-1",
+				Number: "CHG0039181",
+				Name:   &subject,
+			},
+			{
+				ID:     "cr-uuid-2",
+				Number: "CHG0039182",
+				Name:   nil,
+			},
+		},
+	}
+	details := MapCaseDetails(cv)
+	if len(details.ChangeRequests) != 2 {
+		t.Fatalf("expected 2 change requests, got %d", len(details.ChangeRequests))
+	}
+
+	cr1 := details.ChangeRequests[0]
+	if cr1.ID != "cr-uuid-1" {
+		t.Errorf("expected ID 'cr-uuid-1', got %q", cr1.ID)
+	}
+	if cr1.Label != subject {
+		t.Errorf("expected Label %q, got %q", subject, cr1.Label)
+	}
+	if cr1.Number != "CHG0039181" {
+		t.Errorf("expected Number 'CHG0039181', got %q", cr1.Number)
+	}
+
+	cr2 := details.ChangeRequests[1]
+	if cr2.ID != "cr-uuid-2" {
+		t.Errorf("expected ID 'cr-uuid-2', got %q", cr2.ID)
+	}
+	if cr2.Label != "CHG0039182" {
+		t.Errorf("expected Label to fall back to number 'CHG0039182', got %q", cr2.Label)
+	}
+	if cr2.Number != "CHG0039182" {
+		t.Errorf("expected Number 'CHG0039182', got %q", cr2.Number)
+	}
+}

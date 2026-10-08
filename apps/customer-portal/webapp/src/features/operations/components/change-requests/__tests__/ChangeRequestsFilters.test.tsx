@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import ChangeRequestsFilters from "@features/operations/components/change-requests/ChangeRequestsFilters";
 
 describe("ChangeRequestsFilters", () => {
-  it("renders state filter label", () => {
+  it("labels the state filter as Status", () => {
     render(
       <ChangeRequestsFilters
         filters={{}}
@@ -27,6 +27,7 @@ describe("ChangeRequestsFilters", () => {
         onFilterChange={() => {}}
       />,
     );
-    expect(screen.getAllByText("State").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Status").length).toBeGreaterThan(0);
+    expect(screen.queryByText("State")).toBeNull();
   });
 });

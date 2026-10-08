@@ -28,19 +28,18 @@ import (
 )
 
 // A customer proposes a new implementation time with PATCH {plannedStartOn,
-// plannedEndOn}: the whole window, moved with its length kept, which is how a
-// customer re-plans a change (a start alone is refused as soon as it passes the
-// stored end, see the bad-window test below). Same harness as the other
-// customer-outcome tests; the proposal is the Re-schedule of every change type
-// started by a contact.
+// plannedEndOn?}: a START, which waits in customer_updated_on for WSO2's answer while the
+// planned window stays what WSO2 planned. The planned LENGTH is kept (a proposal is a
+// start), so the end the portal's dialog derives may ride with the start, and it must be
+// exactly start + length. Same harness as the other customer-outcome tests; the proposal
+// is the same for every change type.
 
-// The proposal of a whole window, in each of the date formats the portal can
-// send, for each change type: the window is applied as given and its length is
-// unchanged, the customer's pending request is superseded, and -- per type --
-// the change goes back through CAB / ECAB (Normal / Emergency) or stays in
-// Customer Approval with the customer asked again (Standard).
+// The proposal of a whole window (the start plus the end that keeps the length), in each
+// of the date formats the portal can send, for each change type: only customer_updated_on
+// is written, the planned window and the customers' request are untouched, and accepting it
+// applies the proposal with the length unchanged.
 func TestChangeRequestCustomerProposalIntegration_WholeWindowKeepsTheDuration(t *testing.T) {
-	// What the stored window reads back as after a proposal: RFC 3339, UTC.
+	// What the proposal reads back as: RFC 3339, UTC.
 	const wantStart, wantEnd = "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"
 	for _, tc := range []struct {
 		name       string
@@ -48,88 +47,45 @@ func TestChangeRequestCustomerProposalIntegration_WholeWindowKeepsTheDuration(t 
 		start, end string // as the customer sends them
 	}{
 		{"Normal, RFC 3339 in UTC", domain.ChangeRequestTypeNormal, "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"},
-		{"Emergency, the webapp's 'YYYY-MM-DD HH:MM:SS' (UTC)", domain.ChangeRequestTypeEmergency, "2030-03-08 09:00:00", "2030-03-08 11:00:00"},
+		{"Normal, the webapp's 'YYYY-MM-DD HH:MM:SS' (UTC)", domain.ChangeRequestTypeNormal, "2030-03-08 09:00:00", "2030-03-08 11:00:00"},
 		{"Standard, RFC 3339 with an offset", domain.ChangeRequestTypeStandard, "2030-03-08T14:30:00+05:30", "2030-03-08T16:30:00+05:30"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCustomerGroupFlow(t)
-			seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
-			id := f.createWithProject(tc.typ, sp(crScopeProjectA), true, false)
-			f.setPlanned(id, rsStart1, rsEnd1)
+			id := f.reachCustomerApproval(tc.typ)
 			before := windowOf(t, f.get(id))
-
-			var cabApprover, wantStages, wantStagesAfterApproval string
-			switch tc.typ {
-			case domain.ChangeRequestTypeNormal:
-				f.driveToCustomerApproval(id)
-				cabApprover = crCABMemberUserID1
-				wantStages = "Peer Approval,CAB Approval,Customer Approval,CAB Approval"
-				wantStagesAfterApproval = "Peer Approval,CAB Approval,Customer Approval,CAB Approval,Customer Approval"
-			case domain.ChangeRequestTypeEmergency:
-				f.requestApproval(id)
-				if err := f.decide(id, crECABMemberUserID, "approved"); err != nil {
-					t.Fatalf("ECAB approval: %v", err)
-				}
-				f.expect(id, "in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				cabApprover = crECABMemberUserID
-				wantStages = "ECAB Approval,Customer Approval,ECAB Approval"
-				wantStagesAfterApproval = "ECAB Approval,Customer Approval,ECAB Approval,Customer Approval"
-			default:
-				f.requestApproval(id)
-				f.expect(id, "in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				wantStages = "Customer Approval,Customer Approval"
-			}
+			stages := f.stageLabels(id)
 			f.wantCanAnswer(id, "before the proposal", true, crScopeUserA1, crScopeUserA2)
 
 			if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(tc.start), PlannedEndOn: sp(tc.end)}); err != nil {
 				t.Fatalf("proposal: %v", err)
 			}
-			f.wantPlanned(id, "after the proposal", wantStart, wantEnd)
-			if after := windowOf(t, f.get(id)); after != before {
-				t.Fatalf("the window's length changed from %v to %v", before, after)
+			f.wantConversation(id, "after the proposal", wantStart, "")
+			f.wantPlanned(id, "after the proposal (the plan is not the proposal)", rsStart1, rsEnd1)
+			f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+			if got := f.stageLabels(id); got != stages {
+				t.Fatalf("stages after the proposal = %s, want them unchanged (%s)", got, stages)
 			}
-			if got := f.stageLabels(id); got != wantStages {
-				t.Fatalf("stages after the proposal = %s, want %s", got, wantStages)
-			}
-			// The customer's request they were just asked is superseded: its rows are
-			// cancelled, whatever the type.
-			custom := f.customerStages(id)
-			assertApprovers(t, "the superseded customer request", custom[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
+			assertApprovers(t, "the customers' request after the proposal", f.customerStages(id)[0].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
 			if a, _ := f.customerOutcome(id); a {
 				t.Fatal("a proposal stamped the customer's approval")
 			}
+			f.wantCanAnswer(id, "after the proposal", true, crScopeUserA1, crScopeUserA2)
 
-			if tc.typ == domain.ChangeRequestTypeStandard {
-				// Nothing internal to repeat: still in Customer Approval, asked again.
-				f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				assertApprovers(t, "the fresh customer request", custom[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
-				f.wantCanAnswer(id, "after the proposal", true, crScopeUserA1, crScopeUserA2)
-			} else {
-				f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
-				f.wantCanAnswer(id, "while the new plan awaits internal approval", false, crScopeUserA1, crScopeUserA2)
-				if err := f.decide(id, cabApprover, "approved"); err != nil {
-					t.Fatalf("approval of the new plan: %v", err)
-				}
-				f.expect(id, "after the new plan is approved", "CUSTOMER_APPROVAL", "authorize", "canceled")
-				if got := f.stageLabels(id); got != wantStagesAfterApproval {
-					t.Fatalf("stages after the new plan is approved = %s, want %s", got, wantStagesAfterApproval)
-				}
-				f.wantCanAnswer(id, "once the customer is asked again", true, crScopeUserA1, crScopeUserA2)
+			// WSO2 accepts: the window is the proposed one and its length is unchanged.
+			f.mustAccept(id)
+			f.wantPlanned(id, "after Accept", wantStart, wantEnd)
+			if after := windowOf(t, f.get(id)); after != before {
+				t.Fatalf("the window's length changed from %v to %v", before, after)
 			}
-
-			// The customer answers the new plan, and the window is the proposed one.
-			if _, err := f.approveAs(id, crScopeUserA2, true); err != nil {
-				t.Fatalf("approval of the new plan: %v", err)
-			}
-			f.expect(id, "after the customer approved the new plan", "SCHEDULED", "implement", "canceled")
-			f.wantPlanned(id, "after the customer approved the new plan", wantStart, wantEnd)
+			f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
 		})
 	}
 }
 
-// What a customer is told when the window they propose cannot be applied: a
-// readable validation message, nothing about the database, and nothing changed.
+// What a customer is told when the time they propose cannot be taken: a readable
+// validation message, nothing about the database, and nothing changed.
 func TestChangeRequestCustomerProposalIntegration_BadWindowMessages(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
@@ -138,12 +94,13 @@ func TestChangeRequestCustomerProposalIntegration_BadWindowMessages(t *testing.T
 	stagesBefore := f.stageLabels(id)
 
 	const (
-		notChanged  = "re-scheduling requires a changed planned start or end: send plannedStartOn and/or plannedEndOn with a value different from the stored one"
-		endsBefore  = "the planned start must not be after the planned end"
+		isPlanned   = "plannedStartOn is the planned start already: propose a different start"
+		keepsLength = "keeps the planned length of 2 hours"
+		needsStart  = "a proposed implementation time needs a new start: send plannedStartOn"
 		notADate    = "plannedStartOn must be a valid date-time"
 		endNotADate = "plannedEndOn must be a valid date-time"
-		emptyWindow = "the planned start must not be the same as the planned end"
-		inThePast   = "is in the past"
+		startPast   = "plannedStartOn is in the past"
+		endPast     = "plannedEndOn is in the past"
 		nothingSent = "at least one field must be provided"
 	)
 	for _, tc := range []struct {
@@ -151,20 +108,20 @@ func TestChangeRequestCustomerProposalIntegration_BadWindowMessages(t *testing.T
 		req  domain.PatchChangeRequestRequest
 		want string
 	}{
-		{"the stored window again", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart1), PlannedEndOn: sp(rsEnd1)}, notChanged},
-		{"the stored start alone", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart1)}, notChanged},
-		{"the stored end alone", domain.PatchChangeRequestRequest{PlannedEndOn: sp(rsEnd1)}, notChanged},
-		{"the same instant in another offset", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2030-03-01T14:30:00+05:30")}, notChanged},
-		{"a window that ends before it starts", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart3), PlannedEndOn: sp(rsEnd1)}, endsBefore},
-		{"a start after the stored end (the end is not moved for the customer)", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart3)}, endsBefore},
-		{"an end before the stored start", domain.PatchChangeRequestRequest{PlannedEndOn: sp("2030-02-28T11:00:00Z")}, endsBefore},
+		{"the stored window again", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart1), PlannedEndOn: sp(rsEnd1)}, isPlanned},
+		{"the stored start alone", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart1)}, isPlanned},
+		{"the stored end alone", domain.PatchChangeRequestRequest{PlannedEndOn: sp(rsEnd1)}, needsStart},
+		{"the same instant in another offset", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2030-03-01T14:30:00+05:30")}, isPlanned},
+		{"a window that ends before it starts", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart3), PlannedEndOn: sp(rsEnd1)}, keepsLength},
+		{"an end that is not the start plus the length", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd3)}, keepsLength},
+		{"an end before the stored start, alone", domain.PatchChangeRequestRequest{PlannedEndOn: sp("2030-02-28T11:00:00Z")}, needsStart},
 		{"text that is not a date", domain.PatchChangeRequestRequest{PlannedStartOn: sp("next tuesday")}, notADate},
 		{"an end that is not a date", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp("later")}, endNotADate},
 		{"an empty start", domain.PatchChangeRequestRequest{PlannedStartOn: sp("")}, notADate},
-		{"a window with no length", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsStart2)}, emptyWindow},
-		{"a window with no length, in two spellings", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2030-03-08 09:00:00"), PlannedEndOn: sp("2030-03-08T14:30:00+05:30")}, emptyWindow},
-		{"a window in the past", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2001-05-01T10:00:00Z"), PlannedEndOn: sp("2001-05-01T12:00:00Z")}, inThePast},
-		{"an end in the past", domain.PatchChangeRequestRequest{PlannedEndOn: sp("2001-05-01T12:00:00Z")}, inThePast},
+		{"a window with no length", domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsStart2)}, keepsLength},
+		{"a window with no length, in two spellings", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2030-03-08 09:00:00"), PlannedEndOn: sp("2030-03-08T14:30:00+05:30")}, keepsLength},
+		{"a window in the past", domain.PatchChangeRequestRequest{PlannedStartOn: sp("2001-05-01T10:00:00Z"), PlannedEndOn: sp("2001-05-01T12:00:00Z")}, startPast},
+		{"an end in the past", domain.PatchChangeRequestRequest{PlannedEndOn: sp("2001-05-01T12:00:00Z")}, endPast},
 		{"nothing at all", domain.PatchChangeRequestRequest{}, nothingSent},
 	} {
 		_, err := f.patchAsContact(id, crScopeUserA1, tc.req)
@@ -174,16 +131,15 @@ func TestChangeRequestCustomerProposalIntegration_BadWindowMessages(t *testing.T
 		}
 	}
 
-	// What was refused left the window as it was; a proposal that is fine still goes through.
+	// What was refused left the change as it was; a proposal that is fine still goes through.
 	f.wantPlanned(id, "after the refused proposals", rsStart1, rsEnd1)
+	f.wantConversation(id, "after the refused proposals", "", "")
 	if _, err := f.patchAsContact(id, crScopeUserA2, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
 		t.Fatalf("a proposal that is fine: %v", err)
 	}
-
-	// Everything refused above left the change as it was (the one proposal that
-	// was accepted is the last step; the refusals ran against the stored window).
-	if stagesBefore == f.stageLabels(id) {
-		t.Fatal("the accepted proposal did not re-schedule the change")
+	f.wantConversation(id, "after the proposal that is fine", rsStart2, "")
+	if got := f.stageLabels(id); got != stagesBefore {
+		t.Fatalf("the proposal changed the stages: %s, was %s (nothing but customer_updated_on is written)", got, stagesBefore)
 	}
 }
 
@@ -194,24 +150,21 @@ func TestChangeRequestCustomerProposalIntegration_RefusedWindowChangesNothing(t 
 	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
 	f.setPlanned(id, rsStart1, rsEnd1)
 	f.driveToCustomerApproval(id)
-	stages := f.stageLabels(id)
+	before := f.snap(id)
 
 	for _, req := range []domain.PatchChangeRequestRequest{
 		{PlannedStartOn: sp(rsStart1), PlannedEndOn: sp(rsEnd1)},
 		{PlannedStartOn: sp(rsStart3), PlannedEndOn: sp(rsEnd1)},
-		{PlannedStartOn: sp(rsStart3)},
+		{PlannedEndOn: sp(rsEnd3)},
 		{PlannedStartOn: sp("next tuesday")},
 	} {
 		if _, err := f.patchAsContact(id, crScopeUserA1, req); err == nil {
-			t.Fatalf("%+v was accepted", req)
+			t.Fatalf("%s %s was accepted", derefStr(req.PlannedStartOn), derefStr(req.PlannedEndOn))
 		}
 	}
-	f.expect(id, "after the refused proposals", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	f.wantPlanned(id, "after the refused proposals", rsStart1, rsEnd1)
-	if got := f.stageLabels(id); got != stages {
-		t.Fatalf("stages = %s, want them untouched (%s)", got, stages)
+	if after := f.snap(id); after != before {
+		t.Fatalf("a refused proposal changed the change request:\n  before: %s\n  after:  %s", before, after)
 	}
-	assertApprovers(t, "customer request untouched", f.customerStages(id)[0].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
 	f.wantCanAnswer(id, "after the refused proposals", true, crScopeUserA1, crScopeUserA2)
 }
 
@@ -296,10 +249,11 @@ func TestChangeRequestCustomerProposalIntegration_ZonelessWindowIsUTCInAnySessio
 			f.driveToCustomerApproval(id)
 
 			if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{
-				PlannedStartOn: sp("2031-05-01 10:00:00"), PlannedEndOn: sp("2031-05-01T21:30:00+05:30")}); err != nil {
+				PlannedStartOn: sp("2031-05-01 10:00:00"), PlannedEndOn: sp("2031-05-01T17:30:00+05:30")}); err != nil {
 				t.Fatalf("proposal: %v", err)
 			}
-			f.wantPlanned(id, "after the proposal", "2031-05-01T10:00:00Z", "2031-05-01T16:00:00Z")
+			f.wantConversation(id, "after the proposal", "2031-05-01T10:00:00Z", "")
+			f.wantPlanned(id, "after the proposal", rsStart1, rsEnd1)
 		})
 	}
 }

@@ -147,8 +147,9 @@ func caseIDsToEnums(ids []int, idToEnum map[string]string) []string {
 // returns. Every other dto in this package keeps using Ref{id, name} for
 // entity references; don't reuse this type there.
 type IDLabelRef struct {
-	ID    string `json:"id,omitempty"`
-	Label string `json:"label"`
+	ID     string `json:"id,omitempty"`
+	Label  string `json:"label"`
+	Number string `json:"number,omitempty"`
 }
 
 // caseStatusRef builds the {id, label} the frontend's CaseListItem.status

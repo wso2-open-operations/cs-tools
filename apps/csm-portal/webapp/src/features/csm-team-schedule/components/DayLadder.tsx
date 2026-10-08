@@ -772,7 +772,9 @@ function TeamSplit({ rows }: { rows: ScheduleAssignment[] }): JSX.Element {
           <div className="tlp on">
             <div className="tlph">
               <i style={{ background: teamColourOf(current[0]) }} />
-              {current[0]}
+              {/* By name, like the list beside it: the key is the directory's
+                  identifier ("phoenix_abt_cre_team"), not a heading. */}
+              {teamNameOf(current[0])} team
               <b>{current[1].length}</b>
             </div>
             <div className="tlpn">

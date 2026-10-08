@@ -102,7 +102,7 @@ func (h *ChangeRequestHandler) CreateChangeRequest(w http.ResponseWriter, r *htt
 	}
 
 	// The change type decides the whole approval flow (Standard: none; Normal:
-	// peer then CAB; Emergency: ECAB only), so a create without one of the
+	// peer then CAB; Emergency: CAB only), so a create without one of the
 	// three is refused here with a message the form can show, rather than
 	// forwarded to be rejected with a generic one.
 	if msg := validateChangeRequestCreateType(body); msg != "" {
@@ -259,6 +259,40 @@ func validateChangeRequestCustomerOutcomeFlags(body []byte) string {
 	}
 	if present("isCustomerReviewed") {
 		return errMsgCustomerReviewedByStaff
+	}
+	return ""
+}
+
+// changeRequestTimeAnswerFields are the fields of WSO2's answer to a time the customer proposed
+// (the entity service's "Accept proposed time" and "Propose a different time"):
+// confirmCustomerUpdatedDate ("agree" is the only value) names the acceptance;
+// expectedCustomerUpdatedOn names the proposal being answered, expectedPlannedStartOn /
+// expectedPlannedEndOn the planned window the page showed. They are forwarded as-is -- the BFF
+// has no change request data and decides nothing about them (whether a proposal waits, whether
+// the window is still the one shown, whether the change is on hold are the entity service's
+// to judge under its row lock, and its refusal text comes back verbatim) -- but a value that is
+// not a string is refused with a message the page can show instead of the generic decode failure.
+var changeRequestTimeAnswerFields = []string{
+	"confirmCustomerUpdatedDate", "expectedCustomerUpdatedOn", "expectedPlannedStartOn", "expectedPlannedEndOn",
+}
+
+// validateChangeRequestTimeAnswerFields returns a user-facing message when body carries one of
+// changeRequestTimeAnswerFields with a value that is not a JSON string (null is "absent" to the
+// entity service), in any spelling of the key, or "" otherwise. A body that is not a JSON object
+// is left for the upstream to reject.
+func validateChangeRequestTimeAnswerFields(body []byte) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	for _, field := range changeRequestTimeAnswerFields {
+		for _, raw := range payloadValues(payload, field) {
+			// A JSON null decodes into a string without error: it is "absent", as to the entity service.
+			var v string
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return field + " must be a string"
+			}
+		}
 	}
 	return ""
 }
@@ -467,6 +501,11 @@ func (h *ChangeRequestHandler) PatchChangeRequest(w http.ResponseWriter, r *http
 	}
 
 	if msg := validateChangeRequestScopeFields(body, true); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	if msg := validateChangeRequestTimeAnswerFields(body); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}

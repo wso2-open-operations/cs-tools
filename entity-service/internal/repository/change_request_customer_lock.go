@@ -46,14 +46,30 @@ import (
 //     FROZEN, for every caller, in every later state: a PATCH that changes
 //     projectId is a 400, one that resends the stored value is an accepted no-op
 //     (a client that sends the whole form back is not punished).
+//   - The change TYPE is frozen with the project: it decides the whole approval flow, so once
+//     Request Approval has chosen it a different type is a 400 and the stored one again an
+//     accepted no-op (checkChangeTypeEdit). A Standard change has no approval stage to lock
+//     it by, which is why the state, not the stage count, is the rule.
 //   - After New a box is ADD-ONLY: false -> true is allowed until the gate the box
 //     controls is passed (approvalRequirementEditable / reviewRequirementEditable),
 //     and only on a change that has a Customer Project (none can be set any more);
 //     true -> false is a 400 in every state. A change that reached a customer stage
-//     necessarily has its box true, so add-only alone is what stops a Re-schedule
-//     (back to Authorize) from reopening anything: the box cannot be unticked in
-//     Authorize either, so the CAB / ECAB approval that follows still asks the
-//     same contacts.
+//     necessarily has its box true, so add-only alone is what stops anything from
+//     reopening it: a Re-schedule no longer leaves Customer Approval, and an old-flow
+//     one still in flight (back in Authorize) cannot have the box unticked either, so
+//     the CAB approval that follows still asks the same contacts.
+//   - An EMERGENCY change takes no customer step at all, so neither box can be set on one,
+//     in any state: a PATCH that turns one on, or that re-types a change that has one
+//     ticked into Emergency, is a 400 (checkEmergencyCustomerConsent, change_request_emergency.go).
+//     The rule judges what a request CHANGES: a write of the value a box already holds is
+//     the no-op it is everywhere here, and the flow ignores the boxes of an Emergency change
+//     whatever they say (effectiveCustomerGates).
+//   - A new REQUESTER after Request Approval is never one more person to ask about a
+//     customer gate still ahead (the requester never approves their own change): a PATCH
+//     that changes requestedById is judged with the new requester in place of the stored
+//     one, and refused with Request Approval's own message when nobody would be left to ask
+//     (checkRequestedByLeavesSomebodyToAsk, rule 4c). The same overlay judges Request Approval
+//     and a Re-schedule that carry a requestedById of their own.
 //   - Request Approval itself ({state: assess}) is refused when a box is ticked and
 //     there is no Customer Project, since the change would otherwise reach a
 //     customer stage with nobody to ask and the project could not be set again.
@@ -231,10 +247,18 @@ func checkRequestApprovalHasProject(state string, approvalRequired, reviewRequir
 // (checkRequestApprovalHasProject, needsProjectMsg own it), nor is one that needs
 // no customer step.
 func requireSomebodyToAsk(ctx context.Context, q crQuerier, workItemID string, project *string, approval, review bool) error {
+	return requireSomebodyToAskWith(ctx, q, workItemID, project, approval, review, nil)
+}
+
+// requireSomebodyToAskWith is requireSomebodyToAsk judging the change's creators with the
+// request's own requestedById in place of the stored one (nil: the stored one): a PATCH
+// that sets the requester AND needs somebody to ask is judged as it will stand once
+// written (rule 4c, Request Approval, a Re-schedule).
+func requireSomebodyToAskWith(ctx context.Context, q crQuerier, workItemID string, project *string, approval, review bool, requestedBy **string) error {
 	if !(approval || review) || !hasProjectID(project) {
 		return nil
 	}
-	ok, err := customerGroupCanBeAsked(ctx, q, workItemID, strings.ToLower(strings.TrimSpace(*project)))
+	ok, err := customerGroupCanBeAskedWith(ctx, q, workItemID, strings.ToLower(strings.TrimSpace(*project)), requestedBy)
 	if err != nil {
 		return fmt.Errorf("patch change request: check who can be asked: %w", err)
 	}
@@ -251,11 +275,11 @@ func requireSomebodyToAsk(ctx context.Context, q crQuerier, workItemID string, p
 // checkRequestApprovalHasProject, which keeps its own message and precedence for a
 // change with no project. A resend on a change that has already left New is not
 // Request Approval and is never judged here.
-func checkRequestApprovalCanAsk(ctx context.Context, q crQuerier, workItemID, state string, approvalRequired, reviewRequired bool, project *string) error {
+func checkRequestApprovalCanAsk(ctx context.Context, q crQuerier, workItemID, state string, approvalRequired, reviewRequired bool, project *string, requestedBy **string) error {
 	if !changeRequestCreationPhase(state) {
 		return nil
 	}
-	return requireSomebodyToAsk(ctx, q, workItemID, project, approvalRequired, reviewRequired)
+	return requireSomebodyToAskWith(ctx, q, workItemID, project, approvalRequired, reviewRequired, requestedBy)
 }
 
 // boxesTurnedOnAfterNew says which boxes a PATCH turns ON (false -> true) on a
@@ -289,10 +313,10 @@ func hasProjectID(project *string) bool {
 }
 
 // changeRequestPatchNeedsGate reports whether the request carries anything the
-// creation-phase gate judges: the state, the project, either box, or any
-// deployment field.
+// creation-phase gate judges: the state, the project, the type, the requester, either
+// box, or any deployment field.
 func changeRequestPatchNeedsGate(req domain.PatchChangeRequestRequest) bool {
-	return req.State != nil || req.ProjectID != nil ||
+	return req.State != nil || req.ProjectID != nil || req.Type != nil || req.RequestedByID != nil ||
 		req.CustomerApprovalRequired != nil || req.CustomerReviewRequired != nil ||
 		req.DeploymentIDs != nil || req.DeploymentProductIDs != nil ||
 		req.DeploymentID != nil || req.DeployedProductID != nil
@@ -310,7 +334,103 @@ func validateCreationPhaseEdits(snap changeRequestGateSnapshot, req domain.Patch
 	if err := checkCustomerProjectEdit(snap.state, snap.projectID, req.ProjectID); err != nil {
 		return err
 	}
+	if err := checkChangeTypeEdit(snap, req.Type); err != nil {
+		return err
+	}
+	// Rule 2c: an Emergency change takes no customer step, so neither box can be set on
+	// one. Before the box rules below, so a tick on an Emergency change is refused for
+	// that reason and not for one the lock gives about a gate it never has.
+	if err := checkEmergencyCustomerConsent(snap, req); err != nil {
+		return err
+	}
 	return validateCustomerGateEdits(snap, req.CustomerApprovalRequired, req.CustomerReviewRequired)
+}
+
+// customerGatesAhead says which customer gates are still ahead of -- or are being
+// waited on by -- a change in the given (upper-case) state with the boxes as stated: the
+// approval gate until the customer's approval is given (New, Assess, Authorize, Customer
+// Approval), the review gate until the customer's review is (every state up to and
+// including Customer Review; a final state has none).
+func customerGatesAhead(state string, approvalRequired, reviewRequired bool) (approval, review bool) {
+	if terminalChangeRequestState(state) {
+		return false, false
+	}
+	approval = approvalRequired && (approvalRequirementEditable(state) || state == crStateCustomerApproval)
+	review = reviewRequired && (reviewRequirementEditable(state) || state == crStateCustomerReview)
+	return approval, review
+}
+
+// checkRequestedByLeavesSomebodyToAsk is rule 4c: a PATCH that changes the REQUESTER
+// of a change that has left New is refused when, with the new requester, a customer gate
+// still ahead (customerGatesAhead) would have nobody to ask -- the requester never
+// approves their own change, so naming the project's only registered contact as the
+// requester would strand the change at its customer gate. The refusal is the one Request
+// Approval gives (nobodyToAskMsg, naming the gate(s)). Only a CHANGE of the requester is
+// judged: a request that leaves it as it is (a whole-form resend included) is never
+// re-judged, whatever the project's contacts have become since, and the creation phase is
+// left to Request Approval, which judges the requester then in force
+// (checkRequestApprovalCanAsk). The boxes in effect are the request's, else the stored
+// ones.
+func checkRequestedByLeavesSomebodyToAsk(ctx context.Context, q crQuerier, workItemID string, snap changeRequestGateSnapshot, req domain.PatchChangeRequestRequest) error {
+	if req.RequestedByID == nil || changeRequestCreationPhase(snap.state) {
+		return nil
+	}
+	var stored *string
+	if err := q.QueryRow(ctx, `SELECT requested_by_user_id::text FROM change_request WHERE id = $1`, workItemID).Scan(&stored); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("patch change request: read the stored requester: %w", err)
+	}
+	requested := *req.RequestedByID
+	if (stored == nil && requested == nil) || (stored != nil && requested != nil && strings.EqualFold(strings.TrimSpace(*stored), strings.TrimSpace(*requested))) {
+		return nil
+	}
+	approvalRequired, reviewRequired := snap.approvalRequired, snap.reviewRequired
+	if req.CustomerApprovalRequired != nil {
+		approvalRequired = *req.CustomerApprovalRequired
+	}
+	if req.CustomerReviewRequired != nil {
+		reviewRequired = *req.CustomerReviewRequired
+	}
+	// An Emergency change has no customer gate ahead whatever its boxes say.
+	approvalRequired, reviewRequired = effectiveCustomerGates(effectiveChangeModel(snap.model, req.Type), approvalRequired, reviewRequired)
+	approval, review := customerGatesAhead(snap.state, approvalRequired, reviewRequired)
+	return requireSomebodyToAskWith(ctx, q, workItemID, snap.projectID, approval, review, req.RequestedByID)
+}
+
+// changeTypeFrozenMsg is the 400 for a change of the change TYPE after Request
+// Approval (rule 2b).
+func changeTypeFrozenMsg(state string) string {
+	return fmt.Sprintf("type can no longer be changed: the change type decides the approval flow, which is fixed once approval has been requested (current state: %s). Cancel this change request and clone it to use another type.", lockStateName(state))
+}
+
+// checkChangeTypeEdit is rule 2b: the change TYPE is editable only in the creation
+// phase, like the Customer Project. The type decides the whole approval flow (Standard:
+// none; Normal: peer then CAB; Emergency: CAB only), so once the change has left New --
+// Request Approval has chosen its flow -- a type other than the stored one is a 400; the
+// stored type again (a client that resends the whole form) is an accepted no-op. Until
+// now only an approval-stage COUNT locked the type (patchChangeRequestTx still checks it,
+// as a second line), which left a Standard change -- it has no stage at all -- free to be
+// re-typed after Request Approval. A type with no change_model label is not the stored one
+// either.
+func checkChangeTypeEdit(snap changeRequestGateSnapshot, requested *domain.ChangeRequestType) error {
+	if requested == nil || changeRequestCreationPhase(snap.state) {
+		return nil
+	}
+	if resendsStoredChangeType(snap.model, requested) {
+		return nil
+	}
+	return &apierror.ValidationError{Msg: changeTypeFrozenMsg(snap.state)}
+}
+
+// resendsStoredChangeType reports whether a requested type IS the stored one (storedModel is
+// change_model's upper-case label, "" when NULL): a client that sends the whole form back sends the
+// type it already has, which changes nothing. A type with no change_model label, or a change with no
+// stored model, is not the stored one.
+func resendsStoredChangeType(storedModel string, requested *domain.ChangeRequestType) bool {
+	if requested == nil || storedModel == "" {
+		return false
+	}
+	model, ok := changeRequestTypeToChangeModel[*requested]
+	return ok && strings.EqualFold(model, storedModel)
 }
 
 // lockChangeRequestForPatch is the first thing a PATCH that carries a state, a
@@ -324,6 +444,7 @@ func validateCreationPhaseEdits(snap changeRequestGateSnapshot, req domain.Patch
 // PATCH takes.
 func lockChangeRequestForPatch(ctx context.Context, tx pgx.Tx, id string) (changeRequestGateSnapshot, error) {
 	var locked string
+	var updatedBy *string
 	// FOR NO KEY UPDATE, the strength the PATCH's own UPDATE of work_item takes, not
 	// FOR UPDATE: a decision (DecideChangeRequestApproval) locks change_request first
 	// and then INSERTs approval_stage / approval_stage_approver rows, whose foreign
@@ -331,15 +452,25 @@ func lockChangeRequestForPatch(ctx context.Context, tx pgx.Tx, id string) (chang
 	// refuse -- a deadlock with a PATCH that holds this lock and waits for the
 	// change_request one. Two PATCHes still exclude each other (NO KEY UPDATE
 	// conflicts with itself), which is all this lock is for.
+	//
+	// updated_by comes back with the lock: it is the last writer BEFORE this PATCH's own
+	// UPDATE of the row (which always stamps the caller). A staff answer to a time the
+	// customer proposed has to know who proposed it, and the only place that is still
+	// intact is here (changeRequestGateSnapshot.priorWriter).
 	err := tx.QueryRow(ctx,
-		`SELECT id::text FROM work_item WHERE id = $1::uuid AND type = 'CHANGE_REQUEST' FOR NO KEY UPDATE`, id).Scan(&locked)
+		`SELECT id::text, updated_by FROM work_item WHERE id = $1::uuid AND type = 'CHANGE_REQUEST' FOR NO KEY UPDATE`, id).Scan(&locked, &updatedBy)
 	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {
 		return changeRequestGateSnapshot{}, &apierror.NotFoundError{Msg: "change request not found"}
 	}
 	if err != nil {
 		return changeRequestGateSnapshot{}, fmt.Errorf("patch change request: lock work item: %w", err)
 	}
-	return lockChangeRequestGateSnapshot(ctx, tx, id)
+	snap, err := lockChangeRequestGateSnapshot(ctx, tx, id)
+	if err != nil {
+		return changeRequestGateSnapshot{}, err
+	}
+	snap.priorWriter = newLastWriter(updatedBy)
+	return snap, nil
 }
 
 // checkSingularDeploymentFields is rule 5 for the single-valued PATCH fields

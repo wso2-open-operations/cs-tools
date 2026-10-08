@@ -115,10 +115,12 @@ func TestChangeRequestVisibilityIntegration_NamingAStateNeverWidensWhatACustomer
 	}
 }
 
-// A change request designated to the customer waits in Authorize after the customer
-// proposed a new time and stays on their list, so it is returned when no state is
-// named, when Authorize is named and when every state is: and it is NOT returned to a
-// contact it was never designated to, whatever they name (strict: nothing is legacy).
+// A change request designated to the customer that sits in Authorize (one an older build
+// sent back through the CAB when the customer proposed a time: a proposal today waits in
+// Customer Approval, but the row stays on the customer's list wherever it is) is returned
+// when no state is named, when Authorize is named and when every state is: and it is NOT
+// returned to a contact it was never designated to, whatever they name (strict: nothing
+// is legacy).
 func TestChangeRequestVisibilityIntegration_NamingAStateNeverWidensWhatACustomerSees_Designated(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	vis := visStrictSinceLongAgo()
@@ -127,10 +129,11 @@ func TestChangeRequestVisibilityIntegration_NamingAStateNeverWidensWhatACustomer
 	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, true)
 	f.setPlanned(id, rsStart1, rsEnd1)
 	f.driveToCustomerApproval(id)
-	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
-		t.Fatalf("proposal: %v", err)
-	}
-	f.expect(id, "in Authorize after the proposal", "AUTHORIZE", "canceled")
+	// The state an older build left it in (a proposal today keeps the change in Customer
+	// Approval): forced, with the customer's request -- the designation -- exactly as the
+	// real flow wrote it.
+	f.setStoredState(id, "AUTHORIZE")
+	f.expect(id, "in Authorize, as an older build left it", "AUTHORIZE", "canceled")
 
 	alice, sam := asContact(crScopeUserA1), asContact(crScopeUserSecurity)
 	authorize := []domain.ChangeRequestState{domain.ChangeRequestStateAuthorize}

@@ -483,6 +483,14 @@ func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+	// Always forced server-side, never left to the request body: a customer
+	// must never see a WORK_NOTE-type comment, in the page OR in totalRecords
+	// -- same "restrict, don't mirror" rule as BuildEntityCreateCaseCommentRequest
+	// forcing type: comment. dto.MapSearchCaseActivities still filters the
+	// array client-side too (defense in depth), but entity-service excluding
+	// them here is what makes totalRecords agree with what's actually shown.
+	excludeWorkNotes := true
+	req.ExcludeWorkNotes = &excludeWorkNotes
 
 	result, err := h.entity.SearchCaseActivities(r.Context(), id, req)
 	if err != nil {

@@ -152,6 +152,118 @@ func TestFetchCaseWatchers_NullEmailDoesNotPanic(t *testing.T) {
 	}
 }
 
+type fakeCaseLinkedRow struct {
+	id, number, subject string
+}
+
+type fakeCaseLinkedRows struct {
+	rows []fakeCaseLinkedRow
+	idx  int
+}
+
+func (f *fakeCaseLinkedRows) Close()                                       {}
+func (f *fakeCaseLinkedRows) Err() error                                   { return nil }
+func (f *fakeCaseLinkedRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (f *fakeCaseLinkedRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (f *fakeCaseLinkedRows) Values() ([]any, error)                       { return nil, nil }
+func (f *fakeCaseLinkedRows) RawValues() [][]byte                          { return nil }
+func (f *fakeCaseLinkedRows) Conn() *pgx.Conn                              { return nil }
+func (f *fakeCaseLinkedRows) TypeMap() *pgtype.Map                         { return nil }
+
+func (f *fakeCaseLinkedRows) Next() bool {
+	if f.idx >= len(f.rows) {
+		return false
+	}
+	f.idx++
+	return true
+}
+
+func (f *fakeCaseLinkedRows) Scan(dest ...any) error {
+	row := f.rows[f.idx-1]
+	*dest[0].(*string) = row.id
+	*dest[1].(*string) = row.number
+	*dest[2].(*string) = row.subject
+	return nil
+}
+
+type fakeCaseLinkedQuerier struct {
+	rows      *fakeCaseLinkedRows
+	lastQuery string
+	lastArgs  []any
+}
+
+func (f *fakeCaseLinkedQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	f.lastQuery = sql
+	f.lastArgs = args
+	return f.rows, nil
+}
+
+func TestFetchCaseLinkedChangeRequests_MapsRowsAndFilters(t *testing.T) {
+	rows := &fakeCaseLinkedRows{rows: []fakeCaseLinkedRow{
+		{id: "cr-1", number: "CHG0000001", subject: "Upgrade DB"},
+		{id: "cr-2", number: "CHG0000002", subject: ""},
+	}}
+	q := &fakeCaseLinkedQuerier{rows: rows}
+	repo := &caseRepo{vis: CRVisibility{}}
+
+	// Unrestricted caller
+	ctxUnrestricted := WithCallerIdentity(context.Background(), SearchScope{Unrestricted: true})
+	got, err := repo.fetchCaseLinkedChangeRequests(ctxUnrestricted, q, "case-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d linked change requests, want 2", len(got))
+	}
+	if strings.Contains(q.lastQuery, "project_contact") || strings.Contains(q.lastQuery, "FALSE") {
+		t.Errorf("expected no visibility filter in query for unrestricted caller, got: %s", q.lastQuery)
+	}
+	if len(q.lastArgs) != 1 || q.lastArgs[0] != "case-1" {
+		t.Errorf("expected query args for unrestricted caller to carry only case-1, got: %+v", q.lastArgs)
+	}
+
+	if got[0].ID != "cr-1" || got[0].Number != "CHG0000001" || got[0].Name == nil || *got[0].Name != "Upgrade DB" {
+		t.Errorf("got[0] = %+v, want ID cr-1, Number CHG0000001, Name 'Upgrade DB'", got[0])
+	}
+	if got[1].ID != "cr-2" || got[1].Number != "CHG0000002" || got[1].Name != nil {
+		t.Errorf("got[1] = %+v, want ID cr-2, Number CHG0000002, Name nil", got[1])
+	}
+
+	// Restricted caller: visibility clause is injected into query
+	scope := SearchScope{ViewerEmail: "customer@example.com"}
+	ctx := WithCallerIdentity(context.Background(), scope)
+	rows2 := &fakeCaseLinkedRows{rows: []fakeCaseLinkedRow{}}
+	q2 := &fakeCaseLinkedQuerier{rows: rows2}
+	_, err = repo.fetchCaseLinkedChangeRequests(ctx, q2, "case-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(q2.lastQuery, "project_contact") {
+		t.Errorf("expected visibility clause in query for restricted caller, got: %s", q2.lastQuery)
+	}
+	if len(q2.lastArgs) < 2 || q2.lastArgs[0] != "case-1" || q2.lastArgs[1] != "customer@example.com" {
+		t.Errorf("expected query args to carry case-1 and customer@example.com, got: %+v", q2.lastArgs)
+	}
+}
+
+func TestFetchCaseLinkedServiceRequests_MapsRows(t *testing.T) {
+	rows := &fakeCaseLinkedRows{rows: []fakeCaseLinkedRow{
+		{id: "sr-1", number: "CS0001001", subject: "Cert Renewal"},
+	}}
+	q := &fakeCaseLinkedQuerier{rows: rows}
+
+	got, err := fetchCaseLinkedServiceRequests(context.Background(), q, "case-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d linked service requests, want 1", len(got))
+	}
+	if got[0].ID != "sr-1" || got[0].Number != "CS0001001" || got[0].Name != "Cert Renewal" {
+		t.Errorf("got[0] = %+v, want ID sr-1, Number CS0001001, Name 'Cert Renewal'", got[0])
+	}
+}
+
 // Every enum label onboardingStatusLabels can produce must exist in the
 // migration's onboarding_status_enum, or a valid filter would fail at query time.
 func TestOnboardingStatusLabelsMatchMigration(t *testing.T) {

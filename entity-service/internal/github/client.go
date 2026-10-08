@@ -306,6 +306,60 @@ func (c *Client) SetState(ctx context.Context, issue Issue, state State) error {
 		map[string]string{"state": string(state)}, nil)
 }
 
+// maxFileBytes bounds FileContent. It reads small configuration files; a
+// repository file larger than this is not one, and is refused rather than
+// buffered.
+const maxFileBytes = 64 << 10
+
+// FileContent returns a file's contents from the repository's default branch.
+// A file that does not exist is (nil, nil): for a configuration file that is an
+// answer, not a failure. Any other non-2xx is an *Error.
+func (c *Client) FileContent(ctx context.Context, owner, repository, path string) ([]byte, error) {
+	if owner == "" || repository == "" || path == "" {
+		return nil, fmt.Errorf("github: incomplete file reference %q/%q:%q", owner, repository, path)
+	}
+	segments := strings.Split(strings.TrimLeft(path, "/"), "/")
+	for i, seg := range segments {
+		segments[i] = url.PathEscape(seg)
+	}
+	target := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL,
+		url.PathEscape(owner), url.PathEscape(repository), strings.Join(segments, "/"))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, fmt.Errorf("github: build request: %w", err)
+	}
+	// The raw media type returns the file itself rather than base64 inside JSON.
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", c.userAgent)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github: GET contents %s/%s: %w", owner, repository, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, c.asError(resp)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("github: read contents %s/%s: %w", owner, repository, err)
+	}
+	if len(body) > maxFileBytes {
+		return nil, fmt.Errorf("github: %s in %s/%s is larger than %d bytes", path, owner, repository, maxFileBytes)
+	}
+	return body, nil
+}
+
 // Error is a non-2xx response from GitHub.
 type Error struct {
 	StatusCode int

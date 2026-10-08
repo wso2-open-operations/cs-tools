@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,8 +89,8 @@ func TestOutageNoticeDrainerPublishesEachDecisionToItsAudience(t *testing.T) {
 		CommunicationRecipients: []string{"sre@wso2.com"},
 	}
 
-	if n := d.drainOnce(context.Background()); n != 2 {
-		t.Fatalf("outagePublished %d, want 2", n)
+	if n, failed := d.drainOnce(context.Background()); n != 2 || failed {
+		t.Fatalf("outagePublished %d failed=%v, want 2 failed=false", n, failed)
 	}
 	if len(pub.got) != 2 {
 		t.Fatalf("got %d events, want 2", len(pub.got))
@@ -135,8 +136,8 @@ func TestOutageNoticeDrainerKeepsGoingPastFailures(t *testing.T) {
 	d := &OutageNoticeDrainer{Notifications: notif, Communications: comm, Publisher: pub,
 		NotificationRecipients: []string{"a@wso2.com"}, CommunicationRecipients: []string{"b@wso2.com"}}
 
-	if n := d.drainOnce(context.Background()); n != 1 {
-		t.Fatalf("outagePublished %d, want 1 (the failed sweep and the failed publish must not stop the rest)", n)
+	if n, failed := d.drainOnce(context.Background()); n != 1 || !failed {
+		t.Fatalf("outagePublished %d failed=%v, want 1 failed=true (the failed sweep and the failed publish must not stop the rest)", n, failed)
 	}
 	if pub.got[0].id != "good" {
 		t.Errorf("outagePublished %q, want the decision after the failed one", pub.got[0].id)
@@ -221,6 +222,87 @@ func TestOutageNoticeDrainerPollsWhenItCannotListen(t *testing.T) {
 	cancel()
 	if l.listens < 2 {
 		t.Errorf("listener tried %d times, want a retry each poll", l.listens)
+	}
+}
+
+// sequencedSweeper returns err[i] (nil = success) for the i-th call, then nil
+// forever once the sequence is exhausted, recording when each call happened.
+type sequencedSweeper struct {
+	OutageCommunicationService
+	mu    sync.Mutex
+	errs  []error
+	calls []time.Time
+}
+
+func (s *sequencedSweeper) Sweep(context.Context, int) (domain.OutageCommunicationSweepResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := len(s.calls)
+	s.calls = append(s.calls, time.Now())
+	if i < len(s.errs) {
+		return domain.OutageCommunicationSweepResponse{}, s.errs[i]
+	}
+	return domain.OutageCommunicationSweepResponse{}, nil
+}
+
+func (s *sequencedSweeper) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+// snapshot copies calls under the lock -- Run's goroutine keeps appending to
+// it until ctx is actually cancelled, which cancel() does not wait for, so
+// reading the slice directly races with that append under go test -race.
+func (s *sequencedSweeper) snapshot() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Time(nil), s.calls...)
+}
+
+// A sustained run of failures must not keep polling at the same fixed
+// UnlistenedInterval forever -- the gap between passes must grow -- and a
+// single successful pass must reset it back down.
+func TestOutageNoticeDrainerBacksOffTheUnlistenedPollOnSustainedFailure(t *testing.T) {
+	const base = 20 * time.Millisecond
+	dbDown := errors.New("database down")
+	sweeper := &sequencedSweeper{errs: []error{dbDown, dbDown, dbDown, nil, dbDown}}
+	l := &fakeListener{listenErr: errors.New("LISTEN not supported through this pooler")}
+	d := &OutageNoticeDrainer{Communications: sweeper, Publisher: &fakeOutagePublisher{},
+		CommunicationRecipients: []string{"sre@wso2.com"},
+		Listener:                l, Interval: time.Hour, UnlistenedInterval: base}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Run(ctx)
+
+	// 5 calls: 3 failures (gaps growing 1x/2x/4x base), a success (gap still
+	// 4x base, the backoff computed before that pass ran), then one more
+	// failure whose NEXT gap resets back to 1x base.
+	deadline := time.Now().Add(5 * time.Second)
+	for sweeper.callCount() < 5 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if n := sweeper.callCount(); n < 5 {
+		t.Fatalf("only %d calls within the deadline, want 5", n)
+	}
+	cancel()
+
+	calls := sweeper.snapshot()
+	gap := func(i int) time.Duration { return calls[i].Sub(calls[i-1]) }
+	// Generous lower bounds only -- real scheduling jitter runs long, never short.
+	if g := gap(1); g < base {
+		t.Errorf("gap after 1st failure = %s, want >= %s (base)", g, base)
+	}
+	if g := gap(2); g < 2*base {
+		t.Errorf("gap after 2nd consecutive failure = %s, want >= %s (2x base)", g, 2*base)
+	}
+	if g := gap(3); g < 4*base {
+		t.Errorf("gap after 3rd consecutive failure = %s, want >= %s (4x base)", g, 4*base)
+	}
+	// Pass 4 (index 4) follows pass 3's success, so it waits the reset base
+	// delay, not a continuation of the pre-success backoff.
+	if g := gap(4); g < base || g >= 2*base {
+		t.Errorf("gap after a successful pass = %s, want in [%s, %s) (reset to base)", g, base, 2*base)
 	}
 }
 

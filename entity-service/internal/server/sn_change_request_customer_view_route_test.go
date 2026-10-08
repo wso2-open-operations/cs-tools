@@ -48,7 +48,7 @@ const (
 	snRouteCustomerClient = "route-customer-portal-backend"
 	snRouteCSMClient      = "route-csm-portal-backend"
 	snRouteM2MClient      = "route-internal-m2m"
-	snRouteProject        = "5aeff120-1b74-c210-2649-97a234bcb54a"
+	snRouteProject        = "00000000-0000-4000-8000-000000000001"
 )
 
 var snRouteStates = []struct {
@@ -103,7 +103,7 @@ func newSNRouteEnv(t *testing.T) *snRouteEnv {
 			rows = append(rows, map[string]any{
 				"id": fmt.Sprintf("%032x", i+1), "number": fmt.Sprintf("CR-FAKE-%02d", i+1), "title": "Example change " + st.label,
 				"createdOn": "2026-01-01 00:00:00",
-				"project":   map[string]any{"id": "5aeff1201b74c210264997a234bcb54a", "name": "Example Corp Platform"},
+				"project":   map[string]any{"id": "00000000000040008000000000000001", "name": "Example Corp Platform"},
 				"state":     map[string]any{"label": st.label},
 			})
 		}

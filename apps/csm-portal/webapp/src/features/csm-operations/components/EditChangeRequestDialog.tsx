@@ -69,9 +69,15 @@ import {
   customerProjectLockedReason,
   customerRequirementOnceSavedHelper,
   customerReviewLockedReason,
+  EMERGENCY_CUSTOMER_STEPS_HELPER,
+  isChangeRequestCreationPhase,
+  isEmergencyChangeRequestType,
 } from "@features/csm-operations/utils/changeRequests";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
+
+/** The one line saying why an Emergency change's two customer boxes are off (their `aria-describedby`). */
+const EMERGENCY_NOTE_ID = "cr-edit-customer-steps-emergency-note";
 
 interface EditChangeRequestDialogProps {
   cr: BeChangeRequestDetail;
@@ -189,6 +195,12 @@ function useRichTextPlanField(storedHtml?: string | null): RichTextPlanField {
  * (`customerApprovalLockedReason` and friends) exactly as the backend decides it;
  * the backend remains the authority and its 400 shows in `saveError`.
  *
+ * An EMERGENCY change acts without customer consent, so both boxes are disabled
+ * and unticked, in every state, with one line saying so. A change of that type
+ * raised before the rule that still has a box ticked in New opens with it off
+ * (saving clears it); after New nothing can untick it (add-only), so a ticked box
+ * is shown as stored, disabled.
+ *
  * Deliberately NOT here, even though the backend's write contract accepts
  * them: `priorityKey` (no metadata endpoint yet for the picker),
  * `comment`/`workNote` (these append journal entries, which the Comments tab
@@ -228,20 +240,33 @@ export default function EditChangeRequestDialog({
   const initialIsPlanningVisibleToCustomers = cr.isPlanningVisibleToCustomers ?? false;
   const initialCustomerApprovalRequired = cr.customerApprovalRequired ?? false;
   const initialCustomerReviewRequired = cr.customerReviewRequired ?? false;
+  // Emergency: no customer steps (see the doc comment above). In New the form seeds
+  // them OFF, so a leftover tick from before the rule is cleared by saving.
+  const isEmergency = isEmergencyChangeRequestType(cr.type);
+  const emergencyClearsCustomerSteps = isEmergency && isChangeRequestCreationPhase(cr.state);
   // After New the customer's part is add-only (see the rules in utils/changeRequests.ts):
   // a ticked box is read-only, an unticked one may still be ticked until the gate it
   // controls has passed and only when a Customer Project is set. The backend refuses
   // anything else (400) and stays the authority; the control is disabled up front
   // with the reason, computed here from the same inputs (state, stored value, project).
   const hasStoredProject = !!cr.project?.id;
-  const customerApprovalLocked = customerApprovalLockedReason(cr.state, {
-    stored: initialCustomerApprovalRequired,
-    hasProject: hasStoredProject,
-  });
-  const customerReviewLocked = customerReviewLockedReason(cr.state, {
-    stored: initialCustomerReviewRequired,
-    hasProject: hasStoredProject,
-  });
+  // An Emergency change's unticked box is off for the Emergency rule (the line under
+  // the boxes), not for one of these reasons; a box a change of that type still has
+  // ticked from before the rule keeps its add-only one.
+  const customerApprovalLocked =
+    isEmergency && !initialCustomerApprovalRequired
+      ? null
+      : customerApprovalLockedReason(cr.state, {
+          stored: initialCustomerApprovalRequired,
+          hasProject: hasStoredProject,
+        });
+  const customerReviewLocked =
+    isEmergency && !initialCustomerReviewRequired
+      ? null
+      : customerReviewLockedReason(cr.state, {
+          stored: initialCustomerReviewRequired,
+          hasProject: hasStoredProject,
+        });
   const [plannedStart, setPlannedStart] = useState(initialPlannedStart);
   const [plannedEnd, setPlannedEnd] = useState(initialPlannedEnd);
   const [assignedTeamId, setAssignedTeamId] = useState(initialAssignedTeamId);
@@ -268,10 +293,10 @@ export default function EditChangeRequestDialog({
     initialIsPlanningVisibleToCustomers,
   );
   const [customerApprovalRequired, setCustomerApprovalRequired] = useState(
-    initialCustomerApprovalRequired,
+    !emergencyClearsCustomerSteps && initialCustomerApprovalRequired,
   );
   const [customerReviewRequired, setCustomerReviewRequired] = useState(
-    initialCustomerReviewRequired,
+    !emergencyClearsCustomerSteps && initialCustomerReviewRequired,
   );
   const rollbackPlan = useRichTextPlanField(cr.rollbackPlan);
   const testPlan = useRichTextPlanField(cr.testPlan);
@@ -445,13 +470,16 @@ export default function EditChangeRequestDialog({
     const control = (
       <FormControlLabel
         sx={{ alignItems: "flex-start", m: 0 }}
-        disabled={isSaving || !!lockedReason}
+        disabled={isSaving || !!lockedReason || isEmergency}
         control={
           <Checkbox
             size="small"
             checked={checked}
             onChange={(e) => onChange(e.target.checked)}
-            inputProps={{ "aria-label": label, "aria-describedby": `${id}-desc` }}
+            inputProps={{
+              "aria-label": label,
+              "aria-describedby": isEmergency ? `${id}-desc ${EMERGENCY_NOTE_ID}` : `${id}-desc`,
+            }}
           />
         }
         label={
@@ -626,7 +654,7 @@ export default function EditChangeRequestDialog({
             customerApprovalRequired,
             setCustomerApprovalRequired,
             customerApprovalLocked,
-            customerRequirementOnceSavedHelper(cr.state, initialCustomerApprovalRequired),
+            isEmergency ? null : customerRequirementOnceSavedHelper(cr.state, initialCustomerApprovalRequired),
           )}
           {renderCustomerStepCheckbox(
             "cr-edit-customer-review",
@@ -635,7 +663,12 @@ export default function EditChangeRequestDialog({
             customerReviewRequired,
             setCustomerReviewRequired,
             customerReviewLocked,
-            customerRequirementOnceSavedHelper(cr.state, initialCustomerReviewRequired),
+            isEmergency ? null : customerRequirementOnceSavedHelper(cr.state, initialCustomerReviewRequired),
+          )}
+          {isEmergency && (
+            <FormHelperText id={EMERGENCY_NOTE_ID} sx={{ mx: 0 }}>
+              {EMERGENCY_CUSTOMER_STEPS_HELPER}
+            </FormHelperText>
           )}
           <TextField
             label="Rollback duration"

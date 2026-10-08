@@ -70,7 +70,6 @@ func TestToDownstreamUTCDateTime(t *testing.T) {
 			"infinity",
 			"now",
 			"tomorrow",
-			"1999-12-31T23:59:59Z", // RFC 3339, but outside the years 2000 to 2100
 			"not a date",
 			"",
 		} {
@@ -86,6 +85,22 @@ func TestToDownstreamUTCDateTime(t *testing.T) {
 			}
 			if want := "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
 				t.Errorf("input %q: got msg %q, want %q", in, ve.Msg, want)
+			}
+		}
+	})
+
+	t.Run("rejects a year outside 2000 to 2100 and a zoneless fraction, saying which", func(t *testing.T) {
+		for in, want := range map[string]string{
+			"1999-12-31T23:59:59Z":  "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss (the year must be in 2000 to 2100)",
+			"1999-01-01 00:00:00":   "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss (the year must be in 2000 to 2100)",
+			"2101-01-01 00:00:00":   "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss (the year must be in 2000 to 2100)",
+			"2026-08-01 10:00:00.5": "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss (whole seconds only, no fractional second)",
+			"1999-01-01 00:00:00.5": "plannedEndDate must follow the format: YYYY-MM-DD HH:mm:ss (whole seconds only, no fractional second)",
+		} {
+			got, err := toDownstreamUTCDateTime("plannedEndDate", in)
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) || got != "" || ve.Msg != want {
+				t.Errorf("input %q: got %q, %v; want a ValidationError %q", in, got, err, want)
 			}
 		}
 	})
@@ -645,6 +660,30 @@ func TestSNChangeRequestService_CreateChangeRequest_RequiresType(t *testing.T) {
 	}
 }
 
+// TestSNChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefused: an
+// Emergency change takes no customer step, so the ServiceNow-only data source refuses a
+// create that ticks either box as the PostgreSQL ones do (before ServiceNow is called: the
+// client here is nil), rather than accepting and dropping it.
+func TestSNChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefused(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+	emergency := domain.ChangeRequestTypeEmergency
+	yes := true
+	const reason = "Emergency changes proceed without customer consent, so customer approval and customer review cannot be required"
+	for name, req := range map[string]domain.CreateChangeRequestRequest{
+		"approval": {Subject: "subject", Type: &emergency, CustomerApprovalRequired: &yes},
+		"review":   {Subject: "subject", Type: &emergency, CustomerReviewRequired: &yes},
+	} {
+		_, err := svc.CreateChangeRequest(contextWithUserIDToken("token"), req)
+		ve, ok := err.(*apierror.ValidationError)
+		if !ok {
+			t.Fatalf("%s: expected *apierror.ValidationError, got %T: %v", name, err, err)
+		}
+		if !strings.HasPrefix(ve.Msg, reason) {
+			t.Errorf("%s: message %q should give the reason %q", name, ve.Msg, reason)
+		}
+	}
+}
+
 // TestWithoutCustomerOutcomeStates: ServiceNow's own offered next states never
 // reach the portal with the two states only the CUSTOMER can reach in them --
 // "scheduled" (from any state, Customer Approval included: the customer's own
@@ -1063,8 +1102,15 @@ func TestSNPlannedTimestamp(t *testing.T) {
 		"2030-03-01T14:30:00+05:30": "2030-03-01 09:00:00",
 		"2030-03-01T04:00:00-05:00": "2030-03-01 09:00:00",
 		"2030-03-01T09:00:00.5Z":    "2030-03-01 09:00:00",
-		// The zoneless layout is forwarded as it always was, whatever its year.
-		"1999-01-01 00:00:00": "1999-01-01 00:00:00",
+		// The edges of the years every planned window is held to.
+		"2000-01-01 00:00:00": "2000-01-01 00:00:00",
+		"2100-12-31 23:59:59": "2100-12-31 23:59:59",
+		// Not spelled as the layout is, but no fraction (Go's parser takes a one-digit hour and more
+		// than one space): read as the PostgreSQL data source reads it and written back in the layout,
+		// not refused as a "fractional second" it does not have.
+		"2030-03-01 9:00:00":   "2030-03-01 09:00:00",
+		"2030-03-01 0:00:00":   "2030-03-01 00:00:00",
+		"2030-03-01  09:00:00": "2030-03-01 09:00:00",
 	} {
 		got, err := snPlannedTimestamp("plannedStartOn", in)
 		if err != nil {
@@ -1076,15 +1122,17 @@ func TestSNPlannedTimestamp(t *testing.T) {
 		}
 	}
 
+	const format = "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"
 	for _, in := range []string{
 		"infinity", "-infinity", "now", "today", "tomorrow", "epoch",
 		"2030-03-01",                // a date alone
 		"2030-03-01T09:00:00",       // a time with no zone designator
 		"2030-03-01 09:00:00 UTC",   // a zone name
 		"2030-03-01 09:00:00+05:30", // an offset on the zoneless layout
-		"1999-12-31T23:59:59Z",      // RFC 3339, outside the years 2000 to 2100
-		"2101-01-01T00:00:00Z",
 		" 2030-03-01T09:00:00Z",
+		"2030-3-01 09:00:00",   // a one-digit month: the parser does not take it (only the hour is lenient)
+		"2030-03-1 09:00:00",   // a one-digit day
+		"2030-03-01 09:00:00 ", // a trailing space
 		"",
 	} {
 		_, err := snPlannedTimestamp("plannedStartOn", in)
@@ -1093,7 +1141,33 @@ func TestSNPlannedTimestamp(t *testing.T) {
 			t.Errorf("input %q: want a ValidationError, got %v", in, err)
 			continue
 		}
-		if want := "plannedStartOn must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+		if ve.Msg != format {
+			t.Errorf("input %q: got msg %q, want %q", in, ve.Msg, format)
+		}
+	}
+
+	// A year outside 2000 to 2100 is refused in BOTH layouts (the zoneless one used to be forwarded
+	// as typed, whatever its year), and a zoneless value with a fractional second is refused
+	// (Go's parser takes one, ServiceNow's layout has none: "1999-01-01 00:00:00.5" used to be
+	// forwarded as typed and fail downstream with an opaque pattern error). Neither is forwarded.
+	for in, want := range map[string]string{
+		"1999-12-31T23:59:59Z":      format + " (the year must be in 2000 to 2100)",
+		"2101-01-01T00:00:00Z":      format + " (the year must be in 2000 to 2100)",
+		"1999-01-01 00:00:00":       format + " (the year must be in 2000 to 2100)",
+		"2101-01-01 00:00:00":       format + " (the year must be in 2000 to 2100)",
+		"2000-01-01T00:00:00+14:00": format + " (the year must be in 2000 to 2100)", // 1999-12-31T10:00Z
+		"2030-03-01 09:00:00.5":     format + " (whole seconds only, no fractional second)",
+		"2030-03-01 09:00:00.000":   format + " (whole seconds only, no fractional second)",
+		"1999-01-01 00:00:00.5":     format + " (whole seconds only, no fractional second)",
+		"2030-03-01 9:00:00.5":      format + " (whole seconds only, no fractional second)", // an odd spelling does not hide a real fraction
+	} {
+		got, err := snPlannedTimestamp("plannedStartOn", in)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) || got != "" {
+			t.Errorf("input %q: got %q, %v; want a ValidationError and nothing to forward", in, got, err)
+			continue
+		}
+		if ve.Msg != want {
 			t.Errorf("input %q: got msg %q, want %q", in, ve.Msg, want)
 		}
 	}
@@ -1162,7 +1236,7 @@ func TestSNChangeRequestService_PatchChangeRequest_PlannedWindowLayouts(t *testi
 	})
 
 	t.Run("anything else is refused and nothing is sent", func(t *testing.T) {
-		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00", "1999-12-31T23:59:59Z", ""} {
+		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00", ""} {
 			for _, which := range []string{"plannedStartOn", "plannedEndOn"} {
 				v := bad
 				var start, end *string
@@ -1178,6 +1252,35 @@ func TestSNChangeRequestService_PatchChangeRequest_PlannedWindowLayouts(t *testi
 					continue
 				}
 				if want := which + " must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+					t.Errorf("%s %q: got msg %q, want %q", which, bad, ve.Msg, want)
+				}
+			}
+		}
+	})
+
+	t.Run("a year outside 2000 to 2100 and a zoneless fractional second are refused, whichever field, and nothing is sent", func(t *testing.T) {
+		for bad, reason := range map[string]string{
+			"1999-12-31T23:59:59Z":  "the year must be in 2000 to 2100",
+			"1999-01-01 00:00:00":   "the year must be in 2000 to 2100",
+			"2101-01-01 00:00:00":   "the year must be in 2000 to 2100",
+			"1999-01-01 00:00:00.5": "whole seconds only, no fractional second",
+			"2030-03-01 09:00:00.5": "whole seconds only, no fractional second",
+		} {
+			for _, which := range []string{"plannedStartOn", "plannedEndOn"} {
+				v := bad
+				var start, end *string
+				if which == "plannedStartOn" {
+					start = &v
+				} else {
+					end = &v
+				}
+				_, calls, err := run(t, start, end)
+				var ve *apierror.ValidationError
+				if !errors.As(err, &ve) || calls != 0 {
+					t.Errorf("%s %q: err %v, downstream calls %d; want a ValidationError and none", which, bad, err, calls)
+					continue
+				}
+				if want := which + " must follow the format: YYYY-MM-DD HH:mm:ss (" + reason + ")"; ve.Msg != want {
 					t.Errorf("%s %q: got msg %q, want %q", which, bad, ve.Msg, want)
 				}
 			}
@@ -1260,7 +1363,7 @@ func TestSNChangeRequestService_CreateChangeRequest_PlannedWindowLayouts(t *test
 	})
 
 	t.Run("anything else is refused and nothing is sent", func(t *testing.T) {
-		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00", "1999-12-31T23:59:59Z"} {
+		for _, bad := range []string{"infinity", "now", "tomorrow", "2030-03-01", "2030-03-01T09:00:00"} {
 			for _, field := range []string{"plannedStartDate", "plannedEndDate"} {
 				req := base("2030-03-01 09:00:00", "2030-03-01 10:00:00")
 				if field == "plannedStartDate" {
@@ -1275,6 +1378,35 @@ func TestSNChangeRequestService_CreateChangeRequest_PlannedWindowLayouts(t *test
 					continue
 				}
 				if want := field + " must follow the format: YYYY-MM-DD HH:mm:ss"; ve.Msg != want {
+					t.Errorf("%s %q: got msg %q, want %q", field, bad, ve.Msg, want)
+				}
+			}
+		}
+	})
+
+	t.Run("a year outside 2000 to 2100 and a zoneless fractional second are refused, whichever field, and nothing is sent", func(t *testing.T) {
+		for bad, reason := range map[string]string{
+			"1999-12-31T23:59:59Z":  "the year must be in 2000 to 2100",
+			"1999-01-01 00:00:00":   "the year must be in 2000 to 2100",
+			"2101-01-01 00:00:00":   "the year must be in 2000 to 2100",
+			"1999-01-01 00:00:00.5": "whole seconds only, no fractional second",
+			"2030-03-01 09:00:00.5": "whole seconds only, no fractional second",
+		} {
+			for _, field := range []string{"plannedStartDate", "plannedEndDate"} {
+				v := bad
+				req := base("2030-03-01 09:00:00", "2030-03-01 10:00:00")
+				if field == "plannedStartDate" {
+					req.PlannedStartDate = &v
+				} else {
+					req.PlannedEndDate = &v
+				}
+				_, calls, err := run(t, req)
+				var ve *apierror.ValidationError
+				if !errors.As(err, &ve) || calls != 0 {
+					t.Errorf("%s %q: err %v, downstream calls %d; want a ValidationError and none", field, bad, err, calls)
+					continue
+				}
+				if want := field + " must follow the format: YYYY-MM-DD HH:mm:ss (" + reason + ")"; ve.Msg != want {
 					t.Errorf("%s %q: got msg %q, want %q", field, bad, ve.Msg, want)
 				}
 			}

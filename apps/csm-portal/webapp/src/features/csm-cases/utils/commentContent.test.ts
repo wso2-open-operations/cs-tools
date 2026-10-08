@@ -20,7 +20,10 @@ import {
   hasDisplayableContent,
   hasPublicComment,
   hasSingleCodeWrapper,
+  isGithubRaisedCaseNumber,
+  isMarkdownComment,
   linkifyBareUrls,
+  preprocessCommentBodyHtml,
   stripAllCodeBlocks,
   stripCodeWrapper,
   stripCustomerCommentAddedLabel,
@@ -169,5 +172,36 @@ describe("linkifyBareUrls", () => {
     const out = linkifyBareUrls(input);
     expect(out).not.toContain('<a href="https://example.com"><a href="https://example.com"');
     expect((out.match(/<a /g) ?? []).length).toBe(1);
+  });
+});
+
+describe("isGithubRaisedCaseNumber", () => {
+  it("recognises the numbers entity-service gives records raised from a GitHub issue", () => {
+    expect(isGithubRaisedCaseNumber("SR-GH-000012")).toBe(true);
+    expect(isGithubRaisedCaseNumber("CHG-GH-000003")).toBe(true);
+  });
+
+  it("does not match ordinary or missing numbers", () => {
+    expect(isGithubRaisedCaseNumber("CS0412345")).toBe(false);
+    expect(isGithubRaisedCaseNumber("WSO2-GH-000012")).toBe(false);
+    expect(isGithubRaisedCaseNumber(undefined)).toBe(false);
+  });
+});
+
+describe("isMarkdownComment / preprocessCommentBodyHtml", () => {
+  const issueBody = "### Request Details\n\ntesting\n\n### Priority\n\nCritical";
+
+  it("renders a markdown-marked body's headings instead of leaving them as text", () => {
+    const comment = { ...makeComment(issueBody), bodyFormat: "markdown" as const };
+    expect(isMarkdownComment(comment)).toBe(true);
+    const html = preprocessCommentBodyHtml(comment);
+    expect(html).toContain("<h3>Request Details</h3>");
+    expect(html).not.toContain("###");
+  });
+
+  it("leaves an unmarked body on the HTML path", () => {
+    const comment = makeComment(issueBody);
+    expect(isMarkdownComment(comment)).toBe(false);
+    expect(preprocessCommentBodyHtml(comment)).toContain("### Request Details");
   });
 });

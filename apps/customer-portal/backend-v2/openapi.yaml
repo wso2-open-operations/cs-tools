@@ -1915,9 +1915,14 @@ paths:
         isCustomerApproved (approve / reject while the change request is in
         Customer Approval), isCustomerReviewed (confirm / fail the review in
         Customer Review), or plannedStartOn and/or plannedEndOn ("propose new
-        implementation time" -- it sends the change request back through
-        approval, so the customer is asked again only once WSO2 has approved
-        the new time). An answer may carry expectedPlannedStartOn /
+        implementation time" -- a proposal is a START: the change request keeps
+        its planned length, so the portal sends the start plus the end that keeps
+        it (start + planned length) and entity-service refuses any other end; a
+        start alone is accepted too, an end alone is a 400. It moves nothing by
+        itself: the change request stays in Customer Approval, shows the
+        proposal as `customerProposal`, and WSO2 accepts it -- the change is
+        Scheduled for that time -- or proposes a different one and the customer
+        is asked again). An answer may carry expectedPlannedStartOn /
         expectedPlannedEndOn, the planned window the customer was shown: it is
         then recorded only while that is still the window (409 otherwise). Any
         other field is a 403 and nothing is forwarded; combining an answer with
@@ -1979,7 +1984,9 @@ paths:
             says which: `change_request_not_asked` (a contact the customer's request was
             never sent to) or `change_request_forbidden` (not a registered contact of the
             change request's project, its own creator, or a field a customer may not set).
-            The message is the same fixed text for all of them.
+            The message is fixed text, not the reason: the generic "forbidden" text for a
+            refusal entity-service made, and its own text ("Customers can only approve or
+            reject ...") for a field a customer may not set, which this API refuses itself.
           content:
             application/json:
               schema:
@@ -1999,8 +2006,11 @@ paths:
             (already answered, or nothing waits for an answer),
             `change_request_schedule_changed` (the window the answer names is no longer the
             change request's), `change_request_not_proposable` (a proposed time where none
-            can be proposed) or `change_request_on_hold` (a proposed time while WSO2 has the
-            change on hold).
+            can be proposed), `change_request_on_hold` (a proposed time while WSO2 has the
+            change on hold), `change_request_proposal_not_now` (a proposed time while an
+            approval that is not the customer's is also being asked) or
+            `change_request_no_planned_window` (a proposed time on a change request with no
+            planned window to move).
           content:
             application/json:
               schema:
@@ -2023,7 +2033,7 @@ paths:
       summary: Get a change request's approval stages.
       description: >-
         The customer's own stages (Customer Approval / Customer Review) are given
-        whole; WSO2's internal stages (Peer, CAB, ECAB, Review) are reduced by
+        whole; WSO2's internal stages (Peer, CAB, Review, and a historic ECAB) are reduced by
         entity-service to their label and status, with no approver names or ids.
       operationId: getChangeRequestsIdApprovals
       parameters:
@@ -6031,7 +6041,11 @@ components:
             the caller or a sibling contact, or the change request has left the state the
             answer belongs to), `change_request_not_proposable` (409: a proposed time on a
             change request that is not in Customer Approval or that nobody was asked to
-            approve), `change_request_not_asked` (403: a contact of the project whom the
+            approve), `change_request_proposal_not_now` (409: a proposed time while an
+            approval that is not the customer's is also being asked; the answer itself is
+            still possible), `change_request_no_planned_window` (409: a proposed time on a
+            change request with no planned window to move; the answer itself is still
+            possible), `change_request_not_asked` (403: a contact of the project whom the
             customer's request was never sent to) and `change_request_forbidden` (403:
             not a registered contact of the change request's project, its own creator, or
             a field a customer may not set). The list grows, so this is deliberately not
@@ -6373,6 +6387,8 @@ components:
         id:
           type: string
         label:
+          type: string
+        number:
           type: string
 
     CaseSummary:
@@ -8057,10 +8073,56 @@ components:
                 passed on). A held change refuses a proposed implementation time,
                 so the portal does not offer one; an answer is still accepted.
                 ABSENT when entity-service did not say, which is not "not held".
+            customerProposal:
+              $ref: '#/components/schemas/ChangeRequestCustomerProposal'
             approvedBy:
               $ref: '#/components/schemas/IdLabelRef'
             approvedOn:
               type: string
+
+    ChangeRequestCustomerProposal:
+      type: object
+      required: [startDate, answer]
+      description: >-
+        The conversation about a time a customer proposed (entity-service derives it from
+        the proposed start and its confirmation, customer_updated_on / customer_updated_date_confirmation);
+        present when one was. While `answer` is "pending" the change request is still in Customer
+        Approval and its planned window (startDate / endDate on the change itself) is still the one
+        WSO2 planned: a proposal changes nothing until WSO2 answers, and a customer who approves
+        approves THAT window, not the proposed one. Once WSO2 answers the window is either the
+        proposal (agreed: the change is scheduled for it) or WSO2's different time (disagreed: the
+        customer is asked again). No name or email of a proposer is ever passed on, nor anything
+        WSO2 knows about whether it can accept it.
+      properties:
+        startDate:
+          type: string
+          format: date-time
+          description: The proposed start (RFC 3339, UTC).
+        endDate:
+          type: string
+          format: date-time
+          description: >-
+            The proposed end -- the proposed start plus the planned length. Present only while
+            `answer` is "pending".
+        answer:
+          type: string
+          enum: [pending, agreed, disagreed, unanswered]
+          description: >-
+            pending: waits for WSO2. agreed: WSO2 accepted it. disagreed: WSO2 asked for a different
+            time. unanswered: history -- including a stored time that nobody is recorded as having
+            proposed (a date a WSO2 user wrote, or one left over from an older cycle): nothing waits
+            for WSO2 on a customer's account then, so it is never "pending" for a customer.
+        proposerRecorded:
+          type: boolean
+          description: >-
+            While pending: whether a registered contact is recorded as having proposed the time. A
+            pending proposal is only ever shown to a customer when somebody is, so it is true
+            whenever it is present here; `proposedByViewer` says whose proposal it is. (A time
+            nobody is recorded as having proposed reads `unanswered`, not pending, and carries
+            neither field.)
+        proposedByViewer:
+          type: boolean
+          description: While pending - whether the proposal is the signed-in customer's own.
 
     ChangeRequestUpdateResponse:
       type: object

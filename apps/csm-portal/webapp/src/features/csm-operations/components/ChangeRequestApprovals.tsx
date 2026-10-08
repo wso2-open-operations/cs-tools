@@ -109,7 +109,7 @@ interface ApproverTableRow {
   /** What clicking the Assignment group opens: the group page, the customer
    * group's contacts, or `null` (plain text) when the stage has neither. */
   groupTarget: ApprovalGroupTarget | null;
-  /** "Peer Approval" / "CAB Approval" / "ECAB Approval" / backend's own name. */
+  /** "Peer Approval" / "CAB Approval" / backend's own name ("ECAB Approval" on an older Emergency change). */
   stageName: string;
 }
 
@@ -182,7 +182,7 @@ function ApproverActionsCell({
   if (!decide || !isMyPendingApproval(approver, currentUserId)) {
     return <>—</>;
   }
-  // The creator can never approve or reject -- Peer, CAB and ECAB alike. Show
+  // The creator can never approve or reject -- Peer and CAB alike. Show
   // the controls disabled with the reason, rather than silently hiding them,
   // so it's clear why this pending row can't be decided by them.
   if (isCreator || !canDecide) {
@@ -326,8 +326,8 @@ export default function ChangeRequestApprovals({
       <Typography variant="subtitle2">Approvals</Typography>
       {isCreator && (
         <Alert severity="info">
-          You created this change request, so you can&apos;t approve or reject it (Peer, CAB or
-          ECAB). Another approver has to decide. You can still cancel it.
+          You created this change request, so you can&apos;t approve or reject it (Peer or CAB).
+          Another approver has to decide. You can still cancel it.
         </Alert>
       )}
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>

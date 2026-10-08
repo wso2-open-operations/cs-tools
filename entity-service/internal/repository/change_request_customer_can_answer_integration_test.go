@@ -401,53 +401,43 @@ func TestChangeRequestCustomerCanAnswerIntegration_NobodyWasAsked(t *testing.T) 
 	})
 }
 
-// A Re-schedule starts the customer's request over: false the moment it is
-// superseded, true again for the contacts once they are asked again.
+// A customer's proposal leaves their request live (they and their colleagues can
+// still answer the CURRENT plan); a Re-schedule or a counter-proposal with a new
+// window starts the request over -- the superseded rows can no longer answer, the fresh
+// ones can at once, no CAB in between -- and a decline that keeps the window leaves it
+// where it was.
 func TestChangeRequestCustomerCanAnswerIntegration_RescheduleFlips(t *testing.T) {
-	t.Run("Normal: back through CAB, then asked again", func(t *testing.T) {
+	t.Run("a proposal changes nothing about who can answer", func(t *testing.T) {
 		f := newCustomerGroupFlow(t)
-		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
-		f.setPlanned(id, rsStart1, rsEnd1)
-		f.driveToCustomerApproval(id)
+		id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
 		f.wantCanAnswer(id, "before the proposal", true, crScopeUserA1, crScopeUserA2)
 
-		receipt, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)})
+		receipt, err := f.proposeAs(id, crScopeUserA1, rsStart2)
 		if err != nil {
 			t.Fatalf("proposal: %v", err)
 		}
-		if receipt.CustomerCanAnswer == nil || *receipt.CustomerCanAnswer {
-			t.Fatalf("customerCanAnswer in the proposal's receipt = %v, want false (the change is back in Authorize)", receipt.CustomerCanAnswer)
-		}
-		f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
-		f.wantCanAnswer(id, "while the new plan awaits CAB", false, crScopeUserA1, crScopeUserA2)
-		f.wantApproveRefused("answering while the new plan awaits CAB", id, crScopeUserA2)
-
-		if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-			t.Fatalf("CAB approval of the new plan: %v", err)
-		}
-		f.expect(id, "after the new CAB approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
-		f.wantCanAnswer(id, "once the customer is asked again", true, crScopeUserA1, crScopeUserA2)
-		if _, err := f.approveAs(id, crScopeUserA2, true); err != nil {
-			t.Fatalf("approval of the new plan: %v", err)
-		}
-		f.wantCanAnswer(id, "after approving the new plan", false, crScopeUserA1, crScopeUserA2)
-	})
-
-	t.Run("Standard: stays in Customer Approval, asked again at once", func(t *testing.T) {
-		f := newCustomerGroupFlow(t)
-		id := f.createWithProject(domain.ChangeRequestTypeStandard, sp(crScopeProjectA), true, false)
-		f.setPlanned(id, rsStart1, rsEnd1)
-		f.requestApproval(id)
-		f.wantCanAnswer(id, "before the proposal", true, crScopeUserA1, crScopeUserA2)
-
-		receipt, err := f.patchAsContact(id, crScopeUserA2, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)})
-		if err != nil {
-			t.Fatalf("proposal: %v", err)
+		if receipt.CustomerCanAnswer == nil || !*receipt.CustomerCanAnswer {
+			t.Fatalf("customerCanAnswer in the proposal's receipt = %v, want true (the change is still in Customer Approval)", receipt.CustomerCanAnswer)
 		}
 		f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
-		if receipt.CustomerCanAnswer == nil || !*receipt.CustomerCanAnswer {
-			t.Fatalf("customerCanAnswer in the proposal's receipt = %v, want true (the customer is asked again)", receipt.CustomerCanAnswer)
+		f.wantCanAnswer(id, "while the proposal waits", true, crScopeUserA1, crScopeUserA2)
+		// Approving now approves the plan the customer sees, not the proposed time.
+		if _, err := f.approveAs(id, crScopeUserA2, true); err != nil {
+			t.Fatalf("approval of the current plan while a proposal waits: %v", err)
 		}
+		f.expect(id, "after approving", "SCHEDULED", "implement", "canceled")
+		f.wantPlanned(id, "after approving", rsStart1, rsEnd1)
+		f.wantCanAnswer(id, "after approving the current plan", false, crScopeUserA1, crScopeUserA2)
+	})
+
+	t.Run("a counter with a new window: the fresh request, true at once", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.reachCustomerApproval(domain.ChangeRequestTypeStandard)
+		f.mustPropose(id, crScopeUserA2, rsStart2)
+		if err := f.counter(id, sp(rsStart3), sp(rsEnd3)); err != nil {
+			t.Fatalf("counter: %v", err)
+		}
+		f.expect(id, "after the counter", "CUSTOMER_APPROVAL", "authorize", "canceled")
 		// The superseded request's rows are cancelled and fresh ones are live.
 		custom := f.customerStages(id)
 		if len(custom) != 2 {
@@ -455,7 +445,37 @@ func TestChangeRequestCustomerCanAnswerIntegration_RescheduleFlips(t *testing.T)
 		}
 		assertApprovers(t, "superseded request", custom[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
 		assertApprovers(t, "fresh request", custom[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
-		f.wantCanAnswer(id, "after the proposal", true, crScopeUserA1, crScopeUserA2)
+		f.wantCanAnswer(id, "after the counter", true, crScopeUserA1, crScopeUserA2)
+	})
+
+	t.Run("a decline that keeps the window leaves the request alone", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
+		f.mustPropose(id, crScopeUserA1, rsStart2)
+		stages := f.stageLabels(id)
+		if err := f.counter(id, nil, nil); err != nil {
+			t.Fatalf("decline: %v", err)
+		}
+		f.wantConversation(id, "after the decline", rsStart2, "DISAGREE")
+		if got := f.stageLabels(id); got != stages {
+			t.Fatalf("a decline changed the stages: %s, was %s", got, stages)
+		}
+		assertApprovers(t, "the customers' request after a decline", f.customerStages(id)[0].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
+		f.wantCanAnswer(id, "after the decline", true, crScopeUserA1, crScopeUserA2)
+	})
+
+	t.Run("a plain Re-schedule with no proposal is the same re-ask", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
+		stages := f.stageLabels(id)
+		if err := f.reschedule(id, sp(rsStart2), sp(rsEnd2)); err != nil {
+			t.Fatalf("Re-schedule: %v", err)
+		}
+		f.expect(id, "after Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
+		if got := f.stageLabels(id); got != stages+",Customer Approval" {
+			t.Fatalf("stages after Re-schedule = %s, want %s and one fresh customer stage", got, stages)
+		}
+		f.wantCanAnswer(id, "after Re-schedule", true, crScopeUserA1, crScopeUserA2)
 	})
 }
 

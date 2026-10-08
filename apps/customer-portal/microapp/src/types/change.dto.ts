@@ -34,6 +34,18 @@ interface ChangeRequestSummaryDto {
   updatedOn: string;
 }
 
+/**
+ * The time a customer proposed, and where WSO2's answer to it stands. A proposal
+ * moves the START only; the change request stays in Customer Approval until WSO2
+ * answers it (`agreed` -> Scheduled; `disagreed` -> the customers are asked again).
+ */
+export interface ChangeRequestCustomerProposalDto {
+  startDate: string;
+  endDate?: string | null;
+  answer: "pending" | "agreed" | "disagreed" | "unanswered";
+  proposedByViewer?: boolean;
+}
+
 export interface ChangeRequestDto {
   id: string;
   number: string;
@@ -47,6 +59,8 @@ export interface ChangeRequestDto {
   duration: string | null;
   hasCustomerApproved: boolean;
   hasCustomerReviewed: boolean;
+  /** Omitted when nothing was ever proposed (or the data source cannot say). */
+  customerProposal?: ChangeRequestCustomerProposalDto | null;
   impact: EntityReference | null;
   state: EntityReference | null;
   type: EntityReference | null;

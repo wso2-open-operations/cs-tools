@@ -188,7 +188,7 @@ export class NoveraChatPage {
    * reading straight after the click can return an empty list while the portal
    * mounts.
    *
-   * Drops the "All States" entry, which means *no* filter — choosing it on an
+   * Drops the "All Statuses" entry, which means *no* filter — choosing it on an
    * unfiltered list sends no request at all, so a caller picking the first option
    * would wait for something that never happens.
    *

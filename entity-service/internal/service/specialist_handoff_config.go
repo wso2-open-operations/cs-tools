@@ -79,6 +79,22 @@ type SpecialistHandoffConfigTeam struct {
 	GroupID string `json:"groupId"`
 }
 
+// teamForGroup is the product and team whose Special Ops group groupID is,
+// or nil, nil for any other group.
+func (c *SpecialistHandoffConfig) teamForGroup(groupID string) (*SpecialistHandoffProduct, *SpecialistHandoffConfigTeam) {
+	if c == nil || groupID == "" {
+		return nil, nil
+	}
+	for i := range c.Products {
+		for j := range c.Products[i].Teams {
+			if strings.EqualFold(c.Products[i].Teams[j].GroupID, groupID) {
+				return &c.Products[i], &c.Products[i].Teams[j]
+			}
+		}
+	}
+	return nil, nil
+}
+
 // ParseSpecialistHandoffConfig reads and validates SPECIALIST_HANDOFF_CONFIG.
 // An empty value is a valid, empty configuration: no service can be handed
 // off. Ids are normalised to lower case.

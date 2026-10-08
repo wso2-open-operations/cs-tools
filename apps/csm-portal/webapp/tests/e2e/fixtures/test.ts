@@ -36,7 +36,7 @@ import path from "node:path";
 //
 //   crApprover          jane.doe@example.com          internal; the requester persona
 //                                                     (in no approval group)
-//   crInternalApprover  alice.perera@example.com      internal; peer / CAB / ECAB
+//   crInternalApprover  alice.perera@example.com      internal; peer / CAB
 //                                                     approver (also bob.fernando,
 //                                                     carol.silva hold the same seats)
 //

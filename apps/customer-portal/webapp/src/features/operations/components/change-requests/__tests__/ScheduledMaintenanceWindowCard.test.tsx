@@ -83,4 +83,57 @@ describe("ScheduledMaintenanceWindowCard", () => {
       }),
     ).not.toBeInTheDocument();
   });
+
+  describe("a time the customer proposed", () => {
+    const approval = { id: "5", label: "Customer Approval" };
+    const renderCard = (overrides: Partial<ChangeRequestDetails>) =>
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <ScheduledMaintenanceWindowCard changeRequest={{ ...mockChangeRequest, ...overrides }} />
+        </ThemeProvider>,
+      );
+    const proposal = (answer: "pending" | "agreed" | "disagreed" | "unanswered") => ({
+      startDate: "2026-03-02 09:00:00",
+      answer,
+    });
+
+    it("shows the proposed start under the planned start while WSO2 has not answered, and keeps the planned window as it is", () => {
+      renderCard({ state: approval, customerProposal: proposal("pending") });
+      expect(screen.getByText("Planned Maintenance Window")).toBeInTheDocument();
+      expect(screen.getByText(/^Proposed start: .*March 2, 2026.* \(waiting for WSO2\)$/)).toBeInTheDocument();
+      expect(screen.getByText(/February 28, 2026/)).toBeInTheDocument();
+    });
+
+    it("says WSO2 accepted the proposed start once it did, and nothing is pending any more", () => {
+      renderCard({
+        startDate: "2026-03-02 09:00:00",
+        endDate: "2026-03-02 11:00:00",
+        customerProposal: proposal("agreed"),
+      });
+      expect(screen.getByText("Scheduled Maintenance Window")).toBeInTheDocument();
+      expect(screen.getByText(/^WSO2 accepted the proposed start, .*March 2, 2026.*\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/waiting for WSO2/)).not.toBeInTheDocument();
+    });
+
+    it("does not say WSO2 accepted it when the change request is back in Customer Approval (the customers are asked again)", () => {
+      renderCard({ state: approval, customerProposal: proposal("agreed") });
+      expect(screen.getByText("Planned Maintenance Window")).toBeInTheDocument();
+      expect(screen.queryByText(/WSO2 accepted/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Proposed start:/)).not.toBeInTheDocument();
+    });
+
+    it("says nothing for a proposal that was declined, never answered or is not there", () => {
+      for (const customerProposal of [proposal("disagreed"), proposal("unanswered"), null, undefined]) {
+        const { unmount } = renderCard({ state: approval, customerProposal });
+        expect(screen.queryByText(/Proposed start:/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/WSO2 accepted/)).not.toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it("does not show a pending answer left on a change request that is no longer in Customer Approval", () => {
+      renderCard({ customerProposal: proposal("pending") });
+      expect(screen.queryByText(/Proposed start:/)).not.toBeInTheDocument();
+    });
+  });
 });

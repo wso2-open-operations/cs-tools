@@ -230,12 +230,34 @@ func main() {
 	// work_item's RLS insert policy (0147) admits it only as internal.
 	incidentReportCtx, stopIncidentReport := context.WithCancel(repository.WithSystemIdentity(context.Background()))
 	defer stopIncidentReport()
+	var specialOpsPublisher service.EventPublisherService
 	if pool != nil {
 		// Dual-write creates the workaround problem in the resolve request,
 		// in ServiceNow and Postgres (workaround_problem.go), not here.
 		incidentReportFlows := service.NewIncidentReportService()
 		if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
 			incidentReportFlows = service.NewDualWriteIncidentReportService()
+		}
+		// incident.special_ops_alert: an incident's assignment group changing
+		// to a Special Ops team's group (migration 0207 records it) is
+		// published on the operations topic for csm-notification-service.
+		// Needs that topic; the teams are SPECIALIST_HANDOFF_CONFIG's.
+		switch handoffTeams, err := service.ParseSpecialistHandoffConfig(cfg.SpecialistHandoffConfig); {
+		case err != nil:
+			log.Printf("special ops alerts off: SPECIALIST_HANDOFF_CONFIG is invalid: %v", err)
+		case cfg.SREEventHubTopic == "" || cfg.EventHubBroker == "" || !cfg.EventPublishingEnabled:
+			log.Printf("special ops alerts off: SRE_EVENT_HUB_TOPIC, EVENT_HUB_BROKER or EVENT_PUBLISHING_ENABLED is not set")
+		default:
+			specialOpsPublisher = service.NewEventPublisherService(
+				eventbus.NewProducer(eventbus.Config{
+					Broker:           cfg.EventHubBroker,
+					ConnectionString: cfg.EventHubConnectionString,
+					Topic:            cfg.SREEventHubTopic,
+				}),
+				service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(pool)),
+			)
+			incidentReportFlows = service.WithSpecialOpsAlerts(incidentReportFlows, specialOpsPublisher, handoffTeams)
+			log.Printf("special ops alerts on: incident.special_ops_alert to topic %q", cfg.SREEventHubTopic)
 		}
 		incidentReportDrainer := service.NewIncidentReportDrainer(
 			repository.NewIncidentReportRepository(repository.NewScoped(pool)),
@@ -294,6 +316,11 @@ func main() {
 	stopCRNotices()
 	if crPublisher != nil {
 		crPublisher.Close()
+	}
+	// Same for the incident report drainer and its special ops alert producer.
+	stopIncidentReport()
+	if specialOpsPublisher != nil {
+		specialOpsPublisher.Close()
 	}
 	log.Println("server stopped")
 }

@@ -19,6 +19,7 @@ import {
   approvalStageLabel,
   changeRequestStateLabel,
   isChangeRequestOffRampState,
+  isEmergencyChangeRequestType,
 } from "@features/csm-operations/utils/changeRequests";
 
 /**
@@ -160,7 +161,8 @@ function customerRejectedApproval(approvals?: readonly StageEvidence[]): boolean
  *    part of moving the change INTO S, so every state before S was passed
  *    (the change may have been canceled while in S itself, so S is not);
  *  - the stage for S is APPROVED and approving it moves the change out of S
- *    (Peer, CAB / ECAB and the two customer stages do): S was passed too. The
+ *    (Peer, CAB (an older Emergency change's ECAB one too) and the two customer
+ *    stages do): S was passed too. The
  *    Review stage is the exception: approving it only records the decision
  *    (the engineer then moves the change on), so a change can sit in Review
  *    with its Review stage approved and be canceled there;
@@ -173,8 +175,9 @@ function customerRejectedApproval(approvals?: readonly StageEvidence[]): boolean
  * proves only that it was reached, a change with no stage rows at all
  * (a Standard change, a project without registered customer contacts, a change
  * canceled at New) proves nothing, and the absence of a row proves nothing
- * either. A re-scheduled change that is canceled back at Authorize still
- * counts its first pass through Customer Approval as passed -- it was.
+ * either. A change that an older Re-schedule sent back to Authorize (a Re-schedule
+ * no longer leaves Customer Approval) and that is canceled there still counts its
+ * first pass through Customer Approval as passed -- it was.
  */
 function provenPassedIndex(approvals: readonly StageEvidence[] | undefined, customerApproved?: boolean): number {
   let passed = customerApproved ? HAPPY_PATH.indexOf("customer_approval") : -1;
@@ -194,9 +197,20 @@ export interface BuildChangeRequestLifecycleInput {
   customerApprovalRequired?: boolean;
   /** The change's "Customer Review" checkbox; `undefined` = unknown. */
   customerReviewRequired?: boolean;
-  /** `GET /change-requests/{id}/approvals`, when loaded. Only read for a rollback or canceled change. */
+  /**
+   * The change's type (`"emergency"`, `"normal"`, ...); `undefined` = unknown. An
+   * Emergency change has no Assess step (it goes from New straight to Authorize, for
+   * the CAB alone), so that stage reads `not-taken` on its line, in every state but
+   * Assess itself (an Emergency change sitting in Assess, however it got there,
+   * is shown where it is).
+   */
+  type?: string | null;
+  /**
+   * `GET /change-requests/{id}/approvals`, when loaded. Read for a rollback or canceled change, and, on an
+   * Emergency change, to tell a customer gate it went through from one it never had.
+   */
   approvals?: readonly StageEvidence[];
-  /** The change's `hasCustomerApproved`: the customer's approval was recorded. Only read for a canceled change. */
+  /** The change's `hasCustomerApproved`: the customer's approval was recorded. Read for a canceled change and for an Emergency change's line. */
   customerApproved?: boolean;
   /**
    * Whether the change's project has registered customer contacts (its
@@ -215,8 +229,17 @@ export interface BuildChangeRequestLifecycleInput {
  *  - Customer Approval / Customer Review are optional (the change's two
  *    checkboxes). A stage whose checkbox is explicitly `false` is left off
  *    unless the change is in that very state; an unknown (`undefined`) flag
- *    keeps the stage.
+ *    keeps the stage. An EMERGENCY change is the exception: it acts without
+ *    customer consent and the flow ignores its boxes, so neither stage is on its
+ *    line unless the record shows the change went there (it is in that state, the
+ *    customer's approval is on record, or a stage row of that gate exists: a
+ *    change raised before the rule).
  *  - Rollback and Canceled are always on the line.
+ *  - Assess stays on the line of an Emergency change but reads `not-taken` (the
+ *    same muted, dashed marker the other stages the change does not take get): the
+ *    change goes from New straight to Authorize, with a single CAB approval. That
+ *    holds in every state, rolled back or canceled included, unless the change is
+ *    in Assess itself.
  *
  * Statuses by the change's state (a stage left off the line has no row):
  *
@@ -261,19 +284,33 @@ export function buildChangeRequestLifecycle({
   state,
   customerApprovalRequired,
   customerReviewRequired,
+  type,
   approvals,
   customerApproved,
   hasCustomerContacts,
 }: BuildChangeRequestLifecycleInput): ChangeRequestLifecycleNode[] {
+  const emergency = isEmergencyChangeRequestType(type);
+
   const onLine = (s: BeChangeRequestState): boolean => {
-    if (s === "customer_approval") return customerApprovalRequired !== false || state === s;
-    if (s === "customer_review") return customerReviewRequired !== false || state === s;
-    return true;
+    if (s !== "customer_approval" && s !== "customer_review") return true;
+    // An Emergency change acts without customer consent: whatever its boxes hold, the flow never asks the customer,
+    // so a customer stage is on its line only when the record shows the change went there (it is in that state, or the
+    // customer's outcome / a stage row of that gate is on record: a change raised before the rule).
+    if (emergency) {
+      return (
+        state === s ||
+        (s === "customer_approval" && customerApproved === true) ||
+        !!approvals?.some((row) => stageState(row) === s)
+      );
+    }
+    return (s === "customer_approval" ? customerApprovalRequired : customerReviewRequired) !== false || state === s;
   };
 
   const customerApprovalAt = HAPPY_PATH.indexOf("customer_approval");
 
   const statusOf = (s: BeChangeRequestState): ChangeRequestLifecycleStatus => {
+    // An Emergency change never takes Assess (its one approval is the CAB's, in Authorize).
+    if (emergency && s === "assess" && state !== s) return "not-taken";
     const exception = isChangeRequestOffRampState(s);
     if (state === "rollback" || state === "canceled") {
       if (s === state) return "current";

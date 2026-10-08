@@ -21,7 +21,9 @@ import {
   CHANGE_REQUEST_ACTION_FAILED_MESSAGE,
   CHANGE_REQUEST_ANSWER_STALE_MESSAGE,
   CHANGE_REQUEST_NOT_A_CONTACT_MESSAGE,
+  CHANGE_REQUEST_NO_WINDOW_MESSAGE,
   CHANGE_REQUEST_ON_HOLD_MESSAGE,
+  CHANGE_REQUEST_PROPOSAL_NOT_NOW_MESSAGE,
   CHANGE_REQUEST_SCHEDULE_CHANGED_MESSAGE,
   ChangeRequestErrorCode,
 } from "@features/operations/utils/changeRequests";
@@ -101,90 +103,121 @@ describe("ProposeNewImplementationTimeModal", () => {
     clearUserPreferredTimeZone();
   });
 
-  it("renders a labelled dialog that says it proposes a time, reviewed internally first", () => {
+  it("renders a labelled dialog that says it proposes a start, not an approval, and promises no CAB round trip", () => {
     renderModal();
     const dialog = screen.getByRole("dialog", { name: "Propose New Implementation Time" });
     expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByText(/proposing a new time, not approving one/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/WSO2 will review it internally first/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/you will then be asked to approve the new time/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/proposing a new start time, not approving one/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/WSO2 will either accept it or suggest a different time/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/planned length of 2 hours stays the same/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/To ask for a different length, contact WSO2/)).toBeInTheDocument();
+    const notice = within(dialog).getByRole("note");
+    expect(notice).not.toHaveTextContent(/internal/i);
+    expect(notice).not.toHaveTextContent(/approval again/i);
+    expect(notice).not.toHaveTextContent(/CAB/);
   });
 
-  it("prefills the start and the end from the current window, in the viewer's time zone", () => {
+  it("says the same for every change type: no copy depends on Normal, Standard or Emergency", () => {
+    for (const label of ["Normal", "Standard", "Emergency"]) {
+      const { unmount } = render(
+        <ProposeNewImplementationTimeModal
+          open
+          onClose={() => {}}
+          changeRequest={{ ...(changeRequest as object), type: { id: label, label } } as never}
+        />,
+      );
+      expect(screen.getByRole("note"), label).toHaveTextContent(/WSO2 will either accept it or suggest a different time/);
+      expect(screen.getByRole("note"), label).not.toHaveTextContent(/internally/);
+      unmount();
+    }
+  });
+
+  it("prefills the start from the current window, and shows the end it implies, in the viewer's time zone", () => {
     renderModal();
     expect(startInput().value).toBe("2026-06-10T10:00");
     expect(endInput().value).toBe("2026-06-10T12:00");
     expect(startInput()).toBeRequired();
-    expect(endInput()).toBeRequired();
     expect(screen.getByText(/Asia\/Colombo/)).toBeInTheDocument();
+    expect(screen.getByText("Same length as the planned window (2 hours)")).toBeInTheDocument();
   });
 
-  it("leaves both fields empty when the change request has no window yet", () => {
+  it("shows the end as read-only: it is not asked for, so it cannot be edited or required", () => {
+    renderModal();
+    const end = endInput();
+    expect(end).toHaveAttribute("readonly");
+    expect(end).toHaveAttribute("aria-readonly", "true");
+    expect(end).not.toBeRequired();
+    // Not disabled: a disabled field loses its contrast and is skipped by assistive technology.
+    expect(end).not.toBeDisabled();
+    // A change event on a read-only field is not a way in: what shows is always
+    // the end the start implies.
+    setValue(end, "2026-06-10T18:00");
+    expect(end.value).toBe("2026-06-10T12:00");
+    setValue(startInput(), "2026-06-12T09:00");
+    expect(end.value).toBe("2026-06-12T11:00");
+  });
+
+  it("leaves the start empty, and the end with it, when the change request has no window yet, and says it cannot be proposed", () => {
     renderModal({ startDate: "", endDate: "" });
     expect(startInput().value).toBe("");
     expect(endInput().value).toBe("");
+    expect(startInput()).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(CHANGE_REQUEST_NO_WINDOW_MESSAGE);
+    expect(screen.getByRole("button", { name: "Submit Proposal" })).toBeDisabled();
+    expect(screen.getByRole("note")).not.toHaveTextContent(/planned length of/);
   });
 
-  it("moves the end with the start, keeping the length, until the end is edited by hand", () => {
+  it("moves the end with the start, keeping the planned length", () => {
     renderModal();
     setValue(startInput(), "2026-06-12T09:00");
     expect(endInput().value).toBe("2026-06-12T11:00");
-
-    setValue(endInput(), "2026-06-12T15:00");
-    setValue(startInput(), "2026-06-13T09:00");
-    expect(endInput().value).toBe("2026-06-12T15:00");
+    setValue(startInput(), "2026-06-13T22:30");
+    expect(endInput().value).toBe("2026-06-14T00:30");
   });
 
-  it("does not invent an end when the change request has no length to keep", () => {
-    renderModal({ startDate: "", endDate: "" });
-    setValue(startInput(), "2026-06-12T09:00");
+  it("empties the end while the start is not a time", () => {
+    renderModal();
+    setValue(startInput(), "");
     expect(endInput().value).toBe("");
   });
 
   it("shows no errors before the first submit", () => {
-    renderModal({ startDate: "", endDate: "" });
+    renderModal();
+    setValue(startInput(), "");
     expect(screen.queryByText(/Enter the proposed/)).not.toBeInTheDocument();
   });
 
-  it("requires both fields, shows the errors inline and sends nothing", () => {
-    renderModal({ startDate: "", endDate: "" });
+  it("requires the start, shows the error inline and sends nothing", () => {
+    renderModal();
+    setValue(startInput(), "");
     submit();
     expect(screen.getByText("Enter the proposed start date and time.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the proposed end date and time.")).toBeInTheDocument();
     expect(startInput()).toHaveAttribute("aria-invalid", "true");
     expect(document.activeElement).toBe(startInput());
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("refuses a start in the past", () => {
+  it("refuses a start in the past, and clears the error once fixed", () => {
     renderModal();
     setValue(startInput(), "2026-04-30T10:00");
-    setValue(endInput(), "2026-04-30T12:00");
     submit();
     expect(screen.getByText("The proposed start must be in the future.")).toBeInTheDocument();
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
+
+    setValue(startInput(), "2026-06-12T10:00");
+    expect(screen.queryByText("The proposed start must be in the future.")).not.toBeInTheDocument();
   });
 
-  it("refuses an end that is not after the start, and clears the error once fixed", () => {
-    renderModal();
-    setValue(endInput(), "2026-06-10T09:00");
-    submit();
-    expect(screen.getByText("The proposed end must be after the proposed start.")).toBeInTheDocument();
-    expect(document.activeElement).toBe(endInput());
-    expect(mocks.mutateAsync).not.toHaveBeenCalled();
-
-    setValue(endInput(), "2026-06-10T13:00");
-    expect(screen.queryByText("The proposed end must be after the proposed start.")).not.toBeInTheDocument();
-  });
-
-  it("refuses a window that is the same as the current one", () => {
+  it("refuses the start that is the current one", () => {
     renderModal();
     submit();
-    expect(screen.getByRole("alert")).toHaveTextContent(/same as the current schedule/);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This is the same as the current schedule. Choose a different start.",
+    );
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("sends both ends as UTC for a viewer outside UTC, then says what happens next and closes", async () => {
+  it("sends the start and the end that keeps the planned length, both as UTC for a viewer outside UTC, then says what happens next and closes", async () => {
     const { onClose } = renderModal();
     setValue(startInput(), "2026-06-11T15:30");
     expect(endInput().value).toBe("2026-06-11T17:30");
@@ -197,34 +230,34 @@ describe("ProposeNewImplementationTimeModal", () => {
       plannedEndOn: "2026-06-11 12:00:00",
     });
     expect(mocks.showSuccess).toHaveBeenCalledWith(
-      "New time proposed. We'll ask for your approval again once it's confirmed internally.",
+      "New time proposed. WSO2 will accept it or suggest a different time, and the answer will appear on this page.",
     );
     expect(mocks.showError).not.toHaveBeenCalled();
   });
 
-  it("sends the start too when only the end was changed", async () => {
-    const { onClose } = renderModal();
-    setValue(endInput(), "2026-06-10T14:00");
-    submit();
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(mocks.mutateAsync).toHaveBeenCalledWith({
-      plannedStartOn: "2026-06-10 04:30:00",
-      plannedEndOn: "2026-06-10 08:30:00",
-    });
-  });
-
-  it("tells a Standard change's customer they will be asked to approve the updated schedule", async () => {
+  it("says the same on success for a Standard change: the type changes nothing", async () => {
     const { onClose } = renderModal({ type: { id: "standard", label: "Standard" } });
-    expect(screen.queryByText(/review it internally/)).not.toBeInTheDocument();
     setValue(startInput(), "2026-06-11T15:30");
     submit();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mocks.showSuccess).toHaveBeenCalledWith(
-      "New time proposed. Review the updated schedule and approve it when you are ready.",
+      "New time proposed. WSO2 will accept it or suggest a different time, and the answer will appear on this page.",
     );
   });
 
-  it("tells the page it was proposed (so focus can move on), only when it was", async () => {
+  it("keeps a length that is not a whole number of hours, and a window that crosses midnight", async () => {
+    const { onClose } = renderModal({ startDate: "2026-06-10 04:30:00", endDate: "2026-06-10 06:15:00" });
+    setValue(startInput(), "2026-06-11T23:00");
+    expect(endInput().value).toBe("2026-06-12T00:45");
+    submit();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mocks.mutateAsync).toHaveBeenCalledWith({
+      plannedStartOn: "2026-06-11 17:30:00",
+      plannedEndOn: "2026-06-11 19:15:00",
+    });
+  });
+
+  it("tells the page it was proposed, only when it was", async () => {
     mocks.mutateAsync.mockRejectedValueOnce(new ApiError(400, "Bad Request", "plannedStartOn is in the past: a proposed implementation time must be one still to come"));
     const { onClose, onProposed } = renderModal();
     setValue(startInput(), "2026-06-11T15:30");
@@ -237,10 +270,10 @@ describe("ProposeNewImplementationTimeModal", () => {
     expect(onProposed).toHaveBeenCalledTimes(1);
   });
 
-  it("submits when Enter is pressed in a field: the fields and the button are one form", async () => {
+  it("submits when Enter is pressed in the field: the field and the button are one form", async () => {
     const { onClose } = renderModal();
     setValue(startInput(), "2026-06-11T15:30");
-    const form = endInput().closest("form");
+    const form = startInput().closest("form");
     expect(form).not.toBeNull();
     expect(screen.getByRole("button", { name: "Submit Proposal" })).toHaveAttribute("type", "submit");
     // What the browser does for Enter in a field of a form with a submit button.
@@ -253,24 +286,76 @@ describe("ProposeNewImplementationTimeModal", () => {
     renderModal();
     expect(screen.getByRole("heading", { level: 2, name: /Propose New Implementation Time/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: "Current Schedule" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: "Proposed implementation window" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Proposed implementation time" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 6 })).not.toBeInTheDocument();
   });
 
-  it("keeps the dialog open with the backend's message when the window is refused", async () => {
+  describe("when a proposed time already waits for WSO2", () => {
+    const waiting = (extra: object = {}) => ({
+      state: { id: "5", label: "Customer Approval" },
+      customerProposal: { startDate: "2026-06-12 04:30:00", endDate: "2026-06-12 06:30:00", answer: "pending", ...extra },
+    });
+
+    it("shows the standing proposal beside the current schedule, in the viewer's zone", () => {
+      renderModal(waiting({ proposedByViewer: true }));
+      expect(screen.getByText("Proposed start waiting for WSO2")).toBeInTheDocument();
+      expect(screen.getByText(/Friday, June 12, 2026 at 10:00 AM GMT\+5:30/)).toBeInTheDocument();
+      // The field still starts from what is planned now.
+      expect(startInput().value).toBe("2026-06-10T10:00");
+    });
+
+    it("shows no standing proposal when nothing waits (an accepted or declined one is history)", () => {
+      for (const answer of ["agreed", "disagreed", "unanswered"]) {
+        const { unmount } = render(
+          <ProposeNewImplementationTimeModal
+            open
+            onClose={() => {}}
+            changeRequest={{ ...(changeRequest as object), ...waiting({ answer }) } as never}
+          />,
+        );
+        expect(screen.queryByText("Proposed start waiting for WSO2"), answer).not.toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it("refuses the time that already waits, a colleague's included, before any request", () => {
+      renderModal(waiting());
+      setValue(startInput(), "2026-06-12T10:00");
+      submit();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "That time is already proposed and is waiting for WSO2's response. Choose a different start.",
+      );
+      expect(mocks.mutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("takes another start, which replaces the standing proposal", async () => {
+      const { onClose } = renderModal(waiting({ proposedByViewer: true }));
+      setValue(startInput(), "2026-06-13T10:00");
+      submit();
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(mocks.mutateAsync).toHaveBeenCalledWith({
+        plannedStartOn: "2026-06-13 04:30:00",
+        plannedEndOn: "2026-06-13 06:30:00",
+      });
+    });
+  });
+
+  it("keeps the dialog open with the backend's message when the start is refused, and lets the customer fix it", async () => {
     mocks.mutateAsync.mockRejectedValueOnce(
-      new ApiError(400, "Bad Request", "the planned start must not be after the planned end"),
+      new ApiError(400, "Bad Request", "plannedStartOn is the planned start already: propose a different start"),
     );
     const { onClose } = renderModal();
     setValue(startInput(), "2026-06-11T15:30");
     submit();
 
-    expect(await screen.findByText("The proposed end must be after the proposed start.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("This is the same as the current schedule. Choose a different start."),
+    ).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(mocks.showSuccess).not.toHaveBeenCalled();
     // The customer can fix it and send again.
     mocks.mutateAsync.mockResolvedValueOnce({ id: "cr-1" });
-    setValue(endInput(), "2026-06-11T19:00");
+    setValue(startInput(), "2026-06-11T19:00");
     submit();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
@@ -303,6 +388,32 @@ describe("ProposeNewImplementationTimeModal", () => {
     setValue(startInput(), "2026-06-11T15:30");
     submit();
     expect(await screen.findByText(CHANGE_REQUEST_ON_HOLD_MESSAGE)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onRefused).not.toHaveBeenCalled();
+    expect(mocks.showError).not.toHaveBeenCalled();
+  });
+
+  it("stays open and says so when the service finds no window to move (409)", async () => {
+    mocks.mutateAsync.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", "any wording at all", undefined, ChangeRequestErrorCode.NO_PLANNED_WINDOW),
+    );
+    const { onClose, onRefused } = renderModal();
+    setValue(startInput(), "2026-06-11T15:30");
+    submit();
+    expect(await screen.findByText(CHANGE_REQUEST_NO_WINDOW_MESSAGE)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onRefused).not.toHaveBeenCalled();
+    expect(mocks.showError).not.toHaveBeenCalled();
+  });
+
+  it("stays open and says only that it cannot be proposed right now when another approval is being asked (409)", async () => {
+    mocks.mutateAsync.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", "any wording at all", undefined, ChangeRequestErrorCode.PROPOSAL_NOT_NOW),
+    );
+    const { onClose, onRefused } = renderModal();
+    setValue(startInput(), "2026-06-11T15:30");
+    submit();
+    expect(await screen.findByText(CHANGE_REQUEST_PROPOSAL_NOT_NOW_MESSAGE)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(onRefused).not.toHaveBeenCalled();
     expect(mocks.showError).not.toHaveBeenCalled();

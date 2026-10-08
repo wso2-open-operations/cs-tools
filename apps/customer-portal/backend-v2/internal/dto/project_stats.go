@@ -75,11 +75,13 @@ func mapReferenceTableItems(items []entity.ReferenceTableItem) []ReferenceItem {
 //     the vocabulary it serves, and this list is the second line). So "-3" is
 //     dropped, exactly like "-5" and "-4".
 //   - On the Postgres data source a change request is visible once it was
-//     designated to the customer, in whatever state it is in, and one the
-//     customer proposed a new time for waits in Authorize and stays on their
-//     list, so the state filter has to offer it. Its id there is the raw enum
-//     label ("AUTHORIZE", see restrictedChangeRequestStateLabels), never "-3",
-//     so it passes this check and is kept.
+//     designated to the customer, in whatever state it is in. A customer's
+//     proposed time and a Re-schedule keep the change in Customer Approval, but
+//     one that an older build sent back to Authorize (through the CAB again)
+//     waits there and stays on their list, so the state filter has to offer it.
+//     Its id there is the raw enum label ("AUTHORIZE", see
+//     restrictedChangeRequestStateLabels), never "-3", so it passes this check
+//     and is kept.
 var restrictedChangeRequestStateIDs = map[string]bool{"-5": true, "-4": true, "-3": true}
 
 // restrictedChangeRequestStateLabels is the Postgres-mode equivalent: on

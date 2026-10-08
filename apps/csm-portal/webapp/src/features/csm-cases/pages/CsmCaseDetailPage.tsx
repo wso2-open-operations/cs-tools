@@ -102,7 +102,10 @@ import ChangeSeverityDialog from "@features/csm-cases/components/ChangeSeverityD
 import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
-import { hasPublicComment } from "@features/csm-cases/utils/commentContent";
+import {
+  hasPublicComment,
+  isGithubRaisedCaseNumber,
+} from "@features/csm-cases/utils/commentContent";
 import { caseTypeTransferLabel } from "@features/csm-cases/utils/caseTypeTransfer";
 import SetAutocloseHoldDialog from "@features/csm-cases/components/SetAutocloseHoldDialog";
 import EditCaseDetailsDialog, {
@@ -178,6 +181,7 @@ import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContex
 import { replaceUuids } from "@utils/redactIds";
 import { formatUtcDateForDisplay } from "@utils/dateTime";
 import {
+  escapeHtml,
   isBlankHtml,
   isDescriptionEchoedInComment,
   stripHtmlTags,
@@ -359,6 +363,44 @@ const TAB_DEFS: Array<{
 const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
   (t) => !t.hidden,
 ).map((t) => t.id);
+
+/**
+ * Composes the customer-visible comment posted for "Share fix ETA with
+ * customer" — matches the real wording ServiceNow production's own "Share
+ * Fix ETA" CWF action uses verbatim, so the comment reads identically
+ * regardless of which data source actually posted it. Posted directly via
+ * POST /cases/{id}/comments instead of ServiceNow's own addPublicComment
+ * PATCH field, which works on every data source. Only the ETA fields
+ * actually set are included, matching the dialog's own "all three
+ * independently optional" behavior.
+ */
+function buildFixEtaShareComment(fields: {
+  bestCaseFixEta?: string;
+  mostLikelyFixEta?: string;
+  worstCaseFixEta?: string;
+  product?: string;
+  publicTicket?: string;
+}): string {
+  // product/publicTicket are free-text form input that ends up in a
+  // customer-visible comment — escape before interpolating, same as any
+  // other user-entered text embedded in markup. The ETA dates are not user
+  // free-text (picker-produced "YYYY-MM-DD" strings) and need no escaping.
+  const lines: string[] = [];
+  if (fields.product) lines.push(`Product: ${escapeHtml(fields.product)}`);
+  if (fields.publicTicket) {
+    lines.push(`Public git issue: ${escapeHtml(fields.publicTicket)}`);
+  }
+  if (fields.bestCaseFixEta) {
+    lines.push(`Best Case Estimate: ${fields.bestCaseFixEta}`);
+  }
+  if (fields.mostLikelyFixEta) {
+    lines.push(`Most Likely Estimate: ${fields.mostLikelyFixEta}`);
+  }
+  if (fields.worstCaseFixEta) {
+    lines.push(`Worst Case Estimate: ${fields.worstCaseFixEta}`);
+  }
+  return `<p>ETA information for the fix will be as follows.</p><p>${lines.join("<br>")}</p>`;
+}
 
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
@@ -1884,26 +1926,71 @@ export default function CsmCaseDetailPage(): JSX.Element {
       // case is on screen. Closing the dialog on a stale success would shut
       // the *new* case's dialog and throw away whatever was typed into it.
       const submittedViewToken = caseViewTokenRef.current;
-      patchCase.mutate(patch as BeCaseUpdatePayload, {
+      const isStale = (): boolean => caseViewTokenRef.current !== submittedViewToken;
+
+      // The ETA save and the "share with customer" step are sent separately,
+      // not bundled into one PATCH: addPublicComment (ServiceNow's own way
+      // of doing the share) is ServiceNow-only, and the backend used to
+      // reject the *entire* request when it was present on another data
+      // source — silently blocking the ETA save too. The share step itself
+      // no longer goes through that field at all: it posts a real,
+      // customer-visible comment via POST /cases/{id}/comments instead,
+      // which works on every data source.
+      const { addPublicComment, product, publicTicket, ...etaOnly } = patch;
+
+      const shareWithCustomer = (): void => {
+        if (!addPublicComment || !caseId) return;
+        void postComment
+          .mutateAsync({
+            caseId,
+            bodyHtml: buildFixEtaShareComment({ ...etaOnly, product, publicTicket }),
+            authorName: engineerName,
+            internal: false,
+          })
+          .then(
+            () => {
+              if (isStale()) return;
+              setFeedback({
+                message: "Fix ETA shared with the customer.",
+                severity: "success",
+                sticky: false,
+              });
+            },
+            (err: unknown) => {
+              if (isStale()) return;
+              showError("Fix ETA saved, but could not share it with the customer.", err);
+            },
+          );
+      };
+
+      patchCase.mutate(etaOnly as BeCaseUpdatePayload, {
         onSuccess: () => {
-          if (caseViewTokenRef.current !== submittedViewToken) return;
-          // Close on success, same as every other dialog on this page. The
-          // PATCH lands either way, so leaving it open reads as a failed save
-          // and invites a second submit of an estimate that's already stored.
-          setFixEtaOpen(false);
-          setFeedback({
-            message: "Fix ETA updated.",
-            severity: "success",
-            sticky: false,
-          });
+          // The share request is a real side effect the engineer asked for —
+          // it must still run even if the case view has since gone stale
+          // (navigated away mid-request); only the UI feedback below is
+          // skipped for a stale view, same as every other guarded callback
+          // on this page.
+          if (!isStale()) {
+            // Close on success, same as every other dialog on this page. The
+            // PATCH lands either way, so leaving it open reads as a failed
+            // save and invites a second submit of an estimate that's
+            // already stored.
+            setFixEtaOpen(false);
+            setFeedback({
+              message: "Fix ETA updated.",
+              severity: "success",
+              sticky: false,
+            });
+          }
+          shareWithCustomer();
         },
         onError: (err) => {
-          if (caseViewTokenRef.current !== submittedViewToken) return;
+          if (isStale()) return;
           showError("Could not set the fix ETA.", err);
         },
       });
     },
-    [patchCase, showError],
+    [patchCase, postComment, caseId, engineerName, showError],
   );
 
   const onRequestUpdate = useCallback(
@@ -2089,6 +2176,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
       createdAt: data?.createdAt ?? "",
       internal: false,
       synthetic: true,
+      // A record raised from a GitHub issue has the issue body as its
+      // description: GitHub Markdown, not HTML. Without this its "### Heading"
+      // template sections render as literal text.
+      ...(isGithubRaisedCaseNumber(data?.caseNumber) && { bodyFormat: "markdown" as const }),
     };
     return [...mergedComments, synthetic];
   }, [data, descriptionEchoedInOriginComment, mergedComments]);
@@ -3263,6 +3354,12 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
       {fixEtaOpen && (
         <SetFixEtaDialog
+          // Sharing now posts through the same comment endpoint
+          // CsmCaseCommentInput's own public-reply composer uses, so it's
+          // gated by the identical backend rule — reusing
+          // publicReplyGateReason rather than a second, possibly-drifting
+          // copy of the same check.
+          publicCommentDisabledReason={publicReplyGateReason}
           currentBestCaseFixEta={c.bestCaseFixEta}
           currentMostLikelyFixEta={c.mostLikelyFixEta}
           currentWorstCaseFixEta={c.worstCaseFixEta}

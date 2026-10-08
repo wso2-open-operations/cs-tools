@@ -86,10 +86,12 @@ func (f *crFlow) subjectOf(id string) string {
 
 // In New everything is editable, in both directions, with or without a project:
 // the Customer Project is chosen, moved and moved back, and the Customer Group
-// that follows it is read back; both boxes are ticked and unticked.
+// that follows it is read back; both boxes are ticked and unticked. (Normal and
+// Standard: an Emergency change takes no customer step, so the boxes are refused on
+// it -- TestChangeRequestEmergencyIntegration_BoxesAreRefusedInEveryState.)
 func TestChangeRequestLockIntegration_NewIsFullyEditable(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeEmergency} {
+	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard} {
 		id := f.createWithProject(typ, nil, false, false)
 		f.expect(id, "after create", "NEW", "assess", "canceled")
 
@@ -180,13 +182,13 @@ func TestChangeRequestLockIntegration_ProjectIsFrozenAfterRequestApproval(t *tes
 
 // The same through the real transition: Request Approval is what freezes it, for
 // every type, and the project cannot be moved while the customer is being asked.
+// (An Emergency change has no customer box to tick; its project freezes all the same.)
 func TestChangeRequestLockIntegration_RequestApprovalFreezesTheProject(t *testing.T) {
 	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeEmergency} {
 		typ := typ
 		t.Run(string(typ), func(t *testing.T) {
 			f := newCustomerGroupFlow(t)
-			seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
-			id := f.createWithProject(typ, sp(crScopeProjectA), true, false)
+			id := f.createWithProject(typ, sp(crScopeProjectA), typ != domain.ChangeRequestTypeEmergency, false)
 			f.setProject(id, crScopeProjectB) // free in New
 			f.setProject(id, crScopeProjectA)
 			f.requestApproval(id)
@@ -271,11 +273,12 @@ func TestChangeRequestLockIntegration_BoxesAreAddOnlyAfterNew(t *testing.T) {
 }
 
 // Request Approval is refused, in the same transaction and with nothing written,
-// when a box is ticked and there is no Customer Project to ask: for every type
-// (Standard included: it would otherwise land in Customer Approval with nobody).
-// Clearing the box, or choosing the project, in the same PATCH lets it through.
+// when a box is ticked and there is no Customer Project to ask: for every type that can
+// have a box (Standard included: it would otherwise land in Customer Approval with nobody;
+// an Emergency change cannot have one). Clearing the box, or choosing the project, in the
+// same PATCH lets it through.
 func TestChangeRequestLockIntegration_RequestApprovalNeedsAProject(t *testing.T) {
-	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeEmergency} {
+	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard} {
 		for _, boxes := range []struct {
 			name             string
 			approval, review bool
@@ -283,7 +286,6 @@ func TestChangeRequestLockIntegration_RequestApprovalNeedsAProject(t *testing.T)
 			typ, boxes := typ, boxes
 			t.Run(string(typ)+"/"+boxes.name, func(t *testing.T) {
 				f := newCustomerGroupFlow(t)
-				seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
 				id := f.createWithProject(typ, nil, boxes.approval, boxes.review)
 
 				// Request Approval alone, then with an unrelated field riding along.
@@ -335,7 +337,6 @@ func TestChangeRequestLockIntegration_RequestApprovalNeedsAProject(t *testing.T)
 // box and has no project (created before the lock, or by ServiceNow).
 func TestChangeRequestLockIntegration_RequestApprovalWithoutRequirementsAndResends(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
 	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeEmergency} {
 		id := f.createWithProject(typ, nil, false, false)
 		f.requestApproval(id)
@@ -387,48 +388,27 @@ func TestChangeRequestLockIntegration_ReturnToNewIsRefused(t *testing.T) {
 }
 
 // A change that has reached a customer stage can never get back to a point where
-// the customer is no longer asked. Re-schedule sends a Normal / Emergency change
-// back to Authorize and a Standard one stays in Customer Approval; in none of them
-// can the box be unticked (the hole the lock exists to close), the project moved
-// or the change sent back to New, and the approval that follows asks again:
-// the same contacts, in a fresh stage, the old one kept as a record.
+// the customer is no longer asked. Re-schedule keeps every type that can reach Customer Approval
+// (Normal, Standard: an Emergency change never does) in it
+// (nothing goes back through CAB: the change itself has not changed) and asks the same
+// contacts again, in a fresh stage with the old one kept as a record; in none of them can
+// the box be unticked (the hole the lock exists to close), the project moved or the change
+// sent back to New. A Re-schedule writes no requirement flag: it needs none.
 func TestChangeRequestLockIntegration_RescheduleCannotReopenTheCustomersApproval(t *testing.T) {
-	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeEmergency, domain.ChangeRequestTypeStandard} {
+	for _, typ := range []domain.ChangeRequestType{domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeStandard} {
 		typ := typ
 		t.Run(string(typ), func(t *testing.T) {
 			f := newCustomerGroupFlow(t)
-			seedApprovalGroupMembers(t, f.scoped, crECABGroupID, crECABMemberUserID)
-			id := f.createWithProject(typ, sp(crScopeProjectA), true, false)
-			f.setPlanned(id, rsStart1, rsEnd1)
-			cabApprover := crCABMemberUserID1
-			switch typ {
-			case domain.ChangeRequestTypeNormal:
-				f.driveToCustomerApproval(id)
-			case domain.ChangeRequestTypeEmergency:
-				cabApprover = crECABMemberUserID
-				f.requestApproval(id)
-				if err := f.decide(id, crECABMemberUserID, "approved"); err != nil {
-					t.Fatalf("ECAB approval: %v", err)
-				}
-			default:
-				f.requestApproval(id)
-			}
-			f.expect(id, "in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
+			id := f.reachCustomerApproval(typ)
 			if len(f.customerStages(id)) != 1 {
 				t.Fatalf("customer stages before the re-schedule = %+v", f.customerStages(id))
 			}
 
-			// Re-schedule: the window moves, the customer's request is superseded.
+			// Re-schedule: the window moves, the customer's request is superseded and asked again.
 			if err := f.reschedule(id, sp(rsStart2), sp(rsEnd2)); err != nil {
 				t.Fatalf("Re-schedule: %v", err)
 			}
-			wantState := "AUTHORIZE"
-			if typ == domain.ChangeRequestTypeStandard {
-				wantState = "CUSTOMER_APPROVAL"
-			}
-			if got := f.state(id); got != wantState {
-				t.Fatalf("state after the Re-schedule = %s, want %s", got, wantState)
-			}
+			f.expect(id, "after the Re-schedule", "CUSTOMER_APPROVAL", "authorize", "canceled")
 
 			// The hole: untick the box, in this state, alone or with anything else.
 			for _, req := range []domain.PatchChangeRequestRequest{
@@ -449,17 +429,10 @@ func TestChangeRequestLockIntegration_RescheduleCannotReopenTheCustomersApproval
 				t.Fatalf("a refused edit wrote the title: %q", got)
 			}
 
-			// Nothing else reopened: the internal approval runs again and the customer is asked again.
-			if typ != domain.ChangeRequestTypeStandard {
-				f.wantCanAnswer(id, "while the new plan awaits internal approval", false, crScopeUserA1, crScopeUserA2)
-				if err := f.decide(id, cabApprover, "approved"); err != nil {
-					t.Fatalf("approval of the new plan: %v", err)
-				}
-			}
-			f.expect(id, "after the new plan is approved", "CUSTOMER_APPROVAL", "authorize", "canceled")
+			// Nothing else reopened: the customer is asked again at once, the old request kept as a record.
 			st := f.customerStages(id)
 			if len(st) != 2 || liveStages(st) != 1 {
-				t.Fatalf("customer stages after the re-approval = %+v, want 2 (the old one cancelled, a fresh one live)", st)
+				t.Fatalf("customer stages after the Re-schedule = %+v, want 2 (the old one cancelled, a fresh one live)", st)
 			}
 			assertApprovers(t, "the superseded request", st[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
 			assertApprovers(t, "the fresh request", st[1].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
@@ -468,19 +441,18 @@ func TestChangeRequestLockIntegration_RescheduleCannotReopenTheCustomersApproval
 	}
 }
 
-// A customer's own proposal of a new time (the Re-schedule a contact starts) is
-// the same: they cannot take their own approval away by it either.
+// A customer's own proposal of a new time waits for WSO2: they cannot take their own
+// approval away by it either (it writes one column, customer_updated_on, and nothing
+// else), and neither can WSO2 afterwards, whether it accepts the proposal or not.
 func TestChangeRequestLockIntegration_CustomerProposalCannotReopenTheApproval(t *testing.T) {
 	f := newCustomerGroupFlow(t)
-	id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), true, false)
-	f.setPlanned(id, rsStart1, rsEnd1)
-	f.driveToCustomerApproval(id)
+	id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
 	start := time.Now().UTC().AddDate(1, 0, 0).Truncate(time.Second)
 	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{
 		PlannedStartOn: sp(start.Format(time.RFC3339)), PlannedEndOn: sp(start.Add(2 * time.Hour).Format(time.RFC3339))}); err != nil {
 		t.Fatalf("the customer's proposal: %v", err)
 	}
-	f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
+	f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	// The customer is not entitled to the box either: it is not one of the fields they may send.
 	_, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(false)})
 	if err == nil {
@@ -489,11 +461,16 @@ func TestChangeRequestLockIntegration_CustomerProposalCannotReopenTheApproval(t 
 	// ...and WSO2 cannot after it.
 	_, err = f.patch(id, domain.PatchChangeRequestRequest{CustomerApprovalRequired: boolp(false)})
 	f.wantValidationError("unticking after the customer's proposal", err, "customerApprovalRequired "+lockMsgTurnOff)
-	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-		t.Fatalf("CAB approval: %v", err)
+	if _, _, approval, _ := f.lockStored(id); !approval {
+		t.Fatal("customerApprovalRequired was unticked")
 	}
-	f.expect(id, "after the new plan is approved", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	f.wantCanAnswer(id, "asked again", true, crScopeUserA1, crScopeUserA2)
+	f.wantCanAnswer(id, "while the proposal waits", true, crScopeUserA1, crScopeUserA2)
+	// WSO2's answer reopens nothing: Accept schedules the change, it does not un-ask the customer.
+	f.mustAccept(id)
+	f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
+	if _, _, approval, _ := f.lockStored(id); !approval {
+		t.Fatal("Accept turned customerApprovalRequired off")
+	}
 }
 
 // Customer Review: the same shape. A change in Review cannot turn its review
@@ -912,4 +889,121 @@ func TestChangeRequestLockIntegration_APatchAndADecisionDoNotDeadlock(t *testing
 		t.Fatalf("the PATCH: %v", err)
 	}
 	f.expect(id, "after the PATCH", "CANCELED")
+}
+
+// The change TYPE is locked by state, like the Customer Project and the two boxes: free in New,
+// and once Request Approval has chosen the approval flow a different type is a 400 in every later
+// state, while the stored type again (a whole-form resend) is accepted. The lock used to be the
+// COUNT of approval stages, which a Standard change never has -- it could be re-typed after Request
+// Approval, into a flow whose stages it never got.
+func TestChangeRequestLockIntegration_TheTypeIsFrozenAfterNew(t *testing.T) {
+	typeMsg := func(state string) string {
+		return "type can no longer be changed: the change type decides the approval flow, which is fixed once approval has been requested (current state: " +
+			strings.ToLower(state) + "). Cancel this change request and clone it to use another type."
+	}
+	types := []domain.ChangeRequestType{domain.ChangeRequestTypeStandard, domain.ChangeRequestTypeNormal, domain.ChangeRequestTypeEmergency}
+	for _, state := range []string{"", "NEW", "ASSESS", "AUTHORIZE", "CUSTOMER_APPROVAL", "SCHEDULED", "IMPLEMENT", "REVIEW", "CUSTOMER_REVIEW", "CLOSED", "CANCELED", "ROLLBACK"} {
+		for _, stored := range types {
+			state, stored := state, stored
+			name := state
+			if name == "" {
+				name = "NULL"
+			}
+			t.Run(name+"/"+string(stored), func(t *testing.T) {
+				f := newCustomerGroupFlow(t)
+				id := f.createWithProject(stored, sp(crScopeProjectA), false, false)
+				f.setState(id, state)
+				storedModel := func() string {
+					var m string
+					if err := f.scoped.QueryRow(f.sys, `SELECT change_model::text FROM change_request WHERE id = $1`, id).Scan(&m); err != nil {
+						t.Fatalf("read the change model: %v", err)
+					}
+					return m
+				}
+				before := storedModel()
+				for _, other := range types {
+					if other == stored {
+						continue
+					}
+					_, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &other, Title: sp("must not be written")})
+					if state == "" || state == "NEW" {
+						// The creation phase: free (a NULL state counts as New).
+						if err != nil {
+							t.Fatalf("re-typing to %s in %s: %v", other, name, err)
+						}
+						if got := storedModel(); got == before {
+							t.Fatalf("the type was not changed in %s", name)
+						}
+						// ...and back.
+						if _, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &stored}); err != nil {
+							t.Fatalf("re-typing back to %s in %s: %v", stored, name, err)
+						}
+						continue
+					}
+					f.wantExact("re-typing "+string(stored)+" to "+string(other)+" in "+name, err, typeMsg(state))
+					if got := storedModel(); got != before {
+						t.Fatalf("a refused re-type changed the type in %s: %s -> %s", name, before, got)
+					}
+					if got := f.subjectOf(id); got != crFlowSubject {
+						t.Fatalf("a refused re-type wrote the rest of the PATCH in %s: %q", name, got)
+					}
+				}
+				// The stored type again is no change, from every state.
+				if _, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &stored}); err != nil && state != "CLOSED" && state != "CANCELED" && state != "ROLLBACK" {
+					t.Fatalf("resending the stored type in %s: %v", name, err)
+				}
+			})
+		}
+	}
+
+	// The change the lock exists for: a Standard change after Request Approval (no stage to count).
+	t.Run("a Standard change after Request Approval, through the real flow", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.createWithProject(domain.ChangeRequestTypeStandard, sp(crScopeProjectA), false, false)
+		f.requestApproval(id)
+		f.expect(id, "after Request Approval", "SCHEDULED", "implement", "canceled")
+		if n := len(f.stages(id)); n != 0 {
+			t.Fatalf("a Standard change has %d stages, the stage-count lock never applied to it", n)
+		}
+		normal := domain.ChangeRequestTypeNormal
+		_, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &normal})
+		f.wantExact("re-typing a Standard change after Request Approval", err, typeMsg("SCHEDULED"))
+		if cr := f.get(id); cr.Type == nil || *cr.Type != string(domain.ChangeRequestTypeStandard) {
+			t.Fatalf("type = %v, want standard", cr.Type)
+		}
+	})
+	// A Normal change has its Peer stage the moment Request Approval is requested, and the stage count
+	// has always locked the type from then on -- but a whole-form resend of the type it already has is
+	// no change at all and is accepted, exactly as on a Standard change (the lock judges a CHANGE of the
+	// type, and the stage count is only its second line).
+	t.Run("a Normal change after Request Approval: the stored type again is no change", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, false)
+		f.requestApproval(id)
+		f.expect(id, "after Request Approval", "ASSESS", "canceled")
+		if n := len(f.stages(id)); n == 0 {
+			t.Fatal("a Normal change has no stage after Request Approval, so this row does not exercise the stage count")
+		}
+		same := domain.ChangeRequestTypeNormal
+		if _, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &same, Title: sp("the whole form, sent back")}); err != nil {
+			t.Fatalf("resending the stored type of a Normal change after Request Approval: %v", err)
+		}
+		if got := f.subjectOf(id); got != "the whole form, sent back" {
+			t.Fatalf("the rest of the resend was not written: %q", got)
+		}
+		emergency := domain.ChangeRequestTypeEmergency
+		_, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &emergency})
+		f.wantExact("re-typing a Normal change after Request Approval", err, typeMsg("ASSESS"))
+	})
+	// A type with no change_model label is not the stored one either; in New it keeps its own message.
+	t.Run("an unsupported type", func(t *testing.T) {
+		f := newCustomerGroupFlow(t)
+		id := f.createWithProject(domain.ChangeRequestTypeNormal, sp(crScopeProjectA), false, false)
+		model := domain.ChangeRequestType("model")
+		_, err := f.patch(id, domain.PatchChangeRequestRequest{Type: &model})
+		f.wantValidationError("an unsupported type in New", err, `type "model" is not supported on the PostgreSQL data source`)
+		f.requestApproval(id)
+		_, err = f.patch(id, domain.PatchChangeRequestRequest{Type: &model})
+		f.wantExact("an unsupported type after Request Approval", err, typeMsg("ASSESS"))
+	})
 }

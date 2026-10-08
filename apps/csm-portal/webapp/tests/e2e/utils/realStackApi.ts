@@ -28,7 +28,7 @@
 //
 // The staff personas are the local seed's (entity-service/CLAUDE.md, "Local seed personas"):
 // jane raises (a requester in no approval group, so she is nobody's approver), alice, bob and
-// carol sit in the Peer, CAB and ECAB groups.
+// carol sit in the Peer and CAB groups.
 //
 
 const OIDC_URL = process.env.E2E_OIDC_URL ?? "http://localhost:9100";
@@ -190,6 +190,14 @@ export async function raise(options: {
     throw new Error(`raising "${options.subject}" answered ${created.status}: ${JSON.stringify(created.body)}`);
   }
   return { id: change.id, number: change.number };
+}
+
+/**
+ * Gives a change request still in New its planned window (UTC, "YYYY-MM-DD HH:MM:SS"), the way the create form would: a
+ * customer can only propose a time for a change that has a window whose length the proposal keeps.
+ */
+export async function plan(change: Raised, window: { start: string; end: string }): Promise<void> {
+  await ok("plan the window", await staff("jane").patch(change.id, { plannedStartOn: window.start, plannedEndOn: window.end }));
 }
 
 /** A call that must succeed (200). */

@@ -346,6 +346,8 @@ describe("a change that was canceled", () => {
         statuses({ state: "canceled", approvals: [{ stage, status }] }).filter((x) => x === "done").length;
       expect(done("Assess")).toBe(2); // Peer Approval: New, Assess
       expect(done("Authorize")).toBe(3);
+      expect(done("CAB Approval")).toBe(3);
+      // An Emergency change raised before ECAB was retired still carries such a stage: read as CAB's.
       expect(done("ECAB Approval")).toBe(3);
       expect(done("Emergency CAB")).toBe(3);
       expect(done("peer approval")).toBe(2);
@@ -529,6 +531,126 @@ describe("the optional customer stages", () => {
     expect(keys(undefined, false)).toContain("customer_approval");
     expect(keys(undefined, false)).not.toContain("customer_review");
     expect(keys(false, false)).toHaveLength(9);
+  });
+});
+
+describe("an Emergency change's line: Assess is never taken (New -> Authorize, one CAB approval)", () => {
+  // Columns (both customer boxes off, as an Emergency change has them): new assess authorize scheduled implement review rollback closed canceled
+  const emergency = (input: BuildChangeRequestLifecycleInput): BuildChangeRequestLifecycleInput => ({
+    type: "emergency",
+    customerApprovalRequired: false,
+    customerReviewRequired: false,
+    ...input,
+  });
+
+  it.each([
+    ["new", "c n p p p p n p n"],
+    ["authorize", "d n c p p p n p n"],
+    ["scheduled", "d n d c p p n p n"],
+    ["implement", "d n d d c p n p n"],
+    ["review", "d n d d d c n p n"],
+    ["closed", "d n d d d d n c n"],
+    ["rollback", "d n d d d d c n n"],
+  ])("in %s it reads %s", (state, expected) => {
+    expect(statuses(emergency({ state }))).toEqual(row(expected));
+  });
+
+  it("labels the line New, Assess, Authorize, Scheduled, Implement, Review, Rollback, Closed, Canceled, with Assess not taken", () => {
+    const nodes = buildChangeRequestLifecycle(emergency({ state: "authorize" }));
+    expect(nodes.map((n) => n.label)).toEqual([
+      "New",
+      "Assess",
+      "Authorize",
+      "Scheduled",
+      "Implement",
+      "Review",
+      "Rollback",
+      "Closed",
+      "Canceled",
+    ]);
+    expect(nodes.find((n) => n.key === "assess")?.status).toBe("not-taken");
+  });
+
+  it("is the same muted status the line already uses for the stages a change does not take", () => {
+    expect(changeRequestLifecycleStatusText("not-taken")).toBe("not taken");
+  });
+
+  it("a canceled Emergency change: Assess is not taken even though a CAB stage proves Authorize was reached", () => {
+    expect(statuses(emergency({ state: "canceled" }))).toEqual(row("u n u u u u n n c"));
+    expect(statuses(emergency({ state: "canceled", approvals: [{ stage: "CAB Approval", status: "REQUESTED" }] }))).toEqual(
+      row("d n u u u u n n c"),
+    );
+    expect(statuses(emergency({ state: "canceled", approvals: [{ stage: "CAB Approval", status: "APPROVED" }] }))).toEqual(
+      row("d n d u u u n n c"),
+    );
+    // An older Emergency change's ECAB stage proves the same thing.
+    expect(statuses(emergency({ state: "canceled", approvals: [{ stage: "ECAB Approval", status: "APPROVED" }] }))).toEqual(
+      row("d n d u u u n n c"),
+    );
+  });
+
+  it("an Emergency change that is somehow in Assess is shown where it is", () => {
+    expect(statuses(emergency({ state: "assess" }))).toEqual(row("d c p p p p n p n"));
+  });
+
+  it("an Emergency change in a customer state (raised before the rule) keeps that stage on its line, and only that one", () => {
+    const nodes = buildChangeRequestLifecycle({ state: "customer_approval", type: "emergency", customerApprovalRequired: true });
+    expect(nodes.map((n) => [n.key, n.status])).toEqual([
+      ["new", "done"],
+      ["assess", "not-taken"],
+      ["authorize", "done"],
+      ["customer_approval", "current"],
+      ["scheduled", "pending"],
+      ["implement", "pending"],
+      ["review", "pending"],
+      ["rollback", "not-taken"],
+      ["closed", "pending"],
+      ["canceled", "not-taken"],
+    ]);
+  });
+
+  it("ignores the stored boxes of an Emergency change: the flow never asks the customer, so neither stage is on the line", () => {
+    for (const flags of [{ customerApprovalRequired: true, customerReviewRequired: true }, {}, { customerApprovalRequired: undefined }]) {
+      const keys = buildChangeRequestLifecycle({ state: "authorize", type: "emergency", ...flags }).map((n) => n.key);
+      expect(keys).not.toContain("customer_approval");
+      expect(keys).not.toContain("customer_review");
+      expect(keys).toHaveLength(9);
+    }
+  });
+
+  it("keeps a customer gate the record shows an Emergency change went through: the customer's approval, or a stage row", () => {
+    expect(buildChangeRequestLifecycle({ state: "scheduled", type: "emergency", customerApproved: true }).map((n) => n.key)).toContain(
+      "customer_approval",
+    );
+    const keys = buildChangeRequestLifecycle({
+      state: "closed",
+      type: "emergency",
+      approvals: [
+        { stage: "ECAB Approval", status: "APPROVED" },
+        { stage: "Customer Approval", status: "APPROVED" },
+        { stage: "Customer Review", status: "APPROVED" },
+      ],
+    }).map((n) => n.key);
+    expect(keys).toContain("customer_approval");
+    expect(keys).toContain("customer_review");
+  });
+
+  it("a Normal change is untouched by all of this: its boxes alone decide", () => {
+    expect(buildChangeRequestLifecycle({ state: "authorize", type: "normal", customerApprovalRequired: true }).map((n) => n.key)).toContain(
+      "customer_approval",
+    );
+    expect(buildChangeRequestLifecycle({ state: "authorize", type: "normal" })).toHaveLength(11);
+  });
+
+  it("only Emergency skips Assess: Normal, Standard and an unknown type still pass through it", () => {
+    for (const type of ["normal", "standard", undefined, null, "model"]) {
+      expect(byKey({ state: "authorize", type, customerApprovalRequired: false, customerReviewRequired: false }).assess).toBe("done");
+    }
+    expect(byKey({ state: "new", type: "normal" }).assess).toBe("pending");
+  });
+
+  it("reads the type however the backend cases it", () => {
+    expect(byKey({ state: "authorize", type: " Emergency " }).assess).toBe("not-taken");
   });
 });
 

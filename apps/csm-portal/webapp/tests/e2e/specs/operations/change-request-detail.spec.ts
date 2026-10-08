@@ -31,7 +31,7 @@
 // New -> Assess is sent by the "Request Approval" button as a plain, direct
 // `{state: "assess"}` PATCH, like every other forward transition in this bar
 // (it used to be labeled "Move to Assess"; there is no "Schedule" button at
-// all -- CAB/ECAB approval moves the CR to Scheduled by itself). Confirmed live
+// all -- CAB approval moves the CR to Scheduled by itself). Confirmed live
 // (2026-07-26) the OLD single-field `{requestApproval:true}` body always
 // 500s ("Failed to update change request.") against the real backend — a
 // standing backend/API-contract issue on that specific payload shape, not

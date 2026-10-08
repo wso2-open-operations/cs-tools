@@ -440,6 +440,69 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
     });
   });
 
+  // The backend ignores an Emergency change's two customer boxes (one CAB approval, nobody asked), so a box still ticked on
+  // the stored row (an older change, or one written by the sync) needs neither a project nor a registered contact. The
+  // button must not claim otherwise; a Normal change with the same row keeps its reason.
+  describe("Request Approval on an Emergency change with a customer box still ticked", () => {
+    const PROJECT_REASON = "Select a Customer Project before requesting approval";
+    const CONTACT_REASON = "Register a contact for the Customer Project before requesting approval";
+    const PROJECT = { id: "proj-a", name: "Example Corp Platform" };
+
+    it.each([
+      ["Customer Approval", { customerApprovalRequired: true }],
+      ["Customer Review", { customerReviewRequired: true }],
+      ["both", { customerApprovalRequired: true, customerReviewRequired: true }],
+    ])("is enabled, with no reason, when %s is ticked and there is no Customer Project", (_name, flags) => {
+      const { onAction } = renderBar({ state: "new", type: "emergency", legalNextStates: ["assess"], ...flags });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeEnabled();
+      expect(screen.queryByLabelText(/before requesting approval/i)).not.toBeInTheDocument();
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it.each([
+      ["Customer Approval", { customerApprovalRequired: true }],
+      ["Customer Review", { customerReviewRequired: true }],
+      ["both", { customerApprovalRequired: true, customerReviewRequired: true }],
+    ])("is enabled, with no reason, when %s is ticked and the project has no registered contact", (_name, flags) => {
+      const { onAction } = renderBar({ state: "new", type: "emergency", legalNextStates: ["assess"], project: PROJECT, customerContacts: [], ...flags });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeEnabled();
+      expect(screen.queryByLabelText(/before requesting approval/i)).not.toBeInTheDocument();
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it("reads the type in any case, as the rest of the page does", () => {
+      renderBar({ state: "new", type: "Emergency", legalNextStates: ["assess"], customerApprovalRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    });
+
+    it("still needs the assigned team, which the CAB stage is provisioned from", () => {
+      renderBar({ state: "new", type: "emergency", legalNextStates: ["assess"], assignedTeam: null, customerApprovalRequired: true });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeDisabled();
+      expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", "Request Approval: Set an assigned team before requesting approval");
+    });
+
+    it("leaves a Normal change with the same stored row blocked, with the project reason and then the contact reason", () => {
+      const { onAction } = renderBar({ state: "new", type: "normal", legalNextStates: ["assess"], customerApprovalRequired: true });
+      const noProject = screen.getByRole("button", { name: /request approval/i });
+      expect(noProject).toBeDisabled();
+      expect(noProject.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${PROJECT_REASON}`);
+      fireEvent.click(noProject);
+      cleanup();
+
+      renderBar({ state: "new", type: "normal", legalNextStates: ["assess"], project: PROJECT, customerContacts: [], customerApprovalRequired: true }, { onAction });
+      const noContact = screen.getByRole("button", { name: /request approval/i });
+      expect(noContact).toBeDisabled();
+      expect(noContact.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${CONTACT_REASON}`);
+      fireEvent.click(noContact);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+  });
+
   it("blocks only the target with the unmet prerequisite, leaving the others clickable", () => {
     // `assess` is blocked *and* is first in FORWARD_ORDER, so it stays the
     // promoted (disabled) primary while `canceled` stays usable behind the
@@ -457,7 +520,7 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
 });
 
 /**
- * CAB (or ECAB) approval moves a CR to Scheduled automatically, and a Standard
+ * CAB approval moves a CR to Scheduled automatically, and a Standard
  * change goes straight there from Request Approval -- there is no manual
  * "Schedule" button. The backend no longer lists `scheduled` in
  * `legalNextStates`; the bar also filters it defensively.
@@ -968,8 +1031,10 @@ describe("ChangeRequestActionBar — Roll back", () => {
 
 /**
  * "Re-schedule": `authorize` from Customer Approval -- the planned time changed,
- * so the change goes back through internal approval. A secondary (outlined)
- * button next to the primary move; offered from `customer_approval` only.
+ * so the customer is asked to approve the new time (the change stays in Customer
+ * Approval and never goes back through CAB). A secondary (outlined) button next to
+ * the primary move; offered from `customer_approval` only. With the customer's
+ * proposed time waiting for WSO2 it is "Propose a different time" instead.
  */
 describe("ChangeRequestActionBar — Re-schedule", () => {
   it("is an outlined button beside 'Change state', which holds Cancel change", () => {
@@ -1000,6 +1065,40 @@ describe("ChangeRequestActionBar — Re-schedule", () => {
   it("is disabled while a transition is in flight", () => {
     renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"] }, { isPending: true });
     expect(screen.getByRole("button", { name: "Re-schedule" })).toBeDisabled();
+  });
+
+  describe("with the customer's proposed time waiting for WSO2", () => {
+    const PENDING = { startOn: "2030-03-08T09:00:00Z", endOn: "2030-03-08T11:00:00Z", answer: "pending" };
+
+    it("reads 'Propose a different time' instead, outlined, and sends the same authorize; Accept is not in the bar (it is the banner's)", () => {
+      const { onAction } = renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"], customerProposal: PENDING });
+      expect(screen.queryByRole("button", { name: "Re-schedule" })).not.toBeInTheDocument();
+      const counter = screen.getByRole("button", { name: "Propose a different time" });
+      expect(counter.className).toContain("MuiButton-outlined");
+      expect(screen.queryByRole("button", { name: /accept/i })).not.toBeInTheDocument();
+      openMenu();
+      expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Cancel change"]);
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      fireEvent.click(counter);
+      expect(onAction).toHaveBeenCalledWith("authorize");
+    });
+
+    it("reads Re-schedule again for every proposal that is not waiting for an answer, and for a state that is not Customer Approval", () => {
+      for (const answer of ["agreed", "disagreed", "unanswered"]) {
+        cleanup();
+        renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"], customerProposal: { ...PENDING, answer } });
+        expect(screen.getByRole("button", { name: "Re-schedule" }), answer).toBeInTheDocument();
+      }
+      cleanup();
+      // A pending verdict on a change that is not in Customer Approval is not one the bar acts on.
+      renderBar({ state: "authorize", legalNextStates: ["authorize", "canceled"], customerProposal: PENDING });
+      expect(screen.queryByRole("button", { name: /re-schedule|propose a different time/i })).not.toBeInTheDocument();
+    });
+
+    it("is disabled while a transition is in flight", () => {
+      renderBar({ state: "customer_approval", legalNextStates: ["authorize", "canceled"], customerProposal: PENDING }, { isPending: true });
+      expect(screen.getByRole("button", { name: "Propose a different time" })).toBeDisabled();
+    });
   });
 
   it("is never offered from any other state, even if the backend listed authorize", () => {

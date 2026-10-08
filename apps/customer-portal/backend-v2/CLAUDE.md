@@ -484,7 +484,7 @@ need `decide` on exactly two routes:
   window without an answer (400), and builds the entity-service request from those six fields alone. Sending `title`, `state`,
   `requestApproval`... with an answer cannot get them through: they are not fields of the struct.
 
-**Error body and the machine-readable `errorCode`.** The body of an error is `{"message": "..."}`, plus `"errorCode": "<snake_case name>"` for the few refusals the webapp has to tell apart (`errorBody.ErrorCode`, `writeErrorCode`; omitted when there is none). The message is wording for people (it can change, no client branches on it); the code is the contract. It comes from entity-service's error body (`apierror.Error.Code`, parsed by `apierror.NewUpstreamError` and kept only when it is a plain lower-case snake_case name of at most 64 characters: nothing else reaches a client through it) and `mapUpstreamError` puts it on the **400, 403, 409 and 422** it belongs to -- the 403 included, whose message stays the fixed `ErrMsgForbidden` -- and on no other status (never a 401, 404 or a failure of the upstream). This layer raises one itself: the 403 for a field a customer may not set carries `change_request_forbidden`. For PATCH `/change-requests/{id}` the codes are `change_request_on_hold` (409), `change_request_schedule_changed` (409), `change_request_approval_not_pending` (409), `change_request_not_proposable` (409), `change_request_not_asked` (403) and `change_request_forbidden` (403); the full table, with what each means, is in entity-service's CLAUDE.md ("Error types"). An older entity-service names none and the body is as it always was; the webapp then says "something went wrong, refresh" for a 409, never "already answered". Pinned by `TestMapUpstreamError_PassesTheMachineReadableCodeThrough`, `TestPatchChangeRequest_EntityRefusalCodesReachTheCustomer` (the real entity client against a stand-in answering as entity-service does) and `TestNewUpstreamError_*`.
+**Error body and the machine-readable `errorCode`.** The body of an error is `{"message": "..."}`, plus `"errorCode": "<snake_case name>"` for the few refusals the webapp has to tell apart (`errorBody.ErrorCode`, `writeErrorCode`; omitted when there is none). The message is wording for people (it can change, no client branches on it); the code is the contract. It comes from entity-service's error body (`apierror.Error.Code`, parsed by `apierror.NewUpstreamError` and kept only when it is a plain lower-case snake_case name of at most 64 characters: nothing else reaches a client through it) and `mapUpstreamError` puts it on the **400, 403, 409 and 422** it belongs to -- the 403 included, whose message stays the fixed `ErrMsgForbidden` -- and on no other status (never a 401, 404 or a failure of the upstream). This layer raises one itself: the 403 for a field a customer may not set carries `change_request_forbidden`. For PATCH `/change-requests/{id}` the codes are `change_request_on_hold` (409), `change_request_schedule_changed` (409), `change_request_approval_not_pending` (409), `change_request_not_proposable` (409), `change_request_proposal_not_now` (409: another approval is being asked too), `change_request_no_planned_window` (409: no planned window to move), `change_request_not_asked` (403) and `change_request_forbidden` (403); the full table, with what each means, is in entity-service's CLAUDE.md ("Error types"). An older entity-service names none and the body is as it always was; the webapp then says "something went wrong, refresh" for a 409, never "already answered". Pinned by `TestMapUpstreamError_PassesTheMachineReadableCodeThrough`, `TestPatchChangeRequest_EntityRefusalCodesReachTheCustomer` (the real entity client against a stand-in answering as entity-service does) and `TestNewUpstreamError_*`.
 
 `decide` is granted to every role that can read a change request on purpose: **this matrix is a
 coarse gate, entity-service decides who may answer which change request.** It resolves the caller
@@ -495,6 +495,26 @@ answering after the first), and only on the caller's own pending approval. entit
 its own whitelist for external callers, so a request that bypassed this layer still could not edit a
 change request. Route wiring is `registerChangeRequestRoutes` in `cmd/server/main.go`, covered by
 `TestChangeRequestRouteGating`.
+
+**A proposed time waits for WSO2: `customerProposal` on the detail.** The customer's `PATCH {plannedStartOn,
+plannedEndOn?}` ("propose new implementation time") is a proposal of a START: the change keeps its planned length,
+the portal sends the start plus the end that keeps it (start + planned length) and entity-service refuses any other
+end (400), a start alone is accepted, an end alone is a 400; this API forwards the window it validated
+(`ValidatePlannedWindow`, still-to-come, order) and nothing else. The change request STAYS in Customer Approval --
+a proposal writes one column, the proposed start (`customer_updated_on`) -- so the detail carries
+`customerProposal {startDate, endDate?, answer, proposerRecorded?, proposedByViewer?}`
+(`dto.ChangeRequestCustomerProposal`, mapped from `entity.ChangeRequestCustomerProposal`): `answer` is `pending`
+(waits for WSO2; the change's own `startDate` / `endDate` are still WSO2's plan and a colleague's Approve approves
+that plan), `agreed` (WSO2 accepted: the change is Scheduled for the proposal), `disagreed` (WSO2 asked for another
+time: the window is its new one and the customer is asked again) or `unanswered` (history). Only the customer's part
+of it is decoded: the proposer's name and email, `proposedOn`, `canAccept` and `acceptBlockedReason` are staff facts
+the entity type has no field for, so they cannot reach the portal whatever entity-service sends
+(`TestMapChangeRequestDetails_NeverPassesOnWhoProposedOrWSO2sOwnFacts`, `TestGetChangeRequest_CarriesTheCustomerProposal`);
+`proposerRecorded` is true whenever it is present for a customer: entity-service tells a customer a time is
+`pending` (waiting for WSO2) only when a registered contact is recorded as having proposed it, and reads a stored time
+nobody is recorded as having proposed (a WSO2 user's date, an old one) as `unanswered` (history), with neither field --
+so no page says WSO2 is deciding on a time the customer never proposed, and none can claim a colleague proposed it. A proposal is never mirrored to the previous system while the dual-write runs (it has no field for
+it): proposals and WSO2's answers are PostgreSQL-only until the sync stops, and the sync can rewrite the columns.
 
 **`customerCanAnswer` on the change-request detail.** `GET /change-requests/{id}` (`dto.ChangeRequestDetails`)
 passes through entity-service's per-caller `customerCanAnswer` (`entity.ChangeRequest.CustomerCanAnswer`, a
@@ -514,7 +534,7 @@ the detail after an answer.
 
 **Which change requests a customer sees is entity-service's decision, never this API's.** A customer sees a
 change request once it was *designated* to them (it reached Customer Approval and/or Customer Review and they
-were one of the contacts asked), in every later state (Authorize after they proposed a new time, Scheduled,
+were one of the contacts asked), in every later state (Scheduled,
 Implement, Review, Closed, Rollback, Canceled), and nothing else: no change request before it first reached a
 customer stage, none that never needs the customer, none designated only to other contacts, none of another
 project. entity-service enforces that on every read and write (search, totals, stats, detail, approvals,
@@ -760,6 +780,16 @@ Two more examples, both in this same "restrict, don't mirror" category:
   `filters.type: comment` on **read** too — entity-service's search endpoint returns `work_note`
   entries verbatim unless the caller filters them out, and those are internal WSO2 annotations that
   must never reach the customer regardless of which reference entity they're attached to.
+- `POST /cases/{id}/activities/search` (`CaseHandler.SearchCaseActivities`) forces
+  `ExcludeWorkNotes: true` onto every request it forwards, regardless of what the client sends —
+  the same restrict-don't-mirror shape as the generic comments endpoints above, for the case
+  activity feed specifically. Found live: entity-service's own `total` counted a
+  `WORK_NOTE`-type comment the same as a public one, while this handler's `dto.MapSearchCaseActivities`
+  already filtered work notes out of the *array* — so a case with one internal note showed
+  `totalRecords: 2` against one visible activity. Forcing the new flag server-side (entity-service's
+  own `SearchCaseActivitiesRequest.ExcludeWorkNotes`, nil/false everywhere else — see that repo's own
+  CLAUDE.md) makes `totalRecords` agree with what's actually rendered, instead of recomputing a count
+  client-side after the fact (which would only ever be correct for a single page, not across pages).
 
 **Not every field worth restricting is a security decision — some are just an entity-service scoping
 convenience, and the path (not the body) is the more reliable source for it.**

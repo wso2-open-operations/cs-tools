@@ -267,7 +267,8 @@ func (f *crFlow) phase(r visRepos, id, project, when string, visibleTo ...string
 // A change request is invisible to every customer until the customer's approval
 // is first asked, then visible for ever -- in EVERY later state -- to exactly the
 // contacts who were asked: Alice and Bob. The path takes in a proposed new time
-// (back to Authorize), the customer's answer, Implement, Review, the customer
+// (which waits in Customer Approval), WSO2's different time (the customers are asked
+// again with a fresh request), the customer's answer, Implement, Review, the customer
 // review and Closed, and goes through the approval cascade that escalates the
 // session identity inside the customer's own transaction. Everything a customer
 // can reach is checked in each state: the list and its total, the aggregate, the
@@ -297,19 +298,21 @@ func TestChangeRequestVisibilityIntegration_DesignatedStaysVisibleThroughTheLife
 	f.expect(id, "in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	f.phase(r, id, a, "in Customer Approval", "alice", "bob")
 
-	// Alice proposes another time: the change request goes back to Authorize and
-	// the request they were asked is superseded -- and it must STAY visible to both.
+	// Alice proposes another time: it waits in Customer Approval for WSO2 -- the
+	// change request stays visible to both.
 	if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
 		t.Fatalf("proposal: %v", err)
 	}
-	f.expect(id, "in Authorize after the proposal", "AUTHORIZE", "canceled")
-	f.phase(r, id, a, "in Authorize after a proposed new time", "alice", "bob")
+	f.expect(id, "in Customer Approval after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	f.phase(r, id, a, "in Customer Approval after a proposed new time", "alice", "bob")
 
-	if err := f.decide(id, crCABMemberUserID1, "approved"); err != nil {
-		t.Fatalf("CAB approval of the new plan: %v", err)
+	// WSO2 proposes a different time: the request they were asked is superseded by a
+	// fresh one -- and it must STAY visible to both.
+	if err := f.counter(id, sp(rsStart3), sp(rsEnd3)); err != nil {
+		t.Fatalf("WSO2's different time: %v", err)
 	}
-	f.expect(id, "in Customer Approval again", "CUSTOMER_APPROVAL", "authorize", "canceled")
-	f.phase(r, id, a, "in Customer Approval again", "alice", "bob")
+	f.expect(id, "in Customer Approval after WSO2's different time", "CUSTOMER_APPROVAL", "authorize", "canceled")
+	f.phase(r, id, a, "in Customer Approval again (asked about WSO2's time)", "alice", "bob")
 
 	// Alice answers (the cascade: Bob's row is Cancelled, the change is Scheduled).
 	if _, err := f.approveAs(id, crScopeUserA1, true); err != nil {
@@ -517,9 +520,12 @@ func TestChangeRequestVisibilityIntegration_CreatedAfterTheCutoverIsNeverLegacy(
 // A legacy change request a customer ACTED on stays visible afterwards: the act
 // records the designation in its own transaction. Here the change request is
 // legacy, waiting in Customer Approval with nobody asked (it got there under an
-// older build); Alice proposes a new time, which sends it back to Authorize --
-// a state a legacy change request is NOT visible in -- and she (and Bob, who was
-// asked by the stage the proposal found it needed) still see it, Sam does not.
+// older build); Alice proposes a new time, which gives it the stage it lacked (and
+// designates Alice and Bob), and WSO2 accepts it -- the change request is Scheduled, a
+// state a legacy change request is visible in to the project's registered contacts. (The
+// states a legacy change request is HIDDEN in -- Authorize and before -- are never reached
+// now: a proposal never leaves Customer Approval; designation keeping a change request
+// visible there is TestChangeRequestVisibilityIntegration_DesignatedStaysVisibleThroughTheLifecycle's.)
 func TestChangeRequestVisibilityIntegration_LegacyChangeRequestActedOnStaysVisible(t *testing.T) {
 	t.Run("a proposed time", func(t *testing.T) {
 		f := newCustomerGroupFlow(t)
@@ -535,18 +541,22 @@ func TestChangeRequestVisibilityIntegration_LegacyChangeRequestActedOnStaysVisib
 		if _, err := f.patchAsContact(id, crScopeUserA1, domain.PatchChangeRequestRequest{PlannedStartOn: sp(rsStart2), PlannedEndOn: sp(rsEnd2)}); err != nil {
 			t.Fatalf("proposal on a legacy change request with no stage: %v", err)
 		}
-		f.expect(id, "after the proposal", "AUTHORIZE", "canceled")
-		f.wantPlanned(id, "after the proposal", rsStart2, rsEnd2)
+		f.expect(id, "after the proposal", "CUSTOMER_APPROVAL", "authorize", "canceled")
+		f.wantPlanned(id, "after the proposal (the plan is not the proposal)", rsStart1, rsEnd1)
+		f.wantConversation(id, "after the proposal", rsStart2, "")
 		st := f.customerStages(id)
 		if len(st) != 1 {
 			t.Fatalf("customer stages after the proposal = %+v, want the one the proposal provisioned", st)
 		}
-		// The stage the proposal needed asked every registered portal contact, and the
-		// proposal then superseded it: all rows stay, Cancelled.
-		assertApprovers(t, "the provisioned stage after the proposal", st[0].approvers, map[string]string{crScopeUserA1: "CANCELLED", crScopeUserA2: "CANCELLED"})
-		// Authorize is a state a legacy change request is hidden in; designation is
-		// what keeps it visible to the contacts who were asked.
-		f.phase(r, id, crScopeProjectA, "legacy, in Authorize after a proposed new time", "alice", "bob")
+		// The stage the proposal needed asks every registered portal contact, and the
+		// proposal leaves it live.
+		assertApprovers(t, "the provisioned stage after the proposal", st[0].approvers, map[string]string{crScopeUserA1: "REQUESTED", crScopeUserA2: "REQUESTED"})
+		f.phase(r, id, crScopeProjectA, "legacy, in Customer Approval after a proposed time", "alice", "bob", "sam", "ian")
+
+		// WSO2 accepts: the change request is Scheduled, still visible to the project's contacts.
+		f.mustAccept(id)
+		f.expect(id, "after Accept", "SCHEDULED", "implement", "canceled")
+		f.phase(r, id, crScopeProjectA, "legacy, in Scheduled after the proposed time was accepted", "alice", "bob", "sam", "ian")
 	})
 	t.Run("a customer's answer", func(t *testing.T) {
 		f := newCustomerGroupFlow(t)

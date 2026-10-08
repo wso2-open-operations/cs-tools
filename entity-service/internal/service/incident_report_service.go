@@ -18,13 +18,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -73,6 +76,27 @@ type incidentReportService struct {
 	// request itself (incidentService.createWorkaroundProblem), so this flow
 	// must not create a second, Postgres-only one.
 	workaroundProblemInRequest bool
+	// specialOps publishes incident.special_ops_alert; nil publishes none.
+	// Set with WithSpecialOpsAlerts.
+	specialOps *specialOpsAlerts
+}
+
+// specialOpsAlerts is where incident.special_ops_alert goes (the sre-events
+// publisher) and which groups raise it (every team in the handoff config).
+type specialOpsAlerts struct {
+	publisher EventPublisherService
+	teams     *SpecialistHandoffConfig
+}
+
+// WithSpecialOpsAlerts makes the drainer publish incident.special_ops_alert
+// on publisher whenever an incident's assignment group changes to one of
+// teams' groups (migration 0207 records the change). Without a publisher or
+// any team it is left unchanged.
+func WithSpecialOpsAlerts(svc IncidentReportService, publisher EventPublisherService, teams *SpecialistHandoffConfig) IncidentReportService {
+	if r, ok := svc.(*incidentReportService); ok && publisher != nil && teams != nil && len(teams.Products) > 0 {
+		r.specialOps = &specialOpsAlerts{publisher: publisher, teams: teams}
+	}
+	return svc
 }
 
 // NewIncidentReportService constructs the flow logic for DATA_SOURCE=postgres.
@@ -91,6 +115,9 @@ func NewDualWriteIncidentReportService() IncidentReportService {
 // acted on however late it is drained -- the drainer always runs, so there
 // is no backlog from a switched-off period to guard against.
 func (s *incidentReportService) HandleChange(ctx context.Context, tx repository.IncidentReportTx, c repository.IncidentReportChange) error {
+	if group, ok := groupChangedTo(c.Changes); ok {
+		return s.specialOps.alert(ctx, tx, c, group)
+	}
 	to, ok := stateChangedTo(c.Changes)
 	if !ok || (to != incidentStateInProgress && to != incidentStateResolved) {
 		return nil
@@ -137,6 +164,59 @@ func stateChangedTo(changes map[string]map[string]any) (string, bool) {
 	}
 	to, ok := st["to"].(string)
 	return to, ok
+}
+
+// groupChangedTo reports the new assignment group when the change is one
+// migration 0207 recorded ("" when the group was cleared).
+func groupChangedTo(changes map[string]map[string]any) (string, bool) {
+	g, ok := changes["assignment_group_id"]
+	if !ok {
+		return "", false
+	}
+	to, _ := g["to"].(string)
+	return to, true
+}
+
+// alert publishes incident.special_ops_alert when group belongs to a Special
+// Ops team, and does nothing for any other group or when no alerts are
+// configured. A publish failure is returned, so the row is retried and in
+// the end parked like any other change.
+func (a *specialOpsAlerts) alert(ctx context.Context, tx repository.IncidentReportTx, c repository.IncidentReportChange, group string) error {
+	if a == nil {
+		return nil
+	}
+	product, team := a.teams.teamForGroup(group)
+	if team == nil {
+		return nil
+	}
+	previous, _ := c.Changes["assignment_group_id"]["from"].(string)
+	src, err := tx.SpecialOpsAlertSource(ctx, c.IncidentID, group, previous)
+	if errors.Is(err, repository.ErrIncidentNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	changedBy, _ := c.Snapshot["updated_by"].(string)
+	raw, err := json.Marshal(events.IncidentSpecialOpsAlertPayload{
+		IncidentID: c.IncidentID, Number: src.Number, Subject: src.Subject,
+		Description: strOrEmpty(src.Description), State: strOrEmpty(src.State), Priority: strOrEmpty(src.Priority),
+		Impact: strOrEmpty(src.Impact), Urgency: strOrEmpty(src.Urgency),
+		ServiceID: strOrEmpty(src.ServiceID), ServiceName: strOrEmpty(src.ServiceName),
+		Product: product.Name, TeamKey: team.Key, TeamLabel: team.Label,
+		AssignmentGroupID: group, AssignmentGroupName: strOrEmpty(src.GroupName),
+		PreviousAssignmentGroupID: previous, PreviousAssignmentGroupName: strOrEmpty(src.PreviousGroupName),
+		ChangedBy: changedBy, ChangedOn: c.OccurredOn.UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("special ops alert: encode payload: %w", err)
+	}
+	if err := a.publisher.Publish(ctx, events.TypeIncidentSpecialOpsAlert, c.IncidentID, raw); err != nil {
+		return fmt.Errorf("special ops alert: publish for incident %s: %w", c.IncidentID, err)
+	}
+	slog.InfoContext(ctx, "specialops: published incident.special_ops_alert",
+		"incidentId", c.IncidentID, "number", src.Number, "team", team.Key)
+	return nil
 }
 
 // reportTaskFor is the Create Record step of "Create Incident Report Task".

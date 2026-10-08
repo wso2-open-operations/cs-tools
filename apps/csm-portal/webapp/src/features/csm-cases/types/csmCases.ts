@@ -206,6 +206,11 @@ export interface CsmCaseComment {
    * the real creator's role isn't known on the frontend, so nothing should be
    * claimed about it. */
   synthetic?: boolean;
+  /** `"markdown"` when {@link bodyHtml} is Markdown rather than rich-text
+   * HTML, so it is rendered through `markdownToHtml` like a chatbot message.
+   * Set on the synthesized description entry of a record raised from a GitHub
+   * issue, whose description is the issue body verbatim. Absent = HTML. */
+  bodyFormat?: "markdown";
   /** True once this comment has been edited at least once. Derived from
    * `BeComment.lastEditedOn` being present — see {@link lastEditedOn} for the
    * actual timestamp used in the "(edited)" marker. */

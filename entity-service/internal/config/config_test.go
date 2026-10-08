@@ -972,6 +972,24 @@ func TestSREEventHubTopicMovesBothOperationsPublishers(t *testing.T) {
 	}
 }
 
+func TestIncidentEventHubTopic(t *testing.T) {
+	t.Setenv("EVENT_HUB_TOPIC", "case-events")
+
+	t.Setenv("INCIDENT_EVENT_HUB_TOPIC", "")
+	if c := Load(); c.IncidentEventHubTopic != "" {
+		t.Errorf("unset: %q, want empty (incidents stay on EVENT_HUB_TOPIC)", c.IncidentEventHubTopic)
+	}
+
+	t.Setenv("INCIDENT_EVENT_HUB_TOPIC", " sre-events ")
+	c := Load()
+	if c.IncidentEventHubTopic != "sre-events" {
+		t.Errorf("set: %q, want sre-events", c.IncidentEventHubTopic)
+	}
+	if c.EventHubTopic != "case-events" {
+		t.Errorf("the case-events topic moved: %q", c.EventHubTopic)
+	}
+}
+
 func TestConfig_Validate_Timeouts(t *testing.T) {
 	tests := []struct {
 		name    string

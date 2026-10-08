@@ -188,8 +188,23 @@ const (
 	teamFamilyExpr = `CASE WHEN lower(t.type) LIKE 'sre%' THEN 'SRE' WHEN lower(t.type) LIKE 'sme%' THEN 'SME' ELSE 'CRE' END`
 	// A leadership team (CRE Leadership) is management above the rota teams,
 	// not a team that works one, so it is no team of the schedule's.
+	//
+	// And only a team that works a rota. A CRE-typed team is not one by its
+	// type alone: the directory sync also brings in the change-request
+	// approval boards (CAB, Devops approval and review) as teams, and once the
+	// roster listed every member of every team, their members turned up on it
+	// under those boards. A team counts when it is an ABT, its type has a rota
+	// (the SRE and SME rotas), it holds rota history, a tag moves people to it
+	// (Migration), or it has an ordinary-weekday window (Americas) -- the last
+	// being how a new team is put on the rota before its first entry.
 	rosteredTeamWhere = `t.type IS NOT NULL AND lower(t.type) LIKE ANY (ARRAY['cre%', 'sre%', 'sme%'])
-		AND lower(t.type) NOT LIKE '%leadership%' AND lower(COALESCE(t.name, '')) NOT LIKE '%leadership%'`
+		AND lower(t.type) NOT LIKE '%leadership%' AND lower(COALESCE(t.name, '')) NOT LIKE '%leadership%'
+		AND (lower(t.type) LIKE '%-abt'
+		     OR EXISTS (SELECT 1 FROM team_schedule_rota rr WHERE lower(rr.team_type) = lower(t.type) AND rr.is_active)
+		     OR EXISTS (SELECT 1 FROM team_schedule_team_default_shift dd WHERE dd.team_key = t.key)
+		     OR EXISTS (SELECT 1 FROM team_schedule_absence_kind kk WHERE lower(kk.moves_to_team_key) = lower(t.key))
+		     OR EXISTS (SELECT 1 FROM team_schedule_assignment aa WHERE aa.team_key = t.key)
+		     OR EXISTS (SELECT 1 FROM team_schedule_absence bb WHERE bb.team_key = t.key))`
 
 	// notManagement leaves out anyone holding a management role -- the
 	// Americas team's lead, the CRE and CS heads. They sit above the teams

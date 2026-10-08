@@ -2874,6 +2874,14 @@ type SearchCasesRequest struct {
 	// ServiceNow-backed service, which always reports one, and when GroupBy is
 	// set (the totals are the bucket counts).
 	SkipTotal bool `json:"skipTotal,omitempty"`
+	// CountOnly is the mirror image of SkipTotal: the search runs only the
+	// COUNT query and skips the page query entirely, returning Cases as an
+	// empty slice. For a count or pie dashboard widget, whose only use for an
+	// ordinary search is reading Total off it -- the page query it would
+	// otherwise also pay for is never read and its one row is thrown away.
+	// Rejected together with SkipTotal (there would be nothing left to
+	// compute); Postgres data source only.
+	CountOnly bool `json:"countOnly,omitempty"`
 }
 
 // AggregateCasesRequest is the input for the dedicated case aggregate
@@ -3534,10 +3542,19 @@ type CaseActivity struct {
 // SearchCaseActivitiesRequest is the input for listing the activity feed of a case.
 // CaseID is populated from the URL path parameter and is not part of the JSON body.
 // When IncludeFieldChanges is nil or false, only comment and attachment entries are returned.
+// When ExcludeWorkNotes is true, WORK_NOTE-type comments are excluded from both the
+// page and Total -- added for callers (the customer portal) that must never show an
+// internal note to a customer and must not report a Total higher than what they can
+// actually display (see MapSearchCaseActivities' own history in the customer-portal
+// backend-v2 for the bug this closes: that BFF already filtered work notes out of the
+// array client-side, but forwarded this repository's unfiltered Total unchanged).
+// Nil/false preserves the original, unfiltered behavior for every other caller (the
+// CSM portal, which must still see work notes and their correct count).
 type SearchCaseActivitiesRequest struct {
 	CaseID              string     `json:"-"`
 	Pagination          Pagination `json:"pagination"`
 	IncludeFieldChanges *bool      `json:"includeFieldChanges,omitempty"`
+	ExcludeWorkNotes    *bool      `json:"excludeWorkNotes,omitempty"`
 }
 
 // SearchCaseActivitiesResponse is the paginated result of a case activity search.
@@ -3914,9 +3931,9 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 // from ServiceNow, so these names are the contract with that data).
 //
 //   - CABApprovalGroupName: the Change Advisory Board, the approver pool of a
-//     Normal change's second (CAB) approval stage.
-//   - ECABApprovalGroupName: the Emergency CAB, the approver pool of an
-//     Emergency change's only approval stage. A group of its own, not CAB.
+//     Normal change's second (CAB) approval stage and of an Emergency change's
+//     only approval stage (the previous system has no Emergency CAB: an Emergency change is
+//     approved by this same group).
 //   - PeerApprovalFallbackGroupName: the peer approval fallback group
 //     ("Devops Approval" in the ServiceNow flow). A Normal change's peer stage
 //     draws its approvers from the active internal members of the change's
@@ -3925,11 +3942,11 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 //     is used. Who is experienced enough to peer-approve is decided when
 //     people are added to the group, not when the stage is provisioned.
 //
-// CAB Approval and ECAB Approval are created by migration
-// 0188_change_request_approval_groups.sql when absent.
+// CAB Approval is created by migration 0188_change_request_approval_groups.sql when
+// absent (that migration also created an "ECAB Approval" group, which nothing
+// resolves any more and which is left in place).
 const (
 	CABApprovalGroupName          = "CAB Approval"
-	ECABApprovalGroupName         = "ECAB Approval"
 	PeerApprovalFallbackGroupName = "Devops Approval"
 )
 
@@ -4448,6 +4465,34 @@ type PatchChangeRequestRequest struct {
 	// only; refused for any other caller or request.
 	ExpectedPlannedStartOn *string `json:"expectedPlannedStartOn,omitempty"`
 	ExpectedPlannedEndOn   *string `json:"expectedPlannedEndOn,omitempty"`
+	// ConfirmCustomerUpdatedDate is WSO2's ACCEPTANCE of the time a customer
+	// proposed for the change (change_request.customer_updated_date_confirmation, the
+	// confirmation of the proposed date): the only value this API takes
+	// is "agree", sent by staff with the proposal's own version
+	// (ExpectedCustomerUpdatedOn) and the planned window the page showed
+	// (ExpectedPlannedStartOn / ExpectedPlannedEndOn, all three required). It
+	// applies the customer's proposed start to the planned window (the planned
+	// length is kept) and moves the change from Customer Approval straight to
+	// Scheduled in one write: no CAB approval again, no second ask of the
+	// customer. To decline a proposal, staff propose a different time (state
+	// "authorize" with the window they want, which writes "disagree"). It goes
+	// alone: with nothing but the three expected* fields. Refused for an external
+	// caller (403), while no proposal is waiting and for a time that no registered
+	// contact of the project is recorded as having proposed (409, errorCode
+	// change_request_proposer_not_recorded). PostgreSQL data source
+	// only. See repository.acceptCustomerProposal and entity-service's CLAUDE.md,
+	// "A customer's proposed time".
+	ConfirmCustomerUpdatedDate *string `json:"confirmCustomerUpdatedDate,omitempty"`
+	// ExpectedCustomerUpdatedOn names the proposal a staff answer is about (RFC 3339,
+	// as ChangeRequest.CustomerProposal.StartOn prints it): it must still be the
+	// stored proposed start, under the row lock, or the answer is refused with a 409
+	// -- a page opened before the customer proposed another time can never answer
+	// the new one. Required with ConfirmCustomerUpdatedDate; on a staff state
+	// "authorize" it is required while a proposal is waiting and refused (409) when
+	// none is. Over a stored time that nobody is recorded as having proposed it is
+	// optional on "authorize" (no proposal waits) and must be the stored time when sent.
+	// Postgres data source only.
+	ExpectedCustomerUpdatedOn *string `json:"expectedCustomerUpdatedOn,omitempty"`
 	// OnHold/OnHoldReason gate change_request.is_on_hold/on_hold_reason
 	// (migration 0178). Combinable with every other field
 	// on this PATCH, including State -- this endpoint has no exclusive/
@@ -4828,6 +4873,13 @@ type ChangeRequest struct {
 	// that finds it absent falls back to what it knew before the field existed.
 	CustomerCanAnswer *bool `json:"customerCanAnswer,omitempty"`
 
+	// CustomerProposal is the conversation about a time the customer proposed
+	// (see ChangeRequestCustomerProposal): present on the PostgreSQL data source
+	// when customer_updated_on is set, absent otherwise. It is derived from the two
+	// synced columns customer_updated_on / customer_updated_date_confirmation
+	// and the approver rows; nothing extra is stored for it.
+	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
+
 	// The fields below are change-request field-parity additions. All 20 are
 	// present on GET /change-requests/{id} and the PATCH receipt (both share
 	// the same mapper); none are on the search response, which was
@@ -4875,6 +4927,66 @@ type ChangeRequest struct {
 	GitReference *string `json:"gitReference"`
 }
 
+// ChangeRequestCustomerProposal is what the change request says about a time the
+// customer proposed for it. The previous system already modelled that conversation and
+// the synced schema carries it: change_request.customer_updated_on is the customer's
+// proposed plan START and change_request.customer_updated_date_confirmation is WSO2's
+// answer, AGREE or DISAGREE (the confirmation of the proposed date). Nothing here is
+// stored beyond those two columns; the object is derived on every read.
+//
+// Answer is one of
+//
+//   - "pending":     the change is in Customer Approval, the proposed start differs from
+//     the planned start, WSO2 has not answered, and no approval but the customer's own is
+//     still asked -- the only state WSO2 can act on (Accept proposed time / Propose a
+//     different time). The planned window (PlannedStartOn / PlannedEndOn) is still the
+//     one WSO2 planned: a proposal changes nothing until WSO2 answers. A stored time that
+//     nobody is recorded as having proposed is pending for a staff reader (ProposerRecorded
+//     false, nothing to accept) and "unanswered" for a customer.
+//   - "agreed":      WSO2 accepted it (AGREE).
+//   - "disagreed":   WSO2 asked for a different time (DISAGREE).
+//   - "unanswered":  history -- the change moved on, or the proposal is the planned start
+//     already, without an answer.
+type ChangeRequestCustomerProposal struct {
+	// StartOn is the proposed plan start (customer_updated_on), RFC 3339 in UTC.
+	StartOn string `json:"startOn"`
+	// EndOn is the proposed end: StartOn plus the length of the planned window (a
+	// proposal is a start; the planned length is kept). Present only while the answer
+	// is "pending" and the planned window has a length.
+	EndOn  *string `json:"endOn,omitempty"`
+	Answer string  `json:"answer"`
+	// ProposerRecorded says whether a registered contact of the change's project is
+	// recorded as having proposed the time: while the answer is "pending", true when the
+	// change's last writer (work_item.updated_by) is one, who is then the person who
+	// proposed it. Nothing else names a proposer (no comment, audit or other log is read)
+	// and nothing is added to record one. False when nobody is recorded -- a date a WSO2
+	// user wrote in the previous system, one left over from an older cycle, or a genuine
+	// proposal that a later write to the change replaced as last writer. A time nobody is
+	// recorded as having proposed is not a proposal WSO2 can accept (CanAccept is false,
+	// Accept is refused) and the banner says the proposer is not recorded; proposing a
+	// different time is the way on, and the customer then approves it. Absent unless
+	// pending. A customer is only ever shown a pending time that somebody is recorded as
+	// having proposed (otherwise they read "unanswered").
+	ProposerRecorded *bool `json:"proposerRecorded,omitempty"`
+	// ProposedByName / ProposedByEmail / ProposedOn: the proposer and the time, only
+	// for a staff reader, only while pending and ProposerRecorded is true.
+	ProposedByName  *string `json:"proposedByName,omitempty"`
+	ProposedByEmail *string `json:"proposedByEmail,omitempty"`
+	ProposedOn      *string `json:"proposedOn,omitempty"`
+	// ProposedByViewer is set for an external caller (a customer) while the answer is
+	// "pending": whether the proposer is the person reading. No names or emails reach a
+	// customer.
+	ProposedByViewer *bool `json:"proposedByViewer,omitempty"`
+	// CanAccept (a staff reader, while "pending"): whether "Accept proposed time"
+	// would be accepted right now; when it would not, AcceptBlockedReason says why in
+	// the words of the refusal the PATCH would give (nobody is recorded as having
+	// proposed the time, the proposed start has passed, the change is on hold, the
+	// planned window has no length to keep). The server stays the authority: every act
+	// re-checks under the row lock.
+	CanAccept           *bool   `json:"canAccept,omitempty"`
+	AcceptBlockedReason *string `json:"acceptBlockedReason,omitempty"`
+}
+
 // ChangeRequestApproverType is a string enum for the kind of approver assigned to an
 // approval stage: a static ServiceNow group, or the change request's dynamic customer contact.
 type ChangeRequestApproverType string
@@ -4907,7 +5019,7 @@ type ChangeRequestApprover struct {
 	// CanDecide is true only on the CALLING user's own approver row, and only
 	// when that row is still REQUESTED and the caller may actually decide it
 	// right now: they are not the change request's creator/requester, and (for
-	// an internal stage: peer, CAB, ECAB, review) are an active internal user,
+	// an internal stage: peer, CAB, review) are an active internal user,
 	// and the change request is in the state the row's stage belongs to (a
 	// REQUESTED row on a stage the change has moved past is false). The webapp
 	// should render

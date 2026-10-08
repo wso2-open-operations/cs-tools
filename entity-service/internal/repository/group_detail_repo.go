@@ -54,13 +54,12 @@ func NewGroupDetailRepository(db *pgxpool.Pool) GroupDetailRepository {
 }
 
 // namedPoolGroups are the groups the approval pools resolve BY NAME rather than
-// by id: the CAB and ECAB stages' own groups and the Devops Approval peer
-// fallback (resolveApprovalPool / resolvePeerPool -> namedGroup). Every other
+// by id: the CAB stage's own group and the Devops Approval peer fallback
+// (resolveApprovalPool / resolvePeerPool -> namedGroup). Every other
 // group an approval stage points at is a change's assigned group, whose pools
 // read team_member.group_id = <the group's id> only (groupMemberIDs).
 var namedPoolGroups = map[string]bool{
 	domain.CABApprovalGroupName:          true,
-	domain.ECABApprovalGroupName:         true,
 	domain.PeerApprovalFallbackGroupName: true,
 }
 
@@ -75,7 +74,7 @@ var namedPoolGroups = map[string]bool{
 //   - an assigned group (the Peer and Review stages) reads
 //     team_member.group_id = <the group's id> and nothing else
 //     (groupMemberIDs) -- so does this, for any group not listed below;
-//   - the CAB / ECAB / Devops Approval groups are resolved by NAME
+//   - the CAB / Devops Approval groups are resolved by NAME
 //     (namedGroup): anyone whose team_member.group_id points at a "group" of
 //     that name, or whose team_member.team_id points at a `team` of that name
 //     (which is also how the CR-notice flow addresses these audiences) -- so

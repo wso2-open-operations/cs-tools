@@ -39,14 +39,19 @@ import {
   callRequestApiPreferredTimeToDatetimeLocal,
   computeMinScheduleDatetimeLocalForTimeZone,
 } from "@features/support/utils/support";
-import { describeChangeRequestActionError } from "@features/operations/utils/changeRequests";
+import {
+  describeChangeRequestActionError,
+  getCustomerProposal,
+  isProposalPending,
+} from "@features/operations/utils/changeRequests";
 import {
   buildProposedWindowPayload,
+  formatPlannedLength,
   getChangeRequestWindow,
   getProposalCopy,
-  hasProposedWindowErrors,
+  hasProposedStartErrors,
   shiftEndKeepingDuration,
-  validateProposedWindow,
+  validateProposedStart,
 } from "@features/operations/utils/changeRequestSchedule";
 import type {
   ChangeRequestDetails,
@@ -73,11 +78,11 @@ type ProposeNewImplementationTimeModalBodyProps = {
 };
 
 /**
- * Mounted only while the dialog is open: the two fields initialize from
+ * Mounted only while the dialog is open: the start initializes from
  * `changeRequest` on mount (no `setState` in `useEffect`).
  *
- * Changing the start moves the end with it, keeping the current duration, until
- * the customer edits the end by hand. Nothing is sent until the window passes
+ * A proposal is a new START: the planned length stays, so the end is shown, not
+ * asked for, and follows the start. Nothing is sent until the start passes
  * validation, and a failure that editing can fix stays in the dialog.
  */
 function ProposeNewImplementationTimeModalBody({
@@ -95,20 +100,21 @@ function ProposeNewImplementationTimeModalBody({
     changeRequest.startDate,
     userTimeZone,
   );
-  const currentEnd = callRequestApiPreferredTimeToDatetimeLocal(
-    changeRequest.endDate,
-    userTimeZone,
-  );
   const { durationMs } = getChangeRequestWindow(changeRequest);
-  const copy = getProposalCopy(changeRequest);
+  const copy = getProposalCopy(durationMs);
+  // A time that already waits for WSO2 (the viewer's own or a colleague's): a new
+  // proposal replaces it, and sending the same one again is refused.
+  const standing = isProposalPending(changeRequest)
+    ? getCustomerProposal(changeRequest)
+    : null;
+  const standingStart = standing
+    ? callRequestApiPreferredTimeToDatetimeLocal(standing.startDate, userTimeZone)
+    : "";
 
   const [proposedStart, setProposedStart] = useState(currentStart);
-  const [proposedEnd, setProposedEnd] = useState(currentEnd);
-  const [endEditedByHand, setEndEditedByHand] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const startInputRef = useRef<HTMLInputElement | null>(null);
-  const endInputRef = useRef<HTMLInputElement | null>(null);
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const inFlightRef = useRef(false);
   // Set when a failure keeps the dialog open: the submit button the customer
@@ -125,15 +131,18 @@ function ProposeNewImplementationTimeModalBody({
   });
   const minDatetime = computeMinScheduleDatetimeLocalForTimeZone(0, userTimeZone);
 
-  const errors = validateProposedWindow({
+  const errors = validateProposedStart({
     start: proposedStart,
-    end: proposedEnd,
     currentStart,
-    currentEnd,
+    standingStart: standingStart || undefined,
+    durationMs,
     timeZone: userTimeZone,
   });
-  // Errors appear once the customer has tried to submit, then follow every edit.
-  const shown = attempted ? errors : {};
+  // The end that start implies; "" until the start is a real time.
+  const derivedEnd = shiftEndKeepingDuration(proposedStart, durationMs, userTimeZone);
+  // A change request with no window to move is refused whatever is typed, so that
+  // is said at once; the field errors appear once the customer has tried to submit.
+  const shown = attempted || durationMs == null ? errors : {};
 
   const handleClose = () => {
     if (isModalBusy) return;
@@ -143,16 +152,6 @@ function ProposeNewImplementationTimeModalBody({
   const handleStartChange = (value: string) => {
     setProposedStart(value);
     setSubmitError(null);
-    if (!endEditedByHand) {
-      const shiftedEnd = shiftEndKeepingDuration(value, durationMs, userTimeZone);
-      if (shiftedEnd) setProposedEnd(shiftedEnd);
-    }
-  };
-
-  const handleEndChange = (value: string) => {
-    setProposedEnd(value);
-    setEndEditedByHand(true);
-    setSubmitError(null);
   };
 
   const handleSubmit = async () => {
@@ -160,14 +159,13 @@ function ProposeNewImplementationTimeModalBody({
     setAttempted(true);
     setSubmitError(null);
 
-    if (hasProposedWindowErrors(errors)) {
+    if (hasProposedStartErrors(errors)) {
       if (errors.start) startInputRef.current?.focus();
-      else if (errors.end) endInputRef.current?.focus();
       return;
     }
     const payload = buildProposedWindowPayload(
       proposedStart,
-      proposedEnd,
+      durationMs,
       userTimeZone,
     );
     if (!payload) {
@@ -236,7 +234,7 @@ function ProposeNewImplementationTimeModalBody({
             Propose New Implementation Time
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Suggest an alternative schedule for this change request
+            Suggest a different start time for this change request
           </Typography>
         </Box>
         <IconButton
@@ -249,7 +247,7 @@ function ProposeNewImplementationTimeModalBody({
           <X size={20} aria-hidden />
         </IconButton>
       </DialogTitle>
-      {/* One form around the content and the actions, so Enter in either field
+      {/* One form around the content and the actions, so Enter in the field
           submits (the Submit button is tied to it by `form`). Validation stays
           ours: the browser's own bubbles are off. */}
       <form
@@ -334,6 +332,24 @@ function ProposeNewImplementationTimeModalBody({
               </Typography>
             </Box>
           </Box>
+          {standing && (
+            <Box sx={{ mt: 2 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                display="block"
+              >
+                Proposed start waiting for WSO2
+              </Typography>
+              <Typography variant="body2" color="text.primary">
+                {formatBackendTimestampForDisplay(
+                  standing.startDate,
+                  SCHEDULE_DISPLAY_OPTIONS,
+                  userTimeZone,
+                ) ?? "Not available"}
+              </Typography>
+            </Box>
+          )}
         </Box>
 
         <Typography
@@ -342,7 +358,7 @@ function ProposeNewImplementationTimeModalBody({
           color="text.secondary"
           sx={{ mb: 0.5 }}
         >
-          Proposed implementation window
+          Proposed implementation time
         </Typography>
         <Typography
           variant="caption"
@@ -352,7 +368,7 @@ function ProposeNewImplementationTimeModalBody({
         >
           {`Times are in your time zone: ${userTimeZone}.${
             durationMs != null
-              ? " Moving the start moves the end with it, until you change the end yourself."
+              ? " The end follows the start: the planned length stays the same."
               : ""
           }`}
         </Typography>
@@ -373,7 +389,7 @@ function ProposeNewImplementationTimeModalBody({
             required
             value={proposedStart}
             onChange={(e) => handleStartChange(e.target.value)}
-            disabled={isModalBusy}
+            disabled={isModalBusy || durationMs == null}
             error={Boolean(shown.start)}
             helperText={shown.start}
             inputRef={startInputRef}
@@ -382,22 +398,24 @@ function ProposeNewImplementationTimeModalBody({
               htmlInput: { min: minDatetime },
             }}
           />
+          {/* Shown, never typed: a proposal moves the start and keeps the planned
+              length. Read-only (not disabled), so it keeps its contrast and is read out. */}
           <TextField
             id="proposed-end"
             label="Proposed end"
             type="datetime-local"
             size="small"
             fullWidth
-            required
-            value={proposedEnd}
-            onChange={(e) => handleEndChange(e.target.value)}
-            disabled={isModalBusy}
-            error={Boolean(shown.end)}
-            helperText={shown.end}
-            inputRef={endInputRef}
+            value={derivedEnd}
+            helperText={
+              durationMs != null
+                ? `Same length as the planned window (${formatPlannedLength(durationMs)})`
+                : undefined
+            }
             slotProps={{
               inputLabel: { shrink: true },
-              htmlInput: { min: proposedStart || minDatetime },
+              input: { readOnly: true },
+              htmlInput: { "aria-readonly": true },
             }}
           />
         </Box>
@@ -423,7 +441,7 @@ function ProposeNewImplementationTimeModalBody({
           variant="contained"
           color="primary"
           ref={submitButtonRef}
-          disabled={isModalBusy}
+          disabled={isModalBusy || durationMs == null}
           startIcon={
             isModalBusy ? <CircularProgress size={16} color="inherit" /> : undefined
           }
@@ -437,7 +455,7 @@ function ProposeNewImplementationTimeModalBody({
 }
 
 /**
- * Modal to propose a new implementation window (planned start and end).
+ * Modal to propose a new implementation start (the planned length stays).
  * Current schedule matches Scheduled Maintenance Window planned start/end.
  *
  * @param props - Dialog state and CR.

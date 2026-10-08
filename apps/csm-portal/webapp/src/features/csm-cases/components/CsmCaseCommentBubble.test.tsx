@@ -217,6 +217,20 @@ describe("CsmCaseCommentBubble", () => {
     expect(screen.getByText("bold answer")).toBeInTheDocument();
   });
 
+  it("renders a markdown-marked description (a GitHub issue body) as headings", () => {
+    renderWithProviders(
+      <CsmCaseCommentBubble
+        comment={makeComment({
+          synthetic: true,
+          bodyFormat: "markdown",
+          bodyHtml: "### Request Details\n\ntesting",
+        })}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 3, name: "Request Details" })).toBeInTheDocument();
+    expect(screen.queryByText(/###/)).not.toBeInTheDocument();
+  });
+
   it("resolves the author link from the canonical email when there is no legacy email and no id", async () => {
     // Regression for a null canonical id + empty legacy `authorEmail`: the
     // author link must still resolve through `comment.authorUser.email`

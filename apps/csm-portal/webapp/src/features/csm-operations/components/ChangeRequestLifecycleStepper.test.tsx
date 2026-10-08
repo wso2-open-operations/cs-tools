@@ -410,3 +410,50 @@ describe("ChangeRequestLifecycleStepper", () => {
     });
   });
 });
+
+describe("ChangeRequestLifecycleStepper — an Emergency change", () => {
+  const noCustomerSteps = { type: "emergency", customerApprovalRequired: false, customerReviewRequired: false };
+
+  it("goes New, Authorize, Scheduled, Implement, Review, Closed, with Assess not taken (and Rollback / Canceled as ever)", () => {
+    render(<ChangeRequestLifecycleStepper state="authorize" {...noCustomerSteps} />);
+    expect(readout()).toEqual([
+      "New, done",
+      "Assess, not taken",
+      "Authorize, current",
+      "Scheduled, upcoming",
+      "Implement, upcoming",
+      "Review, upcoming",
+      "Rollback, not taken",
+      "Closed, upcoming",
+      "Canceled, not taken",
+    ]);
+  });
+
+  it("marks Assess with the same faint, dashed marker as the stages a change never takes, and explains it on hover", async () => {
+    render(<ChangeRequestLifecycleStepper state="new" {...noCustomerSteps} />);
+    expect(stage("Assess")).toHaveTextContent("Assess, not taken");
+    // The same hint the Rollback / Canceled stages carry.
+    fireEvent.mouseOver(stage("Assess"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Technical assessment completed \(not taken\)$/);
+    // The line into Assess is dashed, like the one into any stage that is not on the path.
+    const connectors = Array.from(stage("Assess").querySelectorAll("[data-segment]")).map((c) => c.getAttribute("data-segment"));
+    expect(connectors).toEqual(["dashed", "plain"]);
+  });
+
+  it("fills the line straight through Assess to Authorize once the CAB stage is reached", () => {
+    render(<ChangeRequestLifecycleStepper state="scheduled" {...noCustomerSteps} />);
+    const into = (label: string): string[] =>
+      Array.from(stage(label).querySelectorAll("[data-segment]")).map((c) => c.getAttribute("data-segment") ?? "");
+    expect(into("Authorize")[0]).toBe("filled");
+  });
+
+  it("a Normal change of the same shape still passes through Assess", () => {
+    render(<ChangeRequestLifecycleStepper state="authorize" type="normal" customerApprovalRequired={false} customerReviewRequired={false} />);
+    expect(stage("Assess")).toHaveTextContent("Assess, done");
+  });
+
+  it("with the type unknown (not in the payload) the line reads as it always did", () => {
+    render(<ChangeRequestLifecycleStepper state="authorize" customerApprovalRequired={false} customerReviewRequired={false} />);
+    expect(stage("Assess")).toHaveTextContent("Assess, done");
+  });
+});

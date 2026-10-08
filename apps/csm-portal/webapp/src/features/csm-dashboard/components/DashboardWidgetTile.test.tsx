@@ -202,6 +202,7 @@ describe("DashboardWidgetTile", () => {
       {
         filters: {},
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -374,6 +375,7 @@ describe("DashboardWidgetTile", () => {
           ],
         },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -766,6 +768,7 @@ describe("DashboardWidgetTile", () => {
       {
         filters: {},
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -920,6 +923,7 @@ describe("DashboardWidgetTile", () => {
           ],
         },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -960,6 +964,7 @@ describe("DashboardWidgetTile", () => {
       {
         filters: { filters: [{ field: "creTeam", op: "in", values: ["team-a-group-id"] }] },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -987,6 +992,7 @@ describe("DashboardWidgetTile", () => {
       {
         filters: { filters: [{ field: "creTeam", op: "in", values: ["team-b-group-id"] }] },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -1016,6 +1022,7 @@ describe("DashboardWidgetTile", () => {
       {
         filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -1102,6 +1109,7 @@ describe("DashboardWidgetTile", () => {
           ],
         },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -1196,6 +1204,7 @@ describe("DashboardWidgetTile", () => {
           ],
         },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -1209,6 +1218,7 @@ describe("DashboardWidgetTile", () => {
           ],
         },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );

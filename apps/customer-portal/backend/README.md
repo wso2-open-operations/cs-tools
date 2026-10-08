@@ -225,6 +225,14 @@ The following endpoints are defined in `service.bal`.
 - `PATCH /change-requests/{id}` - Update change request.
 - `GET /change-requests/{id}/comments` - List change request comments.
 
+> **A customer's proposed time is not carried by this (deprecated) backend.** The v2 backend's change request detail
+> has `customerProposal` (the time a customer proposed and where WSO2's answer to it stands), and the portal reads it
+> to say "Waiting for WSO2 to respond to your proposed time" and "Proposed time accepted". This backend's detail
+> mapping (`mapChangeRequestResponse` in `utils.bal`) does not pass it on, and it passes `hasCustomerApproved` through
+> as it is. Against this backend a proposed time still reaches entity-service, but the pages have no proposal to show,
+> and a change WSO2 accepted a proposed time for (Scheduled, `hasCustomerApproved` false) reads as not approved.
+> Changing it is out of scope: new feature development targets the Go backend (see the notice above).
+
 ### Registry Tokens
 
 - `POST /projects/{id}/registry-tokens` - Create registry token.

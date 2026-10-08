@@ -420,6 +420,16 @@ describe("MonthRoster: a window around a day", () => {
     expect(heads[0].querySelector(".mo")).not.toBeNull();
     expect(heads[heads.length - 1].querySelector(".d")?.textContent).toBe("12");
   });
+
+  it("names the weekday under every date", () => {
+    const { container } = renderRoster({ from: new Date(2026, 8, 14), to: new Date(2026, 9, 12) });
+    const heads = container.querySelectorAll("thead th.day");
+    const weekday = (d: Date) => d.toLocaleDateString(undefined, { weekday: "short" });
+    // 14 Sept 2026 is a Monday; 12 Oct 2026 is one too.
+    expect(heads[0].querySelector(".w")?.textContent).toBe(weekday(new Date(2026, 8, 14)));
+    expect(heads[5].querySelector(".w")?.textContent).toBe(weekday(new Date(2026, 8, 19)));
+    expect(heads[heads.length - 1].querySelector(".w")?.textContent).toBe(weekday(new Date(2026, 9, 12)));
+  });
 });
 
 describe("MonthRoster: an SME rotation", () => {

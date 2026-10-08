@@ -60,6 +60,14 @@ vi.mock("@features/csm-operations/api/usePatchChangeRequest", () => ({
     },
   }),
 }));
+// The originating service request's detail, which the form infers its project,
+// deployment, subject and description from. Undefined = not loaded / none.
+let sourceCaseFixture: Record<string, unknown> | undefined;
+vi.mock("@features/csm-cases/api/useGetCsmCaseDetail", () => ({
+  useGetCsmCaseDetail: (id: string | undefined) => ({
+    data: id && sourceCaseFixture && sourceCaseFixture.id === id ? sourceCaseFixture : undefined,
+  }),
+}));
 vi.mock("@features/settings/api/useGetUsersMe", () => ({
   useGetUsersMe: () => ({ data: undefined }),
 }));
@@ -1070,6 +1078,166 @@ describe("CreateChangeRequestPage — Customer Approval / Customer Review checkb
   });
 });
 
+describe("CreateChangeRequestPage — an Emergency change proceeds without customer approval or review", () => {
+  const EMERGENCY_LINE = "Emergency changes proceed without customer approval or review.";
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    locationState = undefined;
+    navigateMock.mockReset();
+    postChangeRequestMutateMock.mockReset();
+    patchChangeRequestMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
+  function submittedPayload(): Record<string, unknown> {
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock).toHaveBeenCalledTimes(1);
+    return postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  it("disables both boxes, unticked, and says why in one line, as soon as Emergency is chosen", () => {
+    render(<CreateChangeRequestPage />);
+    // Nothing chosen yet: the boxes are live and the line is not there.
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeEnabled();
+    expect(screen.queryByText(EMERGENCY_LINE)).not.toBeInTheDocument();
+
+    selectType("Emergency");
+
+    const approval = screen.getByRole("checkbox", { name: "Customer Approval" });
+    const review = screen.getByRole("checkbox", { name: "Customer Review" });
+    expect(approval).toBeDisabled();
+    expect(review).toBeDisabled();
+    expect(approval).not.toBeChecked();
+    expect(review).not.toBeChecked();
+    expect(screen.getAllByText(EMERGENCY_LINE)).toHaveLength(1);
+    // The line describes the boxes for assistive tech, beside each box's own helper.
+    expect(approval).toHaveAccessibleDescription(new RegExp(EMERGENCY_LINE.replace(/\./g, "\\.")));
+    expect(review).toHaveAccessibleDescription(new RegExp(EMERGENCY_LINE.replace(/\./g, "\\.")));
+  });
+
+  it("clears boxes that were ticked when the type is switched to Emergency", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Normal");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Review" }));
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeChecked();
+
+    selectType("Emergency");
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Customer Review" })).not.toBeChecked();
+  });
+
+  it("leaves them off, and tickable again, when the type is switched away from Emergency", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Normal");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    selectType("Emergency");
+    selectType("Normal");
+
+    const approval = screen.getByRole("checkbox", { name: "Customer Approval" });
+    const review = screen.getByRole("checkbox", { name: "Customer Review" });
+    expect(approval).toBeEnabled();
+    expect(review).toBeEnabled();
+    expect(approval).not.toBeChecked();
+    expect(review).not.toBeChecked();
+    expect(screen.queryByText(EMERGENCY_LINE)).not.toBeInTheDocument();
+    fireEvent.click(approval);
+    expect(approval).toBeChecked();
+  });
+
+  it("sends an Emergency change with both flags false", () => {
+    render(<CreateChangeRequestPage />);
+    fillSubject("Emergency");
+    const payload = submittedPayload();
+    expect(payload).toHaveProperty("type", "emergency");
+    expect(payload).toHaveProperty("customerApprovalRequired", false);
+    expect(payload).toHaveProperty("customerReviewRequired", false);
+  });
+
+  it("sends false even after boxes were ticked on another type first", () => {
+    render(<CreateChangeRequestPage />);
+    fillSubject("Normal");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Review" }));
+    selectType("Emergency");
+    const payload = submittedPayload();
+    expect(payload.customerApprovalRequired).toBe(false);
+    expect(payload.customerReviewRequired).toBe(false);
+  });
+
+  it("does not let a click tick a disabled box", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Emergency");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).not.toBeChecked();
+  });
+
+  it("clones an Emergency change with both boxes off, whatever its source had ticked", () => {
+    locationState = {
+      sourceNumber: "CHG0009988",
+      subject: "Clone me",
+      type: "emergency",
+      customerApprovalRequired: true,
+      customerReviewRequired: true,
+    };
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByRole("radio", { name: /^emergency/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Customer Review" })).not.toBeChecked();
+    const payload = submittedPayload();
+    expect(payload.customerApprovalRequired).toBe(false);
+    expect(payload.customerReviewRequired).toBe(false);
+  });
+
+  it("restores an Emergency draft saved with ticked boxes with both boxes off", () => {
+    const draft: ChangeRequestDraft = {
+      subject: "Drafted before the rule",
+      type: "emergency",
+      impact: "low",
+      priority: "",
+      plannedStartDate: "",
+      plannedEndDate: "",
+      description: "",
+      justification: "",
+      implementationPlan: "",
+      riskImpactAnalysis: "",
+      backoutPlan: "",
+      testPlan: "",
+      isPlanningVisibleToCustomers: false,
+      customerApprovalRequired: true,
+      customerReviewRequired: true,
+      groupId: "",
+      assignedEngineerId: "",
+      requestedById: "",
+      parentValue: "",
+    };
+    saveChangeRequestDraft(changeRequestDraftKey({ kind: "new" }), draft);
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Customer Review" })).not.toBeChecked();
+    expect(screen.getAllByText(EMERGENCY_LINE)).toHaveLength(1);
+  });
+
+  it("keeps Normal and Standard as before: both boxes live, and ticked ones are sent", () => {
+    for (const type of ["Normal", "Standard"] as const) {
+      postChangeRequestMutateMock.mockReset();
+      const { unmount } = render(<CreateChangeRequestPage />);
+      fillSubject(type);
+      expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeEnabled();
+      expect(screen.queryByText(EMERGENCY_LINE)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("checkbox", { name: "Customer Review" }));
+      const payload = submittedPayload();
+      expect(payload.customerApprovalRequired, type).toBe(false);
+      expect(payload.customerReviewRequired, type).toBe(true);
+      unmount();
+      sessionStorage.clear();
+    }
+  });
+});
+
 describe("CreateChangeRequestPage — customer project, deployments, deployment products, customer group", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -1641,5 +1809,52 @@ describe("CreateChangeRequestPage — scope fields in the in-progress draft and 
     expect(screen.getByText(/customer project, category/i)).toBeInTheDocument();
     expect(screen.getByText(/Deployments, deployment products, schedule/i)).toBeInTheDocument();
     expect(screen.getByText(/The Customer Group follows the customer project/i)).toBeInTheDocument();
+  });
+});
+
+describe("CreateChangeRequestPage — fields inferred from the originating service request", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    postChangeRequestMutateMock.mockReset();
+    sourceCaseFixture = {
+      id: "sr-1",
+      projectId: "proj-a",
+      projectName: "Acme Project",
+      subject: "Upgrade the gateway",
+      description: "<p>Needs a change</p>",
+      productContext: { deploymentId: SCOPE_FIXTURE["proj-a"][0].id },
+    };
+  });
+  afterEach(() => {
+    sourceCaseFixture = undefined;
+  });
+
+  it("fills project, deployment, subject and description when opened from the service request", () => {
+    locationState = { caseId: "sr-1", caseNumber: "CS-1", projectId: "proj-a" };
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByDisplayValue("Upgrade the gateway")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("<p>Needs a change</p>")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("proj-a")).toBeInTheDocument();
+  });
+
+  it("infers the same fields when the service request is picked in the field instead", () => {
+    locationState = undefined;
+    render(<CreateChangeRequestPage />);
+    fireEvent.change(screen.getByLabelText(/originating service request/i), {
+      target: { value: encodeParentRecordValue("service_request", "sr-1") },
+    });
+    expect(screen.getByDisplayValue("Upgrade the gateway")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("proj-a")).toBeInTheDocument();
+  });
+
+  it("never overwrites a subject the user already typed", () => {
+    locationState = undefined;
+    render(<CreateChangeRequestPage />);
+    fillSubject();
+    const typed = (screen.getByLabelText(/short description|subject/i) as HTMLInputElement).value;
+    fireEvent.change(screen.getByLabelText(/originating service request/i), {
+      target: { value: encodeParentRecordValue("service_request", "sr-1") },
+    });
+    expect((screen.getByLabelText(/short description|subject/i) as HTMLInputElement).value).toBe(typed);
   });
 });

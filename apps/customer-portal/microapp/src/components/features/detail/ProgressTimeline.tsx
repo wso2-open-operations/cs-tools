@@ -5,6 +5,7 @@ import type { CasesFiltersDto, ChangeRequest } from "@root/src/types";
 import { useQuery } from "@tanstack/react-query";
 import { changeRequests } from "@root/src/services/changes";
 import { useFilters } from "@root/src/context/filters";
+import { timelineStepStates } from "@root/src/utils/changeRequestProgress";
 
 interface ProgressTimelineViewProps {
   hasCustomerApproved?: boolean;
@@ -12,28 +13,24 @@ interface ProgressTimelineViewProps {
 }
 
 function ProgressTimelineView({ hasCustomerApproved, activeIndex }: ProgressTimelineViewProps) {
+  const steps = timelineStepStates(
+    TIMELINE_META.map((step) => step.title),
+    activeIndex,
+    !!hasCustomerApproved,
+  );
+
   return (
     <Timeline>
       {TIMELINE_META.map((step, index) => (
         <TimelineEntry
           key={index}
           variant="progress"
-          status={
-            index >= TIMELINE_META.length - 3
-              ? index === activeIndex
-                ? "active"
-                : "pending"
-              : index === activeIndex
-                ? "active"
-                : index < activeIndex
-                  ? "completed"
-                  : "pending"
-          }
+          status={steps[index].status}
           title={step.title}
           description={step.description}
-          fill={index === 3 ? (hasCustomerApproved ? "green" : "red") : undefined}
-          end={index > TIMELINE_META.length - 4}
-          last={index === TIMELINE_META.length - 1}
+          fill={steps[index].fill}
+          end={steps[index].end}
+          last={steps[index].last}
         />
       ))}
     </Timeline>
@@ -67,5 +64,13 @@ export function ProgressTimeline({ id }: { id: string }) {
 
   if (isLoading || isFiltersLoading || !data || !filters) return <ProgressTimelineSkeletonView />;
 
-  return <ProgressTimelineView activeIndex={activeIndex} />;
+  // A time WSO2 accepted (and the change moved on because of it) counts as the customer's approval here: the flag
+  // itself stays false. The Customer Approval step is green for either, never red for a step still to come or still
+  // waiting (see `customerApprovalStepFill`).
+  return (
+    <ProgressTimelineView
+      hasCustomerApproved={data.hasCustomerApproved || data.isProposedTimeAccepted}
+      activeIndex={activeIndex}
+    />
+  );
 }

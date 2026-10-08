@@ -21,6 +21,9 @@ import type { ScheduledMaintenanceWindowCardProps } from "@features/operations/t
 import {
   formatChangeRequestDisplayDate,
   formatChangeRequestDuration,
+  getCustomerProposal,
+  isProposalAccepted,
+  isProposalPending,
 } from "@features/operations/utils/changeRequests";
 import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
 import { resolveChangeRequestCanonicalState } from "@features/operations/utils/changeRequestUi";
@@ -59,6 +62,10 @@ export default function ScheduledMaintenanceWindowCard({
     }
     return durationTextValue;
   }, [changeRequest]);
+
+  const proposal = getCustomerProposal(changeRequest);
+  const proposalPending = proposal != null && isProposalPending(changeRequest);
+  const proposalAccepted = proposal != null && isProposalAccepted(changeRequest);
 
   return (
     <Paper
@@ -100,6 +107,17 @@ export default function ScheduledMaintenanceWindowCard({
                 {formatChangeRequestDisplayDate(changeRequest?.startDate)}
               </Typography>
             </Box>
+            {proposalPending && (
+              <Typography
+                id="cr-window-proposed-start"
+                variant="caption"
+                color="text.secondary"
+                display="block"
+                sx={{ mt: 0.5 }}
+              >
+                {`Proposed start: ${formatChangeRequestDisplayDate(proposal.startDate)} (waiting for WSO2)`}
+              </Typography>
+            )}
           </Box>
 
           <Box>
@@ -125,6 +143,17 @@ export default function ScheduledMaintenanceWindowCard({
             {durationText}
           </Typography>
         </Box>
+
+        {proposalAccepted && (
+          <Typography
+            id="cr-window-proposal-accepted"
+            variant="body2"
+            color="text.secondary"
+            sx={{ mt: 2 }}
+          >
+            {`WSO2 accepted the proposed start, ${formatChangeRequestDisplayDate(proposal.startDate)}.`}
+          </Typography>
+        )}
       </Box>
     </Paper>
   );

@@ -20,6 +20,7 @@ import { format } from "date-fns";
 
 const { LocalizationProvider, DatePicker } = DatePickers;
 import type { JSX } from "react";
+import { useControlledDatePickerValue, isPastOrPresentDate } from "@hooks/useControlledDatePickerValue";
 import type { TimeCardsDateFilterProps } from "@features/project-details/types/projectDetailsComponents";
 
 function parseDateOnly(value: string): Date | null {
@@ -48,8 +49,24 @@ export default function TimeCardsDateFilter({
   onClear,
 }: TimeCardsDateFilterProps): JSX.Element {
   const hasFilters = Boolean(startDate || endDate);
-  const parsedStart = parseDateOnly(startDate);
-  const parsedEnd = parseDateOnly(endDate);
+  // isComplete: isPastOrPresentDate -- both pickers below are `disableFuture`
+  // (case-created-date filters can't meaningfully name a future day), but
+  // MUI's own `disableFuture` only disables the calendar popup's future
+  // days; it doesn't stop a hand-typed future date from reaching onChange.
+  const start = useControlledDatePickerValue({
+    value: startDate,
+    onChange: onStartDateChange,
+    parse: parseDateOnly,
+    format: formatDateOnly,
+    isComplete: isPastOrPresentDate,
+  });
+  const end = useControlledDatePickerValue({
+    value: endDate,
+    onChange: onEndDateChange,
+    parse: parseDateOnly,
+    format: formatDateOnly,
+    isComplete: isPastOrPresentDate,
+  });
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -61,12 +78,10 @@ export default function TimeCardsDateFilter({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           <DatePicker
             label="From"
-            value={parsedStart}
+            value={start.localDate}
             disableFuture
-            maxDate={parsedEnd ?? undefined}
-            onChange={(date) => {
-              onStartDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-            }}
+            maxDate={end.localDate ?? undefined}
+            onChange={start.handleChange}
             slotProps={{
               textField: {
                 id: "time-cards-start-date",
@@ -74,17 +89,15 @@ export default function TimeCardsDateFilter({
                 sx: { minWidth: 160 },
                 slotProps: { htmlInput: { "aria-label": "Start date" } },
               },
-              field: { clearable: true },
+              field: { clearable: true, onClear: start.handleClear },
             }}
           />
           <DatePicker
             label="To"
-            value={parsedEnd}
+            value={end.localDate}
             disableFuture
-            minDate={parsedStart ?? undefined}
-            onChange={(date) => {
-              onEndDateChange(date instanceof Date && !isNaN(date.getTime()) ? formatDateOnly(date) : "");
-            }}
+            minDate={start.localDate ?? undefined}
+            onChange={end.handleChange}
             slotProps={{
               textField: {
                 id: "time-cards-end-date",
@@ -92,7 +105,7 @@ export default function TimeCardsDateFilter({
                 sx: { minWidth: 160 },
                 slotProps: { htmlInput: { "aria-label": "End date" } },
               },
-              field: { clearable: true },
+              field: { clearable: true, onClear: end.handleClear },
             }}
           />
           {hasFilters && onClear && (

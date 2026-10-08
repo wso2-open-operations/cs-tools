@@ -78,7 +78,8 @@ describe("IncidentTaskDetailPage", () => {
     patchMutateMock.mockReset();
   });
 
-  // ServiceNow's incident task State is a free dropdown: any state from any state.
+  // Any state from any state, as in ServiceNow; the three closed ones sit
+  // behind "Close" and its dialog.
   function chooseState(label: string): void {
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: label }));
@@ -91,12 +92,24 @@ describe("IncidentTaskDetailPage", () => {
     expect(patchMutateMock).toHaveBeenCalledWith({ id: TASK_ID, patch: { state: "WORK_IN_PROGRESS" } });
   });
 
-  it("closes through the dialog, pre-set to the chosen closed state", () => {
+  it("offers the open states and one Close", () => {
     useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
     renderPage();
-    chooseState("Closed Incomplete");
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Pending",
+      "Open",
+      "Work in Progress",
+      "Close",
+    ]);
+  });
+
+  it("closes through the dialog, which asks for the outcome", () => {
+    useGetIncidentTaskMock.mockReturnValue({ data: TASK, isLoading: false, isError: false });
+    renderPage();
+    chooseState("Close");
     expect(patchMutateMock).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Closed Incomplete")).toBeChecked();
+    expect(screen.getByLabelText("Closed Complete")).toBeChecked();
     fireEvent.click(screen.getByLabelText("Closed Skipped"));
     fireEvent.change(screen.getByLabelText("Close notes"), { target: { value: "  covered by INC0099783  " } });
     fireEvent.click(screen.getByRole("button", { name: "Close task" }));
@@ -123,6 +136,18 @@ describe("IncidentTaskDetailPage", () => {
     expect(screen.getByText("Report filed.")).toBeInTheDocument();
     chooseState("Open");
     expect(patchMutateMock).toHaveBeenCalledWith({ id: TASK_ID, patch: { state: "OPEN" } });
+  });
+
+  it("shows a closed task's outcome, and Close starts from it", () => {
+    useGetIncidentTaskMock.mockReturnValue({
+      data: { ...TASK, state: "CLOSED_INCOMPLETE", stateLabel: "Closed Incomplete" },
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    expect(screen.getByRole("combobox")).toHaveTextContent("Closed Incomplete");
+    chooseState("Close");
+    expect(screen.getByRole("radio", { name: "Closed Incomplete" })).toBeChecked();
   });
 
   it("shows the task and links to its incident's Related tab", () => {
