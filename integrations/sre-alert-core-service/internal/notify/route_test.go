@@ -23,9 +23,10 @@ import (
 	"alert-core-service/internal/model"
 )
 
-// The SRE escalation ladder routes an incident by its assignment group (an SRE team) or its contact type
-// (a monitoring source); an alert-born incident that carries neither gets no ladder at all.
-func TestCreateRequest_CarriesAssignmentGroupAndContactType(t *testing.T) {
+// The create carries the contact type (a monitoring source), which the SRE escalation ladder routes by, but
+// never an assignment group, even when the service has one: entity-service assigns the service's support
+// group itself and rejects a create that names a group.
+func TestCreateRequest_CarriesContactTypeButNoAssignmentGroup(t *testing.T) {
 	n := &Notifier{callerID: "caller"}
 	inc := model.Incident{Fingerprint: "fp", Service: "svc", Source: "Azure", Category: "availability", Impact: "HIGH", Urgency: "HIGH"}
 
@@ -39,8 +40,8 @@ func TestCreateRequest_CarriesAssignmentGroupAndContactType(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["assignmentGroupId"] != "grp-apollo" {
-		t.Errorf("assignmentGroupId = %v, want grp-apollo", got["assignmentGroupId"])
+	if v, present := got["assignmentGroupId"]; present {
+		t.Errorf("assignmentGroupId = %v; want it omitted, entity-service rejects it", v)
 	}
 	if got["contactType"] != "AZURE" {
 		t.Errorf("contactType = %v, want AZURE", got["contactType"])
@@ -50,8 +51,7 @@ func TestCreateRequest_CarriesAssignmentGroupAndContactType(t *testing.T) {
 	}
 }
 
-// AWS (and any source the contact-type enum has no value for) sends no contactType rather than a wrong one,
-// and a service with no support group sends no assignmentGroupId rather than an empty string.
+// AWS (and any source the contact-type enum has no value for) sends no contactType rather than a wrong one.
 func TestCreateRequest_OmitsWhatIsUnknown(t *testing.T) {
 	n := &Notifier{callerID: "caller"}
 	req := n.createRequest(model.Incident{Fingerprint: "fp", Source: "AWS"}, resolvedService{id: "svc-id"}, "[fp:tag]", "")

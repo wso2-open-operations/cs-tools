@@ -145,9 +145,10 @@ func (n *Notifier) NotifyCSM(ctx context.Context, inc model.Incident, creationNo
 		n.logger.Error("service id resolution failed, will retry", "incident_number", inc.IncidentNumber, "service", inc.Service, "error", err)
 		return "", "", false, false
 	}
-	var routedBy string
-	svc.groupID, routedBy = n.assignmentGroup(inc, svc.groupID)
-	n.logger.Info("assignment group chosen", "incident_number", inc.IncidentNumber, "by", routedBy, "assignment_group_id", svc.groupID)
+	// The routing chain still runs so its answer is visible, but nothing sends it: entity-service assigns the
+	// incident to its service's support group and rejects a create that names a group.
+	routedGroup, routedBy := n.assignmentGroup(inc, svc.groupID)
+	n.logger.Info("assignment group resolved, not sent", "incident_number", inc.IncidentNumber, "by", routedBy, "assignment_group_id", routedGroup)
 
 	req := n.createRequest(inc, svc, tag, creationNote)
 
@@ -213,8 +214,9 @@ type resolvedService struct {
 	groupID string
 }
 
-// createRequest builds the POST /incidents body. The assignment group and contact type are what put an
-// alert-born incident on the SRE escalation ladder: without either, it matches no SRE routing rule.
+// createRequest builds the POST /incidents body. It never carries an assignment group: entity-service
+// assigns the service's support group and rejects a create that names one. The contact type is sent, so a
+// monitoring-raised incident still matches the SRE escalation ladder's routing.
 func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, creationNote string) csm.CreateIncidentRequest {
 	req := csm.CreateIncidentRequest{
 		CallerID:      n.callerID,
@@ -227,10 +229,6 @@ func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, c
 	}
 	if creationNote != "" {
 		req.WorkNotes = &creationNote
-	}
-	if svc.groupID != "" {
-		group := svc.groupID
-		req.AssignmentGroupID = &group
 	}
 	if ct := contactTypeForSource(inc.Source); ct != "" {
 		req.ContactType = &ct

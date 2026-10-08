@@ -47,9 +47,11 @@ notifications independently until they're actually delivered.
   backoff: `csm_retry_base_delay`, `csm_retry_multiplier`, `csm_retry_max_delay`,
   up to `max_csm_attempts`), pushes owed work notes in order, posts the Chat
   fallback, and schedules its next due time.
-- **Assignment group and contact type.** These two fields are what route an incident
-  onto the SRE escalation ladder; an incident with neither gets no ladder. The group is
-  taken from the most specific signal the first alert carries, in this order:
+- **Assignment group and contact type.** The create never sends an assignment group:
+  entity-service assigns every incident to its service's support group, and rejects a
+  create that names one (a permanent 400 here). The routing chain below still runs and
+  is logged, but its answer is not sent until it is decided how it fits that rule. The
+  group it would pick is the most specific signal the first alert carries, in this order:
   1. the group the alert names for itself (an AWS alarm's `AlarmDescription`
      `"assignment_group"`), as a group id or as a name mapped in
      `CSM_ASSIGNMENT_GROUP_ROUTES` (`"group:<name>"`);
@@ -58,10 +60,10 @@ notifications independently until they're actually delivered.
   4. the account it was sent from, an AWS account id (`"account:<id>"`);
   5. `CSM_DEFAULT_ASSIGNMENT_GROUP_ID`.
 
-  The log line `assignment group chosen` names the step that decided (`by=`). The
-  contact type is set when the alert's source has one in CSM's enum (Azure → `AZURE`,
-  Site24x7 → `SITE_247`, Sentinel → `SENTINEL`); AWS and the rest have none and route
-  by the group alone.
+  The log line `assignment group resolved, not sent` names the step that decided
+  (`by=`). The contact type is sent when the alert's source has one in CSM's enum
+  (Azure → `AZURE`, Site24x7 → `SITE_247`, Sentinel → `SENTINEL`); AWS and the rest
+  have none, so their incidents reach the SRE ladder through the service's support group.
 - **Duplicate-create protection.** Before creating an incident, and again before
   every retry, the service searches CSM by `correlationId` so a lost create response
   never causes a duplicate.

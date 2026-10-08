@@ -22,7 +22,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -43,8 +42,6 @@ var awsStoredAlerts = map[string]string{
 	"service": `{"service":"choreo-control-plane",` + awsAlertBase + `}`,
 	"account": `{"service":"",` + awsAlertBase + `}`,
 }
-
-var uuidLike = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // fakeCSM is csm-integration-service as alert-core sees it: an OAuth2 token endpoint, the CMDB
 // service search, the dedup search, and the incident create, whose request bodies it keeps.
@@ -70,10 +67,11 @@ func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/incidents":
 		var req map[string]any
 		_ = json.Unmarshal(body, &req)
-		// entity-service accepts assignmentGroupId only as a UUID; anything else is a 400.
-		if g, ok := req["assignmentGroupId"].(string); ok && !uuidLike.MatchString(g) {
+		// entity-service takes the group from the service and rejects a create that names one, as an
+		// unknown field (its decoder disallows unknown fields), which alert-core treats as permanent.
+		if _, named := req["assignmentGroupId"]; named {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"message":"assignmentGroupId contains invalid UUID"}`)
+			_, _ = io.WriteString(w, `{"code":400,"message":"unknown field \"assignmentGroupId\" in request body"}`)
 			return
 		}
 		f.mu.Lock()
@@ -86,16 +84,16 @@ func (f *fakeCSM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// An AWS alarm, as ingestion stores it, through the real engine, notifier and CSM client: the
-// POST /incidents that reaches CSM carries the assignment group the routing chain picks, which is
-// what puts the incident on the SRE escalation ladder.
-func TestAWSAlarm_CreatesTheIncidentInItsAssignmentGroup(t *testing.T) {
+// An AWS alarm, as ingestion stores it, through the real engine, notifier and CSM client, creates the
+// incident in CSM whatever the routing chain resolves: the create names the service and never a group,
+// so entity-service (which rejects a named group) accepts it and assigns the service's support group.
+func TestAWSAlarm_CreatesTheIncident(t *testing.T) {
 	cases := []struct {
-		alert, wantGroup, wantService string
+		alert, wantService string
 	}{
-		{"named", "aaaaaaaa-0000-4000-8000-000000000001", "svc-choreo"},    // the alarm names its own group: beats its service
-		{"service", "aaaaaaaa-0000-4000-8000-000000000002", "svc-choreo"},  // the CMDB service's support group
-		{"account", "aaaaaaaa-0000-4000-8000-000000000004", "svc-unknown"}, // no service: the AWS account
+		{"named", "svc-choreo"},    // the alarm names its own group
+		{"service", "svc-choreo"},  // the CMDB service has a support group
+		{"account", "svc-unknown"}, // no service: only an account route matches
 	}
 	for _, tc := range cases {
 		t.Run(tc.alert, func(t *testing.T) {
@@ -140,14 +138,14 @@ func TestAWSAlarm_CreatesTheIncidentInItsAssignmentGroup(t *testing.T) {
 				t.Fatalf("%d incident creates reached CSM, want 1", len(fake.creates))
 			}
 			req := fake.creates[0]
-			if req["assignmentGroupId"] != tc.wantGroup {
-				t.Errorf("assignmentGroupId = %v, want %s", req["assignmentGroupId"], tc.wantGroup)
+			if v, named := req["assignmentGroupId"]; named {
+				t.Errorf("assignmentGroupId = %v; want it omitted", v)
 			}
 			if req["serviceId"] != tc.wantService {
 				t.Errorf("serviceId = %v, want %s", req["serviceId"], tc.wantService)
 			}
 			if _, set := req["contactType"]; set {
-				t.Errorf("contactType = %v; AWS has none in the enum and must route by group alone", req["contactType"])
+				t.Errorf("contactType = %v; AWS has none in the enum", req["contactType"])
 			}
 			if req["impact"] != "HIGH" || req["urgency"] != "HIGH" || req["subject"] != "prod-rds-cpu-utilization-high" {
 				t.Errorf("impact/urgency/subject = %v/%v/%v; want HIGH/HIGH and the alarm name", req["impact"], req["urgency"], req["subject"])
