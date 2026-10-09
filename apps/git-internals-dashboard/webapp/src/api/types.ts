@@ -163,6 +163,8 @@ export interface Timeseries {
 
 export interface StatusDefRow {
   name: string;
+  /** Label to show instead of `name` (equals `name` when none is configured). */
+  displayName: string;
   category: string;
   accruesSla: boolean;
   isTerminal: boolean;
@@ -176,6 +178,8 @@ export interface Taxonomy {
 
 export interface SyncStatus {
   running: boolean;
+  /** Seconds until POST /sync/runs stops answering 429 (0 = allowed now). */
+  manualSyncCooldownRemainingSeconds: number;
   repos: Array<{ repo: string; lastSyncedAt: string | null }>;
   lastRun: {
     kind: string | null;

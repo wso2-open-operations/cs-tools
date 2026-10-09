@@ -18,59 +18,43 @@ repos:
     issueQuery: 'label:"Test01" -label:"Test02"'
 
 taxonomy:
+  # Only the statuses with special handling are listed. Every other board
+  # status is treated as product-team side ("Other" in the dashboard) and
+  # accrues SLA (see settings.unknownStatusPolicy). Only WOC pauses the
+  # clock, besides the issue being closed on GitHub.
   statuses:
-    # Product Team Side — accrues SLA
-    - { name: "Open",                              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 10 }
-    - { name: "In Progress",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 20 }
-    - { name: "WOW",                               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 30 }
-    - { name: "Reopened",                          category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 40 }
-    - { name: "Waiting-on-PC",                     category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 50 }
-    - { name: "POC Pending",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 60 }
-    - { name: "Requests",                          category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 70 }
-    - { name: "Todo",                              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 80 }
-    - { name: "Proactive Pending",                 category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 90 }
-    - { name: "Doc Pending",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 100 }
-    - { name: "Approved / Not Started",            category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 110 }
-    - { name: "Pending Approval",                  category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 120 }
-    - { name: "Backlog",                           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 130 }
-    - { name: "Ready",                             category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 140 }
-    - { name: "Approved / U2",                     category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 150 }
-    - { name: "U2 Pipeline",                       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 160 }
-    - { name: "Trasnferred to Dev Team",           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 170 }
-    - { name: "PR Sent / In Review",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 180 }
-    - { name: "Fix Deployed to Dev",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 190 }
-    - { name: "Fix Deployed to Stage",             category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 200 }
-    - { name: "Fix Deployed to Prod",              category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 210 }
-    - { name: "Waiting-on-release",                category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 220 }
-    - { name: "Only-Pending-Forward-Port",         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 230 }
-    - { name: "Waiting on Product RR Team",        category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 240 }
-    - { name: "OVERDUE",                           category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 250 }
-    - { name: "Untriaged",                         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 260 }
-    - { name: "Trasnsferred to SRE",               category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 270 }
-    - { name: "Waiting on SRE",                    category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 280 }
-    - { name: "Approved / Future Roadmap",         category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 290 }
-    - { name: "Under Discussion (features)",       category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 300 }
-    - { name: "ETA Shared",                        category: PRODUCT_SIDE, accruesSla: true,   isTerminal: false,  sortOrder: 310 }
-    # CS Team Side — pauses (no accrual)
-    - { name: "WOC",                               category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 320 }
-    - { name: "Pending Patch Queue",               category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 330 }
-    - { name: "Waiting for Customer Confirmation", category: CS_SIDE,      accruesSla: false,  isTerminal: false,  sortOrder: 340 }
-    # Other — pauses
-    - { name: "Added to Update Queue",             category: OTHER,        accruesSla: false,  isTerminal: false,  sortOrder: 350 }
-    - { name: "On Hold",                           category: OTHER,        accruesSla: false,  isTerminal: false,  sortOrder: 360 }
-    # Other + terminal — pauses, excluded from alerts
-    - { name: "Resolved",                          category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 370 }
-    - { name: "Duplicate",                         category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 380 }
-    - { name: "Done",                              category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 390 }
-    - { name: "Closed",                            category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 400 }
-    - { name: "Rejected",                          category: OTHER,        accruesSla: false,  isTerminal: true,   sortOrder: 410 }
-    # Transient empty status (item briefly removed from board) — pauses
-    - { name: "",                                  category: TRANSIENT,    accruesSla: false,  isTerminal: false,  sortOrder: 999 }
+    - { name: "Open",        category: PRODUCT_SIDE, accruesSla: true,  sortOrder: 10 }
+    - { name: "Reopened",    category: PRODUCT_SIDE, accruesSla: true,  sortOrder: 20 }
+    - { name: "In Progress", category: PRODUCT_SIDE, accruesSla: true,  sortOrder: 30 }
+    - { name: "WOW",         category: PRODUCT_SIDE, accruesSla: true,  sortOrder: 40, displayName: "Waiting on Product Team" }
+    - { name: "WOC",         category: CS_SIDE,      accruesSla: false, sortOrder: 50, displayName: "Waiting on CS Team" }
   aliases:
-    - { alias: "Re-Opened",            canonical: "Reopened" }
-    - { alias: "On-Hold",              canonical: "On Hold" }
-    - { alias: "Approved/Not started", canonical: "Approved / Not Started" }
-    - { alias: "Waiting on CS Team",   canonical: "WOC" }
+    - { alias: "Re-Opened",          canonical: "Reopened" }
+    - { alias: "Waiting on CS Team", canonical: "WOC" }
+
+# Static teams that take over an issue from the ABT team named in its
+# description. An issue carrying `label` is attributed to `name` instead
+# (e.g. accounts mid-migration or mid-onboarding stay assigned to an ABT like
+# Atlas, but the dedicated team handles the case). Label match is
+# case-insensitive; if an issue carries several, the first entry listed here
+# wins. Optional — omit to disable. Changing this takes effect on the next
+# sync of an issue; run `cmd/backfill-meta` to re-derive existing rows.
+specialTeams:
+  - name: Migrations
+    label: "Migration/Affected"
+  - name: Onboarding
+    label: "Onboarding/Affected"
+
+# Variant "Priority/<tier>" labels some projects use, folded onto a budgeted
+# tier. `alias` is the text after "Priority/" on the GitHub label (exact,
+# case-sensitive); `canonical` must be a priority listed under budgets below.
+# Without an alias, a variant tier is stored as written and, matching no
+# budget, gets no SLA. Takes effect for an issue on its next sync.
+priorityAliases:
+  - { alias: "High",        canonical: "High(P2)" }
+  - { alias: "High (P2)",   canonical: "High(P2)" }
+  - { alias: "Medium",      canonical: "Medium(P3)" }
+  - { alias: "Normal (P3)", canonical: "Medium(P3)" }
 
 # Budgets in coverage-clock hours (time accrues only inside the coverage window).
 # A 12x5 "business day" is the 12-hour 09:00–21:00 IST window, so
@@ -122,7 +106,7 @@ settings:
   # retroactively re-accrues/re-pauses every past interval that sat on the
   # affected status, on the very next tick. Same retroactive-recompute class
   # as editing holidays below.
-  unknownStatusPolicy: pause
+  unknownStatusPolicy: accrue
 
 # IST calendar dates (YYYY-MM-DD) excluded from the 12x5_ist coverage window
 # — e.g. Indian public holidays, if the SLA contract excludes them. Applies

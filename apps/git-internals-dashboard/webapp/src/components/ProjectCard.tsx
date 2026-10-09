@@ -198,7 +198,7 @@ export function ProjectCard({ project, focused, dim, onFocus, onDrill }: Project
       <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1 }}>
         <StatCell label="Violated" value={project.violated} color="var(--sla-violated)" hoverBorder="var(--sla-violated)" onClick={drill("violated")} />
         <StatCell label="At risk" value={project.atRisk} color="var(--sla-at-risk)" hoverBorder="var(--sla-at-risk)" onClick={drill("at_risk")} />
-        <StatCell label="On CS side" value={project.cs} color="var(--sla-cs)" hoverBorder="var(--sla-cs)" onClick={drill("cs")} />
+        <StatCell label="On CS Team Side" value={project.cs} color="var(--sla-cs)" hoverBorder="var(--sla-cs)" onClick={drill("cs")} />
       </Box>
 
       <Box sx={{ mt: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--sla-border-soft)", px: 0.125, py: 1.5 }}>

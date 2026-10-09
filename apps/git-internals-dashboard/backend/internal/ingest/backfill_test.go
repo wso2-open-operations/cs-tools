@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/github"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -85,7 +86,7 @@ func TestBackfillIssueMetaUpdatesExistingRow(t *testing.T) {
 		},
 	}
 
-	results, err := BackfillIssueMeta(ctx, pool, stub, 90)
+	results, err := BackfillIssueMeta(ctx, pool, stub, 90, nil)
 	if err != nil {
 		t.Fatalf("BackfillIssueMeta: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestBackfillIssueMetaSkipsUnknownIssueNumberWithoutInserting(t *testing.T) 
 		},
 	}
 
-	results, err := BackfillIssueMeta(ctx, pool, stub, 90)
+	results, err := BackfillIssueMeta(ctx, pool, stub, 90, nil)
 	if err != nil {
 		t.Fatalf("BackfillIssueMeta: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestBackfillIssueMetaIsolatesPerRepoFailures(t *testing.T) {
 		},
 	}
 
-	results, err := BackfillIssueMeta(ctx, pool, stub, 90)
+	results, err := BackfillIssueMeta(ctx, pool, stub, 90, nil)
 	if err != nil {
 		t.Fatalf("BackfillIssueMeta: %v", err)
 	}
@@ -226,4 +227,42 @@ func createSecondEnabledRepo(t *testing.T, pool *pgxpool.Pool) {
 		pool.Exec(context.Background(), `DELETE FROM repositories WHERE id = $1`, repositoryID)
 		pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1`, projectID)
 	})
+}
+
+// TestBackfillIssueMetaAppliesSpecialTeamOverride verifies the label-driven
+// special-team override wins over the team parsed from the issue body on the
+// backfill write path, not only on full ingest.
+func TestBackfillIssueMetaAppliesSpecialTeamOverride(t *testing.T) {
+	pool := testPool(t)
+	ictx := setupIngestFixture(t, pool)
+	ctx := context.Background()
+
+	p := testPair(false)
+	p.Node.Title = ""
+	p.Node.Body = ""
+	first, err := IngestIssue(ctx, pool, p, ictx)
+	if err != nil {
+		t.Fatalf("seed existing issue: %v", err)
+	}
+
+	stub := &stubRepoIssueSearcher{
+		nodesByRepo: map[string][]github.IssueNode{
+			"test-owner/test-repo-ingest": {
+				{Number: 42, Title: "T", Body: "ABT Team : Atlas", Labels: []string{"Migration/Affected"}},
+			},
+		},
+	}
+	teams := []config.SpecialTeamEntry{{Name: "Migrations", Label: "Migration/Affected"}}
+
+	if _, err := BackfillIssueMeta(ctx, pool, stub, 90, teams); err != nil {
+		t.Fatalf("BackfillIssueMeta: %v", err)
+	}
+
+	var abtTeam *string
+	if err := pool.QueryRow(ctx, `SELECT abt_team FROM issues WHERE id = $1`, first.IssueID).Scan(&abtTeam); err != nil {
+		t.Fatalf("read back issue: %v", err)
+	}
+	if abtTeam == nil || *abtTeam != "Migrations" {
+		t.Errorf("expected abt_team %q from the special-team label, got %v", "Migrations", abtTeam)
+	}
 }

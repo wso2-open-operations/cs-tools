@@ -243,6 +243,10 @@ type slaFilter struct {
 	value string
 }
 
+// otherStatus is the reserved `status` filter value meaning "any status not
+// listed in taxonomy.statuses".
+const otherStatus = "Other"
+
 type statusFilter struct {
 	mode   string // "" | "in" | "notIn"
 	values []string
@@ -287,8 +291,10 @@ func priorityListCondition(args *sqlArgs, priorities []string) string {
 // explicitly is stating the whole SLA scope themselves (this also covers
 // `slaState=NO_SLA` matching an issue with no issue_sla row at all, via
 // COALESCE). csStatuses and productSideStatuses must be sortOrder-ascending
-// status names categorized CS_SIDE and PRODUCT_SIDE respectively.
-func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (string, []any) {
+// status names categorized CS_SIDE and every configured status respectively.
+// Product side is every non-CS status, so the "Other" status value (see
+// otherStatus) matches any status outside configuredStatuses.
+func buildIssuesWhere(csStatuses, configuredStatuses []string, q issuesQuery) (string, []any) {
 	// Base scope: open, non-terminal issues from enabled repos.
 	state := "OPEN"
 	sla := slaFilter{mode: "notTerminal"}
@@ -311,9 +317,9 @@ func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (
 		sla = slaFilter{mode: "none"}
 	case "product_side":
 		// Mirrors overview.go's hero.productSide count: base open/non-terminal
-		// scope (sla stays "notTerminal"), narrowed to statuses currently
-		// categorized PRODUCT_SIDE.
-		statusBucket = statusFilter{mode: "in", values: productSideStatuses}
+		// scope (sla stays "notTerminal"), narrowed to every status that
+		// isn't on the CS side.
+		statusBucket = statusFilter{mode: "notIn", values: csStatuses}
 	case "tracked":
 		priorityBucket = "notNull"
 	case "untracked":
@@ -362,7 +368,23 @@ func buildIssuesWhere(csStatuses, productSideStatuses []string, q issuesQuery) (
 		conditions = append(conditions, "i.current_status <> ALL("+args.add(statusBucket.values)+")")
 	}
 	if len(q.Statuses) > 0 {
-		conditions = append(conditions, "i.current_status = ANY("+args.add(q.Statuses)+")")
+		named := make([]string, 0, len(q.Statuses))
+		wantOther := false
+		for _, s := range q.Statuses {
+			if s == otherStatus {
+				wantOther = true
+			} else {
+				named = append(named, s)
+			}
+		}
+		var alts []string
+		if len(named) > 0 {
+			alts = append(alts, "i.current_status = ANY("+args.add(named)+")")
+		}
+		if wantOther {
+			alts = append(alts, "i.current_status <> ALL("+args.add(configuredStatuses)+")")
+		}
+		conditions = append(conditions, "("+strings.Join(alts, " OR ")+")")
 	}
 
 	if attention {

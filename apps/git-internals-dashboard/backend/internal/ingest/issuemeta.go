@@ -19,6 +19,8 @@ package ingest
 import (
 	"regexp"
 	"strings"
+
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 )
 
 // IssueMeta is the metadata derived from an issue body that is safe to
@@ -122,4 +124,22 @@ func normalizeTitle(t string) *string {
 		return nil
 	}
 	return &t
+}
+
+// ApplySpecialTeam overrides meta.ABTTeam with the name of the first entry in
+// teams whose label appears in labels (case-insensitive, whitespace-trimmed).
+// Teams are in priority order, so an issue carrying several special labels
+// resolves to the earliest-listed team. No match leaves meta unchanged.
+func ApplySpecialTeam(meta IssueMeta, labels []string, teams []config.SpecialTeamEntry) IssueMeta {
+	for _, t := range teams {
+		want := strings.ToLower(strings.TrimSpace(t.Label))
+		for _, l := range labels {
+			if strings.ToLower(strings.TrimSpace(l)) == want {
+				name := t.Name
+				meta.ABTTeam = &name
+				return meta
+			}
+		}
+	}
+	return meta
 }

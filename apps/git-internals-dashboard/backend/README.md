@@ -72,9 +72,10 @@ Copy `.env.example` to `.env` and fill in the values.
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres DSN. Local default `postgres://gid:gid@localhost:5433/gid?sslmode=disable`. |
 | `PORT` | no (default `8080`) | HTTP listen port. |
-| `GITHUB_TOKEN` | no | Fine-grained PAT (`Issues:Read` + `Projects:Read`). Used by incremental sync (`POST /sync/runs`), the real-GitHub seed (`cmd/seed`), and the metadata backfill (`cmd/backfill-meta`). Unset ⇒ `POST /sync/runs` returns `sync_token_missing`, seed falls back to synthetic fixtures, and backfill-meta fails immediately (it has no synthetic mode). |
+| `GITHUB_TOKEN` | no | Fine-grained PAT (`Issues:Read` + `Projects:Read`). Used by incremental sync (`POST /sync/runs` and the scheduled sync), the real-GitHub seed (`cmd/seed`), and the metadata backfill (`cmd/backfill-meta`). Unset ⇒ `POST /sync/runs` returns `sync_token_missing`, seed falls back to synthetic fixtures, and backfill-meta fails immediately (it has no synthetic mode). |
 | `CORS_ALLOWED_ORIGINS` | no | Comma-separated Origin allow-list. Empty ⇒ no cross-origin browser request allowed (fail closed). Local dev: `http://localhost:5173`. |
 | `RECOMPUTE_ENABLED` | no (default on) | `0` disables the recompute scheduler (tests/CI). |
+| `SYNC_SCHEDULER_ENABLED` | no (default on) | `0` disables the scheduled GitHub sync (tests/CI/local dev). It also stays off when `GITHUB_TOKEN` is unset. Interval: `jobs.githubSyncIntervalMinutes` in `app-config.yaml` (default 15; first run one interval after boot). |
 | `SLA_CONFIG_PATH` | no | Override config path (default `config/sla-config.yaml`). |
 | `APP_CONFIG_PATH` | no | Override runtime config path (default `config/app-config.yaml`). |
 | `LOG_LEVEL` | no | slog level, default `info`. |
@@ -94,7 +95,12 @@ this properly means persisting priority-change events and walking budget segment
 until then, treat `pct_consumed`/`sla_state` as computed against an issue's *current* priority,
 not a running record of the priority in effect when the time was actually spent.
 
-**`settings.unknownStatusPolicy`** (`pause` default, or `accrue`) controls what the SLA clock
+**Taxonomy.** `taxonomy.statuses` lists only the statuses with special handling (Open, Reopened,
+In Progress, WOW, WOC). Every other board status is product-team side ("Other" in the dashboard)
+and accrues SLA; only WOC (the sole `CS_SIDE` entry) pauses the clock, besides the GitHub issue
+being closed. `displayName` is what the dashboard shows for a status.
+
+**`settings.unknownStatusPolicy`** (`pause` default, or `accrue`; the shipped config uses `accrue`) controls what the SLA clock
 does with a board status absent from `taxonomy.statuses` — a renamed or newly added column. Either
 way, the current set of unknown statuses is always surfaced on `GET /metrics/overview` (as
 `unknownStatuses`, backed by the `unknown_statuses` table the recompute tick maintains) so they get
@@ -223,7 +229,7 @@ backend/
 - `GET /issues/{id}` — Get issue by ID
 - `GET /metrics/overview` — Aggregate SLA/volume overview
 - `GET /metrics/timeseries` — SLA/volume trend over time
-- `POST /sync/runs` — Trigger an incremental GitHub sync
+- `POST /sync/runs` — Trigger an incremental GitHub sync (429 `sync_cooldown` with `Retry-After` if a sync finished within `jobs.manualSyncCooldownSeconds`, default 30)
 - `GET /sync/status` — Get the status of the most recent sync
 
 See `openapi.yaml` for the full request/response contract.
@@ -243,7 +249,9 @@ See `openapi.yaml` for the full request/response contract.
 
 Persisted: issue title, ABT team, and opened-by (only a `@wso2.com` address), as approved by
 Security. The issue body is read transiently during ingest solely to derive ABT team and
-opened-by, then discarded. Labels are read transiently to derive priority, then discarded.
+opened-by, then discarded. Labels are read transiently to derive priority and to apply the `specialTeams` override in
+`config/sla-config.yaml` (an issue with e.g. `Migration/Affected` is stored under the Migrations
+team instead of its description's ABT team), then discarded.
 Assignees and status-event actors are never fetched or stored.
 
 ## Deploying
@@ -267,6 +275,10 @@ GITHUB_TOKEN=... DATABASE_URL=... make backfill-meta
 
 It only updates existing rows (never inserts, never touches SLA history) and is safe to
 re-run.
+
+It updates only `title`, `abt_team` (including the special-team label override) and
+`opened_by`. It does not re-apply `priorityAliases`, so an existing row keeps its stored
+priority until the issue is next ingested by a sync.
 
 The backfill only reaches issues within the search lookback window
 (`settings.seedClosedLookbackDays`); issues closed longer ago than that keep `NULL`

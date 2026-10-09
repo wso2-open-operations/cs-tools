@@ -98,3 +98,17 @@ func TestLoadReturnsDescriptiveErrorWhenFileMissing(t *testing.T) {
 		t.Errorf("expected 'SLA config not found at' in error, got: %v", err)
 	}
 }
+
+// TestLoadCommittedConfig guards the repo's own config/sla-config.yaml:
+// it must parse, validate, and carry the special teams, so a misplaced edit
+// fails in CI instead of at server boot.
+func TestLoadCommittedConfig(t *testing.T) {
+	t.Setenv("SLA_CONFIG_PATH", "../../config/sla-config.yaml")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load committed config: %v", err)
+	}
+	if len(cfg.SpecialTeams) != 2 {
+		t.Fatalf("SpecialTeams = %+v, want Migrations and Onboarding", cfg.SpecialTeams)
+	}
+}

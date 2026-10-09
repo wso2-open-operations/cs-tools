@@ -228,8 +228,6 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 	repo, priority := f.Repo, f.Priority
 	csStatuses := taxonomy.CsStatuses(cfg)
 	isCsStatus := func(s string) bool { return slices.Contains(csStatuses, s) }
-	productSideStatuses := taxonomy.ProductSideStatuses(cfg)
-	isProductSideStatus := func(s string) bool { return slices.Contains(productSideStatuses, s) }
 
 	var repoOwner, repoName string
 	if repo != nil {
@@ -286,7 +284,7 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 
 	// ── 2. Spark + delta (last 16 days; delta = today − yesterday) ──────────
 	// Honors repo + priority + abtTeam.
-	sparkRows, err := fetchSpark(ctx, tx, f, productSideStatuses)
+	sparkRows, err := fetchSpark(ctx, tx, f, csStatuses)
 	if err != nil {
 		return Overview{}, fmt.Errorf("metrics: spark query: %w", err)
 	}
@@ -317,7 +315,7 @@ func BuildOverview(ctx context.Context, pool *pgxpool.Pool, cfg *config.AppConfi
 			heroCs++
 			heroCsByStatus[status]++
 		}
-		if isProductSideStatus(status) {
+		if status != "" && !isCsStatus(status) {
 			heroProductSide++
 		}
 	}
@@ -635,16 +633,16 @@ type sparkAggRow struct {
 }
 
 // fetchSpark returns the last 16 days' daily violated/at_risk/product_side
-// counts of open issues in one query, narrowed by f's active filters. An
-// empty productSideStatuses list is passed through as an empty slice —
-// "= ANY('{}')" is false for every row, so the product_side column comes
-// back 0 for every date rather than needing a separate short-circuit.
-func fetchSpark(ctx context.Context, q querier, f Filter, productSideStatuses []string) ([]sparkAggRow, error) {
+// counts of open issues in one query, narrowed by f's active filters.
+// Product side is every non-null status outside csStatuses; an empty
+// csStatuses list is passed through as an empty slice ("<> ALL('{}')" is
+// true for every non-null status).
+func fetchSpark(ctx context.Context, q querier, f Filter, csStatuses []string) ([]sparkAggRow, error) {
 	sql := `
 		SELECT s.snapshot_date,
 		       COUNT(*) FILTER (WHERE s.sla_state = 'VIOLATED')::int    AS violated,
 		       COUNT(*) FILTER (WHERE s.sla_state = 'AT_RISK')::int     AS at_risk,
-		       COUNT(*) FILTER (WHERE s.current_status = ANY($1))::int  AS product_side
+		       COUNT(*) FILTER (WHERE s.current_status <> ALL($1))::int AS product_side
 		FROM sla_snapshots s
 		JOIN issues i ON i.id = s.issue_id
 		JOIN repositories r ON r.id = s.repository_id
@@ -652,7 +650,7 @@ func fetchSpark(ctx context.Context, q querier, f Filter, productSideStatuses []
 		  AND i.state = 'OPEN'
 		  AND r.enabled = true
 	`
-	args := []any{productSideStatuses}
+	args := []any{csStatuses}
 	sql, args = appendFilters(sql, args, f)
 	sql += ` GROUP BY s.snapshot_date ORDER BY s.snapshot_date`
 

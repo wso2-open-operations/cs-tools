@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/github"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,7 +56,7 @@ type backfillRepoRow struct {
 // same overwrite behavior as a normal ingest. A failure fetching or
 // updating one repository is recorded on that repository's result and does
 // not stop the remaining repositories.
-func BackfillIssueMeta(ctx context.Context, pool *pgxpool.Pool, gh RepoIssueSearcher, closedLookbackDays int) ([]BackfillRepoResult, error) {
+func BackfillIssueMeta(ctx context.Context, pool *pgxpool.Pool, gh RepoIssueSearcher, closedLookbackDays int, specialTeams []config.SpecialTeamEntry) ([]BackfillRepoResult, error) {
 	repos, err := fetchEnabledRepoRows(ctx, pool)
 	if err != nil {
 		return nil, fmt.Errorf("backfill: list enabled repos: %w", err)
@@ -71,7 +72,7 @@ func BackfillIssueMeta(ctx context.Context, pool *pgxpool.Pool, gh RepoIssueSear
 			continue
 		}
 
-		updated, err := backfillRepoIssues(ctx, pool, repo.ID, nodes)
+		updated, err := backfillRepoIssues(ctx, pool, repo.ID, nodes, specialTeams)
 		if err != nil {
 			results = append(results, BackfillRepoResult{Repo: repoLabel, Fetched: len(nodes), Err: err})
 			continue
@@ -108,7 +109,7 @@ func fetchEnabledRepoRows(ctx context.Context, pool *pgxpool.Pool) ([]backfillRe
 // repositoryID, batched into one round trip. A node whose github_number has
 // no matching row (not yet ingested by any prior seed/sync) matches zero
 // rows and is silently skipped — this never inserts.
-func backfillRepoIssues(ctx context.Context, pool *pgxpool.Pool, repositoryID int32, nodes []github.IssueNode) (int, error) {
+func backfillRepoIssues(ctx context.Context, pool *pgxpool.Pool, repositoryID int32, nodes []github.IssueNode, specialTeams []config.SpecialTeamEntry) (int, error) {
 	if len(nodes) == 0 {
 		return 0, nil
 	}
@@ -117,6 +118,7 @@ func backfillRepoIssues(ctx context.Context, pool *pgxpool.Pool, repositoryID in
 	for _, node := range nodes {
 		title := normalizeTitle(node.Title)
 		meta := ExtractIssueMeta(node.Body) // node.Body is discarded after this line — never logged, persisted elsewhere, or returned
+		meta = ApplySpecialTeam(meta, node.Labels, specialTeams)
 		batch.Queue(`
 			UPDATE issues SET title = $3, abt_team = $4, opened_by = $5
 			WHERE repository_id = $1 AND github_number = $2

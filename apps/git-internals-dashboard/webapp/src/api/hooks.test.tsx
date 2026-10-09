@@ -18,7 +18,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useOverview, useTaxonomy } from "./hooks";
+import { useOverview, useRefreshOnSync, useTaxonomy } from "./hooks";
 
 /** Wraps a hook under test in its own fresh QueryClient. */
 function wrapper({ children }: { children: ReactNode }) {
@@ -108,5 +108,62 @@ describe("api hooks", () => {
 
     await waitFor(() => expect(result.current.data).toEqual({ repo: "b" }));
     expect(result.current.isPlaceholderData).toBe(false);
+  });
+
+  describe("useRefreshOnSync", () => {
+    const statusBody = (lastSyncedAt: string | null) => ({
+      running: false,
+      repos: [{ repo: "a/b", lastSyncedAt }],
+      lastRun: null,
+      manualSyncCooldownRemainingSeconds: 0,
+    });
+
+    function setup(bodies: Array<ReturnType<typeof statusBody>>) {
+      let call = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => {
+          const body = bodies[Math.min(call++, bodies.length - 1)];
+          return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }),
+      );
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const Wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      );
+      renderHook(() => useRefreshOnSync(), { wrapper: Wrapper });
+      return { queryClient, invalidate };
+    }
+
+    const invalidatedKeys = (invalidate: ReturnType<typeof vi.spyOn>) =>
+      invalidate.mock.calls.map((c) => (c[0] as { queryKey: string[] }).queryKey[0]);
+
+    it("does not invalidate on the first status load", async () => {
+      const { queryClient, invalidate } = setup([statusBody("2026-01-01T00:00:00Z")]);
+      await waitFor(() => expect(queryClient.getQueryData(["sync-status"])).toBeDefined());
+      expect(invalidatedKeys(invalidate)).toEqual([]);
+    });
+
+    it("does not invalidate when a refetch shows the same watermark", async () => {
+      const { queryClient, invalidate } = setup([statusBody("2026-01-01T00:00:00Z")]);
+      await waitFor(() => expect(queryClient.getQueryData(["sync-status"])).toBeDefined());
+      await queryClient.refetchQueries({ queryKey: ["sync-status"] });
+      expect(invalidatedKeys(invalidate)).toEqual([]);
+    });
+
+    it("invalidates overview, issues, timeseries and issue detail when the newest watermark advances", async () => {
+      const { queryClient, invalidate } = setup([statusBody("2026-01-01T00:00:00Z"), statusBody("2026-01-01T00:15:00Z")]);
+      await waitFor(() => expect(queryClient.getQueryData(["sync-status"])).toBeDefined());
+      await queryClient.refetchQueries({ queryKey: ["sync-status"] });
+      await waitFor(() => expect(invalidatedKeys(invalidate).sort()).toEqual(["issue", "issues", "overview", "timeseries"]));
+    });
+
+    it("treats the first-ever sync (null -> value) as new data", async () => {
+      const { queryClient, invalidate } = setup([statusBody(null), statusBody("2026-01-01T00:15:00Z")]);
+      await waitFor(() => expect(queryClient.getQueryData(["sync-status"])).toBeDefined());
+      await queryClient.refetchQueries({ queryKey: ["sync-status"] });
+      await waitFor(() => expect(invalidatedKeys(invalidate)).toContain("overview"));
+    });
   });
 });

@@ -19,8 +19,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +47,9 @@ type SyncHandler struct {
 	runtime         *ingest.RuntimeConfig
 	githubToken     string
 	syncRunDeadline time.Duration
+	// manualSyncCooldown is the minimum gap enforced between the last
+	// finished sync and a POST /sync/runs; 0 disables it.
+	manualSyncCooldown time.Duration
 }
 
 // NewSyncHandler creates a SyncHandler. githubToken may be empty — POST
@@ -54,11 +60,41 @@ type SyncHandler struct {
 // WriteTimeout/ReadTimeout, since a real sync fetches issue detail per
 // updated issue with a courtesy delay plus GraphQL round trips and can
 // easily exceed 30s over a few hundred issues.
-func NewSyncHandler(pool *pgxpool.Pool, cfg *config.AppConfig, lock *jobs.Lock, runtime *ingest.RuntimeConfig, githubToken string, syncRunDeadline time.Duration) *SyncHandler {
+func NewSyncHandler(pool *pgxpool.Pool, cfg *config.AppConfig, lock *jobs.Lock, runtime *ingest.RuntimeConfig, githubToken string, syncRunDeadline, manualSyncCooldown time.Duration) *SyncHandler {
 	return &SyncHandler{
 		pool: pool, cfg: cfg, lock: lock, runtime: runtime,
 		githubToken: strings.TrimSpace(githubToken), syncRunDeadline: syncRunDeadline,
+		manualSyncCooldown: manualSyncCooldown,
 	}
+}
+
+// cooldownError is returned from inside the job-lock callback when the last
+// finished sync is too recent; PostSyncRuns maps it to 429.
+type cooldownError struct{ retryAfter time.Duration }
+
+func (e *cooldownError) Error() string {
+	return fmt.Sprintf("sync cooldown: retry in %s", e.retryAfter.Round(time.Second))
+}
+
+// cooldownRemaining reports how much of the manual-sync cooldown is left,
+// measured from the newest finished sync_runs row (manual or scheduled) on
+// the database clock, so it holds across replicas. Zero means a sync may run.
+func (h *SyncHandler) cooldownRemaining(ctx context.Context) (time.Duration, error) {
+	if h.manualSyncCooldown <= 0 {
+		return 0, nil
+	}
+	var finished, now *time.Time
+	if err := h.pool.QueryRow(ctx, `SELECT max(finished_at), now() FROM sync_runs`).Scan(&finished, &now); err != nil {
+		return 0, err
+	}
+	if finished == nil || now == nil {
+		return 0, nil
+	}
+	remaining := finished.Add(h.manualSyncCooldown).Sub(*now)
+	if remaining < 0 {
+		return 0, nil
+	}
+	return remaining, nil
 }
 
 // PostSyncRuns handles POST /sync/runs: triggers an incremental sync
@@ -101,6 +137,15 @@ func (h *SyncHandler) PostSyncRuns(w http.ResponseWriter, r *http.Request) {
 
 	client := github.NewClient(h.githubToken)
 	summary, ran, err := jobs.TryRun(runCtx, h.lock, func(ctx context.Context) (sync.Summary, error) {
+		// Checked under the lock so two near-simultaneous requests cannot both
+		// pass the check before either has finished a run.
+		remaining, err := h.cooldownRemaining(ctx)
+		if err != nil {
+			return sync.Summary{}, err
+		}
+		if remaining > 0 {
+			return sync.Summary{}, &cooldownError{retryAfter: remaining}
+		}
 		s, err := sync.Run(ctx, h.pool, client, h.cfg, h.runtime)
 		if err != nil {
 			return sync.Summary{}, err
@@ -110,6 +155,13 @@ func (h *SyncHandler) PostSyncRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		return s, nil
 	})
+	var cooldown *cooldownError
+	if errors.As(err, &cooldown) {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(cooldown.retryAfter.Seconds()))))
+		apierror.Write(w, http.StatusTooManyRequests, apierror.CodeSyncCooldown,
+			"a sync finished moments ago; try again shortly")
+		return
+	}
 	if err != nil {
 		apierror.Internal(w, r, "sync run failed", err)
 		return
@@ -138,6 +190,11 @@ type syncStatusWire struct {
 	Running bool                `json:"running"`
 	Repos   []repoWatermarkWire `json:"repos"`
 	LastRun *lastRunWire        `json:"lastRun"`
+	// ManualSyncCooldownRemainingSeconds is how long POST /sync/runs would
+	// still be refused with 429 (0 = allowed now). Reported as a duration
+	// measured on the database clock, so the UI can count down locally
+	// without comparing its own clock to the server's.
+	ManualSyncCooldownRemainingSeconds int `json:"manualSyncCooldownRemainingSeconds"`
 }
 
 // GetSyncStatus handles GET /sync/status: this replica's in-process lock
@@ -157,7 +214,16 @@ func (h *SyncHandler) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, syncStatusWire{Running: h.lock.Running(), Repos: repos, LastRun: lastRun})
+	cooldown, err := h.cooldownRemaining(ctx)
+	if err != nil {
+		apierror.Internal(w, r, "compute sync cooldown failed", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, syncStatusWire{
+		Running: h.lock.Running(), Repos: repos, LastRun: lastRun,
+		ManualSyncCooldownRemainingSeconds: int(math.Ceil(cooldown.Seconds())),
+	})
 }
 
 // fetchRepoWatermarks returns each enabled repo's last_synced_at watermark

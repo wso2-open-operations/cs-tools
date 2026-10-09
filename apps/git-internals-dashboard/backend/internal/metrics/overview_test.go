@@ -18,13 +18,13 @@ package metrics
 
 import (
 	"context"
-	"os"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/db"
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,10 +32,7 @@ import (
 // (rather than failing) when it's unreachable.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		url = "postgres://gid:gid@localhost:5433/gid?sslmode=disable"
-	}
+	url := testdb.URL(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	pool, err := db.NewPool(ctx, url)
@@ -776,10 +773,10 @@ func TestBuildOverviewAllFiltersTogether(t *testing.T) {
 	}
 }
 
-// TestBuildOverviewEmptyProductSideCategory verifies a taxonomy with no
-// PRODUCT_SIDE status — a valid configuration — yields zero product-side
-// counts across the whole spark window rather than an error.
-func TestBuildOverviewEmptyProductSideCategory(t *testing.T) {
+// TestBuildOverviewNoProductSideWhenEveryStatusIsCs verifies product side is
+// "every non-CS status": with all fixture statuses configured CS_SIDE, the
+// product-side counts are zero across the whole spark window, no error.
+func TestBuildOverviewNoProductSideWhenEveryStatusIsCs(t *testing.T) {
 	pool := testPool(t)
 	repositoryID := seedMetricsFixture(t, pool)
 	seedMetricsYesterdaySnapshots(t, pool, repositoryID)
@@ -788,8 +785,9 @@ func TestBuildOverviewEmptyProductSideCategory(t *testing.T) {
 	cfg := &config.AppConfig{
 		Taxonomy: config.Taxonomy{
 			Statuses: []config.StatusEntry{
+				{Name: "Open", Category: config.CategoryCSSide, AccruesSla: false},
+				{Name: "In Progress", Category: config.CategoryCSSide, AccruesSla: false},
 				{Name: "WOC", Category: config.CategoryCSSide, AccruesSla: false},
-				{Name: "Resolved", Category: config.CategoryOther, AccruesSla: false, IsTerminal: true},
 			},
 		},
 		Budgets: metricsTestConfig.Budgets,

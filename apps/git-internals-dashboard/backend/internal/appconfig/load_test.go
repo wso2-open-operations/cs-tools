@@ -17,6 +17,7 @@
 package appconfig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -341,5 +342,65 @@ func TestLoadReadinessDrainGracePeriodOverrideLeavesRestAtDefault(t *testing.T) 
 	want.DrainGracePeriodSeconds = 5
 	if cfg.Readiness != want {
 		t.Errorf("expected only drainGracePeriodSeconds to differ from Default(), got: %+v", cfg.Readiness)
+	}
+}
+
+// TestDefaultGithubSyncIntervalIs15Minutes pins the shipped default for the
+// scheduled GitHub sync.
+func TestDefaultGithubSyncIntervalIs15Minutes(t *testing.T) {
+	if got := Default().Jobs.GithubSyncIntervalMinutes; got != 15 {
+		t.Errorf("expected default jobs.githubSyncIntervalMinutes=15, got %d", got)
+	}
+}
+
+func TestLoadGithubSyncIntervalOverride(t *testing.T) {
+	path := writeConfig(t, "jobs:\n  githubSyncIntervalMinutes: 5\n")
+	t.Setenv("APP_CONFIG_PATH", path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+	if cfg.Jobs.GithubSyncIntervalMinutes != 5 {
+		t.Errorf("expected jobs.githubSyncIntervalMinutes=5, got %d", cfg.Jobs.GithubSyncIntervalMinutes)
+	}
+	if cfg.Jobs.SyncRunDeadlineMinutes != Default().Jobs.SyncRunDeadlineMinutes {
+		t.Errorf("expected sibling jobs keys to stay at default, got %+v", cfg.Jobs)
+	}
+}
+
+func TestLoadGithubSyncIntervalExplicitZeroRejected(t *testing.T) {
+	path := writeConfig(t, "jobs:\n  githubSyncIntervalMinutes: 0\n")
+	t.Setenv("APP_CONFIG_PATH", path)
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected an error for an explicit 0 githubSyncIntervalMinutes")
+	}
+	if !strings.Contains(err.Error(), "jobs.githubSyncIntervalMinutes") {
+		t.Errorf("expected error naming jobs.githubSyncIntervalMinutes, got: %v", err)
+	}
+}
+
+// TestDefaultManualSyncCooldownIs30Seconds pins the shipped default for the
+// POST /sync/runs cooldown.
+func TestDefaultManualSyncCooldownIs30Seconds(t *testing.T) {
+	if got := Default().Jobs.ManualSyncCooldownSeconds; got != 30 {
+		t.Errorf("expected default jobs.manualSyncCooldownSeconds=30, got %d", got)
+	}
+}
+
+func TestLoadManualSyncCooldownOverrideAndExplicitZero(t *testing.T) {
+	for _, want := range []int{60, 0} { // 0 is legal: it disables the cooldown
+		path := writeConfig(t, fmt.Sprintf("jobs:\n  manualSyncCooldownSeconds: %d\n", want))
+		t.Setenv("APP_CONFIG_PATH", path)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("expected valid config for %d, got: %v", want, err)
+		}
+		if cfg.Jobs.ManualSyncCooldownSeconds != want {
+			t.Errorf("expected jobs.manualSyncCooldownSeconds=%d, got %d", want, cfg.Jobs.ManualSyncCooldownSeconds)
+		}
 	}
 }

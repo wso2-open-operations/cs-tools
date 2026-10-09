@@ -42,10 +42,25 @@ function oldestLastSynced(repos: Array<{ lastSyncedAt: string | null }>): string
 
 /** Manual-sync trigger button: triggers a POST /sync/runs run and shows last-synced time and in-flight/error state. */
 export function SyncButton() {
-  const { data: status } = useSyncStatus();
+  const { data: status, dataUpdatedAt } = useSyncStatus();
   const [transientMessage, setTransientMessage] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
   const mutation = useManualSync();
+
+  // The server reports the cooldown as seconds remaining at the moment it
+  // answered; count down locally from when that answer arrived rather than
+  // comparing this machine's clock to a server timestamp.
+  const [tick, setTick] = useState(() => Date.now());
+  // A response newer than the last tick is "now" as far as the countdown goes.
+  const now = Math.max(tick, dataUpdatedAt);
+  const availableAt = status ? dataUpdatedAt + status.manualSyncCooldownRemainingSeconds * 1000 : 0;
+  const cooldownSeconds = Math.max(0, Math.ceil((availableAt - now) / 1000));
+  const inCooldown = cooldownSeconds > 0;
+  useEffect(() => {
+    if (!inCooldown) return;
+    const id = setInterval(() => setTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [inCooldown]);
 
   // Fall back to the relative "Last synced" text a few seconds after a
   // successful sync, instead of pinning the "Synced — N issues..." message
@@ -67,6 +82,9 @@ export function SyncButton() {
   if (mutation.isPending) statusText = "Syncing…";
   else if (errorMessage) statusText = errorMessage;
   else if (transientMessage) statusText = transientMessage;
+  else if (inCooldown) statusText = `Sync available in ${cooldownSeconds}s`;
+
+  const buttonTitle = inCooldown ? `Sync available in ${cooldownSeconds}s` : "Sync now";
 
   const expanded = hovered || mutation.isPending || !!errorMessage || !!transientMessage;
 
@@ -111,9 +129,9 @@ export function SyncButton() {
         onMouseLeave={() => setHovered(false)}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
-        disabled={mutation.isPending}
+        disabled={mutation.isPending || inCooldown}
         aria-label="Sync now"
-        title="Sync now"
+        title={buttonTitle}
         sx={{
           height: 28,
           width: 28,

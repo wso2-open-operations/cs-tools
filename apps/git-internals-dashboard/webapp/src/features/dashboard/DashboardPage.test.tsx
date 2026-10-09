@@ -166,6 +166,21 @@ describe("DashboardPage", () => {
     await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
   });
 
+  it("does not render the removed Closest to breach widget", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/metrics/overview")) return Promise.resolve(jsonResponse(OVERVIEW));
+      if (url.includes("/metrics/timeseries"))
+        return Promise.resolve(jsonResponse({ window: 12, metric: "violated", groupBy: "priority", dates: [], series: [] }));
+      if (url.includes("/taxonomy")) return Promise.resolve(jsonResponse({ statuses: [], csStatuses: [] }));
+      if (url.includes("/issues")) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    renderDashboardPage(fetchMock);
+    await screen.findByRole("button", { name: "Focus project Alpha" });
+    expect(screen.queryByText("Closest to breach")).not.toBeInTheDocument();
+  });
+
   it("carries the abtTeam filter through a drill link", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -208,5 +223,61 @@ describe("DashboardPage", () => {
     const search = new URLSearchParams(router.state.location.search);
     expect(search.getAll("priority")).toEqual(["Critical(P1)", "High(P2)", "Medium(P3)"]);
     expect(search.get("bucket")).toBeNull();
+  });
+
+  const DRILL_TAXONOMY = {
+    statuses: [
+      { name: "Open", displayName: "Open", category: "PRODUCT_SIDE", accruesSla: true, isTerminal: false, sortOrder: 10 },
+      { name: "WOW", displayName: "Waiting on Product Team", category: "PRODUCT_SIDE", accruesSla: true, isTerminal: false, sortOrder: 20 },
+      { name: "WOC", displayName: "Waiting on CS Team", category: "CS_SIDE", accruesSla: false, isTerminal: false, sortOrder: 30 },
+    ],
+    csStatuses: ["WOC"],
+  };
+  const drillFetch = () =>
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/metrics/overview")) return Promise.resolve(jsonResponse(OVERVIEW));
+      if (url.includes("/metrics/timeseries"))
+        return Promise.resolve(jsonResponse({ window: 12, metric: "violated", groupBy: "priority", dates: [], series: [] }));
+      if (url.includes("/taxonomy")) return Promise.resolve(jsonResponse(DRILL_TAXONOMY));
+      if (url.includes("/issues")) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+  it("drills 'On Product Team Side' into every non-CS status plus Other", async () => {
+    const router = renderDashboardPage(drillFetch());
+    fireEvent.click(await screen.findByTitle("View on product team side issues"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/issues"));
+    expect(new URLSearchParams(router.state.location.search).getAll("status")).toEqual(["Open", "WOW", "Other"]);
+  });
+
+  it("shows a single 'On CS Team Side' tile that drills into the CS status", async () => {
+    const router = renderDashboardPage(drillFetch());
+    expect((await screen.findAllByText("On CS Team Side")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByTitle("View Waiting on CS Team issues"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/issues"));
+    expect(new URLSearchParams(router.state.location.search).getAll("status")).toEqual(["WOC"]);
+  });
+
+  it("uses a generic CS label and drills into every CS status when several are configured", async () => {
+    const taxonomy = {
+      statuses: [
+        ...DRILL_TAXONOMY.statuses,
+        { name: "WOV", displayName: "Waiting on Vendor", category: "CS_SIDE", accruesSla: false, isTerminal: false, sortOrder: 40 },
+      ],
+      csStatuses: ["WOC", "WOV"],
+    };
+    const base = drillFetch();
+    const fetchMock = vi.fn((input: RequestInfo | URL) =>
+      String(input).includes("/taxonomy") ? Promise.resolve(jsonResponse(taxonomy)) : base(input),
+    );
+    const router = renderDashboardPage(fetchMock);
+
+    fireEvent.click(await screen.findByTitle("View CS team side issues"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/issues"));
+    expect(new URLSearchParams(router.state.location.search).getAll("status")).toEqual(["WOC", "WOV"]);
   });
 });

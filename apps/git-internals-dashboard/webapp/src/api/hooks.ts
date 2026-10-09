@@ -15,9 +15,10 @@
 // under the License.
 
 // TanStack React Query hooks wrapping the api client's endpoint functions.
+import { useEffect, useRef } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./endpoints";
-import type { GlobalFilters, IssueFilters } from "./types";
+import type { GlobalFilters, IssueFilters, Taxonomy } from "./types";
 
 /**
  * GET /metrics/overview, optionally scoped to repo/priority/abtTeam; polls
@@ -89,6 +90,37 @@ export function useSyncStatus() {
   });
 }
 
+/** Latest lastSyncedAt across repos, or null before any repo has synced. */
+function newestWatermark(status: { repos: Array<{ lastSyncedAt: string | null }> } | undefined): string | null {
+  const times = (status?.repos ?? []).map((r) => r.lastSyncedAt).filter((t): t is string => t != null);
+  return times.length === 0 ? null : times.reduce((newest, t) => (t > newest ? t : newest));
+}
+
+/**
+ * Refreshes the data views when a sync (scheduled, manual, or from another
+ * replica) lands new data. Watches the already-polled /sync/status and, when
+ * the newest per-repo watermark moves, invalidates the queries that don't poll
+ * on their own. The overview keeps its own 60s poll too, because the recompute
+ * tick moves SLA states between syncs without touching any watermark. The
+ * first load only records the baseline, so opening the page never double-fetches.
+ */
+export function useRefreshOnSync() {
+  const queryClient = useQueryClient();
+  const { data } = useSyncStatus();
+  const seen = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!data) return;
+    const newest = newestWatermark(data);
+    const previous = seen.current;
+    seen.current = newest;
+    if (previous === undefined || previous === newest) return;
+    for (const key of ["overview", "issues", "timeseries", "issue"]) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  }, [data, queryClient]);
+}
+
 /** GET /issues/{id}; disabled until `enabled` (the row's timeline is expanded). */
 export function useIssue(id: number, enabled: boolean) {
   return useQuery({
@@ -109,5 +141,19 @@ export function useManualSync() {
       void queryClient.invalidateQueries({ queryKey: ["issues"] });
       void queryClient.invalidateQueries({ queryKey: ["timeseries"] });
     },
+    // A refused POST (429 cooldown, 409 in progress) means the status the UI
+    // is showing is stale: refetch it so the cooldown countdown is accurate.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sync-status"] });
+    },
   });
+}
+
+/** Reserved `status` filter value matching any status not listed in the taxonomy. */
+export const OTHER_STATUS = "Other";
+
+/** Maps a raw board status to its configured display name (unchanged when none). */
+export function makeStatusLabel(taxonomy: Taxonomy | undefined) {
+  const byName = new Map((taxonomy?.statuses ?? []).map((s) => [s.name, s.displayName]));
+  return (status: string): string => byName.get(status) || status;
 }

@@ -40,7 +40,7 @@ const COLS = [
   { key: "violated", label: "Violated", bucket: "violated", hex: "#d32f2f" },
   { key: "atRisk", label: "At risk", bucket: "at_risk", hex: "#ed6c02" },
   { key: "onTrack", label: "On track", bucket: "on_track", hex: "#2e7d32" },
-  { key: "cs", label: "CS side", bucket: "cs", hex: "#646cff" },
+  { key: "cs", label: "CS Team side", bucket: "cs", hex: "#646cff" },
 ] as const;
 
 const PRODUCT_SIDE_COL_COUNT = 3;

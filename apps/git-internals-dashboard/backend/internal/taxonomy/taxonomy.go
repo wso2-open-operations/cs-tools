@@ -52,8 +52,15 @@ func CsStatuses(cfg *config.AppConfig) []string {
 	return namesByCategory(cfg, config.CategoryCSSide)
 }
 
-// ProductSideStatuses returns status names categorized PRODUCT_SIDE (the
-// statuses currently owned by the product team), sortOrder-ascending.
-func ProductSideStatuses(cfg *config.AppConfig) []string {
-	return namesByCategory(cfg, config.CategoryProductSide)
+// ConfiguredStatuses returns every non-empty status name in the taxonomy,
+// sortOrder-ascending. Any board status outside this list is "Other" and,
+// like every non-CS status, sits on the product team side.
+func ConfiguredStatuses(cfg *config.AppConfig) []string {
+	names := make([]string, 0, len(cfg.Taxonomy.Statuses))
+	for _, s := range SortedStatusDefs(cfg) {
+		if s.Name != "" {
+			names = append(names, s.Name)
+		}
+	}
+	return names
 }

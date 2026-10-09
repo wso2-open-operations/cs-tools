@@ -40,6 +40,8 @@ interface IssueTimelineRowProps {
   variant?: IssueRowVariant;
   projectName?: string; // friendly name; falls back to repo short name
   isCsStatus: (status: string | null | undefined) => boolean;
+  /** Maps a raw status to its display name; defaults to the raw status. */
+  statusLabel?: (status: string) => string;
 }
 
 /** One issue's row in a list, expandable to its status-event timeline. */
@@ -48,6 +50,7 @@ export function IssueTimelineRow({
   variant = "compact",
   projectName,
   isCsStatus,
+  statusLabel,
 }: IssueTimelineRowProps) {
   const [open, setOpen] = useState(false);
   const { data: detail, isError, error, refetch } = useIssue(issue.id, open);
@@ -139,7 +142,7 @@ export function IssueTimelineRow({
               color: cs ? "var(--sla-cs)" : "var(--sla-fg2)",
             }}
           >
-            {issue.currentStatus ?? "—"}
+            {issue.currentStatus ? (statusLabel?.(issue.currentStatus) ?? issue.currentStatus) : "—"}
           </Box>
         </span>
 

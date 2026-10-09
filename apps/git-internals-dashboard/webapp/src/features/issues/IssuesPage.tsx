@@ -17,7 +17,7 @@
 import { useSearchParams } from "react-router";
 import { Box, Button, Chip, Skeleton, TablePagination, TableSortLabel } from "@mui/material";
 import { X } from "@wso2/oxygen-ui-icons-react";
-import { useOverview, useIssues, useTaxonomy, makeIsCsStatus } from "@api/hooks";
+import { useOverview, useIssues, useTaxonomy, makeIsCsStatus, makeStatusLabel, OTHER_STATUS } from "@api/hooks";
 import type { BucketKey, SlaState } from "@api/types";
 import { DEFAULT_ISSUE_SORT, parseIssueSortField, parseIssueSortOrder, type IssueSortField, type IssueSortOrder } from "@api/issueSort";
 import { BackButton } from "@components/BackButton";
@@ -46,8 +46,8 @@ const BUCKET_TITLES: Partial<Record<BucketKey, string>> = {
   violated: "Violated issues",
   at_risk: "At-risk issues",
   on_track: "On-track issues",
-  cs: "On-CS-side issues",
-  product_side: "On-product-side issues",
+  cs: "On-CS-team-side issues",
+  product_side: "On-product-team-side issues",
   tracked: "Open tracked issues",
   untracked: "Untracked / missing priority",
   attention: "Attention set",
@@ -57,10 +57,10 @@ const BUCKET_TITLES: Partial<Record<BucketKey, string>> = {
 // options (e.g. "on track" is SLA OK *and* not on the CS side) still reaches
 // the backend as `bucket`, shown here as a removable scope chip instead.
 const SCOPE_CHIP_LABEL: Partial<Record<BucketKey, string>> = {
-  on_track: "On track (excluding CS side)",
+  on_track: "On track (excluding CS team side)",
   tracked: "Has a priority",
   attention: "Needs attention",
-  cs: "On CS side",
+  cs: "On CS team side",
   product_side: "On product team side",
   violated: "Violated",
   at_risk: "At risk",
@@ -138,6 +138,7 @@ export default function IssuesPage() {
   const { data: overview } = useOverview();
   const { data: taxonomy } = useTaxonomy();
   const isCsStatus = makeIsCsStatus(taxonomy?.csStatuses);
+  const statusLabel = makeStatusLabel(taxonomy);
   const {
     data,
     isLoading,
@@ -167,11 +168,14 @@ export default function IssuesPage() {
   const projectOptions = (overview?.projects ?? []).map((p) => ({ value: p.repo, label: p.name }));
   const priorityOptions = [...priorityOptionsFrom(overview?.priorities), { value: NO_PRIORITY_VALUE, label: "No priority" }];
   const abtTeamOptions = (overview?.abtTeams ?? []).map((t) => ({ value: t, label: t }));
-  const statusOptions = (taxonomy?.statuses ?? [])
-    .filter((s) => !s.isTerminal && s.name !== "")
-    .slice()
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((s) => ({ value: s.name, label: s.name }));
+  const statusOptions = [
+    ...(taxonomy?.statuses ?? [])
+      .filter((s) => s.name !== "")
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((s) => ({ value: s.name, label: s.displayName || s.name })),
+    { value: OTHER_STATUS, label: "Other" },
+  ];
 
   const hasScopeChip = !!bucket && bucket !== "all";
   const activeFilterCount =
@@ -271,6 +275,7 @@ export default function IssuesPage() {
               variant="full"
               projectName={projectNameFor(overview?.projects, issue.repo)}
               isCsStatus={isCsStatus}
+              statusLabel={statusLabel}
             />
           ))
         )}

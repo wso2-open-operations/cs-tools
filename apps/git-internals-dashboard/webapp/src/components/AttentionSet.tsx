@@ -30,7 +30,7 @@ type Category = "violated" | "at_risk" | "cs";
 const CHIPS: { key: Category; label: string; color: string; tint: string }[] = [
   { key: "violated", label: "Violated", color: "var(--sla-violated)", tint: "var(--sla-violated-tint)" },
   { key: "at_risk", label: "At risk", color: "var(--sla-at-risk)", tint: "var(--sla-at-risk-tint)" },
-  { key: "cs", label: "On CS side", color: "var(--sla-cs)", tint: "var(--sla-cs-tint)" },
+  { key: "cs", label: "On CS Team Side", color: "var(--sla-cs)", tint: "var(--sla-cs-tint)" },
 ];
 
 interface AttentionSetProps {
@@ -40,14 +40,19 @@ interface AttentionSetProps {
   priority?: string;
   abtTeam?: string;
   isCsStatus: (status: string | null | undefined) => boolean;
+  statusLabel?: (status: string) => string;
 }
 
-/** Filterable list of violated/at-risk/CS-side issues, with toggleable category chips. */
-export function AttentionSet({ hero, projects, repo, priority, abtTeam, isCsStatus }: AttentionSetProps) {
+/** Max rows shown, applied after the chip filter so every chip combination still fills up to this many. */
+const MAX_ROWS = 10;
+
+/** Top-10 filterable list of violated/at-risk/CS-side issues, with toggleable category chips. */
+export function AttentionSet({ hero, projects, repo, priority, abtTeam, isCsStatus, statusLabel }: AttentionSetProps) {
   const [active, setActive] = useState<Set<Category>>(new Set(["violated", "at_risk", "cs"]));
 
   // Capped summary, not a browse view: no pagination/sort controls of its
-  // own, just a bounded top-N by SLA consumption. The full, paginated list
+  // own, just a bounded top-N by SLA consumption. Fetches more than MAX_ROWS
+  // because the chip filter below runs client-side and can drop rows. The full, paginated list
   // lives on the Issues page (bucket=attention).
   const { data } = useIssues({
     bucket: "attention",
@@ -77,12 +82,14 @@ export function AttentionSet({ hero, projects, repo, priority, abtTeam, isCsStat
     cs: hero.cs.n,
   };
 
-  const rows = (issues ?? []).filter((i) => {
-    if (active.has("violated") && i.sla?.slaState === "VIOLATED") return true;
-    if (active.has("at_risk") && i.sla?.slaState === "AT_RISK") return true;
-    if (active.has("cs") && isCsStatus(i.currentStatus)) return true;
-    return false;
-  });
+  const rows = (issues ?? [])
+    .filter((i) => {
+      if (active.has("violated") && i.sla?.slaState === "VIOLATED") return true;
+      if (active.has("at_risk") && i.sla?.slaState === "AT_RISK") return true;
+      if (active.has("cs") && isCsStatus(i.currentStatus)) return true;
+      return false;
+    })
+    .slice(0, MAX_ROWS);
 
   const cols = gridTemplate("compact");
 
@@ -163,6 +170,7 @@ export function AttentionSet({ hero, projects, repo, priority, abtTeam, isCsStat
             issue={issue}
             projectName={nameForRepo(issue.repo)}
             isCsStatus={isCsStatus}
+            statusLabel={statusLabel}
           />
         ))
       )}

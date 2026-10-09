@@ -39,7 +39,7 @@ describe("PriorityStateMatrix", () => {
     expect(screen.getByText("Violated")).toBeTruthy();
     expect(screen.getByText("At risk")).toBeTruthy();
     expect(screen.getByText("On track")).toBeTruthy();
-    expect(screen.getByText("CS side")).toBeTruthy();
+    expect(screen.getByText("CS Team side")).toBeTruthy();
     expect(screen.getByText("Total")).toBeTruthy();
   });
 

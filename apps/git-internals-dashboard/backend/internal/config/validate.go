@@ -110,6 +110,30 @@ func Validate(cfg *AppConfig) error {
 		}
 	}
 
+	seenTeamName := make(map[string]bool, len(cfg.SpecialTeams))
+	seenTeamLabel := make(map[string]bool, len(cfg.SpecialTeams))
+	for i, t := range cfg.SpecialTeams {
+		if strings.TrimSpace(t.Name) == "" {
+			add("specialTeams.%d.name: must not be empty", i)
+		}
+		if strings.TrimSpace(t.Label) == "" {
+			add("specialTeams.%d.label: must not be empty", i)
+		}
+		if t.Name != "" {
+			if seenTeamName[t.Name] {
+				add("duplicate specialTeams name: %q", t.Name)
+			}
+			seenTeamName[t.Name] = true
+		}
+		if t.Label != "" {
+			key := strings.ToLower(strings.TrimSpace(t.Label))
+			if seenTeamLabel[key] {
+				add("duplicate specialTeams label: %q", t.Label)
+			}
+			seenTeamLabel[key] = true
+		}
+	}
+
 	seenPriority := make(map[string]bool, len(cfg.Budgets))
 	for i, b := range cfg.Budgets {
 		if b.Priority == "" {
@@ -125,6 +149,26 @@ func Validate(cfg *AppConfig) error {
 			add("duplicate budget priority: %s", b.Priority)
 		}
 		seenPriority[b.Priority] = true
+	}
+
+	seenPriorityAlias := make(map[string]bool, len(cfg.PriorityAliases))
+	for i, a := range cfg.PriorityAliases {
+		if strings.TrimSpace(a.Alias) == "" {
+			add("priorityAliases.%d.alias: must not be empty", i)
+		}
+		if a.Canonical == "" {
+			add("priorityAliases.%d.canonical: must not be empty", i)
+		}
+		// Keyed on the trimmed alias, matching ingest.BuildRuntimeConfig:
+		// "High" and "High " collide at runtime, so they must collide here.
+		aliasKey := strings.TrimSpace(a.Alias)
+		if seenPriorityAlias[aliasKey] {
+			add("duplicate priorityAliases alias: %q", a.Alias)
+		}
+		seenPriorityAlias[aliasKey] = true
+		if a.Canonical != "" && !seenPriority[a.Canonical] {
+			add("priorityAliases: %q maps to %q, which is not a budgets priority", a.Alias, a.Canonical)
+		}
 	}
 
 	if cfg.Settings.AtRiskThreshold <= 0 || cfg.Settings.AtRiskThreshold >= 1 {

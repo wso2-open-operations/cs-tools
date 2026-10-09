@@ -37,11 +37,12 @@ func NewTaxonomyHandler(cfg *config.AppConfig) *TaxonomyHandler {
 }
 
 type statusDefWire struct {
-	Name       string `json:"name"`
-	Category   string `json:"category"`
-	AccruesSla bool   `json:"accruesSla"`
-	IsTerminal bool   `json:"isTerminal"`
-	SortOrder  int    `json:"sortOrder"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Category    string `json:"category"`
+	AccruesSla  bool   `json:"accruesSla"`
+	IsTerminal  bool   `json:"isTerminal"`
+	SortOrder   int    `json:"sortOrder"`
 }
 
 type taxonomyResponse struct {
@@ -54,12 +55,17 @@ func (h *TaxonomyHandler) GetTaxonomy(w http.ResponseWriter, r *http.Request) {
 	statuses := taxonomy.SortedStatusDefs(h.cfg)
 	wire := make([]statusDefWire, len(statuses))
 	for i, s := range statuses {
+		display := s.DisplayName
+		if display == "" {
+			display = s.Name
+		}
 		wire[i] = statusDefWire{
-			Name:       s.Name,
-			Category:   string(s.Category),
-			AccruesSla: s.AccruesSla,
-			IsTerminal: s.IsTerminal,
-			SortOrder:  s.SortOrder,
+			Name:        s.Name,
+			DisplayName: display,
+			Category:    string(s.Category),
+			AccruesSla:  s.AccruesSla,
+			IsTerminal:  s.IsTerminal,
+			SortOrder:   s.SortOrder,
 		}
 	}
 	writeJSON(w, http.StatusOK, taxonomyResponse{Statuses: wire, CsStatuses: taxonomy.CsStatuses(h.cfg)})

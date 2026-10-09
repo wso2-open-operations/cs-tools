@@ -18,22 +18,19 @@ package jobs
 
 import (
 	"context"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/db"
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/testdb"
 )
 
 // testDatabaseURL returns DATABASE_URL, or the local docker-composed
 // Postgres's default connection string if unset.
 func testDatabaseURL(t *testing.T) string {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		url = "postgres://gid:gid@localhost:5433/gid?sslmode=disable"
-	}
+	url := testdb.URL(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	pool, err := db.NewPool(ctx, url)

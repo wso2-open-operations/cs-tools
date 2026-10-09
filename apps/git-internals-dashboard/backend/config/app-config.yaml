@@ -81,6 +81,17 @@ jobs:
   # Deadline for one POST /sync/runs pass. Deliberately far above the server
   # write timeout: the route runs on a detached context.
   syncRunDeadlineMinutes: 15
+  # How often the in-process scheduler syncs from GitHub (same work as
+  # POST /sync/runs, under the same job lock, so a scheduled and a manual
+  # sync never overlap). The first run happens one full interval after boot,
+  # not at startup. Disabled when GITHUB_TOKEN is unset or
+  # SYNC_SCHEDULER_ENABLED=0. Must be at least 1.
+  githubSyncIntervalMinutes: 15
+  # Minimum gap between the last finished sync (manual or scheduled) and the
+  # next POST /sync/runs; a request inside the window gets 429 sync_cooldown
+  # with a Retry-After header. The webapp disables its Sync button for the same
+  # window. 0 disables the cooldown.
+  manualSyncCooldownSeconds: 30
   # Timeout for releasing the Postgres advisory lock on the way out.
   lockReleaseTimeoutSeconds: 5
   # Keyset page size for one recompute pass.

@@ -187,3 +187,23 @@ func TestValidateReadinessDrainGracePeriodNegativeRejected(t *testing.T) {
 		t.Errorf("expected drainGracePeriodSeconds=0 to be valid, got: %v", err)
 	}
 }
+
+func TestValidateRejectsNonPositiveGithubSyncInterval(t *testing.T) {
+	for _, v := range []int{0, -1} {
+		cfg := Default()
+		cfg.Jobs.GithubSyncIntervalMinutes = v
+		err := Validate(&cfg)
+		if err == nil || !strings.Contains(err.Error(), "jobs.githubSyncIntervalMinutes") {
+			t.Errorf("value %d: expected error naming jobs.githubSyncIntervalMinutes, got: %v", v, err)
+		}
+	}
+}
+
+func TestValidateRejectsNegativeManualSyncCooldown(t *testing.T) {
+	cfg := Default()
+	cfg.Jobs.ManualSyncCooldownSeconds = -1
+	err := Validate(&cfg)
+	if err == nil || !strings.Contains(err.Error(), "jobs.manualSyncCooldownSeconds") {
+		t.Errorf("expected error naming jobs.manualSyncCooldownSeconds, got: %v", err)
+	}
+}

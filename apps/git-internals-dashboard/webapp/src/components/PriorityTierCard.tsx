@@ -187,7 +187,7 @@ export function PriorityTierCard({ tier, focused, dim, onFocusToggle, onDrill }:
 
       <Box sx={{ mt: 1, display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--sla-fg3)" }}>
         <span>{tier.total} open tracked</span>
-        <span>{tier.cs} on CS side</span>
+        <span>{tier.cs} on CS Team side</span>
       </Box>
     </Box>
   );

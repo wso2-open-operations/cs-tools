@@ -30,6 +30,7 @@ const (
 	CodeValidationFailed = "validation_failed"
 	CodeNotFound         = "not_found"
 	CodeSyncInProgress   = "sync_in_progress"
+	CodeSyncCooldown     = "sync_cooldown"
 	CodeSyncTokenMissing = "sync_token_missing"
 	CodeInternal         = "internal"
 )

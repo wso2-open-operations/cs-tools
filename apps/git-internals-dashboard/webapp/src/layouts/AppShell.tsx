@@ -17,7 +17,7 @@
 import type { ReactNode } from "react";
 import { Box, MenuItem } from "@mui/material";
 import { Outlet, useMatch } from "react-router";
-import { useOverview } from "@api/hooks";
+import { useOverview, useRefreshOnSync } from "@api/hooks";
 import { FetchProgressBar, FetchProgressProvider } from "@components/FetchProgressBar";
 import { FilterSelect } from "@components/FilterSelect";
 import { IssueSearchBox } from "@components/IssueSearchBox";
@@ -90,6 +90,7 @@ export default function AppShell({ children }: { children?: ReactNode }) {
 function AppShellContent({ children }: { children?: ReactNode }) {
   const progressActive = useFetchProgressActive();
   const onIssuesPage = useMatch("/issues");
+  useRefreshOnSync();
 
   return (
     // No bgcolor here — Oxygen UI's MuiCssBaseline override paints the

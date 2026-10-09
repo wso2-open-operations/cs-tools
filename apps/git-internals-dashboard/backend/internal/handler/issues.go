@@ -188,7 +188,7 @@ func (h *IssuesHandler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	whereSQL, args := buildIssuesWhere(taxonomy.CsStatuses(h.cfg), taxonomy.ProductSideStatuses(h.cfg), q)
+	whereSQL, args := buildIssuesWhere(taxonomy.CsStatuses(h.cfg), taxonomy.ConfiguredStatuses(h.cfg), q)
 	orderSQL := issueOrderBy(q.Sort, q.Order)
 
 	pageArgs := &sqlArgs{values: args}

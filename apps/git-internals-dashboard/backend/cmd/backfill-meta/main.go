@@ -75,7 +75,7 @@ func main() {
 
 	client := github.NewClient(token)
 
-	results, err := ingest.BackfillIssueMeta(ctx, pool, client, app.Settings.SeedClosedLookbackDays)
+	results, err := ingest.BackfillIssueMeta(ctx, pool, client, app.Settings.SeedClosedLookbackDays, app.SpecialTeams)
 	if err != nil {
 		fatal("backfill failed", err)
 	}

@@ -16,10 +16,9 @@
 
 import { useNavigate, useSearchParams } from "react-router";
 import { Box, Skeleton } from "@mui/material";
-import { useOverview, useTaxonomy, makeIsCsStatus } from "@api/hooks";
+import { useOverview, useTaxonomy, makeIsCsStatus, makeStatusLabel, OTHER_STATUS } from "@api/hooks";
 import { ErrorState } from "@components/ErrorState";
 import { StaleDataAlert } from "@components/StaleDataAlert";
-import { UnknownStatusAlert } from "@components/UnknownStatusAlert";
 import { errorMessage } from "@lib/apiError";
 import { useReportFetchProgress } from "@lib/fetchProgress";
 import { NO_PRIORITY_VALUE, useGlobalFilters } from "@lib/filters";
@@ -29,7 +28,6 @@ import { ProjectCard } from "@components/ProjectCard";
 import { PriorityTierCard } from "@components/PriorityTierCard";
 import { PriorityStateMatrix } from "@components/PriorityStateMatrix";
 import { TimeseriesChart } from "@components/TimeseriesChart";
-import { ClosestToBreach } from "@components/ClosestToBreach";
 import { VolumePanel } from "@components/VolumePanel";
 import { AttentionSet } from "@components/AttentionSet";
 import { acrylicSurfaceSx } from "@lib/surfaces";
@@ -42,7 +40,7 @@ import { acrylicSurfaceSx } from "@lib/surfaces";
 // bucket itself maps onto /issues's dropdown-backed filters wherever that's
 // exact, rather than being carried across as `bucket` verbatim: violated/
 // at_risk become an slaState tick, cs/product_side become one status= tick
-// per matching taxonomy status (falling back to `bucket` when taxonomy
+// per matching taxonomy status (product_side adds "Other") (falling back to `bucket` when taxonomy
 // hasn't loaded yet), untracked becomes the priority sentinel, and tracked
 // (with or without a specific priority override) becomes one priority= tick
 // per matching canonical priority tier — every tier when there's no
@@ -90,18 +88,18 @@ function buildDrillUrl(
       next.set("slaState", "AT_RISK");
       break;
     case "cs":
-      if (opts.status) {
-        next.set("status", opts.status);
-      } else if (taxonomy) {
+      if (taxonomy) {
         for (const s of taxonomy.csStatuses) next.append("status", s);
       } else {
         next.set("bucket", "cs");
       }
       break;
     case "product_side": {
-      const productSideStatuses = taxonomy?.statuses.filter((s) => s.category === "PRODUCT_SIDE").map((s) => s.name) ?? [];
+      // Every configured non-CS status, plus "Other" (any unlisted status).
+      const productSideStatuses = taxonomy?.statuses.filter((s) => s.category !== "CS_SIDE" && s.name !== "").map((s) => s.name) ?? [];
       if (productSideStatuses.length > 0) {
         for (const s of productSideStatuses) next.append("status", s);
+        next.append("status", OTHER_STATUS);
       } else {
         next.set("bucket", "product_side");
       }
@@ -133,6 +131,7 @@ export default function DashboardPage() {
   useReportFetchProgress(isPlaceholderData);
   const { data: taxonomy } = useTaxonomy();
   const isCsStatus = makeIsCsStatus(taxonomy?.csStatuses);
+  const statusLabel = makeStatusLabel(taxonomy);
 
   // Navigates to /issues, pre-filtered to bucket plus any repo/priority/abtTeam/status override.
   const drill = (
@@ -180,9 +179,6 @@ export default function DashboardPage() {
           <Skeleton variant="rounded" sx={{ height: 300, borderRadius: "16px" }} />
         </Box>
 
-        {/* Closest to breach */}
-        <Skeleton variant="rounded" sx={{ height: 260, borderRadius: "16px" }} />
-
         {/* New-issue volume */}
         <Skeleton variant="rounded" sx={{ height: 340, borderRadius: "16px" }} />
 
@@ -204,8 +200,6 @@ export default function DashboardPage() {
         <StaleDataAlert key={errorUpdatedAt} message={errorMessage(error, "Failed to refresh the dashboard")} />
       )}
 
-      <UnknownStatusAlert statuses={overview.unknownStatuses} />
-
       {/* All-clear banner */}
       {allClear && (
         <Box sx={{ mb: "22px", display: "flex", alignItems: "center", gap: 1.5, borderRadius: "12px", border: "1px solid color-mix(in srgb, var(--sla-ok) 35%, transparent)", bgcolor: "var(--sla-ok-tint)", px: "18px", py: 1.75 }}>
@@ -220,8 +214,8 @@ export default function DashboardPage() {
       )}
 
       {/* Hero attention bar */}
-      <Box component="section" sx={{ mb: "26px", display: "grid", gap: "18px", gridTemplateColumns: { lg: "1.55fr .9fr" } }}>
-        <Box sx={{ display: "grid", gap: 1.75, gridTemplateColumns: { sm: "1fr 1fr", lg: "1fr 1fr 1fr" } }}>
+      <Box component="section" sx={{ mb: "26px", display: "grid", gap: 1.75, gridTemplateColumns: { sm: "1fr 1fr", lg: "repeat(4, minmax(0, 1fr))" } }}>
+        <>
           <HeroCard
             label="Violated"
             n={overview.hero.violated.n}
@@ -246,8 +240,16 @@ export default function DashboardPage() {
             accent="var(--sla-primary)"
             onClick={() => drill("product_side")}
           />
-        </Box>
-        <CsHeroCard n={overview.hero.cs.n} byStatus={overview.hero.cs.byStatus} onDrill={(status) => drill("cs", { status })} />
+        </>
+        <CsHeroCard
+          n={overview.hero.cs.n}
+          // hero.cs.n counts every CS status, so name one only when it is the
+          // only one; several get a generic label rather than understating.
+          label={
+            (taxonomy?.csStatuses.length ?? 0) > 1 ? "CS team side" : statusLabel(taxonomy?.csStatuses[0] ?? "WOC")
+          }
+          onDrill={() => drill("cs")}
+        />
       </Box>
 
       {/* Per-project comparison */}
@@ -297,11 +299,6 @@ export default function DashboardPage() {
         <TimeseriesChart repo={repo} abtTeam={abtTeam} activePriority={priority} onPriorityFilter={(pKey) => setFilter("priority", pKey)} />
       </Box>
 
-      {/* Closest to breach */}
-      <Box sx={{ mb: "22px" }}>
-        <ClosestToBreach repo={repo} priority={priority} abtTeam={abtTeam} projects={overview.projects} />
-      </Box>
-
       {/* New-issue volume */}
       {overview.volume.length > 0 && (
         <Box component="section" sx={{ ...acrylicSurfaceSx, mb: "22px", borderRadius: "16px", border: "1px solid var(--sla-border)", px: "22px", py: 2.5, boxShadow: "0 1px 2px rgba(17,24,39,.04)" }}>
@@ -332,7 +329,7 @@ export default function DashboardPage() {
       )}
 
       {/* Attention set */}
-      <AttentionSet hero={overview.hero} projects={overview.projects} repo={repo} priority={priority} abtTeam={abtTeam} isCsStatus={isCsStatus} />
+      <AttentionSet hero={overview.hero} projects={overview.projects} repo={repo} priority={priority} abtTeam={abtTeam} isCsStatus={isCsStatus} statusLabel={statusLabel} />
 
       {/* Footer */}
       <Box sx={{ mt: 3, textAlign: "center", fontSize: 11.5, color: "var(--sla-no-sla)" }}>

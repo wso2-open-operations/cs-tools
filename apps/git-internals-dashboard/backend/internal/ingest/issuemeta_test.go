@@ -19,6 +19,8 @@ package ingest
 import (
 	"strings"
 	"testing"
+
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/config"
 )
 
 // TestExtractIssueMeta covers the key/value lines ExtractIssueMeta must
@@ -217,4 +219,39 @@ func strPtrDisplay(s *string) string {
 		return "<nil>"
 	}
 	return *s
+}
+
+func TestApplySpecialTeam(t *testing.T) {
+	teams := []config.SpecialTeamEntry{
+		{Name: "Migrations", Label: "Migration/Affected"},
+		{Name: "Onboarding", Label: "Onboarding/Affected"},
+	}
+	cases := []struct {
+		name   string
+		labels []string
+		teams  []config.SpecialTeamEntry
+		want   *string
+	}{
+		{"no special label keeps description team", []string{"Type/Bug"}, teams, strp("Atlas")},
+		{"migration label overrides", []string{"Type/Bug", "Migration/Affected"}, teams, strp("Migrations")},
+		{"onboarding label overrides", []string{"Onboarding/Affected"}, teams, strp("Onboarding")},
+		{"match is case-insensitive", []string{"migration/affected"}, teams, strp("Migrations")},
+		{"both labels: first configured wins", []string{"Onboarding/Affected", "Migration/Affected"}, teams, strp("Migrations")},
+		{"no teams configured", []string{"Migration/Affected"}, nil, strp("Atlas")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ApplySpecialTeam(IssueMeta{ABTTeam: strp("Atlas")}, tc.labels, tc.teams)
+			if got.ABTTeam == nil || *got.ABTTeam != *tc.want {
+				t.Fatalf("ABTTeam = %v, want %v", got.ABTTeam, *tc.want)
+			}
+		})
+	}
+
+	t.Run("overrides even when description has no team", func(t *testing.T) {
+		got := ApplySpecialTeam(IssueMeta{}, []string{"Onboarding/Affected"}, teams)
+		if got.ABTTeam == nil || *got.ABTTeam != "Onboarding" {
+			t.Fatalf("ABTTeam = %v", got.ABTTeam)
+		}
+	})
 }

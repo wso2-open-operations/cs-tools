@@ -38,6 +38,7 @@ import (
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/ingest"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/jobs"
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/middleware"
+	"github.com/binara-sachin/git-internals-dashboard/backend/internal/sync"
 )
 
 // main wires up config, the DB pool, config→DB sync, the job lock/recompute
@@ -108,12 +109,38 @@ func main() {
 
 	githubToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 
+	// GitHub sync scheduler: one sync (plus a recompute tick, same as
+	// POST /sync/runs) every jobs.githubSyncIntervalMinutes, first run after
+	// one full interval. SYNC_SCHEDULER_ENABLED=0 disables it (tests/CI/local
+	// dev); a missing GITHUB_TOKEN disables it too, with a warning.
+	switch {
+	case os.Getenv("SYNC_SCHEDULER_ENABLED") == "0":
+		slog.Info("github sync scheduler disabled via SYNC_SCHEDULER_ENABLED=0")
+	case githubToken == "":
+		slog.Warn("github sync scheduler not started: GITHUB_TOKEN is not set")
+	default:
+		interval := time.Duration(appCfg.Jobs.GithubSyncIntervalMinutes) * time.Minute
+		deadline := time.Duration(appCfg.Jobs.SyncRunDeadlineMinutes) * time.Minute
+		client := github.NewClient(githubToken)
+		jobs.NewSyncScheduler(lock, interval, func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, deadline)
+			defer cancel()
+			if _, err := sync.Run(ctx, pool, client, slaCfg, runtime); err != nil {
+				return err
+			}
+			_, err := jobs.RunTickOnce(ctx, pool, runtime, time.Now())
+			return err
+		}).Start(ctx)
+		slog.Info("github sync scheduler started", "intervalMinutes", appCfg.Jobs.GithubSyncIntervalMinutes)
+	}
+
 	healthHandler := handler.NewHealthHandler(pool, appCfg.Readiness)
 	taxonomyHandler := handler.NewTaxonomyHandler(slaCfg)
 	issuesHandler := handler.NewIssuesHandler(pool, slaCfg, appCfg.API)
 	metricsHandler := handler.NewMetricsHandler(pool, slaCfg, appCfg.Cache, appCfg.API)
 	syncHandler := handler.NewSyncHandler(pool, slaCfg, lock, runtime, githubToken,
-		time.Duration(appCfg.Jobs.SyncRunDeadlineMinutes)*time.Minute)
+		time.Duration(appCfg.Jobs.SyncRunDeadlineMinutes)*time.Minute,
+		time.Duration(appCfg.Jobs.ManualSyncCooldownSeconds)*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler.GetHealthz)

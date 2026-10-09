@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/binara-sachin/git-internals-dashboard/backend/internal/github"
@@ -79,11 +80,17 @@ var priorityRe = regexp.MustCompile(`^Priority/(.+)$`)
 
 // extractPriority reads the first "Priority/<tier>" label and discards the
 // rest — labels are read transiently to derive priority only; no label
-// value is ever written to the database.
-func extractPriority(labels []string) *string {
+// value is ever written to the database. A tier listed in aliases (after
+// trimming) is replaced by its canonical budgeted tier, so variants such as
+// "Priority/High" land on "High(P2)".
+func extractPriority(labels []string, aliases map[string]string) *string {
 	for _, l := range labels {
 		if m := priorityRe.FindStringSubmatch(l); m != nil {
-			return &m[1]
+			tier := strings.TrimSpace(m[1])
+			if canonical, ok := aliases[tier]; ok {
+				tier = canonical
+			}
+			return &tier
 		}
 	}
 	return nil
@@ -128,9 +135,10 @@ func IngestIssue(ctx context.Context, pool *pgxpool.Pool, pair Pair, ictx Contex
 	node, detail := pair.Node, pair.Detail
 	normalize := ictx.Runtime.Normalize
 
-	priority := extractPriority(node.Labels)
+	priority := extractPriority(node.Labels, ictx.Runtime.PriorityAliases)
 	title := normalizeTitle(node.Title)
 	meta := ExtractIssueMeta(node.Body) // node.Body is discarded after this line — never logged, persisted elsewhere, or returned
+	meta = ApplySpecialTeam(meta, node.Labels, ictx.Runtime.SpecialTeams)
 
 	// Current status scoped to THIS repo's configured project.
 	var scoped *github.ProjectStatus

@@ -61,23 +61,17 @@ describe("HeroCard", () => {
 });
 
 describe("CsHeroCard", () => {
-  const byStatus = [
-    { status: "WOC", n: 2 },
-    { status: "PPQ", n: 1 },
-  ];
-
-  it("renders a count and label per status", () => {
-    render(<CsHeroCard n={3} byStatus={byStatus} />);
-    expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText("WOC")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getByText("PPQ")).toBeInTheDocument();
+  it("renders the title, count and status label", () => {
+    render(<CsHeroCard n={3} label="Waiting on CS Team" />);
+    expect(screen.getByText("On CS Team Side")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("Waiting on CS Team")).toBeInTheDocument();
   });
 
-  it("calls onDrill with the clicked status", () => {
+  it("calls onDrill when the count is clicked", () => {
     const onDrill = vi.fn();
-    render(<CsHeroCard n={3} byStatus={byStatus} onDrill={onDrill} />);
-    fireEvent.click(screen.getByText("WOC"));
-    expect(onDrill).toHaveBeenCalledWith("WOC");
+    render(<CsHeroCard n={3} label="Waiting on CS Team" onDrill={onDrill} />);
+    fireEvent.click(screen.getByText("Waiting on CS Team"));
+    expect(onDrill).toHaveBeenCalledTimes(1);
   });
 });

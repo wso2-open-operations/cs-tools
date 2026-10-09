@@ -48,12 +48,11 @@ const EMPTY_OVERVIEW = {
 
 const TAXONOMY = {
   statuses: [
-    { name: "Open", category: "PRODUCT_SIDE", accruesSla: true, isTerminal: false, sortOrder: 10 },
-    { name: "WOC", category: "CS_SIDE", accruesSla: false, isTerminal: false, sortOrder: 20 },
-    { name: "Pending Patch Queue", category: "CS_SIDE", accruesSla: false, isTerminal: false, sortOrder: 30 },
-    { name: "Resolved", category: "OTHER", accruesSla: false, isTerminal: true, sortOrder: 40 },
+    { name: "Open", displayName: "Open", category: "PRODUCT_SIDE", accruesSla: true, isTerminal: false, sortOrder: 10 },
+    { name: "WOW", displayName: "Waiting on Product Team", category: "PRODUCT_SIDE", accruesSla: true, isTerminal: false, sortOrder: 20 },
+    { name: "WOC", displayName: "Waiting on CS Team", category: "CS_SIDE", accruesSla: false, isTerminal: false, sortOrder: 30 },
   ],
-  csStatuses: ["WOC", "Pending Patch Queue"],
+  csStatuses: ["WOC"],
 };
 
 /** Two issues with title/abtTeam/openedBy set (one with openedBy: null), as the /issues envelope shape. */
@@ -161,15 +160,21 @@ describe("IssuesPage", () => {
     act(() => {
       fireEvent.mouseDown(statusSelect);
     });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Open",
+      "Waiting on Product Team",
+      "Waiting on CS Team",
+      "Other",
+    ]);
     act(() => {
-      fireEvent.click(screen.getByRole("option", { name: "WOC" }));
+      fireEvent.click(screen.getByRole("option", { name: "Waiting on CS Team" }));
     });
     act(() => {
-      fireEvent.click(screen.getByRole("option", { name: "Pending Patch Queue" }));
+      fireEvent.click(screen.getByRole("option", { name: "Other" }));
     });
 
     const statusValues = new URLSearchParams(router.state.location.search).getAll("status");
-    expect(statusValues).toEqual(["WOC", "Pending Patch Queue"]);
+    expect(statusValues).toEqual(["WOC", "Other"]);
   });
 
   it('shows "Clear filters (n)" once a filter is active, and clears the filter keys and bucket', async () => {
@@ -199,7 +204,7 @@ describe("IssuesPage", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    const chipLabel = screen.getByText("On track (excluding CS side)");
+    const chipLabel = screen.getByText("On track (excluding CS team side)");
     expect(chipLabel).toBeTruthy();
 
     const chip = chipLabel.closest(".MuiChip-root");

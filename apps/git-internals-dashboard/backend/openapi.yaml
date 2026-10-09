@@ -110,7 +110,7 @@ paths:
               $ref: '#/components/schemas/SlaState'
         - name: status
           in: query
-          description: Repeatable; values are OR-ed together.
+          description: Repeatable; values are OR-ed together. The reserved value `Other` matches any status not listed in `taxonomy.statuses`.
           style: form
           explode: true
           schema:
@@ -301,6 +301,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: >
+            sync_cooldown — a sync (manual or scheduled) finished less than
+            jobs.manualSyncCooldownSeconds ago. Retry after the number of
+            seconds in the Retry-After header.
+          headers:
+            Retry-After:
+              description: Seconds until a sync may be triggered again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           $ref: '#/components/responses/InternalServerError'
 
@@ -364,7 +378,7 @@ components:
           properties:
             code:
               type: string
-              enum: [validation_failed, not_found, sync_in_progress, sync_token_missing, internal]
+              enum: [validation_failed, not_found, sync_in_progress, sync_cooldown, sync_token_missing, internal]
             message:
               type: string
 
@@ -377,6 +391,9 @@ components:
       properties:
         name:
           type: string
+        displayName:
+          type: string
+          description: Label to show instead of `name` (equals `name` when none is configured).
         category:
           type: string
           enum: [PRODUCT_SIDE, CS_SIDE, OTHER, TRANSIENT]
@@ -627,6 +644,12 @@ components:
       properties:
         running:
           type: boolean
+        manualSyncCooldownRemainingSeconds:
+          type: integer
+          description: >
+            Seconds until POST /sync/runs stops answering 429 sync_cooldown
+            (0 = a sync may be triggered now). Measured on the database
+            clock, so clients can count down locally.
         repos:
           type: array
           items:

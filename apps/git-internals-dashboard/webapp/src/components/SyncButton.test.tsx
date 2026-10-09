@@ -87,4 +87,87 @@ describe("SyncButton", () => {
     expect(screen.queryByText("Synced — 14 issues, 14 events")).toBeNull();
     expect(screen.getByText(/Last synced/)).toBeTruthy();
   });
+
+  describe("cooldown", () => {
+    const statusWith = (remaining: number) => ({
+      running: false,
+      repos: [{ repo: "a/b", lastSyncedAt: "2026-01-01T00:00:00Z" }],
+      lastRun: null,
+      manualSyncCooldownRemainingSeconds: remaining,
+    });
+    const stubStatus = (remaining: number) =>
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL) => {
+          if (String(input).includes("/sync/status")) return Promise.resolve(jsonResponse(statusWith(remaining)));
+          return Promise.reject(new Error(`unexpected fetch: ${String(input)}`));
+        }),
+      );
+    const button = () => screen.getByRole("button", { name: "Sync now" }) as HTMLButtonElement;
+
+    it("disables the button during the cooldown, counts down, and re-enables when it ends", async () => {
+      stubStatus(30);
+      renderSyncButton();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(button().disabled).toBe(true);
+      expect(button().title).toBe("Sync available in 30s");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(button().disabled).toBe(true);
+      expect(button().title).toBe("Sync available in 20s");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(button().disabled).toBe(false);
+      expect(button().title).toBe("Sync now");
+    });
+
+    it("leaves the button enabled when no cooldown is reported", async () => {
+      stubStatus(0);
+      renderSyncButton();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(button().disabled).toBe(false);
+    });
+
+    it("shows the server's message and refetches status when POST is refused with 429", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          calls.push(`${init?.method ?? "GET"} ${url}`);
+          if (url.includes("/sync/runs") && init?.method === "POST") {
+            return Promise.resolve(
+              new Response(JSON.stringify({ error: { code: "sync_cooldown", message: "a sync finished moments ago; try again shortly" } }), {
+                status: 429,
+                headers: { "Content-Type": "application/json", "Retry-After": "12" },
+              }),
+            );
+          }
+          if (url.includes("/sync/status")) return Promise.resolve(jsonResponse(statusWith(0)));
+          return Promise.reject(new Error(`unexpected fetch: ${url}`));
+        }),
+      );
+      renderSyncButton();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      await act(async () => {
+        fireEvent.click(button());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.getByText("a sync finished moments ago; try again shortly")).toBeTruthy();
+      expect(calls.filter((c) => c.endsWith("/sync/status")).length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });

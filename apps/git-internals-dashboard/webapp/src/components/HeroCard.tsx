@@ -115,16 +115,13 @@ export function HeroCard({ label, n, delta, spark, accent, onClick }: HeroCardPr
 
 interface CsHeroCardProps {
   n: number;
-  byStatus: Array<{ status: string; n: number }>;
-  onDrill?: (status: string) => void;
+  /** Display name of the CS-side status the count is for (e.g. "Waiting on CS Team"). */
+  label: string;
+  onDrill?: () => void;
 }
 
-// Alternates between the two CS accent colors by index; two entries covers
-// today's WOC/PPQ two-tile layout.
-const CS_COLORS = ["var(--sla-cs)", "var(--sla-cs-lite)"];
-
-/** The hero bar's CS-side tile: one drill-down count per current CS status. */
-export function CsHeroCard({ n, byStatus, onDrill }: CsHeroCardProps) {
+/** The hero bar's CS-team-side tile: the count of issues waiting on the CS team (WOC). */
+export function CsHeroCard({ n, label, onDrill }: CsHeroCardProps) {
   const isZero = n === 0;
   const accent = isZero ? "var(--sla-ok)" : "var(--sla-cs)";
   const chipTint = isZero ? "var(--sla-ok-tint)" : "var(--sla-cs-tint)";
@@ -145,7 +142,7 @@ export function CsHeroCard({ n, byStatus, onDrill }: CsHeroCardProps) {
     >
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Box component="span" sx={{ whiteSpace: "nowrap", fontSize: 13, fontWeight: 600, color: "var(--sla-fg2)" }}>
-          On CS side
+          On CS Team Side
         </Box>
         <Box
           component="span"
@@ -166,45 +163,37 @@ export function CsHeroCard({ n, byStatus, onDrill }: CsHeroCardProps) {
         </Box>
       </Box>
 
-      <Box sx={{ mt: 2, display: "flex", alignItems: "flex-start", gap: "14px" }}>
-        {byStatus.map(({ status, n: count }, i) => {
-          const color = CS_COLORS[i % CS_COLORS.length];
-          return (
-            <Box key={status} sx={{ display: "flex", flex: 1, alignItems: "flex-start", gap: "14px" }}>
-              {i > 0 && <Box sx={{ alignSelf: "stretch", width: "1px", bgcolor: "var(--sla-border-soft)" }} />}
-              <Box
-                component="button"
-                type="button"
-                onClick={() => onDrill?.(status)}
-                title={`View ${status} issues`}
-                sx={{
-                  flex: 1,
-                  textAlign: "left",
-                  transition: "opacity 0.15s",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  p: 0,
-                  "&:hover": { opacity: 0.6 },
-                }}
-              >
-                <Box sx={{ lineHeight: 0.85, letterSpacing: "-0.02em", fontFamily: MONO, fontSize: 44, fontWeight: 600, color }}>
-                  {count}
-                </Box>
-                <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.75, fontSize: 12, color: "var(--sla-fg2)" }}>
-                  <Box component="span" sx={{ height: 10, width: 10, borderRadius: "2px", bgcolor: color }} />
-                  {status}
-                </Box>
-              </Box>
-            </Box>
-          );
-        })}
-
-        {isZero && (
-          <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, fontSize: 12, fontWeight: 600, color: "var(--sla-ok)" }}>
-            ✓
+      <Box
+        component="button"
+        type="button"
+        onClick={() => onDrill?.()}
+        title={`View ${label} issues`}
+        sx={{
+          mt: 2,
+          display: "block",
+          textAlign: "left",
+          transition: "opacity 0.15s",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          p: 0,
+          "&:hover": { opacity: 0.6 },
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <Box sx={{ lineHeight: 0.85, letterSpacing: "-0.02em", fontFamily: MONO, fontSize: 44, fontWeight: 600, color: "var(--sla-cs)" }}>
+            {n}
           </Box>
-        )}
+          {isZero && (
+            <Box component="span" sx={{ fontSize: 12, fontWeight: 600, color: "var(--sla-ok)" }}>
+              ✓
+            </Box>
+          )}
+        </Box>
+        <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.75, fontSize: 12, color: "var(--sla-fg2)" }}>
+          <Box component="span" sx={{ height: 10, width: 10, borderRadius: "2px", bgcolor: "var(--sla-cs)" }} />
+          {label}
+        </Box>
       </Box>
     </Box>
   );
