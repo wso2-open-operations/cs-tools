@@ -1,0 +1,994 @@
+# Change request tests
+
+Where the change request tests are, how to list and run them, and which scenario each layer covers. The lists in the appendices are a snapshot taken when this file was written; regenerate them with the commands in section 2 instead of editing them by hand.
+
+## 1. The layers
+
+Not every scenario is a Playwright test. The rules (who may answer, what Accept needs, what an Emergency change may enter, which rows a customer may see) live in entity-service and are tested there against a real Postgres, as the superuser and as the restricted `csm_app` role so that row-level security is in force. Playwright covers the two portals' UI flows on top.
+
+| Layer | Where | Needs | Proves |
+|---|---|---|---|
+| Go unit | `entity-service/internal/repository/change_request_*_test.go` (files without `integration`), `entity-service/internal/service`, `internal/domain`, `internal/apierror`, `internal/server`, `apps/csm-portal/backend/internal/handler/change_requests_test.go`, `apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go` | nothing (`go test ./...`) | the transition graph, predicates, locks, error codes, the proposer rule's inputs, the BFFs' pass-through of refusals and `errorCode` |
+| Go integration | `entity-service/internal/repository/change_request_*_integration_test.go` | a Postgres 18 migrated by `scripts/csm-compose/migrate-and-seed.sh`, `CHANGE_REQUEST_TEST_DSN` (superuser) and, for the RLS runs, the same suite as `csm_app`; also run on a copy whose enum columns have the sync's shape | the whole flow on real rows: Request Approval, CAB, the customer's answer, proposals, Accept, counter, decline, Re-schedule, visibility, the Emergency rule, no-bypass, migrated-shaped rows |
+| Vitest | CSM webapp `src/features/csm-operations` and `src/features/help`; customer webapp `src/features/operations`; both microapps | nothing (`node_modules/.bin/vitest run`) | UI logic: dialogs, banners, the stepper, gating, `errorCode` handling, the timeline function |
+| Playwright, CSM portal | `apps/csm-portal/webapp/tests/e2e/specs/operations/change-request-{lifecycle,creation,detail}.spec.ts` | the describes marked "mocked backend" run against a faked API; the ones marked "real stack" or "local stack" need the compose stack (`apps/csm-portal/webapp/tests/e2e/auth/README.md`) | staff UI flows end to end |
+| Playwright, customer portal | `apps/customer-portal/webapp/tests/e2e/specs/local/customer-change-request*.spec.ts` | the local compose stack (`apps/customer-portal/webapp/tests/e2e/README.md`, "Local stack") | the customer's UI flows on real data |
+
+Black-box API probes (propose, Accept, counter, decline races, migrated shapes, every caller) are run by hand against a real stack and are not part of the repository.
+
+## 2. Listing what exists today
+
+```bash
+# Go: every change request test function (unit and integration)
+grep -h '^func Test' entity-service/internal/repository/change_request_*_test.go | sed 's/(.*//'
+
+# Go: what a run would execute (skipped without the DSN)
+cd entity-service && go test ./internal/repository/ -list 'ChangeRequest|CRVisibility'
+
+# Playwright, CSM portal
+cd apps/csm-portal/webapp && node_modules/.bin/playwright test --list tests/e2e/specs/operations/change-request-*.spec.ts
+
+# Playwright, customer portal
+cd apps/customer-portal/webapp && node_modules/.bin/playwright test --list tests/e2e/specs/local/customer-change-request*.spec.ts
+
+# Vitest, CSM webapp
+cd apps/csm-portal/webapp && node_modules/.bin/vitest list src/features/csm-operations src/features/help
+```
+
+Run the integration tests twice, as the superuser and as `csm_app`: five tests of the repository package (two migration-idempotence tests and three seed tests) need table ownership or bypass RLS and fail as `csm_app`; that is expected and they pass as the superuser.
+
+## 3. Scenario map
+
+The files below are where each scenario is tested first; most scenarios appear in more than one layer.
+
+| Scenario | Go (real Postgres unless noted) | Playwright |
+|---|---|---|
+| Create, Request Approval, the lifecycle and the transition graph | `change_request_repo_integration_test.go`, `change_request_create_integration_test.go`, `change_request_transitions_integration_test.go`, `change_request_transitions_test.go` (unit), `change_request_seed_integration_test.go` | CSM `change-request-lifecycle` ("approval flow" Normal / Standard, "state machine", "stepper and action bar"), `change-request-creation`, `change-request-detail` |
+| The customer's answer: who may answer, the customer stages, the lock on the two requirement boxes | `change_request_customer_outcome_integration_test.go`, `change_request_customer_can_answer_integration_test.go`, `change_request_customer_lock_integration_test.go`, `change_request_customer_group_integration_test.go`, `change_request_customer_privacy_integration_test.go` | CSM `change-request-lifecycle` ("customer group", "the customer's own answer is the only way on", "customer requirements lock (real stack)"); customer `customer-change-request-answer`, `-approval`, `-access` |
+| Nobody answers for the customer; nobody to ask; stale approvals | `change_request_no_bypass_integration_test.go`, `change_request_nobody_to_ask_integration_test.go`, `change_request_stale_approvals_integration_test.go` | CSM `change-request-lifecycle` ("nobody answers for the customer", "Request Approval is refused when nobody can be asked") |
+| A customer's proposed time: propose, Accept, counter, decline, Re-schedule; who proposed it; timestamps | `change_request_proposal_integration_test.go`, `change_request_proposal_proposer_integration_test.go`, `change_request_customer_proposal_integration_test.go`, `change_request_reschedule_legacy_integration_test.go`, `change_request_timestamp_echo_integration_test.go`, `change_request_dates_integration_test.go`; unit: `change_request_customer_proposal_test.go`, `change_request_proposer_test.go`, `change_request_window_test.go` | CSM `change-request-lifecycle` ("a customer's proposed time" mocked and real stack, "Re-schedule"); customer `customer-change-request-propose`, `-dates` |
+| Emergency changes: one CAB approval, no customer step, the boxes ignored | `change_request_emergency_integration_test.go`, `change_request_emergency_test.go` (unit), `change_request_customer_group_integration_test.go` | CSM `change-request-creation` ("an Emergency change proceeds without customer approval or review"), `change-request-lifecycle` ("approval flow, Emergency", "an Emergency change never reaches a customer state"); customer `customer-change-request-visibility` |
+| Which change requests a customer sees, and when | `change_request_visibility_integration_test.go`, `change_request_visibility_state_filter_integration_test.go`, `change_request_visibility_test.go` and `change_request_visibility_lint_test.go` (unit) | customer `customer-change-request-visibility`, `customer-change-requests` |
+| Migrated (synced) rows: unlabeled stages, the sync's enum shapes, legacy rows | `change_request_synced_stages_integration_test.go`, `change_request_synced_stages_test.go` (unit), `change_request_deployment_rls_integration_test.go`; the integration suite re-run on the enum-shaped copy | CSM `change-request-lifecycle` ("migrated (legacy) change requests (real stack)"); customer `customer-change-request-legacy` |
+| Refusals and their `errorCode` | `change_request_error_codes_integration_test.go`, `internal/apierror/errors_test.go` (unit), the two BFF handler tests | customer `customer-change-request-error-codes`; CSM dialogs in `change-request-lifecycle` (mocked backend) |
+| Colour contrast of the answer buttons | none | customer `customer-change-request-contrast` |
+
+## Appendix A. Go test functions (snapshot)
+
+`entity-service/internal/repository`: 39 files, 391 test functions. Subtests (`t.Run`) are in addition. The 5 test functions whose names carry the previous system's name (the tests of the mirror to it) are counted in their file's total but not listed by name; the `grep` in section 2 lists every one.
+
+**`change_request_approvals_group_integration_test.go`** (integration, 1)
+- TestChangeRequestFlowIntegration_ApprovalsCarryTheAssignmentGroup
+
+**`change_request_create_integration_test.go`** (integration, 4)
+- TestChangeRequestCreateIntegration_PortalPersistsAssignmentGroup
+- TestChangeRequestCreateIntegration_PortalWithoutAssignmentGroupLeavesItNull
+- TestChangeRequestCreateIntegration_PortalUnknownAssignmentGroupIsValidationError
+
+**`change_request_customer_can_answer_integration_test.go`** (integration, 7)
+- TestChangeRequestCustomerCanAnswerIntegration_Lifecycle
+- TestChangeRequestCustomerCanAnswerIntegration_FalseAfterAnyAnswer
+- TestChangeRequestCustomerCanAnswerIntegration_WhoMayAnswer
+- TestChangeRequestCustomerCanAnswerIntegration_NobodyWasAsked
+- TestChangeRequestCustomerCanAnswerIntegration_RescheduleFlips
+- TestChangeRequestCustomerCanAnswerIntegration_RefusedProposalLeavesItAlone
+- TestChangeRequestCustomerCanAnswerIntegration_NotOnSearchRows
+
+**`change_request_customer_group_integration_test.go`** (integration, 13)
+- TestChangeRequestFlowIntegration_CustomerGroupNormalLifecycle
+- TestChangeRequestFlowIntegration_CustomerGroupRejections
+- TestChangeRequestFlowIntegration_CustomerGroupStandardRequestApproval
+- TestChangeRequestFlowIntegration_CustomerGroupEmergencyNeverAsksTheCustomer
+- TestChangeRequestFlowIntegration_CustomerGroupCreatorAndNonMember
+- TestChangeRequestFlowIntegration_CustomerGroupFirstResponderWins
+- TestChangeRequestFlowIntegration_CustomerGroupNobodyToAsk
+- TestChangeRequestFlowIntegration_CustomerGroupInactiveMemberSkipped
+- TestChangeRequestFlowIntegration_CustomerGroupFollowsTheProject
+- TestChangeRequestFlowIntegration_CustomerGroupIsolatesCustomers
+- TestChangeRequestFlowIntegration_CustomerGroupRefusesManualTransition
+- TestChangeRequestFlowIntegration_SeedCustomerGroupFixtures
+- TestChangeRequestFlowIntegration_StoredCustomerGroupIsNoLongerUsedForApprovals
+
+**`change_request_customer_lock_integration_test.go`** (integration, 19)
+- TestChangeRequestLockIntegration_NewIsFullyEditable
+- TestChangeRequestLockIntegration_NullStateCountsAsNew
+- TestChangeRequestLockIntegration_ProjectIsFrozenAfterRequestApproval
+- TestChangeRequestLockIntegration_RequestApprovalFreezesTheProject
+- TestChangeRequestLockIntegration_BoxesAreAddOnlyAfterNew
+- TestChangeRequestLockIntegration_RequestApprovalNeedsAProject
+- TestChangeRequestLockIntegration_RequestApprovalWithoutRequirementsAndResends
+- TestChangeRequestLockIntegration_ReturnToNewIsRefused
+- TestChangeRequestLockIntegration_RescheduleCannotReopenTheCustomersApproval
+- TestChangeRequestLockIntegration_CustomerProposalCannotReopenTheApproval
+- TestChangeRequestLockIntegration_CustomerReviewCannotBeReopened
+- TestChangeRequestLockIntegration_NoContactsReachedTheStage
+- TestChangeRequestLockIntegration_OutcomeFlagsStayOneWay
+- TestChangeRequestLockIntegration_DeploymentsFollowTheFrozenProject
+- TestChangeRequestLockIntegration_CreatesAreFreeInNew
+- TestChangeRequestLockIntegration_RequestApprovalRacingAProjectEdit
+- TestChangeRequestLockIntegration_RequestApprovalAfterAProjectEditSeesTheProject
+- TestChangeRequestLockIntegration_APatchAndADecisionDoNotDeadlock
+- TestChangeRequestLockIntegration_TheTypeIsFrozenAfterNew
+
+**`change_request_customer_lock_test.go`** (unit, 13)
+- TestCustomerRequirementsLock_TruthTable
+- TestCustomerRequirementsLock_TruthTableCoversEveryState
+- TestCustomerRequirementsLock_FirstFailingRuleWins
+- TestCustomerRequirementsLock_ProjectResendIsCaseInsensitive
+- TestCheckRequestApprovalHasProject
+- TestNobodyToAskMsg
+- TestAnyContactToAsk
+- TestBoxesTurnedOnAfterNew
+- TestNobodyToAskNeedsNoQueryWhenThereIsNothingToJudge
+- TestChangeRequestPatchNeedsGate
+- TestCheckChangeTypeEdit
+- TestResendsStoredChangeType
+- TestCustomerGatesAhead
+
+**`change_request_customer_outcome_integration_test.go`** (integration, 13)
+- TestChangeRequestCustomerOutcomeIntegration_PatchLifecycle
+- TestChangeRequestCustomerOutcomeIntegration_PatchRejections
+- TestChangeRequestCustomerOutcomeIntegration_PatchEqualsDecisionRoute
+- TestChangeRequestCustomerOutcomeIntegration_PatchOutOfState
+- TestChangeRequestCustomerOutcomeIntegration_PatchWhoMayAnswer
+- TestChangeRequestCustomerOutcomeIntegration_PatchWhenNobodyWasAsked
+- TestChangeRequestCustomerOutcomeIntegration_PatchRespectsTheFlagLock
+- TestChangeRequestCustomerOutcomeIntegration_ExternalWhitelist
+- TestChangeRequestCustomerOutcomeIntegration_InternalFlagStampRefused
+- TestChangeRequestCustomerOutcomeIntegration_ConcurrentAnswers
+- TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeWaitsForWSO2
+- TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeIsCounteredByWSO2
+- TestChangeRequestCustomerOutcomeIntegration_ProposeNewTimeRefusals
+
+**`change_request_customer_outcome_test.go`** (unit, 5)
+- TestIsExternalCaller
+- TestClassifyExternalPatch
+- TestStateForMessage
+- TestCustomerCanAnswer_NeedsNoQueryOutsideTheCustomerStates
+- TestMarkCustomerCanAnswer_WhoIsToldWhat
+
+**`change_request_customer_privacy_integration_test.go`** (integration, 3)
+- TestChangeRequestCustomerPrivacyIntegration_AnswerIsBoundToTheWindowSeen
+- TestChangeRequestCustomerPrivacyIntegration_ExpectedWindowOnlyAccompaniesAnAnswer
+- TestChangeRequestCustomerPrivacyIntegration_ApprovalsHideWhoApprovesInternally
+
+**`change_request_customer_proposal_integration_test.go`** (integration, 7)
+- TestChangeRequestCustomerProposalIntegration_WholeWindowKeepsTheDuration
+- TestChangeRequestCustomerProposalIntegration_BadWindowMessages
+- TestChangeRequestCustomerProposalIntegration_RefusedWindowChangesNothing
+- TestChangeRequestCustomerProposalIntegration_HostileWindowsAreRefused
+- TestChangeRequestCustomerProposalIntegration_ZonelessWindowIsUTCInAnySession
+- TestChangeRequestCustomerProposalIntegration_NonFiniteRowStillReads
+- TestChangeRequestCustomerProposalIntegration_StaffRescheduleSharesTheParserNotThePastRule
+
+**`change_request_customer_proposal_read_test.go`** (unit, 1)
+- TestFillCustomerProposal_AFailedReadLeavesTheFieldUnset
+
+**`change_request_customer_proposal_test.go`** (unit, 8)
+- TestFmtPlannedLength
+- TestCustomerProposalFacts_LengthAndProposedEnd
+- TestCustomerProposalAnswer
+- TestAcceptBlock
+- TestValidateAcceptRequest
+- TestJudgeStaffWindow
+- TestExpectedScheduleConflict
+- TestPendingProposalSQL_IsOneCoalescedAllowlist
+
+**`change_request_dates_integration_test.go`** (integration, 6)
+- TestChangeRequestDatesIntegration_PatchRefusesWhatPostgresWouldHaveParsed
+- TestChangeRequestDatesIntegration_PatchAcceptsRFC3339AndTheZonelessLayoutAsUTC
+- TestChangeRequestDatesIntegration_BothCreatesRefuseWhatPostgresWouldHaveParsed
+- TestChangeRequestDatesIntegration_BothCreatesStoreTheParsedWindow
+- TestChangeRequestDatesIntegration_AnEndOnlyProposalCannotKeepAStartThatHasPassed
+- TestChangeRequestDatesIntegration_PastStartIsRefusedForCustomersOnly
+
+**`change_request_deployment_rls_integration_test.go`** (integration, 1)
+- TestChangeRequestDeploymentRLS_InternalSessionCanUpsertWhatTheSyncWrites
+
+**`change_request_emergency_integration_test.go`** (integration, 10)
+- TestChangeRequestEmergencyIntegration_CreateRefusesTheBoxes
+- TestChangeRequestEmergencyIntegration_BoxesAreRefusedInEveryState
+- TestChangeRequestEmergencyIntegration_ALegacyTickedBoxIsNotRewritten
+- TestChangeRequestEmergencyIntegration_RetypingIntoEmergency
+- TestChangeRequestEmergencyIntegration_LegacyBoxesAreIgnoredByTheGate
+- TestChangeRequestEmergencyIntegration_MigratedEmergencyInACustomerStateIsAnswerable
+- TestChangeRequestEmergencyIntegration_MigratedEmergencyFollowsTheProposedTimeRules
+- TestChangeRequestEmergencyIntegration_MigratedEmergencyDisplaysDecidesAndSchedulesAsCAB
+- TestChangeRequestEmergencyIntegration_AFinishedMigratedEmergencyStillReadsAsCAB
+- TestChangeRequestEmergencyIntegration_AHistoricECABStageStillDecides
+
+**`change_request_emergency_test.go`** (unit, 10)
+- TestIsEmergencyModel
+- TestEffectiveCustomerGates
+- TestEffectiveChangeModel
+- TestValidateCreateChangeRequestCustomerGates
+- TestCheckEmergencyCustomerConsent
+- TestValidateCreationPhaseEdits_EmergencyRuleComesFirst
+- TestLegalChangeRequestNextStatesForModel_Emergency
+- TestChangeRequestApprovalStageLabel_Emergency
+- TestBuildChangeRequestApprovals_MigratedEmergencyStage
+- TestBuildChangeRequestApprovals_HistoricECABStageIsStillShown
+
+**`change_request_error_codes_integration_test.go`** (integration, 3)
+- TestChangeRequestErrorCodesIntegration_CustomerRefusals
+- TestChangeRequestErrorCodesIntegration_NothingPending
+- TestChangeRequestErrorCodesIntegration_NotProposableOutOfState
+
+**`change_request_no_bypass_integration_test.go`** (integration, 7)
+- TestChangeRequestNoBypassIntegration_ManualScheduledOutOfCustomerApprovalIsRefused
+- TestChangeRequestNoBypassIntegration_ManualClosedOutOfCustomerReviewIsRefused
+- TestChangeRequestNoBypassIntegration_TheCustomersOwnWaysStillWork
+- TestChangeRequestNoBypassIntegration_ANobodyToAskChangeIsAskedOnceAContactRegisters
+- TestChangeRequestNoBypassIntegration_NoStaffIdentityCanSendTheFlags
+- TestChangeRequestNoBypassIntegration_LegalNextStatesExactTable
+- TestChangeRequestNoBypassIntegration_OtherDoorsAreClosedToo
+
+**`change_request_nobody_to_ask_integration_test.go`** (integration, 9)
+- TestChangeRequestNobodyToAskIntegration_RequestApprovalMatrix
+- TestChangeRequestNobodyToAskIntegration_RequestApprovalJudgesTheRequestsOwnValues
+- TestChangeRequestNobodyToAskIntegration_TickingABoxOnAfterRequestApproval
+- TestChangeRequestNobodyToAskIntegration_TickingAfterNewInTheLaterStates
+- TestChangeRequestNobodyToAskIntegration_TheContactIsAskedAtTheGateAndCanAnswer
+- TestChangeRequestNobodyToAskIntegration_ResidualEdgeContactsLeaveAfterRequestApproval
+- TestChangeRequestNobodyToAskIntegration_ALegacyDeadEndRowIsNotRejudged
+- TestChangeRequestNobodyToAskIntegration_AMigratedShapedChangeInNewIsUnaffected
+- TestChangeRequestNobodyToAskIntegration_TheRefusalPredictsTheProvisioningOutcome
+
+**`change_request_proposal_harness_integration_test.go`** (integration, 0)
+
+**`change_request_proposal_integration_test.go`** (integration, 17)
+- TestChangeRequestProposalIntegration_PredicateMatrix
+- TestChangeRequestProposalIntegration_AcceptHappyAndEveryRefusal
+- TestChangeRequestProposalIntegration_OnHoldAndPast
+- TestChangeRequestProposalIntegration_AnAcceptStaysInsideTheRangeOfEveryWindow
+- TestChangeRequestProposalIntegration_AnEmptyWindowHasNoLengthToKeep
+- TestChangeRequestProposalIntegration_CounterHappyAndEveryRefusal
+- TestChangeRequestProposalIntegration_DeclineKeepsTheWindow
+- TestChangeRequestProposalIntegration_CounterNeedsSomebodyToAsk
+- TestChangeRequestProposalIntegration_NoExtraRows
+- TestChangeRequestProposalIntegration_TriggerCommentUnderRLS
+- TestChangeRequestProposalIntegration_RepeatedCycles
+- TestChangeRequestProposalIntegration_AnAcceptedChangeGoesOnToItsClose
+- TestChangeRequestProposalIntegration_CreatorAndOtherStaffMayAnswerCustomersMayNot
+- TestChangeRequestProposalIntegration_CustomerRefusals
+- TestChangeRequestProposalIntegration_AMigratedChangeIsAnsweredLikeAnyOther
+- TestChangeRequestProposalIntegration_RacesHaveOneWinner
+- TestChangeRequestProposalIntegration_OutboxRowsCarryTheTurnsOfTheNotices
+
+**`change_request_proposal_proposer_integration_test.go`** (integration, 8)
+- TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer
+- TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedIsNoProposalToAnswer
+- TestChangeRequestProposalIntegration_AGenuineProposalAfterAnUnrelatedStaffEditReadsNotRecorded
+- TestChangeRequestProposalIntegration_TheProposerIsTheLastWriterAndNothingElse
+- TestChangeRequestProposalIntegration_AStoredTimeNobodyProposedInEveryShape
+- TestChangeRequestProposalIntegration_NoStatementReadsACommentToNameAProposer
+- TestChangeRequestProposalIntegration_ARecordedProposerIsAcceptedEndToEnd
+- TestChangeRequestProposalIntegration_ACustomerCannotClaimAStoredTimeByWritingItAgain
+
+**`change_request_proposer_test.go`** (unit, 4)
+- TestNewLastWriter
+- TestResolveProposer_TheLastWriterAndNothingElse
+- TestReadProposer_ReadsTheLastWriterAndNothingElse
+- TestProposalFile_NoSQLReadsTheCommentTable
+
+**`change_request_repo_integration_test.go`** (integration, 101)
+- TestChangeRequestIntegration_RequestApprovalIsBookkeepingOnly
+- TestChangeRequestIntegration_DecideApprovalCascadesAssessToAuthorize
+- TestChangeRequestIntegration_DecideApprovalRejectionDoesNotCascade
+- TestChangeRequestIntegration_DecideApprovalDoesNotCascadeOutsideAssess
+- TestChangeRequestIntegration_DecideApprovalCancelsSiblingApprovers
+- TestChangeRequestIntegration_DecideRejectionCancelsSiblingApprovers
+- TestChangeRequestIntegration_DecideRejectionCancelsSiblingApproversAtEveryCheckpoint
+- TestChangeRequestIntegration_DecideRejectionDoesNotDisturbAlreadyApprovedStage
+- TestChangeRequestIntegration_PatchAssignedTeamID
+- TestChangeRequestIntegration_PatchAssignedTeamIDUnknownTeamIsValidationError
+- TestChangeRequestIntegration_PatchAssessRequiresAssignedTeam
+- TestChangeRequestIntegration_PatchAssessWithTeamAlreadyOnRecordSucceeds
+- TestChangeRequestIntegration_PatchAssessProvisionsApproversFromGroupMembers
+- TestChangeRequestIntegration_PatchAssessDoesNotReprovisionWhenStageExists
+- TestChangeRequestIntegration_PatchAssessRejectsEmptyGroup
+- TestChangeRequestIntegration_PatchAssessDeduplicatesGroupMembers
+- TestChangeRequestIntegration_PatchAssessProvisionsRequesterAsCancelled
+- TestChangeRequestIntegration_PatchAssessRejectsWhenOnlyMemberIsRequester
+- TestChangeRequestIntegration_PatchReviewProvisionsApproversFromGroupMembers
+- TestChangeRequestIntegration_PatchReviewDoesNotReprovisionWhenStageExists
+- TestChangeRequestIntegration_PatchReviewRejectsEmptyGroup
+- TestChangeRequestIntegration_PatchReviewDeduplicatesGroupMembers
+- TestChangeRequestIntegration_PatchReviewProvisionsRequesterAsCancelled
+- TestChangeRequestIntegration_PatchReviewRejectsWhenOnlyMemberIsRequester
+- TestChangeRequestIntegration_AssessAuthorizeAndReviewStagesCoexist
+- TestChangeRequestIntegration_PatchOnHoldPersistsAndReadsBack
+- TestChangeRequestIntegration_PatchStateRejectedWhileOnHold
+- TestChangeRequestIntegration_PatchClearsOnHoldAndAdvancesStateTogether
+- TestChangeRequestIntegration_PatchOffHoldAlwaysSucceeds
+- TestChangeRequestIntegration_PatchNonStateFieldSucceedsWhileOnHold
+- TestChangeRequestIntegration_PatchCustomerFlagInternalCallerCannotSetEither
+- TestChangeRequestIntegration_PatchCustomerFlagQualifyingPortalUserContactNeedsTheCustomerState
+- TestChangeRequestIntegration_PatchCustomerFlagContactOnDifferentProjectCannot
+- TestChangeRequestIntegration_PatchCustomerFlagWrongRoleContactForbiddenStateUnaffected
+- TestChangeRequestIntegration_PatchCustomerFlagInvitedContactCannotReach
+- TestChangeRequestIntegration_PatchCustomerFlagLockedTrueCannotRevert
+- TestChangeRequestIntegration_PatchCustomerFlagFalseFromNonContactIsRefused
+- TestChangeRequestIntegration_PatchCustomerFlagsNeverFromStaffWhateverIsStored
+- TestChangeRequestFlowIntegration_NormalFullLifecycle
+- TestChangeRequestFlowIntegration_EmergencyLifecycle
+- TestChangeRequestFlowIntegration_StandardLifecycle
+- TestChangeRequestFlowIntegration_RequestApprovalOnlyFromNew
+- TestChangeRequestFlowIntegration_CreatorCannotApproveAnyStage
+- TestChangeRequestFlowIntegration_CreatorRecognisedByCreatedByEmail
+- TestChangeRequestFlowIntegration_SRETeamAssignedGroupMembersArePeerApprovers
+- TestChangeRequestFlowIntegration_PeerPoolFallsBackToDevopsApprovalOnlyWhenAssignedGroupYieldsNobody
+- TestChangeRequestFlowIntegration_MixedPoolsKeepOnlyActiveInternalUsers
+- TestChangeRequestFlowIntegration_AllExternalGroupsAreRefusedClearly
+- TestChangeRequestFlowIntegration_ExternalUserCannotDecideInternalStage
+- TestChangeRequestFlowIntegration_CustomerStagesStillWorkForExternalContacts
+- TestChangeRequestFlowIntegration_LifecycleStageRowsWithInternalAndExternalMembers
+- TestChangeRequestFlowIntegration_NormalRequiresEligibleCABApprovers
+- TestChangeRequestFlowIntegration_PeerApprovalRefusedWhenCABGroupEmptied
+- TestChangeRequestFlowIntegration_CABRejectionDoesNotSchedule
+- TestChangeRequestFlowIntegration_TypeLockedAfterApprovalRequested
+- TestChangeRequestFlowIntegration_CanDecide
+- TestChangeRequestFlowIntegration_ApprovalGroupsExistAndMigrationIsIdempotent
+- TestChangeRequestFlowIntegration_CreateRequiresCreatableType
+- TestChangeRequestFlowIntegration_NormalCustomerGateLifecycles
+- TestChangeRequestFlowIntegration_EmergencyNeverReachesACustomerState
+- TestChangeRequestFlowIntegration_StandardCustomerApprovalLifecycle
+- TestChangeRequestFlowIntegration_StandardCustomerApprovalTickedWithRequestApproval
+- TestChangeRequestFlowIntegration_CustomerGateFlagsAcceptedAndReturned
+- TestChangeRequestFlowIntegration_CustomerApprovalRequiredEditableUntilGatePassed
+- TestChangeRequestFlowIntegration_CustomerReviewRequiredEditableUntilReviewLeft
+- TestChangeRequestFlowIntegration_CloseFromReviewHonoursTheFlagInTheSamePatch
+- TestChangeRequestFlowIntegration_ManualScheduledRefusedBeforeCustomerApproval
+- TestChangeRequestFlowIntegration_CustomerApprovalCanBeCancelled
+- TestChangeRequestFlowIntegration_ApproverRulesHoldWithCustomerGates
+- TestChangeRequestFlowIntegration_LegacyRowsDefaultToNoCustomerSteps
+- TestChangeRequestFlowIntegration_CustomerGateMigrationIsIdempotent
+- TestChangeRequestScopeIntegration_CreatePersistsEveryField
+- TestChangeRequestScopeIntegration_CreateWithoutScopeReadsEmptyArrays
+- TestChangeRequestScopeIntegration_CreateProjectOnly
+- TestChangeRequestScopeIntegration_CreateRejectsInconsistentSelections
+- TestChangeRequestScopeIntegration_CreateExplicitProductsAndDuplicates
+- TestChangeRequestScopeIntegration_PersistsEveryCategory
+- TestChangeRequestScopeIntegration_PatchArraysReplace
+- TestChangeRequestScopeIntegration_PatchRefusesRemovedFields
+- TestChangeRequestScopeIntegration_PatchRejectsInconsistentSelections
+- TestChangeRequestScopeIntegration_PatchMovesProject
+- TestChangeRequestScopeIntegration_PatchDeploymentProductsReadOnly
+- TestChangeRequestScopeIntegration_PatchEditWindow
+- TestChangeRequestScopeIntegration_PatchAppendsJournalEntries
+- TestChangeRequestScopeIntegration_CustomerContactsAreDerivedFromTheProject
+- TestChangeRequestScopeIntegration_SurvivesNormalLifecycle
+- TestChangeRequestScopeIntegration_LinkOptions
+- TestChangeRequestScopeIntegration_JoinRowsCascade
+- TestChangeRequestScopeIntegration_MigrationIsIdempotent
+- TestChangeRequestFlowIntegration_NormalRollbackFromReview
+- TestChangeRequestFlowIntegration_NormalRollbackFromCustomerReview
+- TestChangeRequestFlowIntegration_RollbackRefusedFromEveryOtherState
+- TestChangeRequestFlowIntegration_RollbackRespectsOnHold
+- TestChangeRequestScopeIntegration_CreateRefusesRemovedFields
+- TestChangeRequestScopeIntegration_LegacyStoredGroupIsIgnored
+- TestChangeRequestFlowIntegration_RescheduleNormalWithCustomerGroup
+- TestChangeRequestFlowIntegration_RescheduleWithNobodyToAskTwice
+- TestChangeRequestFlowIntegration_RescheduleLegacyEmergencyInCustomerApproval
+- TestChangeRequestFlowIntegration_RescheduleStandard
+- TestChangeRequestFlowIntegration_RescheduleRefusedFromEveryOtherState
+- TestChangeRequestFlowIntegration_RescheduleOnHoldAndAtomic
+
+**`change_request_repo_test.go`** (unit, 32)
+- TestChangeRequestChangeModelToType
+- TestChangeRequestTypeToChangeModel_SupportedTypesRoundTrip
+- TestChangeRequestTypeToChangeModel_UnsupportedTypesRejected
+- TestScanChangeRequestViewAndDetail_FieldParityAdditions
+- TestChangeRequestApprovalStagePosition
+- TestNormalizeChangeRequestApprovalStatus
+- TestBuildChangeRequestApprovals_PositionalLabelsAndFirstResponderWinsStatus
+- TestBuildChangeRequestApprovals_AssignmentGroup
+- TestBuildChangeRequestApprovals_NoStages
+- TestLegalChangeRequestNextStates
+- TestCustomerGateHelpers
+- TestChangeRequestFlowForModel
+- TestClassifyApprovalStage
+- TestValidateCreateChangeRequestType
+- TestCustomerStageSpecs
+- TestWithoutStaffRollbackWhileCustomerReviewPending
+- TestRefuseStaffCustomerOutcomeFlags
+- TestRefuseStaffExitFromCustomerState
+- TestCustomerStageManualRefusal
+- TestRejectRemovedChangeRequestFields
+- TestCustomerStageSpecForLabel
+- TestChangeRequestLinkHelpers
+- TestStageKindNeedsInternalApprover
+- TestInternalApproverIDsAndOnlyInternalApprovers
+- TestApproverDecisionBlock_InternalOnly
+- TestNoInternalMembersMessage
+- TestApprovalStageDecidableState
+- TestApprovalStageDecidableState_ThroughClassifier
+- TestApprovalStageOutOfState
+- TestKnownChangeRequestStates
+- TestChangeRequestStateDisplayName
+- TestStaleApprovalRefusal
+
+**`change_request_requested_by_integration_test.go`** (integration, 1)
+- TestChangeRequestNobodyToAskIntegration_TheRequesterIsJudgedAsItWillStand
+
+**`change_request_reschedule_legacy_integration_test.go`** (integration, 4)
+- TestChangeRequestRescheduleLegacyIntegration_NormalAsksTheCustomerAgain
+- TestChangeRequestRescheduleLegacyIntegration_StandardAsksTheCustomerAgain
+- TestChangeRequestRescheduleLegacyIntegration_ACustomersProposalAsksThemAgain
+- TestChangeRequestRescheduleLegacyIntegration_BoxInTheRequestAndRefusals
+
+**`change_request_seed_integration_test.go`** (integration, 7)
+- TestChangeRequestSeedIntegration_Personas
+- TestChangeRequestSeedIntegration_FixtureApprovers
+- TestChangeRequestSeedIntegration_AssignedGroupProvisionsOnlyTheInternalPersonas
+- TestChangeRequestSeedIntegration_DevopsApprovalFallback
+- TestChangeRequestSeedIntegration_SeedIsSelfHealing
+- TestChangeRequestSeedIntegration_LumenWorksPlatformContacts
+- TestChangeRequestSeedIntegration_CustomerPortalEntitlements
+
+**`change_request_stale_approvals_integration_test.go`** (integration, 13)
+- TestChangeRequestFlowIntegration_StaleApprovals_ReviewToCustomerReviewToClosed
+- TestChangeRequestFlowIntegration_StaleApprovals_ReviewToClosed
+- TestChangeRequestFlowIntegration_StaleApprovals_Rollback
+- TestChangeRequestFlowIntegration_StaleApprovals_CancelFromEveryState
+- TestChangeRequestFlowIntegration_StaleApprovals_RescheduleLoop
+- TestChangeRequestFlowIntegration_StaleApprovals_OldFlowRescheduleStillFinishesThroughTheCAB
+- TestChangeRequestFlowIntegration_StaleApprovals_RescheduleStandard
+- TestChangeRequestFlowIntegration_StaleApprovals_EmergencyAndStandardUnaffected
+- TestChangeRequestFlowIntegration_StaleApprovals_RejectedReviewThenClosed
+- TestChangeRequestFlowIntegration_StaleApprovals_DecisionGuard
+- TestChangeRequestFlowIntegration_StaleApprovals_UnknownStagesAreNotGuarded
+- TestChangeRequestFlowIntegration_StaleApprovals_Migration
+- TestChangeRequestFlowIntegration_StaleApprovals_GithubStateWriteCancels
+
+**`change_request_synced_stages_integration_test.go`** (integration, 8)
+- TestChangeRequestSyncedStagesIntegration_EmergencyInAuthorizeWithAStageAtPositionZero
+- TestChangeRequestSyncedStagesIntegration_TheApproverRulesStillHold
+- TestChangeRequestSyncedStagesIntegration_ACabGroupStageWithNoLabel
+- TestChangeRequestSyncedStagesIntegration_AStalePositionZeroStageIsNeverCancelledOrRefused
+- TestChangeRequestSyncedStagesIntegration_APositionZeroStageInAssessIsStillPeer
+- TestChangeRequestSyncedStagesIntegration_APositionTwoStageIsNeverTheCustomers
+- TestChangeRequestSyncedStagesIntegration_AnApproverWithNoUser
+- TestChangeRequestSyncedStagesIntegration_NobodyEligibleIsDiagnosable
+
+**`change_request_synced_stages_test.go`** (unit, 3)
+- TestRuntimeApprovalStageKind
+- TestRuntimeApprovalStageKind_NeverOutOfState
+- TestExcludedMembersSummary
+
+**`change_request_timestamp_echo_integration_test.go`** (integration, 2)
+- TestChangeRequestTimestampEchoIntegration_TheReadPrintsWhatTheWritePathKept
+- TestChangeRequestTimestampEchoIntegration_EveryAnswerAcceptsWhatTheReadPrinted
+
+**`change_request_transitions_integration_test.go`** (integration, 7)
+- TestChangeRequestTransitionsIntegration_EveryStateByEveryRequest
+- TestChangeRequestTransitionsIntegration_ResendsAreNoOps
+- TestChangeRequestTransitionsIntegration_CanceledOrClosedCannotBeRevived
+- TestChangeRequestTransitionsIntegration_NoStepIsSkipped
+- TestChangeRequestTransitionsIntegration_ReviewWithoutCustomerReview
+- TestChangeRequestTransitionsIntegration_SpellingOfTheRequestedState
+- TestChangeRequestTransitionsIntegration_MigratedShapedRows
+
+**`change_request_transitions_test.go`** (unit, 6)
+- TestNormalizeRequestedChangeRequestState
+- TestCheckStaffStateRequest_Table
+- TestCheckStaffStateRequest_AgreesWithLegalNextStates
+- TestChangeRequestStaffTargets
+- TestTransitionRefusalMessages
+- TestCheckGithubStateMove
+
+**`change_request_visibility_integration_test.go`** (integration, 15)
+- TestChangeRequestVisibilityIntegration_DesignatedStaysVisibleThroughTheLifecycle
+- TestChangeRequestVisibilityIntegration_RollbackAndCanceledStayVisible
+- TestChangeRequestVisibilityIntegration_DesignationIsPerPersonAndPermanent
+- TestChangeRequestVisibilityIntegration_NeverRequiredTheCustomer
+- TestChangeRequestVisibilityIntegration_LegacyRule
+- TestChangeRequestVisibilityIntegration_CreatedAfterTheCutoverIsNeverLegacy
+- TestChangeRequestVisibilityIntegration_LegacyChangeRequestActedOnStaysVisible
+- TestChangeRequestVisibilityIntegration_LegacyInFlightGetsItsStage
+- TestChangeRequestVisibilityIntegration_InternalCallersAreNotNarrowed
+- TestChangeRequestVisibilityIntegration_CommentsByIDFollowTheChangeRequest
+- TestChangeRequestVisibilityIntegration_NoticeAudience
+- TestChangeRequestVisibilityIntegration_StatsCountWhatTheListShows
+- TestChangeRequestVisibilityIntegration_CaseEndpointsCannotReachAHiddenChangeRequest
+- TestChangeRequestVisibilityIntegration_MembershipAndEmailEdges
+- TestChangeRequestVisibilityIntegration_TheCreatorWhoIsAContact
+
+**`change_request_visibility_lint_test.go`** (unit, 3)
+- TestChangeRequestVisibilityLint_ExportedEntryPointsApplyTheRule
+- TestChangeRequestVisibilityLint_EveryInterfaceMethodIsClassified
+- TestChangeRequestVisibilityLintMatchers
+
+**`change_request_visibility_state_filter_integration_test.go`** (integration, 2)
+- TestChangeRequestVisibilityIntegration_NamingAStateNeverWidensWhatACustomerSees_Legacy
+- TestChangeRequestVisibilityIntegration_NamingAStateNeverWidensWhatACustomerSees_Designated
+
+**`change_request_visibility_test.go`** (unit, 10)
+- TestCRVisibilityClause_AnUnrestrictedCallerIsNotNarrowed
+- TestCRVisibilityClause_FailsClosed
+- TestCRVisibilityClause_BindsTheViewerAndTheCutover
+- TestCRVisibilityClause_CarriesItsOwnMembershipCheck
+- TestCRVisibility_TheCustomerStageLabelsArePinned
+- TestCRVisibility_OnlyAskedApproverStatesDesignate
+- TestCRVisibility_TheLegacyStates
+- TestCRVisibility_IsLegacyBoundary
+- TestFirstCRVisibilityAndSQLStringList
+- TestCRVisibilityContext
+
+**`change_request_window_test.go`** (unit, 8)
+- TestNormalizePlannedTimestamp_AcceptsExactlyTwoLayoutsAsUTC
+- TestNormalizePlannedTimestamp_RefusesWhatPostgresWouldHaveAccepted
+- TestMirrorPlannedTimestamp_HandsBackWhatItCannotRead
+- TestStrictMirrorPlannedTimestamp
+- TestNormalizePatchAndCreateWindows
+- TestRequireFutureWindow
+- TestParseExpectedTimestamp
+- TestRedactInternalApprovalStages
+
+Service, domain, error-code, route and BFF tests (the tests of the other data source's service files are not listed here):
+
+**`entity-service/internal/service/change_request_filters_test.go`** (8)
+- TestParseChangeRequestFieldFilters_CreatedOnRelativeDate
+- TestParseChangeRequestFieldFilters_CreatedOnAbsoluteDateStillWorks
+- TestParseChangeRequestFieldFilters_AssignedUserId
+- TestParseChangeRequestFieldFilters_AssignedUserIdInvalidUUIDRejected
+- TestParseChangeRequestFieldFilters_AssignedUserIdWrongOpRejected
+- TestParseChangeRequestFieldFilters_ApprovalAccepted
+- TestParseChangeRequestFieldFilters_ApprovalInvalidValueRejected
+- TestParseChangeRequestFieldFilters_ApprovalWrongOpRejected
+
+**`entity-service/internal/service/change_request_service_proposal_test.go`** (4)
+- TestChangeRequestService_PatchChangeRequest_TheTimeConversationMirror
+- TestChangeRequestService_PatchChangeRequest_ACustomersWindowIsNeverMirrored
+- TestChangeRequestService_PatchChangeRequest_EveryOtherPatchMirrorsAsBefore
+- TestSNChangeRequestService_PatchChangeRequest_RefusesTheAnswerToAProposedTime
+
+**`entity-service/internal/service/change_request_service_test.go`** (30)
+- TestChangeRequestService_CreateChangeRequest_RequiresType
+- TestChangeRequestService_CreateChangeRequest_SNFailureLeavesPostgresUntouched
+- TestChangeRequestService_CreateChangeRequest_RejectsUnsupportedTypeBeforeSN
+- TestChangeRequestService_CreateChangeRequest_SNSuccessCreatesPostgresRowWithMatchingIdentity
+- TestChangeRequestService_CreateChangeRequest_DoesNotRetryValidationError
+- TestChangeRequestService_PatchChangeRequest_MirrorFailureRecordsWritebackFailure
+- TestChangeRequestService_GetChangeRequestApprovals_ValidatesID
+- TestChangeRequestService_GetChangeRequestApprovals_ReadsAlwaysStayOnPostgres
+- TestChangeRequestService_DecideChangeRequestApproval_RejectsInvalidDecision
+- TestChangeRequestService_DecideChangeRequestApproval_RequiresUserIDToken
+- TestChangeRequestService_DecideChangeRequestApproval_NoWritebackWhenSnWritebackNil
+- TestChangeRequestService_DecideChangeRequestApproval_NonMemberRefusalPropagates
+- TestChangeRequestService_DecideChangeRequestApproval_ExternalUserRefusalPropagates
+- TestChangeRequestService_DecideChangeRequestApproval_MirrorFailureRecordsWritebackFailure
+- TestChangeRequestService_DecideChangeRequestApproval_RepoNotFoundPropagates
+- TestChangeRequestService_PatchChangeRequest_AcceptsFieldParityFieldsAlone
+- TestChangeRequestService_PatchChangeRequest_CustomerGateFlagsAlone
+- TestChangeRequestService_PatchChangeRequest_CustomerGateFlagsStayOutOfTheMirror
+- TestChangeRequestService_CreateChangeRequest_EmergencyWithACustomerBoxIsRefusedBeforeAnyWrite
+- TestChangeRequestService_CreateChangeRequest_PassesCustomerGateFlags
+- TestChangeRequestService_GetChangeRequestApprovals_StampsViewerEmail
+- TestChangeRequestService_ScopeFields_ShapeValidation
+- TestChangeRequestService_PatchChangeRequest_ScopeFieldsReachTheRepository
+- TestChangeRequestService_PatchChangeRequest_ScopeFieldsStayOutOfTheMirror
+- TestChangeRequestService_CreateChangeRequest_ScopeValidatedBeforeSNAndStrippedFromIt
+- TestChangeRequestService_GetChangeRequestLinkOptions
+- TestChangeRequestService_PatchChangeRequest_RefusesRemovedFields
+- TestChangeRequestService_GetChangeRequest_PassesTheViewerAnswerThrough
+
+**`entity-service/internal/service/change_request_service_dates_test.go`** (2)
+
+**`entity-service/internal/service/change_request_service_lock_test.go`** (1)
+- TestChangeRequestService_PatchChangeRequest_RefusalIsNeverMirrored
+
+**`entity-service/internal/service/cr_notice_service_test.go`** (13)
+- TestApprovalNotice_StateTable
+- TestApprovalNotice_OnlyOnTransition
+- TestTeamFromGitReference
+- TestApprovalNotice_NoRecipientsPublishesNothing
+- TestApprovalNotice_DeletedRecord
+- TestNormaliseAddresses
+- TestPlanDate_DateChangeWinsOverClearedConfirmation
+- TestPlanDate_Turns
+- TestPlanDate_ADeclineSendsTheSameNoticeAsADifferentTime
+- TestPlanDate_WSO2ActorSuppressesCustomerProposed
+- TestPlanDate_CustomerProposedNotifiesInternalGroup
+- TestHandleChange_IgnoresUnrelatedEntityType
+- TestHandleChange_SecondBranchRunsAfterFirstFails
+
+**`entity-service/internal/domain/change_request_customer_can_answer_test.go`** (2)
+- TestChangeRequest_CustomerCanAnswerJSONContract
+- TestSearchChangeRequestView_HasNoCustomerCanAnswer
+
+**`entity-service/internal/apierror/errors_test.go`** (4)
+- TestInvalidValue
+- TestWriteJSON_HasNoErrorCodeUnlessGiven
+- TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage
+- TestCodes_AreStableLowerSnakeCase
+
+**`entity-service/internal/server/change_request_routes_test.go`** (1)
+- TestChangeRequestLinkOptionsIsInternalOnly
+
+**`apps/csm-portal/backend/internal/handler/change_requests_test.go`** (19)
+- TestCreateChangeRequest
+- TestGetChangeRequest
+- TestPatchChangeRequest
+- TestGetChangeRequestApprovals
+- TestDecideChangeRequestApproval
+- TestCustomerGroupApprovalMessages
+- TestUpstreamErrorCodesPassThrough
+- TestPatchChangeRequestRefusesTheCustomersAnswer
+- TestPatchChangeRequest_TimeAnswerFields
+- TestSearchChangeRequests
+- TestCreateChangeRequestComment
+- TestSearchChangeRequestComments
+- TestAggregateChangeRequests
+- TestCreateChangeRequest_CustomerGateFlags
+- TestPatchChangeRequest_CustomerGateFlags
+- TestGetChangeRequest_ReturnsCustomerGateFlags
+- TestChangeRequestScopeFieldValidation
+- TestChangeRequestLinkOptions
+- TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys
+
+**`apps/customer-portal/backend-v2/internal/handler/change_requests_customer_test.go`** (15)
+- TestPatchChangeRequest_CustomerAllowedBodies
+- TestPatchChangeRequest_CustomerCannotSendAnyOtherField
+- TestPatchChangeRequest_CustomerMalformedAndAmbiguousBodies
+- TestPatchChangeRequest_OnlyUpdateGetsTheFullFieldSet
+- TestPatchChangeRequest_StaffUnchanged
+- TestPatchChangeRequest_StaffCannotCarryTheExpectedWindow
+- TestPatchChangeRequest_CustomerUpstreamErrors
+- TestGetChangeRequest_CarriesCustomerCanAnswer
+- TestGetChangeRequest_CarriesTheCustomerProposal
+- TestMapChangeRequestDetails_NeverPassesOnWhoProposedOrWSO2sOwnFacts
+- TestPatchChangeRequest_CustomerProposalIsValidatedBeforeItIsSent
+- TestPatchChangeRequest_StaffWindowIsCheckedForFormAndRangeOnly
+- TestCreateChangeRequest_PlannedWindowIsValidatedBeforeItIsSent
+- TestPatchChangeRequest_EntityRefusalCodesReachTheCustomer
+- TestPatchChangeRequest_CustomerFieldRefusalCarriesTheForbiddenCode
+
+## Appendix B. Playwright, CSM portal (snapshot)
+
+192 tests in 3 files.
+
+**`specs/operations/change-request-creation.spec.ts`** (29)
+- change request creation — page structure › offers exactly Normal, Standard and Emergency, with none pre-selected
+- change request creation — page structure › requires a change type and a subject before Create change request is enabled
+- change request creation — page structure › sends the chosen type in the POST /change-requests payload
+- change request creation — Customer Approval / Customer Review checkboxes › offers both as real checkboxes, unchecked by default, with their helper lines
+- change request creation — Customer Approval / Customer Review checkboxes › always sends both flags in the POST payload (approval false, review false)
+- change request creation — Customer Approval / Customer Review checkboxes › always sends both flags in the POST payload (approval true, review false)
+- change request creation — Customer Approval / Customer Review checkboxes › always sends both flags in the POST payload (approval false, review true)
+- change request creation — Customer Approval / Customer Review checkboxes › always sends both flags in the POST payload (approval true, review true)
+- change request creation — an Emergency change proceeds without customer approval or review (mocked backend) › choosing Emergency disables and unticks both boxes with one line saying why; choosing another type leaves them off, tickable again
+- change request creation — an Emergency change proceeds without customer approval or review (mocked backend) › the create carries type emergency with both flags false, whatever was ticked before the type was chosen
+- change request creation — happy path › creates a real change request and lands on its detail page
+- change request creation — customer project cascade (mocked backend) › lays out Customer Project, Deployments, Deployment products, Customer Group, Category and Communication
+- change request creation — customer project cascade (mocked backend) › keeps Deployments disabled until a project is chosen; Deployment products is read-only
+- change request creation — customer project cascade (mocked backend) › choosing a project offers exactly that project's deployments
+- change request creation — customer project cascade (mocked backend) › choosing deployments derives the deployment products
+- change request creation — customer project cascade (mocked backend) › removing a deployment drops the products only it provided
+- change request creation — customer project cascade (mocked backend) › changing the project clears the dependents and offers the new project's deployments
+- change request creation — customer project cascade (mocked backend) › clearing the project clears the dependents and disables Deployments again
+- change request creation — Customer Group: the project's registered contacts, read-only (mocked backend) › is a locked, read-only field that asks for a Customer Project first
+- change request creation — Customer Group: the project's registered contacts, read-only (mocked backend) › lists the chosen project's registered contacts, with the derived helper, as soon as the project is chosen
+- change request creation — Customer Group: the project's registered contacts, read-only (mocked backend) › changing the project re-derives it: another customer's contacts never carry over; clearing it empties the list
+- change request creation — Customer Group: the project's registered contacts, read-only (mocked backend) › a customer box ticked on a project with no registered contact is accepted at create (the change is New, nobody is asked yet); the detail page then says Request Approval needs a contact, with the reason
+- change request creation — Customer Group: the project's registered contacts, read-only (mocked backend) › is never sent: the create carries no customerGroupId (nor environmentIds), whatever the project's contacts
+- change request creation — the customer scope on the wire (mocked backend) › POST /change-requests carries projectId, deploymentIds, deploymentProductIds, category, comment and workNote with the exact names
+- change request creation — the customer scope on the wire (mocked backend) › omits every new field that was left empty (arrays only when non-empty); Category still defaults to other
+- change request creation — the customer scope on the wire (mocked backend) › a project alone is sent without empty deployment / product arrays
+- change request creation — the customer scope on the wire (mocked backend) › shows the backend's 400 about an inconsistent combination verbatim and stays on the form
+- change request creation — draft and clone (mocked backend) › the project, deployments, category and notes survive leaving the form and coming back, and the group is re-derived
+- change request creation — draft and clone (mocked backend) › Clone carries the project and category, leaves the deployments for the new target to be chosen, and derives the group from the project
+
+**`specs/operations/change-request-detail.spec.ts`** (2)
+- change request detail — Request Approval › transitions the approval section to a requested/pending state
+- change request detail — approve/reject › approves the signed-in user's own pending stage, self-skipping on 403 or no button
+
+**`specs/operations/change-request-lifecycle.spec.ts`** (161)
+- seeded fixtures (local stack) › change request lifecycle — compulsory team gate › Request Approval is disabled with no assigned team, and states why
+- seeded fixtures (local stack) › change request lifecycle — Assess-entry auto-provisioning › Request Approval succeeds once a team is assigned, and provisions that team's INTERNAL members as approvers
+- seeded fixtures (local stack) › change request lifecycle — approve cascades to Authorize › an internal approver sees the peer stage and approving it cascades to Authorize (CAB) and cancels the others
+- seeded fixtures (local stack) › change request lifecycle — terminal approval display › an already-decided change request shows its resolved approval state with no pending actions
+- seeded fixtures (local stack) › change request lifecycle — opening an Assignment group › an internal stage's group opens and lists the people its pool is drawn from, in name order
+- seeded fixtures (local stack) › change request lifecycle — opening an Assignment group › the Customer Approval stage opens the Customer Group: the project's registered contacts
+- seeded fixtures (local stack) › change request lifecycle — the customer stages and the customer's answer › CHG-FIXED-007 (Customer Approval): once the customer approves it, the Approvals tab shows Dave Mendis Approved, Erin Jayawardena Cancelled and the change Scheduled
+- seeded fixtures (local stack) › change request lifecycle — the customer stages and the customer's answer › CHG-FIXED-007 (Customer Approval): once the customer rejects it, the Approvals tab shows Erin Jayawardena Rejected, Dave Mendis Cancelled and the change Canceled
+- seeded fixtures (local stack) › change request lifecycle — the customer stages and the customer's answer › CHG-FIXED-008 (Customer Review): once the customer approves it, the Approvals tab shows Erin Jayawardena Approved, Dave Mendis Cancelled and the change Closed
+- seeded fixtures (local stack) › change request lifecycle — the customer stages and the customer's answer › CHG-FIXED-008 (Customer Review): once the customer rejects it, the Approvals tab shows Dave Mendis Rejected, Erin Jayawardena Cancelled and the change Rollback
+- seeded fixtures (local stack) › change request lifecycle — the customer stages and the customer's answer › an internal user who is not a contact of the project cannot answer the customer stages
+- seeded fixtures (local stack) › change request lifecycle — a Review approver's controls follow the state (real stack) › Review -> Customer Review -> Closed: the reviewers lose Approve / Reject when the change leaves Review, the customer answers (in the customer portal), nothing stays requested
+- seeded fixtures (local stack) › change request lifecycle — a Review approver's controls follow the state (real stack) › CHG-FIXED-006 (in Review, Customer Review ticked): sending it for customer review cancels the reviewers' rows, Carol's included
+- seeded fixtures (local stack) › change request lifecycle — a Review approver's controls follow the state (real stack) › a legacy REQUESTED Review row on a Closed change reads canDecide=false, the API refuses it with a 409 and migration 0193 repairs it
+- seeded fixtures (local stack) › change request lifecycle — no bypass, and the stepper, while the customer is asked (real stack) › CHG-FIXED-007 (Customer Approval, Dave and Erin asked): Re-schedule and Cancel change are all staff have, there is no Bypass entry, and the API refuses {state: scheduled}
+- seeded fixtures (local stack) › change request lifecycle — no bypass, and the stepper, while the customer is asked (real stack) › CHG-FIXED-008 (Customer Review, Dave and Erin asked): Roll back is a disabled Change state entry naming them, there is no Close and no Bypass, and the API refuses {state: closed} and {state: rollback}
+- change request approval flow — Normal › Normal, customer approval off, customer review off: every step shows the right state and actions
+- change request approval flow — Normal › Normal, customer approval off, customer review on: every step shows the right state and actions
+- change request approval flow — Normal › Normal, customer approval on, customer review off: every step shows the right state and actions
+- change request approval flow — Normal › Normal, customer approval on, customer review on: every step shows the right state and actions
+- change request approval flow — Normal › a non-creator approver sees Approve and Reject, with no creator notice
+- change request approval flow — Emergency › Request Approval -> one CAB Approval (no Peer, no ECAB) -> auto Scheduled -> Implement -> Review -> Closed, with Assess never taken
+- change request approval flow — Emergency › the customer's part reads Not applicable on the Approval tab, from New to Scheduled
+- change request approval flow — an Emergency change never reaches a customer state › CAB approval schedules it straight away on a project with registered contacts, and no customer stage or request is ever made
+- change request approval flow — an Emergency change never reaches a customer state › a project nobody on which can be asked does not hold Request Approval back: there is nobody to ask for
+- change request approval flow — an Emergency change never reaches a customer state › the API refuses a customer box on an Emergency change in the backend's words (create and PATCH), and moves nothing
+- change request approval flow — an Emergency change never reaches a customer state › an OLDER Emergency change with a live ECAB stage still shows it, its asked approver can still decide it, and the CAB approval schedules it
+- change request approval flow — Standard with Customer Approval › Request Approval goes to Customer Approval (not Scheduled), and only the customer's answer schedules it
+- change request approval flow — editing the customer checkboxes › both are editable before their gate, are sent via PATCH, and show on the Approval tab afterwards
+- change request approval flow — editing the customer checkboxes › Customer Approval is disabled with an explanation once the CR is scheduled; Customer Review can still be added (the project is stored)
+- change request approval flow — editing the customer checkboxes › Customer Review is disabled once the CR has reached customer review
+- change request approval flow — editing the customer checkboxes › shows the backend's refusal when the gate passed while the dialog was open (400)
+- change request approval flow — the Edit dialog follows the lock in every state › new (approval unticked, review unticked, no project): the project is editable, the approval box open, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › new (approval ticked, review ticked, a project): the project is editable, the approval box open, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › assess (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › assess (approval unticked, review unticked, no project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › authorize (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box open, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › authorize (approval ticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › customer_approval (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › scheduled (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › scheduled (approval unticked, review unticked, no project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › implement (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › review (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box open
+- change request approval flow — the Edit dialog follows the lock in every state › review (approval unticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › customer_review (approval ticked, review ticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › customer_review (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › closed (approval unticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › canceled (approval ticked, review unticked, a project): the project is read-only with its reason, the approval box read-only, the review box read-only
+- change request approval flow — the Edit dialog follows the lock in every state › a client that resends the whole form is not punished: the stored project and boxes are accepted, and saving changes nothing it should not
+- change request approval flow — the Edit dialog follows the lock in every state › no Customer Project: a box cannot be turned on after New, in the backend's words; and Request Approval with a box ticked and no project is refused in them too
+- change request approval flow — Standard › Request Approval goes straight to Scheduled, with no approval stages
+- change request lifecycle — project and deployments (mocked backend) › Normal change: create with project + deployments, see them on the detail page, edit the scope, approve, and have it locked once implementing
+- change request lifecycle — project and deployments (mocked backend) › editing: changing the project clears the dependents and sends the new project with empty lists
+- change request lifecycle — project and deployments (mocked backend) › editing: picking deployments of a new project derives the products
+- change request lifecycle — project and deployments (mocked backend) › editing: the category is sent on its own when only it changed
+- change request lifecycle — project and deployments (mocked backend) › editing: shows the backend's refusal verbatim when a chosen deployment was deactivated behind the dialog
+- change request lifecycle — project and deployments (mocked backend) › the detail Overview shows a dash for each field a change request has none of
+- change request approval flow — customer group (the project's registered contacts) › Normal with Customer Approval and Customer Review on a project with registered contacts: every step shows the right state, stage rows and buttons for the creator and a non-contact, and the customer's answers (applied server-side) show up
+- change request approval flow — customer group (the project's registered contacts) › a contact rejecting the Customer Approval (in the customer portal) cancels the change request, and the CSM page shows it
+- change request approval flow — customer group (the project's registered contacts) › a contact rejecting the Customer Review (in the customer portal) moves the change request to Rollback (terminal, no actions left), and the CSM page shows it
+- change request approval flow — customer group (the project's registered contacts) › an older change at Customer Approval on a project with no registered contacts: no customer stage, the Approval tab explains why, and nobody can record the approval: Re-schedule and Cancel change are what is left
+- change request approval flow — customer group (the project's registered contacts) › an older change at Customer Review on a project with no registered contacts shows the helper, Roll back and Cancel change are on offer, there is no Close and no Bypass
+- change request approval flow — customer group (the project's registered contacts) › an older change at Customer Approval on a project without registered contacts has no stage and the helper; the project cannot be swapped for one that has contacts (it is fixed once approval was requested), so the change waits until a contact registers on THAT project
+- change request approval flow — customer group (the project's registered contacts) › the Customer Project cannot be changed while the customer is asked: the dialog shows it read-only with the reason, the backend refuses a swap in words, and the contacts asked are still the same
+- change request approval flow — customer group (the project's registered contacts) › isolation: a change request of customer A is put only to customer A's contacts, never to customer B's, who cannot answer it
+- change request approval flow — customer group (the project's registered contacts) › an older change at Customer Approval on a project whose only contact is the creator has no stage: nobody is asked, the note says so (not that no contacts are registered), and still no way to record the approval
+- change request approval flow — customer group (the project's registered contacts) › an older change at Customer Review with nobody eligible (the requester is the project's only contact) shows the same note, naming Roll back or Cancel change as the ways out
+- change request approval flow — customer group (the project's registered contacts) › a customer request that is waiting on somebody shows no note at either gate
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › normal change, Customer Approval ticked, a project with no registered contact: Request Approval is disabled with the reason, the API refuses it in the backend's words, and nothing moves
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › normal change, Customer Review ticked, a project with no registered contact: Request Approval is disabled with the reason, the API refuses it in the backend's words, and nothing moves
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › standard change, both boxes ticked, a project with no registered contact: Request Approval is disabled with the reason, the API refuses it in the backend's words, and nothing moves
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › with no customer box ticked there is nobody to ask for: Request Approval is enabled on a project with no registered contact, and goes through
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › a contact registers on the project: the block lifts, Request Approval goes through, and the customer is asked at the gate
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › unticking the box in the Edit dialog (allowed in New) lifts the block: the change then goes through with nobody to ask for
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › a project whose only contact is the requester: the page cannot tell, so the button is enabled; the backend's refusal shows in the error banner, the change stays in New, and a second contact lets it through
+- change request approval flow — Request Approval is refused when nobody can be asked (mocked backend) › after New, ticking a box on for a project nobody on which can be asked is refused too: the dialog shows the backend's words and the box is not saved
+- change request approval flow — opening an Assignment group › Peer row: the group opens with its details and members; Escape closes it and returns focus to the link
+- change request approval flow — opening an Assignment group › CAB row: opens the CAB Approval group's own members (not the peer group's)
+- change request approval flow — opening an Assignment group › Emergency: the CAB Approval row opens the CAB group (its one stage is in the existing group)
+- change request approval flow — opening an Assignment group › an OLDER Emergency change's ECAB Approval row still opens its (unused) ECAB group
+- change request approval flow — opening an Assignment group › Customer Approval row: opens the Customer Group listing the project's registered contacts, with no group request
+- change request approval flow — opening an Assignment group › a group that cannot be loaded shows an error with Try again, leaves the approvals table alone, and recovers
+- change request approval flow — opening an Assignment group › opening and closing a group leaves Approve / Reject working
+- change request approval flow — Roll back › Normal, customer review on: New -> ... -> Review -> Roll back (reason required), state shown after every step
+- change request approval flow — Roll back › Normal, customer review off: New -> ... -> Review -> Roll back (reason required), state shown after every step
+- change request approval flow — Roll back › an older Normal change at Customer Review with nobody asked: Roll back is not held back (nothing is pending), and takes a reason
+- change request approval flow — Roll back › Customer Review with a customer group: Roll back is listed disabled, with why, while the group's review is pending
+- change request approval flow — Roll back › Standard: Roll back is offered from Review too, and nowhere before it
+- change request approval flow — a Review approver's controls follow the change request's state › Review: the assigned group's members can decide their own row, nobody else can
+- change request approval flow — a Review approver's controls follow the change request's state › Review -> customer_review: the reviewers can no longer approve or reject
+- change request approval flow — a Review approver's controls follow the change request's state › Review -> closed: the reviewers can no longer approve or reject
+- change request approval flow — a Review approver's controls follow the change request's state › Review -> rollback: the reviewers can no longer approve or reject
+- change request approval flow — a Review approver's controls follow the change request's state › Review -> canceled: the reviewers can no longer approve or reject
+- change request approval flow — a Review approver's controls follow the change request's state › Review -> Customer Review -> the customer approves (in the customer portal) -> Closed: nothing is requested at the end
+- change request approval flow — a Review approver's controls follow the change request's state › a Review decision records the answer and leaves the change in Review; the other member's row is cancelled
+- change request approval flow — a Review approver's controls follow the change request's state › a legacy row left REQUESTED after the change moved on reads canDecide=false: the controls are disabled, with the reason
+- change request approval flow — Re-schedule › Normal with a customer group: Customer Approval -> Re-schedule -> still Customer Approval, the customer asked again (no Authorize, no CAB) -> a member approves (in the customer portal) -> Scheduled, state shown after every step
+- change request approval flow — Re-schedule › an older Normal change at Customer Approval with nobody to ask: Re-schedule is the outlined button beside Change state, but it is REFUSED in the words Request Approval uses, writes nothing and can be tried again; an unchanged window is blocked in the dialog
+- change request approval flow — Re-schedule › a contact registers on the project: the same older change can then be re-scheduled, and the customer is asked in a fresh request
+- change request approval flow — Re-schedule › Emergency (an OLDER row sitting in Customer Approval, its approval stage still named ECAB): Re-schedule stays in Customer Approval too: no CAB, no Authorize
+- change request approval flow — Re-schedule › Standard with a customer group: Re-schedule stays in Customer Approval and asks the customer again
+- change request approval flow — a customer's proposed time (mocked backend) › the proposal waits in Customer Approval, planned window untouched: the banner shows both windows and who proposed it, the header says the change waits for WSO2, and nothing else was written
+- change request approval flow — a customer's proposed time (mocked backend) › ACCEPT: one confirmation, the proposal becomes the planned window and the change is Scheduled; no CAB, no new customer request, and nothing is stamped as the customer's approval
+- change request approval flow — a customer's proposed time (mocked backend) › COUNTER: a different time asks the customer again (no CAB), answers the proposal Disagree and the banner is gone; the loop repeats with the customer's next proposal
+- change request approval flow — a customer's proposed time (mocked backend) › DECLINE (keep the current time): only the answer is written; the customer keeps their live request and nothing new is opened
+- change request approval flow — a customer's proposed time (mocked backend) › the very time the customer proposed is not a counter: the dialog says to use Accept, and the API refuses it in words
+- change request approval flow — a customer's proposed time (mocked backend) › nobody is recorded as having proposed the stored time (a date WSO2 users write too, or one left over from an earlier round): the banner says so, Accept is disabled with the reason and refused by the API, and Propose a different time is a plain Re-schedule that writes no answer
+- change request approval flow — a customer's proposed time (mocked backend) › a date that is not a proposal waiting for WSO2 shows no banner and no actions on it: a stale date equal to the plan, an answered one, an internal approval still being asked (an unknown approval group), a change in Authorize
+- change request approval flow — a customer's proposed time (mocked backend) › Accept is disabled with its reason on hold, once the proposed time has passed, or when its window would end after the year 2100; the API refuses each in words
+- change request approval flow — a customer's proposed time (mocked backend) › a time the customer re-proposed behind an open confirmation is refused in the backend's words, the dialog keeps what the engineer was shown, and nothing is accepted
+- change request approval flow — a customer's proposed time (mocked backend) › a window re-scheduled behind an open Accept confirmation: the refusal names its code, the dialog closes, the page says why with focus on the notice, shows the new window, and Accept then goes through
+- change request approval flow — a customer's proposed time (mocked backend) › a window re-scheduled behind an open counter: the dialog closes with no note posted, and opened again the reason is recorded exactly once
+- change request approval flow — a customer's proposed time (mocked backend) › a plain Re-schedule opened before the customer proposed never answers a proposal it did not see: the API says so, in words
+- change request approval flow — a customer's proposed time (mocked backend) › every refusal of the two answers, in the backend's words, and none writes anything: the shape of Accept, the state, a stale window, a stale proposal
+- change request approval flow — a customer's proposed time (mocked backend) › a legacy change in Customer Approval whose requirement box is false (a migrated row) is asked again by a Re-schedule: it stays in Customer Approval, no CAB, nothing but its own window and request changes; and only the customer's own answer schedules it
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Normal, customer approval and customer review on: every state shows its stage statuses and its actions
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Normal, customer approval and customer review off: every state shows its stage statuses and its actions
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Rollback: the stage turns current, everything through Review stays done, Closed and Canceled are not taken (an older change whose project had nobody to ask: Customer Review leaves no proof either way)
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Rollback from Review on a project with registered contacts: Customer Review was never entered, so it reads 'not taken'
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Canceled: the stage turns current; with no approvals to prove it, earlier stages read 'history not recorded', never done or upcoming
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Canceled in Review: what the approvals prove was passed is done, the rest is 'history not recorded'
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Canceled at Customer Approval while the customer is asked: the stages before it are done, it and the rest are not recorded
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Canceled in Review after the Review stage was approved: Review itself reads 'history not recorded', since approving it does not move the change on
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › Canceled after the customer approved (in the customer portal): Customer Approval reads done (their approved stage and the recorded approval prove it), later stages are not recorded
+- change request lifecycle — the stepper and the action bar in every state (mocked backend) › a customer stage is left off the line while its checkbox is off, and joins it when ticked
+- change request action bar — nobody answers for the customer (mocked backend) › Customer Approval, the customer's request pending: Re-schedule and Cancel change only; no Bypass anywhere, and the API refuses {state: scheduled}
+- change request action bar — nobody answers for the customer (mocked backend) › Customer Approval, nobody asked (an older change on a project with no registered contacts): the same bar -- Re-schedule beside Change state, whose menu holds Cancel change -- and the same refusal in words
+- change request action bar — nobody answers for the customer (mocked backend) › Customer Review, the customer's request pending: Roll back is disabled and says why; there is no Close and no Bypass, and the API refuses {state: closed} and {state: rollback}
+- change request action bar — nobody answers for the customer (mocked backend) › Customer Review, nobody asked (an older change): Roll back is the first menu entry, before Cancel change, enabled; no button or entry closes the change, and the API refuses {state: closed}
+- change request action bar — nobody answers for the customer (mocked backend) › there is no bypass anywhere else either: Review's plain Close is a button, and neither Review nor Scheduled lists anything like one
+- change request approval flow — the customer's own answer is the only way on (mocked backend) › Customer Approval: the customer approves in the customer portal -> Scheduled, 'Customer approved' reads Yes, and nothing was sent from the CSM page
+- change request approval flow — the customer's own answer is the only way on (mocked backend) › Customer Review: the customer approves in the customer portal -> Closed, 'Customer reviewed' reads Yes, and nothing was sent from the CSM page
+- change request approval flow — the customer's own answer is the only way on (mocked backend) › a manual scheduled / closed sent anyway is refused with the backend's words, from a customer gate, asked or not, and changes nothing (no state, no stamp, no work note)
+- change request approval flow — the customer's own answer is the only way on (mocked backend) › Cancel change out of a customer gate still takes a reason, recorded as an internal note before the PATCH
+- change request approval flow — the customer's own answer is the only way on (mocked backend) › the backend refuses a Roll back the page still thought possible (a customer review request appeared behind the dialog): its words show in the dialog and the reason is not posted twice on retry
+- change request state machine — final states and jumps (mocked backend) › Canceled out of Customer Approval is final: not one state can be named afterwards (a Re-schedule included), each refusal says so in words and writes nothing; no action is offered
+- change request state machine — final states and jumps (mocked backend) › Rollback is final: nothing moves a rolled-back change anywhere, Cancel included, and nothing is written
+- change request state machine — final states and jumps (mocked backend) › Closed is final: nothing moves a closed change anywhere, Cancel included, and nothing is written
+- change request state machine — final states and jumps (mocked backend) › no jump over a state or an approval gate: with the customer's approval ticked, Implement, Review, Customer Review and Close are refused from New, Assess and Authorize, and every refusal writes nothing
+- change request state machine — final states and jumps (mocked backend) › no jump over a state later on either: Scheduled, Implement and Review only move to their next state (or Cancel), and Review needs its customer review when it is ticked
+- the customer requirements lock (real stack) › in New the Customer Project and both boxes are freely editable: the dialog offers them and every change, ticks and un-ticks and a swap of project, is saved
+- the customer requirements lock (real stack) › Request Approval is disabled with the reason when a customer box is ticked and there is no Customer Project; the API refuses it in words; choosing a project enables it
+- the customer requirements lock (real stack) › Request Approval is refused when a customer box is ticked and nobody on the project can be asked: disabled with the reason, refused in the backend's words by the API, lifted by clearing the box; ticking a box on after New is refused the same way, in the dialog
+- the customer requirements lock (real stack) › after Request Approval the Customer Project is read-only in the dialog and refused by the API; a ticked box is read-only and cannot be unticked; an unticked one can be added, once, and then cannot be removed; resending what is stored is accepted
+- the customer requirements lock (real stack) › every state, at the API, with the backend's own words: the project is frozen after New, a box is add-only until its gate, and past the gate nothing can be added
+- the customer requirements lock (real stack) › a change with no Customer Project can never take a customer box after New: the API says so and the dialog shows both boxes disabled with the reason
+- the customer requirements lock (real stack) › a Re-schedule asks the customer again and the change stays in Customer Approval: no Authorize, no CAB; the box stays ticked and the project cannot be swapped, and the customer's own answer then schedules it
+- the customer requirements lock (real stack) › a required customer review cannot be skipped by unticking it to close from Review: the box cannot be removed, and Review offers Send for customer review, never Close
+- the customer requirements lock (real stack) › a canceled, a closed and a rolled-back change request have no exit: every state by every request is refused in words that name both states and nothing moves; naming the state it is in is no move
+- the customer requirements lock (real stack) › no jump over a state or an approval gate, in the backend's words: with both customer boxes ticked, Implement, Review, Customer Review and Close are refused from New, Assess and Authorize, and out of Customer Approval every destination is the customer's own answer
+- migrated (legacy) change requests in the CSM portal (real stack) › an Emergency change in Authorize whose only approval stage was synced with no label: its pending approver sees Approve in the Approvals tab, decides, and the change is Scheduled (it used to be refused as a stale Peer stage)
+- migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request sitting in Customer Approval with nobody asked: the Approvals tab says so, and staff cannot answer for the customer (Re-schedule and Cancel change only; the API refuses {state: scheduled})
+- migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request sitting in Customer Review with nobody asked: the note names Roll back or Cancel change as the ways out, Roll back is enabled, there is no Close, and the API refuses {state: closed}
+- migrated (legacy) change requests in the CSM portal (real stack) › Re-schedule on a legacy change in Customer Approval whose requirement box is false (migration 0189 defaulted it) asks the customer again and the change stays in Customer Approval: no CAB, the box is not written, and only the customer's own answer schedules it
+- migrated (legacy) change requests in the CSM portal (real stack) › a legacy change request in Scheduled with its flags false and a Customer Project: the Edit dialog freezes the project, closes the approval box (its gate is passed) and still lets the review box be added
+- a customer's proposed time (real stack) › Dave proposes a start: the change waits in Customer Approval with its window untouched and nothing else written; the banner names him, and Accept proposed time schedules it by the proposal, with no CAB, no new request and nothing stamped as the customer's approval
+- a customer's proposed time (real stack) › Propose a different time asks the customer again (no CAB) and answers the proposal DISAGREE; a decline keeps the window and the customers' live request; the customer's next proposal brings the banner back
+- a customer's proposed time (real stack) › on the rows the sync writes: a migrated change in Customer Approval with a customer date and no answer is a stored time nobody is recorded as having proposed: Accept is refused (page and API), and Propose a different time is a plain Re-schedule that writes no answer
+- a customer's proposed time (real stack) › a date on a migrated change that is NOT a proposal waiting for WSO2 is never read as one: one waiting on an unlabeled approval in Authorize, one whose date is the planned start, one with an answer
+- a customer's proposed time (real stack) › a customer date the sync left far ahead is a stored time nobody proposed: Accept is refused for that reason first, whatever window it would give, in the read model and at the API, and nothing is written
+- seeded fixtures (local stack) — create with an assignment group › a team picked from the Assignment group picker is saved on create (no FK 400)
+
+## Appendix C. Playwright, customer portal (snapshot)
+
+60 tests in 10 files.
+
+**`specs/local/customer-change-request-access.spec.ts`** (6)
+- Local stack — who may not answer a change request › mira.santos@lumenworks.example, a customer of another project, is never offered the answer, cannot list CHG-FIXED-007 and is refused when she tries to answer or propose
+- Local stack — who may not answer a change request › CHG-FIXED-005 (New) and CHG-FIXED-006 (Review, nobody asked yet) were never asked of dave: they are not there for him, by address, in a list or by any call, and moving one on does not show it
+- Local stack — who may not answer a change request › CHG-FIXED-007, once asked of dave, stays visible to him in every later state, Authorize and the terminal ones included, with nothing to answer
+- Local stack — who may not answer a change request › a contact whose own request on CHG-FIXED-007 was cancelled still sees it, with nothing to answer, and her answer is refused
+- Local stack — who may not answer a change request › at Customer Review (CHG-FIXED-008) a contact whose own request was cancelled is offered neither Successful nor Unsuccessful, and her answer is refused, while dave who is still asked is
+- Local stack — who may not answer a change request › a direct PATCH from dave's token with anything but an answer or a proposed time is refused, and nothing about CHG-FIXED-007 moves
+
+**`specs/local/customer-change-request-answer.spec.ts`** (6)
+- Local stack — a customer answers a change request › dave.mendis@example.com approves CHG-FIXED-007: banner, Scheduled in the page and the list, and erin.jayawardena@example.com no longer sees Approve
+- Local stack — a customer answers a change request › erin.jayawardena@example.com's open tab still offers Approve when dave answers first: she gets the plain-words 409 and the page refreshes
+- Local stack — a customer answers a change request › on a 390px screen the banner that answers dave.mendis@example.com's click is not clipped on the left
+- Local stack — a customer answers a change request › dave.mendis@example.com rejects CHG-FIXED-007: the confirmation comes first ("Go back" changes nothing), then the change is Canceled
+- Local stack — a customer answers a change request › dave.mendis@example.com marks CHG-FIXED-008 Successful in Customer Review: the change is Closed
+- Local stack — a customer answers a change request › dave.mendis@example.com marks CHG-FIXED-008 Unsuccessful: the confirmation comes first, then the change is in Rollback
+
+**`specs/local/customer-change-request-approval.spec.ts`** (2)
+- Local stack — a customer answers a change request › dave approves CHG-FIXED-007 in Customer Approval: Scheduled, banner kept, buttons gone, erin has nothing left to answer
+- Local stack — a customer answers a change request › dave confirms CHG-FIXED-008 in Customer Review as Successful: Closed
+
+**`specs/local/customer-change-request-contrast.spec.ts`** (4)
+- Local stack — answer buttons in light mode › Propose New Time, Approve, Reject and the reject confirmation read at AA
+- Local stack — answer buttons in light mode › Successful and Unsuccessful read at AA
+- Local stack — answer buttons in dark mode › Propose New Time, Approve, Reject and the reject confirmation read at AA
+- Local stack — answer buttons in dark mode › Successful and Unsuccessful read at AA
+
+**`specs/local/customer-change-request-dates.spec.ts`** (4)
+- Local stack — the planned time is validated by the server › a customer's proposal with a date word, a date with no time, a past start, an empty or inverted window or a year out of range is a 400 in the service's words, and nothing changes: through the customer backend and straight at entity-service
+- Local stack — the planned time is validated by the server › a good start right after the refusals still works, the whole loop: dave proposes it (RFC 3339 with an offset, stored as the UTC instant, nothing else moves), WSO2 accepts it, and the change is Scheduled at that start
+- Local stack — the planned time is validated by the server › an end-only proposal is refused, whatever the age of the planned start: a proposal needs a new start
+- Local stack — the planned time is validated by the server › the same strings are refused on a staff member's PATCH and on create (a past date is the staff's own business), and a refused create leaves no change request behind
+
+**`specs/local/customer-change-request-error-codes.spec.ts`** (8)
+- Local stack — a refused answer carries its machine-readable errorCode › a proposed time while CHG-FIXED-007 is on hold is a 409 change_request_on_hold; the answer itself is still taken afterwards
+- Local stack — a refused answer carries its machine-readable errorCode › a proposed time on CHG-FIXED-007 with no planned window to move is a 409 change_request_no_planned_window; the answer itself is still taken afterwards
+- Local stack — a refused answer carries its machine-readable errorCode › an answer for a planned window that has moved on CHG-FIXED-007 is a 409 change_request_schedule_changed and records nothing
+- Local stack — a refused answer carries its machine-readable errorCode › an answer after a colleague answered is a 409 change_request_approval_not_pending, and a proposed time then is a 409 change_request_not_proposable
+- Local stack — a refused answer carries its machine-readable errorCode › a proposed time at Customer Review (CHG-FIXED-008) is a 409 change_request_not_proposable
+- Local stack — a refused answer carries its machine-readable errorCode › a contact whose request on CHG-FIXED-007 was withdrawn is refused with a 403 change_request_not_asked, for an answer and for a proposed time
+- Local stack — a refused answer carries its machine-readable errorCode › a field a customer may not set is a 403 change_request_forbidden, alone or beside an answer
+- Local stack — a refused answer carries its machine-readable errorCode › a refusal that has no name carries no errorCode key: a malformed date is a plain 400
+
+**`specs/local/customer-change-request-legacy.spec.ts`** (9)
+- Local stack — legacy (migrated) change requests › dave and erin see the legacy change requests exactly as customers see them today: every state but New, Assess and Authorize, the row at the cutover instant not, and the stat cards count what the list shows
+- Local stack — legacy (migrated) change requests › a change request raised after the cutover that nobody was asked about is NOT shown in a state a legacy one is: the same Scheduled, a different row
+- Local stack — legacy (migrated) change requests › a legacy change request in Customer Approval with NO live stage (the "Demo Test 1" shape, on Lumen Works Platform) can be answered by a contact: reading changes nothing, the answer provisions the stage once and it stays visible to both contacts
+- Local stack — legacy (migrated) change requests › a legacy Customer Review with no live stage: dave's Unsuccessful provisions the stage, sends it to Rollback, and erin's request is cancelled, never left asking
+- Local stack — legacy (migrated) change requests › a legacy change request dave PROPOSES a start on stays in Customer Approval, a state a legacy one is shown in, with the one stage the proposal needed provisioned for both contacts; WSO2 accepts it and it is Scheduled at that start; an untouched legacy one in Authorize is never shown
+- Local stack — legacy (migrated) change requests › WSO2 answers a legacy change request's proposal with a window of its own: both contacts are asked afresh (the stage the proposal provisioned is superseded), no CAB, and the second contact's approval schedules WSO2's window
+- Local stack — legacy (migrated) change requests › a migrated change request the previous system itself put to its customers (an UNLABELED customer stage on the customer group): a proposal waits, the one labelled stage a contact's act always provisioned is added beside the previous system's own rows, and WSO2's acceptance schedules it and leaves those rows alone
+- Local stack — legacy (migrated) change requests › a stale proposal on a migrated change request that waits on a live approval of WSO2's is never a proposal to answer: Authorize with the previous system's unlabeled stage and a customer_updated_on left over from an old cycle reads as history, and every answer is refused in words
+- Local stack — legacy (migrated) change requests › a stage the sync mirrored with no label: an Emergency change in Authorize is decided by its pending approver (it used to be refused as stale); a stale position-0 stage on a Scheduled one keeps its pending approver through every state move, and customers are shown its label and status only
+
+**`specs/local/customer-change-request-propose.spec.ts`** (13)
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › Propose New Time asks for a START: the end is shown, read-only, and follows it; an empty, a past and an unchanged start show inline errors and send nothing
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › ACCEPT: dave.mendis@example.com proposes a start for CHG-FIXED-007, the change STAYS in Customer Approval with every answer on offer and nothing else moves; WSO2 accepts it and the change is Scheduled at that start
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › COUNTER: WSO2 proposes its own window -> the customers are asked again with fresh requests, no CAB, the page says the proposal was not accepted, and erin approves WSO2's window
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › DECLINE: WSO2 keeps its window -> the customers' live requests are untouched, the page says the proposal was not accepted, and the customer proposes again and is accepted
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › a STANDARD change (CHG-FIXED-005) is the same: the same dialog copy, the proposal waits in Customer Approval, and accepting it schedules it
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › a plain Re-schedule by WSO2 (nothing proposed) asks the customers again of the new window: still Customer Approval, no CAB, fresh requests
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › Approve while a proposal waits approves the CURRENT window, not the proposed time: Scheduled at the planned window, and the proposal stays unanswered history
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › CHG-FIXED-007 on hold: Propose New Time is off with the reason beside it, a hold placed after the dialog was opened is refused with the reason, and Approve is still taken
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › a change request with NO planned window has nothing to move: Propose New Time is off with the reason beside it, the service refuses a proposal in words, and Approve is still taken
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › a page opened before CHG-FIXED-007 was re-scheduled cannot approve the new window: the schedule-changed message, nothing recorded, and the page shows the new window
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › the loop can be repeated: dave proposes, WSO2 counters, dave proposes again from WSO2's window (the end follows the start), WSO2 accepts, and the history keeps every round
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › the service's refusals of a proposal, in its words, change nothing: the planned start, the standing proposal, an end that is not the planned length, an end alone, and a past start
+- Local stack — a customer proposes a new implementation time and WSO2 answers it › WSO2 cannot answer a proposal it did not see, or one that is not there: a stale proposal, a stale window and nothing waiting are 409s in the service's words, and nothing changes
+
+**`specs/local/customer-change-request-visibility.spec.ts`** (7)
+- Local stack — who sees a change request, over its whole life › both boxes ticked on Lumen Works Platform: invisible in New, Assess and Authorize; visible to mira.santos@lumenworks.example AND noel.prasad@lumenworks.example at Customer Approval; still visible, in Customer Approval, after mira proposes a new start and WSO2 answers it, and in every state through Closed; never to dave
+- Local stack — who sees a change request, over its whole life › an unticked Normal and an unticked Standard change request are never visible to a customer, in any state through Closed
+- Local stack — who sees a change request, over its whole life › a Standard change with Customer Approval ticked goes straight to Customer Approval at Request Approval, where both contacts see it (and a proposal keeps it there, as it does every change); an Emergency change never asks the customer: a ticked box is refused at create, and one raised without is invisible through its CAB approval
+- Local stack — who sees a change request, over its whole life › only the customer's REVIEW ticked: invisible through Scheduled, Implement and Review (the box alone shows nothing), visible to both contacts from Customer Review on, and kept after Closed
+- Local stack — who sees a change request, over its whole life › a contact registered AFTER the change request was put to the others (ozzy.late@lumenworks.example) was never asked: they see nothing of it in any state, and the others still do
+- Local stack — who sees a change request, over its whole life › designation is not enough on its own: a contact who is no longer REGISTERED on the project sees nothing (and sees it again when registered), and a change request the sync moved to another project is theirs no more and nobody's there
+- Local stack — who sees a change request, over its whole life › the approvals a customer reads hold the customer's own rows by name, and every internal stage as a label and a status only
+
+**`specs/local/customer-change-requests.spec.ts`** (1)
+- Local stack — customer change requests › dave.mendis@example.com lists CHG-FIXED-007 with its state (Customer Approval on a fresh seed), and only his own project's change requests
+
+## Appendix D. Vitest files about change requests (snapshot; `it()` / `test()` blocks per file)
+
+
+**`apps/csm-portal/webapp`**
+
+- `src/features/csm-cases/components/LinkedChangeRequestsWidget.test.tsx` (6)
+- `src/features/csm-operations/api/useChangeRequestScopeLookups.test.tsx` (10)
+- `src/features/csm-operations/api/useDecideChangeRequestApproval.test.tsx` (6)
+- `src/features/csm-operations/api/usePatchChangeRequest.test.tsx` (3)
+- `src/features/csm-operations/api/useQuickChangeRequestSearch.test.tsx` (7)
+- `src/features/csm-operations/components/ChangeRequestAcceptProposedTimeDialog.test.tsx` (8)
+- `src/features/csm-operations/components/ChangeRequestActionBar.test.tsx` (86)
+- `src/features/csm-operations/components/ChangeRequestApprovals.test.tsx` (51)
+- `src/features/csm-operations/components/ChangeRequestLifecycleStepper.test.tsx` (37)
+- `src/features/csm-operations/components/ChangeRequestProposedTimeBanner.test.tsx` (18)
+- `src/features/csm-operations/components/ChangeRequestRescheduleDialog.test.tsx` (28)
+- `src/features/csm-operations/components/ChangeRequestTransitionReasonDialog.test.tsx` (24)
+- `src/features/csm-operations/components/ChangeRequestsFilterBar.test.tsx` (4)
+- `src/features/csm-operations/components/ChangeRequestsTab.test.tsx` (5)
+- `src/features/csm-operations/components/EditChangeRequestDialog.test.tsx` (83)
+- `src/features/csm-operations/hooks/useChangeRequestScope.test.tsx` (17)
+- `src/features/csm-operations/pages/CreateChangeRequestPage.test.tsx` (104)
+- `src/features/csm-operations/pages/CsmChangeRequestDetailPage.test.tsx` (171)
+- `src/features/csm-operations/utils/__tests__/changeRequestReportPdf.test.ts` (5)
+- `src/features/csm-operations/utils/__tests__/changeRequestStages.test.ts` (57)
+- `src/features/csm-operations/utils/__tests__/changeRequests.test.ts` (152)
+- `src/features/csm-operations/utils/changeRequestsFiltersUrl.test.ts` (11)
+
+**`apps/customer-portal/webapp`**
+
+- `src/components/header/__tests__/SearchChangeRequestCard.test.tsx` (1)
+- `src/features/dashboard/api/__tests__/useGetProjectChangeRequestsStats.test.tsx` (1)
+- `src/features/operations/api/__tests__/fetchChangeRequestSearchResults.test.ts` (2)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestDetailsLoadingSkeleton.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestRejectConfirmDialog.test.tsx` (8)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsCalendarSkeleton.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsCalendarView.test.tsx` (3)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsCsvExportButton.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsFilters.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsList.test.tsx` (2)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsListSkeleton.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsSearchBar.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ChangeRequestsStatCards.test.tsx` (1)
+- `src/features/operations/components/change-requests/__tests__/ProposeNewImplementationTimeModal.test.tsx` (34)
+- `src/features/operations/components/change-requests/__tests__/ScheduledMaintenanceWindowCard.test.tsx` (7)
+- `src/features/operations/pages/__tests__/ChangeRequestDetailsPage.focus.test.tsx` (19)
+- `src/features/operations/pages/__tests__/ChangeRequestDetailsPage.test.tsx` (51)
+- `src/features/operations/pages/__tests__/ChangeRequestsPage.test.tsx` (1)
+- `src/features/operations/pages/__tests__/ChangeRequestsPage.visibility.test.tsx` (3)
+- `src/features/operations/utils/__tests__/changeRequestSchedule.test.ts` (31)
+- `src/features/operations/utils/__tests__/changeRequestUi.test.ts` (8)
+- `src/features/operations/utils/__tests__/changeRequests.test.ts` (64)
+- `src/features/operations/utils/__tests__/changeRequestsCsvExport.test.ts` (3)
+- `src/features/operations/utils/__tests__/changeRequestsSchedulePdf.test.ts` (1)
+
+**`apps/customer-portal/microapp`**
+
+- `src/utils/changeRequestProgress.test.ts` (16)
+
+**`apps/csm-portal/microapp`**
+
+- `src/types/changeRequest.model.test.ts` (6)
