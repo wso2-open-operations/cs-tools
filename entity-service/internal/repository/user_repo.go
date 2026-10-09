@@ -388,7 +388,7 @@ func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []string) ([]domain.Us
 	// last_name, email and user_type are all nullable -- scanning them
 	// into non-pointer fields fails the whole batch on one NULL.
 	rows, err := r.db.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM "user" WHERE id = ANY($1)`, userColumns),
+		fmt.Sprintf(`SELECT %s FROM "user" WHERE id = ANY($1::text[]::uuid[])`, userColumns),
 		ids,
 	)
 	if err != nil {

@@ -8610,6 +8610,7 @@ type CreateKBArticleRequest struct {
 	Body            string  `json:"body"`
 	AuthorID        string  `json:"authorId"`
 	TeamKey         *string `json:"teamKey,omitempty"`
+	SourceCaseID    *string `json:"sourceCaseId,omitempty"`
 }
 
 type UpdateKBArticleStateRequest struct {

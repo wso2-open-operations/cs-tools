@@ -103,6 +103,42 @@ const (
 	// full design.
 	TypeSLATierReached Type = "sla.tier_reached"
 
+	// TypeKBArticlePublished is published by entity-service when a KB
+	// article transitions to the published state -- same reasoning as
+	// TypeSLAClockRegister above: not an email/Chat trigger, so
+	// dispatch.Handle's switch has no case for it either. Consumed
+	// instead by internal/kbembeddingengine on its own handling, sharing
+	// Flow 1's csm-notification-service-kb-embedding consumer group
+	// (both flows subscribe to the same case-events topic anyway --
+	// see cmd/server/main.go's kbDraftConsumerGroup comment).
+	TypeKBArticlePublished Type = "kb.article_published"
+
+	// TypeCaseBillableStatusChanged is Postgres-data-source-only on the
+	// entity-service side, and — like TypeSLATierReached above — not an
+	// email/Chat trigger, so dispatch.Handle's switch has no
+	// case for it either. Unlike TypeSLATierReached, it isn't even handled
+	// by dispatch's own no-op case: internal/timecardengine.Engine consumes
+	// it instead, on its own dedicated consumer group (see
+	// cmd/server/main.go's TIME_CARD_CONSUMER_GROUP/_COUNT) — because
+	// eventbus.Consumer.Run processes one record at a time, fully
+	// sequentially (fetch, handle, commit, repeat), so a future bulk update
+	// over "several time cards," each its own HTTP round trip to
+	// entity-service, must not delay unrelated email/Chat delivery on
+	// dispatch's own consumer instance.
+	//
+	// TODO: internal/timecardengine.Engine.Handle only logs today — the
+	// actual reaction (bulk-flipping every time card's billable flag for
+	// the case) needs a Postgres time_cards table/repo/service on
+	// entity-service first (it has none today; time cards are
+	// ServiceNow-only there). entity-service's own Publish call for this
+	// event is itself still commented out for the same reason, so this
+	// consumer group exists ahead of ever actually receiving one — see
+	// that type's own doc comment in entity-service's copy of this file.
+	// Declared here anyway, kept in sync by hand with entity-service's own
+	// internal/events/events.go, so the two schemas never drift even while
+	// this type is otherwise dormant.
+	TypeCaseBillableStatusChanged Type = "case.billable_status_changed"
+
 	// TypeCRApprovalRequested is published by csm-flow-service's
 	// cr_approval_notice flow when a change request enters an approval state.
 	// Unlike the case.* types, its recipients and subject arrive already
@@ -133,7 +169,7 @@ const (
 var KnownTypes = []Type{
 	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeWorkaroundProvided, TypeIncidentCreated,
 	TypeIncidentAcknowledged, TypeIncidentPriorityElevated, TypeIncidentCommentAdded, TypeIncidentAssigned,
-	TypeSLATierReached,
+	TypeSLATierReached, TypeCaseBillableStatusChanged, TypeKBArticlePublished,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
 	TypeOutageNotificationDue, TypeOutageCommunicationDue,
 	TypeProjectContactInvited, TypeProjectContactRegistered,
@@ -289,6 +325,25 @@ type CommentAddedPayload struct {
 	// with no lookup here at all. See entity-service's own
 	// CommentAddedPayload.IsSupportEngineerResponse doc comment.
 	IsSupportEngineerResponse bool `json:"isSupportEngineerResponse,omitempty"`
+}
+
+// KBArticlePublishedPayload is TypeKBArticlePublished's payload --
+// mirrors entity-service's own copy of this type exactly (same reasoning
+// as every other payload in this file: keep the two schemas in sync by
+// hand). KnowledgeArticleID must match Envelope.EntityID, validated the
+// same way CaseID is validated against EntityID elsewhere in this file.
+type KBArticlePublishedPayload struct {
+	KnowledgeArticleID string `json:"knowledgeArticleId"`
+}
+
+// CaseBillableStatusChangedPayload is the Payload shape for
+// TypeCaseBillableStatusChanged — mirrors entity-service's own
+// CaseBillableStatusChangedPayload exactly; see that type's own doc comment
+// for why LOW severity is the one thing this reacts to and why IsBillable
+// is precomputed there rather than left for a consumer to re-derive.
+type CaseBillableStatusChangedPayload struct {
+	CaseID     string `json:"caseId"`
+	IsBillable bool   `json:"isBillable"`
 }
 
 // StatusChangedPayload is TypeStatusChanged's payload. See

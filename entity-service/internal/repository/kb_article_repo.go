@@ -133,13 +133,27 @@ func scanKBArticle(row interface {
 
 // CreateKBArticle implements KBArticleRepository.
 func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKBArticleRequest) (domain.KBArticle, error) {
+	// Idempotent on source_case_id: if an article already exists for this
+	// case (e.g. a Kafka retry re-running Flow 1's draft generation), the
+	// INSERT no-ops on the unique partial index below and this returns the
+	// existing article instead of erroring or creating a duplicate draft.
+	// source_case_id is nil for non-Flow-1 callers (UI-created articles),
+	// so ON CONFLICT never applies to those.
 	query := fmt.Sprintf(`
-		INSERT INTO knowledge_article (id, knowledge_base_id, title, body, state, author_id, created_by, updated_by, created_on, updated_on, latest)
-		VALUES (gen_random_uuid(), $1, $2, $3, 'draft', $4::uuid, $4::text, $4::text, NOW(), NOW(), true)
-		RETURNING %s`, kbArticleColumns)
+		WITH ins AS (
+			INSERT INTO knowledge_article (id, knowledge_base_id, title, body, state, author_id, source_case_id, created_by, updated_by, created_on, updated_on, latest)
+			VALUES (gen_random_uuid(), $1, $2, $3, 'draft', $4::uuid, $5::uuid, $4::text, $4::text, NOW(), NOW(), true)
+			ON CONFLICT (source_case_id) WHERE source_case_id IS NOT NULL DO NOTHING
+			RETURNING %[1]s
+		)
+		SELECT %[1]s FROM ins
+		UNION ALL
+		SELECT %[1]s FROM knowledge_article
+		WHERE source_case_id = $5::uuid AND NOT EXISTS (SELECT 1 FROM ins)
+		LIMIT 1`, kbArticleColumns)
 
 	var a domain.KBArticle
-	err := scanKBArticle(r.db.QueryRow(ctx, query, req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID), &a)
+	err := scanKBArticle(r.db.QueryRow(ctx, query, req.KnowledgeBaseID, req.Title, req.Body, req.AuthorID, req.SourceCaseID), &a)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {

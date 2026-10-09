@@ -38,12 +38,16 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbclient"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbdraftengine"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/kbembeddingengine"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/slaengine"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/timecardengine"
 )
 
 func main() {
@@ -957,6 +961,102 @@ func main() {
 		}
 	}
 
+	// timecardengine has no Redis/state dependency at all (unlike slaEngine
+	// above) — it's a plain Kafka consumer, so it's started unconditionally,
+	// not gated behind the REDIS_URL/REDIS_ADDR check. Its own dedicated
+	// consumer group, not dispatcher's — see that package's own doc comment
+	// for why. Its Handle is currently log-only (see the package doc
+	// comment): entity-service's own Publish call for events.
+	// TypeCaseBillableStatusChanged is itself still commented out, so this
+	// consumer group exists ahead of having anything to actually do yet.
+	timeCardEngine := timecardengine.NewEngine()
+	timeCardConsumerGroup := envOrDefault("TIME_CARD_CONSUMER_GROUP", "csm-notification-service-time-card")
+	timeCardConsumerCount := envInt("TIME_CARD_CONSUMER_COUNT", 1)
+	timeCardConsumers := startConsumers(ctx, "time-card", eventBusCfg, timeCardConsumerGroup, timeCardConsumerCount, timeCardEngine.Handle, toDeadLetter)
+
+	// KB draft/embedding consumers (Flow 1 + Flow 2). Gated behind
+	// KB_DRAFT_ENABLED=true so the placeholder KB resolver and mock
+	// generators never run against real deployments accidentally.
+	var kbDraftConsumers []*eventbus.Consumer
+	if os.Getenv("KB_DRAFT_ENABLED") == "true" {
+		kbDraftAuthorID := os.Getenv("KB_DRAFT_AUTHOR_ID")
+		if kbDraftAuthorID == "" {
+			slog.Error("KB_DRAFT_ENABLED=true but KB_DRAFT_AUTHOR_ID is empty; refusing to start")
+			os.Exit(1)
+		}
+		azureKey := os.Getenv("AZURE_US_OPENAI_API_KEY")
+		if azureKey == "" {
+			slog.Error("KB_DRAFT_ENABLED=true but AZURE_US_OPENAI_API_KEY is empty; refusing to start")
+			os.Exit(1)
+		}
+		embURL := os.Getenv("AZURE_US_OPENAI_EMBEDDING_URL")
+		pineconeHost := os.Getenv("PINECONE_HOST")
+		if embURL == "" || pineconeHost == "" {
+			slog.Error("KB_DRAFT_ENABLED=true but AZURE_US_OPENAI_EMBEDDING_URL or PINECONE_HOST is empty; refusing to start")
+			os.Exit(1)
+		}
+
+		kbEntityClient := kbclient.New(kbclient.Config{
+			BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+			TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+			ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+			ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+			Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+		})
+
+		// TODO: placeholder resolution -- picks the first active knowledge
+		// base rather than mapping the case's actual product. Replace once
+		// the real case->KB mapping is confirmed (see kbdraftengine's doc).
+		// Gated behind KB_DRAFT_ENABLED so this never runs in production
+		// until the real resolver is in place.
+		resolveKnowledgeBaseID := func(ctx context.Context, kb *kbclient.Client, caseID string) (string, error) {
+			kbs, err := kb.ListKnowledgeBases(ctx)
+			if err != nil {
+				return "", err
+			}
+			for _, k := range kbs {
+				if k.Active {
+					return k.ID, nil
+				}
+			}
+			return "", fmt.Errorf("no active knowledge base found")
+		}
+
+		kbDraftGenerator := kbdraftengine.NewAzureOpenAIDraftGenerator(
+			os.Getenv("AZURE_US_OPENAI_ENDPOINT"),
+			azureKey,
+			os.Getenv("AZURE_US_OPENAI_DEPLOYMENT_NAME"),
+		)
+		kbDraftEngine := kbdraftengine.New(kbEntityClient, kbDraftGenerator, kbDraftAuthorID, resolveKnowledgeBaseID)
+
+		kbEmbeddingGenerator := kbembeddingengine.NewAzureOpenAIEmbeddingGenerator(
+			embURL,
+			os.Getenv("AZURE_US_OPENAI_EMBEDDING_KEY"),
+			os.Getenv("AZURE_US_OPENAI_ENDPOINT"),
+			os.Getenv("AZURE_US_OPENAI_API_KEY"),
+			os.Getenv("AZURE_US_OPENAI_DEPLOYMENT_NAME"),
+		)
+		kbPineconeUpserter := kbembeddingengine.NewPineconeClient(pineconeHost, os.Getenv("PINECONE_KEY"))
+		kbEmbeddingEngine := kbembeddingengine.New(kbEntityClient, kbEmbeddingGenerator, kbPineconeUpserter)
+
+		kbCombinedHandle := func(ctx context.Context, record eventbus.Record) error {
+			if err := kbDraftEngine.Handle(ctx, record); err != nil {
+				return err
+			}
+			return kbEmbeddingEngine.Handle(ctx, record)
+		}
+		kbDraftConsumerGroup := envOrDefault("KB_DRAFT_CONSUMER_GROUP", "csm-notification-service-kb-embedding")
+		kbDraftConsumerCount := envInt("KB_DRAFT_CONSUMER_COUNT", 1)
+		kbDraftConsumers = startConsumers(ctx, "kb-draft", eventBusCfg, kbDraftConsumerGroup, kbDraftConsumerCount, kbCombinedHandle, toDeadLetter)
+
+		slog.Info("KB draft/embedding consumers started",
+			"authorID", kbDraftAuthorID,
+			"consumerGroup", kbDraftConsumerGroup,
+			"consumerCount", kbDraftConsumerCount)
+	} else {
+		slog.Info("KB draft/embedding consumers disabled (set KB_DRAFT_ENABLED=true to enable)")
+	}
+
 	<-ctx.Done()
 	stop()
 
@@ -991,6 +1091,12 @@ func main() {
 		c.Close()
 	}
 	for _, c := range projectDLQConsumers {
+		c.Close()
+	}
+	for _, c := range timeCardConsumers {
+		c.Close()
+	}
+	for _, c := range kbDraftConsumers {
 		c.Close()
 	}
 	for _, c := range escalationConsumers {
