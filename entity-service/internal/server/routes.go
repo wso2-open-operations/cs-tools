@@ -933,6 +933,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		srNotices := service.NewSRNoticeService(
 			repository.NewSRNoticeRepository(repository.NewScoped(db)), srEventPublisher, cfg.SRAlertSRETeamIDs)
 		activeCaseSvc = service.WithSRNotices(activeCaseSvc, srNotices)
+		// Under dual-write, an SR created ServiceNow-first too, unless
+		// SR_CREATION_NOTICES_ENABLED=false hands it back to ServiceNow's flow.
+		if cfg.SRCreationNoticesOnDualWrite() {
+			activeCaseSvc = service.WithSRCreationNoticesOnDualWrite(activeCaseSvc)
+		}
 		// An SR created from a GitHub issue gets the same automation and card.
 		// Set in place, so the GitHub handlers built above already have it.
 		if githubSync != nil {

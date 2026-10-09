@@ -33,6 +33,32 @@ import (
 // longer tied to the caller's own deadline.
 const recordFailureTimeout = 10 * time.Second
 
+// publishTimeout bounds one Event Hub write in Publish. Like the failure
+// record, the write runs on a context.WithoutCancel copy of the caller's ctx
+// (see Publish), so it needs a bound of its own.
+const publishTimeout = 15 * time.Second
+
+// notifyTimeout bounds a whole post-commit notification: the reads that
+// enrich an event (case view, recipients) plus its publish.
+const notifyTimeout = 30 * time.Second
+
+// detachedNotifyContext returns the context for notification work that runs
+// after a write has committed.
+//
+// THE REQUEST'S OWN CONTEXT IS THE WRONG ONE FOR THIS. It is cancelled when
+// the caller disconnects or REQUEST_TIMEOUT (60s) passes -- and by then the
+// write it announces has already committed, so cancelling the notification
+// loses it for good: the record changed and nobody was told. On staging that
+// was dozens of case.comment_added / case.created / sr.comment_added events
+// failing with "context canceled" or "context deadline exceeded".
+//
+// WithoutCancel keeps ctx's values (caller identity, correlation id), which
+// the enrichment reads need, and drops only its cancellation; notifyTimeout
+// stands in for the deadline it drops.
+func detachedNotifyContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+}
+
 // kafkaProducer abstracts eventbus.Producer for testability.
 type kafkaProducer interface {
 	Publish(ctx context.Context, key, value []byte) error
@@ -71,7 +97,13 @@ func (s *eventPublisherService) Publish(ctx context.Context, eventType events.Ty
 		return fmt.Errorf("eventpublisher: encode envelope: %w", err)
 	}
 
-	pubErr := s.kafka.Publish(ctx, []byte(entityID), body)
+	// Detached for the same reason as detachedNotifyContext: every caller
+	// publishes after its write has committed, so the caller going away must
+	// not take the event with it. Done here as well as at the call sites so no
+	// event type can lose its publish to a cancelled request again.
+	pubCtx, cancelPub := context.WithTimeout(context.WithoutCancel(ctx), publishTimeout)
+	defer cancelPub()
+	pubErr := s.kafka.Publish(pubCtx, []byte(entityID), body)
 	if pubErr == nil {
 		return nil
 	}

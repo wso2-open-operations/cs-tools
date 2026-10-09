@@ -948,6 +948,8 @@ func membershipStep(in domain.SalesforceMembershipUpsert, rec salesforceWriteRec
 // systems have already been written, and EventPublisherService records the
 // failure durably.
 func (s *projectMembershipWriteService) publishInvited(ctx context.Context, m domain.ProjectMembership, rec salesforceWriteRecord, resend bool) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.deps.Publisher == nil {
 		return
 	}

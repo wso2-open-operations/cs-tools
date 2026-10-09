@@ -994,6 +994,8 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 // Any failure is logged and does not fail CreateIncident itself: the
 // incident already exists in ServiceNow by this point.
 func (s *snIncidentService) publishIncidentCreated(ctx context.Context, req domain.CreateIncidentRequest, incidentID, number, createdOn string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishIncidentCreatedEvent(ctx, s.publisher, req, incidentID, number, createdOn, s.GetIncidentByID)
 }
 
@@ -1028,6 +1030,8 @@ func fetchIncidentView(ctx context.Context, fetch incidentViewFetcher, id string
 // constructed with publisher=nil specifically so its own CreateIncident
 // never double-publishes -- see routes.go's incident DataSource wiring).
 func publishIncidentCreatedEvent(ctx context.Context, publisher EventPublisherService, req domain.CreateIncidentRequest, incidentID, number, createdOn string, fetch incidentViewFetcher) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1696,6 +1700,8 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 func (s *snIncidentService) publishEscalationSignals(
 	ctx context.Context, req domain.UpdateIncidentRequest, before, after domain.IncidentView,
 ) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil || before.ID == nil {
 		return
 	}
@@ -1732,12 +1738,16 @@ func incidentAssignment(before, after domain.IncidentView) (domain.EntityRef, bo
 // publishIncidentAssigned emits the SRE escalation ladder's stop signal: an
 // engineer has taken the incident.
 func (s *snIncidentService) publishIncidentAssigned(ctx context.Context, incidentID string, assignee domain.EntityRef) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishIncidentAssignedEvent(ctx, s.publisher, incidentID, assignee)
 }
 
 // publishIncidentAssignedEvent is publishIncidentAssigned for any data source, so the Postgres
 // incident update sends the same event. A nil publisher publishes nothing.
 func publishIncidentAssignedEvent(ctx context.Context, publisher EventPublisherService, incidentID string, assignee domain.EntityRef) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1817,12 +1827,16 @@ func incidentPriorityElevation(before, after domain.IncidentView) (oldP, newP st
 // publishIncidentAcknowledged emits the signal that cancels a running call
 // escalation for this incident.
 func (s *snIncidentService) publishIncidentAcknowledged(ctx context.Context, incidentID, prev, next string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishIncidentAcknowledgedEvent(ctx, s.publisher, incidentID, prev, next)
 }
 
 // publishIncidentAcknowledgedEvent is publishIncidentAcknowledged for any data source. A nil
 // publisher publishes nothing.
 func publishIncidentAcknowledgedEvent(ctx context.Context, publisher EventPublisherService, incidentID, prev, next string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1850,6 +1864,8 @@ func publishIncidentAcknowledgedEvent(ctx context.Context, publisher EventPublis
 // stop half. Without them an incident created in Postgres (an alert-born SRE incident) pages
 // every rung even after somebody has it. before without an ID means no baseline: nothing is sent.
 func publishIncidentStopSignals(ctx context.Context, publisher EventPublisherService, req domain.UpdateIncidentRequest, before, after domain.IncidentView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil || before.ID == nil {
 		return
 	}
@@ -1871,6 +1887,8 @@ func publishIncidentStopSignals(ctx context.Context, publisher EventPublisherSer
 func (s *snIncidentService) publishIncidentPriorityElevated(
 	ctx context.Context, incidentID, oldP, newP string, after domain.IncidentView,
 ) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	ctx, cancel := context.WithTimeout(ctx, publishIncidentEscalationSignalTimeout)
 	defer cancel()
 

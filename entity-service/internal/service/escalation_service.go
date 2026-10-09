@@ -264,6 +264,8 @@ func (s *escalationService) CreateEscalation(ctx context.Context, req domain.Cre
 // port of the flow. An escalation that resolved nobody is not published
 // (SN's flow fails that run with "Email has no recipients").
 func (s *escalationService) publishCaseEscalated(ctx context.Context, cv domain.CaseView, actor domain.User, e domain.CreatedEscalation) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}

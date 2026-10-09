@@ -95,6 +95,10 @@ type caseService struct {
 	// srNotices runs the service-request automation and publishes the sr.*
 	// events (see SRNoticeService). nil unless wired via WithSRNotices.
 	srNotices srNotifier
+	// srNoticesOnSNFirst runs srNotices for an SR created ServiceNow-first
+	// (dual-write) too, not only for one created in Postgres alone. Set via
+	// WithSRCreationNoticesOnDualWrite (SR_CREATION_NOTICES_ENABLED).
+	srNoticesOnSNFirst bool
 	// srCatalog derives a service request's subject and description from its
 	// catalog answers when the caller sent none (fillServiceRequestText). nil
 	// unless wired via WithServiceRequestCatalog.
@@ -103,6 +107,55 @@ type caseService struct {
 	// unless wired via WithCaseTypeTransfer, in which case a request carrying a
 	// type is refused as it was before the transfer existed.
 	typeTransfer repository.CaseTypeTransferRepository
+}
+
+// WithSRCreationNoticesOnDualWrite makes an SR created ServiceNow-first under
+// dual-write get the same automation as one created in Postgres alone:
+// assigned to its SRE team, acknowledged, and announced in Chat (sr.created,
+// sr.acknowledged). The acknowledgement comment is mirrored to ServiceNow.
+//
+// Without it, dual-write leaves all of that to ServiceNow's "SR New Request -
+// Acknowledge & Chat Alert" flow. Deactivate that flow when this is on, or
+// each SR is acknowledged and announced twice. A no-op if svc is not a
+// *caseService.
+func WithSRCreationNoticesOnDualWrite(svc CaseService) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.srNoticesOnSNFirst = true
+	}
+	return svc
+}
+
+// srMirroredNotifier is implemented by *SRNoticeService: OnCreated with the
+// acknowledgement mirrored to ServiceNow.
+type srMirroredNotifier interface {
+	OnCreatedMirrored(ctx context.Context, caseID string, mirrorAck func(ctx context.Context, caseID, comment string))
+}
+
+// notifySRCreatedOnSNFirst runs the SR automation for an SR just created
+// ServiceNow-first, mirroring its acknowledgement comment to ServiceNow
+// through the same writeback the comment endpoint uses.
+func (s *caseService) notifySRCreatedOnSNFirst(ctx context.Context, caseID string) {
+	if s.srNotices == nil || !s.srNoticesOnSNFirst {
+		return
+	}
+	mn, ok := s.srNotices.(srMirroredNotifier)
+	if !ok {
+		s.srNotices.OnCreated(ctx, caseID)
+		return
+	}
+	var mirrorAck func(context.Context, string, string)
+	if m, isMirror := s.snMirror.(snCommentMirror); isMirror && s.snWriteback != nil {
+		mirrorAck = func(ctx context.Context, caseID, comment string) {
+			s.snWriteback.Dispatch(ctx, "case_comment", caseID, "create",
+				map[string]any{"caseId": caseID, "type": domain.CommentTypeComment, "content": comment},
+				func(writeCtx context.Context) error {
+					_, err := m.CreateBareCaseComment(writeCtx, caseID, domain.CommentTypeComment, comment)
+					return err
+				},
+			)
+		}
+	}
+	mn.OnCreatedMirrored(ctx, caseID, mirrorAck)
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -680,8 +733,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// createCaseSNFirst orders it this way: publishCaseCreatedEvent's own
 	// GetCaseByID re-fetch needs them already written to resolve Recipients.
 	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, req, c.ID)
-	// Plain Postgres only: under dual-write the SR is created in ServiceNow
-	// first, where its own flow still assigns, acknowledges and announces it.
+	// Plain Postgres only. Under dual-write the SR is created ServiceNow-first
+	// (createCaseSNFirst), which runs this itself when
+	// SR_CREATION_NOTICES_ENABLED leaves it on -- see notifySRCreatedOnSNFirst.
 	if req.Type == "service_request" && s.srNotices != nil {
 		s.srNotices.OnCreated(ctx, c.ID)
 	}
@@ -845,6 +899,10 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// comment.
 	if req.Type == "case" {
 		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
+	}
+	// After the Postgres insert, for the same reason as the publish above.
+	if req.Type == "service_request" {
+		s.notifySRCreatedOnSNFirst(ctx, c.ID)
 	}
 
 	responseState := ""
@@ -1306,11 +1364,15 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// SearchCaseComments re-fetch trick, since the create response never
 	// loses the author's identity here in the first place.
 	if s.publisher != nil {
-		if cv, err := s.GetCaseByID(ctx, req.CaseID); err != nil {
+		// The comment has committed; the re-read below must not be cancelled
+		// with the request (see detachedNotifyContext).
+		notifyCtx, cancelNotify := detachedNotifyContext(ctx)
+		defer cancelNotify()
+		if cv, err := s.GetCaseByID(notifyCtx, req.CaseID); err != nil {
 			slog.ErrorContext(ctx, "create comment: enrich case for case.comment_added publish failed", "caseId", req.CaseID)
 		} else {
-			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
-			publishCommentAddedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.ProjectOnboardingInfo, cv, req, c.ID, authorName, actorEmail, isSupportEngineerResponse)
+			cv.WatchList = s.filterActiveWatchListUsers(notifyCtx, cv, cv.WatchList)
+			publishCommentAddedEvent(notifyCtx, s.publisher, s.AccountDefaultWatcherEmails, s.ProjectOnboardingInfo, cv, req, c.ID, authorName, actorEmail, isSupportEngineerResponse)
 		}
 	}
 
@@ -1815,18 +1877,22 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// notify about it, so a future data-source change doesn't silently stop
 	// notifications from firing. State/Severity are mutually exclusive on
 	// this request (fieldCount above), so at most one of these two fires.
+	// The update has committed; the reads below must not be cancelled with
+	// the request (see detachedNotifyContext).
+	notifyCtx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if req.State != nil && before != nil && derefState(before.State) != *req.State {
 		if label, ok := caseStateDisplayLabel[*req.State]; ok {
-			before.WatchList = s.filterActiveWatchListUsers(ctx, *before, before.WatchList)
-			publishStatusChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, label, *before)
+			before.WatchList = s.filterActiveWatchListUsers(notifyCtx, *before, before.WatchList)
+			publishStatusChangedEvent(notifyCtx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, label, *before)
 		}
 	}
 	if req.Severity != nil && c.Severity != nil && derefSeverity(oldSeverity) != *c.Severity {
-		if cv, err := s.GetCaseByID(ctx, req.ID); err != nil {
+		if cv, err := s.GetCaseByID(notifyCtx, req.ID); err != nil {
 			slog.ErrorContext(ctx, "update case: enrich case for case.severity_changed publish failed", "caseId", req.ID)
 		} else {
-			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
-			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
+			cv.WatchList = s.filterActiveWatchListUsers(notifyCtx, cv, cv.WatchList)
+			publishSeverityChangedEvent(notifyCtx, s.publisher, s.AccountDefaultWatcherEmails, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
 			// Deliberately independent of s.publisher -- see
 			// reviseCaseSLAClocks' own doc comment (sn_case_service.go) for
 			// why revising SLA clocks must not depend on Event Hub being
@@ -2335,6 +2401,8 @@ func (s *caseService) updateCaseMarkFixIssued(ctx context.Context, req domain.Up
 // cv.ProjectDetails/cv.WatchList don't change based on the assignment
 // itself either way.
 func (s *caseService) publishCaseAssigned(ctx context.Context, caseID, assigneeName, assigneeEmail string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil || assigneeEmail == "" {
 		return
 	}
@@ -2446,6 +2514,8 @@ func (s *caseService) acknowledgeCase(ctx context.Context, req domain.UpdateCase
 // than a second lookup -- unlike ServiceNow, this data source computed that
 // identity itself in the same round trip that performed the claim.
 func (s *caseService) publishCaseAcknowledged(ctx context.Context, caseID, acknowledgerName string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}

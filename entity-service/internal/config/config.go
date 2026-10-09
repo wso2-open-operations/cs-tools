@@ -562,6 +562,12 @@ type Config struct {
 	// means on wherever Postgres holds the escalation (DATA_SOURCE=postgres and
 	// dual-write); "false" turns it off. See CaseEscalationNoticesOn.
 	CaseEscalationNotices string
+	// SRCreationNotices is SR_CREATION_NOTICES_ENABLED, the off switch for
+	// running the SR automation (assign, acknowledge, sr.created/sr.acknowledged
+	// cards) on an SR created ServiceNow-first under dual-write. Unset or
+	// "true" means on; "false" leaves it to ServiceNow's own flow. See
+	// SRCreationNoticesOnDualWrite.
+	SRCreationNotices string
 
 	// RedisURL/RedisAddr/RedisPassword configure the optional user cache in
 	// front of GET /users/{id} and GET /users/me (internal/cache), with the
@@ -701,6 +707,7 @@ func Load() *Config {
 		EscalationEL2ProductIdentityServerEmail:       strings.TrimSpace(os.Getenv("ESCALATION_EL2_PRODUCT_EMAIL_IDENTITY_SERVER")),
 		EscalationEL2ProductDefaultEmail:              strings.TrimSpace(os.Getenv("ESCALATION_EL2_PRODUCT_EMAIL_DEFAULT")),
 		CaseEscalationNotices:                         strings.ToLower(strings.TrimSpace(os.Getenv("CASE_ESCALATION_NOTICES_ENABLED"))),
+		SRCreationNotices:                             strings.ToLower(strings.TrimSpace(os.Getenv("SR_CREATION_NOTICES_ENABLED"))),
 		ServerReadTimeout:                             duration("SERVER_READ_TIMEOUT", DefaultServerReadTimeout),
 		ServerWriteTimeout:                            duration("SERVER_WRITE_TIMEOUT", DefaultServerWriteTimeout),
 		RequestTimeout:                                duration("REQUEST_TIMEOUT", DefaultRequestTimeout),
@@ -1031,6 +1038,9 @@ func (c *Config) Validate() error {
 	if v := c.CaseEscalationNotices; v != "" && v != "true" && v != "false" {
 		return fmt.Errorf("CASE_ESCALATION_NOTICES_ENABLED %q must be true, false or unset", v)
 	}
+	if v := c.SRCreationNotices; v != "" && v != "true" && v != "false" {
+		return fmt.Errorf("SR_CREATION_NOTICES_ENABLED %q must be true, false or unset", v)
+	}
 	if v := c.IncidentDefaultServiceID; v != "" && !validate.IsUUID(v) {
 		return fmt.Errorf("INCIDENT_DEFAULT_SERVICE_ID %q is not a valid UUID", v)
 	}
@@ -1104,6 +1114,20 @@ func isSysID(v string) bool {
 // escalation is emailed twice.
 func (c *Config) CaseEscalationNoticesOn() bool {
 	return c.PostgresAuthoritative() && c.CaseEscalationNotices != "false"
+}
+
+// SRCreationNoticesOnDualWrite reports whether an SR created ServiceNow-first
+// under dual-write gets the SR automation (assigned to its SRE team,
+// acknowledged, announced in Chat), as one created in Postgres alone always
+// does. On by default; SR_CREATION_NOTICES_ENABLED=false leaves it to
+// ServiceNow's "SR New Request - Acknowledge & Chat Alert" flow. Only
+// meaningful under dual-write: DATA_SOURCE=postgres runs the automation
+// regardless, and DATA_SOURCE=servicenow has no Postgres SR to run it on.
+//
+// Deactivate that ServiceNow flow when this is on, or each SR is acknowledged
+// and announced twice.
+func (c *Config) SRCreationNoticesOnDualWrite() bool {
+	return c.DataSource == DataSourcePostgresServiceNowDualWrite && c.SRCreationNotices != "false"
 }
 
 func (c *Config) PostgresAuthoritative() bool {

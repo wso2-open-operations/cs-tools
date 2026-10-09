@@ -78,6 +78,24 @@ func NewSRNoticeService(repo repository.SRNoticeRepository, publisher EventPubli
 // OnCreated runs the flow for a service request that was just created.
 // Called only for a case of type service_request.
 func (s *SRNoticeService) OnCreated(ctx context.Context, caseID string) {
+	s.onCreated(ctx, caseID, nil)
+}
+
+// OnCreatedMirrored is OnCreated for an SR that also exists in ServiceNow
+// (created ServiceNow-first under dual-write): mirrorAck is handed the
+// acknowledgement comment once it is written here, so ServiceNow's copy gets
+// it too. A nil mirrorAck behaves exactly like OnCreated.
+//
+// The assignment is not mirrored: ServiceNow's case update API takes no
+// assignment group, so its copy of the SR stays unassigned until it does.
+func (s *SRNoticeService) OnCreatedMirrored(ctx context.Context, caseID string, mirrorAck func(ctx context.Context, caseID, comment string)) {
+	s.onCreated(ctx, caseID, mirrorAck)
+}
+
+func (s *SRNoticeService) onCreated(ctx context.Context, caseID string, mirrorAck func(ctx context.Context, caseID, comment string)) {
+	// The SR has committed; finish its automation even if the request ends.
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	// The flow runs as the system, not as whoever raised the SR (often a
 	// customer, who could not assign it).
 	ctx = repository.WithSystemIdentity(ctx)
@@ -118,6 +136,9 @@ func (s *SRNoticeService) OnCreated(ctx context.Context, caseID string) {
 		return
 	}
 	slog.InfoContext(ctx, "sr notices: service request assigned and acknowledged", "caseId", caseID, "number", sr.Number)
+	if mirrorAck != nil {
+		mirrorAck(ctx, caseID, srAcknowledgement)
+	}
 	s.publish(ctx, events.TypeSRAcknowledged, caseID, events.SRAcknowledgedPayload{
 		SRRef:     srRef(sr),
 		CommentID: commentID,
@@ -130,6 +151,8 @@ func (s *SRNoticeService) OnCreated(ctx context.Context, caseID string) {
 // consumer requires one, and an event it rejects is retried into its
 // dead-letter topic for nothing.
 func (s *SRNoticeService) OnComment(ctx context.Context, caseID, commentID string, commentType domain.CommentType, content, authorEmail, authorName string, createdOn time.Time) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	var t events.SRCommentType
 	switch commentType {
 	case domain.CommentTypeComment:
@@ -163,6 +186,8 @@ func (s *SRNoticeService) OnComment(ctx context.Context, caseID, commentID strin
 }
 
 func (s *SRNoticeService) publish(ctx context.Context, eventType events.Type, caseID string, payload any) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}

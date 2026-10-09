@@ -283,6 +283,8 @@ func wasInvitedState(state string) bool {
 // publishProjectContactRegistered emits project_contact.registered for the
 // Welcome email. Failures are logged, like publishProjectContactInvited.
 func (s *salesforceEventService) publishProjectContactRegistered(ctx context.Context, in domain.SalesforceMembershipUpsert, pc salesentity.ProjectContact, eventModifiedOn time.Time, hasModified bool) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.membership.Publisher == nil {
 		return
 	}
@@ -331,6 +333,8 @@ func (s *salesforceEventService) recordDatabaseStepFailed(ctx context.Context, s
 // invitation. Failures are logged, never returned: the database write is
 // already committed and EventPublisherService records the failure durably.
 func (s *salesforceEventService) publishProjectContactInvited(ctx context.Context, in domain.SalesforceMembershipUpsert, pc salesentity.ProjectContact, eventModifiedOn time.Time, hasModified bool) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.membership.Publisher == nil {
 		return
 	}

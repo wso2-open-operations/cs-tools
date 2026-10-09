@@ -1138,3 +1138,42 @@ func TestConfig_Validate_CaseEscalationNotices(t *testing.T) {
 		t.Error(`"yes": want a startup error`)
 	}
 }
+
+// TestConfig_SRCreationNoticesOnDualWrite: on by default under dual-write,
+// off with "false", and never reported for the other data sources (postgres
+// runs the automation regardless; servicenow has no Postgres SR).
+func TestConfig_SRCreationNoticesOnDualWrite(t *testing.T) {
+	for _, tc := range []struct {
+		ds      DataSource
+		setting string
+		want    bool
+	}{
+		{DataSourcePostgresServiceNowDualWrite, "", true},
+		{DataSourcePostgresServiceNowDualWrite, "true", true},
+		{DataSourcePostgresServiceNowDualWrite, "false", false},
+		{DataSourcePostgres, "", false},
+		{DataSourceServiceNow, "true", false},
+	} {
+		c := Config{DataSource: tc.ds, SRCreationNotices: tc.setting}
+		if got := c.SRCreationNoticesOnDualWrite(); got != tc.want {
+			t.Errorf("DATA_SOURCE=%s SR_CREATION_NOTICES_ENABLED=%q: got %v, want %v", tc.ds, tc.setting, got, tc.want)
+		}
+	}
+}
+
+// TestConfig_Validate_SRCreationNotices: anything but true / false / unset
+// refuses to start.
+func TestConfig_Validate_SRCreationNotices(t *testing.T) {
+	for _, v := range []string{"", "true", "false"} {
+		c := baseValidConfig()
+		c.SRCreationNotices = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("%q: unexpected error %v", v, err)
+		}
+	}
+	c := baseValidConfig()
+	c.SRCreationNotices = "on"
+	if err := c.Validate(); err == nil {
+		t.Error(`"on": want a startup error`)
+	}
+}

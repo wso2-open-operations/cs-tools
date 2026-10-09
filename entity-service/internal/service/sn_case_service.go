@@ -1172,6 +1172,8 @@ func registerCaseSLAClocksEvent(ctx context.Context, slaEngine SLAEngineService,
 // reasoning — this is now a thin wrapper around it, same shape as
 // snIncidentService.publishIncidentCreated/publishIncidentCreatedEvent.
 func (s *snCaseService) publishCaseCreated(ctx context.Context, req domain.CreateCaseRequest, caseID string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, req, caseID)
 }
 
@@ -1255,6 +1257,8 @@ func publishCaseCreatedEvent(
 	req domain.CreateCaseRequest,
 	caseID string,
 ) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1420,6 +1424,8 @@ func (s *snCaseService) resolveCommentAuthor(ctx context.Context, caseID, commen
 // call site (see caseService.CreateCaseComment) and needs no re-fetch at
 // all.
 func (s *snCaseService) publishCommentAdded(ctx context.Context, req domain.CreateCaseCommentRequest, commentID string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}
@@ -1474,6 +1480,8 @@ func (s *snCaseService) publishCommentAdded(ctx context.Context, req domain.Crea
 // looked up here, since "is this author a support engineer" is answered via
 // a different mechanism on each data source.
 func publishCommentAddedEvent(ctx context.Context, publisher EventPublisherService, resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error), resolveProjectOnboardingInfo func(context.Context, string) (string, bool, error), cv domain.CaseView, req domain.CreateCaseCommentRequest, commentID, authorName, authorEmail string, isSupportEngineerResponse bool) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1767,6 +1775,8 @@ func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, r
 // wrapper around publishStatusChangedEvent — see that function's own doc
 // comment for why.
 func (s *snCaseService) publishStatusChanged(ctx context.Context, caseID, newStatus string, before domain.CaseView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishStatusChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, caseID, newStatus, before)
 }
 
@@ -1808,6 +1818,8 @@ var caseStateDisplayLabel = map[domain.CaseState]string{
 // confirm the state is actually transitioning, not a caller re-PATCHing
 // the current value.
 func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherService, resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error), caseID, newStatus string, before domain.CaseView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil || newStatus == "" {
 		return
 	}
@@ -1881,6 +1893,8 @@ func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherServ
 // wrapper around publishSeverityChangedEvent — see that function's own doc
 // comment for why.
 func (s *snCaseService) publishSeverityChanged(ctx context.Context, caseID, oldSeverity, newSeverity string, before domain.CaseView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, caseID, oldSeverity, newSeverity, before)
 }
 
@@ -1892,6 +1906,8 @@ func (s *snCaseService) publishSeverityChanged(ctx context.Context, caseID, oldS
 // already confirmed they actually differ, not a caller re-PATCHing the
 // case's current severity.
 func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherService, resolveAccountDefaultWatcherEmails func(context.Context, string) ([]string, error), caseID, oldSeverity, newSeverity string, before domain.CaseView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil || newSeverity == "" {
 		return
 	}
@@ -1947,6 +1963,8 @@ func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherSe
 // there's no recipient audience and no display enrichment to resolve for a
 // pure tracking signal, so this needs no CaseView at all.
 func publishWorkaroundProvidedEvent(ctx context.Context, publisher EventPublisherService, caseID string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if publisher == nil {
 		return
 	}
@@ -1990,6 +2008,8 @@ func publishWorkaroundProvidedEvent(ctx context.Context, publisher EventPublishe
 // Runs synchronously, bounded by publishCaseAssignedTimeout — see
 // publishCaseCreated's own doc comment for why (same reasoning).
 func (s *snCaseService) publishCaseAssigned(ctx context.Context, caseID, assigneeName, assigneeEmail string, before domain.CaseView) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil || assigneeEmail == "" {
 		return
 	}
@@ -2044,6 +2064,8 @@ func (s *snCaseService) publishCaseAssigned(ctx context.Context, caseID, assigne
 // Runs synchronously, bounded by publishCaseAcknowledgedTimeout — see
 // publishCaseCreated's own doc comment for why (same reasoning).
 func (s *snCaseService) publishCaseAcknowledged(ctx context.Context, caseID, acknowledgerName string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}

@@ -203,6 +203,8 @@ func (s *snCommentSearchService) CreateComment(ctx context.Context, req domain.C
 // CreateComment: the comment exists in ServiceNow by this point, exactly the
 // reasoning publishIncidentCreated applies.
 func (s *snCommentSearchService) publishIncidentCommentAdded(ctx context.Context, req domain.CreateCommentRequest, commentID string) {
+	ctx, cancelNotify := detachedNotifyContext(ctx)
+	defer cancelNotify()
 	if s.publisher == nil {
 		return
 	}
