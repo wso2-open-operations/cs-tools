@@ -104,8 +104,8 @@ const NEXT_ROTATION_HORIZON_DAYS = 56;
 
 const TITLE: Record<ViewTab, string> = {
   mine: "My week",
-  today: "Who is working today",
-  week: "Who is working this week",
+  today: "Who is on today",
+  week: "Who is on this week",
   roster: "Month roster",
 };
 
@@ -1132,6 +1132,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               zones={zones}
               absences={absences.data?.absences ?? []}
               absenceKinds={catalogue.data?.absenceKinds ?? []}
+              teamDefaultShift={teamDefaultShift}
               {...scopeControls}
             />
           ) : view === "week" ? (
@@ -1191,7 +1192,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               tz={tz}
               myAbsences={mineAbsences.data?.absences ?? []}
               absenceKinds={catalogue.data?.absenceKinds ?? []}
-              // A day card opens that day in "Who is working today".
+              // A day card opens that day in "Who is on today".
               onShowDay={(iso) => {
                 const [y, m, d] = iso.split("-").map(Number);
                 setAnchor(new Date(y, m - 1, d));

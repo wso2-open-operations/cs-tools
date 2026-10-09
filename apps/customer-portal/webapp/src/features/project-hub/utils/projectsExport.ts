@@ -16,7 +16,10 @@
 
 import { buildCsvContent, downloadCsvFile } from "@utils/csv";
 import { downloadPdfFile, type PdfColumnStyle } from "@utils/pdf";
-import type { ProjectListItem, SearchProjectsResponse } from "@features/project-hub/types/projects";
+import type {
+  GlobalSearchPayload,
+  GlobalSearchResponse,
+} from "@features/project-hub/types/globalSearch";
 
 export type AuthFetchFn = (
   input: RequestInfo | URL,
@@ -24,6 +27,21 @@ export type AuthFetchFn = (
 ) => Promise<Response>;
 
 const EXPORT_ALL_PAGE_SIZE = 50;
+
+/**
+ * What an exported project row needs. Both a project row of the global search (what the
+ * Projects tables on screen show) and a ProjectListItem satisfy it, so the export can be fed
+ * either without a conversion.
+ */
+export type ProjectExportRow = {
+  key: string;
+  name: string;
+  closureState?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  actionRequiredCount?: number | null;
+  outstandingCount?: number | null;
+};
 
 const EXPORT_HEADERS = [
   "Project Key",
@@ -61,6 +79,20 @@ function formatDate(value: string | null | undefined): string {
   return isNaN(d.getTime()) ? "--" : d.toLocaleDateString(DATE_LOCALE, DATE_FORMAT);
 }
 
+/**
+ * The status as the export has always printed it: "Open", "Read Only", "Pending Notified".
+ * POST /search returns the raw lowercase value ("read_only"); the endpoint the export used to
+ * read title-cased it (INITCAP(REPLACE(state, '_', ' '))), so do the same here to keep the
+ * exported files unchanged. No status is "Active".
+ */
+function formatClosureState(value: string | null | undefined): string {
+  if (!value) return "Active";
+  return value
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/(^|[^a-z0-9])([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+}
+
 function buildFilename(ext: "csv" | "pdf"): string {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -69,11 +101,11 @@ function buildFilename(ext: "csv" | "pdf"): string {
   return `projects-${yyyy}-${mm}-${dd}.${ext}`;
 }
 
-function mapProjectsToRows(projects: ProjectListItem[]): string[][] {
+function mapProjectsToRows(projects: ProjectExportRow[]): string[][] {
   return projects.map((p) => [
     p.key,
     p.name,
-    p.closureState ?? "Active",
+    formatClosureState(p.closureState),
     formatDate(p.startDate),
     formatDate(p.endDate),
     String(p.actionRequiredCount ?? 0),
@@ -84,24 +116,31 @@ function mapProjectsToRows(projects: ProjectListItem[]): string[][] {
 /**
  * Fetches every page of projects matching an optional search query.
  * Use this to collect the full dataset before exporting.
+ *
+ * It asks the same endpoint the Projects tables on screen do (POST /search, projects only), so
+ * the file carries the counts the table shows. POST /projects/search, which this used to call,
+ * returns no Action Required / Outstanding counts at all, so every exported row said 0.
  */
 export async function fetchAllProjectsForExport(
   authFetch: AuthFetchFn,
   searchQuery?: string,
-): Promise<ProjectListItem[]> {
+): Promise<ProjectExportRow[]> {
   const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
   if (!baseUrl) throw new Error("CUSTOMER_PORTAL_BACKEND_BASE_URL is not configured");
 
-  const allProjects: ProjectListItem[] = [];
+  const allProjects: ProjectExportRow[] = [];
   let offset = 0;
 
   for (;;) {
-    const body = {
-      pagination: { offset, limit: EXPORT_ALL_PAGE_SIZE },
-      ...(searchQuery?.trim() ? { filters: { searchQuery: searchQuery.trim() } } : {}),
+    const body: GlobalSearchPayload = {
+      filters: {
+        types: ["projects"],
+        ...(searchQuery?.trim() ? { searchQuery: searchQuery.trim() } : {}),
+      },
+      projectsPagination: { offset, limit: EXPORT_ALL_PAGE_SIZE },
     };
 
-    const response = await authFetch(`${baseUrl}/projects/search`, {
+    const response = await authFetch(`${baseUrl}/search`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -110,27 +149,28 @@ export async function fetchAllProjectsForExport(
       throw new Error(`Error fetching projects for export: ${response.statusText}`);
     }
 
-    const data: SearchProjectsResponse = await response.json();
+    const data: GlobalSearchResponse = await response.json();
     const page = data.projects ?? [];
     allProjects.push(...page);
 
-    const nextOffset = offset + EXPORT_ALL_PAGE_SIZE;
-    if (page.length === 0 || allProjects.length >= data.totalRecords || nextOffset <= offset) {
+    // Advance by what the page actually held, not by the page size we asked for: if any layer
+    // ever returned fewer than asked, stepping by the full size would skip the rows between.
+    if (page.length === 0 || allProjects.length >= data.projectsTotal) {
       break;
     }
-    offset = nextOffset;
+    offset += page.length;
   }
 
   return allProjects;
 }
 
-export function downloadProjectListCsv(projects: ProjectListItem[]): void {
+export function downloadProjectListCsv(projects: ProjectExportRow[]): void {
   const rows = mapProjectsToRows(projects);
   const content = buildCsvContent(EXPORT_HEADERS, rows);
   downloadCsvFile(buildFilename("csv"), content);
 }
 
-export function downloadProjectListPdf(projects: ProjectListItem[]): void {
+export function downloadProjectListPdf(projects: ProjectExportRow[]): void {
   const rows = mapProjectsToRows(projects);
   downloadPdfFile(
     buildFilename("pdf"),

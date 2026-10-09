@@ -239,6 +239,12 @@ type Config struct {
 	// validated by service.ParseSpecialistHandoffConfig at startup; empty
 	// hands nothing off.
 	SpecialistHandoffConfig string
+	// IncidentDefaultServiceID is INCIDENT_DEFAULT_SERVICE_ID: the service
+	// (service.id, a UUID) whose support group a new incident gets when its
+	// own service has none -- the "default team". Empty: such an incident is
+	// created unassigned and logged as an error. Validated as a UUID; checked
+	// at startup (best effort, logged only) to exist and have a support group.
+	IncidentDefaultServiceID string
 	// SpecialistHandoffGithubTokens is SPECIALIST_HANDOFF_GITHUB_TOKENS, a
 	// secret: one line of JSON mapping a credential name to the GitHub token
 	// that files a specialist handoff's internal issue (ServiceNow's
@@ -532,39 +538,30 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// Escalation* configure the fixed, deployment-specific notification
-	// recipient GROUPS EscalationService.CreateEscalation (Postgres data
-	// source) layers on top of the per-case-derived ones (account technical
-	// owner, CRE team lead, product routing, CSM) -- see that method's own
-	// doc comment for the full EL1..EL5 cumulative rule these feed. Each one
-	// is a "group".id (migration 0074), resolved to its real member list
-	// via team_member.group_id, NOT a single fixed address -- every
-	// configured tier notifies however many people are actually in that
-	// group. Every one of these is OPTIONAL: an unset/empty value means "no
-	// recipients from this slot," never a startup failure or a request
-	// error -- not every deployment configures every tier on day one, same
-	// reasoning CustomerRoles/CSEngineerRole's own doc comments give for
-	// org-specific vocabulary that doesn't belong hardcoded in this repo.
-	// None of these are required by Validate for that reason, though a SET
-	// value is still checked there for being a well-formed UUID (a
-	// misconfigured group id would otherwise silently resolve zero
-	// recipients instead of surfacing the typo at startup).
-	EscalationEL1AmericasTLGroupID string
-	EscalationEL2AmericasTUGroupID string
-	// EscalationEL2ServiceProductGroupID/EscalationEL2IdentityServerGroupID/
-	// EscalationEL2DefaultProductGroupID are the three product-routed EL2
-	// buckets: the case's deployed product's category/business_unit picks
-	// exactly one (SERVICE -> service; SOFTWARE with business_unit IAM ->
-	// identity server; everything else, including no business_unit -> the
-	// software default). A case with no deployed product/product info at
-	// all gets none of the three, silently.
-	EscalationEL2ServiceProductGroupID string
-	EscalationEL2IdentityServerGroupID string
-	EscalationEL2DefaultProductGroupID string
-	EscalationEL3CREHeadGroupID        string
-	EscalationEL4CCOGroupID            string
-	EscalationEL4CROGroupID            string
-	EscalationEL5CEOGroupID            string
+	// Escalation* are the fixed EL1/EL2 case-escalation notification
+	// recipients EscalationService.CreateEscalation (Postgres data sources)
+	// adds to the per-case ones -- see EscalationRepository.CreateEscalation's
+	// doc comment for the full EL1..EL5 rule (EL3-EL5 come from the cre_head
+	// team position and the case_escalation_el4/el5 roles, not from config).
+	// Each is ServiceNow's matching x_wso2_customer_0.escalation.* system
+	// property, copied as it is: the two *_EMAILS are comma-separated lists,
+	// the rest one address each.
+	// Every one is OPTIONAL: unset means "no recipients from this slot",
+	// never a startup failure. A set value must look like an email address
+	// (Validate), since a typo would otherwise drop that tier silently.
+	EscalationEL1AmericasTLEmails []string
+	EscalationEL2AmericasTUEmails []string
+	// EscalationEL2Product*Email: exactly one of the three is notified at
+	// EL2, picked by the case's product (service / WSO2 Identity Server /
+	// anything else or no product).
+	EscalationEL2ProductServiceEmail        string
+	EscalationEL2ProductIdentityServerEmail string
+	EscalationEL2ProductDefaultEmail        string
+	// CaseEscalationNotices is CASE_ESCALATION_NOTICES_ENABLED, the off switch
+	// for publishing case.escalated (the escalation email): unset or "true"
+	// means on wherever Postgres holds the escalation (DATA_SOURCE=postgres and
+	// dual-write); "false" turns it off. See CaseEscalationNoticesOn.
+	CaseEscalationNotices string
 
 	// RedisURL/RedisAddr/RedisPassword configure the optional user cache in
 	// front of GET /users/{id} and GET /users/me (internal/cache), with the
@@ -657,15 +654,16 @@ func Load() *Config {
 		CSMPortalBaseURL:                         os.Getenv("CSM_PORTAL_BASE_URL"),
 		SpecialistHandoffConfig:                  os.Getenv("SPECIALIST_HANDOFF_CONFIG"),
 		SpecialistHandoffGithubTokens:            os.Getenv("SPECIALIST_HANDOFF_GITHUB_TOKENS"),
+		IncidentDefaultServiceID:                 strings.TrimSpace(os.Getenv("INCIDENT_DEFAULT_SERVICE_ID")),
 		GithubLabelTypeIncident:                  os.Getenv("GITHUB_LABEL_TYPE_INCIDENT"),
 		GithubLabelTypeServiceRequest:            os.Getenv("GITHUB_LABEL_TYPE_SERVICE_REQUEST"),
 		GithubLabelsClass:                        os.Getenv("GITHUB_LABELS_CLASS"),
 		GithubLabelStatusAssigned:                os.Getenv("GITHUB_LABEL_STATUS_ASSIGNED"),
 		CRNoticesEnabled:                         os.Getenv("CR_NOTICES_ENABLED") == "true",
 		CRStrictVisibilityFromRaw:                strings.TrimSpace(os.Getenv("CR_STRICT_VISIBILITY_FROM")),
-		CSMMigrationSalesforceMembershipIngestEnabled: os.Getenv("CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED") == "true",
-		CSMMigrationSalesforceAccountIngestEnabled:    os.Getenv("CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED") == "true",
-		CSMMigrationPortalWritesEnabled:               os.Getenv("CSM_MIGRATION_PORTAL_WRITES_ENABLED") == "true",
+		CSMMigrationSalesforceMembershipIngestEnabled: envFlagOn("CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED"),
+		CSMMigrationSalesforceAccountIngestEnabled:    envFlagOn("CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED"),
+		CSMMigrationPortalWritesEnabled:               envFlagOn("CSM_MIGRATION_PORTAL_WRITES_ENABLED"),
 		CREventHubTopic:                               getEnvOrDefault("CR_EVENT_HUB_TOPIC", "cr-events"),
 		ProjectEventHubTopic:                          getEnvOrDefault("PROJECT_EVENT_HUB_TOPIC", "project-events"),
 		IncidentEventHubTopic:                         strings.TrimSpace(os.Getenv("INCIDENT_EVENT_HUB_TOPIC")),
@@ -696,16 +694,13 @@ func Load() *Config {
 		SalesEntityClientID:                           os.Getenv("SALES_ENTITY_CLIENT_ID"),
 		SalesEntityClientSecret:                       os.Getenv("SALES_ENTITY_CLIENT_SECRET"),
 		SalesEntityScopes:                             os.Getenv("SALES_ENTITY_SCOPES"),
-		CSMMigrationMembershipRegistrationEnabled:     os.Getenv("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED") == "true",
-		EscalationEL1AmericasTLGroupID:                os.Getenv("ESCALATION_EL1_AMERICAS_TL_GROUP_ID"),
-		EscalationEL2AmericasTUGroupID:                os.Getenv("ESCALATION_EL2_AMERICAS_TU_GROUP_ID"),
-		EscalationEL2ServiceProductGroupID:            os.Getenv("ESCALATION_EL2_SERVICE_PRODUCT_GROUP_ID"),
-		EscalationEL2IdentityServerGroupID:            os.Getenv("ESCALATION_EL2_IDENTITY_SERVER_GROUP_ID"),
-		EscalationEL2DefaultProductGroupID:            os.Getenv("ESCALATION_EL2_DEFAULT_PRODUCT_GROUP_ID"),
-		EscalationEL3CREHeadGroupID:                   os.Getenv("ESCALATION_EL3_CRE_HEAD_GROUP_ID"),
-		EscalationEL4CCOGroupID:                       os.Getenv("ESCALATION_EL4_CCO_GROUP_ID"),
-		EscalationEL4CROGroupID:                       os.Getenv("ESCALATION_EL4_CRO_GROUP_ID"),
-		EscalationEL5CEOGroupID:                       os.Getenv("ESCALATION_EL5_CEO_GROUP_ID"),
+		CSMMigrationMembershipRegistrationEnabled:     envFlagOn("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED"),
+		EscalationEL1AmericasTLEmails:                 splitComma(os.Getenv("ESCALATION_EL1_AMERICAS_TL_EMAILS")),
+		EscalationEL2AmericasTUEmails:                 splitComma(os.Getenv("ESCALATION_EL2_AMERICAS_TU_EMAILS")),
+		EscalationEL2ProductServiceEmail:              strings.TrimSpace(os.Getenv("ESCALATION_EL2_PRODUCT_EMAIL_SERVICE")),
+		EscalationEL2ProductIdentityServerEmail:       strings.TrimSpace(os.Getenv("ESCALATION_EL2_PRODUCT_EMAIL_IDENTITY_SERVER")),
+		EscalationEL2ProductDefaultEmail:              strings.TrimSpace(os.Getenv("ESCALATION_EL2_PRODUCT_EMAIL_DEFAULT")),
+		CaseEscalationNotices:                         strings.ToLower(strings.TrimSpace(os.Getenv("CASE_ESCALATION_NOTICES_ENABLED"))),
 		ServerReadTimeout:                             duration("SERVER_READ_TIMEOUT", DefaultServerReadTimeout),
 		ServerWriteTimeout:                            duration("SERVER_WRITE_TIMEOUT", DefaultServerWriteTimeout),
 		RequestTimeout:                                duration("REQUEST_TIMEOUT", DefaultRequestTimeout),
@@ -722,11 +717,11 @@ func Load() *Config {
 			"clientId", cfg.CSMPortalBackendClientID)
 	}
 	// Set outside the literal so its longer key does not realign every field above.
-	cfg.CSMMigrationSalesforceOpportunityIngestEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED") == "true"
-	cfg.CSMMigrationSalesforceProjectIngestEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED") == "true"
-	cfg.CSMMigrationSalesforceProjectInsertEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED") == "true"
-	cfg.CSMMigrationSalesforcePartnerIngestEnabled = os.Getenv("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED") == "true"
-	cfg.CSMMigrationCustomerEngagementIngestEnabled = os.Getenv("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED") == "true"
+	cfg.CSMMigrationSalesforceOpportunityIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED")
+	cfg.CSMMigrationSalesforceProjectIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED")
+	cfg.CSMMigrationSalesforceProjectInsertEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED")
+	cfg.CSMMigrationSalesforcePartnerIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED")
+	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
 	cfg.RedisAddr = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
@@ -1015,26 +1010,29 @@ func (c *Config) Validate() error {
 	if c.CSMPortalBackendClientID != "" && c.CSMPortalBackendClientID == c.CustomerPortalBackendClientID {
 		return fmt.Errorf("CSM_PORTAL_BACKEND_CLIENT_ID and CUSTOMER_PORTAL_BACKEND_CLIENT_ID must not be the same client id")
 	}
-	// Each Escalation*GroupID is optional (unset = no recipients from that
-	// slot, see the field's own doc comment) but, if SET, must be a
-	// well-formed "group".id -- otherwise a typo'd env var would silently
-	// resolve to zero recipients at request time instead of failing loudly
-	// at startup where it's actually actionable.
-	escalationGroupIDs := map[string]string{
-		"ESCALATION_EL1_AMERICAS_TL_GROUP_ID":     c.EscalationEL1AmericasTLGroupID,
-		"ESCALATION_EL2_AMERICAS_TU_GROUP_ID":     c.EscalationEL2AmericasTUGroupID,
-		"ESCALATION_EL2_SERVICE_PRODUCT_GROUP_ID": c.EscalationEL2ServiceProductGroupID,
-		"ESCALATION_EL2_IDENTITY_SERVER_GROUP_ID": c.EscalationEL2IdentityServerGroupID,
-		"ESCALATION_EL2_DEFAULT_PRODUCT_GROUP_ID": c.EscalationEL2DefaultProductGroupID,
-		"ESCALATION_EL3_CRE_HEAD_GROUP_ID":        c.EscalationEL3CREHeadGroupID,
-		"ESCALATION_EL4_CCO_GROUP_ID":             c.EscalationEL4CCOGroupID,
-		"ESCALATION_EL4_CRO_GROUP_ID":             c.EscalationEL4CROGroupID,
-		"ESCALATION_EL5_CEO_GROUP_ID":             c.EscalationEL5CEOGroupID,
+	// Each Escalation* recipient is optional (unset = no recipients from
+	// that slot) but, if SET, must look like an email address -- a typo
+	// would otherwise drop that tier silently at escalation time instead of
+	// failing at startup where it is actionable.
+	escalationEmails := map[string][]string{
+		"ESCALATION_EL1_AMERICAS_TL_EMAILS":            c.EscalationEL1AmericasTLEmails,
+		"ESCALATION_EL2_AMERICAS_TU_EMAILS":            c.EscalationEL2AmericasTUEmails,
+		"ESCALATION_EL2_PRODUCT_EMAIL_SERVICE":         {c.EscalationEL2ProductServiceEmail},
+		"ESCALATION_EL2_PRODUCT_EMAIL_IDENTITY_SERVER": {c.EscalationEL2ProductIdentityServerEmail},
+		"ESCALATION_EL2_PRODUCT_EMAIL_DEFAULT":         {c.EscalationEL2ProductDefaultEmail},
 	}
-	for envVar, value := range escalationGroupIDs {
-		if value != "" && !validate.IsUUID(value) {
-			return fmt.Errorf("%s %q is not a valid UUID", envVar, value)
+	for envVar, values := range escalationEmails {
+		for _, v := range values {
+			if v != "" && (strings.ContainsAny(v, " \t,;") || strings.Count(v, "@") != 1 || strings.HasPrefix(v, "@") || strings.HasSuffix(v, "@")) {
+				return fmt.Errorf("%s %q is not an email address", envVar, v)
+			}
 		}
+	}
+	if v := c.CaseEscalationNotices; v != "" && v != "true" && v != "false" {
+		return fmt.Errorf("CASE_ESCALATION_NOTICES_ENABLED %q must be true, false or unset", v)
+	}
+	if v := c.IncidentDefaultServiceID; v != "" && !validate.IsUUID(v) {
+		return fmt.Errorf("INCIDENT_DEFAULT_SERVICE_ID %q is not a valid UUID", v)
 	}
 	if v := c.CustomerEngagementFirefightingTypeID; v != "" && !isSysID(v) {
 		return fmt.Errorf("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID must be a 32-character hex sys_id")
@@ -1094,6 +1092,20 @@ func isSysID(v string) bool {
 // nothing more. Memberships never go through the ServiceNow mirror: ServiceNow
 // gets them from Salesforce, through its own Service Bus subscription, so it
 // stays current in either mode.
+// CaseEscalationNoticesOn reports whether escalations publish case.escalated
+// (the escalation email): on wherever Postgres holds the escalation --
+// DATA_SOURCE=postgres and dual-write alike -- unless
+// CASE_ESCALATION_NOTICES_ENABLED=false. Never on the ServiceNow data source,
+// which has no Postgres escalation to publish from.
+//
+// Under dual-write the escalation is also mirrored into ServiceNow, whose
+// "Internal Escalation notification" flow mails it too wherever that instance
+// delivers mail. Switch the flow off when this goes live there, or each
+// escalation is emailed twice.
+func (c *Config) CaseEscalationNoticesOn() bool {
+	return c.PostgresAuthoritative() && c.CaseEscalationNotices != "false"
+}
+
 func (c *Config) PostgresAuthoritative() bool {
 	return c.DataSource == DataSourcePostgres || c.DataSource == DataSourcePostgresServiceNowDualWrite
 }
@@ -1190,6 +1202,11 @@ func (c *Config) HasGithubIntegration() bool {
 	return c.GithubIntegrationEnabled &&
 		c.GithubToken != "" &&
 		c.GithubIntegrationLogin != ""
+}
+
+// envFlagOn is true unless the value is "false" (case-insensitive).
+func envFlagOn(key string) bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv(key)), "false")
 }
 
 // envDuration reads a Go duration string (e.g. "5s", "500ms"), falling back to

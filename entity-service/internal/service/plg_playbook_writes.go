@@ -21,13 +21,20 @@ import (
 
 // PlaybookWriter is the write half of the playbook templates.
 type PlaybookWriter interface {
-	Create(ctx context.Context, req domain.CreatePlaybookRequest) (domain.CreatePlaybookResult, error)
-	Patch(ctx context.Context, req domain.PatchPlaybookRequest) (domain.WriteResult, error)
-	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) (domain.WriteResult, error)
+	Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (domain.CreatePlaybookResult, error)
+	Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) (domain.WriteResult, error)
+	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) (domain.WriteResult, error)
 	Delete(ctx context.Context, id string) (domain.WriteResult, error)
 }
 
-func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookRequest) (domain.CreatePlaybookResult, error) {
+func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (domain.CreatePlaybookResult, error) {
+	// Every attributed write validates the caller, the same as the pairing
+	// writes do -- see validateActor. Without it an omitted actorId reaches
+	// uuidArg as "", becomes a NULL column, and the write SUCCEEDS while
+	// recording nobody: an attribution hole that looks like working code.
+	if err := validateActor(actorID); err != nil {
+		return domain.CreatePlaybookResult{}, err
+	}
 	if !domain.ValidLifecycleStage[req.LifecycleStage] {
 		return domain.CreatePlaybookResult{}, invalidEnum("lifecycleStage", string(req.LifecycleStage))
 	}
@@ -46,24 +53,43 @@ func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookR
 			return domain.CreatePlaybookResult{}, invalidEnum("tasks.valueType", string(req.Tasks[i].ValueType))
 		}
 	}
-	id, err := s.repo.Create(ctx, req)
+	id, err := s.repo.Create(ctx, req, actorID)
+	plgAudit(ctx, "create playbook", actorID, err,
+		"productCode", req.ProductCode, "lifecycleStage", string(req.LifecycleStage),
+		"playbookType", string(req.PlaybookType), "taskCount", len(req.Tasks), "playbookId", id)
 	if err != nil {
 		return domain.CreatePlaybookResult{}, err
 	}
 	return domain.CreatePlaybookResult{PlaybookID: id}, nil
 }
 
-func (s *playbookService) Patch(ctx context.Context, req domain.PatchPlaybookRequest) (domain.WriteResult, error) {
+func (s *playbookService) Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) (domain.WriteResult, error) {
+	// Every attributed write validates the caller, the same as the pairing
+	// writes do -- see validateActor. Without it an omitted actorId reaches
+	// uuidArg as "", becomes a NULL column, and the write SUCCEEDS while
+	// recording nobody: an attribution hole that looks like working code.
+	if err := validateActor(actorID); err != nil {
+		return domain.WriteResult{}, err
+	}
 	if err := validateUUID("playbookId", req.ID); err != nil {
 		return domain.WriteResult{}, err
 	}
-	if err := s.repo.Patch(ctx, req); err != nil {
+	err := s.repo.Patch(ctx, req, actorID)
+	plgAudit(ctx, "patch playbook", actorID, err, "playbookId", req.ID)
+	if err != nil {
 		return domain.WriteResult{}, err
 	}
 	return domain.WriteResult{RowsAffected: 1}, nil
 }
 
-func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) (domain.WriteResult, error) {
+func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) (domain.WriteResult, error) {
+	// Every attributed write validates the caller, the same as the pairing
+	// writes do -- see validateActor. Without it an omitted actorId reaches
+	// uuidArg as "", becomes a NULL column, and the write SUCCEEDS while
+	// recording nobody: an attribution hole that looks like working code.
+	if err := validateActor(actorID); err != nil {
+		return domain.WriteResult{}, err
+	}
 	if err := validateUUID("playbookId", req.PlaybookID); err != nil {
 		return domain.WriteResult{}, err
 	}
@@ -72,7 +98,9 @@ func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePl
 			return domain.WriteResult{}, invalidEnum("tasks.valueType", string(req.Tasks[i].ValueType))
 		}
 	}
-	if err := s.repo.ReplaceTasks(ctx, req); err != nil {
+	err := s.repo.ReplaceTasks(ctx, req, actorID)
+	plgAudit(ctx, "replace tasks", actorID, err, "playbookId", req.PlaybookID, "taskCount", len(req.Tasks))
+	if err != nil {
 		return domain.WriteResult{}, err
 	}
 	return domain.WriteResult{RowsAffected: len(req.Tasks)}, nil
@@ -82,7 +110,9 @@ func (s *playbookService) Delete(ctx context.Context, id string) (domain.WriteRe
 	if err := validateUUID("playbookId", id); err != nil {
 		return domain.WriteResult{}, err
 	}
-	if err := s.repo.Delete(ctx, id); err != nil {
+	err := s.repo.Delete(ctx, id)
+	plgAudit(ctx, "delete playbook", "", err, "playbookId", id)
+	if err != nil {
 		return domain.WriteResult{}, err
 	}
 	return domain.WriteResult{RowsAffected: 1}, nil

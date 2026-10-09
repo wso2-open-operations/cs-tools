@@ -18,12 +18,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -60,6 +63,10 @@ func (f *fakeEscalationRepoForService) CreateEscalation(_ context.Context, _ str
 }
 
 // fakeUserRepoForEscalationService resolves exactly one known email.
+func (f *fakeEscalationRepoForService) CaseTeamLeads(context.Context, string) ([]domain.EscalationNotifiedUser, error) {
+	panic("fakeEscalationRepoForService.CaseTeamLeads: not expected to be called by these tests")
+}
+
 type fakeUserRepoForEscalationService struct {
 	knownEmail string
 	user       domain.User
@@ -92,8 +99,8 @@ func (f *fakeUserRepoForEscalationService) GetUserGroups(context.Context, string
 func (f *fakeUserRepoForEscalationService) CreateUser(context.Context, domain.CreateUserRequest, string) (domain.User, error) {
 	panic("fakeUserRepoForEscalationService.CreateUser: not expected to be called by these tests")
 }
-func (f *fakeUserRepoForEscalationService) UpdateUserTimeZone(context.Context, string, string) (time.Time, error) {
-	panic("fakeUserRepoForEscalationService.UpdateUserTimeZone: not expected to be called by these tests")
+func (f *fakeUserRepoForEscalationService) UpdateUserProfile(context.Context, string, *string, *string) (domain.UserProfileUpdate, error) {
+	panic("fakeUserRepoForEscalationService.UpdateUserProfile: not expected to be called by these tests")
 }
 
 // caseFoundInScopeRepo is the default stubCaseRepo.GetCaseByID for tests
@@ -380,5 +387,172 @@ func TestEscalationService_CreateEscalation_NoMirrorOnPlainPostgres(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- case.escalated publish ---
+
+func escalationEmailPtr(s string) *string { return &s }
+
+func escalationWithRecipients() *fakeEscalationRepoForService {
+	number := "CS0012345"
+	return &fakeEscalationRepoForService{createResp: domain.CreatedEscalation{
+		ID:            "22222222-2222-2222-2222-222222222222",
+		CreatedOn:     "2026-10-08T09:03:17Z",
+		Case:          domain.ReferenceTableItem{ID: escalationTestCaseID, Number: &number},
+		PreviousLevel: domain.ChoiceListItem{ID: "1", Label: "1"},
+		CurrentLevel:  domain.ChoiceListItem{ID: "2", Label: "2"},
+		Reason:        escalationEmailPtr("  production down for a day  "),
+		NotificationSentTo: []domain.EscalationNotifiedUser{
+			{ID: "u1", Email: escalationEmailPtr("Lead@WSO2.com ")},
+			{ID: "u2", Email: nil},
+			{ID: "u3", Email: escalationEmailPtr("lead@wso2.com")},
+			{ID: "u4", Email: escalationEmailPtr("tu@wso2.com")},
+		},
+	}}
+}
+
+func newPublishingEscalationService(repo *fakeEscalationRepoForService, pub EventPublisherService) EscalationService {
+	caseRepo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			sev := domain.CaseSeverity("critical")
+			dpName := "WSO2 Identity Server 7.1.0"
+			return domain.CaseView{
+				ID: escalationTestCaseID, Number: "CS0012345", InternalID: "WSO2-1000", Subject: "Gateway down",
+				Severity:               &sev,
+				ProjectDetails:         &domain.EntityRef{ID: "proj-1", Name: "Acme Prod"},
+				AccountDetails:         &domain.AccountRef{ID: "acc-1", Name: "Acme"},
+				DeploymentDetails:      &domain.EntityRef{ID: "dep-1", Name: "Production"},
+				DeployedProductDetails: &domain.DeployedProductRef{DisplayName: &dpName},
+				AssignedEngineer:       &domain.UserReference{Email: "eng@wso2.com", Name: "Eng"},
+			}, nil
+		},
+	}
+	userRepo := &fakeUserRepoForEscalationService{
+		knownEmail: "engineer@example.com",
+		user:       domain.User{ID: "user-engineer", Email: "engineer@example.com", FirstName: "Eng", LastName: "Neer"},
+	}
+	return WithEscalationNotices(NewEscalationService(repo, userRepo, caseRepo, alwaysUnrestrictedAccess{}), pub)
+}
+
+func TestEscalationService_CreateEscalation_PublishesCaseEscalated(t *testing.T) {
+	pub := &mockEventPublisher{}
+	svc := newPublishingEscalationService(escalationWithRecipients(), pub)
+	reason := "production down for a day"
+	if _, err := svc.CreateEscalation(contextWithUserIDToken(fakeJWTWithEmail(t, "engineer@example.com")),
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Reason: &reason}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pub.calls) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.calls))
+	}
+	call := pub.calls[0]
+	if call.eventType != events.TypeCaseEscalated || call.entityID != escalationTestCaseID {
+		t.Fatalf("published %s for %s, want case.escalated for the case", call.eventType, call.entityID)
+	}
+	var got events.CaseEscalatedPayload
+	if err := json.Unmarshal(call.payload, &got); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	want := events.CaseEscalatedPayload{
+		CaseID: escalationTestCaseID, CaseNumber: "CS0012345", CaseTitle: "Gateway down", Severity: "CRITICAL",
+		AccountName: "Acme", Product: "WSO2 Identity Server 7.1.0", Environment: "Production", AssignedEngineerEmail: "eng@wso2.com",
+		EscalationID: "22222222-2222-2222-2222-222222222222", PreviousLevel: 1, CurrentLevel: 2,
+		Reason: "production down for a day", ActorEmail: "engineer@example.com", EscalatedOn: "2026-10-08T09:03:17Z",
+		Recipients: []string{"lead@wso2.com", "tu@wso2.com"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("payload:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestEscalationService_CreateEscalation_NoRecipientsPublishesNothing(t *testing.T) {
+	pub := &mockEventPublisher{}
+	repo := escalationWithRecipients()
+	repo.createResp.NotificationSentTo = []domain.EscalationNotifiedUser{{ID: "u2"}}
+	svc := newPublishingEscalationService(repo, pub)
+	reason := "slow responses"
+	if _, err := svc.CreateEscalation(contextWithUserIDToken(fakeJWTWithEmail(t, "engineer@example.com")),
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Reason: &reason}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("published %d events for an escalation nobody is notified of, want none", len(pub.calls))
+	}
+}
+
+func TestEscalationService_CreateEscalation_PublishFailureDoesNotFailEscalation(t *testing.T) {
+	pub := &mockEventPublisher{err: errors.New("event hub down")}
+	svc := newPublishingEscalationService(escalationWithRecipients(), pub)
+	reason := "slow responses"
+	resp, err := svc.CreateEscalation(contextWithUserIDToken(fakeJWTWithEmail(t, "engineer@example.com")),
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Reason: &reason})
+	if err != nil {
+		t.Fatalf("a failed publish must not fail a committed escalation: %v", err)
+	}
+	if resp.Escalation.ID == "" {
+		t.Error("escalation missing from the response")
+	}
+}
+
+// TestEscalationService_CreateEscalation_DeescalationPublishesNothing: SN's
+// flow mails only rows with u_current_level != 0, and a de-escalation always
+// lands on EL0.
+func TestEscalationService_CreateEscalation_DeescalationPublishesNothing(t *testing.T) {
+	pub := &mockEventPublisher{}
+	repo := escalationWithRecipients()
+	repo.createResp.PreviousLevel = domain.ChoiceListItem{ID: "2", Label: "2"}
+	repo.createResp.CurrentLevel = domain.ChoiceListItem{ID: "0", Label: "0"}
+	svc := newPublishingEscalationService(repo, pub)
+	deescalate := domain.EscalationActionDeescalate
+	if _, err := svc.CreateEscalation(contextWithUserIDToken(fakeJWTWithEmail(t, "engineer@example.com")),
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Action: &deescalate}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("published %d events for a de-escalation, want none", len(pub.calls))
+	}
+}
+
+func TestWithEscalationNotices_IgnoresServiceNowSource(t *testing.T) {
+	sn := NewServiceNowEscalationService(nil)
+	if got := WithEscalationNotices(sn, &mockEventPublisher{}); got != sn {
+		t.Error("the ServiceNow escalation service must be returned unchanged")
+	}
+}
+
+// TestEscalationService_CreateEscalation_CustomersNeverRecipients: the
+// escalation email is internal. A non-WSO2 address on the notification list
+// (a per-case field or role grant pointing at a customer) is dropped, and an
+// escalation that would reach only customers publishes nothing.
+func TestEscalationService_CreateEscalation_CustomersNeverRecipients(t *testing.T) {
+	reason := "slow responses"
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "engineer@example.com"))
+
+	pub := &mockEventPublisher{}
+	repo := escalationWithRecipients()
+	repo.createResp.NotificationSentTo = append(repo.createResp.NotificationSentTo,
+		domain.EscalationNotifiedUser{ID: "u-cust", Email: escalationEmailPtr("buyer@acme.com")})
+	if _, err := newPublishingEscalationService(repo, pub).CreateEscalation(ctx,
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Reason: &reason}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got events.CaseEscalatedPayload
+	if err := json.Unmarshal(pub.calls[0].payload, &got); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if want := []string{"lead@wso2.com", "tu@wso2.com"}; !reflect.DeepEqual(got.Recipients, want) {
+		t.Errorf("recipients = %v, want only the WSO2 ones %v", got.Recipients, want)
+	}
+
+	pub = &mockEventPublisher{}
+	repo = escalationWithRecipients()
+	repo.createResp.NotificationSentTo = []domain.EscalationNotifiedUser{{ID: "u-cust", Email: escalationEmailPtr("buyer@acme.com")}}
+	if _, err := newPublishingEscalationService(repo, pub).CreateEscalation(ctx,
+		domain.CreateEscalationRequest{CaseID: escalationTestCaseID, Reason: &reason}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("published %d events for an escalation that reaches only customers, want none", len(pub.calls))
 	}
 }

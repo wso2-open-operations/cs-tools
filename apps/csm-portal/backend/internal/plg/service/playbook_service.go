@@ -19,9 +19,9 @@ type PlaybookService interface {
 	ListAll(ctx context.Context) ([]domain.Playbook, error)
 	ListByProduct(ctx context.Context, productCode string) ([]domain.Playbook, error)
 	Get(ctx context.Context, id string) (*domain.Playbook, error)
-	Create(ctx context.Context, req domain.CreatePlaybookRequest) (*domain.Playbook, error)
-	Patch(ctx context.Context, req domain.PatchPlaybookRequest) (*domain.Playbook, error)
-	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) (*domain.Playbook, error)
+	Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (*domain.Playbook, error)
+	Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) (*domain.Playbook, error)
+	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) (*domain.Playbook, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -50,7 +50,7 @@ func (s *playbookService) Get(ctx context.Context, id string) (*domain.Playbook,
 	return s.repo.Get(ctx, id)
 }
 
-func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookRequest) (*domain.Playbook, error) {
+func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (*domain.Playbook, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		return nil, apierror.Validation("name is required")
@@ -78,14 +78,14 @@ func (s *playbookService) Create(ctx context.Context, req domain.CreatePlaybookR
 	}
 	req.Tasks = tasks
 
-	id, err := s.repo.Create(ctx, req)
+	id, err := s.repo.Create(ctx, req, actorID)
 	if err != nil {
 		return nil, err
 	}
 	return s.repo.Get(ctx, id)
 }
 
-func (s *playbookService) Patch(ctx context.Context, req domain.PatchPlaybookRequest) (*domain.Playbook, error) {
+func (s *playbookService) Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) (*domain.Playbook, error) {
 	if err := validateUUID("playbookId", req.ID); err != nil {
 		return nil, err
 	}
@@ -108,13 +108,13 @@ func (s *playbookService) Patch(ctx context.Context, req domain.PatchPlaybookReq
 		return nil, apierror.Validation("name must not be empty")
 	}
 
-	if err := s.repo.Patch(ctx, req); err != nil {
+	if err := s.repo.Patch(ctx, req, actorID); err != nil {
 		return nil, err
 	}
 	return s.repo.Get(ctx, req.ID)
 }
 
-func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) (*domain.Playbook, error) {
+func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) (*domain.Playbook, error) {
 	if err := validateUUID("playbookId", req.PlaybookID); err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (s *playbookService) ReplaceTasks(ctx context.Context, req domain.ReplacePl
 	}
 	req.Tasks = tasks
 
-	if err := s.repo.ReplaceTasks(ctx, req); err != nil {
+	if err := s.repo.ReplaceTasks(ctx, req, actorID); err != nil {
 		return nil, err
 	}
 	return s.repo.Get(ctx, req.PlaybookID)

@@ -60,6 +60,7 @@ import {
   getStatusColor,
   resolveColorFromTheme,
   hasSubmittableEditorContent,
+  collapseCommentSourceWhitespace,
   hasSingleCodeWrapper,
   stripCodeWrapper,
   stripAllCodeBlocks,
@@ -606,7 +607,9 @@ export default function ServiceRequestDetailContent({
                             }}
                             dangerouslySetInnerHTML={{
                               __html: (() => {
-                                const raw = comment.content ?? "";
+                                const raw = collapseCommentSourceWhitespace(
+                                  comment.content ?? "",
+                                );
                                 const isFullCodeWrap =
                                   hasSingleCodeWrapper(raw);
                                 const codeBlockCount =

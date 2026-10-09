@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -174,6 +175,10 @@ func (h *AIChatHandler) SearchConversations(w http.ResponseWriter, r *http.Reque
 		// A state id this backend cannot map is refused rather than answered.
 		// Dropping it would leave the search unfiltered, which returns every
 		// conversation in the project and looks like a working filter.
+		if errors.Is(err, dto.ErrInvalidConversationDate) {
+			writeError(w, http.StatusBadRequest, "Invalid conversation date filter.")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "Unsupported conversation state filter.")
 		return
 	}
@@ -228,6 +233,54 @@ func (h *AIChatHandler) GetConversationMessages(w http.ResponseWriter, r *http.R
 // createEntityStateResolved is entity-service's ConversationState value used
 // to auto-resolve a conversation when the AI agent reports the issue solved.
 const createEntityStateResolved = "RESOLVED"
+
+// createEntityStateActive is entity-service's ConversationState value this
+// handler moves a conversation to once Novera has actually replied to it.
+//
+// A conversation is meant to start ACTIVE ("a chat is live from its first
+// message" -- see entity-service's conversationService.CreateConversation
+// doc comment), but under DATA_SOURCE=postgres-servicenow-dual-write its
+// initial state is overridden by ServiceNow's own create response, which
+// reports a brand-new conversation as OPEN (SN state key 1), not ACTIVE --
+// and nothing in either backend ever transitions a conversation from OPEN to
+// ACTIVE afterward. A conversation that the AI agent never auto-resolves,
+// and that the customer never manually closes/abandons/converts, is stuck
+// showing "Open" forever no matter how many messages are exchanged --
+// confirmed live against the staging database: 478 of 626 OPEN conversations
+// there already carry at least one Novera-authored reply. Reported live as
+// "the chat status must be Active once Novera replied, but it's shown as
+// Open."
+//
+// Only ever sent when the conversation's own current state is OPEN (see
+// maybeActivateConversation below) -- entity-service's UpdateConversation
+// has no transition guard of its own (it writes whatever state is sent,
+// unconditionally), so blindly sending ACTIVE after every reply would just
+// as easily reopen a conversation the customer had already closed/abandoned/
+// converted, or one the AI agent had already resolved in an earlier turn.
+const createEntityStateActive = "ACTIVE"
+
+// conversationActivator is the one entity-client method maybeActivateConversation
+// needs -- both AIChatHandler's entityConversationClient and WebSocketHandler's
+// entityCommentCreator satisfy it already, so this helper is shared by both
+// (see websocket.go's own call site) rather than duplicated per handler.
+type conversationActivator interface {
+	UpdateConversation(ctx context.Context, id string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error)
+}
+
+// maybeActivateConversation moves a conversation from OPEN to ACTIVE,
+// best-effort, after Novera has posted a reply to it -- see
+// createEntityStateActive's own doc comment for why this check (rather than
+// an unconditional PATCH) is needed, and why this never fails the request:
+// the AI's reply has already been saved as a comment by the time this runs,
+// so a failure here must not be reported as a failed turn.
+func maybeActivateConversation(ctx context.Context, client conversationActivator, userID, conversationID string, currentState *string) {
+	if currentState == nil || *currentState != "OPEN" {
+		return
+	}
+	if _, err := client.UpdateConversation(ctx, conversationID, entity.UpdateConversationRequest{State: createEntityStateActive}); err != nil {
+		slog.ErrorContext(ctx, "entity UpdateConversation failed to auto-activate", "userID", userID, "conversationID", conversationID, "err", summarizeErr(err))
+	}
+}
 
 // CreateConversation handles POST /projects/{id}/conversations — starts a
 // brand-new conversation and gets the AI agent's first response via this
@@ -337,6 +390,14 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 			mapUpstreamError(w, err, "Failed to save chat response as comment.")
 			return
 		}
+		// convResp.Conversation.State already reflects this conversation's
+		// real just-created state (ACTIVE on plain Postgres, OPEN under
+		// dual-write -- see createEntityStateActive's own doc comment), so
+		// no extra read is needed here the way SendConversationMessage below
+		// needs one. Runs before the resolve check: if the agent's very
+		// first reply also reports the issue solved, that RESOLVED write
+		// must be the one that wins.
+		maybeActivateConversation(r.Context(), h.entity, user.UserID, conversationID, convResp.Conversation.State)
 	}
 
 	if chatResp.Resolved != nil && *chatResp.Resolved {
@@ -431,6 +492,18 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 			slog.ErrorContext(r.Context(), "entity CreateComment failed for chat response", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
 			mapUpstreamError(w, err, "Failed to save chat response as comment.")
 			return
+		}
+		// Unlike CreateConversation, there's no just-created response object
+		// carrying this conversation's current state here -- a fresh read is
+		// the only way to know it before deciding whether to activate it.
+		// Best-effort: a failed read just means a skipped activation attempt
+		// on this turn, not a failed one -- the reply has already been saved.
+		if conv, err := h.entity.GetConversation(r.Context(), conversationID); err != nil {
+			slog.WarnContext(r.Context(), "entity GetConversation failed while checking state for auto-activate", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+		} else {
+			// Runs before the resolve check below, same ordering reason as
+			// CreateConversation's own call site.
+			maybeActivateConversation(r.Context(), h.entity, user.UserID, conversationID, conv.State)
 		}
 	}
 

@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -88,6 +89,47 @@ func TestSNCallRequestService_UpdateCallRequest_Validation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := svc.UpdateCallRequest(tt.ctx, tt.req)
 			assertErrType(t, tt.wantErr, err)
+		})
+	}
+}
+
+// TestSNCallRequestService_UpdateCallRequest_ConcludeWithoutNotesReachesServiceNow:
+// the dual-write mirror and the pure ServiceNow data source both run this service's
+// own validation first, so a conclude with no notes ("Mark as completed",
+// digiops-cs#3350) must get past it and be sent to ServiceNow as the concluded
+// state with no notes field, leaving ServiceNow to accept or refuse it.
+func TestSNCallRequestService_UpdateCallRequest_ConcludeWithoutNotesReachesServiceNow(t *testing.T) {
+	validID := "11111111-1111-1111-1111-111111111111"
+	var gotPath string
+	var gotBody map[string]any
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"Call request updated successfully.","callRequest":{"id":"11111111111111111111111111111111","updatedOn":"2026-10-08T00:00:00Z","updatedBy":"jane"}}`))
+	}))
+	svc := NewServiceNowCallRequestService(client)
+
+	blank := "  \t "
+	for name, notes := range map[string]*string{"no notes": nil, "blank notes": &blank} {
+		t.Run(name, func(t *testing.T) {
+			gotPath, gotBody = "", nil
+			resp, err := svc.UpdateCallRequest(contextWithUserIDToken("token"), domain.UpdateCallRequestRequest{ID: validID, State: domain.CallRequestStateConcluded, Notes: notes})
+			if err != nil {
+				t.Fatalf("a conclude without notes must reach ServiceNow, got %v", err)
+			}
+			if resp.CallRequest.ID != validID {
+				t.Errorf("response id = %q, want %q", resp.CallRequest.ID, validID)
+			}
+			if gotPath != "/call-requests/11111111111111111111111111111111" {
+				t.Errorf("PATCH path = %q", gotPath)
+			}
+			if got := gotBody["stateKey"]; got != float64(callRequestStateToKey[domain.CallRequestStateConcluded]) {
+				t.Errorf("stateKey = %v, want the concluded key %d", got, callRequestStateToKey[domain.CallRequestStateConcluded])
+			}
+			if _, present := gotBody["notes"]; present {
+				t.Errorf("notes must be omitted (blank ones included, they could blank ServiceNow's), body = %v", gotBody)
+			}
 		})
 	}
 }

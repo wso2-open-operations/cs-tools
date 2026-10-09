@@ -31,5 +31,5 @@
  */
 export function isOnboardingStatusEnabled(): boolean {
   const raw = window.config?.CSM_MIGRATION_ONBOARDING_STATUS_ENABLED;
-  return raw === true || raw === "true";
+  return !(raw === false || (typeof raw === "string" && raw.trim().toLowerCase() === "false"));
 }

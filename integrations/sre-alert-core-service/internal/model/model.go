@@ -73,7 +73,7 @@ type Incident struct {
 	Category       string `json:"category" db:"category"`
 	Environment    string `json:"environment" db:"environment"`
 	Source         string `json:"source" db:"source"`
-	// The first alert's routing signals, kept so every CSM create attempt (including retries) assigns the same group.
+	// The first alert's routing signals, recorded for reference; not sent to CSM (entity-service assigns the group from the service).
 	AssignmentGroup string    `json:"assignment_group" db:"assignment_group"`
 	SourceTopic     string    `json:"source_topic" db:"source_topic"`
 	SourceAccount   string    `json:"source_account" db:"source_account"`

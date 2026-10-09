@@ -22,7 +22,7 @@ type OrgPlatformRepository interface {
 	Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) (domain.AcknowledgeResult, error)
 
 	AttachPlaybook(ctx context.Context, req domain.AttachPlaybookRequest, actor string) error
-	DetachRun(ctx context.Context, runID string) (res domain.WriteResult, orgID, productCode string, err error)
+	DetachRun(ctx context.Context, runID, actorID string) (res domain.WriteResult, orgID, productCode string, err error)
 	PatchRunTask(ctx context.Context, req domain.PatchRunTaskRequest, actor string) (orgID, productCode string, err error)
 	RunTaskShape(ctx context.Context, taskID string) (domain.RunTaskShape, error)
 
@@ -683,7 +683,12 @@ func (r *orgPlatformRepository) AttachPlaybook(ctx context.Context, req domain.A
 		SELECT $1::UUID, pb.id, $3::UUID
 		FROM   plg_playbook pb
 		WHERE  pb.id::TEXT = $2 AND pb.active
-		ON CONFLICT (org_platform_id, playbook_id) DO NOTHING
+		-- The WHERE repeats uq_plg_playbook_run_attached's own predicate: the
+		-- constraint is a PARTIAL unique index, and ON CONFLICT cannot infer a
+		-- partial index from its columns alone -- without it Postgres raises
+		-- 42P10, "no unique or exclusion constraint matching the ON CONFLICT
+		-- specification", and every attach fails.
+		ON CONFLICT (org_platform_id, playbook_id) WHERE detached_on IS NULL DO NOTHING
 		RETURNING id::TEXT`, pairingID, req.PlaybookID, uuidArg(actor)).Scan(&runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Either it is already attached, or the playbook is absent/inactive. The
@@ -692,7 +697,8 @@ func (r *orgPlatformRepository) AttachPlaybook(ctx context.Context, req domain.A
 		var attached bool
 		if e := tx.QueryRow(ctx, `
 			SELECT EXISTS (SELECT 1 FROM plg_playbook_run
-			               WHERE org_platform_id::TEXT = $1 AND playbook_id::TEXT = $2)`,
+			               WHERE org_platform_id::TEXT = $1 AND playbook_id::TEXT = $2
+			                 AND detached_on IS NULL)`,
 			pairingID, req.PlaybookID).Scan(&attached); e != nil {
 			return fmt.Errorf("check existing run: %w", e)
 		}
@@ -733,19 +739,30 @@ func (r *orgPlatformRepository) AttachPlaybook(ctx context.Context, req domain.A
 	return tx.Commit(ctx)
 }
 
-// DetachRun removes a run and its task instances.
+// DetachRun takes a playbook off a pairing, recording who did it.
 //
 // GUARDED WRITE (contract W4). A closed run cannot be detached — that would
 // erase a recorded outcome. The refusal is in the DELETE's WHERE clause rather
 // than a read before it, so a run closed in between is still protected.
-func (r *orgPlatformRepository) DetachRun(ctx context.Context, runID string) (domain.WriteResult, string, string, error) {
+func (r *orgPlatformRepository) DetachRun(ctx context.Context, runID, actorID string) (domain.WriteResult, string, string, error) {
 	var res domain.WriteResult
 
 	// Locate first: the caller's response is the reloaded pairing, so the ids are
-	// needed whether or not the delete applies.
+	// needed whether or not the detach applies.
+	//
+	// detached_on IS NULL here as well as in the UPDATE, so an already-detached
+	// run is NOT FOUND rather than a conflict. Every read of a run goes through
+	// plg_playbook_run_v, which filters detached rows, so such a run is already
+	// invisible to the caller -- 404 is what the rest of the API says about it.
+	//
+	// It also keeps rowsAffected == 0 meaning exactly one thing downstream: the
+	// run has a completed CLOSE_PLAYBOOK task. The BFF turns that single case
+	// into its 409 and names it; without this filter that message would also be
+	// returned for a repeated detach, where it is simply untrue.
 	var pairingID string
 	err := r.db.QueryRow(ctx,
-		`SELECT org_platform_id::TEXT FROM plg_playbook_run WHERE id::TEXT = $1`,
+		`SELECT org_platform_id::TEXT FROM plg_playbook_run
+		  WHERE id::TEXT = $1 AND detached_on IS NULL`,
 		runID).Scan(&pairingID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return res, "", "", &apierror.NotFoundError{Msg: "playbook run not found"}
@@ -759,16 +776,28 @@ func (r *orgPlatformRepository) DetachRun(ctx context.Context, runID string) (do
 		return res, "", "", err
 	}
 
-	// The guard: no completed CLOSE_PLAYBOOK task on this run. Expressed against
-	// the task table rather than the view's run_status, because a WHERE clause
-	// cannot reference a derived column of the row it is deleting.
+	// An UPDATE rather than a DELETE, so the row survives to record who removed
+	// the playbook and when. plg_playbook_run_v and plg_work_queue_v both filter
+	// detached_on, so a detached run disappears from every read exactly as the
+	// deleted row used to -- see 0212_plg_audit_attribution.sql.
+	//
+	// The guard is unchanged: no completed CLOSE_PLAYBOOK task on this run.
+	// Expressed against the task table rather than the view's run_status,
+	// because a WHERE clause cannot reference a derived column of its own row.
+	//
+	// detached_on IS NULL is part of the WHERE, which makes a second detach a
+	// no-op (rowsAffected 0) instead of overwriting the first detacher with
+	// whoever repeated the call.
 	tag, err := r.db.Exec(ctx, `
-		DELETE FROM plg_playbook_run r
+		UPDATE plg_playbook_run r
+		SET    detached_on = NOW(),
+		       detached_by = $3::UUID
 		WHERE  r.id::TEXT = $1
+		  AND  r.detached_on IS NULL
 		  AND  NOT EXISTS (SELECT 1 FROM plg_playbook_run_task t
 		                   WHERE t.playbook_run_id = r.id
 		                     AND t.code = $2 AND t.is_completed)`,
-		runID, domain.TaskCodeClose)
+		runID, domain.TaskCodeClose, uuidArg(actorID))
 	if err != nil {
 		return res, "", "", fmt.Errorf("detach playbook run: %w", err)
 	}
@@ -787,7 +816,13 @@ func (r *orgPlatformRepository) RunTaskShape(ctx context.Context, taskID string)
 		       COALESCE(ARRAY(SELECT o ->> 'code'
 		                      FROM   jsonb_array_elements(t.options) o), '{}')
 		FROM   plg_playbook_run_task t
-		WHERE  t.id::TEXT = $1`, taskID).Scan(&shape.ValueType, &shape.OptionCodes)
+		JOIN   plg_playbook_run run ON run.id = t.playbook_run_id
+		-- Only tasks of an ATTACHED run. A detached run's tasks survive now that
+		-- the detach is an update rather than a delete; before, the row went with
+		-- its run (ON DELETE CASCADE) and this query found nothing. Without the
+		-- join, history stays editable through a task id the caller can no longer
+		-- see in any read.
+		WHERE  t.id::TEXT = $1 AND run.detached_on IS NULL`, taskID).Scan(&shape.ValueType, &shape.OptionCodes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return shape, &apierror.NotFoundError{Msg: "task not found"}
 	}
@@ -808,7 +843,9 @@ func (r *orgPlatformRepository) PatchRunTask(ctx context.Context, req domain.Pat
 		SELECT run.org_platform_id::TEXT
 		FROM   plg_playbook_run_task t
 		JOIN   plg_playbook_run run ON run.id = t.playbook_run_id
-		WHERE  t.id::TEXT = $1`, req.ID).Scan(&pairingID)
+		-- Attached runs only, same reason as RunTaskShape above: a detached run's
+		-- tasks are history and must not stay writable by id.
+		WHERE  t.id::TEXT = $1 AND run.detached_on IS NULL`, req.ID).Scan(&pairingID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", &apierror.NotFoundError{Msg: "task not found"}
 	}
@@ -829,6 +866,14 @@ func (r *orgPlatformRepository) PatchRunTask(ctx context.Context, req domain.Pat
 		                            WHEN $6::TEXT[] IS NOT NULL THEN NULLIF($6::TEXT[], '{}')
 		                            ELSE value_checked END
 		WHERE  id::TEXT = $1
+		  -- The attached check travels INSIDE the statement, not only in the
+		  -- lookup above: between that read and this write a concurrent detach
+		  -- can land, and a lock cannot span the gap. This is the same guarded
+		  -- write the detach itself uses -- zero rows means the precondition no
+		  -- longer holds, which the caller reads as "not found".
+		  AND  EXISTS (SELECT 1 FROM plg_playbook_run r
+		               WHERE r.id = plg_playbook_run_task.playbook_run_id
+		                 AND r.detached_on IS NULL)
 		RETURNING is_completed`
 
 	// Both writes go in one transaction. is_completed is generated from the
@@ -841,9 +886,40 @@ func (r *orgPlatformRepository) PatchRunTask(ctx context.Context, req domain.Pat
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Lock the parent run for the duration, and confirm under that lock that it
+	// is still attached.
+	//
+	// Guarding each statement individually is not enough. The two writes below
+	// are separate statements, and READ COMMITTED gives each its own snapshot:
+	// a detach committing BETWEEN them leaves the first applied and the second
+	// matching nothing, which is the split state this function exists to
+	// prevent — a value recorded as complete with no completed_on or
+	// completed_by beside it. The guards stay as defence, but this is what
+	// closes the window: a concurrent detach now waits for this transaction
+	// instead of landing inside it.
+	var locked string
+	if err := tx.QueryRow(ctx, `
+		SELECT r.id::TEXT
+		FROM   plg_playbook_run_task t
+		JOIN   plg_playbook_run r ON r.id = t.playbook_run_id
+		WHERE  t.id::TEXT = $1 AND r.detached_on IS NULL
+		FOR    UPDATE OF r`, req.ID).Scan(&locked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", &apierror.NotFoundError{Msg: "task not found"}
+		}
+		return "", "", fmt.Errorf("lock playbook run: %w", err)
+	}
+
 	var completed bool
 	if err := tx.QueryRow(ctx, q, req.ID, req.ClearValue,
 		req.BoolValue, req.NumberValue, req.TextValue, req.CheckedCodes).Scan(&completed); err != nil {
+		// No row matched: either the task is gone, or its run was detached
+		// between the lookup and this statement. Both mean the same thing to the
+		// caller, and both are the answer every read already gives for a
+		// detached run.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", &apierror.NotFoundError{Msg: "task not found"}
+		}
 		if isConstraintViolation(err) {
 			return "", "", &apierror.ValidationError{Msg: "that value does not match the task's type"}
 		}
@@ -852,12 +928,23 @@ func (r *orgPlatformRepository) PatchRunTask(ctx context.Context, req domain.Pat
 
 	// Stamp or clear the completion trail to match what the generated column now
 	// says, so the two can never describe different states.
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE plg_playbook_run_task
 		SET    completed_on = CASE WHEN is_completed THEN COALESCE(completed_on, NOW()) ELSE NULL END,
 		       completed_by = CASE WHEN is_completed THEN COALESCE(completed_by, $2::UUID) ELSE NULL END
-		WHERE  id::TEXT = $1`, req.ID, uuidArg(actor)); err != nil {
+		WHERE  id::TEXT = $1
+		  AND  EXISTS (SELECT 1 FROM plg_playbook_run r
+		               WHERE r.id = plg_playbook_run_task.playbook_run_id
+		                 AND r.detached_on IS NULL)`, req.ID, uuidArg(actor))
+	if err != nil {
 		return "", "", actorWrite(err, actor, "stamp completion")
+	}
+	// Impossible while the lock above is held, and worth failing loudly rather
+	// than committing half the change if it ever becomes possible: the value is
+	// already written by this point, so a silent miss here is the split state
+	// again.
+	if tag.RowsAffected() == 0 {
+		return "", "", fmt.Errorf("stamp completion: the run was detached mid-transaction")
 	}
 
 	if err := tx.Commit(ctx); err != nil {

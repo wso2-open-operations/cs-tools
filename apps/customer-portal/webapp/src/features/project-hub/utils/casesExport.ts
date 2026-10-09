@@ -19,6 +19,7 @@ import { downloadPdfFile, type PdfColumnStyle } from "@utils/pdf";
 import type { GlobalSearchCase, GlobalSearchResponse } from "@features/project-hub/types/globalSearch";
 import type { AuthFetchFn } from "@features/project-hub/utils/projectsExport";
 import { getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
+import { formatCaseStatusLabel } from "@features/dashboard/utils/casesTable";
 
 const EXPORT_ALL_PAGE_SIZE = 50;
 
@@ -85,7 +86,7 @@ function mapCasesToRows(cases: GlobalSearchCase[]): string[][] {
       formatCaseId(c.number, c.internalId),
       caseTypeLabel,
       c.severity?.label ?? "--",
-      c.state?.label ?? "--",
+      formatCaseStatusLabel(c.state?.label),
       c.createdBy?.trim() ?? "--",
       formatDate(c.createdOn),
       c.project?.label ?? "--",

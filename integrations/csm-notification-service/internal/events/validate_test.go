@@ -39,6 +39,7 @@ func TestValidate_Valid(t *testing.T) {
 		"case.assigned":                         {"CASE-1", TypeCaseAssigned, `{"assigneeName":"n","assigneeEmail":"e@x.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["r@x.com"]}`},
 		"case.acknowledged":                     {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-1","acknowledgerName":"n"}`},
 		"case.severity_changed":                 {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
+		"case.workaround_provided":              {"CASE-1", TypeWorkaroundProvided, `{"caseId":"CASE-1"}`},
 		"incident.created":                      {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
 		"incident.created omits product/callTo": {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
 		"incident.acknowledged":                 {"INC-1", TypeIncidentAcknowledged, `{"previousState":"NEW","newState":"IN_PROGRESS"}`},
@@ -97,6 +98,8 @@ func TestValidate_RequiresFields(t *testing.T) {
 		"acknowledged missing acknowledgerName":                    {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-1"}`},
 		"acknowledged missing caseId":                              {"CASE-1", TypeCaseAcknowledged, `{"acknowledgerName":"n"}`},
 		"acknowledged caseId/entityId mismatch":                    {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-2","acknowledgerName":"n"}`},
+		"workaround_provided missing caseId":                       {"CASE-1", TypeWorkaroundProvided, `{}`},
+		"workaround_provided caseId/entityId mismatch":             {"CASE-1", TypeWorkaroundProvided, `{"caseId":"CASE-2"}`},
 		"severity_changed missing oldSeverity":                     {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","newSeverity":"LOW","recipients":["r@x.com"]}`},
 		"severity_changed missing newSeverity":                     {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","recipients":["r@x.com"]}`},
 		"severity_changed missing projectId":                       {"CASE-1", TypeSeverityChanged, `{"caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
@@ -246,5 +249,74 @@ func TestValidate_ServiceRequest(t *testing.T) {
 				t.Errorf("Validate() = %v, wantErr %v", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// TestValidate_CaseEscalated covers case.escalated: required fields, the
+// levels being an escalation (never a de-escalation, which is not
+// published), the caseId/entityId match, and that an escalation with nobody
+// to mail is rejected.
+func TestValidate_CaseEscalated(t *testing.T) {
+	const id = "11111111-1111-1111-1111-111111111111"
+	payload := func(mod func(p map[string]any)) json.RawMessage {
+		p := map[string]any{
+			"caseId": id, "caseNumber": "CS0012345", "caseTitle": "Gateway down",
+			"escalationId": "e1", "previousLevel": 1, "currentLevel": 2,
+			"actorEmail": "a@x.com", "escalatedOn": "2026-10-08T09:03:17Z", "recipients": []string{"r@x.com"},
+		}
+		if mod != nil {
+			mod(p)
+		}
+		raw, _ := json.Marshal(p)
+		return raw
+	}
+
+	if err := Validate(id, TypeCaseEscalated, payload(nil)); err != nil {
+		t.Fatalf("a well-formed escalation: Validate() = %v, want nil", err)
+	}
+
+	for name, mod := range map[string]func(p map[string]any){
+		"no case number":      func(p map[string]any) { delete(p, "caseNumber") },
+		"no escalation id":    func(p map[string]any) { delete(p, "escalationId") },
+		"no actor":            func(p map[string]any) { delete(p, "actorEmail") },
+		"no time":             func(p map[string]any) { delete(p, "escalatedOn") },
+		"de-escalation":       func(p map[string]any) { p["previousLevel"], p["currentLevel"] = 2, 0 },
+		"level above EL5":     func(p map[string]any) { p["currentLevel"] = 6 },
+		"same level":          func(p map[string]any) { p["previousLevel"] = 2 },
+		"no recipients":       func(p map[string]any) { p["recipients"] = []string{} },
+		"malformed recipient": func(p map[string]any) { p["recipients"] = []string{"not-an-email"} },
+		"other case's id":     func(p map[string]any) { p["caseId"] = "22222222-2222-2222-2222-222222222222" },
+		"unknown field":       func(p map[string]any) { p["action"] = "ESCALATE" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(id, TypeCaseEscalated, payload(mod)); err == nil {
+				t.Fatal("Validate() = nil, want an error")
+			}
+		})
+	}
+}
+
+func TestValidate_OutageStatusPageDue(t *testing.T) {
+	const ok = `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","number":"OUT0010021","cloud":"choreo","event":"outage_begin","timestamp":"2026-10-09T06:54:00.000Z"}`
+	cases := []struct {
+		name     string
+		entityID string
+		payload  string
+		wantErr  bool
+	}{
+		{"valid", "O-1", ok, false},
+		{"end, agent-manager", "O-1", `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","cloud":"agent-manager","event":"outage_end","timestamp":"2026-10-09T07:00:00.123Z"}`, false},
+		{"outageId/entityId mismatch", "O-2", ok, true},
+		{"unknown event", "O-1", `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","cloud":"choreo","event":"OUTAGE_BEGIN","timestamp":"2026-10-09T06:54:00.000Z"}`, true},
+		{"unknown cloud", "O-1", `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","cloud":"CHOREO","event":"outage_begin","timestamp":"2026-10-09T06:54:00.000Z"}`, true},
+		{"timestamp without millis", "O-1", `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","cloud":"choreo","event":"outage_begin","timestamp":"2026-10-09T06:54:00Z"}`, true},
+		{"missing claimToken", "O-1", `{"webhookId":"W-1","outageId":"O-1","cloud":"choreo","event":"outage_begin","timestamp":"2026-10-09T06:54:00.000Z"}`, true},
+		{"unknown field", "O-1", `{"webhookId":"W-1","claimToken":"T-1","outageId":"O-1","cloud":"choreo","event":"outage_begin","timestamp":"2026-10-09T06:54:00.000Z","x":1}`, true},
+	}
+	for _, c := range cases {
+		err := Validate(c.entityID, TypeOutageStatusPageDue, json.RawMessage(c.payload))
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
+		}
 	}
 }

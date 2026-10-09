@@ -16,7 +16,10 @@
 
 package domain
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Cloud status webhooks
 //
@@ -228,12 +231,27 @@ type PendingCloudStatusWebhook struct {
 	Timestamp    string `json:"timestamp"`
 	AttemptCount int    `json:"attemptCount"`
 	LastError    string `json:"lastError,omitempty"`
+	// ClaimToken is the attempt this row was handed out under. Send it back
+	// with the outcome (RecordCloudStatusDeliveryRequest.ClaimToken) so the
+	// report is fenced to this attempt.
+	ClaimToken string `json:"claimToken,omitempty"`
+	// CreatedOn orders a claimed batch; not part of the API.
+	CreatedOn time.Time `json:"-"`
 }
 
 // PendingCloudStatusWebhooksResponse is the body of the pending-webhook read.
+//
+// THE READ CLAIMS WHAT IT RETURNS. Every row comes back with an attempt already
+// started under its ClaimToken, so the caller must post it and report the
+// outcome; nobody else can post it meanwhile (migration 0213).
 type PendingCloudStatusWebhooksResponse struct {
 	Count    int                         `json:"count"`
 	Webhooks []PendingCloudStatusWebhook `json:"webhooks"`
+	// UnknownOutcome counts webhooks whose last attempt ended with no known
+	// outcome (a timeout after sending, or a sender that never reported).
+	// They are never posted again automatically -- the dashboard may already
+	// have them -- and need someone to check the status page.
+	UnknownOutcome int `json:"unknownOutcome"`
 }
 
 // CloudStatusSweepResponse reports what one decision sweep recorded.
@@ -264,4 +282,18 @@ type RecordCloudStatusDeliveryRequest struct {
 	ID        string `json:"-"`
 	Delivered bool   `json:"delivered"`
 	Error     string `json:"error,omitempty"`
+	// Unknown: the request was sent and no answer came back, so the
+	// dashboard may have it. The webhook is then never posted again
+	// automatically. Requires delivered=false and an error.
+	Unknown bool `json:"unknown,omitempty"`
+	// ClaimToken is the token the webhook was handed out under; when given,
+	// the report is accepted only for that attempt.
+	ClaimToken string `json:"claimToken,omitempty"`
+}
+
+// ClaimCloudStatusWebhookRequest starts the attempt to post a webhook that was
+// published as outage.status_page_due, under the token it carried.
+type ClaimCloudStatusWebhookRequest struct {
+	ID         string `json:"-"`
+	ClaimToken string `json:"claimToken"`
 }

@@ -38,11 +38,16 @@ import type {
  * default single-state view working even if the webapp is ever rolled out
  * ahead of an entity-service that doesn't know `states` yet. Only a genuine
  * multi-state selection depends on the newer field.
+ *
+ * `enabled: false` sends nothing: the backend only serves this search to
+ * announcement creators, so a caller who is not one must not fire a request
+ * that is certain to be refused.
  */
 export function useSearchAnnouncementRequests(
   states: AnnouncementRequestState[],
   page: number,
   pageSize: number,
+  options: { enabled?: boolean } = {},
 ): UseQueryResult<SearchAnnouncementRequestsResponse, Error> {
   const api = useBackendApi();
   const offset = page * pageSize;
@@ -64,5 +69,6 @@ export function useSearchAnnouncementRequests(
       ),
     placeholderData: keepPreviousData,
     staleTime: 10_000,
+    enabled: options.enabled ?? true,
   });
 }

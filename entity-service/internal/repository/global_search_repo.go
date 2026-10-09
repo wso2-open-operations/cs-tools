@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,14 @@ type SearchScope struct {
 	// check at all; callers that also want to treat such a caller as internal
 	// should check Unrestricted separately, as UpdateCase does.
 	HasInternalAccess bool
+	// ViaCustomerPortal is true when the request came from the customer portal's
+	// backend (AccessClientConfig.CustomerPortalBackendClientID), whoever the signed-in
+	// user is -- including WSO2 staff looking at a customer's project. The data scope
+	// is unchanged (a staff user is still Unrestricted); what it changes is which
+	// numbers a card shows: the customer portal's lists show every change request the
+	// caller can see, so its change-request counts use the customer grouping
+	// (crOutstandingStatesFor) for staff too, or a staff user's card and list disagree.
+	ViaCustomerPortal bool
 }
 
 // scopePredicate is the single place the "row belongs to one of the caller's
@@ -113,15 +122,24 @@ type GlobalSearchRepository interface {
 	// SearchCases does the same for case-like work items within scope, matching
 	// number, subject, WSO2 id and description.
 	SearchCases(ctx context.Context, scope SearchScope, query string, sortBy SearchSortField, desc bool, pagination domain.Pagination) ([]domain.GlobalSearchCase, int, error)
+	// ProjectActivityCounts returns, for each of projectIDs, the three counts
+	// a project row shows in the customer portal's project list. Every
+	// project in projectIDs is present in the result, at zero when nothing
+	// counts. See ProjectActivityStates for what each count is made of.
+	ProjectActivityCounts(ctx context.Context, scope SearchScope, projectIDs []string, states ProjectActivityStates) (map[string]ProjectActivityCounts, error)
 }
 
 type globalSearchRepo struct {
 	db *Scoped
+	// vis narrows the change request counts to what a customer may see, the
+	// same rule the project stats apply (change_request_visibility.go).
+	vis CRVisibility
 }
 
 // NewGlobalSearchRepository constructs a GlobalSearchRepository backed by the given connection pool.
-func NewGlobalSearchRepository(db *Scoped) GlobalSearchRepository {
-	return &globalSearchRepo{db: db}
+// vis is optional: none given is the zero CRVisibility, no strict-visibility cutover.
+func NewGlobalSearchRepository(db *Scoped, vis ...CRVisibility) GlobalSearchRepository {
+	return &globalSearchRepo{db: db, vis: firstCRVisibility(vis)}
 }
 
 // containsPattern turns user text into an ILIKE "contains" pattern with LIKE
@@ -214,9 +232,9 @@ var projectSortColumns = map[SearchSortField]string{
 
 // SearchProjects implements GlobalSearchRepository.
 //
-// activeChatsCount/actionRequiredCount/outstandingCount are left at 0: what
-// they count is defined by ServiceNow-side logic with no Postgres definition
-// yet. TODO: define and populate them.
+// activeChatsCount/actionRequiredCount/outstandingCount are left at 0 here:
+// they are filled in by the caller from ProjectActivityCounts, for just the
+// page of projects this returns.
 func (r *globalSearchRepo) SearchProjects(ctx context.Context, scope SearchScope, query string, sortBy SearchSortField, desc bool, pagination domain.Pagination) ([]domain.GlobalSearchProject, int, error) {
 	if !scope.Unrestricted && len(scope.ProjectIDs) == 0 {
 		return []domain.GlobalSearchProject{}, 0, nil
@@ -377,4 +395,280 @@ func dateString(t *time.Time) *string {
 	}
 	s := t.Format("2006-01-02")
 	return &s
+}
+
+// projectActivityCaseTypes are the work item types a project's Action Required
+// and Outstanding counts are made of, besides change requests: the four the
+// project dashboard combines (apps/customer-portal DashboardPage's
+// combinedCaseTypes). Announcements are left out there, so they are here.
+var projectActivityCaseTypes = []string{"CASE", "SERVICE_REQUEST", "ENGAGEMENT", "SECURITY_REPORT_ANALYSIS"}
+
+// ProjectActivityStates names the states that make an item count, so the
+// state vocabulary stays with the service that owns it (the project stats
+// service's constants) and this repository only does the counting.
+//
+//   - Outstanding = case-like items in any state but CaseClosed + change
+//     requests in CROutstanding.
+//   - Action Required = case-like items in CaseActionRequired + change
+//     requests in CRActionRequired.
+//   - Active Chats = conversations in ChatActive.
+//
+// Case-like items are the types in projectActivityCaseTypes. A state list may
+// be empty, which counts nothing for that part (CaseClosed empty counts every
+// case-like item as outstanding).
+//
+// Outstanding is "not closed" rather than "in one of these states" on purpose:
+// that is how the project dashboard's Outstanding tile counts
+// (projectCaseStatsService: "active and outstanding are the same set, every
+// state except CLOSED"), so a state added to the enum is outstanding without
+// being listed anywhere. It counts only an item that HAS a state of its own
+// type (caseLikeOwnStateColumn): a case-like work item whose extension row is
+// missing, or belongs to another type, which real synced data has, is in no
+// list filtered by state, and the dashboard tile leaves it out for the same
+// reason (the tile used to count it and read higher than the list behind it).
+type ProjectActivityStates struct {
+	CaseClosed         []string
+	CaseActionRequired []string
+	CROutstanding      []string
+	CRActionRequired   []string
+	ChatActive         []string
+}
+
+// ProjectActivityCounts is one project's row of ProjectActivityCounts.
+type ProjectActivityCounts struct {
+	ActiveChats    int
+	ActionRequired int
+	Outstanding    int
+}
+
+// ProjectActivityCounts implements GlobalSearchRepository. It is three
+// grouped queries for the whole page of projects, not three per project, and
+// they run concurrently.
+//
+// Each count is read exactly as the project's own dashboard reads it, so a
+// project's row in the list agrees with its dashboard tiles: the same tables,
+// the same states (passed in by the service from the stats constants), and for
+// a customer the same visibility, i.e. row-level security through Scoped (the
+// identity comes from scope, as in runSearch) plus, for change requests, the
+// designation rule (CRVisibility), which row-level security does not apply.
+//
+// If any query fails the first error is returned and no partial map with it:
+// a count that silently stayed zero is indistinguishable from a real zero, so
+// the caller decides what a missing count is worth.
+func (r *globalSearchRepo) ProjectActivityCounts(ctx context.Context, scope SearchScope, projectIDs []string, states ProjectActivityStates) (map[string]ProjectActivityCounts, error) {
+	out := make(map[string]ProjectActivityCounts, len(projectIDs))
+	for _, id := range projectIDs {
+		out[id] = ProjectActivityCounts{}
+	}
+	if len(projectIDs) == 0 {
+		return out, nil
+	}
+	ctx = WithCallerIdentity(ctx, scope)
+
+	var (
+		mu sync.Mutex
+		eg errgroup.Group
+	)
+	add := func(projectID string, fn func(*ProjectActivityCounts)) {
+		mu.Lock()
+		defer mu.Unlock()
+		c, ok := out[projectID]
+		if !ok {
+			// A row for a project that was not asked for cannot happen with
+			// the ANY($1) filter; ignore it rather than invent an entry.
+			return
+		}
+		fn(&c)
+		out[projectID] = c
+	}
+
+	eg.Go(func() error {
+		return r.perChunk(ctx, scope, projectIDs, func(q activityQuerier, ids []string) error {
+			// The state is the one of the item's own type (caseLikeOwnStateColumn), the
+			// one a list filtered by state matches. An item with none is NULL here and
+			// satisfies neither condition, so it is not counted (see
+			// ProjectActivityStates): a bare <> ALL is NULL for it, which is what drops it.
+			notClosed := caseLikeOwnStateColumn + ` <> ALL($3::text[])`
+			rows, err := q.Query(ctx, `
+				SELECT wi.project_id::text,
+				       COUNT(*) FILTER (WHERE `+notClosed+`),
+				       COUNT(*) FILTER (WHERE `+caseLikeOwnStateColumn+` = ANY($4::text[]))
+				  FROM work_item wi
+				  LEFT JOIN "case" c ON c.id = wi.id`+caseLikeJoins+`
+				 WHERE wi.project_id = ANY($1::text[]::uuid[])
+				   AND wi.type = ANY($2::work_item_type_enum[])
+				   AND (`+notClosed+` OR `+caseLikeOwnStateColumn+` = ANY($4::text[]))
+				 GROUP BY 1`,
+				ids, projectActivityCaseTypes, nonNil(states.CaseClosed), nonNil(states.CaseActionRequired))
+			if err != nil {
+				return fmt.Errorf("project activity counts: cases: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id string
+				var outstanding, actionRequired int
+				if err := rows.Scan(&id, &outstanding, &actionRequired); err != nil {
+					return fmt.Errorf("project activity counts: scan cases: %w", err)
+				}
+				add(id, func(c *ProjectActivityCounts) {
+					c.Outstanding += outstanding
+					c.ActionRequired += actionRequired
+				})
+			}
+			return rows.Err()
+		})
+	})
+
+	if len(states.CROutstanding)+len(states.CRActionRequired) > 0 {
+		eg.Go(func() error {
+			return r.perChunk(ctx, scope, projectIDs, func(q activityQuerier, ids []string) error {
+				// The state arguments come first so the visibility fragment's own
+				// placeholders continue after them (andClause numbers from the
+				// length of the args it is given).
+				visSQL, args := r.vis.andClause(ctx, "wi", "cr",
+					[]any{ids, nonNil(states.CROutstanding), nonNil(states.CRActionRequired)})
+				rows, err := q.Query(ctx, `
+					SELECT wi.project_id::text,
+					       COUNT(*) FILTER (WHERE cr.state::TEXT = ANY($2::text[])),
+					       COUNT(*) FILTER (WHERE cr.state::TEXT = ANY($3::text[]))
+					  FROM work_item wi
+					  JOIN change_request cr ON cr.id = wi.id
+					 WHERE wi.project_id = ANY($1::text[]::uuid[])
+					   AND (cr.state::TEXT = ANY($2::text[]) OR cr.state::TEXT = ANY($3::text[]))`+visSQL+`
+					 GROUP BY 1`, args...)
+				if err != nil {
+					return fmt.Errorf("project activity counts: change requests: %w", err)
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var id string
+					var outstanding, actionRequired int
+					if err := rows.Scan(&id, &outstanding, &actionRequired); err != nil {
+						return fmt.Errorf("project activity counts: scan change requests: %w", err)
+					}
+					add(id, func(c *ProjectActivityCounts) {
+						c.Outstanding += outstanding
+						c.ActionRequired += actionRequired
+					})
+				}
+				return rows.Err()
+			})
+		})
+	}
+
+	if len(states.ChatActive) > 0 {
+		eg.Go(func() error {
+			return r.perChunk(ctx, scope, projectIDs, func(q activityQuerier, ids []string) error {
+				rows, err := q.Query(ctx, `
+					SELECT wi.project_id::text, COUNT(*)
+					  FROM work_item wi
+					  JOIN conversation conv ON conv.id = wi.id
+					 WHERE wi.project_id = ANY($1::text[]::uuid[])
+					   AND conv.state::TEXT = ANY($2::text[])
+					 GROUP BY 1`, ids, states.ChatActive)
+				if err != nil {
+					return fmt.Errorf("project activity counts: conversations: %w", err)
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var id string
+					var n int
+					if err := rows.Scan(&id, &n); err != nil {
+						return fmt.Errorf("project activity counts: scan conversations: %w", err)
+					}
+					add(id, func(c *ProjectActivityCounts) { c.ActiveChats += n })
+				}
+				return rows.Err()
+			})
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// activityQuerier is what the count queries need: a Scoped (one round trip
+// that carries the caller's identity) or a pgx.Tx that already carries it.
+type activityQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// projectActivityChunkSize is how many projects one narrowed statement covers.
+// Measured on a staging-like copy (409k work items, a customer registered on
+// the 50 heaviest projects): counting all 50 in one go took ~430 ms, as chunks
+// of 25 ~240 ms, of 10 ~120 ms, of 5 ~90 ms. Ten is the portal's default page
+// size, so the common page is one chunk, and the gain from 5 does not pay for
+// the extra round trips.
+const projectActivityChunkSize = 10
+
+// narrowViewerProjectIDsSQL narrows app.viewer_project_ids, the list every
+// row-level-security policy compares a row's project against, to the part of it
+// that is in $1 (the projects about to be counted).
+//
+// WHY: each policy re-parses that setting's text into a uuid[] for every row it
+// checks, so the cost per row grows with the length of the viewer's whole list.
+// For a caller registered on 50 projects that made the counts ~4x slower per
+// item than for the same page narrowed to its own projects.
+//
+// WHY IT CANNOT WIDEN ACCESS: it is an intersection, computed in the database,
+// with the list Scoped established a statement earlier in the SAME transaction
+// (from project_contact, REGISTERED). A project in $1 that the viewer is not a
+// member of is not in the list and stays invisible; nothing here reads or
+// trusts a caller-supplied project as membership. It is set_config(..., true),
+// so it reverts at COMMIT/ROLLBACK and cannot leak to the next statement on the
+// connection. An internal caller's list is '{}' and is never narrowed (see
+// perChunk), and is_internal short-circuits every policy before the list is
+// read anyway. Every row the narrowed policies reject is a row the query's own
+// `project_id = ANY($1)` would have excluded: for the rows the query asks for,
+// the result is the same as without it.
+//
+// It must be its own statement ahead of the guarded query, never inlined into
+// it (the planner may evaluate a policy before a non-leakproof set_config; see
+// setCallerIdentity).
+const narrowViewerProjectIDsSQL = `SELECT set_config('app.viewer_project_ids', COALESCE((
+	SELECT array_agg(p)::text
+	  FROM unnest(NULLIF(current_setting('app.viewer_project_ids', true), '')::uuid[]) AS p
+	 WHERE p = ANY($1::text[]::uuid[])
+), '{}'), true)`
+
+// perChunk runs fn for projectIDs under the caller's row-level security.
+//
+// A caller registered on more than projectActivityChunkSize projects (a partner)
+// is served in chunks of that size, each in its own Scoped transaction whose
+// viewer project list is narrowed to the chunk (narrowViewerProjectIDsSQL). Any
+// other caller -- an internal one, or a customer on a handful of projects, whose
+// list is already short -- takes the single-statement path exactly as before, with
+// no narrowing and no extra round trips.
+//
+// scope.ProjectIDs is used only to decide whether narrowing is worth doing, never
+// as the membership that is enforced: that stays the database's.
+func (r *globalSearchRepo) perChunk(ctx context.Context, scope SearchScope, projectIDs []string, fn func(q activityQuerier, ids []string) error) error {
+	if scope.Unrestricted || len(scope.ProjectIDs) <= projectActivityChunkSize {
+		return fn(r.db, projectIDs)
+	}
+	for start := 0; start < len(projectIDs); start += projectActivityChunkSize {
+		chunk := projectIDs[start:min(start+projectActivityChunkSize, len(projectIDs))]
+		err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, narrowViewerProjectIDsSQL, chunk); err != nil {
+				return fmt.Errorf("narrow viewer project ids: %w", err)
+			}
+			return fn(tx, chunk)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// nonNil turns a nil slice into an empty one, so it binds as an empty
+// text[] rather than a NULL (= ANY(NULL) is NULL, which would silently make a
+// FILTER match nothing for the wrong reason).
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

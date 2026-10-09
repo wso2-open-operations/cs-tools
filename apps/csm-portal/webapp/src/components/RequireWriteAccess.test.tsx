@@ -21,6 +21,7 @@ import "@testing-library/jest-dom/vitest";
 import RequireWriteAccess from "@components/RequireWriteAccess";
 
 let mockCanWrite = true;
+let mockCanCreateAnnouncement = true;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
@@ -29,6 +30,7 @@ vi.mock("@context/current-user/usePortalAccess", () => ({
     canUseOperations: true,
     canUseTimeCardsAndUpdates: true,
     canWrite: mockCanWrite,
+    canCreateAnnouncement: mockCanCreateAnnouncement,
   }),
 }));
 
@@ -42,6 +44,14 @@ function renderAt(path: string): ReturnType<typeof render> {
           element={
             <RequireWriteAccess to="/list">
               <div>Create form</div>
+            </RequireWriteAccess>
+          }
+        />
+        <Route
+          path="/list/announce"
+          element={
+            <RequireWriteAccess to="/list" capability="canCreateAnnouncement">
+              <div>Announcement form</div>
             </RequireWriteAccess>
           }
         />
@@ -62,5 +72,29 @@ describe("RequireWriteAccess", () => {
     renderAt("/list/new");
     expect(screen.queryByText("Create form")).not.toBeInTheDocument();
     expect(screen.getByText("List page")).toBeInTheDocument();
+  });
+
+  describe("capability canCreateAnnouncement", () => {
+    it("renders its children for a caller who can create announcements", () => {
+      mockCanWrite = true;
+      mockCanCreateAnnouncement = true;
+      renderAt("/list/announce");
+      expect(screen.getByText("Announcement form")).toBeInTheDocument();
+    });
+
+    it("redirects a caller who can write but is not an announcement creator", () => {
+      mockCanWrite = true;
+      mockCanCreateAnnouncement = false;
+      renderAt("/list/announce");
+      expect(screen.queryByText("Announcement form")).not.toBeInTheDocument();
+      expect(screen.getByText("List page")).toBeInTheDocument();
+    });
+
+    it("does not let canWrite alone through, and the default capability ignores the announcement flag", () => {
+      mockCanWrite = true;
+      mockCanCreateAnnouncement = false;
+      renderAt("/list/new");
+      expect(screen.getByText("Create form")).toBeInTheDocument();
+    });
   });
 });

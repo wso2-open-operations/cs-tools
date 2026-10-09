@@ -31,19 +31,20 @@ import (
 )
 
 type fakeProjectStatsRepo struct {
-	billableMinutes    int
-	nonBillableMinutes int
-	deployments        int
-	deployedProducts   int
-	instances          int
-	instanceErr        error
-	lastDeployment     *time.Time
-	outstanding        map[string]int
-	slaInputs          repository.ProjectSLAStatusInputs
-	conversations      []repository.StateCount
-	changeRequests     []repository.StateCount
-	crCurrentMonth     int
-	crPastThirtyDays   int
+	billableMinutes       int
+	nonBillableMinutes    int
+	deployments           int
+	deployedProducts      int
+	instances             int
+	instanceErr           error
+	lastDeployment        *time.Time
+	outstanding           map[string]int
+	slaInputs             repository.ProjectSLAStatusInputs
+	conversations         []repository.StateCount
+	resolvedConversations int
+	changeRequests        []repository.StateCount
+	crCurrentMonth        int
+	crPastThirtyDays      int
 
 	timeLoggedStart string
 	timeLoggedEnd   string
@@ -77,6 +78,9 @@ func (f *fakeProjectStatsRepo) SLAStatusInputs(context.Context, string) (reposit
 }
 func (f *fakeProjectStatsRepo) ConversationStateCounts(context.Context, string, string) ([]repository.StateCount, error) {
 	return f.conversations, nil
+}
+func (f *fakeProjectStatsRepo) ResolvedConversationsPastThirtyDays(context.Context, string, string) (int, error) {
+	return f.resolvedConversations, nil
 }
 func (f *fakeProjectStatsRepo) ChangeRequestStateCounts(context.Context, string) ([]repository.StateCount, error) {
 	return f.changeRequests, nil
@@ -243,6 +247,59 @@ func TestGetProjectConversationStats_ActiveStates(t *testing.T) {
 	}
 	if got := countFor(t, resp.StateCount, "CLOSE"); got != 0 {
 		t.Errorf("unseen state CLOSE = %d, want 0 but present", got)
+	}
+}
+
+// Resolved via Chat (Last 30d) is its own figure, not the Resolved entry of the
+// state breakdown (which is not limited to any period).
+func TestGetProjectConversationStats_ResolvedPastThirtyDays(t *testing.T) {
+	repo := &fakeProjectStatsRepo{
+		conversations:         []repository.StateCount{{State: "RESOLVED", Count: 10}},
+		resolvedConversations: 3,
+	}
+
+	resp, err := newStatsService(repo).GetProjectConversationStats(context.Background(), testUUID, "")
+	if err != nil {
+		t.Fatalf("GetProjectConversationStats: %v", err)
+	}
+	if resp.ResolvedPastThirtyDays == nil || *resp.ResolvedPastThirtyDays != 3 {
+		t.Errorf("resolvedPastThirtyDays = %v, want 3", resp.ResolvedPastThirtyDays)
+	}
+	if got := countFor(t, resp.StateCount, "RESOLVED"); got != 10 {
+		t.Errorf("stateCount[RESOLVED] = %d, want 10 -- the breakdown stays all-time", got)
+	}
+}
+
+// The customer portal's change request list shows Authorize to a WSO2 staff user as well, so
+// the card counts it for a staff caller that came through the customer portal (and still not
+// for staff on any other path).
+func TestProjectChangeRequestStats_AuthorizeIsOutstandingForStaffOnTheCustomerPortal(t *testing.T) {
+	counts := []repository.StateCount{
+		{State: "AUTHORIZE", Count: 2},
+		{State: "CUSTOMER_APPROVAL", Count: 3},
+		{State: "SCHEDULED", Count: 4},
+	}
+	ref := statsEnums()
+	staffViaPortal := stubAccess{scope: AccessScope{Unrestricted: true, HasInternalAccess: true, ViaCustomerPortal: true}}
+	repo := &fakeProjectStatsRepo{changeRequests: counts, outstanding: map[string]int{}}
+	svc := NewProjectStatsService(repo, ref, staffViaPortal, NewProjectMetadataService(ref),
+		NewProjectCaseStatsService(&fakeCaseStatsRepo{}, ref, staffViaPortal))
+
+	resp, err := svc.GetProjectChangeRequestStats(context.Background(), testUUID)
+	if err != nil {
+		t.Fatalf("GetProjectChangeRequestStats: %v", err)
+	}
+	if resp.OutstandingCount != 9 {
+		t.Errorf("staff via the customer portal: outstandingCount = %d, want 9 (Authorize counted, as in the list they see)", resp.OutstandingCount)
+	}
+	if resp.ActionRequiredCount != 3 {
+		t.Errorf("actionRequiredCount = %d, want 3 -- Authorize is still not waiting on the customer", resp.ActionRequiredCount)
+	}
+	if _, err := svc.GetProjectStats(context.Background(), testUUID); err != nil {
+		t.Fatalf("GetProjectStats: %v", err)
+	}
+	if !containsString(repo.crStatesSeen, "AUTHORIZE") {
+		t.Errorf("the dashboard's outstanding states = %v, want AUTHORIZE among them", repo.crStatesSeen)
 	}
 }
 

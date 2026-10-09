@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,12 +46,8 @@ type Notifier struct {
 	client           *http.Client
 	csm              *csm.Client
 	callerID         string
-	unknownServiceID string
-	// defaultAssignmentGroupID assigns an incident no other signal routes, so it still reaches a team.
-	defaultAssignmentGroupID string
-	// groupRoutes maps "group:<name>", "topic:<source topic>" and "account:<source account>" (lower-cased) to a CSM group id.
-	groupRoutes map[string]string
-	services    *serviceCache
+	defaultServiceID string
+	services         *serviceCache
 	// serviceResolveGroup collapses concurrent cache misses for the same unresolved label into one CSM search.
 	serviceResolveGroup     singleflight.Group
 	fallbackChatWebhookURLs []string
@@ -65,14 +60,9 @@ type Notifier struct {
 // Config groups New's dependencies to avoid a growing positional-argument list.
 type Config struct {
 	CallerID string
-	// UnknownServiceID is used when a Service label has no CMDB match.
-	UnknownServiceID string
-	// DefaultAssignmentGroupID assigns an incident that no other signal routes; empty leaves it unassigned.
-	DefaultAssignmentGroupID string
-	// AssignmentGroupRoutes maps routing keys to CSM group ids: "group:<name>" (a group an alert names
-	// for itself), "topic:<source topic>" and "account:<source account>".
-	// Keys are matched ignoring case.
-	AssignmentGroupRoutes map[string]string
+	// DefaultServiceID is the Default service, used when an alert has no Service label or the label has no
+	// CMDB match; entity-service assigns that service's support group (the default team).
+	DefaultServiceID string
 	// ServiceCacheTTL bounds reuse of a resolved label->serviceId mapping.
 	ServiceCacheTTL time.Duration
 	MaxAttempts     int
@@ -85,18 +75,16 @@ type Config struct {
 // New wires the notifier; a nil csm client disables CSM delivery so incidents only reach Chat.
 func New(logger *slog.Logger, csm *csm.Client, cfg Config) *Notifier {
 	n := &Notifier{
-		logger:                   logger,
-		client:                   &http.Client{Timeout: cfg.HTTPTimeout},
-		csm:                      csm,
-		callerID:                 cfg.CallerID,
-		unknownServiceID:         cfg.UnknownServiceID,
-		defaultAssignmentGroupID: cfg.DefaultAssignmentGroupID,
-		groupRoutes:              normaliseRoutes(cfg.AssignmentGroupRoutes),
-		services:                 newServiceCache(cfg.ServiceCacheTTL),
-		fallbackChatWebhookURLs:  splitURLs(os.Getenv("FALLBACK_CHAT_WEBHOOK_URLS")),
-		maxAttempts:              cfg.MaxAttempts,
-		retryBaseDelay:           cfg.RetryBaseDelay,
-		chatThreadingEnabled:     cfg.ChatThreadingEnabled,
+		logger:                  logger,
+		client:                  &http.Client{Timeout: cfg.HTTPTimeout},
+		csm:                     csm,
+		callerID:                cfg.CallerID,
+		defaultServiceID:        cfg.DefaultServiceID,
+		services:                newServiceCache(cfg.ServiceCacheTTL),
+		fallbackChatWebhookURLs: splitURLs(os.Getenv("FALLBACK_CHAT_WEBHOOK_URLS")),
+		maxAttempts:             cfg.MaxAttempts,
+		retryBaseDelay:          cfg.RetryBaseDelay,
+		chatThreadingEnabled:    cfg.ChatThreadingEnabled,
 	}
 	if len(n.fallbackChatWebhookURLs) == 0 {
 		logger.Warn("FALLBACK_CHAT_WEBHOOK_URLS not set; incidents will not reach Chat if CSM fails")
@@ -120,38 +108,22 @@ func (n *Notifier) CSMEnabled() bool {
 	return n.csm != nil
 }
 
-// DedupTag includes FirstSeen for uniqueness; millisecond precision ensures same-second recurrences get distinct tags.
-func DedupTag(fingerprint string, firstSeen time.Time) string {
+// CorrelationTag includes FirstSeen for uniqueness; millisecond precision ensures same-second recurrences get distinct tags.
+func CorrelationTag(fingerprint string, firstSeen time.Time) string {
 	return fmt.Sprintf("[fp:%s:%d]", fingerprint[:12], firstSeen.UnixMilli())
 }
 
-// NotifyCSM returns permanent=true for non-retryable rejections (non-429 4xx). CSMAttempts >= 1 already counts current attempt; only first attempts fail open on search errors.
+// NotifyCSM returns permanent=true for non-retryable rejections (non-429 4xx); it never searches CSM for a prior create, so a lost create response means a second create on retry.
 func (n *Notifier) NotifyCSM(ctx context.Context, inc model.Incident, creationNote string) (incidentID, incidentNumber string, ok bool, permanent bool) {
-	tag := DedupTag(inc.Fingerprint, inc.FirstSeen)
-	if id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag); err != nil {
-		if inc.CSMAttempts > 1 {
-			n.logger.Warn("csm dedup search failed on retry, deferring to avoid a duplicate create", "incident_number", inc.IncidentNumber, "error", err)
-			return "", "", false, false
-		}
-		// Fail open: first attempt, so no prior create possible; search error doesn't prove no incident exists.
-		n.logger.Warn("csm dedup search failed, proceeding to create", "incident_number", inc.IncidentNumber, "error", err)
-	} else if found {
-		n.logger.Info("found existing csm incident via dedup search, reusing", "incident_id", id, "incident_number", number)
-		return id, number, true, false
-	}
-
 	svc, err := n.resolveService(ctx, inc.Service)
 	if err != nil {
 		n.logger.Error("service id resolution failed, will retry", "incident_number", inc.IncidentNumber, "service", inc.Service, "error", err)
 		return "", "", false, false
 	}
-	var routedBy string
-	svc.groupID, routedBy = n.assignmentGroup(inc, svc.groupID)
-	n.logger.Info("assignment group chosen", "incident_number", inc.IncidentNumber, "by", routedBy, "assignment_group_id", svc.groupID)
 
-	req := n.createRequest(inc, svc, tag, creationNote)
+	req := n.createRequest(inc, svc, CorrelationTag(inc.Fingerprint, inc.FirstSeen), creationNote)
 
-	res, err := n.createIncidentWithRetry(ctx, tag, req)
+	res, err := n.createIncidentWithRetry(ctx, req)
 	if err != nil {
 		var apiErr *csm.Error
 		perm := errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != http.StatusTooManyRequests
@@ -172,29 +144,16 @@ func (n *Notifier) PushWorkNote(ctx context.Context, incidentID, note string) er
 }
 
 // IncidentState returns found=false when CSM has no matching incident yet.
-func (n *Notifier) IncidentState(ctx context.Context, incidentNumber string) (open bool, found bool, err error) {
-	return n.csm.IncidentState(ctx, incidentNumber)
+func (n *Notifier) IncidentState(ctx context.Context, incidentID, incidentNumber string) (open bool, found bool, err error) {
+	return n.csm.IncidentState(ctx, incidentID, incidentNumber)
 }
 
-// createIncidentWithRetry re-checks dedup on each retry, since a lost response could mean CSM already created it.
-func (n *Notifier) createIncidentWithRetry(ctx context.Context, tag string, req csm.CreateIncidentRequest) (*csm.CreateIncidentResult, error) {
+// createIncidentWithRetry retries transient CreateIncident failures with backoff; 4xx other than 429 is permanent.
+func (n *Notifier) createIncidentWithRetry(ctx context.Context, req csm.CreateIncidentRequest) (*csm.CreateIncidentResult, error) {
 	eb := backoff.NewExponentialBackOff()
 	eb.InitialInterval = n.retryBaseDelay
 
-	attempt := 0
 	return backoff.Retry(ctx, func() (*csm.CreateIncidentResult, error) {
-		attempt++
-		if attempt > 1 {
-			// Recheck dedup on retry: prior attempt may have succeeded but lost response; CreateIncident isn't idempotent.
-			id, number, found, err := n.csm.SearchIncidentByCorrelationID(ctx, tag)
-			if err != nil {
-				return nil, fmt.Errorf("dedup search before retry: %w", err)
-			}
-			if found {
-				n.logger.Info("found existing csm incident via dedup search on retry, reusing", "incident_id", id, "incident_number", number)
-				return &csm.CreateIncidentResult{IncidentID: id, IncidentNumber: number}, nil
-			}
-		}
 		res, err := n.csm.CreateIncident(ctx, req)
 		if err == nil {
 			return res, nil
@@ -207,14 +166,14 @@ func (n *Notifier) createIncidentWithRetry(ctx context.Context, tag string, req 
 	}, backoff.WithBackOff(eb), backoff.WithMaxTries(uint(n.maxAttempts)))
 }
 
-// resolvedService is a CMDB service and the group that supports it ("" when it has none).
+// resolvedService is the CMDB service an incident is raised against.
 type resolvedService struct {
-	id      string
-	groupID string
+	id string
 }
 
-// createRequest builds the POST /incidents body. The assignment group and contact type are what put an
-// alert-born incident on the SRE escalation ladder: without either, it matches no SRE routing rule.
+// createRequest builds the POST /incidents body. It never names an assignment group: entity-service sets it
+// from the service's support group, which with the contact type is what puts an alert-born incident on the
+// SRE escalation ladder.
 func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, creationNote string) csm.CreateIncidentRequest {
 	req := csm.CreateIncidentRequest{
 		CallerID:      n.callerID,
@@ -228,108 +187,15 @@ func (n *Notifier) createRequest(inc model.Incident, svc resolvedService, tag, c
 	if creationNote != "" {
 		req.WorkNotes = &creationNote
 	}
-	if svc.groupID != "" {
-		group := svc.groupID
-		req.AssignmentGroupID = &group
-	}
 	if ct := contactTypeForSource(inc.Source); ct != "" {
 		req.ContactType = &ct
 	}
 	return req
 }
 
-// assignmentGroup picks the incident's group from the most specific signal it has, in order: the group the
-// alert named for itself, its service's CMDB support group, the topic it was sent from, the account it was sent from, then the configured default. by names the signal that decided ("none" when nothing did), for the log.
-func (n *Notifier) assignmentGroup(inc model.Incident, serviceGroupID string) (id, by string) {
-	if named := strings.TrimSpace(inc.AssignmentGroup); named != "" {
-		if id := n.groupRoutes[routeKey("group", named)]; id != "" {
-			return id, "alert"
-		}
-		// A UUID named in the alarm is used as-is, on purpose: a team can route its own alarms to its
-		// group without a route being added here first. Editing an alarm's description is limited to the
-		// account's own operators, and entity-service still rejects an id that is not a real group.
-		if looksLikeGroupID(named) {
-			return named, "alert"
-		}
-		n.logger.Warn("alert names an assignment group with no route, ignoring it", "incident_number", inc.IncidentNumber, "assignment_group", named)
-	}
-	if serviceGroupID != "" {
-		return serviceGroupID, "service"
-	}
-	if id := n.groupRoutes[routeKey("topic", inc.SourceTopic)]; inc.SourceTopic != "" && id != "" {
-		return id, "topic"
-	}
-	if id := n.groupRoutes[routeKey("account", inc.SourceAccount)]; inc.SourceAccount != "" && id != "" {
-		return id, "account"
-	}
-	if n.defaultAssignmentGroupID != "" {
-		return n.defaultAssignmentGroupID, "default"
-	}
-	return "", "none"
-}
-
-// routeKey is the lookup key for one routing signal.
-func routeKey(kind, value string) string {
-	return kind + ":" + strings.ToLower(strings.TrimSpace(value))
-}
-
-// normaliseRoutes lower-cases and trims every key ("Group: SRE - Apollo" and "group:sre - apollo" are one route).
-func normaliseRoutes(routes map[string]string) map[string]string {
-	out := make(map[string]string, len(routes))
-	for k, v := range routes {
-		kind, value, ok := strings.Cut(k, ":")
-		if !ok {
-			continue
-		}
-		out[routeKey(strings.ToLower(strings.TrimSpace(kind)), value)] = strings.TrimSpace(v)
-	}
-	return out
-}
-
-// looksLikeGroupID reports whether v is already a group id rather than a name. Only the dashed UUID form
-// counts: entity-service rejects any other assignmentGroupId with a 400, which alert-core treats as permanent,
-// so a bare ServiceNow sys_id sent as-is would stop the incident being created at all.
-func looksLikeGroupID(v string) bool {
-	return uuidPattern.MatchString(v)
-}
-
-// uuidPattern is entity-service's own validate.UUIDPattern (a separate Go module, so copied by hand).
-var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
-// routeKinds are the routing signals a CSM_ASSIGNMENT_GROUP_ROUTES key may name.
-var routeKinds = map[string]bool{"group": true, "topic": true, "account": true}
-
-// ValidateGroupIDs checks the configured default group and every route's group id are UUIDs, the only
-// assignmentGroupId entity-service accepts; a bad one would make every incident it routes fail to create.
-// It also refuses a key whose kind is not group, topic or account (it would never match anything), and two
-// keys that are the same route once normalised but name different groups (which one won would depend on
-// map order).
-func ValidateGroupIDs(cfg Config) error {
-	if v := strings.TrimSpace(cfg.DefaultAssignmentGroupID); v != "" && !looksLikeGroupID(v) {
-		return fmt.Errorf("CSM_DEFAULT_ASSIGNMENT_GROUP_ID %q is not a UUID", v)
-	}
-	seen := make(map[string]string, len(cfg.AssignmentGroupRoutes)) // normalised key -> original key
-	for k, v := range cfg.AssignmentGroupRoutes {
-		kind, value, ok := strings.Cut(k, ":")
-		kind = strings.ToLower(strings.TrimSpace(kind))
-		if !ok || !routeKinds[kind] {
-			return fmt.Errorf("CSM_ASSIGNMENT_GROUP_ROUTES key %q must start with group:, topic: or account:", k)
-		}
-		if !looksLikeGroupID(strings.TrimSpace(v)) {
-			return fmt.Errorf("CSM_ASSIGNMENT_GROUP_ROUTES[%q] = %q is not a UUID", k, v)
-		}
-		key := routeKey(kind, value)
-		if other, dup := seen[key]; dup && !strings.EqualFold(strings.TrimSpace(cfg.AssignmentGroupRoutes[other]), strings.TrimSpace(v)) {
-			return fmt.Errorf("CSM_ASSIGNMENT_GROUP_ROUTES keys %q and %q are the same route but name different groups", other, k)
-		}
-		seen[key] = k
-	}
-	return nil
-}
-
 // contactTypes maps an alert's Source (normalised by normaliseSource) to entity-service's IncidentContactType.
 // Only sources that enum names are listed; any other source (AWS, Grafana, ...) sends no contact type and
-// relies on the assignment group alone.
+// relies alone on the assignment group entity-service sets from its service.
 var contactTypes = map[string]string{
 	"azure":             "AZURE",
 	"azuremonitor":      "AZURE",
@@ -356,10 +222,11 @@ func normaliseSource(source string) string {
 	return b.String()
 }
 
-// resolveService returns a search error as-is, never falling back to UnknownServiceID, so callers retry.
+// resolveService falls back to the Default service when label is empty or has no CMDB match. A search error is
+// returned as-is, never falling back to the Default service, so callers retry.
 func (n *Notifier) resolveService(ctx context.Context, label string) (resolvedService, error) {
 	if label == "" {
-		return resolvedService{id: n.unknownServiceID}, nil
+		return resolvedService{id: n.defaultServiceID}, nil
 	}
 	if svc, ok := n.services.get(label, time.Now()); ok {
 		return svc, nil
@@ -373,7 +240,7 @@ func (n *Notifier) resolveService(ctx context.Context, label string) (resolvedSe
 		if !found {
 			return resolvedService{}, nil
 		}
-		svc := resolvedService{id: hit.ID, groupID: hit.SupportGroupID()}
+		svc := resolvedService{id: hit.ID}
 		n.services.set(label, svc, time.Now())
 		return svc, nil
 	})
@@ -386,7 +253,7 @@ func (n *Notifier) resolveService(ctx context.Context, label string) (resolvedSe
 		}
 		svc := res.Val.(resolvedService)
 		if svc.id == "" {
-			return resolvedService{id: n.unknownServiceID}, nil
+			return resolvedService{id: n.defaultServiceID}, nil
 		}
 		return svc, nil
 	}
@@ -405,7 +272,7 @@ func csmCategory(category string) string {
 	return "SERVICE_INTERRUPTION"
 }
 
-// incidentSubject is the metric name alone; the dedup tag and other alert context live in WorkNotes instead of the title.
+// incidentSubject is the metric name alone; the correlation tag and other alert context live outside the title.
 func incidentSubject(inc model.Incident) string {
 	subject := inc.MetricName
 	if subject == "" {

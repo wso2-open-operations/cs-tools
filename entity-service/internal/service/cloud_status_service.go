@@ -20,6 +20,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -50,6 +51,41 @@ type cloudStatusService struct {
 	// most likely to change -- adding a cloud to the status page is a
 	// business decision, not a code change.
 	parentServiceIDs []string
+	// publisher puts each transition on the operations topic (sre-events) as
+	// outage.status_page_due the moment it is recorded, for
+	// csm-notification-service to post. Nil leaves every post to
+	// csm-scheduled-tasks' tick, as before. See WithCloudStatusPublisher.
+	publisher EventPublisherService
+}
+
+// cloudStatusDeliveryLease protects a reservation (published, not yet
+// attempted) and an attempt (a sender is posting). A reservation that runs
+// out goes to the scheduled task -- nothing was sent. An attempt that runs out
+// without an outcome is an unknown outcome and is never re-sent. Long enough
+// for the scheduled task to post a whole batch (50 x 15s).
+const cloudStatusDeliveryLease = 15 * time.Minute
+
+// reservedWebhook is a row recorded and reserved for publishing.
+type reservedWebhook struct{ id, token string }
+
+// WithCloudStatusPublisher makes the record-triggered path (HandleOutages,
+// called straight after an outage is written) publish each transition it
+// records as outage.status_page_due, instead of leaving it for
+// csm-scheduled-tasks' next tick -- up to five minutes, plus however often
+// Choreo fires that component. csm-notification-service posts it and reports
+// the outcome; the scheduled task stays the retry path for a failed post, and
+// its sweep still records anything never published.
+//
+// *** THE SAME DOUBLE-FIRE GUARD AS CLOUD_STATUS_ENABLED. *** While
+// ServiceNow's "Cloud Status Event Notification Flow" (and "- Affected CI")
+// is active, ServiceNow posts these too.
+//
+// svc is returned unchanged when it is not the service this package builds.
+func WithCloudStatusPublisher(svc CloudStatusService, publisher EventPublisherService) CloudStatusService {
+	if s, ok := svc.(*cloudStatusService); ok && publisher != nil {
+		s.publisher = publisher
+	}
+	return svc
 }
 
 // NewCloudStatusService constructs the cloud status webhook decision service.
@@ -104,7 +140,9 @@ func (s *cloudStatusService) Sweep(ctx context.Context) (domain.CloudStatusSweep
 	}
 
 	resp := domain.CloudStatusSweepResponse{Scanned: len(candidates)}
-	if err := s.process(ctx, candidates, &resp); err != nil {
+	// nil: the sweep only records. It is csm-scheduled-tasks that calls it,
+	// and that component posts the pending rows in the same run.
+	if err := s.process(ctx, candidates, &resp, nil); err != nil {
 		return domain.CloudStatusSweepResponse{}, err
 	}
 	return resp, nil
@@ -118,7 +156,11 @@ func (s *cloudStatusService) Sweep(ctx context.Context) (domain.CloudStatusSweep
 // transition handled by the trigger would behave differently from the same
 // transition handled by reconciliation, and the two are indistinguishable
 // after the fact.
-func (s *cloudStatusService) process(ctx context.Context, candidates []repository.CloudStatusCandidate, resp *domain.CloudStatusSweepResponse) error {
+//
+// due, when non-nil, collects the rows recorded for instant delivery: each is
+// recorded with a reservation (RecordAndReserve), and the caller publishes it
+// after this returns.
+func (s *cloudStatusService) process(ctx context.Context, candidates []repository.CloudStatusCandidate, resp *domain.CloudStatusSweepResponse, due *[]reservedWebhook) error {
 	for _, c := range candidates {
 		clouds, err := s.cloudsFor(ctx, c)
 		if err != nil {
@@ -143,7 +185,17 @@ func (s *cloudStatusService) process(ctx context.Context, candidates []repositor
 		for _, cloud := range clouds {
 			rec := c
 			rec.Cloud = cloud
-			recorded, err := s.repo.Record(ctx, rec)
+			var recorded bool
+			var err error
+			if due != nil && s.publisher != nil {
+				var id, token string
+				id, token, recorded, err = s.repo.RecordAndReserve(ctx, rec, cloudStatusDeliveryLease)
+				if recorded {
+					*due = append(*due, reservedWebhook{id: id, token: token})
+				}
+			} else {
+				recorded, err = s.repo.Record(ctx, rec)
+			}
 			if err != nil {
 				return err
 			}
@@ -292,13 +344,19 @@ func (s *cloudStatusService) applyMonitorStatus(ctx context.Context, c repositor
 	return changed, unknownType, nil
 }
 
-// PendingWebhooks returns the webhooks still owed to the dashboard, for the
-// delivering task to post.
+// PendingWebhooks claims and returns the webhooks still owed to the
+// dashboard, for the scheduled task to post.
+//
+// THE READ IS A CLAIM. Each returned row has an attempt started under its
+// ClaimToken (repository.ClaimPending), so it cannot be posted by anyone else
+// while the caller posts it -- in particular not by csm-notification-service
+// handling outage.status_page_due for the same row. csm-scheduled-tasks needs
+// no change for this: it already reports every row it reads.
 //
 // The cloud is translated to its wire slug here rather than in SQL so that the
 // mapping lives in one place next to the reason it exists.
 func (s *cloudStatusService) PendingWebhooks(ctx context.Context) (domain.PendingCloudStatusWebhooksResponse, error) {
-	rows, err := s.repo.Pending(ctx, cloudStatusPendingLimit, cloudStatusMaxAttempts)
+	rows, err := s.repo.ClaimPending(ctx, cloudStatusPendingLimit, cloudStatusMaxAttempts, cloudStatusDeliveryLease)
 	if err != nil {
 		return domain.PendingCloudStatusWebhooksResponse{}, err
 	}
@@ -306,38 +364,90 @@ func (s *cloudStatusService) PendingWebhooks(ctx context.Context) (domain.Pendin
 	out := make([]domain.PendingCloudStatusWebhook, 0, len(rows))
 	for _, w := range rows {
 		slug := domain.CloudOfferingSlug(w.Cloud)
-		if slug == "" {
-			// Recorded under an offering this build cannot address. Only
-			// reachable if the sync adds an enum value ahead of this service
-			// knowing about it, so it is worth a loud line rather than a
-			// silent drop.
-			slog.ErrorContext(ctx, "pending cloud status webhook has an unmappable offering; not dispatching",
-				"webhookId", w.ID, "cloudOffering", w.Cloud)
-			continue
-		}
 		wire := w.Event.WireValue()
-		if wire == "" {
-			// An event this build cannot put on the wire. Same reasoning as
-			// the unmappable cloud above: better to hold it back visibly than
-			// to post a literal the dashboard will not recognise.
-			slog.ErrorContext(ctx, "pending cloud status webhook has no wire value for its event; not dispatching",
-				"webhookId", w.ID, "event", string(w.Event))
+		if slug == "" || wire == "" {
+			// Recorded under an offering or an event this build cannot put on
+			// the wire -- only reachable through version skew. Better held
+			// back visibly than posted as something the dashboard ignores.
+			// Claimed above, so its attempt is closed here as a definite
+			// failure (nothing was sent); left open it would read as an
+			// unknown outcome.
+			slog.ErrorContext(ctx, "pending cloud status webhook cannot be put on the wire; not dispatching",
+				"webhookId", w.ID, "cloudOffering", w.Cloud, "event", string(w.Event))
+			if _, err := s.repo.RecordDelivery(ctx, w.ID, repository.DeliveryOutcome{
+				Error: "no wire value for cloud " + w.Cloud + " / event " + string(w.Event), ClaimToken: w.ClaimToken,
+			}); err != nil {
+				slog.ErrorContext(ctx, "cloudstatus: closing an unpostable webhook failed", "webhookId", w.ID, "err", err)
+			}
 			continue
 		}
 		w.Cloud = slug
 		w.WireEvent = wire
 		out = append(out, w)
 	}
-	return domain.PendingCloudStatusWebhooksResponse{Count: len(out), Webhooks: out}, nil
+
+	unknown, err := s.repo.UnknownOutcomes(ctx, cloudStatusPendingLimit)
+	if err != nil {
+		// Reporting only: the claimed rows above must still go out.
+		slog.ErrorContext(ctx, "cloudstatus: reading webhooks with an unknown outcome failed", "err", err)
+	}
+	for _, w := range unknown {
+		// Logged on every tick until someone settles it: this is the one
+		// state the system cannot resolve by itself without risking a
+		// duplicate on the public page.
+		slog.ErrorContext(ctx, "cloudstatus: webhook outcome unknown -- check the status page; it will not be re-sent automatically",
+			"webhookId", w.ID, "number", w.Number, "cloud", w.Cloud, "event", string(w.Event), "lastError", w.LastError)
+	}
+	return domain.PendingCloudStatusWebhooksResponse{Count: len(out), Webhooks: out, UnknownOutcome: len(unknown)}, nil
 }
 
-// RecordDelivery stamps the outcome of one webhook attempt.
+// RecordDelivery stamps the outcome of one webhook attempt. A ConflictError
+// means there was no open attempt to record it against: the webhook is
+// already delivered, or the report is for an attempt that is not current.
 func (s *cloudStatusService) RecordDelivery(ctx context.Context, req domain.RecordCloudStatusDeliveryRequest) error {
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return err
 	}
+	if req.ClaimToken != "" {
+		if err := validateUUIDs("claimToken", []string{req.ClaimToken}); err != nil {
+			return err
+		}
+	}
+	if req.Delivered && req.Unknown {
+		return &apierror.ValidationError{Msg: "unknown cannot be true when delivered is true"}
+	}
 	if !req.Delivered && strings.TrimSpace(req.Error) == "" {
 		return &apierror.ValidationError{Msg: "error is required when delivered is false"}
 	}
-	return s.repo.RecordDelivery(ctx, req.ID, req.Delivered, req.Error)
+	recorded, err := s.repo.RecordDelivery(ctx, req.ID, repository.DeliveryOutcome{
+		Delivered: req.Delivered, Unknown: req.Unknown, Error: req.Error, ClaimToken: req.ClaimToken,
+	})
+	if err != nil {
+		return err
+	}
+	if !recorded {
+		return &apierror.ConflictError{Msg: "delivery not recorded: the webhook is already delivered, or has no open attempt under this claim"}
+	}
+	return nil
+}
+
+// ClaimWebhook starts the attempt to post a webhook published as
+// outage.status_page_due, under the claim token the event carried. A
+// ConflictError means the caller must NOT post: the webhook is already
+// delivered, or its reservation ran out and the scheduled task has it.
+func (s *cloudStatusService) ClaimWebhook(ctx context.Context, req domain.ClaimCloudStatusWebhookRequest) error {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return err
+	}
+	if err := validateUUIDs("claimToken", []string{req.ClaimToken}); err != nil {
+		return err
+	}
+	started, err := s.repo.StartAttempt(ctx, req.ID, req.ClaimToken, cloudStatusDeliveryLease)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return &apierror.ConflictError{Msg: "webhook not claimable: already delivered, or no longer reserved under this claim"}
+	}
+	return nil
 }

@@ -48,3 +48,34 @@ type OutageNoticePayload struct {
 	// drainer does not sweep a flow it has nobody to send to.
 	Recipients []string `json:"recipients"`
 }
+
+// TypeOutageStatusPageDue asks for one cloud status webhook to the public
+// status dashboard: an outage began or ended on a cloud the page shows.
+// Published on the operations topic (sre-events) the moment the outage is
+// written, and posted by csm-notification-service -- which reports the
+// outcome back (POST /internal/cloud-status/{id}/delivery). csm-scheduled-tasks
+// remains the retry path for a post that fails.
+const TypeOutageStatusPageDue Type = "outage.status_page_due"
+
+// OutageStatusPageDuePayload is one webhook, already decided: the consumer
+// posts Event, Timestamp and Cloud verbatim as the dashboard's body
+// ({"event","timestamp","cloud"}) and reports the result under WebhookID.
+type OutageStatusPageDuePayload struct {
+	// WebhookID is the cloud_status_events row; the delivery is recorded
+	// against it.
+	WebhookID string `json:"webhookId"`
+	// ClaimToken is the reservation this event was published under. The
+	// consumer must claim the webhook with it before posting
+	// (POST /internal/cloud-status/{id}/claim) and report the outcome with it.
+	ClaimToken string `json:"claimToken"`
+	OutageID   string `json:"outageId"`
+	Number     string `json:"number,omitempty"`
+	// Cloud is the dashboard's slug: asgardeo, choreo, bijira, devant,
+	// moesif, choreo-eu or agent-manager.
+	Cloud string `json:"cloud"`
+	// Event is the wire value: outage_begin or outage_end.
+	Event string `json:"event"`
+	// Timestamp is the outage's begin or end instant, ISO-8601 UTC with
+	// milliseconds ("2026-10-09T06:54:00.000Z"), as the dashboard parses it.
+	Timestamp string `json:"timestamp"`
+}

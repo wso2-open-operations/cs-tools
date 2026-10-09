@@ -32,6 +32,7 @@ import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseComments
 import type { CaseComment } from "@features/support/types/cases";
 import {
   compareByCreatedOnThenId,
+  collapseCommentSourceWhitespace,
   convertCodeTagsToHtml,
   formatCommentDate,
   getInitials,
@@ -65,7 +66,7 @@ function commentAuthorDisplayName(comment: CaseComment): string {
 }
 
 function sanitizeCommentContent(content: string, isDarkMode: boolean): string {
-  const rawContent = content ?? "";
+  const rawContent = collapseCommentSourceWhitespace(content ?? "");
   const isFullCodeWrap = hasSingleCodeWrapper(rawContent);
   const codeBlockCount = (rawContent.match(/\[code\]/gi) ?? []).length;
   const afterCode = isFullCodeWrap

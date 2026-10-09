@@ -149,6 +149,49 @@ describe("CsmCaseCommentBubble", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  describe("laid-out HTML source", () => {
+    const laidOut =
+      "<p>Findings:</p>\r\n<ul>\r\n  <li>First point\r\n    continues here.<br>\r\n    Second line.</li>\r\n</ul>";
+
+    it("renders no newline between or inside the blocks, so pre-wrap does not print them", () => {
+      const { container } = renderWithProviders(
+        <CsmCaseCommentBubble comment={makeComment({ bodyHtml: laidOut })} />,
+      );
+      const list = container.querySelector("ul");
+      expect(list).not.toBeNull();
+      expect(list?.textContent).toBe("First point continues here.Second line.");
+      expect(container.querySelector("ul")?.parentElement?.innerHTML).not.toMatch(/[\r\n]/);
+    });
+
+    it("renders a body inside a [code] wrapper the same way", () => {
+      const { container } = renderWithProviders(
+        <CsmCaseCommentBubble comment={makeComment({ bodyHtml: `[code]${laidOut}[/code]` })} />,
+      );
+      expect(container.querySelector("ul")?.parentElement?.innerHTML).not.toMatch(/[\r\n]/);
+    });
+
+    it("keeps the line breaks inside a <pre> block and an inline <code> snippet", () => {
+      const { container } = renderWithProviders(
+        <CsmCaseCommentBubble
+          comment={makeComment({
+            bodyHtml: "<p>Run:</p>\n<pre>one\n  two</pre>\n<p>or <code>x\ny</code></p>",
+          })}
+        />,
+      );
+      expect(container.querySelector("pre")?.textContent).toBe("one\n  two");
+      expect(container.querySelector("code")?.textContent).toBe("x\ny");
+    });
+
+    it("keeps the container's pre-wrap, so editor spacing and plain-text newlines are unchanged", () => {
+      renderWithProviders(
+        <CsmCaseCommentBubble comment={makeComment({ bodyHtml: "Line one\nLine two" })} />,
+      );
+      const body = screen.getByText("Line one", { exact: false }).closest("div");
+      expect(getComputedStyle(body?.parentElement as HTMLElement).whiteSpace).toBe("pre-wrap");
+      expect(body?.textContent).toBe("Line one\nLine two");
+    });
+  });
+
   it("strips a single [code]...[/code] wrapper before rendering", () => {
     renderWithProviders(
       <CsmCaseCommentBubble

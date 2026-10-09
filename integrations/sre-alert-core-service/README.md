@@ -48,20 +48,15 @@ notifications independently until they're actually delivered.
   up to `max_csm_attempts`), pushes owed work notes in order, posts the Chat
   fallback, and schedules its next due time.
 - **Assignment group and contact type.** These two fields are what route an incident
-  onto the SRE escalation ladder; an incident with neither gets no ladder. The group is
-  taken from the most specific signal the first alert carries, in this order:
-  1. the group the alert names for itself (an AWS alarm's `AlarmDescription`
-     `"assignment_group"`), as a group id or as a name mapped in
-     `CSM_ASSIGNMENT_GROUP_ROUTES` (`"group:<name>"`);
-  2. the matched CMDB service's support group;
-  3. the topic it was sent from, an AWS SNS `TopicArn` (`"topic:<arn>"`);
-  4. the account it was sent from, an AWS account id (`"account:<id>"`);
-  5. `CSM_DEFAULT_ASSIGNMENT_GROUP_ID`.
-
-  The log line `assignment group chosen` names the step that decided (`by=`). The
-  contact type is set when the alert's source has one in CSM's enum (Azure → `AZURE`,
-  Site24x7 → `SITE_247`, Sentinel → `SENTINEL`); AWS and the rest have none and route
-  by the group alone.
+  onto the SRE escalation ladder. alert-core never sends an assignment group:
+  entity-service sets it from the service's support group, falling back to the Default
+  service's. The service is the CMDB service matching the first alert's label, or
+  `INCIDENT_DEFAULT_SERVICE_ID` when the alert has no label or one with no match (a failed
+  search is retried, never treated as no match). The first alert's routing signals (a
+  group an AWS alarm names, its SNS topic and AWS account) are still stored on the
+  incident for reference, but not used. The contact type is set when the alert's source
+  has one in CSM's enum (Azure → `AZURE`, Site24x7 → `SITE_247`, Sentinel → `SENTINEL`);
+  AWS and the rest have none and route by the group alone.
 - **Duplicate-create protection.** Before creating an incident, and again before
   every retry, the service searches CSM by `correlationId` so a lost create response
   never causes a duplicate.
@@ -93,9 +88,9 @@ two replicas never claim the same alert row, and a crashed replica's claims beco
 reclaimable after `poll.claim_ttl`. If two replicas do hold alerts for the same
 fingerprint, the transaction-scoped fold lock serializes them, so the outcome is
 the same as one replica processing both. Delivery is serialized per incident by a
-session advisory try-lock (`internal/pglock`), and CSM's dedup-by-tag search covers
-the remaining gap where a replica crashes between a CSM create succeeding and its
-confirmation being stored.
+session advisory try-lock (`internal/pglock`). CSM is not searched for a prior
+create, so if a replica crashes, or a create response is lost, between a CSM create
+succeeding and its confirmation being stored, the retry creates a second CSM incident.
 
 ## Package layout
 
@@ -145,7 +140,13 @@ migration.
 
 CSM delivery turns on only when all of `CSM_INTEGRATION_BASE_URL`,
 `CSM_INTEGRATION_TOKEN_URL`, `CSM_INTEGRATION_CLIENT_ID`,
-`CSM_INTEGRATION_CLIENT_SECRET`, `CSM_CALLER_ID` and `CSM_UNKNOWN_SERVICE_ID` are set.
+`CSM_INTEGRATION_CLIENT_SECRET`, `CSM_CALLER_ID` and `INCIDENT_DEFAULT_SERVICE_ID` are set.
+`INCIDENT_DEFAULT_SERVICE_ID` is the Default service; incidents for alerts with no or an
+unknown service use it, and entity-service assigns its support group (the default team).
+Must be the same value as entity-service's `INCIDENT_DEFAULT_SERVICE_ID`. It replaces
+`CSM_UNKNOWN_SERVICE_ID`, which is no longer read.
+`CSM_DEFAULT_ASSIGNMENT_GROUP_ID` and `CSM_ASSIGNMENT_GROUP_ROUTES` are no longer used; if
+still set, startup logs a warning and ignores them.
 Without them incidents are still created and deduplicated in Postgres and surfaced via
 `FALLBACK_CHAT_WEBHOOK_URLS` (if set). See `.env.example`.
 

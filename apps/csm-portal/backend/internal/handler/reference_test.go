@@ -23,6 +23,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
 )
 
 func TestReferenceHandler_SearchRoles(t *testing.T) {
@@ -306,4 +308,87 @@ func TestProjectHandler_GetProjectContact(t *testing.T) {
 			t.Error("the entity client was called for a malformed contact id, want no upstream call")
 		}
 	})
+}
+
+type fakeTeamSearchClient struct {
+	body []byte
+	resp []byte
+	err  error
+}
+
+func (f *fakeTeamSearchClient) SearchTeams(_ context.Context, body []byte) ([]byte, error) {
+	f.body = body
+	return f.resp, f.err
+}
+
+func TestReferenceHandler_SearchTeams_FromEntityService(t *testing.T) {
+	const unknownID = "99999999-9999-9999-9999-999999999999"
+
+	t.Run("lists the team table and enriches registry teams by name", func(t *testing.T) {
+		fake := &fakeTeamSearchClient{resp: []byte(`{"teams":[` +
+			`{"id":"11111111-1111-1111-1111-111111111111","name":"ABT One","type":"cre"},` +
+			`{"id":"` + unknownID + `","name":"Not In Registry","type":"cre"}],"total":2}`)}
+		h := NewReferenceHandler(testDirectory(t)).WithEntityClient(fake)
+		w := httptest.NewRecorder()
+		h.SearchTeams(w, withUser(httptest.NewRequest(http.MethodPost, "/teams/search",
+			strings.NewReader(`{"filters":{"searchQuery":" abt "},"pagination":{"limit":10}}`))))
+
+		assertStatus(t, w, http.StatusOK)
+		if !strings.Contains(string(fake.body), `"searchQuery":"abt"`) || !strings.Contains(string(fake.body), `"limit":10`) {
+			t.Errorf("upstream body = %s, want the trimmed query and the requested limit", fake.body)
+		}
+		var got directory.SearchTeamsResponse
+		got = decodeJSON[directory.SearchTeamsResponse](t, w)
+		if got.Total != 2 || len(got.Teams) != 2 {
+			t.Fatalf("response = %+v, want 2 teams", got)
+		}
+		if got.Teams[0].ID != "abt-1" || got.Teams[0].Family != "cre-abt" || got.Teams[0].CreGroupID == "" {
+			t.Errorf("registry team = %+v, want its key as id plus family and group id", got.Teams[0])
+		}
+		if got.Teams[1].ID != unknownID || got.Teams[1].Name != "Not In Registry" || got.Teams[1].Family != "" {
+			t.Errorf("unregistered team = %+v, want the team table's id and name only", got.Teams[1])
+		}
+	})
+
+	t.Run("a family filter is answered from the registry without an upstream call", func(t *testing.T) {
+		fake := &fakeTeamSearchClient{err: errors.New("must not be called")}
+		h := NewReferenceHandler(testDirectory(t)).WithEntityClient(fake)
+		w := httptest.NewRecorder()
+		h.SearchTeams(w, withUser(httptest.NewRequest(http.MethodPost, "/teams/search",
+			strings.NewReader(`{"filters":{"family":"sre-abt"}}`))))
+
+		assertStatus(t, w, http.StatusOK)
+		if fake.body != nil {
+			t.Errorf("entity service was called for a family-scoped search")
+		}
+		var got directory.SearchTeamsResponse
+		got = decodeJSON[directory.SearchTeamsResponse](t, w)
+		if len(got.Teams) != 1 || got.Teams[0].ID != "beta" {
+			t.Errorf("teams = %+v, want only the sre-abt registry team", got.Teams)
+		}
+	})
+
+	t.Run("an upstream failure is not echoed", func(t *testing.T) {
+		h := NewReferenceHandler(testDirectory(t)).WithEntityClient(&fakeTeamSearchClient{err: errors.New("db down")})
+		w := httptest.NewRecorder()
+		h.SearchTeams(w, withUser(httptest.NewRequest(http.MethodPost, "/teams/search", strings.NewReader(`{}`))))
+
+		assertStatus(t, w, http.StatusInternalServerError)
+		if strings.Contains(w.Body.String(), "db down") {
+			t.Errorf("body leaked the upstream error: %s", w.Body.String())
+		}
+	})
+}
+
+func TestReferenceHandler_SearchTeams_MatchesRegistryNamesIgnoringCase(t *testing.T) {
+	fake := &fakeTeamSearchClient{resp: []byte(`{"teams":[{"id":"11111111-1111-1111-1111-111111111111","name":"abt one","type":"cre"}],"total":1}`)}
+	h := NewReferenceHandler(testDirectory(t)).WithEntityClient(fake)
+	w := httptest.NewRecorder()
+	h.SearchTeams(w, withUser(httptest.NewRequest(http.MethodPost, "/teams/search", strings.NewReader(`{}`))))
+
+	assertStatus(t, w, http.StatusOK)
+	got := decodeJSON[directory.SearchTeamsResponse](t, w)
+	if len(got.Teams) != 1 || got.Teams[0].ID != "abt-1" || got.Teams[0].Family != "cre-abt" {
+		t.Errorf("teams = %+v, want the registry row for a differently-cased team name", got.Teams)
+	}
 }

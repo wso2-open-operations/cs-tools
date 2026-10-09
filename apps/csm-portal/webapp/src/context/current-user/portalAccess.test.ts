@@ -28,6 +28,7 @@ const NONE = {
   canUseSecurityCenter: false,
   canUsePlg: false,
   canManagePlaybooks: false,
+  canCreateAnnouncement: false,
 };
 
 describe("getPortalAccess", () => {
@@ -110,22 +111,25 @@ describe("getPortalAccess", () => {
       canUseSecurityCenter: true,
       canUsePlg: true,
     };
-    // canEscalate is the one further exception beyond canCreateUser: admin
-    // holds it, cs_engineer does not (escalation is a dedicated
-    // responsibility -- see canEscalate's own doc comment). canManagePlaybooks
-    // is a third of the same kind: both roles hold canUsePlg, only admin may
-    // author a playbook template.
+    // Both hold canEscalate (any internal engineer may escalate, as in
+    // ServiceNow). canManagePlaybooks is the further exception beyond
+    // canCreateUser: both roles hold canUsePlg, only admin may author a
+    // playbook template. canCreateAnnouncement is the one write a plain CS
+    // engineer no longer holds: sending an announcement needs the
+    // announcement_creator role (admin always has it).
     expect(getPortalAccess(["cs_engineer"])).toEqual({
       ...all,
       canCreateUser: false,
-      canEscalate: false,
+      canEscalate: true,
       canManagePlaybooks: false,
+      canCreateAnnouncement: false,
     });
     expect(getPortalAccess(["admin"])).toEqual({
       ...all,
       canCreateUser: true,
       canEscalate: true,
       canManagePlaybooks: true,
+      canCreateAnnouncement: true,
     });
   });
 
@@ -167,11 +171,11 @@ describe("getPortalAccess", () => {
     }
   });
 
-  it("only admin and escalator can escalate -- CS engineer does not share this one", () => {
+  it("admin, CS engineer and escalator can escalate -- any internal engineer, as in ServiceNow", () => {
     expect(getPortalAccess(["admin"]).canEscalate).toBe(true);
+    expect(getPortalAccess(["cs_engineer"]).canEscalate).toBe(true);
     expect(getPortalAccess(["escalator"]).canEscalate).toBe(true);
     for (const role of [
-      "cs_engineer",
       "viewer",
       "attachment_downloader",
       "usage_metrics_viewer",
@@ -240,5 +244,48 @@ describe("getPortalAccess", () => {
 
   it("matches role keys case-insensitively", () => {
     expect(getPortalAccess(["CS_Engineer"]).canWrite).toBe(true);
+  });
+
+  // Mirrors the backend's PermCreateAnnouncement, which is checked on top of
+  // PermWrite: the role narrows who may send an announcement, it does not make
+  // anyone a writer.
+  describe("canCreateAnnouncement", () => {
+    it("a CS engineer without the announcement_creator role cannot create an announcement but still writes", () => {
+      expect(getPortalAccess(["cs_engineer"])).toMatchObject({ canWrite: true, canCreateAnnouncement: false });
+    });
+
+    it("a CS engineer who also holds announcement_creator can", () => {
+      expect(getPortalAccess(["cs_engineer", "announcement_creator"])).toMatchObject({
+        canWrite: true,
+        canCreateAnnouncement: true,
+      });
+    });
+
+    it("admin can without the role, like every other capability", () => {
+      expect(getPortalAccess(["admin"]).canCreateAnnouncement).toBe(true);
+    });
+
+    it("the role on its own grants nothing at all, not even entry past the no-access screen", () => {
+      expect(getPortalAccess(["announcement_creator"])).toEqual(NONE);
+    });
+
+    it("alongside any role that does grant access, hasAnyRole is true as before", () => {
+      expect(getPortalAccess(["viewer", "announcement_creator"]).hasAnyRole).toBe(true);
+    });
+
+    it("no role other than admin and cs_engineer + announcement_creator can create one", () => {
+      for (const role of ["viewer", "escalator", "attachment_downloader", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "worknote_creator", "sales_solutions"]) {
+        expect(getPortalAccess([role, "announcement_creator"]).canCreateAnnouncement).toBe(false);
+        expect(getPortalAccess([role]).canCreateAnnouncement).toBe(false);
+      }
+    });
+
+    it("matches the role key case-insensitively, like every other role", () => {
+      expect(getPortalAccess(["CS_Engineer", "Announcement_Creator"]).canCreateAnnouncement).toBe(true);
+    });
+
+    it("is false while roles are not loaded, so the controls fail closed", () => {
+      expect(getPortalAccess(undefined).canCreateAnnouncement).toBe(false);
+    });
   });
 });

@@ -45,7 +45,12 @@ const (
 	TypeCaseAssigned     Type = "case.assigned"
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
-	TypeIncidentCreated  Type = "incident.created"
+	// TypeWorkaroundProvided is published whenever a case's
+	// WorkaroundProvided field is set to true via PATCH — see
+	// WorkaroundProvidedPayload's own doc comment for why this exists at
+	// all.
+	TypeWorkaroundProvided Type = "case.workaround_provided"
+	TypeIncidentCreated    Type = "incident.created"
 	// TypeIncidentAcknowledged / TypeIncidentPriorityElevated drive the
 	// incident call-escalation ladder in csm-notification-service. The ladder
 	// starts on incident.created (or a priority elevation) and keeps calling
@@ -262,6 +267,30 @@ type CaseAcknowledgedPayload struct {
 	// Team — see CaseCreatedPayload's own doc comment.
 	Team             string `json:"team,omitempty"`
 	AcknowledgerName string `json:"acknowledgerName"`
+}
+
+// WorkaroundProvidedPayload is the Payload shape for
+// TypeWorkaroundProvided — mirrors csm-notification-service's own
+// WorkaroundProvidedPayload. WorkaroundProvided (on UpdateCaseRequest) is
+// the one genuine "a workaround was provided" signal anywhere in the
+// domain model, and entity-service's own Postgres-side SLAEngineService
+// already completes its own workaround clock when it's set to true (see
+// SLAEngineService.CompleteWorkaroundClock's own doc comment) — but that's
+// a different tracker in a different process from
+// csm-notification-service's Redis-based SLA engine (see that repo's own
+// CLAUDE.md, "SLA breach-alerting engine"), and nothing published this
+// signal to it at all before this event existed: unlike response (a
+// qualifying public comment, already carried by case.comment_added's own
+// IsSupportEngineerResponse) and resolution (a status change to Closed,
+// already carried by case.status_changed), a workaround being provided had
+// no event of its own, so that service's own workaround clock could still
+// fire a breach alert well after a workaround had genuinely been provided.
+// No Recipients/email reaction and no Chat alert — this is a pure tracking
+// signal, not a notification. false (a recall) is deliberately never
+// published either, mirroring CompleteWorkaroundClock's own "no uncomplete
+// operation" posture.
+type WorkaroundProvidedPayload struct {
+	CaseID string `json:"caseId"`
 }
 
 // SeverityChangedPayload is the Payload shape for TypeSeverityChanged —

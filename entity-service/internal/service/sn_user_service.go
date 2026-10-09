@@ -603,7 +603,14 @@ func (s *snUserService) GetMe(ctx context.Context) (domain.GetUserMeResponse, er
 func (s *snUserService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 
+	// phone is accepted but not stored on this data source: callers update the
+	// identity provider first and then send phone here too, so rejecting it would
+	// fail the request after the phone was already saved and leave a combined
+	// timeZone update unapplied. A phone-only request is therefore a no-op.
 	if req.TimeZone == "" {
+		if req.Phone != nil {
+			return domain.PatchUserMeResponse{Message: "phone is not stored by this data source; no changes applied"}, nil
+		}
 		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "timeZone is required"}
 	}
 

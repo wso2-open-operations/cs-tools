@@ -61,6 +61,9 @@ describe("useGetCsmCaseEscalations", () => {
       currentNotifiedUsers: [
         { id: "u-1", userName: "jdoe", name: "Jane Doe", email: "jane.doe@example.com" },
       ],
+      teamLeads: [
+        { id: "u-2", userName: "lead", name: "Abt Lead", email: "lead@example.com" },
+      ],
     });
 
     const { result } = renderHook(() => useGetCsmCaseEscalations("case-1"), {
@@ -84,6 +87,7 @@ describe("useGetCsmCaseEscalations", () => {
       currentNotifiedUsers: [
         { id: "u-1", name: "Jane Doe", email: "jane.doe@example.com" },
       ],
+      teamLeads: [{ id: "u-2", name: "Abt Lead", email: "lead@example.com" }],
     });
   });
 
@@ -98,6 +102,7 @@ describe("useGetCsmCaseEscalations", () => {
     expect(result.current.data).toEqual({
       escalations: [],
       currentNotifiedUsers: [],
+      teamLeads: [],
     });
   });
 

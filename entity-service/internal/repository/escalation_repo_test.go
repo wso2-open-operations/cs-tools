@@ -20,35 +20,47 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"sort"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// fakeGroupMemberResolver seeds a fixed set of "group" -> team_member rows in
-// memory, exactly matching groupMemberResolver's contract (empty/unknown
-// group id -> empty slice, not an error) without a real team_member table.
-type fakeGroupMemberResolver struct {
-	membersByGroup map[string][]string
+// fakeRecipientDirectory maps addresses, team positions and app roles to
+// "user".id values in memory, matching recipientDirectory's contract (an
+// unknown address, or a position/role nobody holds, yields nobody, not an
+// error) without real tables. It records every address lookup so a test can
+// see which configured slots were consulted.
+type fakeRecipientDirectory struct {
+	idByEmail  map[string]string
+	byPosition map[string][]string
+	byRole     map[string][]string
+	looked     []string
 }
 
-// GroupMemberUserIDs ignores q entirely -- this fake never touches a real
-// database, so it has nothing to run a query through; q is accepted (and a
-// test may legitimately pass nil for it) purely to satisfy groupMemberResolver's
-// real signature, which now threads CreateEscalation's own tx through
-// (rowsQuerier, case_repo.go) rather than always using a separate pool
-// connection -- see resolveEscalationRecipients's own doc comment for why.
-func (f *fakeGroupMemberResolver) GroupMemberUserIDs(_ context.Context, _ rowsQuerier, groupID string) ([]string, error) {
-	// A group id with no seeded team_member rows (unknown group, or a real
-	// group with zero members) resolves to nil, not an error -- the map's
-	// own zero value already gives this for free, mirroring
-	// dbGroupMemberResolver's real "zero rows back, no error" behavior.
-	return f.membersByGroup[groupID], nil
+// The methods ignore q -- this fake never touches a database; q is accepted
+// (a test may pass nil) to satisfy the real signatures, which thread
+// CreateEscalation's own tx through.
+func (f *fakeRecipientDirectory) UserIDsByEmails(_ context.Context, _ rowsQuerier, emails []string) ([]string, error) {
+	var ids []string
+	for _, e := range emails {
+		f.looked = append(f.looked, e)
+		if id, ok := f.idByEmail[e]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
-var _ groupMemberResolver = (*fakeGroupMemberResolver)(nil)
+func (f *fakeRecipientDirectory) TeamPositionHolders(_ context.Context, _ rowsQuerier, position string) ([]string, error) {
+	return f.byPosition[position], nil
+}
+
+func (f *fakeRecipientDirectory) AppRoleHolders(_ context.Context, _ rowsQuerier, role string) ([]string, error) {
+	return f.byRole[role], nil
+}
+
+var _ recipientDirectory = (*fakeRecipientDirectory)(nil)
 
 // --- nextEscalationLevel: level-transition math ---
 
@@ -64,33 +76,48 @@ func TestNextEscalationLevel_EscalateIncrements(t *testing.T) {
 	}
 }
 
-func TestNextEscalationLevel_EscalateCapsAtEL5(t *testing.T) {
-	got, err := nextEscalationLevel(domain.EscalationActionEscalate, maxEscalationLevel)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != maxEscalationLevel {
-		t.Errorf("got %d, want %d (capped, not an error)", got, maxEscalationLevel)
+// TestNextEscalationLevel_EscalateAtEL5IsConflict: SN's createEscalation
+// refuses with 409 "Case already at maximum escalation level".
+func TestNextEscalationLevel_EscalateAtEL5IsConflict(t *testing.T) {
+	_, err := nextEscalationLevel(domain.EscalationActionEscalate, maxEscalationLevel)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("got error %v (%T), want *apierror.ConflictError", err, err)
 	}
 }
 
-func TestNextEscalationLevel_DeescalateDecrements(t *testing.T) {
+// TestNextEscalationLevel_DeescalateGoesToEL0: SN's deescalateToEL0 drops the
+// case to EL0 from any level, not one step down.
+func TestNextEscalationLevel_DeescalateGoesToEL0(t *testing.T) {
 	for previous := 1; previous <= maxEscalationLevel; previous++ {
 		got, err := nextEscalationLevel(domain.EscalationActionDeescalate, previous)
 		if err != nil {
 			t.Fatalf("previous=%d: unexpected error: %v", previous, err)
 		}
-		if want := previous - 1; got != want {
-			t.Errorf("previous=%d: got %d, want %d", previous, got, want)
+		if got != 0 {
+			t.Errorf("previous=%d: got EL%d, want EL0", previous, got)
 		}
 	}
 }
 
-func TestNextEscalationLevel_DeescalateAtEL0IsValidationError(t *testing.T) {
+// TestNextEscalationLevel_DeescalateAtEL0IsConflict: SN's 409 "Case already
+// at EL0".
+func TestNextEscalationLevel_DeescalateAtEL0IsConflict(t *testing.T) {
 	_, err := nextEscalationLevel(domain.EscalationActionDeescalate, 0)
-	var valErr *apierror.ValidationError
-	if !errors.As(err, &valErr) {
-		t.Fatalf("got error %v (%T), want *apierror.ValidationError", err, err)
+	var conflict *apierror.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("got error %v (%T), want *apierror.ConflictError", err, err)
+	}
+}
+
+// TestNotificationLevel: an escalation notifies the level it reached, a
+// de-escalation the level it left (SN passes currentLevel, not 0).
+func TestNotificationLevel(t *testing.T) {
+	if got := notificationLevel(domain.EscalationActionEscalate, 2, 3); got != 3 {
+		t.Errorf("escalate EL2->EL3 notifies EL%d, want EL3", got)
+	}
+	if got := notificationLevel(domain.EscalationActionDeescalate, 3, 0); got != 3 {
+		t.Errorf("de-escalate EL3->EL0 notifies EL%d, want EL3", got)
 	}
 }
 
@@ -117,83 +144,92 @@ func TestEscalationLevelInt(t *testing.T) {
 
 // --- resolveEscalationRecipients: cumulative EL1..EL5 recipient rule ---
 
-func sortedIDs(ids []string) []string {
-	out := append([]string(nil), ids...)
-	sort.Strings(out)
-	return out
+// escalationTestConfig is every EL1/EL2 slot configured, one user per
+// address, the way ServiceNow's x_wso2_customer_0.escalation.* properties
+// are, plus a CRE head and the EL4/EL5 role holders.
+func escalationTestConfig() (EscalationNotificationConfig, *fakeRecipientDirectory) {
+	cfg := EscalationNotificationConfig{
+		EL1AmericasTLEmails:           []string{"tl-a@wso2.com", "tl-b@wso2.com"},
+		EL2AmericasTUEmails:           []string{"tu@wso2.com"},
+		EL2ProductServiceEmail:        "service@wso2.com",
+		EL2ProductIdentityServerEmail: "is@wso2.com",
+		EL2ProductDefaultEmail:        "default@wso2.com",
+	}
+	dir := &fakeRecipientDirectory{
+		idByEmail: map[string]string{
+			"tl-a@wso2.com": "user-tl-a", "tl-b@wso2.com": "user-tl-b", "tu@wso2.com": "user-tu",
+			"service@wso2.com": "user-service", "is@wso2.com": "user-is", "default@wso2.com": "user-default",
+		},
+		byPosition: map[string][]string{"cre_head": {"user-cre-head"}},
+		byRole: map[string][]string{
+			"case_escalation_el4": {"user-cco", "user-cro"},
+			"case_escalation_el5": {"user-ceo"},
+		},
+	}
+	return cfg, dir
 }
 
-func TestResolveEscalationRecipients_CumulativeAcrossLevels(t *testing.T) {
-	ctx := context.Background()
-	// Seeded "group" + team_member fixture: three groups, each with real
-	// (possibly multiple) members -- resolveEscalationRecipients must widen
-	// to every member of a configured group, not just one address.
-	groups := &fakeGroupMemberResolver{membersByGroup: map[string][]string{
-		"group-el1-tl":  {"user-el1-tl-a", "user-el1-tl-b"},
-		"group-el2-tu":  {"user-el2-tu"},
-		"group-el3-cre": {"user-el3-cre"},
-	}}
-	notifyCfg := EscalationNotificationConfig{
-		EL1AmericasTLGroupID: "group-el1-tl",
-		EL2AmericasTUGroupID: "group-el2-tu",
-		EL3CREHeadGroupID:    "group-el3-cre",
-	}
-	r := &escalationRepo{groups: groups, notifyCfg: notifyCfg}
-
+// TestResolveEscalationRecipients_CumulativeInSNOrder pins the whole
+// EscalationNotificationUtils rule, level by level and in ServiceNow's own
+// order: team leads, Americas TLs, account owner, technical owner (EL1);
+// Americas TU, product contact (EL2); cre_head holders, CSM (EL3);
+// case_escalation_el4 holders (EL4); case_escalation_el5 holders (EL5). Each
+// level keeps everything below it.
+func TestResolveEscalationRecipients_CumulativeInSNOrder(t *testing.T) {
+	cfg, dir := escalationTestConfig()
+	r := &escalationRepo{dir: dir, notifyCfg: cfg}
 	cc := escalationCaseContext{
+		teamLeadIDs:      []string{"user-lead-a", "user-lead-b"},
+		accountManagerID: strPtr("user-account-owner"),
 		technicalOwnerID: strPtr("user-tech-owner"),
 		csmID:            strPtr("user-csm"),
-		creTeamManagerID: strPtr("user-cre-manager"),
 	}
+	el1 := []string{"user-lead-a", "user-lead-b", "user-tl-a", "user-tl-b", "user-account-owner", "user-tech-owner"}
+	el2 := append(append([]string{}, el1...), "user-tu", "user-default")
+	el3 := append(append([]string{}, el2...), "user-cre-head", "user-csm")
+	el4 := append(append([]string{}, el3...), "user-cco", "user-cro")
+	el5 := append(append([]string{}, el4...), "user-ceo")
 
-	// Level 1: only the EL1 sources, but the whole group membership (both
-	// group-el1-tl members), not just one of them.
-	got1, err := r.resolveEscalationRecipients(ctx, nil, 1, cc)
-	if err != nil {
-		t.Fatalf("level 1: unexpected error: %v", err)
+	for level, want := range map[int][]string{1: el1, 2: el2, 3: el3, 4: el4, 5: el5} {
+		got, err := r.resolveEscalationRecipients(context.Background(), nil, level, cc)
+		if err != nil {
+			t.Fatalf("level %d: unexpected error: %v", level, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("level %d:\n got %v\nwant %v", level, got, want)
+		}
 	}
-	want1 := []string{"user-el1-tl-a", "user-el1-tl-b", "user-tech-owner", "user-cre-manager"}
-	if !reflect.DeepEqual(sortedIDs(got1), sortedIDs(want1)) {
-		t.Errorf("level 1: got %v, want %v", sortedIDs(got1), sortedIDs(want1))
-	}
+}
 
-	// Level 3: EL1 recipients are STILL present (cumulative), plus EL2/EL3
-	// sources join in. This is the key assertion: escalating straight to
-	// EL3 must not drop the EL1 recipients in favor of only EL3's own.
-	got3, err := r.resolveEscalationRecipients(ctx, nil, 3, cc)
+// TestResolveEscalationRecipients_DedupesKeepingFirst: one person in two
+// roles (here the technical owner is also the CSM and an Americas TL) is
+// notified once, at the first place SN would have added them.
+func TestResolveEscalationRecipients_DedupesKeepingFirst(t *testing.T) {
+	cfg, dir := escalationTestConfig()
+	r := &escalationRepo{dir: dir, notifyCfg: cfg}
+	cc := escalationCaseContext{technicalOwnerID: strPtr("user-tl-b"), csmID: strPtr("user-tl-b")}
+
+	got, err := r.resolveEscalationRecipients(context.Background(), nil, 3, cc)
 	if err != nil {
-		t.Fatalf("level 3: unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	want3 := []string{
-		"user-el1-tl-a", "user-el1-tl-b", "user-tech-owner", "user-cre-manager", // EL1
-		"user-el2-tu",              // EL2 (no product configured, so no product-routed recipient)
-		"user-el3-cre", "user-csm", // EL3
-	}
-	if !reflect.DeepEqual(sortedIDs(got3), sortedIDs(want3)) {
-		t.Errorf("level 3: got %v, want %v", sortedIDs(got3), sortedIDs(want3))
+	want := []string{"user-tl-a", "user-tl-b", "user-tu", "user-default", "user-cre-head"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
 // TestResolveEscalationRecipients_LevelZeroReturnsEmpty guards the fact that
 // none of the "if newLevel >= N" branches fire at level 0 (a DEESCALATE that
 // brought the case back down to EL0): the notification list must come back
-// empty, matching is_escalated turning FALSE at that level. Configures a
-// real EL1 group AND a case-derived id (technicalOwnerID) that WOULD be
-// picked up at level >= 1, specifically so a future edit that accidentally
-// adds an unconditional recipient outside any level guard fails this test
-// instead of shipping silently.
+// empty. Every slot is configured and the case carries every per-case id, so
+// a future edit that adds a recipient outside a level guard fails here.
 func TestResolveEscalationRecipients_LevelZeroReturnsEmpty(t *testing.T) {
-	ctx := context.Background()
-	groups := &fakeGroupMemberResolver{membersByGroup: map[string][]string{
-		"group-el1-tl": {"user-a"},
-	}}
-	r := &escalationRepo{
-		groups:    groups,
-		notifyCfg: EscalationNotificationConfig{EL1AmericasTLGroupID: "group-el1-tl"},
-	}
-	cc := escalationCaseContext{technicalOwnerID: strPtr("user-owner")}
+	cfg, dir := escalationTestConfig()
+	r := &escalationRepo{dir: dir, notifyCfg: cfg}
+	cc := escalationCaseContext{technicalOwnerID: strPtr("user-owner"), accountManagerID: strPtr("user-am"), csmID: strPtr("user-csm")}
 
-	got, err := r.resolveEscalationRecipients(ctx, nil, 0, cc)
+	got, err := r.resolveEscalationRecipients(context.Background(), nil, 0, cc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,112 +238,72 @@ func TestResolveEscalationRecipients_LevelZeroReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestResolveEscalationRecipients_ProductRouting pins SN's
+// _resolveProductBasedUser: exactly one EL2 product contact, and the default
+// one when the case has no product at all.
 func TestResolveEscalationRecipients_ProductRouting(t *testing.T) {
-	ctx := context.Background()
-	groups := &fakeGroupMemberResolver{membersByGroup: map[string][]string{
-		"group-service": {"user-service"},
-		"group-iam":     {"user-iam"},
-		"group-default": {"user-default"},
-	}}
-	notifyCfg := EscalationNotificationConfig{
-		EL2ServiceProductGroupID: "group-service",
-		EL2IdentityServerGroupID: "group-iam",
-		EL2DefaultProductGroupID: "group-default",
-	}
-	r := &escalationRepo{groups: groups, notifyCfg: notifyCfg}
+	cfg, dir := escalationTestConfig()
+	cfg.EL1AmericasTLEmails, cfg.EL2AmericasTUEmails = nil, nil
+	r := &escalationRepo{dir: dir, notifyCfg: cfg}
 
-	cases := []struct {
-		name    string
-		cc      escalationCaseContext
-		wantIDs []string
+	for _, tc := range []struct {
+		name string
+		cc   escalationCaseContext
+		want string
 	}{
-		{
-			name:    "no deployed product/product info at all -- no product recipient, silently",
-			cc:      escalationCaseContext{},
-			wantIDs: nil,
-		},
-		{
-			name:    "category SERVICE routes to the service product group",
-			cc:      escalationCaseContext{productCategory: strPtr("SERVICE")},
-			wantIDs: []string{"user-service"},
-		},
-		{
-			name:    "category SOFTWARE + business_unit IAM routes to the identity server group",
-			cc:      escalationCaseContext{productCategory: strPtr("SOFTWARE"), productBusinessUnit: strPtr("IAM")},
-			wantIDs: []string{"user-iam"},
-		},
-		{
-			name:    "category SOFTWARE + a non-IAM business_unit falls to the default product group",
-			cc:      escalationCaseContext{productCategory: strPtr("SOFTWARE"), productBusinessUnit: strPtr("INTEGRATION_SOFTWARE")},
-			wantIDs: []string{"user-default"},
-		},
-		{
-			name:    "category SOFTWARE with no business_unit at all also falls to the default",
-			cc:      escalationCaseContext{productCategory: strPtr("SOFTWARE")},
-			wantIDs: []string{"user-default"},
-		},
-	}
-	for _, tc := range cases {
+		{"no product falls to the default (SN defaults, it does not skip)", escalationCaseContext{}, "user-default"},
+		{"a service product", escalationCaseContext{productCategory: strPtr("SERVICE"), productCode: strPtr("wso2is")}, "user-service"},
+		{"Identity Server by code", escalationCaseContext{productCategory: strPtr("SOFTWARE"), productCode: strPtr("wso2is")}, "user-is"},
+		{"Identity Server by name", escalationCaseContext{productCategory: strPtr("SOFTWARE"), productName: strPtr("WSO2 Identity Server")}, "user-is"},
+		{"another software product", escalationCaseContext{productCategory: strPtr("SOFTWARE"), productCode: strPtr("wso2am"), productName: strPtr("WSO2 API Manager")}, "user-default"},
+		{"a near-miss name is not Identity Server", escalationCaseContext{productCategory: strPtr("SOFTWARE"), productName: strPtr("WSO2 Identity Server as Key Manager")}, "user-default"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := r.resolveEscalationRecipients(ctx, nil, 2, tc.cc)
+			got, err := r.resolveEscalationRecipients(context.Background(), nil, 2, tc.cc)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !reflect.DeepEqual(sortedIDs(got), sortedIDs(tc.wantIDs)) {
-				t.Errorf("got %v, want %v", sortedIDs(got), sortedIDs(tc.wantIDs))
+			if !reflect.DeepEqual(got, []string{tc.want}) {
+				t.Errorf("got %v, want [%s]", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestResolveEscalationRecipients_UnconfiguredEnvVarsDoNotError(t *testing.T) {
-	ctx := context.Background()
-	// Zero-value EscalationNotificationConfig: every group id slot unset.
-	r := &escalationRepo{groups: &fakeGroupMemberResolver{membersByGroup: map[string][]string{}}, notifyCfg: EscalationNotificationConfig{}}
+// TestResolveEscalationRecipients_UnconfiguredOrUnknownIsNotFatal: an unset
+// slot is never looked up, an address with no user contributes nobody, and a
+// position or role nobody holds contributes nobody -- SN logs "user not
+// found" and carries on.
+func TestResolveEscalationRecipients_UnconfiguredOrUnknownIsNotFatal(t *testing.T) {
+	dir := &fakeRecipientDirectory{}
+	r := &escalationRepo{dir: dir, notifyCfg: EscalationNotificationConfig{EL2ProductDefaultEmail: "nobody@wso2.com"}}
 
-	// Level 5 exercises every tier's group id slot at once.
-	got, err := r.resolveEscalationRecipients(ctx, nil, 5, escalationCaseContext{})
+	got, err := r.resolveEscalationRecipients(context.Background(), nil, 5, escalationCaseContext{})
 	if err != nil {
-		t.Fatalf("unexpected error with every notifyCfg slot unset: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("got %v, want no recipients (nothing configured, no case-derived ids)", got)
+		t.Errorf("got %v, want no recipients", got)
+	}
+	if want := []string{"nobody@wso2.com"}; !reflect.DeepEqual(dir.looked, want) {
+		t.Errorf("looked up %v, want only the one configured address %v", dir.looked, want)
 	}
 }
 
-func TestResolveEscalationRecipients_UnknownOrEmptyGroupIsSkippedNotFatal(t *testing.T) {
-	ctx := context.Background()
-	// notifyCfg names a group id that has no seeded team_member rows at all
-	// -- a group that doesn't exist, or currently has zero members. Either
-	// way: zero recipients from that slot, not an error.
-	r := &escalationRepo{
-		groups:    &fakeGroupMemberResolver{membersByGroup: map[string][]string{}},
-		notifyCfg: EscalationNotificationConfig{EL5CEOGroupID: "group-ceo-empty"},
-	}
-
-	got, err := r.resolveEscalationRecipients(ctx, nil, 5, escalationCaseContext{})
+// TestResolveEscalationRecipients_EL5IncludesEL4Holders: escalation is
+// cumulative, so an EL5 escalation reaches the EL4 role holders too, and a
+// person holding both roles is notified once.
+func TestResolveEscalationRecipients_EL5IncludesEL4Holders(t *testing.T) {
+	dir := &fakeRecipientDirectory{byRole: map[string][]string{
+		"case_escalation_el4": {"user-cco", "user-exec"},
+		"case_escalation_el5": {"user-exec"},
+	}}
+	r := &escalationRepo{dir: dir}
+	got, err := r.resolveEscalationRecipients(context.Background(), nil, 5, escalationCaseContext{})
 	if err != nil {
-		t.Fatalf("an unknown/empty group must be skipped, not fatal: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("got %v, want no recipients (the one configured group has no members)", got)
-	}
-}
-
-// TestResolveEscalationRecipients_AccountManagerIDNeverRead is a structural
-// regression guard for the confirmed, deliberate gap documented on
-// EscalationRepository.CreateEscalation: account.account_manager_id (SN's
-// u_owner) must never be treated as a real recipient signal, since nothing
-// in this repo's write path ever populates it. escalationCaseContext simply
-// has no field to carry it -- if a future change adds one and wires it into
-// resolveEscalationRecipients, this test's field-count/name assertion catches
-// the regression before it ships.
-func TestResolveEscalationRecipients_AccountManagerIDNeverRead(t *testing.T) {
-	typ := reflect.TypeOf(escalationCaseContext{})
-	for i := 0; i < typ.NumField(); i++ {
-		name := typ.Field(i).Name
-		if name == "accountManagerID" {
-			t.Fatalf("escalationCaseContext must not carry account_manager_id -- it's a confirmed, always-NULL-in-practice gap (see CreateEscalation's own doc comment), not a real recipient signal")
-		}
+	if want := []string{"user-cco", "user-exec"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }

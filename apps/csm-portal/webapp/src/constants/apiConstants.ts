@@ -79,6 +79,7 @@ export const ApiQueryKeys = {
   CHANGE_REQUEST_LINK_OPTIONS: "change-request-link-options",
   INCIDENTS: "incidents",
   INCIDENT_DETAILS: "incident-details",
+  INCIDENT_CREATE_DEFAULTS: "incident-create-defaults",
   SPECIALIST_HANDOFF_TEAMS: "specialist-handoff-teams",
   INCIDENT_COMMENTS: "incident-comments",
   INCIDENT_ACTIVITIES: "incident-activities",

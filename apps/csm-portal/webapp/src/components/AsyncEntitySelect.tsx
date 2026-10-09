@@ -14,13 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Autocomplete, TextField } from "@wso2/oxygen-ui";
-import { useMemo, useState, type JSX } from "react";
+import { Autocomplete, Box, TextField, Typography } from "@wso2/oxygen-ui";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 
 interface AsyncEntitySelectOption {
   id: string;
   label: string;
+  /** Set only on the pinned option (see `pinnedOption`). */
+  caption?: string;
+}
+
+/** An option always listed first, with a short caption saying why. */
+export interface AsyncEntitySelectPinnedOption {
+  id: string;
+  label: string;
+  /** e.g. "service's support group" — shown under the label in the list. */
+  caption: string;
 }
 
 export interface AsyncEntitySelectProps<T> {
@@ -39,7 +49,10 @@ export interface AsyncEntitySelectProps<T> {
   /** Marks the field required (asterisk + `aria-required`). Display only: the
    * caller still owns validation. */
   required?: boolean;
-  helperText?: string;
+  helperText?: ReactNode;
+  /** Shows the field in its error state (e.g. the backend refused the value);
+   * the caller supplies the words through `helperText`. */
+  error?: boolean;
   /** Type-ahead search hook — disabled externally while the dropdown is
    * closed or nothing has been typed yet. Must be passed as a stable
    * reference (e.g. `useSearch={useSearchGroups}`), never wrapped in an
@@ -65,6 +78,10 @@ export interface AsyncEntitySelectProps<T> {
    * offered again. The currently selected `value` is never excluded, so the
    * field stays labelled. */
   excludeIds?: readonly string[];
+  /** Listed first whenever the typed term is empty or matches its label, and
+   * not repeated among the search results below it. Picking it reports its id,
+   * with `item` only when the same entity is also among the current results. */
+  pinnedOption?: AsyncEntitySelectPinnedOption | null;
 }
 
 /**
@@ -91,6 +108,8 @@ export default function AsyncEntitySelect<T>({
   knownLabel,
   searchExtra,
   excludeIds,
+  error,
+  pinnedOption,
 }: AsyncEntitySelectProps<T>): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -112,18 +131,34 @@ export default function AsyncEntitySelect<T>({
   const selectedOption = useMemo<AsyncEntitySelectOption | null>(() => {
     if (!value) return null;
     if (picked && picked.id === value) return picked;
+    if (pinnedOption && pinnedOption.id === value) {
+      return { id: value, label: pinnedOption.label };
+    }
     const match = items.find((item) => getId(item) === value);
     if (match) return { id: value, label: getLabel(match) };
     return { id: value, label: knownLabel ?? value };
-  }, [value, picked, items, getId, getLabel, knownLabel]);
+  }, [value, picked, items, getId, getLabel, knownLabel, pinnedOption]);
 
   const options = useMemo<AsyncEntitySelectOption[]>(() => {
-    const results = items.map((item) => ({ id: getId(item), label: getLabel(item) }));
-    if (selectedOption && !results.some((o) => o.id === selectedOption.id)) {
-      return [selectedOption, ...results];
+    let results: AsyncEntitySelectOption[] = items.map((item) => ({
+      id: getId(item),
+      label: getLabel(item),
+    }));
+    const pinned =
+      pinnedOption &&
+      (query.length === 0 || pinnedOption.label.toLowerCase().includes(query.toLowerCase()))
+        ? pinnedOption
+        : null;
+    if (pinnedOption) results = results.filter((o) => o.id !== pinnedOption.id);
+    if (
+      selectedOption &&
+      selectedOption.id !== pinned?.id &&
+      !results.some((o) => o.id === selectedOption.id)
+    ) {
+      results = [selectedOption, ...results];
     }
-    return results;
-  }, [items, selectedOption, getId, getLabel]);
+    return pinned ? [{ ...pinned }, ...results] : results;
+  }, [items, selectedOption, getId, getLabel, pinnedOption, query]);
 
   return (
     <Autocomplete<AsyncEntitySelectOption>
@@ -143,6 +178,25 @@ export default function AsyncEntitySelect<T>({
       // The backend already filtered by the typed term; don't re-filter locally.
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.label}
+      renderOption={
+        pinnedOption
+          ? (props, opt) => {
+              const { key, ...optionProps } = props as typeof props & { key: string };
+              return (
+                <Box component="li" key={key} {...optionProps}>
+                  <Box>
+                    <Typography variant="body2">{opt.label}</Typography>
+                    {opt.caption && (
+                      <Typography variant="caption" color="text.secondary">
+                        {opt.caption}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              );
+            }
+          : undefined
+      }
       isOptionEqualToValue={(opt, val) => opt.id === val.id}
       onChange={(_event, next) => {
         setPicked(next);
@@ -168,7 +222,7 @@ export default function AsyncEntitySelect<T>({
           label={label}
           required={required}
           placeholder={value ? undefined : placeholder}
-          error={isError}
+          error={isError || !!error}
           helperText={isError ? "Search failed." : helperText}
         />
       )}

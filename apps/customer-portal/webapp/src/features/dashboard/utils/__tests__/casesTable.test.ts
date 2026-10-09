@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCasesTableCaseIdentifier,
+  formatCaseStatusLabel,
   getSeverityColor,
   getStatusColor,
 } from "@features/dashboard/utils/casesTable";
@@ -58,6 +59,51 @@ describe("casesTable utils", () => {
 
     it("should return 'text.secondary' for unknown status", () => {
       expect(getStatusColor("Unknown")).toBe("text.secondary");
+    });
+
+    it("should match raw UPPER_SNAKE_CASE labels from the global search endpoint", () => {
+      // Regression: the global search/project-hub cases table renders a raw
+      // Postgres-sourced enum label ("WORK_IN_PROGRESS") rather than the
+      // humanized form ("Work In Progress"), which used to fail every
+      // .includes() check here and silently fall through to the default color.
+      expect(getStatusColor("OPEN")).toBe("info.main");
+      expect(getStatusColor("AWAITING_INFO")).toBe("primary.main");
+      expect(getStatusColor("WORK_IN_PROGRESS")).toBe("warning.main");
+      expect(getStatusColor("CLOSED")).toBe("success.main");
+    });
+  });
+
+  describe("formatCaseStatusLabel", () => {
+    it("converts a raw UPPER_SNAKE_CASE backend label to a human-readable one", () => {
+      expect(formatCaseStatusLabel("WORK_IN_PROGRESS")).toBe("Work In Progress");
+      expect(formatCaseStatusLabel("OPEN")).toBe("Open");
+      expect(formatCaseStatusLabel("AWAITING_INFO")).toBe("Awaiting Info");
+    });
+
+    it("leaves an already human-readable label untouched", () => {
+      expect(formatCaseStatusLabel("Work In Progress")).toBe("Work In Progress");
+      expect(formatCaseStatusLabel("Open")).toBe("Open");
+    });
+
+    it("does not mangle a label that isn't a raw enum, even with an acronym or punctuation", () => {
+      // A blind lower-case/re-title-case pass would turn these into
+      // "Waiting On Wso2" and "On Hold (customer)" -- only a raw
+      // UPPER_SNAKE_CASE value should ever be normalized.
+      expect(formatCaseStatusLabel("Waiting On WSO2")).toBe("Waiting On WSO2");
+      expect(formatCaseStatusLabel("On Hold (Customer)")).toBe("On Hold (Customer)");
+    });
+
+    it("returns '--' for an absent label", () => {
+      expect(formatCaseStatusLabel(undefined)).toBe("--");
+      expect(formatCaseStatusLabel(null)).toBe("--");
+      expect(formatCaseStatusLabel("")).toBe("--");
+    });
+
+    it("returns '--' for a label that is whitespace-only or becomes blank after normalizing", () => {
+      expect(formatCaseStatusLabel("   ")).toBe("--");
+      // All-underscore input passes the raw-enum check but turns into pure
+      // whitespace once underscores become spaces.
+      expect(formatCaseStatusLabel("___")).toBe("--");
     });
   });
 

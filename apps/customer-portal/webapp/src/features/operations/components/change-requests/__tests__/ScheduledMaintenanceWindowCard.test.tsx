@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import ScheduledMaintenanceWindowCard from "../ScheduledMaintenanceWindowCard";
@@ -82,6 +82,76 @@ describe("ScheduledMaintenanceWindowCard", () => {
         name: /propose new implementation time/i,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  describe("duration calculation", () => {
+    it("derives and formats duration when duration field is null but start and end dates are present", () => {
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <ScheduledMaintenanceWindowCard
+            changeRequest={{
+              ...mockChangeRequest,
+              startDate: "2026-10-08 13:30:00",
+              endDate: "2026-10-08 15:00:00",
+              duration: null,
+            }}
+          />
+        </ThemeProvider>,
+      );
+
+      expect(screen.getByText("1 hour 30 minutes")).toBeInTheDocument();
+    });
+
+    it("uses explicit duration when provided", () => {
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <ScheduledMaintenanceWindowCard
+            changeRequest={{
+              ...mockChangeRequest,
+              duration: "90",
+            }}
+          />
+        </ThemeProvider>,
+      );
+
+      expect(screen.getByText("1 hour 30 minutes")).toBeInTheDocument();
+    });
+
+    it("displays 'Not available' when neither duration nor start/end dates are available", () => {
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <ScheduledMaintenanceWindowCard
+            changeRequest={{
+              ...mockChangeRequest,
+              startDate: "",
+              endDate: "",
+              duration: null,
+            }}
+          />
+        </ThemeProvider>,
+      );
+
+      const durationSection = screen.getByText("Duration").parentElement!;
+      expect(within(durationSection).getByText("Not available")).toBeInTheDocument();
+    });
+
+    it("displays 'Not available' when endDate is before startDate", () => {
+      render(
+        <ThemeProvider theme={createTheme()}>
+          <ScheduledMaintenanceWindowCard
+            changeRequest={{
+              ...mockChangeRequest,
+              startDate: "2026-10-08 15:00:00",
+              endDate: "2026-10-08 13:30:00",
+              duration: null,
+            }}
+          />
+        </ThemeProvider>,
+      );
+
+      const durationSection = screen.getByText("Duration").parentElement!;
+      expect(within(durationSection).getByText("Not available")).toBeInTheDocument();
+    });
   });
 
   describe("a time the customer proposed", () => {

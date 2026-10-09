@@ -88,11 +88,43 @@ type stubIncidentRepo struct {
 	getIncidentByID              func(ctx context.Context, id string) (domain.IncidentView, error)
 	updateIncidentLifecycle      func(ctx context.Context, id string, u repository.IncidentLifecycleUpdate, actorEmail string) error
 	applySpecialistHandoff       func(ctx context.Context, id, actorEmail string, plan func(repository.SpecialistHandoffSnapshot) (repository.SpecialistHandoffPlan, error)) (repository.SpecialistHandoffWritten, error)
-	supportGroups                map[string]string // service id -> support group id; unset = none
+	supportGroups                map[string]string // service id -> support group id ("" = none); a key is a service that exists
+	serviceNames                 map[string]string // service id -> name; a key is a service that exists
+	groupNames                   map[string]string // group id -> name
+	// allowedGroups is the support-group set IsSupportGroup answers from;
+	// nil means every group in supportGroups (all active).
+	allowedGroups map[string]bool
+	// lookupErr fails both support-group lookups.
+	lookupErr error
 }
 
-func (s *stubIncidentRepo) SupportGroupOfService(_ context.Context, serviceID string) (string, error) {
-	return s.supportGroups[serviceID], nil
+// SupportGroupOfService answers from the stub's per-service support groups.
+func (s *stubIncidentRepo) SupportGroupOfService(_ context.Context, serviceID string) (repository.ServiceSupportGroup, error) {
+	if s.lookupErr != nil {
+		return repository.ServiceSupportGroup{}, s.lookupErr
+	}
+	group, ok := s.supportGroups[serviceID]
+	name, named := s.serviceNames[serviceID]
+	if !ok && !named {
+		return repository.ServiceSupportGroup{}, nil
+	}
+	return repository.ServiceSupportGroup{Found: true, ServiceName: name, GroupID: group, GroupName: s.groupNames[group]}, nil
+}
+
+// IsSupportGroup answers from the stub's support-group set.
+func (s *stubIncidentRepo) IsSupportGroup(_ context.Context, groupID string) (bool, error) {
+	if s.lookupErr != nil {
+		return false, s.lookupErr
+	}
+	if s.allowedGroups != nil {
+		return s.allowedGroups[groupID], nil
+	}
+	for _, g := range s.supportGroups {
+		if g != "" && g == groupID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *stubIncidentRepo) SearchIncidents(context.Context, domain.SearchIncidentsRequest, []string, []string, []string, []string, *bool, *bool, *time.Time, *time.Time) ([]domain.SearchIncidentView, int, error) {

@@ -96,10 +96,9 @@ func TestGetMe_FirstAccessDisabledMakesNoCall(t *testing.T) {
 	}
 }
 
-// TestGetMe_FirstAccessEnabledCallsAfterResponding: with the flag on the
-// call happens, and it happens after the profile has been written, so it
-// cannot delay or alter what the browser receives.
-func TestGetMe_FirstAccessEnabledCallsAfterResponding(t *testing.T) {
+// TestGetMe_FirstAccessEnabledCallsBeforeResponding: with the flag on the
+// call happens before the profile is written, so the profile sees it.
+func TestGetMe_FirstAccessEnabledCallsBeforeResponding(t *testing.T) {
 	rec := httptest.NewRecorder()
 	client := &fakeFirstAccessUserClient{called: make(chan struct{}), rec: rec}
 	h := NewUserHandler(client, noopSCIMUserClient{}, true)
@@ -123,8 +122,8 @@ func TestGetMe_FirstAccessEnabledCallsAfterResponding(t *testing.T) {
 		t.Fatal("RegisterInvitedMemberships was not called with the flag on")
 	}
 	// Read after the receive above, which orders it after the fake's write.
-	if client.bodyLenAtCall == 0 {
-		t.Error("RegisterInvitedMemberships started before the profile was written")
+	if client.bodyLenAtCall != 0 {
+		t.Error("RegisterInvitedMemberships ran after the profile was written")
 	}
 }
 

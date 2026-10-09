@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -30,6 +31,13 @@ type fakeTeamRepo struct {
 	existsErr  error
 	members    []repository.TeamMemberRow
 	membersErr error
+
+	teams      []domain.Team
+	teamsTotal int
+	teamsErr   error
+	gotQuery   string
+	gotLimit   int
+	gotOffset  int
 }
 
 func (f *fakeTeamRepo) TeamExists(context.Context, string) (bool, error) {
@@ -38,6 +46,11 @@ func (f *fakeTeamRepo) TeamExists(context.Context, string) (bool, error) {
 
 func (f *fakeTeamRepo) GetTeamMembers(context.Context, string) ([]repository.TeamMemberRow, error) {
 	return f.members, f.membersErr
+}
+
+func (f *fakeTeamRepo) SearchTeams(_ context.Context, q string, limit, offset int) ([]domain.Team, int, error) {
+	f.gotQuery, f.gotLimit, f.gotOffset = q, limit, offset
+	return f.teams, f.teamsTotal, f.teamsErr
 }
 
 const testTeamID = "11111111-1111-1111-1111-111111111111"
@@ -81,5 +94,36 @@ func TestTeamService_GetTeamMembers_ReturnsRoster(t *testing.T) {
 	}
 	if len(resp.Members) != 1 || resp.Members[0].ID != "u1" || resp.Members[0].Role == nil || *resp.Members[0].Role != "lead" {
 		t.Fatalf("unexpected members: %+v", resp.Members)
+	}
+}
+
+func TestTeamService_SearchTeams_PassesQueryAndPagination(t *testing.T) {
+	repo := &fakeTeamRepo{
+		teams:      []domain.Team{{ID: testTeamID, Name: "apollo", Type: "cre"}},
+		teamsTotal: 7,
+	}
+	svc := NewTeamService(repo)
+
+	resp, err := svc.SearchTeams(context.Background(), domain.SearchTeamsRequest{
+		Filters:    &domain.SearchTeamsFilters{SearchQuery: "apo"},
+		Pagination: domain.Pagination{Limit: 5, Offset: 10},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.gotQuery != "apo" || repo.gotLimit != 5 || repo.gotOffset != 10 {
+		t.Fatalf("repo got (%q, %d, %d), want (apo, 5, 10)", repo.gotQuery, repo.gotLimit, repo.gotOffset)
+	}
+	if resp.Total != 7 || len(resp.Teams) != 1 || resp.Teams[0].Name != "apollo" || resp.Limit != 5 || resp.Offset != 10 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestTeamService_SearchTeams_RepoError(t *testing.T) {
+	boom := errors.New("boom")
+	svc := NewTeamService(&fakeTeamRepo{teamsErr: boom})
+
+	if _, err := svc.SearchTeams(context.Background(), domain.SearchTeamsRequest{}); !errors.Is(err, boom) {
+		t.Fatalf("expected repo error, got %v", err)
 	}
 }

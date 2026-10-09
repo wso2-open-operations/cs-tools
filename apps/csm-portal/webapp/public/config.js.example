@@ -217,7 +217,7 @@ window.config = {
   // error on hover. Off by default; only `true` turns it on, and the backend
   // must have the env var of the same name set to "true" too, or the column
   // reads "Unavailable". Off means no column and no request.
-  CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: false,
+  CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: true,
 
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded

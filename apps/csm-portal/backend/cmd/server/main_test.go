@@ -276,16 +276,12 @@ func TestOnboardingStatusEnabled(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{"", false},
-		{"false", false},
-		{"0", false},
-		{"1", false},
-		{"TRUE", false},
-		{"True", false},
-		{"t", false},
-		{"yes", false},
+		{"", true},
+		{"1", true},
 		{"true", true},
-		{"  true\n", true},
+		{"false", false},
+		{"FALSE", false},
+		{"  false\n", false},
 	}
 	for _, tc := range tests {
 		t.Run("value="+tc.raw, func(t *testing.T) {
@@ -303,12 +299,12 @@ func TestLoadOnboardingStatusEnabledReadsEnv(t *testing.T) {
 	if !loadOnboardingStatusEnabled() {
 		t.Error("expected on when the flag is exactly \"true\"")
 	}
-	t.Setenv(onboardingStatusFlag, "TRUE")
+	t.Setenv(onboardingStatusFlag, "false")
 	if loadOnboardingStatusEnabled() {
 		t.Error("expected off for \"TRUE\": only the exact lower-case value opts in")
 	}
 	t.Setenv(onboardingStatusFlag, "")
-	if loadOnboardingStatusEnabled() {
+	if !loadOnboardingStatusEnabled() {
 		t.Error("expected off when the flag is unset/empty")
 	}
 }

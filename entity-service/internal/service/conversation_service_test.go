@@ -38,11 +38,15 @@ const (
 // unconfigured methods panic if called -- same convention as
 // stubCallRequestRepo.
 type stubConversationRepo struct {
-	updateConversation func(ctx context.Context, id string, state domain.ConversationState, actorEmail string) (domain.UpdatedConversation, error)
-	createConversation func(ctx context.Context, in repository.CreateConversationInput) (domain.CreatedConversation, error)
+	searchConversations func(ctx context.Context, req domain.SearchConversationsRequest, callerEmail string) ([]domain.SearchConversationView, int, error)
+	updateConversation  func(ctx context.Context, id string, state domain.ConversationState, actorEmail string) (domain.UpdatedConversation, error)
+	createConversation  func(ctx context.Context, in repository.CreateConversationInput) (domain.CreatedConversation, error)
 }
 
-func (s *stubConversationRepo) SearchConversations(context.Context, domain.SearchConversationsRequest, string) ([]domain.SearchConversationView, int, error) {
+func (s *stubConversationRepo) SearchConversations(ctx context.Context, req domain.SearchConversationsRequest, callerEmail string) ([]domain.SearchConversationView, int, error) {
+	if s.searchConversations != nil {
+		return s.searchConversations(ctx, req, callerEmail)
+	}
 	panic("not implemented")
 }
 func (s *stubConversationRepo) GetConversation(context.Context, string) (domain.ConversationDetails, error) {
@@ -298,5 +302,43 @@ func TestConversationService_CreateConversation_DualWriteServiceNowFailure(t *te
 
 	if _, err := svc.CreateConversation(ctx, domain.CreateConversationRequest{ProjectID: testConversationProjectID, InitialMessage: "hi"}); err == nil {
 		t.Fatal("expected the ServiceNow error to be returned")
+	}
+}
+
+// The Support page's "Resolved via Chat (Last 30d)" list sends the window as an
+// updated-date range; it must reach the repository untouched, and an inverted
+// range is a 400 before anything is queried.
+func TestConversationService_SearchConversations_UpdatedDateWindow(t *testing.T) {
+	end := time.Now()
+	start := end.Add(-30 * 24 * time.Hour)
+
+	var got domain.SearchConversationsFilters
+	repo := &stubConversationRepo{
+		searchConversations: func(_ context.Context, req domain.SearchConversationsRequest, _ string) ([]domain.SearchConversationView, int, error) {
+			got = req.Filters
+			return nil, 0, nil
+		},
+	}
+	svc := NewConversationService(repo)
+
+	if _, err := svc.SearchConversations(context.Background(), domain.SearchConversationsRequest{
+		Filters: domain.SearchConversationsFilters{
+			ProjectIDs: []string{testConversationProjectID}, StartUpdatedDate: &start, EndUpdatedDate: &end,
+		},
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.StartUpdatedDate == nil || !got.StartUpdatedDate.Equal(start) || got.EndUpdatedDate == nil || !got.EndUpdatedDate.Equal(end) {
+		t.Errorf("window reaching the repository = %v..%v, want %v..%v", got.StartUpdatedDate, got.EndUpdatedDate, start, end)
+	}
+
+	_, err := svc.SearchConversations(context.Background(), domain.SearchConversationsRequest{
+		Filters: domain.SearchConversationsFilters{
+			ProjectIDs: []string{testConversationProjectID}, StartUpdatedDate: &end, EndUpdatedDate: &start,
+		},
+	})
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("an end before the start = %v, want a ValidationError", err)
 	}
 }

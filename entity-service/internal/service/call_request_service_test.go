@@ -314,7 +314,6 @@ func TestCallRequestService_UpdateValidation(t *testing.T) {
 		{"scheduled needs meetingDate", domain.UpdateCallRequestRequest{ID: testUUID, State: scheduled, DurationMinutes: num(30)}},
 		{"scheduled needs duration", domain.UpdateCallRequestRequest{ID: testUUID, State: scheduled, MeetingDate: str("2026-10-02T10:00:00Z")}},
 		{"meetingDate must be RFC3339", domain.UpdateCallRequestRequest{ID: testUUID, State: scheduled, MeetingDate: str("tomorrow"), DurationMinutes: num(30)}},
-		{"concluded needs notes", domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateConcluded}},
 		{"non-positive actual duration", domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateNotesPending, ActualDurationMin: num(0)}},
 		{"empty utcTimes when provided", domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateCanceled, UTCTimes: []string{}}},
 	}
@@ -326,6 +325,125 @@ func TestCallRequestService_UpdateValidation(t *testing.T) {
 	// Valid input still needs an authenticated caller.
 	_, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateCanceled})
 	requireErrKind(t, "update without token", err, &apierror.UnauthorizedError{})
+}
+
+// TestCallRequestService_UpdateCallRequest_ConcludeWithoutNotes covers the one-click
+// "Mark as completed" (digiops-cs#3350): a conclude with no post-call notes is not a
+// validation error any more, reaches the repository as sent, and a conflict the
+// repository reports (the call is not scheduled / notes pending) is passed on as a
+// conflict rather than turned into a 400 or a 500.
+func TestCallRequestService_UpdateCallRequest_ConcludeWithoutNotes(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	blank := "   "
+	for name, notes := range map[string]*string{"nil notes": nil, "whitespace-only notes": &blank} {
+		t.Run(name, func(t *testing.T) {
+			var got domain.UpdateCallRequestRequest
+			calls := 0
+			svc := &callRequestService{repo: &stubCallRequestRepo{
+				updateCallRequest: func(_ context.Context, r domain.UpdateCallRequestRequest, _ *string, _ string) (domain.UpdateCallRequestResponse, error) {
+					calls++
+					got = r
+					return domain.UpdateCallRequestResponse{Message: "ok"}, nil
+				},
+			}}
+			if _, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateConcluded, Notes: notes}); err != nil {
+				t.Fatalf("a conclude without notes must pass validation: %v", err)
+			}
+			if calls != 1 || got.State != domain.CallRequestStateConcluded {
+				t.Errorf("repository calls = %d, state = %q; want 1 call concluding the request", calls, got.State)
+			}
+			if got.Notes != nil {
+				t.Errorf("notes reaching the repository = %q, want none (blank notes must not be written)", *got.Notes)
+			}
+		})
+	}
+
+	t.Run("a repository conflict stays a conflict", func(t *testing.T) {
+		svc := &callRequestService{repo: &stubCallRequestRepo{
+			updateCallRequest: func(context.Context, domain.UpdateCallRequestRequest, *string, string) (domain.UpdateCallRequestResponse, error) {
+				return domain.UpdateCallRequestResponse{}, &apierror.ConflictError{Msg: "only a scheduled call"}
+			},
+		}}
+		_, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateConcluded})
+		var conflict *apierror.ConflictError
+		if !errors.As(err, &conflict) {
+			t.Errorf("got %T (%v), want the repository's *apierror.ConflictError passed through", err, err)
+		}
+	})
+}
+
+// Blank notes are only dropped for a conclude (so "Mark as completed" cannot erase the
+// notes a call already has). Every other state keeps exactly what it was sent.
+func TestCallRequestService_UpdateCallRequest_BlankNotesOnlyDroppedForConclude(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	blank := "   "
+	var got domain.UpdateCallRequestRequest
+	svc := &callRequestService{repo: &stubCallRequestRepo{
+		updateCallRequest: func(_ context.Context, r domain.UpdateCallRequestRequest, _ *string, _ string) (domain.UpdateCallRequestResponse, error) {
+			got = r
+			return domain.UpdateCallRequestResponse{}, nil
+		},
+	}}
+	req := domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateNotesPending, Notes: &blank}
+	if _, err := svc.UpdateCallRequest(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Notes == nil || *got.Notes != blank {
+		t.Errorf("notes for a non-conclude state = %v, want them passed through exactly as sent", got.Notes)
+	}
+}
+
+// Under dual-write the Postgres change commits first and ServiceNow is only mirrored
+// after it succeeds: a conclude the repository refuses must never reach the mirror,
+// and one it accepts must reach it exactly as the repository saw it (blank notes
+// already dropped), or ServiceNow could be told to blank notes Postgres kept.
+func TestCallRequestService_UpdateCallRequest_ConcludeMirrorFollowsPostgres(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	blank := "  "
+	newSvc := func(repoErr error) (*callRequestService, chan domain.UpdateCallRequestRequest) {
+		mirrored := make(chan domain.UpdateCallRequestRequest, 1)
+		repo := &stubCallRequestRepo{
+			updateCallRequest: func(context.Context, domain.UpdateCallRequestRequest, *string, string) (domain.UpdateCallRequestResponse, error) {
+				return domain.UpdateCallRequestResponse{}, repoErr
+			},
+			getCallRequestSNSysID: func(context.Context, string) (*string, error) { return nil, nil },
+		}
+		mirror := &stubMirrorCallRequestService{
+			updateCallRequest: func(_ context.Context, r domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error) {
+				mirrored <- r
+				return domain.UpdateCallRequestResponse{}, nil
+			},
+		}
+		svc := NewCallRequestServiceWithSNWriteback(repo, stubUserRepo{}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror)
+		return svc.(*callRequestService), mirrored
+	}
+
+	t.Run("a refused conclude is never mirrored", func(t *testing.T) {
+		svc, mirrored := newSvc(&apierror.ConflictError{Msg: "not scheduled"})
+		if _, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateConcluded}); err == nil {
+			t.Fatal("expected the repository's conflict")
+		}
+		select {
+		case r := <-mirrored:
+			t.Errorf("ServiceNow was sent %+v for a conclude Postgres refused", r)
+		case <-time.After(300 * time.Millisecond):
+		}
+	})
+
+	t.Run("an accepted conclude is mirrored with the blank notes already dropped", func(t *testing.T) {
+		svc, mirrored := newSvc(nil)
+		if _, err := svc.UpdateCallRequest(ctx, domain.UpdateCallRequestRequest{ID: testUUID, State: domain.CallRequestStateConcluded, Notes: &blank}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		select {
+		case r := <-mirrored:
+			if r.State != domain.CallRequestStateConcluded || r.Notes != nil {
+				t.Errorf("mirror got state=%q notes=%v, want concluded with no notes", r.State, r.Notes)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("the accepted conclude was never mirrored")
+		}
+	})
 }
 
 func TestCatalogService_Validation(t *testing.T) {

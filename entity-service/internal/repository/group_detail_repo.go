@@ -31,10 +31,10 @@ import (
 // page a user lands on when they open an approval stage's assignment group,
 // like ServiceNow's group form and its "Group Members" tab.
 //
-// This is deliberately separate from GroupRepository, whose SearchGroups lists
-// the `team` registry (the group picker). Ids from the approvals response
-// (approval_stage.assignment_group_id) are "group" ids, and a group's members
-// are team_member rows keyed by group_id -- see entity-service CLAUDE.md,
+// GroupRepository.SearchGroups lists the same "group" table, so ids from the
+// group list and from the approvals response (approval_stage.assignment_group_id)
+// are interchangeable here. A group's members are its group_member rows plus any
+// team_member rows keyed by group_id -- see entity-service CLAUDE.md,
 // "team_member.group_id is the real column for this".
 type GroupDetailRepository interface {
 	// GetGroupDetail returns the group and its active INTERNAL members ordered by name,
@@ -66,7 +66,10 @@ var namedPoolGroups = map[string]bool{
 // groupDetailMembersSQL lists the distinct active INTERNAL users who are members
 // of the group, one row per user, in name order.
 //
-// WHO IS A MEMBER is exactly who the approval pools provision from, so the list
+// group_member rows (migration 0140, mirrored from sys_user_grmember) are always
+// included for the group's own id, on top of the team_member shapes below.
+//
+// WHO IS A MEMBER is otherwise who the approval pools provision from, so the list
 // a user sees is the list of people who can actually be asked to approve
 // (apart from per-change exclusions such as the creator), and there are two
 // shapes of pool:
@@ -105,15 +108,20 @@ const groupDetailMembersSQL = `
 	       u.email,
 	       u.user_type::text,
 	       CASE WHEN BOOL_OR(tm.role = 'lead') THEN 'lead' ELSE 'member' END AS member_role
-	FROM team_member tm
+	FROM (
+	    SELECT tm.user_id, tm.role
+	    FROM team_member tm
+	    WHERE tm.group_id = $1::uuid
+	       OR ($3::boolean AND $2::text IS NOT NULL AND (
+	              tm.group_id IN (SELECT g2.id FROM "group" g2 WHERE g2.name = $2::text)
+	           OR tm.team_id  IN (SELECT t.id  FROM team    t  WHERE t.name  = $2::text)))
+	    UNION ALL
+	    SELECT gm.user_id, NULL::text AS role
+	    FROM group_member gm
+	    WHERE gm.group_id = $1::uuid
+	) tm
 	JOIN "user" u ON u.id = tm.user_id
-	WHERE (
-	        tm.group_id = $1::uuid
-	     OR ($3::boolean AND $2::text IS NOT NULL AND (
-	            tm.group_id IN (SELECT g2.id FROM "group" g2 WHERE g2.name = $2::text)
-	         OR tm.team_id  IN (SELECT t.id  FROM team    t  WHERE t.name  = $2::text)))
-	      )
-	  AND u.user_type = 'INTERNAL'::user_type_enum
+	WHERE u.user_type = 'INTERNAL'::user_type_enum
 	  AND COALESCE(u.is_active, TRUE)
 	GROUP BY u.id, u.name, u.first_name, u.last_name, u.email, u.user_type
 	ORDER BY LOWER(COALESCE(NULLIF(TRIM(u.name), ''),

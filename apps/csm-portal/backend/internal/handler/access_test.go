@@ -39,6 +39,7 @@ func testAccessConfig() AccessConfig {
 		DashboardDesigner:    []string{"test-dashboard-designer"},
 		SalesSolutions:       []string{"test-sales-solutions"},
 		WorknoteCreator:      []string{"test-worknote-creator"},
+		AnnouncementCreator:  []string{"test-announcement-creator"},
 	}
 }
 
@@ -58,13 +59,13 @@ func serveWithRoles(g *AccessGuard, perm Permission, roles []string) (status int
 }
 
 func TestAccessGuard_PermissionMatrix(t *testing.T) {
-	// csEngineerPerms is every route permission cs_engineer holds. PermAdmin,
-	// PermEscalate, and PermApproveTimeCard are deliberately excluded and
-	// tested separately below -- escalating and approving a time card are
-	// each a dedicated responsibility cs_engineer does not share, the same
-	// way PermAdmin doesn't.
-	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg}
-	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermEscalate, PermApproveTimeCard, PermManagePlaybooks)
+	// csEngineerPerms is every route permission cs_engineer holds, escalation
+	// included (any internal engineer may escalate, as in ServiceNow).
+	// PermAdmin and PermApproveTimeCard are deliberately excluded and tested
+	// separately below -- approving a time card is a dedicated responsibility
+	// cs_engineer does not share, the same way PermAdmin isn't.
+	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg}
+	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement)
 	tests := []struct {
 		name  string
 		roles []string
@@ -73,8 +74,10 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 		{"viewer reads only", []string{"test-viewer"}, []Permission{PermView}},
 		{"escalator can view and escalate", []string{"test-escalator"}, []Permission{PermView, PermEscalate}},
 		{"downloader can view and download", []string{"test-attachment-downloader"}, []Permission{PermView, PermDownloadAttachment}},
-		{"CS engineer can do every route permission except admin-only, escalate, and approve-time-card ones", []string{"test-cs-engineer"}, csEngineerPerms},
+		{"CS engineer can do every route permission except admin-only and approve-time-card ones", []string{"test-cs-engineer"}, csEngineerPerms},
 		{"admin can do every route permission, including admin-only ones", []string{"test-admin"}, all},
+		{"announcement creator alone holds only PermCreateAnnouncement -- not even view", []string{"test-announcement-creator"}, []Permission{PermCreateAnnouncement}},
+		{"CS engineer with announcement creator adds PermCreateAnnouncement and nothing else", []string{"test-cs-engineer", "test-announcement-creator"}, append(append([]Permission{}, csEngineerPerms...), PermCreateAnnouncement)},
 		{"usage metrics viewer can view only", []string{"test-usage-metrics-viewer"}, []Permission{PermView}},
 		{"timecard approver can view, use time cards and updates, and approve", []string{"test-timecard-approver"}, []Permission{PermView, PermTimeCardsAndUpdates, PermApproveTimeCard}},
 		{"dashboard designer can view only", []string{"test-dashboard-designer"}, []Permission{PermView}},
@@ -213,8 +216,9 @@ func TestAccessGuard_RolesFor(t *testing.T) {
 		{"every role", []string{
 			"test-viewer", "test-escalator", "test-attachment-downloader",
 			"test-cs-engineer", "test-usage-metrics-viewer", "test-timecard-approver",
-			"test-dashboard-designer", "test-admin", "test-sales-solutions",
-		}, []string{"viewer", "escalator", "attachment_downloader", "cs_engineer", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "admin", "sales_solutions"}},
+			"test-dashboard-designer", "test-admin", "test-sales-solutions", "test-worknote-creator", "test-announcement-creator",
+		}, []string{"viewer", "escalator", "attachment_downloader", "cs_engineer", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "admin", "sales_solutions", "worknote_creator", "announcement_creator"}},
+		{"announcement creator is reported like any other portal role", []string{"test-cs-engineer", "test-announcement-creator"}, []string{"cs_engineer", "announcement_creator"}},
 		{"unrelated roles are ignored", []string{"wso2-everyone", "agent"}, []string{}},
 		{"a duplicated held role is reported once", []string{"test-viewer", "test-viewer"}, []string{"viewer"}},
 		{"sales solutions is reported like any other portal role, alongside a real capability", []string{"test-viewer", "test-sales-solutions"}, []string{"viewer", "sales_solutions"}},
@@ -316,7 +320,7 @@ func TestAccessGuard_SecurityCenterIsForCsEngineersAndAdmins(t *testing.T) {
 
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
-	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote} {
+	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement} {
 		if status, _ := serveWithRoles(g, perm, []string{"test-admin", "test-viewer", ""}); status != http.StatusForbidden {
 			t.Errorf("permission %d with no roles configured: status = %d, want 403", perm, status)
 		}
@@ -461,4 +465,81 @@ func TestAccessGuard_ViewerWithWorknoteCreatorRoleSet(t *testing.T) {
 	if status, _ := serveWithRoles(g, PermWrite, withNotes); status != http.StatusForbidden {
 		t.Errorf("with worknote_creator: PermWrite status = %d, want 403 (a work note is not a write)", status)
 	}
+}
+
+// serveAllWithRoles is serveWithRoles for a route registered through RequireAll.
+func serveAllWithRoles(g *AccessGuard, roles []string, perms ...Permission) (status int, reached bool) {
+	h := g.RequireAll(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}, perms...)
+	user := &middleware.UserInfo{Email: "staff@example.com", UserID: "user-1", Roles: roles}
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	w := httptest.NewRecorder()
+	h(w, req.WithContext(middleware.WithUserInfo(req.Context(), user)))
+	return w.Code, reached
+}
+
+// TestAccessGuard_CreateAnnouncementNarrowsWrite pins what announcement_creator
+// is for: sending customers an announcement needs it on top of PermWrite, so a
+// plain CS engineer loses that one ability and keeps every other write, while a
+// holder of the role who cannot write at all still cannot send anything.
+func TestAccessGuard_CreateAnnouncementNarrowsWrite(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	both := []Permission{PermWrite, PermCreateAnnouncement}
+
+	tests := []struct {
+		name  string
+		roles []string
+		want  int
+	}{
+		{"cs_engineer without the role is refused", []string{"test-cs-engineer"}, http.StatusForbidden},
+		{"cs_engineer with the role is allowed", []string{"test-cs-engineer", "test-announcement-creator"}, http.StatusNoContent},
+		{"admin is allowed without the role, like every other permission", []string{"test-admin"}, http.StatusNoContent},
+		{"the role alone is refused: it makes nobody a writer", []string{"test-announcement-creator"}, http.StatusForbidden},
+		{"a viewer with the role is refused", []string{"test-viewer", "test-announcement-creator"}, http.StatusForbidden},
+		{"worknote_creator and escalator do not help", []string{"test-worknote-creator", "test-escalator"}, http.StatusForbidden},
+		{"no roles", nil, http.StatusForbidden},
+		{"role names are case sensitive", []string{"test-cs-engineer", "TEST-ANNOUNCEMENT-CREATOR"}, http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, reached := serveAllWithRoles(g, tc.roles, both...)
+			if status != tc.want || reached != (tc.want == http.StatusNoContent) {
+				t.Errorf("status = %d reached = %v, want status %d", status, reached, tc.want)
+			}
+		})
+	}
+
+	t.Run("cs_engineer without the role keeps every other write", func(t *testing.T) {
+		if status, _ := serveWithRoles(g, PermWrite, []string{"test-cs-engineer"}); status != http.StatusNoContent {
+			t.Errorf("PermWrite status = %d, want 204", status)
+		}
+	})
+}
+
+func TestAccessGuard_RequireAll(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+
+	t.Run("no permissions listed denies everyone", func(t *testing.T) {
+		if status, reached := serveAllWithRoles(g, []string{"test-admin"}); status != http.StatusForbidden || reached {
+			t.Errorf("status = %d reached = %v, want 403 and not reached", status, reached)
+		}
+	})
+	t.Run("every listed permission must be held, not any one", func(t *testing.T) {
+		if status, _ := serveAllWithRoles(g, []string{"test-escalator"}, PermView, PermEscalate); status != http.StatusNoContent {
+			t.Errorf("holds both: status = %d, want 204", status)
+		}
+		if status, _ := serveAllWithRoles(g, []string{"test-viewer"}, PermView, PermEscalate); status != http.StatusForbidden {
+			t.Errorf("holds only one: status = %d, want 403", status)
+		}
+	})
+	t.Run("a missing token is 401, not 403", func(t *testing.T) {
+		h := g.RequireAll(func(http.ResponseWriter, *http.Request) {}, PermWrite)
+		w := httptest.NewRecorder()
+		h(w, httptest.NewRequest(http.MethodPost, "/x", nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", w.Code)
+		}
+	})
 }

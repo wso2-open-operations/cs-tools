@@ -19,7 +19,7 @@ import { useParams } from "react-router";
 import { useState, useMemo, useEffect, type JSX } from "react";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectDetails from "@api/useGetProjectDetails";
-import useCustomerPermissions from "@hooks/useCustomerPermissions";
+import useCustomerPermissions, { normalizeCustomerRoles } from "@hooks/useCustomerPermissions";
 import TabBar from "@components/tab-bar/TabBar";
 import SettingsAiAssistant from "@features/settings/components/SettingsAiAssistant";
 import SettingsDisplay from "@features/settings/components/SettingsDisplay";
@@ -55,6 +55,11 @@ export default function SettingsPage(): JSX.Element {
   const isCustomerAdmin = useMemo(
     () => hasCustomerAdminRole(userDetails?.roles),
     [userDetails?.roles],
+  );
+  // Partner admins manage contacts too; the backend already allows them.
+  const canManageUsers = useMemo(
+    () => isCustomerAdmin || normalizeCustomerRoles(userDetails?.roles).includes("partner_admin"),
+    [isCustomerAdmin, userDetails?.roles],
   );
 
   // The AI Assistant settings save through PATCH /projects/{id}, which the
@@ -129,7 +134,7 @@ export default function SettingsPage(): JSX.Element {
       {displayTab === SettingsPageTabId.USERS && (
         <SettingsUserManagement
           projectId={projectId}
-          canAddOrRemoveUsers={isCustomerAdmin && !isRestricted}
+          canAddOrRemoveUsers={canManageUsers && !isRestricted}
         />
       )}
       {displayTab === SettingsPageTabId.AI && (

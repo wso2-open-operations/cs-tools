@@ -43,20 +43,14 @@ import { PORTAL_ROLE } from "@context/current-user/portalAccess";
 import { pickAccessibleText } from "@utils/contrastText";
 import { sanitizeRichTextHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
 import { useDarkMode } from "@utils/useDarkMode";
-import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 import { replaceCallRequestLinks } from "@features/csm-cases/utils/callRequestLinks";
 import { replaceSnLinks, type SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
 import {
-  convertCodeTagsToHtml,
   hasDisplayableContent,
-  hasSingleCodeWrapper,
-  isMarkdownComment,
   linkifyBareUrls,
-  stripAllCodeBlocks,
-  stripCodeWrapper,
-  stripCustomerCommentAddedLabel,
+  preprocessCommentBodyHtml,
 } from "@features/csm-cases/utils/commentContent";
 import type {
   CsmCaseComment,
@@ -145,25 +139,15 @@ export default function CsmCaseCommentBubble({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isBot = comment.authorRole === "chatbot";
-  const isMarkdown = isMarkdownComment(comment);
   // A chatbot (Novera) message body is Markdown, and so is the description of
-  // a record raised from a GitHub issue; render those to HTML first. Every
-  // other comment body is already rich-text HTML and goes through the same
-  // code-wrapper/label-stripping pipeline the customer portal uses, since
-  // Markdown bodies never carry ServiceNow's [code] wrapper tags or the
-  // "Customer comment added" label.
-  const preprocessed = useMemo(() => {
-    if (isMarkdown) return markdownToHtml(comment.bodyHtml);
-    const raw = comment.bodyHtml ?? "";
-    const isFullCodeWrap = hasSingleCodeWrapper(raw);
-    const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
-    const afterCode = isFullCodeWrap
-      ? stripCodeWrapper(raw)
-      : codeBlockCount > 1
-        ? stripAllCodeBlocks(raw)
-        : convertCodeTagsToHtml(raw);
-    return stripCustomerCommentAddedLabel(afterCode);
-  }, [comment.bodyHtml, isMarkdown]);
+  // a record raised from a GitHub issue; those are rendered to HTML first.
+  // Every other comment body is rich-text HTML and goes through the
+  // code-wrapper/label-stripping pipeline the customer portal uses (plus the
+  // laid-out-source whitespace clean-up), since Markdown bodies never carry
+  // ServiceNow's [code] wrapper tags or the "Customer comment added" label.
+  // The pipeline itself lives in `preprocessCommentBodyHtml`, shared with the
+  // PDF export so the two cannot drift.
+  const preprocessed = useMemo(() => preprocessCommentBodyHtml(comment), [comment]);
   const darkModeHtml = isDarkMode
     ? stripLightModeInlineStyles(preprocessed)
     : preprocessed;

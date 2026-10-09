@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
@@ -268,7 +269,8 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchMe handles PATCH /users/me.
-// phoneNumber update is handled via SCIM; timeZone update is handled via the entity service.
+// phoneNumber is updated via SCIM and then mirrored to the entity service; timeZone is updated
+// via the entity service. A request carrying both makes one entity call.
 func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -303,6 +305,13 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Entity treats an empty timeZone as absent, so reject it up front rather than
+	// report a value that was never stored. Must precede the identity provider call.
+	if payload.TimeZone != nil && strings.TrimSpace(*payload.TimeZone) == "" {
+		writeError(w, http.StatusBadRequest, "timeZone must not be empty.")
+		return
+	}
+
 	resp := userUpdateResponse{}
 
 	if payload.PhoneNumber != nil {
@@ -315,15 +324,38 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		resp.PhoneNumber = updatedPhone
 	}
 
+	// Mirror into the platform database with one entity PATCH carrying only the
+	// fields this request changed. SCIM has already succeeded; it is idempotent,
+	// so a client retry after an entity failure is safe.
+	entityFields := map[string]string{}
+	if payload.PhoneNumber != nil {
+		// Store what the identity provider actually kept, falling back to the request.
+		stored := *payload.PhoneNumber
+		if resp.PhoneNumber != nil {
+			stored = *resp.PhoneNumber
+		}
+		entityFields["phone"] = stored
+	}
 	if payload.TimeZone != nil {
-		patchBody, marshalErr := json.Marshal(map[string]string{"timeZone": *payload.TimeZone})
+		entityFields["timeZone"] = *payload.TimeZone
+	}
+	if len(entityFields) > 0 {
+		errMsg := "Failed to update time zone."
+		if payload.PhoneNumber != nil {
+			errMsg = "Failed to update phone number."
+			if payload.TimeZone != nil {
+				errMsg = "Failed to update profile."
+			}
+		}
+		patchBody, marshalErr := json.Marshal(entityFields)
 		if marshalErr != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to update time zone.")
+			writeError(w, http.StatusInternalServerError, errMsg)
 			return
 		}
 		if _, entityErr := h.entity.PatchUserMe(r.Context(), patchBody); entityErr != nil {
+			// Never log the body: it may carry the phone number.
 			slog.ErrorContext(r.Context(), "entity PatchUserMe failed", "userID", user.UserID, "err", entityErr)
-			mapUpstreamError(w, entityErr, "Failed to update time zone.")
+			mapUpstreamError(w, entityErr, errMsg)
 			return
 		}
 		resp.TimeZone = payload.TimeZone

@@ -17,7 +17,7 @@ import (
 type OrganizationRepository interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
-	Patch(ctx context.Context, req domain.PatchOrganizationRequest) error
+	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
 }
 
 type organizationRepository struct{ db *pgxpool.Pool }
@@ -264,12 +264,18 @@ func (r *organizationRepository) loadPlatformCards(ctx context.Context, orgID st
 
 // Patch updates the one organisation-level field the portal writes: the CS
 // owner. A single owner handles every pairing for the customer.
-func (r *organizationRepository) Patch(ctx context.Context, req domain.PatchOrganizationRequest) error {
+func (r *organizationRepository) Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error {
 	// $2 is bound as a nullable UUID rather than wrapped in NULLIF: a UUID column
 	// fails the cast before NULLIF can run. See uuidArg in common.go.
+	// owner_updated_by/_on are set unconditionally: this statement ran, so
+	// somebody reassigned the account, and that stays true even when the new
+	// owner is the same person as the old one. plg_cs_owner says whose work it
+	// is; these say who decided that and when.
 	const q = `
 		UPDATE plg_organization
-		SET    plg_cs_owner = $2::UUID
+		SET    plg_cs_owner     = $2::UUID,
+		       owner_updated_by = $3::UUID,
+		       owner_updated_on = NOW()
 		WHERE  id::TEXT = $1`
 
 	owner := ""
@@ -277,7 +283,7 @@ func (r *organizationRepository) Patch(ctx context.Context, req domain.PatchOrga
 		owner = *req.OwnerID
 	}
 
-	tag, err := r.db.Exec(ctx, q, req.ID, uuidArg(owner))
+	tag, err := r.db.Exec(ctx, q, req.ID, uuidArg(owner), uuidArg(actorID))
 	if err != nil {
 		if isConstraintViolation(err) {
 			return &apierror.ValidationError{Msg: "unknown CS user: " + owner}

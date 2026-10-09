@@ -44,10 +44,8 @@ func (c *Client) RegisterInvitedMemberships(ctx context.Context) error {
 	return err
 }
 
-// PatchMe calls PATCH /users/me to update the caller's timezone -- phone
-// number is a separate, SCIM-only field this backend updates directly
-// against Asgardeo (see UserHandler.PatchMe), never through entity-service
-// at all, since entity-service has nowhere to store one.
+// PatchMe calls PATCH /users/me to update the caller's own row (timezone
+// and/or phone number). Fields left nil in req are not sent.
 func (c *Client) PatchMe(ctx context.Context, req PatchUserMeRequest) (PatchUserMeResponse, error) {
 	var out PatchUserMeResponse
 	err := c.patchJSON(ctx, "/users/me", req, &out)

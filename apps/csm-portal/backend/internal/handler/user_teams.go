@@ -123,7 +123,9 @@ func (h *UsersHandler) withUserTeams(raw []byte) ([]byte, error) {
 //     team's backing group id (the same shape accounts.creTeam.id/sreTeam.id
 //     expose) -- both resolve to the same team. The entity service filters
 //     membership by group name; only this layer knows which name either id
-//     shape means.
+//     shape means. A UUID that is no registry group id is a `team` table id
+//     (a team POST /teams/search lists that the registry does not know) and is
+//     forwarded as teamIds for the entity service to match on team_member.
 //
 // Every other field passes through untouched, and a body with no filters object
 // is returned byte-for-byte as it arrived. The returned error is caller-facing:
@@ -184,6 +186,7 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 				return nil, errors.New(ErrMsgBadRequest)
 			}
 		}
+		var teamTableIDs []string
 		for _, key := range teamIDs {
 			var team directory.Team
 			var ok bool
@@ -191,6 +194,14 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 				// The platform UUID form of a team's backing group id -- the
 				// same shape accounts.creTeam.id/sreTeam.id already expose.
 				team, ok = h.dir.TeamByUUID(key)
+				if !ok {
+					// Not a registry group id: it is a `team` table id, as
+					// listed by POST /teams/search for a team the registry
+					// does not know. The entity service matches it against
+					// team_member.team_id.
+					teamTableIDs = append(teamTableIDs, key)
+					continue
+				}
 			} else {
 				team, ok = h.dir.TeamByKey(key)
 			}
@@ -199,11 +210,20 @@ func (h *UsersHandler) resolveUserSearchFilters(body []byte) ([]byte, error) {
 			}
 			groupNames = append(groupNames, team.Name)
 		}
-		encoded, err := json.Marshal(groupNames)
-		if err != nil {
-			return nil, errors.New(ErrMsgInternal)
+		if len(teamTableIDs) > 0 {
+			encoded, err := json.Marshal(teamTableIDs)
+			if err != nil {
+				return nil, errors.New(ErrMsgInternal)
+			}
+			filters["teamIds"] = encoded
 		}
-		filters["groupNames"] = encoded
+		if len(groupNames) > 0 {
+			encoded, err := json.Marshal(groupNames)
+			if err != nil {
+				return nil, errors.New(ErrMsgInternal)
+			}
+			filters["groupNames"] = encoded
+		}
 	}
 
 	encodedFilters, err := json.Marshal(filters)

@@ -195,6 +195,67 @@ describe("UserProfilePage", () => {
     expect(screen.queryByText("agent", { selector: ".MuiChip-label" })).not.toBeInTheDocument();
   });
 
+  it("does not render a CSM Platform roles section for a non-wso2.com internal user, and keeps the plain 'Platform roles' label", async () => {
+    mockQueryResult({ data: INTERNAL_USER });
+    renderPage();
+    expect(screen.queryByText(/CSM Platform roles/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/^Platform roles \(2\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Customer Portal roles/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a CSM Platform roles section, with resolved labels, for a wso2.com-email user", async () => {
+    mockQueryResult({
+      data: { ...INTERNAL_USER, email: "jane.doe@wso2.com", csmPlatformRoles: ["cs_engineer", "admin"] },
+    });
+    renderPage();
+    expect(await screen.findByText(/CSM Platform roles \(2\)/i)).toBeInTheDocument();
+    expect(screen.getByText("CS Engineer", { selector: ".MuiChip-label" })).toBeInTheDocument();
+    expect(screen.getByText("Admin", { selector: ".MuiChip-label" })).toBeInTheDocument();
+  });
+
+  it("renders the CSM Platform roles section with an empty state for a wso2.com-email user holding none", () => {
+    mockQueryResult({ data: { ...INTERNAL_USER, email: "jane.doe@wso2.com", csmPlatformRoles: [] } });
+    renderPage();
+    expect(screen.getByText(/CSM Platform roles \(0\)/i)).toBeInTheDocument();
+    expect(screen.getByText("No CSM Platform roles assigned.")).toBeInTheDocument();
+  });
+
+  // csmPlatformRoles is absent (not []) when the backend's SCIM lookup itself
+  // failed, or no AccessGuard was wired -- that must read as "couldn't check",
+  // never as the false "confirmed zero roles" a plain `?? []` would collapse
+  // it to, matching the pattern already established by ExternalAccountMetaCell.
+  it("renders 'Unavailable', with no count, when csmPlatformRoles is absent (the SCIM lookup itself failed)", () => {
+    mockQueryResult({
+      data: { ...INTERNAL_USER, email: "jane.doe@wso2.com", csmPlatformRoles: undefined },
+    });
+    renderPage();
+    expect(screen.getByText("CSM Platform roles")).toBeInTheDocument();
+    expect(screen.queryByText(/CSM Platform roles \(/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No CSM Platform roles assigned.")).not.toBeInTheDocument();
+  });
+
+  // The CSM Platform roles section is gated on email domain, not userType --
+  // a wso2.com account can be mistakenly tagged external in the backing data
+  // source and still have a real Asgardeo CSM role assignment worth showing.
+  it("renders the CSM Platform roles section for a wso2.com email even when userType is external", () => {
+    mockQueryResult({
+      data: { ...BLOCKED_EXTERNAL_USER, email: "tester@wso2.com", csmPlatformRoles: ["viewer"] },
+    });
+    renderPage();
+    expect(screen.getByText(/CSM Platform roles \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText("Viewer", { selector: ".MuiChip-label" })).toBeInTheDocument();
+  });
+
+  it("still shows Customer Portal roles (entity-service's own vocabulary) alongside CSM Platform roles", async () => {
+    mockQueryResult({
+      data: { ...INTERNAL_USER, email: "jane.doe@wso2.com", csmPlatformRoles: ["admin"] },
+    });
+    renderPage();
+    expect(await screen.findByText(/Customer Portal roles \(2\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/CSM Platform roles \(1\)/i)).toBeInTheDocument();
+  });
+
   it("renders 'Unassigned' rather than hiding the field when an internal user has no team", () => {
     mockQueryResult({ data: { ...INTERNAL_USER, teams: [] } });
     renderPage();

@@ -184,6 +184,12 @@ type githubSyncService struct {
 	// is how it behaved before the mutation layer existed and is still useful
 	// for a dry run against a live repository.
 	mutate repository.GithubMutationRepository
+	// srNotices runs the service-request automation for an SR created from an
+	// issue, exactly as caseService does for one created in the portal:
+	// assignment and acknowledgement for an automated SRE team, and sr.created
+	// for the Chat card. Nil (no SRE_EVENT_HUB_TOPIC) runs none. Set with
+	// WithGithubSRNotices.
+	srNotices srNotifier
 	// integrationLogin is our own GitHub account. Events it sent are our own
 	// writes coming back and are dropped -- identity, not string-matching the
 	// comment body the way the case webhook does.
@@ -222,6 +228,17 @@ func NewGithubSyncServiceWithLabels(repo repository.GithubSyncRepository, gh git
 func (s *githubSyncService) WithMutations(m repository.GithubMutationRepository) GithubSyncService {
 	s.mutate = m
 	return s
+}
+
+// WithGithubSRNotices gives the sync the service-request automation the
+// portal's create path runs (caseService's srNotices), so an SR created from a
+// GitHub issue is assigned, acknowledged and announced in Chat the same way.
+// A no-op if svc is not a *githubSyncService or n is nil.
+func WithGithubSRNotices(svc GithubSyncService, n *SRNoticeService) GithubSyncService {
+	if s, ok := svc.(*githubSyncService); ok && n != nil {
+		s.srNotices = n
+	}
+	return svc
 }
 
 // NewGithubSyncServiceWriting is the full service: recognises, writes, and
@@ -404,6 +421,11 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 	}
 	slog.InfoContext(ctx, "github: service request created from issue",
 		"serviceRequestId", id, "number", number, "issue", p.Issue.Number, "catalog", catalog)
+	// Only for a new record: an issue that already had one ("exists" above)
+	// was announced when that record was created.
+	if s.srNotices != nil {
+		s.srNotices.OnCreated(ctx, id)
+	}
 	return Outcome{Action: "created", ChangeRequestID: id, Number: number}, nil
 }
 

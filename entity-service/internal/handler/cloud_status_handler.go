@@ -74,3 +74,20 @@ func (h *CloudStatusHandler) RecordDelivery(w http.ResponseWriter, r *http.Reque
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// Claim handles POST /internal/cloud-status/{id}/claim: csm-notification-service
+// claims a webhook it received as outage.status_page_due before posting it.
+// 204 means post it; 409 means do not -- already delivered, or no longer
+// reserved under this token.
+func (h *CloudStatusHandler) Claim(w http.ResponseWriter, r *http.Request) {
+	var req domain.ClaimCloudStatusWebhookRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	if err := h.svc.ClaimWebhook(r.Context(), req); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

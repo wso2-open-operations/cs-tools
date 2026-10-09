@@ -518,11 +518,16 @@ func (s *snCallRequestService) UpdateCallRequest(ctx context.Context, req domain
 		if req.DurationMinutes == nil {
 			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "durationInMinutes is required when state is scheduled"}
 		}
-	case domain.CallRequestStateConcluded:
-		if req.Notes == nil || strings.TrimSpace(*req.Notes) == "" {
-			return domain.UpdateCallRequestResponse{}, &apierror.ValidationError{Msg: "notes is required when state is concluded"}
-		}
 	}
+	// Blank notes on a conclude are no notes: sending "   " to ServiceNow could blank
+	// out the notes it already holds.
+	if req.State == domain.CallRequestStateConcluded && req.Notes != nil && strings.TrimSpace(*req.Notes) == "" {
+		req.Notes = nil
+	}
+	// concluded needs no notes at this layer (digiops-cs#3350, "Mark as completed"):
+	// whether ServiceNow accepts a conclude without them is its own decision, and
+	// this validation also runs for the dual-write mirror, where rejecting it
+	// locally would make every such mirror fail before it ever reached ServiceNow.
 
 	sysid := uuidToSysid(req.ID)
 

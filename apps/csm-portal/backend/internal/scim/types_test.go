@@ -28,12 +28,12 @@ import (
 // assumed -- decoding it the naive way failed every GetUser call for an
 // internal user with "json: cannot unmarshal object into Go value of type
 // string"; (2) once that was fixed, "value" turned out to be the role
-// resource's own opaque id (a UUID), not its name -- filtering by
-// CSMAppRolePrefix against Value silently matched nothing, since no role id
-// happens to start with "app-csm-". The actual role name (with an
-// environment-specific suffix) is "display" instead. Every shape scimRoles
-// claims to accept is exercised here so a future regression on any one of
-// them fails a test instead of only being caught live again.
+// resource's own opaque id (a UUID), not its name -- a role id is never a
+// readable string, so anything trying to recognize a role by matching
+// against Value alone would silently match nothing. The actual role name is
+// "display" instead. Every shape scimRoles claims to accept is exercised
+// here so a future regression on any one of them fails a test instead of
+// only being caught live again.
 func TestScimRoles_UnmarshalJSON(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -74,9 +74,12 @@ func TestScimRoles_UnmarshalJSON(t *testing.T) {
 // TestSearchUser_ExtractsRolesFromValueObjects proves SearchUser's own
 // end-to-end decoding (scimSearchResponse -> scimUser -> UserInfo) survives
 // the real object-array shape, not just the isolated scimRoles unit above.
-// The fixture is entirely synthetic: several non-CSM application roles
-// alongside a couple of "app-csm-*" ones, plus an organization-scope role --
-// exactly the mix CSMAppRolePrefix has to filter down correctly.
+// The fixture is entirely synthetic: several other-application roles
+// alongside a couple of this-portal ones, plus an organization-scope role --
+// UserInfo.Roles must carry every one of them through unfiltered, since
+// recognizing which belong to this portal is AccessGuard.RolesFor's job
+// (matched against its own AUTH_<ROLE>_ROLES configuration), not this
+// package's.
 func TestSearchUser_ExtractsRolesFromValueObjects(t *testing.T) {
 	raw := []byte(`{
 		"totalResults": 1,

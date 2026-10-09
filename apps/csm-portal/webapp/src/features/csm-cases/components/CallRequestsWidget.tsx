@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -29,7 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Phone, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { BeCallRequestView, BeCallRequestStateKey } from "@api/backend/types";
 import type {
   CaseState,
@@ -43,6 +44,7 @@ import {
 import {
   ALL_CALL_REQUEST_STATES,
   CALL_REQUEST_STATE_LABEL,
+  OPEN_CALL_REQUEST_STATES,
   callRequestCaseStateBlockReason,
   type CallRequestAgentAction,
   resolveCallRequestStateKey,
@@ -85,6 +87,9 @@ interface CallRequestsWidgetProps {
   readOnly?: boolean;
 }
 
+/** "open" = calls that can still move on, "all" = every call, else a single state. */
+type CallRequestStateFilter = BeCallRequestStateKey | "open" | "all";
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -98,10 +103,16 @@ export function CallRequestsWidget({
   isClosed,
   readOnly,
 }: CallRequestsWidgetProps): JSX.Element {
-  // State filter — empty string means "all". Filtering happens server-side
-  // via `filters.states` on the search request.
-  const [stateFilter, setStateFilter] = useState<BeCallRequestStateKey | "">("");
-  const activeStates = stateFilter ? [stateFilter] : undefined;
+  // State filter. The default shows only calls that can still move on, so a call
+  // that was completed, canceled or rejected leaves the list; "all" brings every
+  // call back. Filtering happens server-side via `filters.states`.
+  const [stateFilter, setStateFilter] = useState<CallRequestStateFilter>("open");
+  const activeStates =
+    stateFilter === "all"
+      ? undefined
+      : stateFilter === "open"
+        ? OPEN_CALL_REQUEST_STATES
+        : [stateFilter];
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useGetCsmCaseCallRequests(caseId, activeStates);
@@ -130,6 +141,11 @@ export function CallRequestsWidget({
   const [notesTarget, setNotesTarget] = useState<BeCallRequestView | null>(null);
   const [cancelTarget, setCancelTarget] = useState<BeCallRequestView | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // "Mark as completed" has no dialog of its own to show a failure in, so its error
+  // is shown on the card. The ref (not just the mutation's isPending) is what stops
+  // a fast double click from sending the PATCH twice before the first re-render.
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const completingRef = useRef(false);
 
   const isReschedule =
     resolveCallRequestStateKey(scheduleTarget?.state) === "scheduled";
@@ -154,7 +170,11 @@ export function CallRequestsWidget({
 
   const handleAction = (action: CallRequestAgentAction, cr: BeCallRequestView) => {
     setActionError(null);
+    setCompleteError(null);
     switch (action) {
+      case "complete":
+        void handleComplete(cr);
+        break;
       case "schedule":
       case "reschedule":
         setScheduleTarget(cr);
@@ -246,6 +266,32 @@ export function CallRequestsWidget({
     }
   };
 
+  // One click, no dialog and no notes: concludes the call (engineers had no way to finish a call). The
+  // backend only accepts this for a scheduled / notes-pending call and answers 409
+  // (with the call's current state) when the row on screen is stale.
+  const handleComplete = async (cr: BeCallRequestView) => {
+    if (completingRef.current) return;
+    completingRef.current = true;
+    setCompleteError(null);
+    try {
+      await patchCallRequest.mutateAsync({
+        caseId,
+        callRequestId: cr.id,
+        patch: { state: "concluded" },
+      });
+    } catch (err) {
+      setCompleteError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not mark the call request as completed.",
+      );
+    }
+    // Reset after the try/catch rather than in a `finally`: the catch above never
+    // rethrows, so this always runs, and the React Compiler does not support a
+    // `finally` clause (it would skip optimizing this whole component).
+    completingRef.current = false;
+  };
+
   const handleCancel = async (cancellationReason: string) => {
     if (!cancelTarget) return;
     setActionError(null);
@@ -283,7 +329,9 @@ export function CallRequestsWidget({
               <Chip
                 size="small"
                 variant="outlined"
-                label={`${requests.length} ${stateFilter ? "matching" : "total"}`}
+                label={`${requests.length} ${
+                  stateFilter === "open" ? "open" : stateFilter === "all" ? "total" : "matching"
+                }`}
               />
             )}
           </Box>
@@ -305,7 +353,7 @@ export function CallRequestsWidget({
                 // focus-driven default, and force the cascade with
                 // `!important` since a plain `sx={{ top: 0 }}` loses to that
                 // theme rule's higher specificity.
-                shrink={stateFilter !== ""}
+                shrink
                 sx={{ top: "0px !important" }}
               >
                 Filter by state
@@ -314,12 +362,11 @@ export function CallRequestsWidget({
                 labelId="cr-filter-label"
                 value={stateFilter}
                 label="Filter by state"
-                notched={stateFilter !== ""}
-                onChange={(e) =>
-                  setStateFilter(e.target.value as BeCallRequestStateKey | "")
-                }
+                notched
+                onChange={(e) => setStateFilter(e.target.value as CallRequestStateFilter)}
               >
-                <MenuItem value="">All states</MenuItem>
+                <MenuItem value="open">Open calls</MenuItem>
+                <MenuItem value="all">All states</MenuItem>
                 <Divider />
                 {ALL_CALL_REQUEST_STATES.map((s) => (
                   <MenuItem key={s} value={s}>
@@ -390,11 +437,19 @@ export function CallRequestsWidget({
         {!isLoading && !isError && requests.length === 0 && (
           <Box sx={{ py: 3, textAlign: "center" }}>
             <Typography variant="body2" color="text.secondary">
-              {stateFilter
-                ? `No call requests in state "${CALL_REQUEST_STATE_LABEL[stateFilter]}".`
-                : "No call requests yet."}
+              {stateFilter === "open"
+                ? "No open call requests. Choose \"All states\" to see finished ones."
+                : stateFilter === "all"
+                  ? "No call requests yet."
+                  : `No call requests in state "${CALL_REQUEST_STATE_LABEL[stateFilter]}".`}
             </Typography>
           </Box>
+        )}
+
+        {completeError && (
+          <Alert severity="error" onClose={() => setCompleteError(null)}>
+            {completeError}
+          </Alert>
         )}
 
         {!isLoading && !isError && requests.length > 0 && (
@@ -403,6 +458,7 @@ export function CallRequestsWidget({
             onAction={handleAction}
             isClosed={isClosed}
             readOnly={readOnly}
+            busy={patchCallRequest.isPending}
           />
         )}
       </Card>

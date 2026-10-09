@@ -133,7 +133,6 @@ export default function AnnouncementsPage(): JSX.Element {
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchTerm("");
     setPage(1);
   };
 

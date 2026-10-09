@@ -247,18 +247,29 @@ func statusEffectFor(newStatus string) caseStatusEffect {
 //
 //   - "Awaiting Info" / "Solution Proposed": WSO2 is waiting on the
 //     customer, so neither clock should keep accumulating — pause both.
-//   - "Closed": resolution is genuinely done — force-complete it
-//     (AdvanceAlertedTier to 100, same as an early completion). workaround
-//     is only paused, not completed: there is no real "workaround
-//     provided" signal available here (see case.comment_added's own
-//     payload, which carries no such field either) — a documented,
-//     accepted gap carried forward from every earlier design this
-//     replaces, not newly introduced.
+//   - "Closed": resolution and response are genuinely done — force-complete
+//     both (AdvanceAlertedTier to 100, same as an early completion).
+//     workaround is only paused, not completed, here — a real "workaround
+//     provided" signal now exists (case.workaround_provided, see
+//     events.WorkaroundProvidedPayload's own doc comment), but it's
+//     consumed by its own handler (dispatch.handleWorkaroundProvided →
+//     CompleteWorkaroundClock), independently of a status change, not by
+//     this function. A case closed without ever having workaroundProvided
+//     set true simply never completes this clock — functionally safe
+//     regardless, since processDueMember drops a paused clock's due wake
+//     entry without alerting, same as a completed one would.
 //   - anything else (Open, Work In Progress, Waiting on WSO2, Reopened):
 //     resume both — the case is active again.
 //
-// The response clock is never touched here — it's only ever completed by
-// CompleteResponseClock, on a qualifying comment.
+// Closing is the one place besides a qualifying comment that force-completes
+// the response clock (reusing CompleteResponseClock itself, so there's only
+// one place that knows how). Without this, a case that closes without ever
+// getting a qualifying support-engineer reply (CompleteResponseClock never
+// called — reported live: a work note doesn't qualify, and neither does a
+// comment whose author didn't resolve as a recognized CS-engineer role)
+// left the response clock neither paused nor completed — its wake entries
+// stayed live in Redis, so a breach alert fired into Chat well after the
+// case had already closed.
 func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string) {
 	if err := e.store.SetState(ctx, caseID, ClockResponse, newStatus); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to update clock state", "caseId", caseID, "clockType", ClockResponse, "err", err)
@@ -275,6 +286,7 @@ func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string
 		e.setPaused(ctx, caseID, ClockWorkaround, true)
 		e.setPaused(ctx, caseID, ClockResolution, true)
 	case effectClose:
+		e.CompleteResponseClock(ctx, caseID)
 		if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResolution, 100, time.Time{}); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to complete resolution clock on case close", "caseId", caseID, "err", err)
 		}
@@ -301,6 +313,37 @@ func (e *Engine) CompleteResponseClock(ctx context.Context, caseID string) {
 	if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResponse, 100, time.Time{}); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to complete response clock", "caseId", caseID, "err", err)
 	}
+}
+
+// CompleteWorkaroundClock force-completes the workaround clock — called
+// from dispatch.handleWorkaroundProvided when entity-service publishes
+// events.TypeWorkaroundProvided (a case's workaroundProvided field was set
+// to true via PATCH; entity-service has no equivalent "recall" event, so
+// there's no opposite operation here either — same accepted gap
+// CompleteWorkaroundClock's entity-service namesake documents). Before this
+// existed, ApplyStateEffects only ever paused/resumed this clock, never
+// completed it — a documented gap this closes. Idempotent, same reasoning
+// as CompleteResponseClock.
+//
+// Unlike every other trigger in this file, this one DOES return its store
+// error rather than just logging it (a CodeRabbit-caught gap): this is a
+// one-shot signal with no later reconciliation pass to re-derive it from —
+// RegisterClocks/ApplyStateEffects/CompleteResponseClock all react to
+// events whose effect either repeats (a resent status change) or is
+// re-established by a later event in the same case's lifecycle, and
+// Reconcile's own startup sweep can rebuild a clock's state from
+// entity-service's durable row regardless. A workaround-provided signal
+// lost here (e.g. a transient Redis outage) has no such second chance:
+// nothing else ever calls this again for the same PATCH. Returning the
+// error lets dispatch.handleWorkaroundProvided fail the record, so
+// eventbus.Consumer retries it instead of silently acknowledging a clock
+// that was never actually completed.
+func (e *Engine) CompleteWorkaroundClock(ctx context.Context, caseID string) error {
+	if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockWorkaround, 100, time.Time{}); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to complete workaround clock", "caseId", caseID, "err", err)
+		return fmt.Errorf("slaengine: complete workaround clock for %s: %w", caseID, err)
+	}
+	return nil
 }
 
 // Tick scans the Redis wake-index for every member due at or before now and

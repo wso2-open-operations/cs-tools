@@ -52,7 +52,7 @@ type stubCaseRepo struct {
 	aggregateCases                func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
 	searchCases                   func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
 	createCaseAttachment          func(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error)
-	createCaseAttachmentFromSN    func(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string, createdOn time.Time) (domain.Attachment, error)
+	createCaseAttachmentFromSN    func(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
 	searchCaseAttachments         func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	searchWorkItemAttachments     func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	getCaseAttachmentByID         func(ctx context.Context, id string) (domain.Attachment, error)
@@ -152,9 +152,9 @@ func (s *stubCaseRepo) CreateCaseAttachment(ctx context.Context, req domain.Crea
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string, createdOn time.Time) (domain.Attachment, error) {
+func (s *stubCaseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
 	if s.createCaseAttachmentFromSN != nil {
-		return s.createCaseAttachmentFromSN(ctx, req, id, sizeBytes, uploadedBy, createdOn)
+		return s.createCaseAttachmentFromSN(ctx, req, id, sizeBytes, uploadedBy)
 	}
 	panic("not implemented")
 }
@@ -347,7 +347,7 @@ type stubUserRepo struct {
 	getUserGroups        func(ctx context.Context, id string) ([]domain.UserGroupRef, error)
 	getUserProjectAccess func(ctx context.Context, email string) ([]domain.UserContactAccess, error)
 	createUser           func(ctx context.Context, req domain.CreateUserRequest, actor string) (domain.User, error)
-	updateUserTimeZone   func(ctx context.Context, userID, timezone string) (time.Time, error)
+	updateUserProfile    func(ctx context.Context, userID string, timezone, phone *string) (domain.UserProfileUpdate, error)
 }
 
 func (s stubUserRepo) CreateUser(ctx context.Context, req domain.CreateUserRequest, actor string) (domain.User, error) {
@@ -357,9 +357,9 @@ func (s stubUserRepo) CreateUser(ctx context.Context, req domain.CreateUserReque
 	panic("not implemented")
 }
 
-func (s stubUserRepo) UpdateUserTimeZone(ctx context.Context, userID, timezone string) (time.Time, error) {
-	if s.updateUserTimeZone != nil {
-		return s.updateUserTimeZone(ctx, userID, timezone)
+func (s stubUserRepo) UpdateUserProfile(ctx context.Context, userID string, timezone, phone *string) (domain.UserProfileUpdate, error) {
+	if s.updateUserProfile != nil {
+		return s.updateUserProfile(ctx, userID, timezone, phone)
 	}
 	panic("not implemented")
 }
@@ -1476,6 +1476,71 @@ func TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall(t *testing.
 
 	if len(slaEngine.completeWorkaroundCalls) != 0 {
 		t.Errorf("expected no CompleteWorkaroundClock call for a recall, got %v", slaEngine.completeWorkaroundCalls)
+	}
+}
+
+// TestCaseService_UpdateCase_PublishesWorkaroundProvided is the regression
+// guard for a second, distinct gap on top of the one above: entity-service's
+// own Postgres-side SLAEngineService (just above) completed its workaround
+// clock, but nothing published any event at all for
+// csm-notification-service's own, independent Redis-based SLA engine to
+// hear about it -- its workaround clock could still fire a breach alert
+// well after a workaround had genuinely been provided. case.workaround_provided
+// closes that gap.
+func TestCaseService_UpdateCase_PublishesWorkaroundProvided(t *testing.T) {
+	workaroundProvided := true
+	repo := &stubCaseRepo{
+		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
+			return time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC), nil
+		},
+	}
+	userRepo := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+		return domain.User{ID: "actor-id", Email: email}, nil
+	}}
+	pub := &mockEventPublisher{}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, pub, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, "")
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, WorkaroundProvided: &workaroundProvided}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	call, found := findPublishCall(pub.calls, events.TypeWorkaroundProvided)
+	if !found {
+		t.Fatalf("expected a case.workaround_provided publish, got %v", publishedTypes(pub.calls))
+	}
+	var payload events.WorkaroundProvidedPayload
+	if err := json.Unmarshal(call.payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.CaseID != testDeploymentUUID {
+		t.Errorf("payload caseId = %q, want %q", payload.CaseID, testDeploymentUUID)
+	}
+}
+
+// TestCaseService_UpdateCase_DoesNotPublishWorkaroundProvidedOnRecall is the
+// negative counterpart -- false (a recall) must not publish either, same
+// "no uncomplete operation" posture as CompleteWorkaroundClock.
+func TestCaseService_UpdateCase_DoesNotPublishWorkaroundProvidedOnRecall(t *testing.T) {
+	workaroundProvided := false
+	repo := &stubCaseRepo{
+		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
+			return time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC), nil
+		},
+	}
+	userRepo := stubUserRepo{getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+		return domain.User{ID: "actor-id", Email: email}, nil
+	}}
+	pub := &mockEventPublisher{}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, pub, alwaysUnrestrictedAccess{}, nil, nil, nil, &fakeSLAEngineService{}, "")
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, WorkaroundProvided: &workaroundProvided}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, found := findPublishCall(pub.calls, events.TypeWorkaroundProvided); found {
+		t.Errorf("expected no case.workaround_provided publish for a recall, got %v", publishedTypes(pub.calls))
 	}
 }
 

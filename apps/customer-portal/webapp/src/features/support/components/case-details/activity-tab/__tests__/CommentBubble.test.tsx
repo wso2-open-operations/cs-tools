@@ -86,6 +86,53 @@ describe("CommentBubble", () => {
     expect(screen.getByText(/why does <thinking> show up\?/)).toBeInTheDocument();
   });
 
+  describe("laid-out HTML source", () => {
+    const laidOut =
+      "<p>Wrapped by hand\r\n   at a fixed width.</p>\r\n<ul>\r\n  <li>First point\r\n    continues here.</li>\r\n</ul>";
+
+    it("renders no newline inside or between the blocks", () => {
+      const { container } = renderBubble({
+        comment: { ...mockComment, id: "laid-out-1", content: laidOut },
+      });
+      expect(container.querySelector("ul")?.textContent).toBe("First point continues here.");
+      expect(container.querySelector("ul")?.previousElementSibling?.textContent).toBe(
+        "Wrapped by hand at a fixed width.",
+      );
+      expect(container.querySelector("ul")?.parentElement?.innerHTML).not.toMatch(/[\r\n]/);
+    });
+
+    it("renders a body inside a [code] wrapper the same way", () => {
+      const { container } = renderBubble({
+        comment: { ...mockComment, id: "laid-out-2", content: `[code]${laidOut}[/code]` },
+      });
+      expect(container.querySelector("ul")?.parentElement?.innerHTML).not.toMatch(/[\r\n]/);
+    });
+
+    it("keeps the line breaks inside a <pre> block and an inline <code> snippet", () => {
+      const { container } = renderBubble({
+        comment: {
+          ...mockComment,
+          id: "code-1",
+          content: "<p>Run:</p>\n<pre>one\n  two</pre>\n<p>or <code>x\ny</code></p>",
+        },
+      });
+      expect(container.querySelector("pre")?.textContent).toBe("one\n  two");
+      expect(container.querySelector("code")?.textContent).toBe("x\ny");
+    });
+
+    it("leaves Novera's Markdown answer alone", () => {
+      renderBubble({
+        comment: {
+          ...mockComment,
+          id: "novera-2",
+          createdBy: "Novera",
+          content: "<p>kept</p>\n<p>as is</p>",
+        },
+      });
+      expect(screen.getByText(/as is/)).toBeInTheDocument();
+    });
+  });
+
   it("should render comment content", () => {
     renderBubble();
     expect(

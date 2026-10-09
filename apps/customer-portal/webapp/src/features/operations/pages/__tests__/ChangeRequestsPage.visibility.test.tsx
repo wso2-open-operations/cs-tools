@@ -158,15 +158,16 @@ describe("ChangeRequestsPage: no state is hidden by the page", () => {
     expect(lastStateKeys()).not.toContain(-4);
   });
 
-  it("counts Authorize as outstanding, not as an action for the customer", () => {
+  it("counts Authorize and Rollback as outstanding, not as an action for the customer", () => {
     mocks.locationState.value = { outstandingOnly: true };
     renderPage();
-    expect(lastStateKeys()).toEqual([-3, 5, -2, -1, 0, 1]);
+    expect(lastStateKeys()).toEqual([-3, 5, -2, -1, 0, 1, 2]);
 
     mocks.searchRequests.length = 0;
     mocks.locationState.value = { actionRequired: true };
     renderPage();
     expect(lastStateKeys()).toEqual([5, 1]);
     expect(lastStateKeys()).not.toContain(-3);
+    expect(lastStateKeys()).not.toContain(2);
   });
 });

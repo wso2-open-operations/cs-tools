@@ -37,6 +37,7 @@ export const GRANTABLE_ROLE_LABELS: Record<string, string> = {
   dashboard_designer: "Dashboard Designer",
   sales_solutions: "Sales Solutions",
   worknote_creator: "Work Note Creator",
+  announcement_creator: "Announcement Creator",
 };
 
 /** Falls back to the raw key, title-cased on underscores, for a role this

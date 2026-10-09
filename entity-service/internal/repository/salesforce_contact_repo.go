@@ -111,8 +111,8 @@ func upsertContactTx(ctx context.Context, tx querier, in domain.SalesforceContac
 
 	// The ledger row as it stood before this write: a contact this writer
 	// soft-deleted (DELETED) and Salesforce has since restored gets its
-	// "user" row back. Only that case — is_active is never forced TRUE
-	// otherwise, so a user deactivated for another reason stays so.
+	// "user" row back. Otherwise only a replacement contact reactivates (see
+	// upsertMembershipUser), so a user deactivated for another reason stays so.
 	prior, err := getSalesforceIngestState(ctx, tx, domain.SalesforceIngestEntityContact, in.ContactSfID)
 	if err != nil {
 		return res, err

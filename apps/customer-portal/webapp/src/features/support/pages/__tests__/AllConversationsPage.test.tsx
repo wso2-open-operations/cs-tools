@@ -55,8 +55,20 @@ vi.mock("@api/useGetProjectFilters", () => ({
   default: () => mockUseGetProjectFilters(),
 }));
 
+// The close-chat flow needs the error banner provider; it plays no part in these tests.
+vi.mock("@features/support/hooks/useCloseConversationFlow", () => ({
+  useCloseConversationFlow: () => ({
+    isConfirmOpen: false,
+    isClosing: false,
+    requestClose: vi.fn(),
+    cancelClose: vi.fn(),
+    confirmClose: vi.fn(),
+  }),
+}));
+
 vi.mock("@features/support/api/useSearchConversations", () => ({
-  useSearchConversations: () => mockUseSearchConversations(),
+  useSearchConversations: (...args: unknown[]) =>
+    mockUseSearchConversations(...args),
 }));
 
 vi.mock("@components/list-view/ListPageHeader", () => ({
@@ -135,6 +147,45 @@ describe("AllConversationsPage", () => {
 
     expect(screen.queryByTestId("search-bar")).not.toBeInTheDocument();
     expect(screen.getByText("Active Chats")).toBeInTheDocument();
+  });
+
+  // The Support card says "Resolved via Chat (Last 30d)"; its list must be limited the same way.
+  it("limits the resolved-via-chat list to the last 30 days", () => {
+    mockUseSearchParams.mockReturnValue([
+      new URLSearchParams("statusFilter=resolvedViaChat"),
+      vi.fn(),
+    ]);
+    mockUseGetProjectFilters.mockReturnValue({
+      data: { conversationStates: [{ id: "3", label: "Resolved" }] },
+    });
+
+    const before = Date.now();
+    render(<AllConversationsPage />);
+
+    const request = mockUseSearchConversations.mock.calls.at(-1)?.[1] as {
+      filters: { stateKeys?: number[]; startUpdatedDate?: string; endUpdatedDate?: string };
+    };
+    expect(request.filters.stateKeys).toEqual([3]);
+    const since = Date.parse(request.filters.startUpdatedDate ?? "");
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+    expect(Number.isNaN(since)).toBe(false);
+    // within a few seconds of exactly 30 days before the render
+    expect(Math.abs(before - thirtyDays - since)).toBeLessThan(5000);
+    expect(request.filters.endUpdatedDate).toBeUndefined();
+  });
+
+  it("does not limit the active-chats list by date", () => {
+    mockUseSearchParams.mockReturnValue([
+      new URLSearchParams("statusFilter=active"),
+      vi.fn(),
+    ]);
+
+    render(<AllConversationsPage />);
+
+    const request = mockUseSearchConversations.mock.calls.at(-1)?.[1] as {
+      filters: { startUpdatedDate?: string };
+    };
+    expect(request.filters.startUpdatedDate).toBeUndefined();
   });
 
   it("should navigate with composed conversation summary", () => {

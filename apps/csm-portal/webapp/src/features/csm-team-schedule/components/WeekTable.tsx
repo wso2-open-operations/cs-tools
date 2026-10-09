@@ -340,7 +340,8 @@ export default function WeekTable({
         .filter((ab) => ab.startsOn <= iso && (!ab.endsOn || iso <= ab.endsOn))
         .map((ab) => ({ ab, kind: kindByCode.get(ab.kindCode) }))
         .filter((x): x is { ab: ScheduleAbsence; kind: ScheduleAbsenceKind } => x.kind?.bucket === "LEAVE")
-        .sort((a, b) => a.kind.sortOrder - b.kind.sortOrder || a.ab.engineer.name.localeCompare(b.ab.engineer.name));
+        // By name: every kind of leave is one list here (see the row below).
+        .sort((a, b) => a.ab.engineer.name.localeCompare(b.ab.engineer.name));
       out.set(iso, list);
     }
     return out;
@@ -504,7 +505,6 @@ export default function WeekTable({
             <tr className="leaverow">
               <th className="lab">
                 <span className="chip sm AL">Leave</span>
-                <small>annual, lieu and sick</small>
               </th>
               {days.map((d) => {
                 const iso = toIsoDate(d);
@@ -515,9 +515,15 @@ export default function WeekTable({
                     {list.length === 0 ? (
                       <span className="none">—</span>
                     ) : (
-                      list.map(({ ab, kind }) => (
-                        <div className="nm" key={ab.id} title={`${ab.engineer.name} · ${teamNameOf(ab.teamKey)} · ${kind.label}`}>
-                          <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
+                      // Who is away, not why: the kind of leave -- maternity,
+                      // sick -- is the person's own business on a view the
+                      // whole team reads, and it changes nothing about the gap.
+                      // The Month roster still shows it to those who need it.
+                      list.map(({ ab }) => (
+                        <div className="nm" key={ab.id} title={`${ab.engineer.name} · ${teamNameOf(ab.teamKey)}`}>
+                          <span className="av" style={{ background: teamColourOf(ab.teamKey) }}>
+                            {initialsOf(ab.engineer.name)}
+                          </span>
                           <span className="who">{ab.engineer.name}</span>
                         </div>
                       ))

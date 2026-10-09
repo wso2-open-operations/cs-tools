@@ -132,7 +132,8 @@ func main() {
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
-	validateAnnouncementDataSourceCompatibility(loadCustomerEntityDataSource(), announcementExcludedProjectKeys)
+	customerEntityDataSource := loadCustomerEntityDataSource()
+	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
 	announcementHandler := handler.NewAnnouncementHandler(customerEntityClient, announcementExcludedProjectKeys)
 	announcementRequestHandler := handler.NewAnnouncementRequestHandler(customerEntityClient, announcementExcludedProjectKeys)
 	announcementRegistryHandler := handler.NewAnnouncementRegistryHandler(customerEntityClient)
@@ -145,6 +146,11 @@ func main() {
 	serviceOfferingHandler := handler.NewServiceOfferingHandler(customerEntityClient)
 	groupHandler := handler.NewGroupHandler(customerEntityClient)
 	referenceHandler := handler.NewReferenceHandler(dir)
+	// entity-service registers POST /teams/search only on the PostgreSQL data
+	// source, so a ServiceNow deployment keeps serving the registry alone.
+	if customerEntityDataSource == customerEntityDataSourcePostgres {
+		referenceHandler = referenceHandler.WithEntityClient(customerEntityClient)
+	}
 	configurationItemHandler := handler.NewConfigurationItemHandler(customerEntityClient)
 	catalogHandler := handler.NewCatalogHandler(customerEntityClient)
 	timeCardHandler := handler.NewTimeCardHandler(customerEntityClient)
@@ -371,6 +377,12 @@ func main() {
 	route := func(pattern string, perm handler.Permission, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, accessGuard.Require(perm, h))
 	}
+	// routeAll registers a route that needs EVERY listed permission rather than
+	// any one role satisfying a single one -- see AccessGuard.RequireAll and
+	// PermCreateAnnouncement, the only user today.
+	routeAll := func(pattern string, h http.HandlerFunc, perms ...handler.Permission) {
+		mux.HandleFunc(pattern, accessGuard.RequireAll(h, perms...))
+	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -479,19 +491,28 @@ func main() {
 	route("POST /projects/search", handler.PermViewSharedEntity, projectHandler.SearchProjects)
 	route("POST /announcements/audience/search", handler.PermView, announcementHandler.SearchCustomerAnnouncementAudience)
 	route("GET /announcements/audience/excluded-project-keys", handler.PermView, announcementHandler.GetExcludedProjectKeys)
-	route("POST /announcement-requests", handler.PermWrite, announcementRequestHandler.CreateAnnouncementRequest)
+	routeAll("POST /announcement-requests", announcementRequestHandler.CreateAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("GET /announcement-requests/{id}", handler.PermView, announcementRequestHandler.GetAnnouncementRequest)
-	route("POST /announcement-requests/search", handler.PermView, announcementRequestHandler.SearchAnnouncementRequests)
+	// The request list (drafts and requests awaiting approval) is the creators'
+	// workspace, so unlike the single-request reads below it needs both
+	// PermWrite and PermCreateAnnouncement. GET /announcement-requests/{id} and
+	// its updates/deliveries stay PermView: a published announcement in the main
+	// list opens the same request dialog for its "delivered to" summary.
+	routeAll("POST /announcement-requests/search", announcementRequestHandler.SearchAnnouncementRequests, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("POST /announcements/registry/search", handler.PermView, announcementRegistryHandler.SearchAnnouncementRegistry)
-	route("PATCH /announcement-requests/{id}", handler.PermWrite, announcementRequestHandler.UpdateAnnouncementRequest)
-	route("POST /announcement-requests/{id}/dry-run", handler.PermWrite, announcementRequestHandler.RecordAnnouncementRequestDryRun)
-	route("POST /announcement-requests/{id}/submit", handler.PermWrite, announcementRequestHandler.SubmitAnnouncementRequest)
+	routeAll("PATCH /announcement-requests/{id}", announcementRequestHandler.UpdateAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
+	routeAll("POST /announcement-requests/{id}/dry-run", announcementRequestHandler.RecordAnnouncementRequestDryRun, handler.PermWrite, handler.PermCreateAnnouncement)
+	routeAll("POST /announcement-requests/{id}/submit", announcementRequestHandler.SubmitAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
+	// Approve stays PermWrite alone: it only records a decision taken over email,
+	// and may be recorded by someone other than the creator -- see
+	// PermCreateAnnouncement. Every other write on this workflow needs BOTH
+	// PermWrite and PermCreateAnnouncement (announcement_creator or admin).
 	route("POST /announcement-requests/{id}/approve", handler.PermWrite, announcementRequestHandler.ApproveAnnouncementRequest)
-	route("POST /announcement-requests/{id}/schedule", handler.PermWrite, announcementRequestHandler.ScheduleAnnouncementRequest)
-	route("POST /announcement-requests/{id}/publish", handler.PermWrite, announcementRequestHandler.PublishAnnouncementRequest)
-	route("POST /announcement-requests/{id}/updates", handler.PermWrite, announcementRequestHandler.CreateAnnouncementRequestUpdate)
+	routeAll("POST /announcement-requests/{id}/schedule", announcementRequestHandler.ScheduleAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
+	routeAll("POST /announcement-requests/{id}/publish", announcementRequestHandler.PublishAnnouncementRequest, handler.PermWrite, handler.PermCreateAnnouncement)
+	routeAll("POST /announcement-requests/{id}/updates", announcementRequestHandler.CreateAnnouncementRequestUpdate, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("GET /announcement-requests/{id}/updates", handler.PermView, announcementRequestHandler.ListAnnouncementRequestUpdates)
-	route("POST /announcement-requests/{id}/deliveries", handler.PermWrite, announcementRequestHandler.RecordAnnouncementRequestDeliveries)
+	routeAll("POST /announcement-requests/{id}/deliveries", announcementRequestHandler.RecordAnnouncementRequestDeliveries, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("GET /announcement-requests/{id}/deliveries", handler.PermView, announcementRequestHandler.ListAnnouncementRequestDeliveries)
 	route("POST /projects/{id}/contacts/search", handler.PermViewSharedEntity, projectHandler.SearchProjectContacts)
 	route("GET /projects/{id}/contacts/{contactId}", handler.PermView, projectHandler.GetProjectContact)
@@ -593,6 +614,7 @@ func main() {
 	route("POST /incidents/search", handler.PermViewOperations, incidentHandler.SearchIncidents)
 	route("POST /incidents/aggregate", handler.PermViewOperations, incidentHandler.AggregateIncidents)
 	route("POST /incidents", handler.PermWrite, incidentHandler.CreateIncident)
+	route("GET /incidents/create-defaults", handler.PermViewOperations, incidentHandler.GetIncidentCreateDefaults)
 	route("GET /incidents/{id}", handler.PermViewOperations, incidentHandler.GetIncident)
 	route("PATCH /incidents/{id}", handler.PermWrite, incidentHandler.PatchIncident)
 	route("POST /incidents/{id}/comments", handler.PermWrite, incidentHandler.CreateIncidentComment)
@@ -974,6 +996,9 @@ func loadAccessConfig() handler.AccessConfig {
 		Admin:             roles("AUTH_ADMIN_ROLES"),
 		TimecardApprover:  roles("AUTH_TIMECARD_APPROVER_ROLES"),
 		DashboardDesigner: roles("AUTH_DASHBOARD_DESIGNER_ROLES"),
+		// Warns when unset (via roles()) on purpose, unlike the two optional
+		// roles below: unset means only admin can create announcements.
+		AnnouncementCreator: roles("AUTH_ANNOUNCEMENT_CREATOR_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES or
 		// AUTH_WORKNOTE_CREATOR_ROLES is a normal, supported state (see this
 		// function's own doc comment for why each is), so both deliberately
@@ -1129,7 +1154,7 @@ func loadOnboardingStatusEnabled() bool {
 
 // onboardingStatusEnabled is the pure parse behind loadOnboardingStatusEnabled.
 func onboardingStatusEnabled(raw string) bool {
-	return strings.TrimSpace(raw) == "true"
+	return !strings.EqualFold(strings.TrimSpace(raw), "false")
 }
 
 // loadSftpgoConfig resolves the SFTPGo-backed attachment-storage feature

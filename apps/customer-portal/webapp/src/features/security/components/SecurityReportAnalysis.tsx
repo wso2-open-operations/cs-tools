@@ -221,7 +221,6 @@ const SecurityReportAnalysis = ({ fixedStatusIds, fixedClosedDateRange }: Securi
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchTerm("");
     setPage(1);
   };
 

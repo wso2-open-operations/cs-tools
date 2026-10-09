@@ -806,11 +806,6 @@ export function buildChangeRequestWorkflowStages(
   const currentState: ChangeRequestState =
     resolveChangeRequestCanonicalState(changeRequest.state) ??
     ChangeRequestStates.NEW;
-  const { hasCustomerReviewed } = changeRequest;
-  // A time WSO2 accepted counts as the customer's approval for what the stepper
-  // shows: the flag itself stays false (no staff action records an approval).
-  const hasCustomerApproved =
-    changeRequest.hasCustomerApproved || isProposalAccepted(changeRequest);
   const currentIndex = CHANGE_REQUEST_STATE_ORDER.indexOf(currentState);
   const isCanceled = currentState === ChangeRequestStates.CANCELED;
   const allowIndexProgress = !isCanceled && currentIndex >= 0;
@@ -842,13 +837,9 @@ export function buildChangeRequestWorkflowStages(
       {
         name: ChangeRequestStates.CUSTOMER_APPROVAL,
         description: describeCustomerApprovalStage(changeRequest),
-        completed:
-          allowIndexProgress && currentIndex > 3 && hasCustomerApproved,
+        completed: allowIndexProgress && currentIndex > 3,
         current: currentState === ChangeRequestStates.CUSTOMER_APPROVAL,
-        disabled:
-          (currentState === ChangeRequestStates.IMPLEMENT ||
-            currentState === ChangeRequestStates.REVIEW) &&
-          !hasCustomerApproved,
+        disabled: false,
       },
       {
         name: ChangeRequestStates.SCHEDULED,
@@ -875,13 +866,11 @@ export function buildChangeRequestWorkflowStages(
         name: ChangeRequestStates.CUSTOMER_REVIEW,
         description: "Customer validation",
         completed:
-          allowIndexProgress && currentIndex > 7 && hasCustomerReviewed,
+          allowIndexProgress &&
+          currentIndex > 7 &&
+          currentState !== ChangeRequestStates.ROLLBACK,
         current: currentState === ChangeRequestStates.CUSTOMER_REVIEW,
-        disabled:
-          (currentState === ChangeRequestStates.ROLLBACK ||
-            currentState === ChangeRequestStates.CLOSED ||
-            currentState === ChangeRequestStates.CANCELED) &&
-          !hasCustomerReviewed,
+        disabled: currentState === ChangeRequestStates.ROLLBACK,
       },
       {
         name: ChangeRequestStates.ROLLBACK,

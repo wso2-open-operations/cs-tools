@@ -157,6 +157,18 @@ export interface SnUserDetail extends SnUser {
   projectAccess?: UserProjectAccess[];
   /** Present for external contacts only; absent when the SCIM lookup itself failed. */
   externalAccount?: ExternalAccountStatus;
+  /**
+   * The CSM portal's own Asgardeo-backed role assignment (`viewer`,
+   * `escalator`, `cs_engineer`, `admin`, ...) — the same vocabulary
+   * `GET /users/me` reports for the caller, resolved for the user being
+   * VIEWED via SCIM. A separate field from this object's own `roles`
+   * (entity-service's role vocabulary, what the Customer Portal's access is
+   * modeled on) — the two describe different things for the same person.
+   * Present only for a wso2.com-email target, regardless of its recorded
+   * `userType`; absent when the target's email isn't wso2.com or when the
+   * SCIM lookup itself failed.
+   */
+  csmPlatformRoles?: string[];
 }
 
 export interface UserSearchFilters {
@@ -301,6 +313,8 @@ export interface NormalizedUserDetail extends NormalizedUser {
   projectAccess?: UserProjectAccess[];
   /** Present for external contacts only; absent when the SCIM lookup itself failed. */
   externalAccount?: ExternalAccountStatus;
+  /** See {@link SnUserDetail.csmPlatformRoles}. */
+  csmPlatformRoles?: string[];
 }
 
 /** Maps `GET /users/{id}`'s response into {@link NormalizedUserDetail}. */
@@ -311,6 +325,7 @@ export function normalizeUserDetail(u: SnUserDetail): NormalizedUserDetail {
     teams: u.teams,
     projectAccess: u.projectAccess,
     externalAccount: u.externalAccount,
+    csmPlatformRoles: u.csmPlatformRoles,
   };
 }
 

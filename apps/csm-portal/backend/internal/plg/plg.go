@@ -176,10 +176,14 @@ func register(
 	// outside, and a caller whose roles are wrong is refused before the identity
 	// resolver makes its entity-service call.
 	add := func(pattern string, perm csmhandler.Permission, fn http.HandlerFunc) {
-		// ForwardCorrelationID wraps identity rather than the other way round:
-		// the identity resolver makes an entity-service call of its own, and it
-		// should be correlated like every other hop. See its doc comment.
-		route(pattern, perm, plgmw.ForwardCorrelationID(identity(fn)).ServeHTTP)
+		// Both forwarders wrap identity rather than the other way round: the
+		// identity resolver makes an entity-service call of its own, and it
+		// should be correlated AND attributed like every other hop. See their
+		// doc comments.
+		route(pattern, perm,
+			plgmw.ForwardCorrelationID(
+				plgmw.ForwardUserIDToken(identity(fn)),
+			).ServeHTTP)
 	}
 
 	// Reference data.

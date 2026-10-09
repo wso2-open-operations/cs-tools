@@ -19,8 +19,10 @@ import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
   isBlankHtml,
+  looksLikeHtml,
   sanitizeDescriptionHtml,
   sanitizeRichTextHtml,
+  sanitizeStructuredHtml,
   stripLightModeInlineStyles,
 } from "./sanitizeHtml";
 
@@ -191,3 +193,62 @@ describe("escapeHtml", () => {
   });
 });
 
+
+describe("looksLikeHtml", () => {
+  it("detects real markup", () => {
+    expect(looksLikeHtml("<p>hi</p>")).toBe(true);
+    expect(looksLikeHtml("<table><tr><td>a</td></tr></table>")).toBe(true);
+    expect(looksLikeHtml("line one<br>line two")).toBe(true);
+  });
+
+  it("leaves plain text with angle brackets alone", () => {
+    expect(looksLikeHtml("Use <token> in the command")).toBe(false);
+    expect(looksLikeHtml("if a <b and c> d")).toBe(false);
+    expect(looksLikeHtml("1 < 2 and 3 > 2")).toBe(false);
+    expect(looksLikeHtml("kubectl get pod <pod-name> -n <namespace>")).toBe(false);
+  });
+});
+
+describe("sanitizeStructuredHtml", () => {
+  it("keeps table structure and text emphasis", () => {
+    const out = sanitizeStructuredHtml(
+      '<table><tbody><tr><td style="font-weight:bold;width:30%">k</td><td>v</td></tr></tbody></table>',
+    );
+    expect(out).toContain("<table>");
+    expect(out).toContain("font-weight:bold");
+    expect(out).toContain("width:30%");
+  });
+
+  it("drops style elements (and their CSS text), images and form controls", () => {
+    const out = sanitizeStructuredHtml(
+      '<style>body{display:none}</style><img src="https://t.example/p.png"><form action="https://x"><input name="a"><button>go</button></form><p>ok</p>',
+    );
+    expect(out).not.toMatch(/<style|<img|<form|<input|<button/i);
+    expect(out).not.toContain("display:none");
+    expect(out).toContain("<p>ok</p>");
+  });
+
+  it("filters inline CSS to the allowlist (no background, colour, url(), position)", () => {
+    const out = sanitizeStructuredHtml(
+      '<p style="background:url(https://t.example/x);color:red;position:fixed;font-style:italic;width:calc(100% - 1px)">x</p>',
+    );
+    expect(out).toContain("font-style:italic");
+    expect(out).not.toMatch(/background|color|position|url\(|calc/i);
+  });
+
+  it("removes the style attribute when nothing is allowed", () => {
+    expect(sanitizeStructuredHtml('<p style="color:red">x</p>')).toBe("<p>x</p>");
+  });
+
+  it("opens safe links in a new tab and strips javascript: links", () => {
+    const out = sanitizeStructuredHtml('<a href="https://a.example/x">a</a><a href="javascript:alert(1)">b</a>');
+    expect(out).toContain('href="https://a.example/x"');
+    expect(out).toContain('target="_blank"');
+    expect(out).toContain('rel="noopener noreferrer"');
+    expect(out).not.toContain("javascript:");
+  });
+
+  it("does not change what the shared policy does elsewhere (hook is scoped)", () => {
+    expect(sanitizeRichTextHtml('<p style="color:red">x</p>')).toContain("color:red");
+  });
+});

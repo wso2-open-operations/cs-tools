@@ -57,6 +57,83 @@ export function sanitizeDescriptionHtml(html: string): string {
   return DOMPurify.sanitize(html, DESCRIPTION_PURIFY_CONFIG);
 }
 
+// A closing tag of a common content element, or a bare <br>/<hr>/<img>. A lone
+// opening tag is deliberately not enough: plain text such as "Use <token> in
+// the command" or "if a <b and c> d" must stay plain text.
+const HTML_MARKUP =
+  /<\/(?:a|b|i|u|s|p|div|span|strong|em|h[1-6]|ul|ol|li|table|thead|tbody|tfoot|tr|th|td|caption|pre|code|blockquote|font|sub|sup)\s*>|<(?:br|hr|img)\b[^<>]*>/i;
+
+/**
+ * Whether a free-text field (a description that may be plain text or the
+ * rich-text editor's / a webhook's HTML) carries real HTML markup.
+ */
+export function looksLikeHtml(text: string): boolean {
+  return HTML_MARKUP.test(text);
+}
+
+/** Elements that load a resource, restyle the page, or take input: none belong in a read-only description. */
+const STRUCTURED_FORBID_TAGS = [
+  "style", "link", "img", "picture", "source", "video", "audio", "iframe", "object", "embed",
+  "svg", "math", "form", "input", "button", "textarea", "select",
+];
+
+/** Inline CSS a description may keep: text emphasis and cell layout only (no background, colour, url(), position). */
+const STRUCTURED_STYLE_PROPS = new Set([
+  "font-weight", "font-style", "text-align", "vertical-align", "text-decoration",
+]);
+const STRUCTURED_STYLE_VALUE = /^[a-z0-9%.\s-]{1,40}$/i;
+const STRUCTURED_WIDTH_VALUE = /^\d{1,3}(?:\.\d+)?(?:%|px)$/i;
+
+function filterStructuredStyle(style: string): string {
+  return style
+    .split(";")
+    .map((declaration) => {
+      const colon = declaration.indexOf(":");
+      if (colon < 0) return "";
+      const prop = declaration.slice(0, colon).trim().toLowerCase();
+      const value = declaration.slice(colon + 1).trim();
+      const keep =
+        (STRUCTURED_STYLE_PROPS.has(prop) && STRUCTURED_STYLE_VALUE.test(value)) ||
+        (prop === "width" && STRUCTURED_WIDTH_VALUE.test(value));
+      return keep ? `${prop}:${value}` : "";
+    })
+    .filter(Boolean)
+    .join(";");
+}
+
+// Own DOMPurify instance so the hook below applies to this policy only, not to
+// every other sanitize() call in the app.
+const structuredPurify = typeof window !== "undefined" ? DOMPurify(window) : DOMPurify;
+structuredPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.hasAttribute("style")) {
+    const kept = filterStructuredStyle(node.getAttribute("style") ?? "");
+    if (kept) node.setAttribute("style", kept);
+    else node.removeAttribute("style");
+  }
+  // Same treatment the comment bubble gives links: open in a new tab so the
+  // engineer is not navigated away from the record.
+  if (node.tagName === "A" && node.hasAttribute("href")) {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
+/**
+ * Sanitize read-only structured HTML (e.g. the label/value tables a monitoring
+ * webhook puts in an incident description). Keeps tables and text formatting,
+ * but drops `<style>`, every resource-loading or form element, and all inline
+ * CSS except {@link STRUCTURED_STYLE_PROPS} and a plain width, so a description
+ * can neither restyle the page nor trigger a network request when opened.
+ * Because backgrounds and colours are dropped, nothing here depends on the
+ * light/dark theme.
+ */
+export function sanitizeStructuredHtml(html: string): string {
+  return structuredPurify.sanitize(html, {
+    FORBID_TAGS: STRUCTURED_FORBID_TAGS,
+    FORBID_ATTR: ["srcset", "background", "poster", "action", "formaction"],
+  });
+}
+
 /**
  * Strips light/pastel inline background declarations from style attributes so
  * dark-mode containers don't end up with washed-out, low-contrast backgrounds

@@ -633,7 +633,7 @@ export default function App(): JSX.Element {
                   <Route
                     path="announcements/new"
                     element={
-                      <RequireWriteAccess to="/announcements">
+                      <RequireWriteAccess to="/announcements" capability="canCreateAnnouncement">
                         <CsmAnnouncementCreatePage />
                       </RequireWriteAccess>
                     }

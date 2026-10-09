@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
 
 // The change request's customer-scope fields -- Customer Project, Deployments
@@ -270,6 +271,11 @@ func customerContactRefs(ctx context.Context, q crQueryer, projectID string) ([]
 	return out, nil
 }
 
+// unusableAssignmentGroupMessage words the refusal of an assignment group for the
+// person on the form: why, and which field to change.
+const unusableAssignmentGroupMessage = "The selected assignment group cannot be used: it is not an assignment group in ServiceNow, " +
+	"and a change request is created in ServiceNow first, so it cannot be assigned to it. Choose another group in \"Assignment group\"."
+
 // resolveChangeRequestLinks validates sel and derives the deployment products
 // from the chosen deployments, per the rules above.
 // Returns a ValidationError (a 400) naming the offending field and id.
@@ -291,6 +297,20 @@ func resolveChangeRequestLinks(ctx context.Context, q crQueryer, sel domain.Chan
 		}
 		if !exists {
 			return res, linkValidationf("projectId does not refer to an existing project: %s", res.projectID)
+		}
+	}
+
+	if sel.AssignmentGroupID != nil && strings.TrimSpace(*sel.AssignmentGroupID) != "" {
+		group := strings.ToLower(strings.TrimSpace(*sel.AssignmentGroupID))
+		if !validate.IsUUID(group) {
+			return res, linkValidationf("groupId must be a valid UUID")
+		}
+		var exists bool
+		if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM "group" WHERE id = $1::uuid)`, group).Scan(&exists); err != nil {
+			return res, fmt.Errorf("resolve change request links: check assignment group: %w", err)
+		}
+		if !exists {
+			return res, linkValidationf("%s", unusableAssignmentGroupMessage)
 		}
 	}
 

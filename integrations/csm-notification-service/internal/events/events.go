@@ -61,7 +61,13 @@ const (
 	TypeCaseAssigned     Type = "case.assigned"
 	TypeCaseAcknowledged Type = "case.acknowledged"
 	TypeSeverityChanged  Type = "case.severity_changed"
-	TypeIncidentCreated  Type = "incident.created"
+	// TypeWorkaroundProvided belongs to internal/slaengine, not
+	// internal/dispatch's own email/Chat reactions — see
+	// WorkaroundProvidedPayload's own doc comment. Published by
+	// entity-service whenever a case's workaroundProvided field is set to
+	// true via PATCH.
+	TypeWorkaroundProvided Type = "case.workaround_provided"
+	TypeIncidentCreated    Type = "incident.created"
 	// TypeIncidentAcknowledged / TypeIncidentPriorityElevated belong to the
 	// incident call-escalation ladder (internal/paging), not to
 	// internal/dispatch. Published by entity-service's UpdateIncident. Both
@@ -125,13 +131,14 @@ const (
 // checked — used both for request validation and for generating docs/errors
 // that enumerate valid values.
 var KnownTypes = []Type{
-	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeIncidentCreated,
+	TypeCaseCreated, TypeCommentAdded, TypeStatusChanged, TypeCaseAssigned, TypeCaseAcknowledged, TypeSeverityChanged, TypeWorkaroundProvided, TypeIncidentCreated,
 	TypeIncidentAcknowledged, TypeIncidentPriorityElevated, TypeIncidentCommentAdded, TypeIncidentAssigned,
 	TypeSLATierReached,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
-	TypeOutageNotificationDue, TypeOutageCommunicationDue,
+	TypeOutageNotificationDue, TypeOutageCommunicationDue, TypeOutageStatusPageDue,
 	TypeProjectContactInvited, TypeProjectContactRegistered,
 	TypeSRCreated, TypeSRAcknowledged, TypeSRCommentAdded,
+	TypeCaseEscalated,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -339,6 +346,21 @@ type CaseAcknowledgedPayload struct {
 	// decode-compatibility pair exists.
 	ProjectOnboardingStatus string `json:"projectOnboardingStatus,omitempty"`
 	IsEvaluationAccount     bool   `json:"isEvaluationAccount,omitempty"`
+}
+
+// WorkaroundProvidedPayload is TypeWorkaroundProvided's payload — mirrors
+// entity-service's own WorkaroundProvidedPayload (events.go there is the
+// schema authority; keep this in sync by hand, same convention as every
+// other payload in this file). It's the one genuine "a workaround was
+// provided" signal anywhere in the events this engine consumes — before
+// this event existed, internal/slaengine had no way to complete a
+// workaround clock at all (see that package's own CLAUDE.md, "ApplyStateEffects",
+// for the documented, carried-forward gap this closes). No Recipients, no
+// Chat alert — this is a pure tracking signal for internal/slaengine's own
+// CompleteWorkaroundClock, consumed directly from dispatch.handleWorkaroundProvided
+// the same way CompleteResponseClock is from handleCommentAdded.
+type WorkaroundProvidedPayload struct {
+	CaseID string `json:"caseId"`
 }
 
 // SeverityChangedPayload is TypeSeverityChanged's payload. Unlike

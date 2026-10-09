@@ -41,19 +41,28 @@ func (h *PlgOrganizationHandler) GetOrganization(w http.ResponseWriter, r *http.
 	writeOK(w, org)
 }
 
+// patchOrganizationBody carries the caller alongside the owner change, the same
+// shape the pairing and playbook writes use. See createPlaybookBody for why
+// actorId lives on the wire type rather than the domain request.
+type patchOrganizationBody struct {
+	domain.PatchOrganizationRequest
+	ActorID string `json:"actorId"`
+}
+
 // PatchOrganization serves PATCH /plg/organizations/{organizationId}.
 //
 // One of the four simple writes: a single statement, no precondition. The
 // organisation's owner is the only field the portal writes at this level —
 // lifecycle stage belongs to the pairing, not the customer.
 func (h *PlgOrganizationHandler) PatchOrganization(w http.ResponseWriter, r *http.Request) {
-	var req domain.PatchOrganizationRequest
-	if !decodeRequest(w, r, &req) {
+	var body patchOrganizationBody
+	if !decodeRequest(w, r, &body) {
 		return
 	}
+	req := body.PatchOrganizationRequest
 	req.ID = r.PathValue("organizationId")
 
-	org, err := h.svc.Patch(r.Context(), req)
+	org, err := h.svc.Patch(r.Context(), req, body.ActorID)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

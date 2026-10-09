@@ -25,6 +25,10 @@ import {
   isProposalAccepted,
   isProposalPending,
 } from "@features/operations/utils/changeRequests";
+import {
+  formatPlannedLength,
+  getChangeRequestWindow,
+} from "@features/operations/utils/changeRequestSchedule";
 import { ChangeRequestStates } from "@features/operations/constants/operationsConstants";
 import { resolveChangeRequestCanonicalState } from "@features/operations/utils/changeRequestUi";
 
@@ -49,18 +53,29 @@ export default function ScheduledMaintenanceWindowCard({
 }: ScheduledMaintenanceWindowCardProps): JSX.Element {
   const durationText = useMemo(() => {
     const duration = (changeRequest as { duration?: string | number | null })
-      .duration;
-    if (duration == null) return "Not available";
-    if (typeof duration === "number") {
-      return formatChangeRequestDuration(duration);
+      ?.duration;
+    if (duration != null) {
+      if (typeof duration === "number") {
+        return formatChangeRequestDuration(duration);
+      }
+      const durationTextValue = String(duration).trim();
+      if (durationTextValue.length > 0) {
+        const mins = parseInt(durationTextValue, 10);
+        if (!Number.isNaN(mins) && /^\d+(\.\d+)?$/.test(durationTextValue)) {
+          return formatChangeRequestDuration(mins);
+        }
+        return durationTextValue;
+      }
     }
-    const durationTextValue = String(duration).trim();
-    if (durationTextValue.length === 0) return "Not available";
-    const mins = parseInt(durationTextValue, 10);
-    if (!Number.isNaN(mins) && /^\d+(\.\d+)?$/.test(durationTextValue)) {
-      return formatChangeRequestDuration(mins);
+
+    if (changeRequest) {
+      const window = getChangeRequestWindow(changeRequest);
+      if (window.durationMs != null) {
+        return formatPlannedLength(window.durationMs);
+      }
     }
-    return durationTextValue;
+
+    return "Not available";
   }, [changeRequest]);
 
   const proposal = getCustomerProposal(changeRequest);

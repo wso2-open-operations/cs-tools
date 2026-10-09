@@ -36,6 +36,10 @@ vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => authFetchMock,
 }));
 
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ isSuccess: true }),
+}));
+
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({ debug: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));

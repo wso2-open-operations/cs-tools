@@ -167,6 +167,57 @@ func TestGetProjectCaseStats_RowsWithoutSeverityStillCount(t *testing.T) {
 	}
 }
 
+// A row with no state of its own type (an extension row that is missing, or that
+// belongs to another type: the repository reports it with an empty State) is in
+// no list filtered by state, so a card that links to such a list must leave it
+// out of active/outstanding. It is still an item of the project, so totalCount
+// keeps it.
+func TestGetProjectCaseStats_RowsWithoutAStateAreNotOutstanding(t *testing.T) {
+	repo := &fakeCaseStatsRepo{stateSeverity: []repository.StateSeverityCount{
+		{State: "OPEN", Severity: "S1", Count: 3},
+		{State: "", Severity: "", Count: 24},
+		{State: "CLOSED", Severity: "S3", Count: 10},
+	}}
+
+	resp, err := NewProjectCaseStatsService(repo, caseStatsEnums(), alwaysUnrestrictedAccess{}).
+		GetProjectCaseStats(context.Background(), testUUID, domain.ProjectCaseStatsRequest{})
+	if err != nil {
+		t.Fatalf("GetProjectCaseStats: %v", err)
+	}
+
+	if resp.TotalCount != 37 {
+		t.Errorf("totalCount = %d, want 37 -- the stateless rows are still items of the project", resp.TotalCount)
+	}
+	if resp.ActiveCount != 3 || resp.OutstandingCount != 3 {
+		t.Errorf("activeCount/outstandingCount = %d/%d, want 3/3 -- a row with no state is neither outstanding nor closed",
+			resp.ActiveCount, resp.OutstandingCount)
+	}
+	if resp.ActionRequiredCount != 0 || resp.ResolvedCount.Total != 10 {
+		t.Errorf("actionRequired/resolved = %d/%d, want 0/10", resp.ActionRequiredCount, resp.ResolvedCount.Total)
+	}
+}
+
+// The outstanding-engagements breakdown follows the same rule as the state counts.
+func TestGetProjectCaseStats_EngagementRowsWithoutAStateAreNotOutstanding(t *testing.T) {
+	repo := &fakeCaseStatsRepo{engagementTypes: []repository.StateEngagementTypeCount{
+		{State: "OPEN", EngagementType: "MIGRATION", Count: 2},
+		{State: "", EngagementType: "MIGRATION", Count: 5},
+		{State: "CLOSED", EngagementType: "MIGRATION", Count: 3},
+	}}
+
+	resp, err := NewProjectCaseStatsService(repo, caseStatsEnums(), alwaysUnrestrictedAccess{}).
+		GetProjectCaseStats(context.Background(), testUUID, domain.ProjectCaseStatsRequest{})
+	if err != nil {
+		t.Fatalf("GetProjectCaseStats: %v", err)
+	}
+	if got := countFor(t, resp.OutstandingEngagementTypeCount, "MIGRATION"); got != 2 {
+		t.Errorf("outstandingEngagementTypeCount[MIGRATION] = %d, want 2", got)
+	}
+	if got := countFor(t, resp.EngagementTypeCount, "MIGRATION"); got != 10 {
+		t.Errorf("engagementTypeCount[MIGRATION] = %d, want 10 -- the all-states breakdown keeps every row", got)
+	}
+}
+
 // averageResponseTime is reported in hours to two decimals, from a mean the
 // ServiceNow implementation floors to whole seconds first.
 func TestGetProjectCaseStats_AverageResponseTimeInHours(t *testing.T) {

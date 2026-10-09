@@ -45,10 +45,12 @@ const (
 	// broader than approving one — see PermApproveTimeCard below, which is what's
 	// actually narrowed to the approver role.
 	PermTimeCardsAndUpdates
-	// PermEscalate is escalating or de-escalating a case. Held ONLY by the
-	// escalator role and admin — NOT the CS engineer, unlike most other
-	// permissions here. Escalation is a dedicated responsibility, not something
-	// being a CS engineer alone should grant.
+	// PermEscalate is escalating or de-escalating a case. Held by the CS
+	// engineer, the escalator role and admin: any internal engineer may
+	// escalate, as in ServiceNow (whose escalation API lets every internal
+	// user escalate). De-escalating additionally requires being one of the
+	// case's ABT team leads -- CaseHandler.CreateCaseEscalation checks that
+	// itself, since a route permission can't see the case.
 	PermEscalate
 	// PermApproveTimeCard is approving or rejecting a time card — a state
 	// transition on the same PATCH /time-cards/{id} route ordinary field edits
@@ -174,6 +176,29 @@ const (
 	// POST /organizations/{id}/products/{product}/playbook-runs, a different path
 	// from the four this guards.
 	PermManagePlaybooks
+	// PermCreateAnnouncement is creating and sending a customer announcement:
+	// every write on the announcement-request workflow (create, edit, dry run,
+	// submit, schedule, publish, add an update, record deliveries), listing the
+	// requests (the Requests tab: drafts and requests awaiting approval, which is
+	// the creators' workspace) and creating a
+	// work item of type announcement through POST /cases, which is how the
+	// dry-run case and the per-project cases of a publish are made. Held by the
+	// announcement_creator role and admin.
+	//
+	// It is checked IN ADDITION to PermWrite, never instead of it: this role
+	// narrows who among the people who can already write may send customers an
+	// announcement, it does not make anyone a writer. So a cs_engineer without
+	// announcement_creator keeps every other write and loses this one, and an
+	// announcement_creator who is not a cs_engineer or admin cannot send
+	// anything. The routes are therefore registered through AccessGuard.RequireAll
+	// with both permissions, and CaseHandler.CreateCase applies it only when the
+	// request body asks for type announcement (a route permission cannot see
+	// the body -- same shape as PermViewSecurityCenter on POST /cases/search).
+	//
+	// Approving a request ("Mark as approved") is deliberately NOT gated by it:
+	// that step only records a decision taken over email, outside this portal,
+	// and may be recorded by someone other than the creator.
+	PermCreateAnnouncement
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -212,6 +237,12 @@ type AccessConfig struct {
 	// to post a customer-visible reply, escalate, download an attachment,
 	// or any other write action; this role grants none of those.
 	WorknoteCreator []string
+	// AnnouncementCreator grants PermCreateAnnouncement (see that permission's
+	// own doc comment): creating and sending a customer announcement, on top
+	// of a caller's own PermWrite. Unlike most roles here an unset variable is
+	// not an "everyone" or a "nobody-can-use-the-portal" state: it means only
+	// admin can create announcements, so deploy it with the variable set.
+	AnnouncementCreator []string
 }
 
 // AccessGuard authorises a request from the roles on the caller's validated
@@ -262,7 +293,10 @@ type portalRole struct {
 // audience check than the webapp's CsEngineer-first portal-nav choice.
 // worknote_creator is narrower still: it implies nothing but
 // PermCreateWorkNote, and even that is capped to work_note-type comments
-// only -- see that permission's own doc comment.
+// only -- see that permission's own doc comment. announcement_creator is
+// narrower in a different way: it implies nothing, not even View, and
+// PermCreateAnnouncement is only ever checked alongside PermWrite, so it
+// removes an ability from cs_engineer rather than adding one.
 func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 	build := func(lists ...[]string) map[string]struct{} {
 		set := make(map[string]struct{})
@@ -285,13 +319,14 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			{"admin", build(cfg.Admin)},
 			{"sales_solutions", build(cfg.SalesSolutions)},
 			{"worknote_creator", build(cfg.WorknoteCreator)},
+			{"announcement_creator", build(cfg.AnnouncementCreator)},
 		},
 		allowed: map[Permission]map[string]struct{}{
 			PermView: build(cfg.Viewer, cfg.Escalator, cfg.AttachmentDownloader,
 				cfg.UsageMetricsViewer, cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover, cfg.DashboardDesigner),
 			PermViewOperations:      build(cfg.CsEngineer, cfg.Admin),
 			PermTimeCardsAndUpdates: build(cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover),
-			PermEscalate:            build(cfg.Escalator, cfg.Admin),
+			PermEscalate:            build(cfg.Escalator, cfg.CsEngineer, cfg.Admin),
 			PermDownloadAttachment:  build(cfg.AttachmentDownloader, cfg.CsEngineer, cfg.Admin),
 			PermWrite:               build(cfg.CsEngineer, cfg.Admin),
 			PermViewAllDashboards:   build(cfg.CsEngineer, cfg.Admin),
@@ -321,6 +356,10 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// narrowing that keeps a WorknoteCreator-only caller from
 			// posting anything but a work_note.
 			PermCreateWorkNote: build(cfg.WorknoteCreator, cfg.CsEngineer, cfg.Admin),
+			// announcement_creator and admin only -- cs_engineer deliberately
+			// does NOT hold it, which is the whole point of the role. Always
+			// checked together with PermWrite (see its doc comment).
+			PermCreateAnnouncement: build(cfg.AnnouncementCreator, cfg.Admin),
 		},
 	}
 }
@@ -360,6 +399,35 @@ func (g *AccessGuard) Require(perm Permission, next http.HandlerFunc) http.Handl
 			slog.WarnContext(r.Context(), "access denied: token carries no role granting this permission", "userID", user.UserID, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusForbidden, ErrMsgForbidden)
 			return
+		}
+		next(w, r)
+	}
+}
+
+// RequireAll is Require for a route that needs EVERY one of perms: the caller
+// must satisfy each, not just one of them. It exists for PermCreateAnnouncement,
+// which narrows PermWrite rather than replacing it. An empty perms list denies
+// everyone, so a registration that forgot to pass one cannot go live open.
+func (g *AccessGuard) RequireAll(next http.HandlerFunc, perms ...Permission) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := middleware.UserInfoFromContext(r.Context())
+		if user == nil {
+			writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+			return
+		}
+		if len(perms) == 0 {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+		for _, perm := range perms {
+			if perm == PermAuthenticated {
+				continue
+			}
+			if !g.Permits(perm, user.Roles) {
+				slog.WarnContext(r.Context(), "access denied: token carries no role granting this permission", "userID", user.UserID, "method", r.Method, "path", r.URL.Path)
+				writeError(w, http.StatusForbidden, ErrMsgForbidden)
+				return
+			}
 		}
 		next(w, r)
 	}

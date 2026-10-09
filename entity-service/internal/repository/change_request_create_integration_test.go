@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -172,4 +173,56 @@ func TestChangeRequestCreateIntegration_FromServiceNowPersistsAssignmentGroup(t 
 		t.Fatalf("CreateChangeRequestFromServiceNow id = %q, want %q", resp.ChangeRequest.ID, crCreateSNID)
 	}
 	assertChangeRequestAssignedTeam(t, scoped, repo, crCreateSNID, groupID)
+}
+
+// A group id that is not a row of "group" (a stale id from a form opened before the group
+// search listed real groups, or a direct API call) is refused before anything is written, in
+// words the person on the form can act on: why, and which field to change; no id, no
+// field name, no table.
+func TestChangeRequestCreateIntegration_AGroupThatIsNotAServiceNowGroupIsRefusedInWords(t *testing.T) {
+	scoped := changeRequestCreatePool(t)
+	repo := repository.NewChangeRequestRepository(scoped)
+	sys := repository.WithSystemIdentity(context.Background())
+
+	const notAGroupID = "dddddddd-0000-4000-8000-0000000cc001"
+
+	check := func(t *testing.T, err error) {
+		t.Helper()
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("err = %v (%T), want *apierror.ValidationError", err, err)
+		}
+		for _, want := range []string{"cannot be used", "not an assignment group in ServiceNow", `"Assignment group"`} {
+			if !strings.Contains(ve.Msg, want) {
+				t.Errorf("message %q does not contain %q", ve.Msg, want)
+			}
+		}
+		for _, bad := range []string{notAGroupID, "groupId", "assignment_group_id", "table", "SQLSTATE"} {
+			if strings.Contains(ve.Msg, bad) {
+				t.Errorf("message %q shows %q to the person on the form", ve.Msg, bad)
+			}
+		}
+	}
+
+	t.Run("the pre-flight the dual-write create runs before ServiceNow", func(t *testing.T) {
+		g := notAGroupID
+		_, err := repo.ValidateChangeRequestLinks(sys, domain.ChangeRequestLinkSelection{AssignmentGroupID: &g})
+		check(t, err)
+	})
+	t.Run("the plain PostgreSQL create", func(t *testing.T) {
+		g := notAGroupID
+		_, err := repo.CreateChangeRequest(sys, domain.CreateChangeRequestRequest{
+			Subject: crCreateSubject, Type: crCreateType(domain.ChangeRequestTypeNormal), GroupID: &g,
+		}, "cr-create-test@test.local")
+		check(t, err)
+	})
+	t.Run("nothing was written", func(t *testing.T) {
+		var n int
+		if err := scoped.QueryRow(sys, `SELECT COUNT(*) FROM work_item WHERE subject = $1`, crCreateSubject).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("%d work items were written for a refused create", n)
+		}
+	})
 }

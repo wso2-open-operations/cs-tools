@@ -118,13 +118,14 @@ func TestSearchUsers_TeamFilterAcceptsUUIDForm(t *testing.T) {
 	}
 }
 
-// A UUID-shaped teamIds entry that matches no configured team's group id is
-// still the same caller-facing "unknown team" error as an unknown teamKey.
-func TestSearchUsers_UnknownTeamUUIDIsRejectedWithoutCallingUpstream(t *testing.T) {
-	called := false
+// A UUID-shaped teamIds entry that matches no configured team's group id is a
+// `team` table id (a team the registry does not know), so it is forwarded as
+// teamIds rather than rejected.
+func TestSearchUsers_UnknownTeamUUIDIsForwardedAsTeamTableID(t *testing.T) {
+	var forwarded []byte
 	h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{
-		searchUsersFn: func(_ context.Context, _ []byte) ([]byte, error) {
-			called = true
+		searchUsersFn: func(_ context.Context, body []byte) ([]byte, error) {
+			forwarded = body
 			return []byte(`{}`), nil
 		},
 	}, testDirectory(t), false, nil)
@@ -132,10 +133,21 @@ func TestSearchUsers_UnknownTeamUUIDIsRejectedWithoutCallingUpstream(t *testing.
 	h.SearchUsers(w, withUser(httptest.NewRequest(http.MethodPost, "/users/search",
 		strings.NewReader(`{"filters":{"teamIds":["ffffffff-ffff-ffff-ffff-ffffffffffff"]}}`))))
 
-	assertStatus(t, w, http.StatusBadRequest)
-	assertErrorMessage(t, w, "teamIds contains unknown team: ffffffff-ffff-ffff-ffff-ffffffffffff")
-	if called {
-		t.Error("the entity service was called with an unresolvable team UUID")
+	assertStatus(t, w, http.StatusOK)
+	var got struct {
+		Filters struct {
+			TeamIDs    []string `json:"teamIds"`
+			GroupNames []string `json:"groupNames"`
+		} `json:"filters"`
+	}
+	if err := json.Unmarshal(forwarded, &got); err != nil {
+		t.Fatalf("forwarded body %s: %v", forwarded, err)
+	}
+	if len(got.Filters.TeamIDs) != 1 || got.Filters.TeamIDs[0] != "ffffffff-ffff-ffff-ffff-ffffffffffff" {
+		t.Errorf("teamIds = %v, want the UUID forwarded", got.Filters.TeamIDs)
+	}
+	if len(got.Filters.GroupNames) != 0 {
+		t.Errorf("groupNames = %v, want none", got.Filters.GroupNames)
 	}
 }
 

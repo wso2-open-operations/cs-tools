@@ -68,26 +68,28 @@ func TestWriteJSONWithCode_AddsErrorCodeBesideTheMessage(t *testing.T) {
 // lower-case snake_case string no client has to escape.
 func TestCodes_AreStableLowerSnakeCase(t *testing.T) {
 	want := map[string]string{
-		"CodeChangeRequestOnHold":              "change_request_on_hold",
-		"CodeChangeRequestScheduleChanged":     "change_request_schedule_changed",
-		"CodeChangeRequestApprovalNotPending":  "change_request_approval_not_pending",
-		"CodeChangeRequestNotProposable":       "change_request_not_proposable",
-		"CodeChangeRequestNotAsked":            "change_request_not_asked",
-		"CodeChangeRequestForbidden":           "change_request_forbidden",
-		"CodeChangeRequestProposalNotNow":      "change_request_proposal_not_now",
-		"CodeChangeRequestNoPlannedWindow":     "change_request_no_planned_window",
-		"CodeChangeRequestProposerNotRecorded": "change_request_proposer_not_recorded",
+		"CodeChangeRequestOnHold":               "change_request_on_hold",
+		"CodeChangeRequestScheduleChanged":      "change_request_schedule_changed",
+		"CodeChangeRequestApprovalNotPending":   "change_request_approval_not_pending",
+		"CodeChangeRequestNotProposable":        "change_request_not_proposable",
+		"CodeChangeRequestNotAsked":             "change_request_not_asked",
+		"CodeChangeRequestForbidden":            "change_request_forbidden",
+		"CodeChangeRequestProposalNotNow":       "change_request_proposal_not_now",
+		"CodeChangeRequestNoPlannedWindow":      "change_request_no_planned_window",
+		"CodeChangeRequestProposerNotRecorded":  "change_request_proposer_not_recorded",
+		"CodeIncidentAssignmentGroupNotAllowed": "incident_assignment_group_not_allowed",
 	}
 	got := map[string]string{
-		"CodeChangeRequestOnHold":              CodeChangeRequestOnHold,
-		"CodeChangeRequestScheduleChanged":     CodeChangeRequestScheduleChanged,
-		"CodeChangeRequestApprovalNotPending":  CodeChangeRequestApprovalNotPending,
-		"CodeChangeRequestNotProposable":       CodeChangeRequestNotProposable,
-		"CodeChangeRequestNotAsked":            CodeChangeRequestNotAsked,
-		"CodeChangeRequestForbidden":           CodeChangeRequestForbidden,
-		"CodeChangeRequestProposalNotNow":      CodeChangeRequestProposalNotNow,
-		"CodeChangeRequestNoPlannedWindow":     CodeChangeRequestNoPlannedWindow,
-		"CodeChangeRequestProposerNotRecorded": CodeChangeRequestProposerNotRecorded,
+		"CodeChangeRequestOnHold":               CodeChangeRequestOnHold,
+		"CodeChangeRequestScheduleChanged":      CodeChangeRequestScheduleChanged,
+		"CodeChangeRequestApprovalNotPending":   CodeChangeRequestApprovalNotPending,
+		"CodeChangeRequestNotProposable":        CodeChangeRequestNotProposable,
+		"CodeChangeRequestNotAsked":             CodeChangeRequestNotAsked,
+		"CodeChangeRequestForbidden":            CodeChangeRequestForbidden,
+		"CodeChangeRequestProposalNotNow":       CodeChangeRequestProposalNotNow,
+		"CodeChangeRequestNoPlannedWindow":      CodeChangeRequestNoPlannedWindow,
+		"CodeChangeRequestProposerNotRecorded":  CodeChangeRequestProposerNotRecorded,
+		"CodeIncidentAssignmentGroupNotAllowed": CodeIncidentAssignmentGroupNotAllowed,
 	}
 	snake := regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 	seen := map[string]string{}

@@ -69,9 +69,11 @@ var (
 // it is outstanding, exactly like the Scheduled / Implement states they already
 // count, and the stat card matches the list they see. Staff keep the grouping
 // the ServiceNow constants define: for them Authorize is active but not yet
-// outstanding.
+// outstanding -- except on the customer portal (scope.ViaCustomerPortal), whose
+// change request list shows Authorize to a staff user as well, so the card there
+// counts it too (digiops-cs#3390: a staff account saw 7 on the card, 16 in the list).
 func crOutstandingStatesFor(scope AccessScope) []string {
-	if scope.Unrestricted {
+	if scope.Unrestricted && !scope.ViaCustomerPortal {
 		return crOutstandingStates
 	}
 	out := make([]string, 0, len(crOutstandingStates)+1)
@@ -312,6 +314,12 @@ func (s *projectStatsService) GetProjectConversationStats(ctx context.Context, p
 			resp.ActiveCount += row.Count
 		}
 	}
+
+	resolved, err := s.repo.ResolvedConversationsPastThirtyDays(ctx, projectID, createdByEmail)
+	if err != nil {
+		return domain.ProjectConversationStatsResponse{}, err
+	}
+	resp.ResolvedPastThirtyDays = &resolved
 	return resp, nil
 }
 

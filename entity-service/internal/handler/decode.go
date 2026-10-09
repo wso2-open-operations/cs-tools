@@ -123,8 +123,10 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &ve):
 		// 400 – caller-supplied input is invalid; the message is safe to return.
+		// A refusal a client has to tell apart carries its machine-readable
+		// errorCode (apierror/codes.go); without one the body has no errorCode key.
 		log.Printf("Bad request: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ve.Msg)) // #nosec G706 -- path and message sanitized
-		apierror.WriteJSON(w, http.StatusBadRequest, ve.Msg)
+		apierror.WriteJSONWithCode(w, http.StatusBadRequest, ve.Msg, ve.Code)
 
 	case errors.As(err, &ue):
 		// 401 – caller is not authenticated.

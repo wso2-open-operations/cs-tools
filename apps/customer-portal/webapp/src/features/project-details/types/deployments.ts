@@ -136,6 +136,7 @@ export type DeploymentProductItem = AuditMetadata & {
   updates?: ProductUpdate[] | null;
   instanceCount?: number;
   instances?: DeploymentProductInstance[] | null;
+  category?: string | null;
 };
 
 // Response type for creating a deployment.
@@ -229,6 +230,9 @@ export type DeploymentSearchRequest = SearchRequestBase & {
 export enum ProductCategory {
   CLOUD = "cl",
   PDP = "pdp",
+  MS = "ms",
+  PC = "pc",
+  PS = "ps",
 }
 
 // Filter type for searching deployed products.

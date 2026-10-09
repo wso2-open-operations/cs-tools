@@ -58,8 +58,13 @@ describe("resolveOutstandingCrStateIds", () => {
     expect(resolveOutstandingCrStateIds(undefined)).toBeUndefined();
   });
 
-  it("excludes Rollback, Closed, and Canceled by label", () => {
+  it("excludes New, Assess, Closed, and Canceled by label, and keeps Rollback", () => {
+    // Mirrors entity-service's own customer-facing crOutstandingStatesFor:
+    // New/Assess haven't reached the customer yet, Rollback is WSO2
+    // engineering work in progress and IS outstanding.
     const states = [
+      { id: "-5", label: "New" },
+      { id: "-4", label: "Assess" },
       { id: "5", label: "Customer Approval" },
       { id: "-2", label: "Scheduled" },
       { id: "-1", label: "Implement" },
@@ -69,15 +74,17 @@ describe("resolveOutstandingCrStateIds", () => {
       { id: "3", label: "Closed" },
       { id: "4", label: "Canceled" },
     ];
-    expect(resolveOutstandingCrStateIds(states)).toEqual([5, -2, -1, 0, 1]);
+    expect(resolveOutstandingCrStateIds(states)).toEqual([5, -2, -1, 0, 1, 2]);
   });
 
-  it("returns all IDs when no excluded labels are present", () => {
+  it("includes Authorize as outstanding", () => {
+    // A customer sees Authorize only via a re-schedule of their own change
+    // request, so it still counts as outstanding for them.
     const states = [
-      { id: "-5", label: "New" },
-      { id: "-4", label: "Assess" },
+      { id: "-3", label: "Authorize" },
+      { id: "5", label: "Customer Approval" },
     ];
-    expect(resolveOutstandingCrStateIds(states)).toEqual([-5, -4]);
+    expect(resolveOutstandingCrStateIds(states)).toEqual([-3, 5]);
   });
 });
 
@@ -195,12 +202,14 @@ describe("buildChangeRequestSearchRequest", () => {
     expect(req.filters?.stateKeys).toEqual([]);
   });
 
-  it("resolves outstanding state IDs from metadata when outstandingOnly is true, Authorize among them", () => {
+  it("resolves outstanding state IDs from metadata when outstandingOnly is true, Authorize and Rollback among them", () => {
     const req = buildChangeRequestSearchRequest({}, "", true, false, false, allStates);
-    expect(req.filters?.stateKeys).toEqual([-5, -4, -3, 5, -2, -1, 0, 1]);
+    expect(req.filters?.stateKeys).toEqual([-3, 5, -2, -1, 0, 1, 2]);
     // A change request waiting in Authorize after the customer proposed a new time
-    // is still outstanding for them: not Closed, Canceled or Rollback.
+    // is still outstanding for them, and so is one WSO2 is rolling back: neither
+    // is Closed, Canceled, New or Assess.
     expect(req.filters?.stateKeys).toContain(-3);
+    expect(req.filters?.stateKeys).toContain(2);
   });
 
   it("resolves action-required state IDs from metadata", () => {

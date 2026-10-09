@@ -64,12 +64,13 @@ type scimUser struct {
 //	 "audienceType": "application", "audienceDisplay": "...", ...}
 //
 // "value" is the role resource's own opaque id (a UUID) -- NOT the role
-// name -- confirmed live: filtering by CSMAppRolePrefix against Value
-// silently matched nothing, since no role id happens to start with
-// "app-csm-". "display" is the actual role name and is what carries the
-// "app-csm-*" convention (with an environment-specific suffix that
-// AUTH_<ROLE>_ROLES's own configured values already account for -- this
-// package doesn't need to know or strip it).
+// name -- confirmed live: an earlier attempt at matching a role's
+// application by a hardcoded prefix against Value silently matched nothing,
+// since a role id is a UUID, never a readable name. "display" is the actual
+// role name, in whatever convention this deployment's Asgardeo org actually
+// uses -- this package makes no assumption about its shape and leaves it to
+// the caller (AccessGuard.RolesFor's own AUTH_<ROLE>_ROLES configuration) to
+// recognize.
 type scimRoleEntry struct {
 	Display string `json:"display"`
 }
@@ -189,19 +190,21 @@ type UserInfo struct {
 	PhoneNumber            *string
 	LastPasswordUpdateTime *string
 	// Roles is the user's full Asgardeo role assignment, spanning every
-	// application they hold a role in -- not just the CSM portal. A caller
-	// wanting only this portal's roles must filter for the app-specific
-	// prefix itself (see CSMAppRolePrefix).
+	// application they hold a role in -- not just the CSM portal, and
+	// deliberately left unfiltered: a caller wanting just this portal's roles
+	// (e.g. handler.UsersHandler.withPortalRoles, to run through
+	// AccessGuard.RolesFor for a user other than the caller) should hand the
+	// whole list to RolesFor rather than pre-filtering it by a guessed naming
+	// convention -- RolesFor already only matches what AUTH_<ROLE>_ROLES
+	// actually configures, so a role belonging to another application simply
+	// never matches anything. An earlier version of this package exported a
+	// CSMAppRolePrefix constant for exactly that pre-filtering, on a guessed
+	// naming convention -- removed after it was confirmed live not to match
+	// this deployment's real one, silently dropping every role and never
+	// resolving anyone's CSM Platform roles regardless of what they actually
+	// held in Asgardeo.
 	Roles []string
 }
-
-// CSMAppRolePrefix marks a SCIM role as belonging to the CSM portal
-// application, as opposed to some other Asgardeo-registered app the same
-// person may also hold roles in. UserInfo.Roles carries every app's roles
-// unfiltered; a caller that needs just this portal's roles (e.g. to run
-// through AccessGuard.RolesFor for a user other than the caller, where no
-// JWT "roles" claim is available) filters by this prefix first.
-const CSMAppRolePrefix = "app-csm-"
 
 // RoleMember is one user holding a role, as returned by GetRole.
 type RoleMember struct {

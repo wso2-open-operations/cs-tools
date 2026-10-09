@@ -19,6 +19,7 @@ package dto
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/aichatagent"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -275,6 +276,23 @@ func MapSearchConversations(r entity.SearchConversationsResponse) SearchConversa
 // cannot translate. Surfaced as a 400 rather than silently widening the search.
 var ErrUnsupportedConversationState = errors.New("unsupported conversation state filter")
 
+// ErrInvalidConversationDate reports an updated-date bound that is not RFC 3339.
+// Refused here so the caller gets a readable 400 instead of entity-service's
+// JSON decoding error.
+var ErrInvalidConversationDate = errors.New("invalid conversation date filter")
+
+// conversationDateBound validates one updated-date bound and returns it as the
+// optional pointer entity-service takes (nil when the bound was not sent).
+func conversationDateBound(v string) (*string, error) {
+	if v == "" {
+		return nil, nil
+	}
+	if _, err := time.Parse(time.RFC3339, v); err != nil {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidConversationDate, v)
+	}
+	return &v, nil
+}
+
 // ConversationSearchFilters holds the optional filter criteria for
 // POST /projects/{id}/conversations/search — shaped to match the frontend's
 // actual request body. StateKeys carries ServiceNow's numeric choice-list
@@ -286,6 +304,11 @@ type ConversationSearchFilters struct {
 	StateKeys   []int  `json:"stateKeys,omitempty"`
 	SearchQuery string `json:"searchQuery,omitempty"`
 	CreatedByMe bool   `json:"createdByMe,omitempty"`
+	// StartUpdatedDate / EndUpdatedDate bound the conversation's last update time
+	// (RFC 3339). The Support page's "Resolved via Chat (Last 30d)" list sends the
+	// last 30 days with the Resolved state.
+	StartUpdatedDate string `json:"startUpdatedDate,omitempty"`
+	EndUpdatedDate   string `json:"endUpdatedDate,omitempty"`
 }
 
 // ConversationSearchRequest is the portal's request body for
@@ -310,12 +333,22 @@ func BuildEntitySearchConversationsRequest(projectID string, req ConversationSea
 	if !ok {
 		return entity.SearchConversationsRequest{}, fmt.Errorf("%w: %d", ErrUnsupportedConversationState, unmapped)
 	}
+	startUpdated, err := conversationDateBound(req.Filters.StartUpdatedDate)
+	if err != nil {
+		return entity.SearchConversationsRequest{}, err
+	}
+	endUpdated, err := conversationDateBound(req.Filters.EndUpdatedDate)
+	if err != nil {
+		return entity.SearchConversationsRequest{}, err
+	}
 	return entity.SearchConversationsRequest{
 		Filters: entity.SearchConversationsFilters{
-			ProjectIDs:  []string{projectID},
-			States:      states,
-			SearchQuery: req.Filters.SearchQuery,
-			CreatedByMe: req.Filters.CreatedByMe,
+			ProjectIDs:       []string{projectID},
+			States:           states,
+			SearchQuery:      req.Filters.SearchQuery,
+			CreatedByMe:      req.Filters.CreatedByMe,
+			StartUpdatedDate: startUpdated,
+			EndUpdatedDate:   endUpdated,
 		},
 		SortBy:     req.SortBy,
 		Pagination: req.Pagination,

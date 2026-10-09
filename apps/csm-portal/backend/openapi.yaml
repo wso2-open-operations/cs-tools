@@ -14,7 +14,7 @@ info:
     | `view_operations` | the same reads under `/incidents`, `/change-requests`, `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` | cs-engineer, admin |
     | `time_cards_and_updates` | every `/time-cards` route and `GET /updates/product-update-levels`, `POST /updates/levels/search` | cs-engineer, time-card-approver, admin |
     | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state` (approve/reject) | time-card-approver, admin |
-    | `escalate` | `POST /cases/{id}/escalations` | escalator, admin |
+    | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
@@ -1860,12 +1860,16 @@ paths:
 
   /teams/search:
     post:
-      summary: Search the team registry.
+      summary: Search teams.
       description: >
-        A team's id is its registry key, which is stable across environments — unlike the
-        backing group's id. The registry is deployment configuration resolved once at
-        startup, including each team's family and the UUID form of its backing group id,
-        and served from memory: this endpoint makes no upstream call. The body is optional.
+        Lists the entity service's team table. A team that matches a row of the configured
+        registry by name is returned as that row: its id is the registry key, which is stable
+        across environments — unlike the backing group's id — together with its family and the
+        UUID form of its backing group ids. A team not in the registry is returned with its
+        team-table id and name only. A request with a family filter is answered from the
+        registry alone, since family is not stored on the team table. The body is optional.
+        Entity-service lists the team table on the PostgreSQL data source only; on ServiceNow
+        deployments this endpoint serves the registry alone.
       operationId: postTeamsSearch
       requestBody:
         description: Team search payload
@@ -1899,8 +1903,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: The entity service does not serve team search.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: The entity service returned a response that could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The entity service is unavailable.
           content:
             application/json:
               schema:
@@ -4949,6 +4971,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: >
+            On the Postgres data source, the call request is not in a state this
+            change is allowed from. Concluding without notes ("Mark as completed")
+            needs a scheduled or notes-pending call; the message names its current
+            state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
           content:
@@ -6065,7 +6097,13 @@ paths:
 
   /groups/search:
     post:
-      summary: Search assignment groups (ServiceNow data source only).
+      summary: Search assignment groups.
+      description: >-
+        Forwarded to the entity service unchanged. With
+        filters.supportGroupsOnly true the result is limited to the groups an
+        incident can be created in with an explicit assignmentGroupId: active
+        groups that are the support group of at least one service (their ids
+        are what assignmentGroupId takes).
       operationId: searchGroups
       security:
         - bearerAuth: []
@@ -6075,6 +6113,22 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                filters:
+                  type: object
+                  properties:
+                    searchQuery:
+                      type: string
+                    supportGroupsOnly:
+                      type: boolean
+                      default: false
+                pagination:
+                  type: object
+                  properties:
+                    limit:
+                      type: integer
+                    offset:
+                      type: integer
       responses:
         "200":
           description: Matching groups.
@@ -6121,8 +6175,9 @@ paths:
         approval stage: the group's name, description, group email and manager,
         and its active internal members in name order. `id` is the `assignmentGroup.id` of
         GET /change-requests/{id}/approvals -- a group id, NOT a team id
-        (POST /groups/search lists teams). The members are the people the
-        approval stage was provisioned from. Customer Approval / Customer Review
+        (POST /groups/search lists the same group table). The members are the
+        group's members, including people the approval stage was not
+        provisioned from. Customer Approval / Customer Review
         stages have no group (`assignmentGroup` is null); their approvers are the
         project's registered contacts, which the change request already carries as
         `customerContacts`. Internal staff only: a caller entity-service
@@ -7254,7 +7309,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreateIncidentResponse'
         "400":
-          description: BadRequest
+          description: >-
+            BadRequest. An assignmentGroupId that is not the active support group of any
+            service is refused with entity-service's message and `errorCode:
+            incident_assignment_group_not_allowed`; every other 400 carries the generic
+            message and no code.
           content:
             application/json:
               schema:
@@ -7389,6 +7448,61 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /incidents/create-defaults:
+    get:
+      summary: The team an incident falls back to.
+      description: >-
+        The entity service's default service and its support group: the group
+        POST /incidents assigns when no assignmentGroupId is sent and the
+        incident's service has no support group. Passed through untouched.
+        defaultServiceId is null when no default service is configured;
+        defaultGroup is null when there is none, or the default service is
+        missing or has no support group (such incidents are created unassigned).
+      operationId: getIncidentCreateDefaults
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [defaultServiceId, defaultGroup]
+                properties:
+                  defaultServiceId:
+                    type: string
+                    format: uuid
+                    nullable: true
+                  defaultGroup:
+                    type: object
+                    nullable: true
+                    required: [id, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error
           content:
             application/json:
               schema:
@@ -13518,8 +13632,9 @@ components:
         The body of an error response. `message` is the reason, worded for people: it
         can change, so a client must never branch on it. `errorCode` is the stable
         machine-readable name entity-service gave a refusal, passed through unchanged
-        on the 400, 403, 409 and 422 of PATCH /change-requests/{id} and on the 403 and
-        409 of POST /change-requests/{id}/approvals/decision; it is omitted when the
+        on the 400, 403, 409 and 422 of PATCH /change-requests/{id}, on the 403 and
+        409 of POST /change-requests/{id}/approvals/decision, and on the 400 of POST
+        /incidents for a refused assignment group; it is omitted when the
         refusal has none, which is the body this API has always returned, so a client
         treats its absence, and a value it does not know, as "no more specific than the
         status". The status and the message are the same with or without it.
@@ -13539,7 +13654,10 @@ components:
             is recorded as having proposed), `change_request_not_asked`
             (403: not asked on the customer group's stage) and `change_request_forbidden`
             (403: the change request's creator, or a user who may not decide an internal
-            stage). The list grows, so this is deliberately not a closed enum.
+            stage); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
+            the assignmentGroupId sent is not the active support group of any service).
+            Every other create-incident failure keeps the generic message and carries no
+            code. The list grows, so this is deliberately not a closed enum.
           example: change_request_approval_not_pending
 
     HealthDependenciesResponse:
@@ -16251,6 +16369,18 @@ components:
               description: >
                 SCIM "external" org existence/lock status. Present for external contacts only
                 (userType other than internal); absent when the SCIM lookup itself failed.
+            csmPlatformRoles:
+              type: array
+              items:
+                type: string
+              description: >
+                The CSM portal's own Asgardeo-backed role assignment (viewer, escalator,
+                cs_engineer, admin, ...), the same vocabulary GET /users/me reports for the
+                caller -- a separate field from this object's own `roles`, which is
+                entity-service's role vocabulary (admin, commenter, customer, ...) and is
+                left untouched. Present only for a wso2.com-email target, regardless of its
+                recorded userType; absent when the target's email is not wso2.com, when no
+                AccessGuard is configured, or when the SCIM lookup itself failed.
 
     ExternalAccountStatus:
       type: object
@@ -18044,8 +18174,14 @@ components:
             $ref: '#/components/schemas/CaseEscalationNotifiedUser'
           description: >-
             The notified-users list of the case's most recent escalation record (empty when the
-            case has never been escalated). Only someone on this list is authorized to
-            de-escalate the case's current level.
+            case has never been escalated).
+        teamLeads:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseEscalationNotifiedUser'
+          description: >-
+            The leads of the case's account's CRE (ABT) team. Only these users may de-escalate
+            the case; anyone with the escalate permission may escalate it.
 
     CaseEscalationCreatePayload:
       type: object
@@ -19531,8 +19667,10 @@ components:
         notes:
           type: string
           description: >
-            Free-form notes describing the outcome of the call. Set when
-            concluding the request.
+            Free-form notes describing the outcome of the call. Optional when
+            concluding the request: a conclude with no notes ("Mark as
+            completed") is for WSO2 staff and, on the Postgres data source,
+            leaves the notes already recorded untouched.
         plan:
           type: string
           description: Optional plan or next steps agreed during the call.
@@ -20645,8 +20783,8 @@ components:
           type: string
           format: uuid
           description: >-
-            The incident's assignment group is set from this service's support
-            group; there is no assignmentGroupId on create.
+            When no assignmentGroupId is sent, the incident's assignment group
+            is this service's support group (see assignmentGroupId).
         serviceOfferingId:
           type: string
           format: uuid
@@ -20665,6 +20803,19 @@ components:
         urgency:
           type: string
           enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional. This backend checks only that it is a UUID (400
+            otherwise) and forwards the body unchanged; the entity service
+            decides the group. Sent: used when it is an active group that is
+            the support group of at least one service (POST /groups/search
+            with filters.supportGroupsOnly lists them), otherwise 400. Not
+            sent: the service's support group; when the service has none, the
+            default team (GET /incidents/create-defaults); with neither, the
+            incident is created unassigned. A work note records the choice.
         assignedEngineerId:
           type: string
           format: uuid
@@ -22449,6 +22600,16 @@ components:
               updatedOn:
                 type: string
                 format: date-time
+              authoredBy:
+                allOf:
+                  - $ref: '#/components/schemas/PlgUserRef'
+                nullable: true
+                description: Who created this playbook. Null if written before attribution existed.
+              updatedBy:
+                allOf:
+                  - $ref: '#/components/schemas/PlgUserRef'
+                nullable: true
+                description: Who last edited it, which need not be the author.
     PlgDashboard:
       type: object
       properties:
@@ -22465,6 +22626,11 @@ components:
               type: integer
             trialsEndingSoon:
               type: integer
+            unresolvedIngestFailures:
+              type: integer
+              description: >-
+                Rows in plg_ingest_failure with no resolved_on. Registrations the
+                ingest refused, which nobody has cleared. Not period-scoped.
         registrationsByProduct:
           type: array
           items:
@@ -22763,6 +22929,16 @@ components:
         updatedOn:
           type: string
           format: date-time
+        authoredBy:
+          allOf:
+            - $ref: '#/components/schemas/PlgUserRef'
+          nullable: true
+          description: Who created this playbook. Null if written before attribution existed.
+        updatedBy:
+          allOf:
+            - $ref: '#/components/schemas/PlgUserRef'
+          nullable: true
+          description: Who last edited it, which need not be the author.
     PlgSearchOrganizationsRequest:
       type: object
       properties:

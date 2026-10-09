@@ -120,6 +120,58 @@ function formatDateTime(value?: string | null): string {
   );
 }
 
+/**
+ * The time cell of a call request in a dashboard list. A call that an engineer has
+ * booked shows the time it is scheduled for. One still waiting for an engineer has no
+ * scheduled time yet, so it shows the first time the customer asked for instead,
+ * marked "Preferred" (with "+N" when they offered more, all listed on hover) rather
+ * than a bare dash that tells the engineer nothing about when the customer wants the call.
+ */
+function callRequestTimeCell(cr: BeCallRequestView): JSX.Element {
+  if (cr.scheduleTime) {
+    return (
+      <Typography key="scheduled" variant="caption" color="text.secondary" noWrap>
+        {formatDateTime(cr.scheduleTime)}
+      </Typography>
+    );
+  }
+  const preferred = (cr.preferredTimes ?? []).filter(
+    (time) => formatBackendTimestampForDisplay(time, { year: "numeric" }) !== null,
+  );
+  if (preferred.length === 0) {
+    return (
+      <Typography key="scheduled" variant="caption" color="text.secondary" noWrap>
+        —
+      </Typography>
+    );
+  }
+  const extra = preferred.length - 1;
+  return (
+    <Typography
+      key="scheduled"
+      variant="caption"
+      color="text.secondary"
+      noWrap
+      title={`Preferred by the customer: ${preferred
+        .map(
+          (time) =>
+            formatBackendTimestampForDisplay(time, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              timeZoneName: "short",
+            }) ?? time,
+        )
+        .join("; ")}`}
+    >
+      Preferred: {formatDateTime(preferred[0])}
+      {extra > 0 ? ` (+${extra})` : ""}
+    </Typography>
+  );
+}
+
 export interface WidgetListRendererProps {
   items: WidgetItem[];
   isLoading: boolean;
@@ -824,7 +876,7 @@ function CallRequestWidgetList({ items, isLoading }: WidgetListRendererProps): J
           { label: "Number", width: "minmax(90px, 0.7fr)" },
           { label: "Reason", width: "minmax(160px, 2fr)" },
           { label: "State", width: "minmax(100px, 1fr)" },
-          { label: "Scheduled", width: "minmax(90px, 1fr)" },
+          { label: "Scheduled / preferred", width: "minmax(90px, 1.5fr)" },
         ]}
         rows={callRequests.map((cr, i) => {
           const href = cr.case?.id ? `/cases/${cr.case.id}` : undefined;
@@ -847,9 +899,7 @@ function CallRequestWidgetList({ items, isLoading }: WidgetListRendererProps): J
                   —
                 </Typography>
               ),
-              <Typography key="scheduled" variant="caption" color="text.secondary" noWrap>
-                {formatDateTime(cr.scheduleTime)}
-              </Typography>,
+              callRequestTimeCell(cr),
             ],
           };
         })}

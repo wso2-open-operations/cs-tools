@@ -42,7 +42,7 @@ func (f *fakePairingRepo) Acknowledge(context.Context, domain.AcknowledgeRequest
 func (f *fakePairingRepo) AttachPlaybook(context.Context, domain.AttachPlaybookRequest, string) error {
 	panic("not reached")
 }
-func (f *fakePairingRepo) DetachRun(context.Context, string) (string, string, error) {
+func (f *fakePairingRepo) DetachRun(context.Context, string, string) (string, string, error) {
 	panic("not reached")
 }
 func (f *fakePairingRepo) PatchRunTask(context.Context, domain.PatchRunTaskRequest, string) (string, string, error) {

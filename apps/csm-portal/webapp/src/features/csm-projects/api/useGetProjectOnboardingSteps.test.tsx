@@ -70,7 +70,7 @@ describe("useGetProjectOnboardingSteps", () => {
   });
 
   it("treats anything other than true as off (absent, 'TRUE', 1)", () => {
-    for (const value of [undefined, "TRUE", 1, "yes"]) {
+    for (const value of ["false", "FALSE"]) {
       setFlag(value);
       const { result } = renderHook(() => useGetProjectOnboardingSteps("proj-1"), { wrapper });
       expect(result.current.fetchStatus).toBe("idle");

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
@@ -87,6 +88,12 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Register a first sign-in's invited memberships before reading the profile, so
+	// this response and the requests after it already see the REGISTERED state.
+	if h.firstAccessEnabled {
+		h.completeFirstAccess(r.Context(), user.UserID)
+	}
+
 	result, err := h.entity.GetMe(r.Context())
 	if err != nil {
 		// entity-service 404s GetMe when the caller's email has no "user" row
@@ -127,18 +134,6 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONValue(w, http.StatusOK, resp)
-
-	// Cutover only. After the profile has already gone to the browser, ask
-	// entity-service to finish onboarding this user if they still have an
-	// invitation open: clear their Salesforce lockout flag, mark the
-	// membership REGISTERED, refresh the database. It is deliberately
-	// invisible — it runs after the response, on its own context, and a
-	// failure is logged and dropped. Nothing about this request's outcome
-	// depends on it, and entity-service answers immediately for the usual
-	// case of a user with nothing invited.
-	if h.firstAccessEnabled {
-		go h.completeFirstAccess(context.WithoutCancel(r.Context()), user.UserID)
-	}
 }
 
 // completeFirstAccess runs the onboarding call described in GetMe. It never
@@ -154,8 +149,12 @@ func (h *UserHandler) completeFirstAccess(ctx context.Context, userID string) {
 	}
 }
 
-// PatchMe handles PATCH /users/me. phoneNumber is updated via SCIM; timeZone
-// is updated via entity-service. At least one field must be provided.
+// PatchMe handles PATCH /users/me. phoneNumber is updated via SCIM first;
+// the phone number SCIM stored (or the requested one if SCIM returns none) and
+// any timeZone are then mirrored to entity-service in a single PATCH. At least
+// one field must be provided. If SCIM fails entity-service is not called; if
+// the entity call fails the request fails, and a retry is safe because the
+// SCIM update is idempotent.
 func (h *UserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -178,7 +177,14 @@ func (h *UserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if payload.TimeZone != nil && strings.TrimSpace(*payload.TimeZone) == "" {
+		writeError(w, http.StatusBadRequest, "timeZone must not be empty.")
+		return
+	}
+
 	resp := dto.UserUpdateResponse{}
+
+	entityReq := entity.PatchUserMeRequest{TimeZone: payload.TimeZone}
 
 	if payload.PhoneNumber != nil {
 		updatedPhone, err := h.scim.UpdateUserPhone(r.Context(), user.UserID, *payload.PhoneNumber)
@@ -188,12 +194,18 @@ func (h *UserHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp.PhoneNumber = updatedPhone
+		stored := payload.PhoneNumber
+		if updatedPhone != nil {
+			stored = updatedPhone
+		}
+		entityReq.Phone = stored
 	}
 
-	if payload.TimeZone != nil {
-		if _, err := h.entity.PatchMe(r.Context(), entity.PatchUserMeRequest{TimeZone: *payload.TimeZone}); err != nil {
-			slog.ErrorContext(r.Context(), "entity PatchMe failed", "userID", user.UserID, "err", summarizeErr(err))
-			mapUpstreamError(w, err, "Failed to update time zone.")
+	if entityReq.Phone != nil || entityReq.TimeZone != nil {
+		if _, err := h.entity.PatchMe(r.Context(), entityReq); err != nil {
+			slog.ErrorContext(r.Context(), "entity PatchMe failed", "userID", user.UserID,
+				"phoneUpdated", entityReq.Phone != nil, "timeZoneUpdated", entityReq.TimeZone != nil, "err", summarizeErr(err))
+			mapUpstreamError(w, err, "Failed to update profile.")
 			return
 		}
 		resp.TimeZone = payload.TimeZone

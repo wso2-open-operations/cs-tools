@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  ALL_CALL_REQUEST_STATES,
   CALL_REQUEST_AGENT_ACTIONS,
   caseAcceptsCallRequests,
   callRequestCaseStateBlockReason,
@@ -67,15 +68,30 @@ describe("resolveCallRequestStateKey", () => {
     }
   });
 
-  it("scheduled state offers reschedule + cancel; pending_on_wso2 offers schedule + reject", () => {
+  it("scheduled state offers reschedule + complete + cancel; pending_on_wso2 offers schedule + reject", () => {
     expect(CALL_REQUEST_AGENT_ACTIONS[resolveCallRequestStateKey({ id: 3 })!]).toEqual([
       "reschedule",
+      "complete",
       "cancel",
     ]);
     expect(CALL_REQUEST_AGENT_ACTIONS[resolveCallRequestStateKey({ id: 2 })!]).toEqual([
       "schedule",
       "reject",
     ]);
+  });
+
+  it("\"Mark as completed\" is offered exactly where the backend accepts a notes-less conclude", () => {
+    // entity-service only applies a conclude with no notes to a scheduled or
+    // notes-pending call and answers 409 for any other state, so offering it
+    // anywhere else would be a button that always fails.
+    const withComplete = ALL_CALL_REQUEST_STATES.filter((k) =>
+      CALL_REQUEST_AGENT_ACTIONS[k].includes("complete"),
+    );
+    expect(withComplete.sort()).toEqual(["notes_pending", "scheduled"]);
+  });
+
+  it("notes_pending keeps 'send call notes' and adds 'complete'", () => {
+    expect(CALL_REQUEST_AGENT_ACTIONS.notes_pending).toEqual(["sendNotes", "complete"]);
   });
 });
 

@@ -75,9 +75,12 @@ type SearchUsersResponse struct {
 	Users []UserSummary `json:"users"`
 }
 
-// PatchUserMeRequest is the request body for PATCH /users/me.
+// PatchUserMeRequest is the request body for PATCH /users/me. At least one
+// field must be set. A nil field is omitted from the body and left untouched
+// by entity-service; a pointer to "" is sent as "" (for Phone, that clears it).
 type PatchUserMeRequest struct {
-	TimeZone string `json:"timeZone"`
+	TimeZone *string `json:"timeZone,omitempty"`
+	Phone    *string `json:"phone,omitempty"`
 }
 
 // PatchUserMeUpdated contains the key fields returned after a successful user update.
@@ -365,6 +368,10 @@ type ProjectConversationStatsResponse struct {
 	TotalCount  int              `json:"totalCount"`
 	ActiveCount int              `json:"activeCount"`
 	StateCount  []ChoiceListItem `json:"stateCount"`
+	// ResolvedPastThirtyDays is the number of conversations Resolved and last updated
+	// in the past 30 days. A pointer: absent from an entity-service that predates it and
+	// from the ServiceNow data source, which is not the same as zero.
+	ResolvedPastThirtyDays *int `json:"resolvedPastThirtyDays,omitempty"`
 }
 
 // ProjectDeploymentStatsResponse is entity-service's response for
@@ -1820,6 +1827,10 @@ type SearchConversationsFilters struct {
 	States      []string `json:"states,omitempty"`
 	SearchQuery string   `json:"searchQuery,omitempty"`
 	CreatedByMe bool     `json:"createdByMe,omitempty"`
+	// StartUpdatedDate / EndUpdatedDate bound the conversation's last update time
+	// (RFC 3339, inclusive). Postgres data source only; see entity-service.
+	StartUpdatedDate *string `json:"startUpdatedDate,omitempty"`
+	EndUpdatedDate   *string `json:"endUpdatedDate,omitempty"`
 }
 
 // ConversationSort specifies the sort field and direction for conversation search results.

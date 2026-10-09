@@ -185,7 +185,7 @@ func (r *projectCaseStatsRepo) StateSeverityCounts(ctx context.Context, f Projec
 	var out []StateSeverityCount
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT `+caseLikeStateColumn+` AS state,
+			SELECT `+caseLikeOwnStateColumn+` AS state,
 			       COALESCE(c.severity::TEXT, '') AS severity,
 			       COUNT(*)`+caseStatsFrom+where+`
 			 GROUP BY 1, 2`, args...)
@@ -196,9 +196,11 @@ func (r *projectCaseStatsRepo) StateSeverityCounts(ctx context.Context, f Projec
 
 		for rows.Next() {
 			var sc StateSeverityCount
-			// state is NULL when a case-like row has no extension row at all;
-			// such a row still counts toward totalCount, so it is kept with an
-			// empty State rather than dropped.
+			// state is NULL when the row has no extension row of its own type
+			// (caseLikeOwnStateColumn); such a row still counts toward
+			// totalCount, so it is kept with an empty State rather than
+			// dropped, and the service leaves it out of every state-based
+			// count.
 			var state *string
 			if err := rows.Scan(&state, &sc.Severity, &sc.Count); err != nil {
 				return fmt.Errorf("project case stats: scan state/severity count: %w", err)
@@ -219,7 +221,7 @@ func (r *projectCaseStatsRepo) StateEngagementTypeCounts(ctx context.Context, f 
 	var out []StateEngagementTypeCount
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT `+caseLikeStateColumn+` AS state,
+			SELECT `+caseLikeOwnStateColumn+` AS state,
 			       eng.type::TEXT,
 			       COUNT(*)`+caseStatsFrom+where+`
 			   AND eng.type IS NOT NULL
@@ -263,8 +265,8 @@ func (r *projectCaseStatsRepo) ResolvedBuckets(ctx context.Context, f ProjectCas
 			SELECT COUNT(*) FILTER (WHERE closed_on >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),
 			       COUNT(*) FILTER (WHERE closed_on >= now() - INTERVAL '30 days')
 			  FROM (
-			        SELECT `+caseLikeStateColumn+` AS state,
-			               `+caseLikeClosedOnColumn+` AS closed_on`+caseStatsFrom+where+`
+			        SELECT `+caseLikeOwnStateColumn+` AS state,
+			               `+caseLikeOwnClosedOnColumn+` AS closed_on`+caseStatsFrom+where+`
 			       ) resolved
 			 WHERE state = ANY(`+statePlaceholder+`) AND closed_on IS NOT NULL`, args...).
 			Scan(&currentMonth, &pastThirtyDays)

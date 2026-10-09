@@ -81,6 +81,10 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
 // mutation-triggering behavior (approve/edit/submit/publish/post-update),
 // which requires canWrite — the real usePortalAccess would derive false
 // here since there's no CurrentUserProvider in this test's render tree.
+// canCreateAnnouncement is mutable so the dedicated gate tests below can turn it
+// off; canWrite stays true throughout (a CS engineer without the announcement
+// creator role is exactly the caller those tests are about).
+let mockCanCreateAnnouncement = true;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
@@ -89,6 +93,7 @@ vi.mock("@context/current-user/usePortalAccess", () => ({
     canUseOperations: true,
     canUseTimeCardsAndUpdates: true,
     canWrite: true,
+    canCreateAnnouncement: mockCanCreateAnnouncement,
   }),
 }));
 // PublishConfirmationDialog's useResolvedAudiencePreview needs both of
@@ -163,6 +168,7 @@ function render(ui: ReactElement): ReturnType<typeof rtlRender> {
 }
 
 beforeEach(() => {
+  mockCanCreateAnnouncement = true;
   mockedGet.mockReset();
   mockedUpdate.mockReset();
   mockedRecordDryRun.mockReset();
@@ -1015,5 +1021,102 @@ describe("AnnouncementRequestDialog — published", () => {
 
     expect(screen.queryByRole("button", { name: /^post update$/i })).not.toBeInTheDocument();
     expect(screen.getByText(/published before case tracking existed/i)).toBeInTheDocument();
+  });
+});
+
+// A CS engineer without the announcement creator role has write access but may
+// not create or send an announcement: the backend refuses every one of these
+// actions with a 403 (PermCreateAnnouncement), so the dialog must not offer
+// them. Marking a request as approved only records a decision taken over
+// email, so it stays available.
+describe("AnnouncementRequestDialog — without the announcement creator role", () => {
+  beforeEach(() => {
+    mockCanCreateAnnouncement = false;
+  });
+
+  it("disables Submit for approval on a draft even when the content is complete", () => {
+    mockGet({ state: "draft" });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /submit for approval/i })).toBeDisabled();
+  });
+
+  it("disables saving an edit on a draft", () => {
+    mockGet({ state: "draft" });
+    const mutate = vi.fn();
+    mockedUpdate.mockReturnValue({
+      mutate,
+      mutateAsync: vi.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useUpdateAnnouncementRequest>);
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByDisplayValue("Scheduled maintenance"), { target: { value: "Edited subject" } });
+    expect(screen.getByRole("button", { name: /^save/i })).toBeDisabled();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("still lets a pending request be marked as approved, but not edited", () => {
+    mockGet({ state: "pending_approval", submittedBy: "jane@example.com", submittedAt: "2026-07-02T10:00:00Z" });
+    const approveMutate = vi.fn();
+    mockedApprove.mockReturnValue({
+      mutate: approveMutate,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useApproveAnnouncementRequest>);
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled();
+    const approveBtn = screen.getByRole("button", { name: /mark as approved/i });
+    expect(approveBtn).toBeEnabled();
+    fireEvent.click(approveBtn);
+    expect(approveMutate).toHaveBeenCalled();
+  });
+
+  it("disables Publish for the request's own creator and never starts the send", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    const handlePublish = vi.fn();
+    mockedPublish.mockReturnValue({
+      publishing: false,
+      progress: null,
+      succeededProjectIds: [],
+      failedProjectIds: [],
+      failedTagProjectIds: [],
+      published: null,
+      readyToPublish: true,
+      hydratingDeliveries: false,
+      hydrationFailed: false,
+      retryHydration: vi.fn(),
+      publishGivingUpOnFailed: vi.fn(),
+      handlePublish,
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    const publishBtn = screen.getByRole("button", { name: /^publish$/i });
+    expect(publishBtn).toBeDisabled();
+    fireEvent.click(publishBtn);
+    expect(handlePublish).not.toHaveBeenCalled();
+  });
+
+  it("does not offer scheduling", () => {
+    mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Schedule for later…" })).not.toBeInTheDocument();
+  });
+
+  it("cannot cancel a schedule that is already set", () => {
+    mockGet({
+      state: "approved",
+      resolvedProjectIds: ["p-1"],
+      resolvedProjectCount: 1,
+      scheduledFor: "2027-01-01T10:00:00Z",
+    });
+    render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /cancel schedule/i })).toBeDisabled();
   });
 });

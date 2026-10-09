@@ -48,19 +48,24 @@
 -- link to a record that no longer exists has no meaning, unlike the nullable
 -- reference columns elsewhere, which keep their row).
 --
--- The three join tables are under FORCE ROW LEVEL SECURITY with the same
--- project-membership rule as work_item_tag / work_item_watcher (migration
--- 0147): internal callers see everything, a member sees the links of change
--- requests of their own project. Update is deliberately not a policy: the
--- repository only ever deletes and re-inserts the whole list.
+-- Row-level security for the three join tables is a SEPARATE migration,
+-- 100024_change_request_project_links_rls.sql, not this one: this file
+-- creates the tables, and the RLS migration track (migrations/1NNNNN_*.sql,
+-- see entity-service/CLAUDE.md's "Database migrations" section) is the only
+-- place CREATE POLICY / ENABLE|FORCE ROW LEVEL SECURITY belongs. Splitting
+-- this out (this file used to also enable and police these three tables
+-- inline) does not change what runs or in what order: the three-phase apply
+-- order (4-digit schema, then the 100000+ RLS track) already guarantees this
+-- file's tables exist by the time 100024 runs, exactly as it did when the
+-- RLS statements lived here.
 --
 -- change_request_category_enum (migration 0043) lacks the four values the API
 -- enum has had since the field-parity work (regular/hotfix release cloud,
 -- devops, cloud computing), so choosing one of them could never be stored.
 -- They are added here so every category the form offers persists.
 --
--- Idempotent: IF NOT EXISTS / ON CONFLICT DO NOTHING / DROP POLICY IF EXISTS
--- throughout, so a re-run is a no-op.
+-- Idempotent: IF NOT EXISTS / ON CONFLICT DO NOTHING throughout, so a
+-- re-run is a no-op.
 
 ALTER TYPE change_request_category_enum ADD VALUE IF NOT EXISTS 'REGULAR_RELEASE_CLOUD';
 ALTER TYPE change_request_category_enum ADD VALUE IF NOT EXISTS 'HOTFIX_RELEASE_CLOUD';
@@ -109,66 +114,5 @@ CREATE TABLE IF NOT EXISTS change_request_deployed_product (
 CREATE INDEX IF NOT EXISTS idx_change_request_deployed_product_deployed_product_id
     ON change_request_deployed_product (deployed_product_id);
 
--- Row level security: see the header.
-ALTER TABLE change_request_deployment ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_request_deployment FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS change_request_deployment_visibility ON change_request_deployment;
-CREATE POLICY change_request_deployment_visibility ON change_request_deployment
-    FOR SELECT USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_deployment.change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_deployment_write ON change_request_deployment;
-CREATE POLICY change_request_deployment_write ON change_request_deployment
-    FOR INSERT WITH CHECK (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_deployment_delete ON change_request_deployment;
-CREATE POLICY change_request_deployment_delete ON change_request_deployment
-    FOR DELETE USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_deployment.change_request_id))
-    );
-
-ALTER TABLE change_request_environment ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_request_environment FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS change_request_environment_visibility ON change_request_environment;
-CREATE POLICY change_request_environment_visibility ON change_request_environment
-    FOR SELECT USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_environment.change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_environment_write ON change_request_environment;
-CREATE POLICY change_request_environment_write ON change_request_environment
-    FOR INSERT WITH CHECK (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_environment_delete ON change_request_environment;
-CREATE POLICY change_request_environment_delete ON change_request_environment
-    FOR DELETE USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_environment.change_request_id))
-    );
-
-ALTER TABLE change_request_deployed_product ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_request_deployed_product FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS change_request_deployed_product_visibility ON change_request_deployed_product;
-CREATE POLICY change_request_deployed_product_visibility ON change_request_deployed_product
-    FOR SELECT USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_deployed_product.change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_deployed_product_write ON change_request_deployed_product;
-CREATE POLICY change_request_deployed_product_write ON change_request_deployed_product
-    FOR INSERT WITH CHECK (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_id))
-    );
-DROP POLICY IF EXISTS change_request_deployed_product_delete ON change_request_deployed_product;
-CREATE POLICY change_request_deployed_product_delete ON change_request_deployed_product
-    FOR DELETE USING (
-        (SELECT current_setting('app.is_internal', true) = 'true')
-        OR is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = change_request_deployed_product.change_request_id))
-    );
+-- Row level security for these three tables: see
+-- 100024_change_request_project_links_rls.sql.

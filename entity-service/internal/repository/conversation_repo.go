@@ -240,6 +240,12 @@ func conversationWhereClause(f domain.SearchConversationsFilters, callerEmail st
 	if len(f.CreatedBy) > 0 {
 		add("LOWER(wi.created_by) = ANY(SELECT LOWER(x) FROM unnest($%d::text[]) x)", f.CreatedBy)
 	}
+	if f.StartUpdatedDate != nil {
+		add("wi.updated_on >= $%d", *f.StartUpdatedDate)
+	}
+	if f.EndUpdatedDate != nil {
+		add("wi.updated_on <= $%d", *f.EndUpdatedDate)
+	}
 
 	return where, args
 }

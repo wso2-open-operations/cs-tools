@@ -1637,10 +1637,12 @@ paths:
   /internal/cloud-status/pending:
     get:
       summary: >-
-        Internal-caller-only. Returns the cloud status webhooks still owed to
-        the public dashboards and not yet past their attempt limit, oldest
-        first, with each cloud already translated to the slug the dashboards
-        are addressed by.
+        Internal-caller-only. Claims and returns the cloud status webhooks still
+        owed to the public dashboards and not yet past their attempt limit,
+        oldest first, with each cloud already translated to the slug the
+        dashboards are addressed by. Every returned webhook has an attempt
+        started under its claimToken: the caller must post it and report the
+        outcome; nobody else can post it meanwhile.
       operationId: listPendingCloudStatusWebhooks
       responses:
         "200":
@@ -1688,6 +1690,59 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No such webhook.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            Conflict — no open attempt to record against: already delivered, or
+            the claimToken is not the current attempt's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: InternalServerError.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/cloud-status/{id}/claim:
+    post:
+      summary: >-
+        Internal-caller-only. Starts the attempt to post a webhook published as
+        outage.status_page_due, under the claimToken the event carried. Only a
+        204 allows the caller to post; after it, nobody else can post the
+        webhook, and an attempt that runs out without a reported outcome is
+        never re-sent automatically.
+      operationId: claimCloudStatusWebhook
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudStatusClaim'
+      responses:
+        "204":
+          description: Claimed -- post it, then report the outcome with the same claimToken.
+        "400":
+          description: BadRequest — invalid id or claimToken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            Conflict — do not post: already delivered, or no longer reserved
+            under this claimToken (the scheduled task has it).
           content:
             application/json:
               schema:
@@ -1973,8 +2028,12 @@ paths:
     patch:
       summary: Update the profile of the currently authenticated user.
       description: >
-        Updates mutable profile fields for the user identified by the x-user-id-token header.
-        Supported by the ServiceNow data source only.
+        Updates mutable profile fields for the user identified by the x-user-id-token header;
+        only the caller's own profile can be written. With the PostgreSQL data source, send
+        `timeZone`, `phone` or both (at least one); a field that is omitted or null is left
+        untouched. The alternate (non-PostgreSQL) data source applies `timeZone` and accepts but
+        ignores `phone`; a phone-only request there succeeds as a no-op (200 with a message and
+        empty `user` fields).
       operationId: patchUserMe
       requestBody:
         required: true
@@ -1997,6 +2056,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — no user row exists for the caller.
           content:
             application/json:
               schema:
@@ -2466,6 +2531,47 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Account not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /teams/search:
+    post:
+      summary: Search the team table (PostgreSQL data source only).
+      description: >-
+        Lists rows of the `team` table, ordered by name, with an optional
+        case-insensitive substring filter on the name. This is the curated
+        team registry, distinct from `POST /groups/search`, which lists the
+        `"group"` table.
+      operationId: searchTeams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchTeamsRequest'
+      responses:
+        "200":
+          description: Teams matching the filters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTeamsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
           content:
             application/json:
               schema:
@@ -4156,8 +4262,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller may not do this (a type transfer is for internal callers only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >
+            Conflict. A type transfer of a case that has attachments, before migration
+            `0210_case_attachment_references_work_item` is applied, or of a case that other
+            cases name as their related case, before `0211_case_related_case_references_work_item`
+            is applied; nothing was changed.
           content:
             application/json:
               schema:
@@ -5118,6 +5240,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            The case cannot move: ESCALATE on a case already at EL5, or DEESCALATE on a
+            case already at EL0. DEESCALATE always returns the case to EL0.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
           content:
@@ -5738,6 +5868,15 @@ paths:
         conclusion with post-call notes (notes, plan, attendees, actionItems,
         actualDurationMin). On the Postgres data source cancellationReason is
         rejected with 400, because customer_call has no column to store it.
+
+        Concluding needs no notes ("Mark as completed"). On the Postgres data
+        source a conclude with no (or blank) notes is restricted to WSO2 staff
+        (403 for any other caller), is only accepted for a call that is
+        scheduled or notes pending (any other current state is a 409 naming
+        that state) and leaves the notes the call already has untouched.
+        Concluding with notes is not restricted by the current state. The
+        ServiceNow data source applies none of these restrictions itself and
+        leaves them to ServiceNow.
       operationId: updateCallRequest
       parameters:
         - name: id
@@ -5771,8 +5910,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: >-
+            A conclude with no notes was attempted by a caller who is not WSO2 staff
+            (Postgres data source).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            Postgres data source: the call request is not in a state this change is
+            allowed from (a conclude with no notes needs a scheduled or notes-pending
+            call).
           content:
             application/json:
               schema:
@@ -7346,7 +7502,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /groups/search:
     post:
-      summary: Search groups (ServiceNow data source only).
+      summary: Search groups.
       operationId: searchGroups
       requestBody:
         required: true
@@ -7391,7 +7547,9 @@ paths:
         GET /change-requests/{id}/approvals): the group's name, description,
         group email and manager, and its active members in name order.
         `id` is a `"group"` id, NOT a `team` id (POST /groups/search lists
-        teams). Members are the users the approval pools provision from: for the
+        the same `"group"` table). Members are the group's `group_member` rows
+        (these can include people who are not approvers) plus the users the
+        approval pools provision from: for the
         CAB Approval / Devops Approval groups, which the pools
         resolve by name, a `team_member` whose `group_id` is any group of that
         name or whose `team_id` is a team of that name; for any other group (a
@@ -8709,6 +8867,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/create-defaults:
+    get:
+      summary: The team an incident falls back to (internal callers only).
+      operationId: getIncidentCreateDefaults
+      description: >-
+        The default service (INCIDENT_DEFAULT_SERVICE_ID) and its support
+        group: the group POST /incidents assigns when no assignmentGroupId is
+        sent and the incident's service has no support group. Read only.
+        defaultServiceId is null when the variable is unset; defaultGroup is
+        null when it is unset, the service does not exist or the service has
+        no support group (such incidents are then created unassigned).
+      responses:
+        "200":
+          description: The default service and its support group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentCreateDefaults'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents/search:
     post:
       summary: Search incidents (ServiceNow data source only).
@@ -9808,7 +10003,9 @@ paths:
         (403). No user token and no client id match above is refused (401) -- there is no
         legitimate caller to resolve. A token that is present but invalid is always
         rejected with 401. The project counts (`activeChatsCount`, `actionRequiredCount`,
-        `outstandingCount`) are 0 on Postgres.
+        `outstandingCount`) are the figures the project's own dashboard shows (outstanding and
+        action-required cases, service requests, engagements, security report analyses and the
+        change requests the caller may see; active conversations). A failed lookup leaves them 0.
       operationId: globalSearch
       requestBody:
         required: false
@@ -10332,6 +10529,14 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            The case cannot move: ESCALATE on a case already at EL5, or DEESCALATE on a
+            case already at EL0. DEESCALATE always returns the case to EL0.
           content:
             application/json:
               schema:
@@ -11056,13 +11261,20 @@ paths:
   /plg/playbook-runs/{playbookRunId}:
     delete:
       summary: Detach a playbook run.
-      description: "Refused while the run is closed \u2014 that would erase a recorded outcome. This is a GUARDED WRITE. The decision travels inside the statement as a `WHERE` clause rather than being read first, because a lock cannot span an HTTP boundary. `rowsAffected: 0` means the precondition no longer held; deciding what that means (usually `409`) is the caller's job, not this service's."
+      description: "A SOFT detach: the row is kept and stamped with `detached_on` and `detached_by`, so who removed a playbook from a pairing is recoverable. Every read filters detached runs (`plg_playbook_run_v`, `plg_work_queue_v`), so the run disappears exactly as the deleted row used to, and the same playbook can be attached again \u2014 uniqueness is a PARTIAL index over attached rows only. A run that is already detached is `404`, not a conflict: it is invisible to every read. Refused while the run is closed \u2014 that would erase a recorded outcome. This is a GUARDED WRITE. The decision travels inside the statement as a `WHERE` clause rather than being read first, because a lock cannot span an HTTP boundary. `rowsAffected: 0` means the precondition no longer held; deciding what that means (usually `409`) is the caller's job, not this service's."
       operationId: plgDetachRun
       parameters:
         - name: playbookRunId
           in: path
           required: true
           description: "The run's id."
+          schema:
+            type: string
+            format: uuid
+        - name: actorId
+          in: query
+          required: true
+          description: "The `user` id the caller has already resolved, recorded as `detached_by`. A query parameter rather than a body field because this is a DELETE, and a body on one is accepted by some proxies and dropped by others. This service has no notion of \"the current user\"."
           schema:
             type: string
             format: uuid
@@ -12571,6 +12783,9 @@ components:
           type: string
         timeZone:
           type: string
+        phone:
+          type: string
+          description: The user's phone number, populated by the data sync. Omitted when none is stored.
         roles:
           type: array
           items:
@@ -12640,11 +12855,31 @@ components:
 
     PatchUserMeRequest:
       type: object
-      required: [timeZone]
+      description: >
+        At least one of `timeZone` or `phone` is required with the PostgreSQL data source;
+        `timeZone` is required with the alternate (non-PostgreSQL) data source unless `phone`
+        is sent, which that source accepts and ignores.
       properties:
         timeZone:
           type: string
-          description: User's preferred time zone (e.g. "America/New_York")
+          description: User's preferred time zone (e.g. "America/New_York"). Cannot be cleared; omit to leave unchanged.
+        phone:
+          type: string
+          nullable: true
+          description: >
+            The user's phone number. Surrounding whitespace is trimmed and no format is
+            enforced. The 32-character limit applies after trimming; longer is a 400. An
+            empty (or whitespace-only) value clears it. Omit or send null to leave it
+            unchanged. Accepted but ignored by the alternate (non-PostgreSQL) data source.
+      anyOf:
+        - required: [timeZone]
+          properties:
+            timeZone:
+              minLength: 1
+        - required: [phone]
+          properties:
+            phone:
+              nullable: false
 
     PatchUserMeUpdated:
       type: object
@@ -12657,6 +12892,12 @@ components:
           type: string
         updatedOn:
           type: string
+        timeZone:
+          type: string
+          description: The profile's time zone after the update. Omitted when none is stored (PostgreSQL data source only).
+        phone:
+          type: string
+          description: The profile's phone number after the update. Omitted when none is stored (PostgreSQL data source only).
 
     PatchUserMeResponse:
       type: object
@@ -12737,6 +12978,15 @@ components:
             Restrict to members of these groups. Resolved to a user-id set before the
             upstream call, because the data source cannot join users against group
             membership in one query. ServiceNow data source only.
+        teamIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+          description: >
+            Restrict to members of these `team` rows (`team_member`), the ids
+            POST /teams/search returns. PostgreSQL data source only.
         groupNames:
           type: array
           maxItems: 50
@@ -14629,8 +14879,20 @@ components:
         `assigneeEmail`, and `acknowledge` are supported by every data source.
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
-        `type` transfers the case to another type and is supported only for the ServiceNow
-        data source. Its companion fields carry the target type's mandatory data:
+        `type` transfers the case to another type and is supported by every data source, for
+        internal callers only (403 otherwise). On the Postgres data sources the old type's
+        extension row is replaced by one of the new type in one transaction, and under
+        dual-write ServiceNow is asked first from inside that transaction, so a refusal there
+        leaves nothing changed. The case keeps its number, state, work state, resolution data,
+        attachments, comments and time cards. A case with attachments cannot be moved until
+        migration `0210_case_attachment_references_work_item` has been applied (409 until then).
+        Only the ticket itself is converted: tickets related to it stay what they are and stay
+        related to it (a case others relate to is refused with a 409 only until migration
+        `0211_case_related_case_references_work_item` is applied).
+        Both flavours of `case` can be moved, in either direction: an Incident (severity S0-S3)
+        and a Query (severity S4); moving an S4 case out of, or into, `case` re-marks its time
+        cards billable or not, as a severity change across the S4 line does.
+        Its companion fields carry the target type's mandatory data:
         `severity` and `issueType` alongside `type: case`; `engagementType` and
         `engagementPaymentType` alongside `type: engagement`; `catalogId`, `catalogItemId`
         and a non-empty `variables` alongside `type: service_request`; none for
@@ -14663,7 +14925,7 @@ components:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
           description: >
-            Transfers the case to this type (ServiceNow only). `announcement` and the
+            Transfers the case to this type (internal callers only). `announcement` and the
             hosting_* types are system-managed and are never valid transfer targets.
         engagementType:
           type: string
@@ -15489,10 +15751,12 @@ components:
           type: string
         type:
           type: string
-          enum: [case, incident, change_request, problem]
+          enum: [case, engagement, service_request, security_report_analysis, announcement, incident, change_request, problem]
           nullable: true
           description: >
-            What kind of record this reference points at. Null when the
+            What kind of record this reference points at. A related case (`relatedCase`)
+            reads as the type the related ticket is now, so a ticket that was converted
+            to another type shows as that type. Null when the
             backing data source could not resolve the referenced record's
             kind; a client must not then assume it is a case, since linking
             to a case detail page for a non-case record would 404.
@@ -17804,9 +18068,20 @@ components:
         groupId:
           type: string
           format: uuid
+          description: >
+            The assignment group, as `POST /groups/search` lists it. Must be a row of
+            `group` (a 400 saying which group cannot be used otherwise); with
+            `DATA_SOURCE=postgres-servicenow-dual-write` that is also what ServiceNow
+            knows it by.
         assignedEngineerId:
           type: string
           format: uuid
+          description: >
+            The person the change is assigned to. With
+            `DATA_SOURCE=postgres-servicenow-dual-write` the person must have a ServiceNow
+            account: one whose id is not a ServiceNow id is looked up there by email and
+            that account is used, and a person with none is refused with a 400 naming the
+            field (the same holds for `requestedById`).
         risk:
           type: string
           enum:
@@ -19195,6 +19470,18 @@ components:
         searchQuery:
           type: string
           description: Free-text search query.
+        supportGroupsOnly:
+          type: boolean
+          default: false
+          description: >-
+            true limits the result to the groups an incident can be created in
+            with an explicit assignmentGroupId: active groups that are the
+            support group of at least one service. The ids are group ids (what
+            assignmentGroupId takes). On the PostgreSQL data source the search
+            without this filter lists the team registry instead, whose ids are
+            not group ids. On the ServiceNow data source the set is built from
+            ServiceNow's services (whose list carries no group's active flag)
+            and matched, sorted by name and paged by this service.
 
     ScheduleZone:
       type: object
@@ -19755,6 +20042,42 @@ components:
         limit:
           type: integer
 
+    SearchTeamsRequest:
+      type: object
+      properties:
+        filters:
+          type: object
+          properties:
+            searchQuery:
+              type: string
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+
+    SearchTeamsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/Team'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+
     GroupManagerRef:
       type: object
       nullable: true
@@ -20235,7 +20558,9 @@ components:
             409), and
             `change_request_forbidden` (403: not a registered contact of the change
             request's project, its own creator, a user who may not decide an internal
-            stage, or a field a customer may not set). The list grows, so this is
+            stage, or a field a customer may not set), and, on POST /incidents,
+            `incident_assignment_group_not_allowed` (400: an assignmentGroupId that is
+            not an active support group of any service; nothing created). The list grows, so this is
             deliberately not a closed enum: a value not listed here is a newer server's.
           example: change_request_on_hold
 
@@ -20925,6 +21250,25 @@ components:
         limit:
           type: integer
 
+    IncidentCreateDefaults:
+      type: object
+      required: [defaultServiceId, defaultGroup]
+      properties:
+        defaultServiceId:
+          type: string
+          format: uuid
+          nullable: true
+        defaultGroup:
+          type: object
+          nullable: true
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+
     CreateIncidentRequest:
       type: object
       required: [callerId, category, serviceId, impact, urgency, subject]
@@ -20948,10 +21292,8 @@ components:
           type: string
           format: uuid
           description: >-
-            The incident's assignment group is set from this service's support
-            group; there is no assignmentGroupId on create. A service with no
-            support group creates the incident unassigned. Reassign afterwards
-            with PATCH.
+            When no assignmentGroupId is sent, the incident's assignment group
+            is this service's support group (see assignmentGroupId).
         serviceOfferingId:
           type: string
           format: uuid
@@ -20974,6 +21316,26 @@ components:
         urgency:
           type: string
           enum: [HIGH, MEDIUM, LOW]
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional. The group is decided once, before anything is written,
+            the same way for every caller and data source. Sent: used when it
+            is an active group that is the support group of at least one
+            service (the set POST /groups/search returns with
+            filters.supportGroupsOnly), otherwise 400 "assignmentGroupId must
+            be the active support group of a service" (a value that is not a
+            UUID is a 400 too; a blank value counts as not sent). Not sent:
+            the service's support group; when the service has none, the
+            support group of the default service (INCIDENT_DEFAULT_SERVICE_ID,
+            see GET /incidents/create-defaults); when there is no default
+            group either, the incident is created unassigned. A failed lookup
+            fails the request and nothing is created. A work note records
+            where the group came from, after any workNotes the caller sent.
+            On the ServiceNow data source the set is read from ServiceNow's
+            services, which carry no group's active flag.
         assignedEngineerId:
           type: string
           format: uuid
@@ -23902,7 +24264,7 @@ components:
 
     CaseEscalationHistory:
       type: object
-      required: [escalations, total, currentNotifiedUsers]
+      required: [escalations, total, currentNotifiedUsers, teamLeads]
       properties:
         escalations:
           type: array
@@ -23917,8 +24279,15 @@ components:
             $ref: '#/components/schemas/EscalationNotifiedUser'
           description: >-
             The notified-users list of the case's most recent escalation record (empty when the
-            case has never been escalated). Only someone on this list is authorized to
-            de-escalate the case's current level.
+            case has never been escalated).
+        teamLeads:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationNotifiedUser'
+          description: >-
+            The leads of the case's account's CRE (ABT) team. Only these users may de-escalate
+            the case from the CSM portal. Empty when the account has no CRE team or the team
+            has no lead.
 
     CaseEscalationCreateRequest:
       description: >
@@ -24879,6 +25248,10 @@ components:
           type: integer
         lastError:
           type: string
+        claimToken:
+          type: string
+          format: uuid
+          description: The attempt this webhook was handed out under; send it back with the outcome.
       required: [id, outageId, number, event, wireEvent, cloud, timestamp, attemptCount]
     PendingCloudStatusWebhooks:
       type: object
@@ -24889,6 +25262,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PendingCloudStatusWebhook'
+        unknownOutcome:
+          type: integer
+          description: >-
+            Webhooks whose last attempt ended with no known outcome (a timeout
+            after sending, or a sender that never reported). Never re-sent
+            automatically -- the dashboard may already have them.
       required: [count, webhooks]
     CloudStatusDeliveryReport:
       type: object
@@ -24898,7 +25277,27 @@ components:
         error:
           type: string
           description: Required when delivered is false.
+        unknown:
+          type: boolean
+          description: >-
+            The request was sent and no answer came back, so the dashboard may
+            have it. The webhook is then never posted again automatically.
+            Requires delivered=false.
+        claimToken:
+          type: string
+          format: uuid
+          description: >-
+            The token the webhook was handed out under (pending response or
+            outage.status_page_due). When given, the report is accepted only
+            for that attempt.
       required: [delivered]
+    CloudStatusClaim:
+      type: object
+      properties:
+        claimToken:
+          type: string
+          format: uuid
+      required: [claimToken]
     AnnouncementRequest:
       description: >
         A draft, in-review, or approved announcement that has not yet been
@@ -26192,6 +26591,30 @@ components:
               updatedOn:
                 type: string
                 format: date-time
+              authoredBy:
+                type: object
+                nullable: true
+                description: Who created this playbook. Null if written before attribution existed.
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  name:
+                    type: string
+              updatedBy:
+                type: object
+                nullable: true
+                description: Who last edited it, which need not be the author.
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  name:
+                    type: string
     PlgPlaybook:
       type: object
       properties:
@@ -26258,6 +26681,34 @@ components:
         updatedOn:
           type: string
           format: date-time
+        authoredBy:
+          type: object
+          nullable: true
+          description: >-
+            Who created this playbook. Null for playbooks written before
+            attribution existed.
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            name:
+              type: string
+        updatedBy:
+          type: object
+          nullable: true
+          description: >-
+            Who last edited it, which need not be the author -- any admin may
+            edit any playbook.
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            name:
+              type: string
     PlgDashboard:
       type: object
       properties:
@@ -26274,6 +26725,11 @@ components:
               type: integer
             trialsEndingSoon:
               type: integer
+            unresolvedIngestFailures:
+              type: integer
+              description: >-
+                Rows in plg_ingest_failure with no resolved_on. Registrations the
+                ingest refused, which nobody has cleared. Not period-scoped.
         registrationsByProduct:
           type: array
           items:
@@ -26605,6 +27061,8 @@ components:
               type: integer
     PlgPatchOrganizationRequest:
       type: object
+      required:
+        - actorId
       properties:
         ownerId:
           type: string
@@ -26613,6 +27071,9 @@ components:
         actorId:
           type: string
           format: uuid
+          description: >-
+            The `user` id the caller has already resolved. Recorded as
+            owner_updated_by, alongside owner_updated_on.
     PlgPatchPairingRequest:
       type: object
       required:
@@ -26749,6 +27210,7 @@ components:
         - name
         - playbookType
         - lifecycleStage
+        - actorId
       properties:
         name:
           type: string
@@ -26763,8 +27225,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlgPlaybookTaskInput"
+        actorId:
+          type: string
+          format: uuid
+          description: >-
+            The `user` id the caller has already resolved. Recorded as the
+            playbook's authored_by and updated_by. This service has no notion
+            of "the current user".
     PlgPatchPlaybookRequest:
       type: object
+      required:
+        - actorId
       properties:
         name:
           type: string
@@ -26777,15 +27248,28 @@ components:
           type: string
         active:
           type: boolean
+        actorId:
+          type: string
+          format: uuid
+          description: >-
+            The `user` id the caller has already resolved. Recorded as the
+            playbook's updated_by, which need not be whoever authored it.
     PlgReplaceTasksRequest:
       type: object
       required:
         - tasks
+        - actorId
       properties:
         tasks:
           type: array
           items:
             $ref: "#/components/schemas/PlgPlaybookTaskInput"
+        actorId:
+          type: string
+          format: uuid
+          description: >-
+            The `user` id the caller has already resolved. Recorded as each
+            task's updated_by, and as created_by for tasks this call adds.
     PlgPlaybookTaskInput:
       type: object
       required:

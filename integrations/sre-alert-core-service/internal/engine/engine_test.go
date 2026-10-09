@@ -309,7 +309,7 @@ func (n *fakeNotifier) PushWorkNote(_ context.Context, _, note string) error {
 	return nil
 }
 
-func (n *fakeNotifier) IncidentState(_ context.Context, number string) (bool, bool, error) {
+func (n *fakeNotifier) IncidentState(_ context.Context, _, number string) (bool, bool, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.stateChecks++

@@ -338,3 +338,57 @@ func TestGetUserMeResponse_GroupsFieldShape(t *testing.T) {
 		t.Fatalf("encoded = %s, want it to contain %s", encoded, want)
 	}
 }
+
+// TestSNUserService_PatchMe_PhoneIgnored: phone is accepted but not stored on
+// this data source. A phone-only request is a no-op 200 that never reaches the
+// upstream; with timeZone also present, only timeZone is forwarded.
+func TestSNUserService_PatchMe_PhoneIgnored(t *testing.T) {
+	phone := "+15555550123"
+
+	t.Run("phone only is a no-op", func(t *testing.T) {
+		calls := 0
+		mux := http.NewServeMux()
+		mux.HandleFunc("/users/me", func(w http.ResponseWriter, _ *http.Request) { calls++ })
+		svc := NewServiceNowUserService(newTestSNClient(t, mux))
+
+		resp, err := svc.PatchMe(contextWithUserIDToken("token"), domain.PatchUserMeRequest{Phone: &phone})
+		if err != nil {
+			t.Fatalf("PatchMe returned error: %v", err)
+		}
+		if resp.Message == "" || resp.User.ID != "" {
+			t.Errorf("response = %+v, want a message and an empty user", resp)
+		}
+		if calls != 0 {
+			t.Errorf("upstream called %d times, want 0", calls)
+		}
+	})
+
+	t.Run("timeZone with phone applies timeZone only", func(t *testing.T) {
+		var body []byte
+		mux := http.NewServeMux()
+		mux.HandleFunc("/users/me", func(w http.ResponseWriter, r *http.Request) {
+			body, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok","user":{"id":"` + testCallerSysid + `","updatedBy":"a","updatedOn":"b"}}`))
+		})
+		svc := NewServiceNowUserService(newTestSNClient(t, mux))
+
+		resp, err := svc.PatchMe(contextWithUserIDToken("token"), domain.PatchUserMeRequest{TimeZone: "Asia/Colombo", Phone: &phone})
+		if err != nil {
+			t.Fatalf("PatchMe returned error: %v", err)
+		}
+		if resp.Message != "ok" {
+			t.Errorf("Message = %q, want ok", resp.Message)
+		}
+		if strings.Contains(string(body), "phone") || !strings.Contains(string(body), "Asia/Colombo") {
+			t.Errorf("forwarded body = %s, want timeZone only", body)
+		}
+	})
+
+	t.Run("empty request still rejected", func(t *testing.T) {
+		svc := NewServiceNowUserService(newTestSNClient(t, http.NewServeMux()))
+		if _, err := svc.PatchMe(contextWithUserIDToken("token"), domain.PatchUserMeRequest{}); err == nil {
+			t.Fatal("want a validation error")
+		}
+	})
+}

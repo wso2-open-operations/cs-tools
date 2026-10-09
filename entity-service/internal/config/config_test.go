@@ -542,7 +542,7 @@ func TestLoad_M2MClientIDsFieldName(t *testing.T) {
 // path that touches Salesforce.
 func TestLoad_CSMMigrationPortalWritesEnabled(t *testing.T) {
 	for value, want := range map[string]bool{
-		"true": true, "TRUE": false, "True": false, "1": false, "yes": false, "": false, " true ": false,
+		"true": true, "TRUE": true, "1": true, "": true, "false": false, "FALSE": false, " false ": false,
 	} {
 		t.Setenv("CSM_MIGRATION_PORTAL_WRITES_ENABLED", value)
 		if got := Load().CSMMigrationPortalWritesEnabled; got != want {
@@ -558,7 +558,7 @@ func TestLoad_CSMMigrationPortalWritesEnabled(t *testing.T) {
 // than half-enabling a path that writes to Salesforce.
 func TestLoad_CSMMigrationMembershipRegistrationEnabled(t *testing.T) {
 	for value, want := range map[string]bool{
-		"true": true, "TRUE": false, "True": false, "1": false, "yes": false, "": false, " true ": false,
+		"true": true, "TRUE": true, "1": true, "": true, "false": false, "FALSE": false, " false ": false,
 	} {
 		t.Setenv("CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED", value)
 		if got := Load().CSMMigrationMembershipRegistrationEnabled; got != want {
@@ -631,32 +631,38 @@ func TestConfig_Validate_Auth(t *testing.T) {
 	}
 }
 
-// TestConfig_Validate_EscalationGroupIDsOptional confirms every
-// Escalation*GroupID stays optional -- a completely unset set must still
+// TestConfig_Validate_EscalationRecipientsOptional confirms every
+// Escalation* recipient stays optional -- a completely unset set must still
 // validate, since not every deployment configures every tier on day one.
-func TestConfig_Validate_EscalationGroupIDsOptional(t *testing.T) {
+func TestConfig_Validate_EscalationRecipientsOptional(t *testing.T) {
 	c := baseValidConfig()
 	if err := c.Validate(); err != nil {
-		t.Fatalf("unexpected error with every Escalation*GroupID unset: %v", err)
+		t.Fatalf("unexpected error with every Escalation* recipient unset: %v", err)
 	}
 }
 
-// TestConfig_Validate_EscalationGroupIDsMustBeUUIDsIfSet confirms a SET
-// Escalation*GroupID is checked for being a well-formed UUID -- a typo'd
-// group id would otherwise silently resolve zero recipients at request time
-// instead of failing loudly at startup.
-func TestConfig_Validate_EscalationGroupIDsMustBeUUIDsIfSet(t *testing.T) {
-	validID := "11111111-1111-1111-1111-111111111111"
+// TestConfig_Validate_EscalationRecipientsMustBeEmailsIfSet confirms a SET
+// Escalation* recipient is checked for looking like one email address -- a
+// typo would otherwise silently drop that tier at escalation time instead of
+// failing loudly at startup.
+func TestConfig_Validate_EscalationRecipientsMustBeEmailsIfSet(t *testing.T) {
 	c := baseValidConfig()
-	c.EscalationEL1AmericasTLGroupID = validID
+	c.EscalationEL1AmericasTLEmails = []string{"tl1@wso2.com", "tl2@wso2.com"}
+	c.EscalationEL2ProductDefaultEmail = "default@wso2.com"
 	if err := c.Validate(); err != nil {
-		t.Fatalf("a well-formed group id must not be rejected: %v", err)
+		t.Fatalf("well-formed addresses must not be rejected: %v", err)
 	}
 
-	c = baseValidConfig()
-	c.EscalationEL5CEOGroupID = "not-a-uuid"
-	if err := c.Validate(); err == nil {
-		t.Fatal("want a startup error for a malformed group id")
+	for name, mod := range map[string]func(*Config){
+		"no at sign":        func(c *Config) { c.EscalationEL2ProductDefaultEmail = "default.wso2.com" },
+		"two addresses":     func(c *Config) { c.EscalationEL2ProductServiceEmail = "a@wso2.com;b@wso2.com" },
+		"list entry broken": func(c *Config) { c.EscalationEL2AmericasTUEmails = []string{"tu@wso2.com", "@wso2.com"} },
+	} {
+		c := baseValidConfig()
+		mod(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: want a startup error", name)
+		}
 	}
 }
 
@@ -1073,3 +1079,62 @@ func TestConfig_Validate_CRStrictVisibilityFromRefusesAnUnparsableValue(t *testi
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+// INCIDENT_DEFAULT_SERVICE_ID is optional, and a UUID when set.
+func TestConfig_IncidentDefaultServiceID(t *testing.T) {
+	for value, wantErr := range map[string]bool{
+		"":                                     false,
+		"5ddddddd-dddd-4ddd-8ddd-dddddddddddd": false,
+		"not-a-uuid":                           true,
+	} {
+		c := baseValidConfig()
+		c.IncidentDefaultServiceID = value
+		if err := c.Validate(); (err != nil) != wantErr {
+			t.Errorf("INCIDENT_DEFAULT_SERVICE_ID=%q: err = %v, want error %v", value, err, wantErr)
+		}
+	}
+	t.Setenv("INCIDENT_DEFAULT_SERVICE_ID", "  5ddddddd-dddd-4ddd-8ddd-dddddddddddd ")
+	if got := Load().IncidentDefaultServiceID; got != "5ddddddd-dddd-4ddd-8ddd-dddddddddddd" {
+		t.Errorf("Load() = %q, want the trimmed id", got)
+	}
+}
+
+// TestConfig_CaseEscalationNoticesOn: on for postgres and dual-write alike
+// unless switched off; the ServiceNow data source never publishes.
+func TestConfig_CaseEscalationNoticesOn(t *testing.T) {
+	for _, tc := range []struct {
+		ds      DataSource
+		setting string
+		want    bool
+	}{
+		{DataSourcePostgres, "", true},
+		{DataSourcePostgresServiceNowDualWrite, "", true},
+		{DataSourcePostgresServiceNowDualWrite, "true", true},
+		{DataSourcePostgres, "false", false},
+		{DataSourcePostgresServiceNowDualWrite, "false", false},
+		{DataSourceServiceNow, "", false},
+		{DataSourceServiceNow, "true", false},
+	} {
+		c := Config{DataSource: tc.ds, CaseEscalationNotices: tc.setting}
+		if got := c.CaseEscalationNoticesOn(); got != tc.want {
+			t.Errorf("DATA_SOURCE=%s CASE_ESCALATION_NOTICES_ENABLED=%q: got %v, want %v", tc.ds, tc.setting, got, tc.want)
+		}
+	}
+}
+
+// TestConfig_Validate_CaseEscalationNotices: anything but true / false / unset
+// refuses to start, so a typo can't silently pick the default.
+func TestConfig_Validate_CaseEscalationNotices(t *testing.T) {
+	for _, v := range []string{"", "true", "false"} {
+		c := baseValidConfig()
+		c.CaseEscalationNotices = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("%q: unexpected error %v", v, err)
+		}
+	}
+	c := baseValidConfig()
+	c.CaseEscalationNotices = "yes"
+	if err := c.Validate(); err == nil {
+		t.Error(`"yes": want a startup error`)
+	}
+}

@@ -37,7 +37,7 @@ type searchITServicesFilters struct {
 type ITService struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
-	// SupportGroup is the CMDB group that supports the service; an incident raised against it is assigned there.
+	// SupportGroup is the CMDB group that supports the service; entity-service assigns an incident raised against it there.
 	SupportGroup *ServiceGroup `json:"supportGroup,omitempty"`
 }
 

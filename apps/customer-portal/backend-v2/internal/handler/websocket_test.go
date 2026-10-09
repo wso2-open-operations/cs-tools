@@ -348,6 +348,12 @@ func (s *stubEntity) getLastCreateReq() entity.CreateConversationRequest {
 	return s.lastCreateReq
 }
 
+func (s *stubEntity) getUpdatedStates() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.updatedStates...)
+}
+
 // stubStreamer is a mock wsStreamer for WebSocket tests.
 type stubStreamer struct {
 	mu sync.Mutex
@@ -747,5 +753,156 @@ func TestHandleWebSocket_CreateConversationError(t *testing.T) {
 	}
 	if evt.Message != "Failed to create a new conversation." {
 		t.Errorf("message = %q, want 'Failed to create a new conversation.'", evt.Message)
+	}
+}
+
+// strPtr is a small helper for building *string test fixtures inline.
+func strPtr(s string) *string { return &s }
+
+// TestHandleWebSocket_ActivatesOpenConversationOnReply is the regression
+// guard for a real, reported bug: under DATA_SOURCE=postgres-servicenow-dual-write
+// a conversation is created in ServiceNow's own OPEN state (not the ACTIVE
+// state a conversation is meant to start in), and nothing ever moved it to
+// ACTIVE once Novera actually replied -- a conversation stayed "Open" in the
+// UI forever, however many messages were exchanged. handleMessage must PATCH
+// the conversation to ACTIVE once the agent's reply has been persisted,
+// whenever the conversation's current state (as entity-service reports it)
+// is OPEN.
+func TestHandleWebSocket_ActivatesOpenConversationOnReply(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+	const createdConvID = "33333333-3333-3333-3333-333333333333"
+
+	v := &stubValidator{accept: "good-token"}
+	e := &stubEntity{
+		project: entity.ProjectDetailsView{ID: projectID, Account: entity.ProjectAccountRef{ID: "acc-1"}},
+		createdConversation: entity.CreateConversationResponse{
+			Conversation: entity.CreatedConversation{ID: createdConvID},
+		},
+		conversation: entity.ConversationDetails{State: strPtr("OPEN")},
+	}
+	ai := &stubStreamer{}
+	h := NewWebSocketHandler(ai, e, v, nil)
+
+	s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+	defer s.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+	dialer := websocket.Dialer{Subprotocols: []string{"cs-customer-portal", "good-token"}}
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	defer func() { _ = conn.Close() }()
+
+	send := func(message string) {
+		t.Helper()
+		msgBytes, _ := json.Marshal(map[string]any{"type": "user_message", "conversationId": "", "message": message})
+		if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+			t.Fatalf("write message failed: %v", err)
+		}
+	}
+	readUntilFinal := func() {
+		t.Helper()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("read message failed: %v", err)
+			}
+			var evt wsEvent
+			if err := json.Unmarshal(data, &evt); err != nil {
+				t.Fatalf("unmarshal event failed: %v", err)
+			}
+			if evt.Type == "final" {
+				return
+			}
+		}
+	}
+
+	send("Hello, I need help")
+	readUntilFinal()
+
+	// handleMessage's own read loop is strictly sequential (never starts
+	// processing frame N+1 until frame N's handler returns -- see
+	// WebSocketHandler's own doc comment), so sending and fully reading a
+	// second turn's response guarantees the first turn's handler -- activation
+	// included, which runs AFTER the "final" event is written mid-StreamChat --
+	// has completely finished by the time this returns. Reading "final" alone
+	// is not enough: it's written before the post-StreamChat activation logic
+	// runs, so asserting right after it would race the server goroutine.
+	send("Second question")
+	readUntilFinal()
+
+	states := e.getUpdatedStates()
+	found := false
+	for _, st := range states {
+		if st == "ACTIVE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("UpdateConversation states = %v, want to contain ACTIVE", states)
+	}
+}
+
+// TestHandleWebSocket_DoesNotReactivateANonOpenConversation proves the
+// activation check only fires for OPEN -- it must never reopen a
+// conversation the customer already converted/closed/abandoned, or one
+// already ACTIVE, just because another reply came in.
+func TestHandleWebSocket_DoesNotReactivateANonOpenConversation(t *testing.T) {
+	for _, state := range []string{"ACTIVE", "CONVERTED", "CLOSED", "ABANDONED"} {
+		t.Run(state, func(t *testing.T) {
+			const projectID = "11111111-1111-1111-1111-111111111111"
+			const createdConvID = "33333333-3333-3333-3333-333333333333"
+
+			v := &stubValidator{accept: "good-token"}
+			e := &stubEntity{
+				project: entity.ProjectDetailsView{ID: projectID, Account: entity.ProjectAccountRef{ID: "acc-1"}},
+				createdConversation: entity.CreateConversationResponse{
+					Conversation: entity.CreatedConversation{ID: createdConvID},
+				},
+				conversation: entity.ConversationDetails{State: strPtr(state)},
+			}
+			ai := &stubStreamer{}
+			h := NewWebSocketHandler(ai, e, v, nil)
+
+			s := httptest.NewServer(http.HandlerFunc(h.HandleWebSocket))
+			defer s.Close()
+
+			wsURL := "ws" + strings.TrimPrefix(s.URL, "http") + "/ws?sessionId=" + projectID
+			dialer := websocket.Dialer{Subprotocols: []string{"cs-customer-portal", "good-token"}}
+			conn, resp, err := dialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("dial failed: %v", err)
+			}
+			if resp != nil && resp.Body != nil {
+				defer resp.Body.Close()
+			}
+			defer func() { _ = conn.Close() }()
+
+			msgBytes, _ := json.Marshal(map[string]any{"type": "user_message", "conversationId": "", "message": "Hello"})
+			if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+				t.Fatalf("write message failed: %v", err)
+			}
+			for i := 0; i < 2; i++ {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					t.Fatalf("read message failed: %v", err)
+				}
+			}
+
+			msg2Bytes, _ := json.Marshal(map[string]any{"type": "user_message", "conversationId": "", "message": "Second"})
+			if err := conn.WriteMessage(websocket.TextMessage, msg2Bytes); err != nil {
+				t.Fatalf("write follow-up failed: %v", err)
+			}
+			if _, _, err := conn.ReadMessage(); err != nil {
+				t.Fatalf("read follow-up message failed: %v", err)
+			}
+
+			if states := e.getUpdatedStates(); len(states) != 0 {
+				t.Errorf("UpdateConversation states = %v, want none (conversation was already %s)", states, state)
+			}
+		})
 	}
 }

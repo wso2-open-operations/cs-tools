@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -38,6 +39,21 @@ func NewTeamHandler(svc service.TeamService) *TeamHandler {
 func (h *TeamHandler) GetTeamMembers(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	resp, err := h.svc.GetTeamMembers(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SearchTeams handles POST /teams/search.
+func (h *TeamHandler) SearchTeams(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchTeamsRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchTeams(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

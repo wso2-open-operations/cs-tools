@@ -23,11 +23,12 @@ import type { CaseEscalationHistory } from "@features/csm-cases/types/csmCases";
 const EMPTY_HISTORY: CaseEscalationHistory = {
   escalations: [],
   currentNotifiedUsers: [],
+  teamLeads: [],
 };
 
 /**
- * A case's full escalation history, newest first, plus who's authorized to
- * de-escalate its current level. Calls `GET /cases/{id}/escalations`
+ * A case's full escalation history, newest first, plus its ABT team leads --
+ * who's authorized to de-escalate it. Calls `GET /cases/{id}/escalations`
  * (ServiceNow data source only — the backend returns an empty history rather
  * than an error for a non-ServiceNow case).
  */
@@ -54,6 +55,11 @@ export function useGetCsmCaseEscalations(
           reason: e.reason,
         })),
         currentNotifiedUsers: (response?.currentNotifiedUsers ?? []).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+        })),
+        teamLeads: (response?.teamLeads ?? []).map((u) => ({
           id: u.id,
           name: u.name,
           email: u.email,

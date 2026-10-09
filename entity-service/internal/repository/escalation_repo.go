@@ -48,70 +48,58 @@ type EscalationRepository interface {
 	// CreateEscalation escalates or de-escalates caseID and recomputes its
 	// notification-recipient list, all in one transaction.
 	//
-	// Level transition: ESCALATE always sets current_level to the case's
-	// current level + 1, capped at EL5 (escalating an already-EL5 case is a
-	// silent no-op on the level, not an error -- it still records a new
-	// case_escalation row). DEESCALATE always sets current_level to current
-	// level - 1, floored at EL0; DEESCALATE on an already-EL0 case has
-	// nothing to de-escalate and returns a ValidationError rather than a
-	// silent no-op or going negative. previous_level is always whatever the
-	// level was immediately before this call, for both directions.
-	// "case".is_escalated is set TRUE for any resulting level >= 1, FALSE at
-	// EL0 -- mirrored both directions.
+	// Level transition, as ServiceNow's EscalationUtils.createEscalation /
+	// deescalateToEL0 (what the portal API's ESCALATE / DEESCALATE call):
+	// ESCALATE sets current_level to the case's level + 1; on an EL5 case it
+	// is a ConflictError (SN's 409 "Case already at maximum escalation
+	// level"), and nothing is written. DEESCALATE always drops the case
+	// straight to EL0, from whatever level it is at; on an EL0 case it is a
+	// ConflictError (SN's 409 "Case already at EL0"). previous_level is
+	// whatever the level was immediately before this call. "case".is_escalated
+	// is TRUE for any resulting level >= 1, FALSE at EL0.
 	//
-	// Notification recipients: resolved and written cumulatively for
-	// whatever the RESULTING level is (1..5), the same rule for both
-	// ESCALATE and DEESCALATE -- e.g. de-escalating EL3 -> EL2 writes the
-	// EL1+EL2 cumulative set, identical to an escalation landing at EL2.
-	// This is an approximation of ServiceNow's real EscalationUtils.
-	// createEscalation/EscalationNotificationUtils.resolveNotificationUsers
-	// (scoped app x_wso2_customer_0, read live against the DEV tenant),
-	// built from what this schema actually has:
+	// Notification recipients: resolved cumulatively for EL1..N, where N is
+	// the RESULTING level for ESCALATE and the level the case LEFT for
+	// DEESCALATE (SN: "same list that was used when the case FIRST moved into
+	// currentLevel") -- so de-escalating EL3 -> EL0 notifies the EL1..EL3
+	// set, the people the escalation reached.
+	// This ports ServiceNow's EscalationNotificationUtils.
+	// resolveNotificationUsers (scoped app x_wso2_customer_0), step for step,
+	// in its order, deduped by user id:
 	//
-	//   - EL1 (level >= 1): the case's account -> account.cre_team_id ->
-	//     "group".manager_id -- an APPROXIMATION of SN's real rule (team
-	//     members with u_team_member_role = 'HR Lead' on
-	//     u_integration_cs_team), which has no Postgres equivalent at all
-	//     ("group" has no per-member-role table, only one manager_id). This
-	//     is a deliberate, documented divergence, not a proven match. This
-	//     one piece is the only genuinely per-account/per-team lookup in the
-	//     whole rule below; every other recipient source is the same across
-	//     every case.
-	//     Also: every REAL member of notifyCfg.EL1AmericasTLGroupID (a
-	//     "group".id, resolved via team_member.group_id -- see
-	//     groupMemberResolver's own doc comment), unconditionally (SN's own
-	//     script comment: "Append Americas TL users -- ALWAYS", no region
-	//     gate), and account.technical_owner_id (confirmed 1:1 match with
-	//     SN's u_technical_owner).
-	//     account.account_manager_id (SN's u_owner / "Account Owner") is a
-	//     CONFIRMED, GENUINE GAP and is never read here: nothing in this
-	//     repo's write path (SalesforceAccountUpsert) ever populates that
-	//     column, so treating it as a real signal would fabricate a
-	//     recipient from a column that's effectively always NULL in
-	//     practice. Fixing it means fixing the Salesforce upsert mapping
-	//     elsewhere -- out of scope here.
-	//   - EL2 (level >= 2): every member of notifyCfg.EL2AmericasTUGroupID,
-	//     unconditionally, plus every member of exactly one product-routed
-	//     group picked from the case's deployed product's product.category/
-	//     business_unit: SERVICE -> EL2ServiceProductGroupID; SOFTWARE with
-	//     business_unit IAM -> EL2IdentityServerGroupID; everything else ->
-	//     EL2DefaultProductGroupID. A case with no deployed product/product
-	//     info at all gets none of the three, silently (not an error) --
-	//     same "absence is a valid state" convention as caseProductName's
-	//     own empty-string fallback.
-	//   - EL3 (level >= 3): every member of notifyCfg.EL3CREHeadGroupID,
-	//     plus account.customer_success_manager_id (confirmed 1:1 match).
-	//   - EL4 (level >= 4): every member of notifyCfg.EL4CCOGroupID and
-	//     notifyCfg.EL4CROGroupID.
-	//   - EL5 (level >= 5): every member of notifyCfg.EL5CEOGroupID.
+	//   - EL1: the account's CRE team lead(s), then every
+	//     notifyCfg.EL1AmericasTLEmails user (SN: "Append Americas TL users
+	//     -- ALWAYS", no region gate), then account.account_manager_id (SN
+	//     u_owner, Salesforce owner.email) and account.technical_owner_id
+	//     (SN u_technical_owner). SN's team leads are the u_team_member_role
+	//     rows on the account's u_integration_cs_team; here they are the
+	//     team_member rows with role 'lead' on the team whose id is
+	//     account.cre_team_id (team.id is the synced sys_user_group id, the
+	//     same id cre_team_id holds; team_member.group_id is not reliably
+	//     set, so the join is on team_id). An account whose CRE team has no
+	//     team row, or no lead, contributes no team lead.
+	//   - EL2: every notifyCfg.EL2AmericasTUEmails user, plus exactly one
+	//     product contact picked from the case's product
+	//     (deployed_product -> product): category SERVICE ->
+	//     EL2ProductServiceEmail; SOFTWARE whose code is "wso2is" or whose
+	//     name is "WSO2 Identity Server" -> EL2ProductIdentityServerEmail;
+	//     any other product, AND a case with no product at all ->
+	//     EL2ProductDefaultEmail (SN defaults rather than skipping).
+	//   - EL3: every holder of the team position cre_head (team_member.role,
+	//     the CRE head the incident call ladder also pages), plus
+	//     account.customer_success_manager_id.
+	//   - EL4: every holder of the app role case_escalation_el4 (SN: the CCO
+	//     and CRO).
+	//   - EL5: every holder of the app role case_escalation_el5 (SN: the CEO).
 	//
-	// Every notifyCfg.*GroupID is OPTIONAL -- empty/unset means no
-	// recipients from that slot, never a request failure. A configured
-	// group id that doesn't exist, or currently has zero team_member rows,
-	// also yields zero recipients from that slot, not an error -- same
-	// "flag, don't fabricate" posture as the rest of this rule. The final
-	// list is deduped by user id before being written to
-	// case_escalation_notification_list.
+	// EL3-EL5 are data, not configuration: who they reach changes by setting
+	// a team position or granting a role (migration 0209 seeds the two
+	// roles), never by redeploying. SN read them from its
+	// x_wso2_customer_0.escalation.* properties. The EL1/EL2 notifyCfg emails
+	// are still those properties, copied as they are; each resolves to a
+	// "user" by email (or user_name, which is where SN looks). An unset slot,
+	// an address with no user, or a position/role nobody holds contributes
+	// nobody and is never an error -- SN logs and carries on the same way.
 	//
 	// Authorization ("only someone on the case's current notified-users list
 	// may de-escalate") is deliberately NOT enforced here -- same reasoning
@@ -125,77 +113,121 @@ type EscalationRepository interface {
 	// counts as not found here, since current_escalation_level/is_escalated
 	// only ever live on "case").
 	CreateEscalation(ctx context.Context, caseID string, action domain.EscalationAction, reason *string, actorEmail string) (domain.CreatedEscalation, error)
+	// CaseTeamLeads returns the leads of caseID's account's CRE (ABT) team:
+	// team_member rows with role 'lead' on the team whose id is
+	// account.cre_team_id, oldest membership first -- the same people EL1
+	// notifies as team leads. Empty, not an error, when the case has no
+	// account, the account no CRE team, or the team no lead.
+	CaseTeamLeads(ctx context.Context, caseID string) ([]domain.EscalationNotifiedUser, error)
 }
 
-// EscalationNotificationConfig holds the fixed, deployment-specific
-// escalation notification recipient GROUPS CreateEscalation layers on top of
-// the per-case-derived ones -- see that method's own doc comment for the full
-// EL1..EL5 cumulative rule these feed. Every field is a "group".id (migration
-// 000073), resolved to its REAL member list via team_member.group_id
-// (groupMemberResolver), not a single fixed address -- every configured tier
-// notifies however many people are actually in that group. Every field is
-// optional: empty means "no recipients from this slot," never a request
-// failure.
+// EscalationNotificationConfig holds the fixed EL1/EL2 recipients
+// CreateEscalation layers on top of the per-case ones -- see that method's
+// own doc comment for the full EL1..EL5 rule (EL3-EL5 come from team and
+// role data, not from here). Each field is ServiceNow's matching
+// x_wso2_customer_0.escalation.* system property, copied as it is: the two
+// list properties are comma-separated there and a []string here, the rest
+// are one address each. Every field is optional: empty means "no recipients
+// from this slot", never a request failure.
 type EscalationNotificationConfig struct {
-	EL1AmericasTLGroupID     string
-	EL2AmericasTUGroupID     string
-	EL2ServiceProductGroupID string
-	EL2IdentityServerGroupID string
-	EL2DefaultProductGroupID string
-	EL3CREHeadGroupID        string
-	EL4CCOGroupID            string
-	EL4CROGroupID            string
-	EL5CEOGroupID            string
+	// EL1AmericasTLEmails is escalation.el1.americas_tl_emails.
+	EL1AmericasTLEmails []string
+	// EL2AmericasTUEmails is escalation.el2.americas_tu_emails.
+	EL2AmericasTUEmails []string
+	// EL2ProductServiceEmail / EL2ProductIdentityServerEmail /
+	// EL2ProductDefaultEmail are escalation.el2.product_email.service /
+	// .identity_server / .default.
+	EL2ProductServiceEmail        string
+	EL2ProductIdentityServerEmail string
+	EL2ProductDefaultEmail        string
 }
 
-// groupMemberResolver resolves a "group".id to its real member user ids, via
-// team_member.group_id (migration 0075) -- that column was added
-// specifically for group membership but had no consumer until this one. An
-// interface, not a direct query call, so tests can substitute an in-memory
-// fixture instead of a real team_member table (see escalation_repo_test.go's
-// fakeGroupMemberResolver). Takes a rowsQuerier (case_repo.go, satisfied by
-// both *pgxpool.Pool and pgx.Tx) rather than always using its own pool, so
-// CreateEscalation can run this against the SAME open tx that already holds
-// the case row's FOR UPDATE lock -- see resolveEscalationRecipients's own
-// doc comment for why that matters.
-type groupMemberResolver interface {
-	// GroupMemberUserIDs returns groupID's member "user".id values, empty
-	// (not an error) if the group doesn't exist or currently has zero
-	// team_member rows.
-	GroupMemberUserIDs(ctx context.Context, q rowsQuerier, groupID string) ([]string, error)
+// The EL3-EL5 recipient sources: a team position and two app roles.
+const (
+	escalationCREHeadPosition = "cre_head"
+	escalationEL4Role         = "case_escalation_el4"
+	escalationEL5Role         = "case_escalation_el5"
+)
+
+// recipientDirectory resolves the non-per-case recipients to "user".id
+// values: configured addresses, team positions and app roles. An interface,
+// not direct query calls, so tests can substitute an in-memory fixture (see
+// escalation_repo_test.go's fakeRecipientDirectory). Every method takes a
+// rowsQuerier (case_repo.go, satisfied by both *pgxpool.Pool and pgx.Tx) so
+// CreateEscalation can run it on the SAME open tx that already holds the
+// case row's FOR UPDATE lock -- see resolveEscalationRecipients's own doc
+// comment for why that matters. None of team_member, role or user_role is
+// under row-level security, so a customer-triggered escalation resolves the
+// same people an internal one does.
+type recipientDirectory interface {
+	// UserIDsByEmails returns one "user".id per address that matches a user,
+	// in the order given; an address with no user is skipped, not an error.
+	UserIDsByEmails(ctx context.Context, q rowsQuerier, emails []string) ([]string, error)
+	// TeamPositionHolders returns every user holding position
+	// (team_member.role) in any team, earliest membership first.
+	TeamPositionHolders(ctx context.Context, q rowsQuerier, position string) ([]string, error)
+	// AppRoleHolders returns every user granted the app role (role.name,
+	// through user_role), earliest grant first.
+	AppRoleHolders(ctx context.Context, q rowsQuerier, role string) ([]string, error)
 }
 
-// dbGroupMemberResolver is groupMemberResolver's real implementation --
-// stateless (it carries no *pgxpool.Pool of its own): every call receives
-// its querier explicitly, so it has no "own connection" to fall back to.
-type dbGroupMemberResolver struct{}
+// dbRecipientDirectory is recipientDirectory's real implementation --
+// stateless: every call receives its querier explicitly.
+type dbRecipientDirectory struct{}
 
-// GroupMemberUserIDs implements groupMemberResolver. Joined to "user" the
-// same way every other recipient resolution in this file is, even though
-// team_member.user_id's own FK already guarantees a matching row -- kept for
-// consistency with the rest of this file's style, not because it changes
-// the result.
-func (r *dbGroupMemberResolver) GroupMemberUserIDs(ctx context.Context, q rowsQuerier, groupID string) ([]string, error) {
-	rows, err := q.Query(ctx, `
-		SELECT u.id
+// UserIDsByEmails implements recipientDirectory. ServiceNow looks each
+// address up by sys_user.user_name (which holds the email there) with
+// setLimit(1); this matches user_name or email, case-insensitively, and keeps
+// one user per address, preferring a user_name match.
+func (r *dbRecipientDirectory) UserIDsByEmails(ctx context.Context, q rowsQuerier, emails []string) ([]string, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	return queryUserIDs(ctx, q, "query escalation recipients by email", `
+		SELECT DISTINCT ON (e.ord) u.id::TEXT
+		FROM unnest($1::text[]) WITH ORDINALITY AS e(addr, ord)
+		JOIN "user" u ON LOWER(u.user_name) = LOWER(e.addr) OR LOWER(u.email) = LOWER(e.addr)
+		ORDER BY e.ord, (LOWER(u.user_name) = LOWER(e.addr)) DESC, u.id`, emails)
+}
+
+// TeamPositionHolders implements recipientDirectory.
+func (r *dbRecipientDirectory) TeamPositionHolders(ctx context.Context, q rowsQuerier, position string) ([]string, error) {
+	return queryUserIDs(ctx, q, "query escalation recipients by team position", `
+		SELECT tm.user_id::TEXT
 		FROM team_member tm
-		JOIN "user" u ON u.id = tm.user_id
-		WHERE tm.group_id = $1::uuid`, groupID)
+		WHERE tm.role = $1
+		GROUP BY tm.user_id
+		ORDER BY MIN(tm.created_on), tm.user_id`, position)
+}
+
+// AppRoleHolders implements recipientDirectory.
+func (r *dbRecipientDirectory) AppRoleHolders(ctx context.Context, q rowsQuerier, role string) ([]string, error) {
+	return queryUserIDs(ctx, q, "query escalation recipients by role", `
+		SELECT ur.user_id::TEXT
+		FROM user_role ur
+		JOIN role r ON r.id = ur.role_id
+		WHERE r.name = $1
+		GROUP BY ur.user_id
+		ORDER BY MIN(ur.created_on), ur.user_id`, role)
+}
+
+// queryUserIDs runs a query returning one user id per row.
+func queryUserIDs(ctx context.Context, q rowsQuerier, what, sql string, arg any) ([]string, error) {
+	rows, err := q.Query(ctx, sql, arg)
 	if err != nil {
-		return nil, fmt.Errorf("query group member user ids: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer rows.Close()
-
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan group member user id: %w", err)
+			return nil, fmt.Errorf("%s: scan: %w", what, err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate group member user ids: %w", err)
+		return nil, fmt.Errorf("%s: iterate: %w", what, err)
 	}
 	return ids, nil
 }
@@ -203,7 +235,7 @@ func (r *dbGroupMemberResolver) GroupMemberUserIDs(ctx context.Context, q rowsQu
 type escalationRepo struct {
 	db        *Scoped
 	notifyCfg EscalationNotificationConfig
-	groups    groupMemberResolver
+	dir       recipientDirectory
 }
 
 // NewEscalationRepository constructs an EscalationRepository backed by the
@@ -211,7 +243,7 @@ type escalationRepo struct {
 // repository issues carries the caller's identity for case_escalation's RLS
 // policy to read.
 func NewEscalationRepository(db *Scoped, notifyCfg EscalationNotificationConfig) EscalationRepository {
-	return &escalationRepo{db: db, notifyCfg: notifyCfg, groups: &dbGroupMemberResolver{}}
+	return &escalationRepo{db: db, notifyCfg: notifyCfg, dir: &dbRecipientDirectory{}}
 }
 
 // escalationLevelToEnum/escalationLevelFromEnum convert between
@@ -411,7 +443,7 @@ func (r *escalationRepo) SearchEscalations(ctx context.Context, caseIDs []string
 }
 
 // maxEscalationLevel is case_escalation_level_enum's ceiling (EL5) --
-// ESCALATE never goes past it.
+// ESCALATE from it is refused.
 const maxEscalationLevel = 5
 
 // escalationLevelInt parses a nullable current_level/previous_level column
@@ -433,23 +465,29 @@ func escalationLevelInt(raw *string) int {
 // nextEscalationLevel computes the resulting level for action given the
 // case's current level (previous int, already normalized via
 // escalationLevelInt) -- see EscalationRepository.CreateEscalation's own doc
-// comment for the full rule. ESCALATE past EL5 silently clamps (not an
-// error); DEESCALATE below EL0 returns a ValidationError instead of a
-// silent no-op or going negative, since there's genuinely nothing to
-// de-escalate.
+// comment for the full rule: ESCALATE goes up one, DEESCALATE goes to EL0,
+// and either one with nowhere to go is SN's 409.
 func nextEscalationLevel(action domain.EscalationAction, previous int) (int, error) {
 	if action == domain.EscalationActionDeescalate {
 		if previous == 0 {
-			return 0, &apierror.ValidationError{Msg: "case is already at the lowest escalation level (EL0); nothing to de-escalate"}
+			return 0, &apierror.ConflictError{Msg: "case is not currently escalated (already at EL0); nothing to de-escalate"}
 		}
-		return previous - 1, nil
+		return 0, nil
 	}
 	// ESCALATE, and any already-validated-upstream default.
-	next := previous + 1
-	if next > maxEscalationLevel {
-		next = maxEscalationLevel
+	if previous >= maxEscalationLevel {
+		return 0, &apierror.ConflictError{Msg: "case is already at the maximum escalation level (EL5); no further escalation is possible"}
 	}
-	return next, nil
+	return previous + 1, nil
+}
+
+// notificationLevel is the level whose cumulative EL1..N list an escalation
+// notifies: the level reached for ESCALATE, the level left for DEESCALATE.
+func notificationLevel(action domain.EscalationAction, previous, next int) int {
+	if action == domain.EscalationActionDeescalate {
+		return previous
+	}
+	return next
 }
 
 // escalationCaseContext is everything CreateEscalation needs about the case
@@ -457,111 +495,128 @@ func nextEscalationLevel(action domain.EscalationAction, previous int) (int, err
 // recipient computation below is consistent with the level transition it's
 // reacting to.
 type escalationCaseContext struct {
-	number, subject     string
-	wso2ID              *string
-	technicalOwnerID    *string
-	csmID               *string
-	creTeamManagerID    *string
-	productCategory     *string
-	productBusinessUnit *string
+	number, subject  string
+	wso2ID           *string
+	accountManagerID *string
+	technicalOwnerID *string
+	csmID            *string
+	// teamLeadIDs are the CRE team's 'lead' members, oldest membership first.
+	teamLeadIDs     []string
+	productCategory *string
+	productCode     *string
+	productName     *string
+}
+
+// wso2ISProductCode / wso2ISProductName are how ServiceNow's
+// EscalationNotificationUtils recognises WSO2 Identity Server for EL2
+// routing (WSO2_IS_PRODUCT_CODE / WSO2_IS_PRODUCT_NAME): either one matches.
+const (
+	wso2ISProductCode = "wso2is"
+	wso2ISProductName = "WSO2 Identity Server"
+)
+
+// el2ProductEmail is SN's _resolveProductBasedUser: which one EL2 product
+// contact a case gets. A case with no product, and any product that is
+// neither a service nor Identity Server, gets the default.
+func (cc escalationCaseContext) el2ProductEmail(cfg EscalationNotificationConfig) string {
+	if cc.productCategory == nil {
+		return cfg.EL2ProductDefaultEmail
+	}
+	if *cc.productCategory == "SERVICE" {
+		return cfg.EL2ProductServiceEmail
+	}
+	if *cc.productCategory == "SOFTWARE" &&
+		((cc.productCode != nil && *cc.productCode == wso2ISProductCode) ||
+			(cc.productName != nil && *cc.productName == wso2ISProductName)) {
+		return cfg.EL2ProductIdentityServerEmail
+	}
+	return cfg.EL2ProductDefaultEmail
 }
 
 // resolveEscalationRecipients implements the cumulative EL1..EL5 rule
 // described on EscalationRepository.CreateEscalation's own doc comment,
-// returning a deduped set of "user".id values for whatever newLevel resulted
-// from this call. A configured notifyCfg group id that doesn't exist or has
-// no members resolves to an empty list, not an error -- identical to an
-// unconfigured (empty) group id slot.
+// returning "user".id values deduped in first-seen order (SN's seenIds) for
+// EL1..newLevel, where newLevel is notificationLevel's pick.
 //
 // q is CreateEscalation's own open tx, not r's pool -- CreateEscalation
 // holds one pool connection for that tx, with a FOR UPDATE lock on the case
-// row, for its whole duration. If GroupMemberUserIDs instead acquired a
-// SECOND pool connection per call (as an earlier revision of this method
-// did), a saturated pool means every concurrent escalation blocks on
-// pool.Acquire while it's still holding its own tx connection and the
-// case-row lock -- a real deadlock/stall risk under load, not just a
-// theoretical one. Running the read on q=tx instead needs no second
-// connection at all. This is safe: the call happens before tx.Commit (see
-// CreateEscalation's own call site), so "transaction already closed" cannot
-// occur, and getEscalationNotifiedUsers already reads through tx for the
-// exact same reason. The reads are read-only, so this adds no extra locks.
+// row, for its whole duration. Acquiring a SECOND pool connection here would
+// mean a saturated pool blocks every concurrent escalation on pool.Acquire
+// while it still holds its own tx connection and the case-row lock. Running
+// the read on q=tx needs no second connection; the reads are read-only, so
+// this adds no extra locks.
 func (r *escalationRepo) resolveEscalationRecipients(ctx context.Context, q rowsQuerier, newLevel int, cc escalationCaseContext) ([]string, error) {
 	seen := map[string]bool{}
+	var ids []string
 	add := func(id *string) {
-		if id != nil && *id != "" {
+		if id != nil && *id != "" && !seen[*id] {
 			seen[*id] = true
+			ids = append(ids, *id)
 		}
 	}
-	addGroup := func(groupID string) error {
-		groupID = strings.TrimSpace(groupID)
-		if groupID == "" {
+	addEmails := func(emails ...string) error {
+		var clean []string
+		for _, e := range emails {
+			if e = strings.TrimSpace(e); e != "" {
+				clean = append(clean, e)
+			}
+		}
+		if len(clean) == 0 {
 			return nil
 		}
-		ids, err := r.groups.GroupMemberUserIDs(ctx, q, groupID)
+		found, err := r.dir.UserIDsByEmails(ctx, q, clean)
 		if err != nil {
-			return fmt.Errorf("resolve escalation recipient group %s: %w", groupID, err)
+			return fmt.Errorf("resolve escalation recipients: %w", err)
 		}
-		for _, id := range ids {
-			seen[id] = true
+		for i := range found {
+			add(&found[i])
+		}
+		return nil
+	}
+
+	addFrom := func(found []string, err error) error {
+		if err != nil {
+			return fmt.Errorf("resolve escalation recipients: %w", err)
+		}
+		for i := range found {
+			add(&found[i])
 		}
 		return nil
 	}
 
 	if newLevel >= 1 {
-		add(cc.creTeamManagerID)
-		if err := addGroup(r.notifyCfg.EL1AmericasTLGroupID); err != nil {
+		for i := range cc.teamLeadIDs {
+			add(&cc.teamLeadIDs[i])
+		}
+		if err := addEmails(r.notifyCfg.EL1AmericasTLEmails...); err != nil {
 			return nil, err
 		}
+		add(cc.accountManagerID)
 		add(cc.technicalOwnerID)
-		// account.account_manager_id (SN's u_owner) is deliberately never
-		// read -- see this repository's CreateEscalation doc comment for why.
 	}
 	if newLevel >= 2 {
-		if err := addGroup(r.notifyCfg.EL2AmericasTUGroupID); err != nil {
+		if err := addEmails(r.notifyCfg.EL2AmericasTUEmails...); err != nil {
 			return nil, err
 		}
-		if cc.productCategory != nil {
-			switch {
-			case *cc.productCategory == "SERVICE":
-				if err := addGroup(r.notifyCfg.EL2ServiceProductGroupID); err != nil {
-					return nil, err
-				}
-			case cc.productBusinessUnit != nil && *cc.productBusinessUnit == "IAM":
-				if err := addGroup(r.notifyCfg.EL2IdentityServerGroupID); err != nil {
-					return nil, err
-				}
-			default:
-				if err := addGroup(r.notifyCfg.EL2DefaultProductGroupID); err != nil {
-					return nil, err
-				}
-			}
+		if err := addEmails(cc.el2ProductEmail(r.notifyCfg)); err != nil {
+			return nil, err
 		}
-		// cc.productCategory == nil (no deployed product/product info at
-		// all): no product-routed recipient, silently -- not an error.
 	}
 	if newLevel >= 3 {
-		if err := addGroup(r.notifyCfg.EL3CREHeadGroupID); err != nil {
+		if err := addFrom(r.dir.TeamPositionHolders(ctx, q, escalationCREHeadPosition)); err != nil {
 			return nil, err
 		}
 		add(cc.csmID)
 	}
 	if newLevel >= 4 {
-		if err := addGroup(r.notifyCfg.EL4CCOGroupID); err != nil {
-			return nil, err
-		}
-		if err := addGroup(r.notifyCfg.EL4CROGroupID); err != nil {
+		if err := addFrom(r.dir.AppRoleHolders(ctx, q, escalationEL4Role)); err != nil {
 			return nil, err
 		}
 	}
 	if newLevel >= 5 {
-		if err := addGroup(r.notifyCfg.EL5CEOGroupID); err != nil {
+		if err := addFrom(r.dir.AppRoleHolders(ctx, q, escalationEL5Role)); err != nil {
 			return nil, err
 		}
-	}
-
-	ids := make([]string, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
 	}
 	return ids, nil
 }
@@ -584,20 +639,22 @@ func (r *escalationRepo) createEscalationTx(ctx context.Context, tx pgx.Tx, case
 	err := tx.QueryRow(ctx, `
 		SELECT c.current_escalation_level::TEXT,
 		       wi.number, wi.subject, wi.wso2_id,
-		       a.technical_owner_id, a.customer_success_manager_id, g.manager_id,
-		       prod.category::TEXT, prod.business_unit::TEXT
+		       a.account_manager_id, a.technical_owner_id, a.customer_success_manager_id,
+		       ARRAY(SELECT tm.user_id::TEXT FROM team_member tm
+		             WHERE tm.team_id = a.cre_team_id AND tm.role = 'lead'
+		             ORDER BY tm.created_on, tm.user_id),
+		       prod.category::TEXT, prod.code, prod.name
 		FROM "case" c
 		JOIN work_item wi ON wi.id = c.id
 		LEFT JOIN account a ON a.id = wi.account_id
-		LEFT JOIN "group" g ON g.id = a.cre_team_id
 		LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
 		LEFT JOIN product prod ON prod.id = dp.product_id
 		WHERE c.id = $1
 		FOR UPDATE OF c`, caseID,
 	).Scan(
 		&currentLevel, &cc.number, &cc.subject, &cc.wso2ID,
-		&cc.technicalOwnerID, &cc.csmID, &cc.creTeamManagerID,
-		&cc.productCategory, &cc.productBusinessUnit,
+		&cc.accountManagerID, &cc.technicalOwnerID, &cc.csmID, &cc.teamLeadIDs,
+		&cc.productCategory, &cc.productCode, &cc.productName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.CreatedEscalation{}, &apierror.NotFoundError{Msg: "case not found"}
@@ -613,7 +670,7 @@ func (r *escalationRepo) createEscalationTx(ctx context.Context, tx pgx.Tx, case
 	}
 	isEscalated := newLevelInt >= 1
 
-	recipientIDs, err := r.resolveEscalationRecipients(ctx, tx, newLevelInt, cc)
+	recipientIDs, err := r.resolveEscalationRecipients(ctx, tx, notificationLevel(action, previousLevelInt, newLevelInt), cc)
 	if err != nil {
 		return domain.CreatedEscalation{}, err
 	}
@@ -685,4 +742,32 @@ func (r *escalationRepo) createEscalationTx(ctx context.Context, tx pgx.Tx, case
 		Reason:             reason,
 		NotificationSentTo: notified,
 	}, nil
+}
+
+// CaseTeamLeads implements EscalationRepository.
+func (r *escalationRepo) CaseTeamLeads(ctx context.Context, caseID string) ([]domain.EscalationNotifiedUser, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT u.id, u.user_name, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')), u.email
+		FROM work_item wi
+		JOIN account a ON a.id = wi.account_id
+		JOIN team_member tm ON tm.team_id = a.cre_team_id AND tm.role = 'lead'
+		JOIN "user" u ON u.id = tm.user_id
+		WHERE wi.id = $1
+		ORDER BY tm.created_on, u.id`, caseID)
+	if err != nil {
+		return nil, fmt.Errorf("list case team leads: %w", err)
+	}
+	defer rows.Close()
+	leads := []domain.EscalationNotifiedUser{}
+	for rows.Next() {
+		var l domain.EscalationNotifiedUser
+		if err := rows.Scan(&l.ID, &l.UserName, &l.Name, &l.Email); err != nil {
+			return nil, fmt.Errorf("scan case team lead: %w", err)
+		}
+		leads = append(leads, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate case team leads: %w", err)
+	}
+	return leads, nil
 }

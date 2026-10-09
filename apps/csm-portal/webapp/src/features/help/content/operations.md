@@ -238,10 +238,18 @@ device/browser.
 A **Create incident** button (or a case's own **Create incident from case…**
 action) opens a form for Caller, Service, and a classification (category,
 subcategory (optional), channel, impact, urgency — Priority is computed live from
-impact × urgency and not itself editable). **Assignment group** is not a
-manual pick here: it's shown read-only, auto-filled from the selected
-Service's ServiceNow support group, and blank with a hint if that service
-has none set in ServiceNow.
+impact × urgency and not itself editable). **Assignment group** defaults to
+the selected Service's support group and follows the Service as you change
+it. If the Service has no support group, the default team is used instead
+(with no default team configured, the field stays empty and the incident is
+created unassigned unless you pick a group). You can pick any group that is
+some service's support group — the list is not limited to the chosen
+Service, and the Service's own group (or the default team) is listed first.
+Once you pick a group yourself it stays when the Service changes, and the
+hint under the field shows the Service's support group with a **Use it**
+link to go back to it; clearing the field also goes back to following the
+Service. If the group is refused on create, the reason is shown on the field
+and the rest of the form is kept.
 
 The detail page shows:
 

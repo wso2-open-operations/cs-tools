@@ -44,12 +44,12 @@ func (r PlaybookRepo) Get(ctx context.Context, id string) (*domain.Playbook, err
 	return r.Client.GetPlaybook(ctx, id)
 }
 
-func (r PlaybookRepo) Create(ctx context.Context, req domain.CreatePlaybookRequest) (string, error) {
-	return r.Client.CreatePlaybook(ctx, req)
+func (r PlaybookRepo) Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (string, error) {
+	return r.Client.CreatePlaybook(ctx, req, actorID)
 }
 
-func (r PlaybookRepo) Patch(ctx context.Context, req domain.PatchPlaybookRequest) error {
-	return r.Client.PatchPlaybook(ctx, req)
+func (r PlaybookRepo) Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) error {
+	return r.Client.PatchPlaybook(ctx, req, actorID)
 }
 
 func (r PlaybookRepo) Delete(ctx context.Context, id string) error {

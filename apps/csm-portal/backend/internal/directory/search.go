@@ -129,6 +129,21 @@ func (d *Directory) SearchTeams(req SearchRequest) SearchTeamsResponse {
 	return SearchTeamsResponse{Teams: page, Total: total, Offset: offset, Limit: limit}
 }
 
+// ClampPagination applies the catalogue's default and maximum page size and a
+// non-negative offset to a caller-supplied page.
+func ClampPagination(p Pagination) Pagination {
+	if p.Limit <= 0 {
+		p.Limit = catalogDefaultLimit
+	}
+	if p.Limit > catalogMaxLimit {
+		p.Limit = catalogMaxLimit
+	}
+	if p.Offset < 0 {
+		p.Offset = 0
+	}
+	return p
+}
+
 // SearchRoles serves the assignable-role catalogue from the startup-resolved
 // list, with the same no-upstream-call guarantee as SearchTeams.
 func (d *Directory) SearchRoles(req SearchRequest) SearchRolesResponse {

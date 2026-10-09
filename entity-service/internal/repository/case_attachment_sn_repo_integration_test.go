@@ -109,7 +109,6 @@ func TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey(t *test
 	ctx := repository.WithSystemIdentity(context.Background())
 	repo := repository.NewCaseRepository(repository.NewScoped(pool))
 
-	createdOn := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	description := "a servicenow-sourced attachment"
 	req := domain.CreateAttachmentRequest{
 		ReferenceID:   caseAttachmentSNTestCaseID,
@@ -119,9 +118,24 @@ func TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey(t *test
 		Description:   &description,
 	}
 
-	created, err := repo.CreateCaseAttachmentFromServiceNow(ctx, req, caseAttachmentSNTestAttachmentID, 2048, caseAttachmentSNTestUserID, createdOn)
+	// Bracket the insert with the database's own clock so the assertion below
+	// does not depend on the test machine's clock or timezone.
+	var before, after time.Time
+	if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&before); err != nil {
+		t.Fatalf("read database clock: %v", err)
+	}
+	created, err := repo.CreateCaseAttachmentFromServiceNow(ctx, req, caseAttachmentSNTestAttachmentID, 2048, caseAttachmentSNTestUserID)
 	if err != nil {
 		t.Fatalf("CreateCaseAttachmentFromServiceNow() error = %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&after); err != nil {
+		t.Fatalf("read database clock: %v", err)
+	}
+	// created_on is the database's own clock, never a ServiceNow timestamp: the
+	// zone-less createdOn ServiceNow replies with is local wall-clock time, and
+	// storing it once put rows hours in the future ("uploaded 5h from now").
+	if created.CreatedOn.Before(before) || created.CreatedOn.After(after) {
+		t.Errorf("created.CreatedOn = %v, want within the database clock window [%v, %v]", created.CreatedOn, before, after)
 	}
 	if created.ID != caseAttachmentSNTestAttachmentID {
 		t.Errorf("created.ID = %q, want %q", created.ID, caseAttachmentSNTestAttachmentID)
@@ -171,6 +185,9 @@ func TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey(t *test
 		}
 		if a.Description == nil || *a.Description != description {
 			t.Errorf("Description = %v, want %q", a.Description, description)
+		}
+		if !a.CreatedOn.Equal(created.CreatedOn) {
+			t.Errorf("stored CreatedOn = %v, want the value the create returned, %v", a.CreatedOn, created.CreatedOn)
 		}
 	})
 }

@@ -27,7 +27,13 @@ The profile page itself shows:
   "Locked out" chip above, and it's a best-effort lookup: if it couldn't be checked, this
   field reads "Unavailable" rather than a false "Not found".
 - **Permissions & assignments**: platform roles, and (internal users only) group
-  memberships.
+  memberships. For a wso2.com-email person this splits into two role lists — **Customer
+  Portal roles** (what the Customer Portal's own access is modeled on) and **CSM Platform
+  roles** (this portal's own role assignment: viewer, escalator, CS Engineer, admin, ...),
+  shown as "Unavailable" rather than a false "none" if the CSM Platform role lookup
+  couldn't be checked — since the two describe different things for the same person;
+  everyone else sees the single, unchanged **Platform roles** list (entity-service's own
+  role data), as before.
 - **Accessible projects**: external contacts only; see below.
 
 ## Reading project access status

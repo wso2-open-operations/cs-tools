@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -78,6 +79,48 @@ func TestUserService_GetMe_ResolvesCallerFromToken(t *testing.T) {
 	}
 }
 
+// TestUserService_GetMe_Phone proves the user's phone is passed through to the
+// response and serialised as "phone", and that a NULL phone is omitted.
+func TestUserService_GetMe_Phone(t *testing.T) {
+	phone := "+15555550123"
+	for _, tc := range []struct {
+		name     string
+		phone    *string
+		wantJSON bool
+	}{
+		{"with phone", &phone, true},
+		{"NULL phone", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := stubUserRepo{
+				getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
+					return domain.User{ID: "11111111-1111-1111-1111-111111111111", Email: email, Phone: tc.phone}, nil
+				},
+			}
+			svc := NewUserService(repo)
+			resp, err := svc.GetMe(contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com")))
+			if err != nil {
+				t.Fatalf("GetMe returned error: %v", err)
+			}
+			raw, err := json.Marshal(resp)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			got, present := m["phone"]
+			if present != tc.wantJSON {
+				t.Fatalf("phone present = %v, want %v (body %s)", present, tc.wantJSON, raw)
+			}
+			if tc.wantJSON && got != phone {
+				t.Errorf("phone = %v, want %q", got, phone)
+			}
+		})
+	}
+}
+
 // TestUserService_GetMe_RequiresToken proves a missing x-user-id-token header
 // fails as Unauthorized rather than falling through to some other identity.
 func TestUserService_GetMe_RequiresToken(t *testing.T) {
@@ -126,35 +169,52 @@ func TestUserService_GetMe_PropagatesRepoNotFound(t *testing.T) {
 	}
 }
 
-// TestUserService_PatchMe_UpdatesTimeZone proves PatchMe resolves the caller
-// from their token (same as GetMe), never a caller-supplied id, and writes
-// the new TimeZone to that user's own row.
-func TestUserService_PatchMe_UpdatesTimeZone(t *testing.T) {
-	var gotUserID, gotTimeZone string
-	repo := stubUserRepo{
+// patchCall records what PatchMe handed to UpdateUserProfile.
+type patchCall struct {
+	userID          string
+	timezone, phone *string
+	called          bool
+}
+
+func patchRepo(call *patchCall) stubUserRepo {
+	return stubUserRepo{
 		getUserByEmail: func(_ context.Context, email string) (domain.User, error) {
-			if email != "jane.doe@example.com" {
-				t.Fatalf("GetUserByEmail called with unexpected email: %q", email)
-			}
 			return domain.User{ID: "11111111-1111-1111-1111-111111111111", Email: email}, nil
 		},
-		updateUserTimeZone: func(_ context.Context, userID, timezone string) (time.Time, error) {
-			gotUserID, gotTimeZone = userID, timezone
-			return time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC), nil
+		updateUserProfile: func(_ context.Context, userID string, timezone, phone *string) (domain.UserProfileUpdate, error) {
+			*call = patchCall{userID: userID, timezone: timezone, phone: phone, called: true}
+			out := domain.UserProfileUpdate{UpdatedOn: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
+			if timezone != nil {
+				out.Timezone = timezone
+			}
+			if phone != nil && *phone != "" {
+				out.Phone = phone
+			}
+			return out, nil
 		},
 	}
-	svc := NewUserService(repo)
+}
+
+// TestUserService_PatchMe_UpdatesTimeZone proves PatchMe resolves the caller
+// from their token (same as GetMe), never a caller-supplied id, and writes
+// the new TimeZone to that user's own row, leaving phone untouched.
+func TestUserService_PatchMe_UpdatesTimeZone(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call))
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	resp, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{TimeZone: "Asia/Colombo"})
 	if err != nil {
 		t.Fatalf("PatchMe returned error: %v", err)
 	}
-	if gotUserID != "11111111-1111-1111-1111-111111111111" {
-		t.Errorf("UpdateUserTimeZone called with userID %q, want the caller's own id", gotUserID)
+	if call.userID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("UpdateUserProfile called with userID %q, want the caller's own id", call.userID)
 	}
-	if gotTimeZone != "Asia/Colombo" {
-		t.Errorf("UpdateUserTimeZone called with timezone %q, want Asia/Colombo", gotTimeZone)
+	if call.timezone == nil || *call.timezone != "Asia/Colombo" {
+		t.Errorf("timezone = %v, want Asia/Colombo", call.timezone)
+	}
+	if call.phone != nil {
+		t.Errorf("phone = %q, want nil (untouched)", *call.phone)
 	}
 	if resp.User.ID != "11111111-1111-1111-1111-111111111111" {
 		t.Errorf("response User.ID = %q, want the caller's own id", resp.User.ID)
@@ -162,12 +222,84 @@ func TestUserService_PatchMe_UpdatesTimeZone(t *testing.T) {
 	if resp.User.UpdatedOn != "2026-10-03T12:00:00Z" {
 		t.Errorf("response User.UpdatedOn = %q, want 2026-10-03T12:00:00Z", resp.User.UpdatedOn)
 	}
+	if resp.User.TimeZone == nil || *resp.User.TimeZone != "Asia/Colombo" {
+		t.Errorf("response User.TimeZone = %v, want Asia/Colombo", resp.User.TimeZone)
+	}
 }
 
-// TestUserService_PatchMe_RejectsBlankTimeZone mirrors the ServiceNow-backed
-// PatchMe's own validation -- an empty TimeZone is a ValidationError before
-// the repository is ever reached.
-func TestUserService_PatchMe_RejectsBlankTimeZone(t *testing.T) {
+// TestUserService_PatchMe_PhoneOnly proves a phone-only PATCH is accepted, the
+// value is trimmed, and timezone is left untouched.
+func TestUserService_PatchMe_PhoneOnly(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call))
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	resp, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp("  +15555550123 ")})
+	if err != nil {
+		t.Fatalf("PatchMe returned error: %v", err)
+	}
+	if call.timezone != nil {
+		t.Errorf("timezone = %q, want nil (untouched)", *call.timezone)
+	}
+	if call.phone == nil || *call.phone != "+15555550123" {
+		t.Errorf("phone = %v, want trimmed +15555550123", call.phone)
+	}
+	if resp.User.Phone == nil || *resp.User.Phone != "+15555550123" {
+		t.Errorf("response User.Phone = %v, want +15555550123", resp.User.Phone)
+	}
+}
+
+// TestUserService_PatchMe_BothFields proves timeZone and phone are written together.
+func TestUserService_PatchMe_BothFields(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call))
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{TimeZone: "Asia/Colombo", Phone: strp("+15555550123")}); err != nil {
+		t.Fatalf("PatchMe returned error: %v", err)
+	}
+	if call.timezone == nil || *call.timezone != "Asia/Colombo" || call.phone == nil || *call.phone != "+15555550123" {
+		t.Errorf("got timezone=%v phone=%v, want both set", call.timezone, call.phone)
+	}
+}
+
+// TestUserService_PatchMe_BlankPhoneClears proves a whitespace-only phone is
+// handed to the repository as an empty string, which clears the column.
+func TestUserService_PatchMe_BlankPhoneClears(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call))
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp("   ")}); err != nil {
+		t.Fatalf("PatchMe returned error: %v", err)
+	}
+	if call.phone == nil || *call.phone != "" {
+		t.Errorf("phone = %v, want empty string (clear)", call.phone)
+	}
+}
+
+// TestUserService_PatchMe_PhoneTooLong proves 33 characters is a ValidationError
+// before the repository is reached, and 32 (after trimming) is accepted.
+func TestUserService_PatchMe_PhoneTooLong(t *testing.T) {
+	var call patchCall
+	svc := NewUserService(patchRepo(&call))
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	_, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(strings.Repeat("1", 33))})
+	if _, ok := err.(*apierror.ValidationError); !ok {
+		t.Fatalf("PatchMe error = %v (%T), want *apierror.ValidationError", err, err)
+	}
+	if call.called {
+		t.Error("UpdateUserProfile was called for an over-long phone")
+	}
+	if _, err := svc.PatchMe(ctx, domain.PatchUserMeRequest{Phone: strp(" " + strings.Repeat("1", 32) + " ")}); err != nil {
+		t.Errorf("32 characters after trimming should be accepted, got %v", err)
+	}
+}
+
+// TestUserService_PatchMe_RejectsEmptyBody proves a PATCH with neither field is
+// a ValidationError before the repository is ever reached.
+func TestUserService_PatchMe_RejectsEmptyBody(t *testing.T) {
 	svc := NewUserService(stubUserRepo{})
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
@@ -304,7 +436,7 @@ func TestUserService_SearchUsers_UserIDsGroupFiltersReachRepository(t *testing.T
 }
 
 // TestUserService_SearchUsers_UserIDsGroupFilters_RejectsMalformedUUID proves
-// userIds/groupIds still validate as UUIDs before reaching the repository --
+// userIds/groupIds/teamIds still validate as UUIDs before reaching the repository --
 // only the blanket "unsupported on Postgres" rejection was removed.
 func TestUserService_SearchUsers_UserIDsGroupFilters_RejectsMalformedUUID(t *testing.T) {
 	tests := []struct {
@@ -313,6 +445,7 @@ func TestUserService_SearchUsers_UserIDsGroupFilters_RejectsMalformedUUID(t *tes
 	}{
 		{name: "userIds", filters: domain.SearchUsersFilters{UserIDs: []string{"not-a-uuid"}}},
 		{name: "groupIds", filters: domain.SearchUsersFilters{GroupIDs: []string{"not-a-uuid"}}},
+		{name: "teamIds", filters: domain.SearchUsersFilters{TeamIDs: []string{"not-a-uuid"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -228,7 +228,6 @@ export default function ChangeRequestsPage(): JSX.Element {
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchTerm("");
     setPage(1);
   };
 

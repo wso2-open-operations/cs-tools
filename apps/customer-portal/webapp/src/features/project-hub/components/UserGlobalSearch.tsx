@@ -55,7 +55,11 @@ import {
   fetchAllCasesForExport,
 } from "@features/project-hub/utils/casesExport";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
-import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
+import {
+  formatCasesTableCaseIdentifier,
+  formatCaseStatusLabel,
+  getStatusColor,
+} from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import type { GlobalSearchCase, GlobalSearchProject } from "@features/project-hub/types/globalSearch";
 import { getCaseNavigationPath, getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
@@ -858,7 +862,7 @@ export default function UserGlobalSearch(): JSX.Element {
                               }}
                             />
                             <Typography variant="body2">
-                              {c.state?.label ?? "--"}
+                              {formatCaseStatusLabel(c.state?.label)}
                             </Typography>
                           </Box>
                         </TableCell>

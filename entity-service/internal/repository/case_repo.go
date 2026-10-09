@@ -166,6 +166,15 @@ func CaseResolutionCodeFromEnum(enumLabel string) domain.CaseResolutionCode {
 // resolved_on columns (migrations 0023/0024), unlike CHANGE_REQUEST,
 // INCIDENT, PROBLEM, and the rest of work_item_type_enum, which are surfaced
 // through entirely different endpoints.
+// caseLikeNonAnnouncementTypes are the work item types that may own a case
+// attachment or be named as another case's related case: every case-like type
+// except an announcement, which has never been able to (it had no "case" row for
+// the old foreign keys to point at, and the row level security of the announcement
+// tables relies on that). Those foreign keys now point at work_item (migrations
+// 0210 and 0211) so a ticket keeps both after it is converted to another type, and
+// the statements that write either check this list instead.
+const caseLikeNonAnnouncementTypes = `'{CASE,ENGAGEMENT,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS}'::work_item_type_enum[]`
+
 const caseLikeWorkItemTypes = `'{CASE,ENGAGEMENT,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS,ANNOUNCEMENT}'::work_item_type_enum[]`
 
 // announcementVisibilityLeakGuard excludes an ANNOUNCEMENT-typed work_item
@@ -224,6 +233,30 @@ func announcementLeakGuardFor(scope SearchScope) string {
 const caseLikeStateColumn = `COALESCE(c.state::TEXT, eng.state::TEXT, sr.state::TEXT, sra.state::TEXT,
 	CASE WHEN ann.state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE ann.state::TEXT END)`
 
+// caseLikeOwnStateColumn is the state of a case-like work item as read from the
+// extension table of its OWN type only (work_item.type), NULL when that table
+// has no row for it. It is what every list filter on state matches
+// (caseLikeStateLookupTables looks each type up in its own table), so a count
+// that must equal what a list shows reads the state through this and not
+// through caseLikeStateColumn, whose COALESCE also finds a state in another
+// type's table. Synced data has both kinds of row that the two disagree on:
+//
+//   - a work item whose extension row is missing altogether (no state anywhere);
+//   - a work item typed CASE whose only extension row is an engagement's or a
+//     security report's (a state, but not one a CASE-typed list can see).
+//
+// Neither appears in a list filtered by state, so neither may be counted as
+// outstanding, action required or resolved by a card that links to such a list.
+// announcement_state_enum's CLOSE is normalised to CLOSED, as in
+// caseLikeStateColumn.
+const caseLikeOwnStateColumn = `CASE wi.type
+	WHEN 'CASE' THEN c.state::TEXT
+	WHEN 'ENGAGEMENT' THEN eng.state::TEXT
+	WHEN 'SERVICE_REQUEST' THEN sr.state::TEXT
+	WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.state::TEXT
+	WHEN 'ANNOUNCEMENT' THEN CASE WHEN ann.state::TEXT = 'CLOSE' THEN 'CLOSED' ELSE ann.state::TEXT END
+END`
+
 // caseLikeCauseColumn/caseLikeCloseNotesColumn/caseLikeResolvedOnColumn
 // mirror caseLikeStateColumn for the other three columns every case-like
 // extension table shares. *_cause_enum's label sets are identical across all
@@ -232,6 +265,20 @@ const caseLikeCauseColumn = `COALESCE(c.cause::TEXT, eng.cause::TEXT, sr.cause::
 const caseLikeCloseNotesColumn = `COALESCE(c.close_notes, eng.close_notes, sr.close_notes, sra.close_notes, ann.close_notes)`
 const caseLikeResolvedOnColumn = `COALESCE(c.resolved_on, eng.resolved_on, sr.resolved_on, sra.resolved_on, ann.resolved_on)`
 const caseLikeClosedOnColumn = `COALESCE(c.closed_on, eng.closed_on, sr.closed_on, sra.closed_on, ann.closed_on)`
+
+// caseLikeOwnClosedOnColumn is the closure time of a work item as read from the
+// extension table of its OWN type only (see caseLikeOwnStateColumn): NULL when
+// that table has no row for it. A closed-date filter and the Closed (Last 30d)
+// card use it so that a work item typed CASE whose only extension row is an
+// engagement's does not match on the engagement's closure time. The detail read
+// keeps caseLikeClosedOnColumn: it shows whatever closure time the item has.
+const caseLikeOwnClosedOnColumn = `CASE wi.type
+	WHEN 'CASE' THEN c.closed_on
+	WHEN 'ENGAGEMENT' THEN eng.closed_on
+	WHEN 'SERVICE_REQUEST' THEN sr.closed_on
+	WHEN 'SECURITY_REPORT_ANALYSIS' THEN sra.closed_on
+	WHEN 'ANNOUNCEMENT' THEN ann.closed_on
+END`
 
 // caseLikeClosedByUserIDColumn mirrors caseLikeClosedOnColumn for
 // closed_by_user_id -- a real column on all five case-like extension tables
@@ -383,7 +430,16 @@ type CaseRepository interface {
 	// ServiceNow identity string) -- unlike deployment.created_by/
 	// deployment_product.created_by, case_attachment.uploaded_by is a real
 	// FK to "user"(id).
-	CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string, createdOn time.Time) (domain.Attachment, error)
+	//
+	// created_on is deliberately NOT a parameter: it takes the column default,
+	// the database's own clock. ServiceNow's attachment-create reply carries a
+	// zone-less "YYYY-MM-DD HH:MM:SS" createdOn that is not UTC (it is rendered
+	// in a ServiceNow-side timezone), so storing it -- as this method used to --
+	// wrote local wall-clock time into a timestamptz as if it were UTC and put
+	// the row hours in the future. The clock here is the same one the plain
+	// CreateCaseAttachment path uses, and sits within the create call's latency
+	// of the moment ServiceNow accepted the file.
+	CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
 	// SearchCaseAttachments returns a paginated slice of attachments for the given
 	// case, most recently created first, together with the total matching count.
 	SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
@@ -1508,7 +1564,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		ackID, ackName, ackEmail                 *string
 		closerID, closerName                     *string
 		pcID, pcNum, pcType                      *string
-		rcID, rcNum                              *string
+		rcID, rcNum, rcType                      *string
 		convID, convSubject                      *string
 		accountID, accountName, accountTier      *string
 		severity, issueType, workState, caseType *string
@@ -1561,7 +1617,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		        ack.id, COALESCE(ack.name, NULLIF(TRIM(CONCAT_WS(' ', ack.first_name, ack.last_name)), '')), ack.email,
 		        closer.id, COALESCE(closer.name, NULLIF(TRIM(CONCAT_WS(' ', closer.first_name, closer.last_name)), '')),
 		        pw.id, pw.number, pw.type::TEXT,
-		        rc_wi.id, rc_wi.number,
+		        rc_wi.id, rc_wi.number, rc_wi.type::TEXT,
 		        conv.id, conv.subject
 		 FROM work_item wi
 		 LEFT JOIN "case" c ON c.id = wi.id
@@ -1579,8 +1635,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		 LEFT JOIN "user" ack ON ack.id = wi.acknowledged_by_user_id
 		 LEFT JOIN "user" closer ON closer.id = `+caseLikeClosedByUserIDColumn+`
 		 LEFT JOIN work_item pw ON pw.id = wi.parent_id
-		 LEFT JOIN "case" rc ON rc.id = c.related_case_id
-		 LEFT JOIN work_item rc_wi ON rc_wi.id = rc.id
+		 LEFT JOIN work_item rc_wi ON rc_wi.id = c.related_case_id
 		 LEFT JOIN work_item conv ON conv.id = wi.conversation_id
 		     AND conv.type = 'CONVERSATION'::work_item_type_enum AND conv.project_id = wi.project_id
 		 WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`)
@@ -1605,7 +1660,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		&ackID, &ackName, &ackEmail,
 		&closerID, &closerName,
 		&pcID, &pcNum, &pcType,
-		&rcID, &rcNum,
+		&rcID, &rcNum, &rcType,
 		&convID, &convSubject,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1800,10 +1855,16 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 		cv.ParentCase = &domain.CaseNumberRef{ID: *pcID, Number: *pcNum, Type: t}
 	}
 	if rcID != nil {
-		// "case".related_case_id (migration 0041) is a foreign key into
-		// "case" specifically, so a resolved related record is always
-		// another case.
-		cv.RelatedCase = &domain.CaseNumberRef{ID: *rcID, Number: *rcNum, Type: &parentRefTypeCase}
+		// "case".related_case_id points at work_item (migration 0211), so the
+		// related ticket is whatever type it is now: a ticket that was converted to
+		// an engagement stays related to the cases that named it.
+		relatedType := parentRefTypeCase
+		if rcType != nil {
+			if t, ok := workItemTypeToCaseType[*rcType]; ok {
+				relatedType = t
+			}
+		}
+		cv.RelatedCase = &domain.CaseNumberRef{ID: *rcID, Number: *rcNum, Type: &relatedType}
 	}
 	// work_item.conversation_id (migration 0021) links a case back to the
 	// Novera chat it was created from -- a real, indexed column that was
@@ -2553,9 +2614,15 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 
 // CreateCaseAttachment implements CaseRepository.
 func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
+	// The EXISTS is the check the table's old foreign key to "case"(id) used to make
+	// for free: only a case-like work item (never an announcement, a change request,
+	// an incident...) owns an attachment. The key now points at work_item (migration
+	// 0210) so a case that changes type keeps its attachments, which makes this
+	// the only thing keeping the narrower rule. A non-matching id inserts nothing.
 	const query = `
 		INSERT INTO case_attachment (case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, $8::text
+		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $1::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
 		RETURNING id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
 
 	var (
@@ -2569,6 +2636,11 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 		&a.ID, &a.ReferenceID, &storageKey, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
 		&uploadedByID, &a.CreatedOn, &a.Status,
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No case-like work item with this id (see the EXISTS above) -- the same
+		// answer the foreign key gave for an id that is not a case.
+		return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist"}
+	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
@@ -2593,10 +2665,14 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 // interface doc comment for the identity/storage_key/status conventions this
 // follows -- id is supplied by the caller (ServiceNow's own attachment
 // sys_id, converted), not generated, and storage_key is always NULL.
-func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string, createdOn time.Time) (domain.Attachment, error) {
+func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
+	// Same case-like-only rule as CreateCaseAttachment, for the same reason.
+	// created_on is left out so the column default (NOW()) applies -- see the
+	// interface doc comment for why ServiceNow's own createdOn is not used.
 	const query = `
-		INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status, created_on)
-		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, 'complete', $8)
+		INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
+		SELECT $1::uuid, $2::uuid, NULL, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, 'complete'
+		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $2::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
 		RETURNING id, case_id, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
 
 	var (
@@ -2604,11 +2680,14 @@ func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req d
 		uploadedByID string
 	)
 	err := r.db.QueryRow(ctx, query,
-		id, req.ReferenceID, req.Name, req.Type, sizeBytes, req.Description, uploadedBy, createdOn,
+		id, req.ReferenceID, req.Name, req.Type, sizeBytes, req.Description, uploadedBy,
 	).Scan(
 		&a.ID, &a.ReferenceID, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
 		&uploadedByID, &a.CreatedOn, &a.Status,
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Attachment{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist"}
+	}
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
@@ -3028,8 +3107,7 @@ const caseSearchJoins = `LEFT JOIN "case" c ON c.id = wi.id
 		 LEFT JOIN product_version pv ON pv.id = dp.version_id
 		 LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		 LEFT JOIN work_item pw ON pw.id = wi.parent_id
-		 LEFT JOIN "case" rc ON rc.id = c.related_case_id
-		 LEFT JOIN work_item rc_wi ON rc_wi.id = rc.id`
+		 LEFT JOIN work_item rc_wi ON rc_wi.id = c.related_case_id`
 
 // buildCaseSearchWhere renders the WHERE clause (and its bound arguments) shared by
 // SearchCases and AggregateCases. It expects the joins in caseSearchJoins.
@@ -3128,17 +3206,24 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		argIdx++
 	}
 
+	// closedOn reads the closure time of the extension table of the work item's
+	// own type (caseLikeOwnClosedOnColumn), not "case".closed_on alone:
+	// engagements, service requests and security report analyses carry their
+	// own closed_on, and the dashboard's Closed (Last 30d) tile counts them
+	// (ResolvedBuckets, same column), so a list behind that tile must be able
+	// to find them.
 	if req.Parsed.ClosedStartDate != nil {
-		where += fmt.Sprintf(" AND c.closed_on >= $%d", argIdx)
+		where += fmt.Sprintf(" AND "+caseLikeOwnClosedOnColumn+" >= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ClosedStartDate)
 		argIdx++
 	}
 	if req.Parsed.ClosedEndDate != nil {
-		where += fmt.Sprintf(" AND c.closed_on <= $%d", argIdx)
+		where += fmt.Sprintf(" AND "+caseLikeOwnClosedOnColumn+" <= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ClosedEndDate)
 		argIdx++
 	}
-	// resolvedOn: "case".resolved_on (migration 0023). Case-only, like closedOn.
+	// resolvedOn: "case".resolved_on (migration 0023). Case-only (closedOn above
+	// reads the own-type extension table; this one has not been widened).
 	if req.Parsed.ResolvedStartDate != nil {
 		where += fmt.Sprintf(" AND c.resolved_on >= $%d", argIdx)
 		filterArgs = append(filterArgs, req.Parsed.ResolvedStartDate)
@@ -4087,6 +4172,18 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 	caseArgs := []any{req.ID}
 	idx := 2
 	if req.RelatedCaseID != nil {
+		// The key now points at work_item, which holds every kind of ticket; a case
+		// is related only to another case-like ticket (never an incident, a change
+		// request, an announcement...), as the old key to "case" guaranteed.
+		var ok bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM work_item WHERE id = $1::uuid AND type = ANY(`+caseLikeNonAnnouncementTypes+`))`,
+			*req.RelatedCaseID).Scan(&ok); err != nil {
+			return time.Time{}, fmt.Errorf("update case fields: look up related case: %w", err)
+		}
+		if !ok {
+			return time.Time{}, &apierror.ValidationError{Msg: "relatedCaseId does not exist"}
+		}
 		caseSets = append(caseSets, fmt.Sprintf("related_case_id = $%d::uuid", idx))
 		caseArgs = append(caseArgs, *req.RelatedCaseID)
 		idx++

@@ -423,9 +423,14 @@ func changeRequestCreatorUserIDsWith(ctx context.Context, q crQuerier, workItemI
 }
 
 // groupMemberIDs lists the distinct user ids in the "group" identified by
-// groupID (team_member.group_id -- see CLAUDE.md on why group_id, not team_id).
+// groupID: team_member.group_id (see CLAUDE.md on why group_id, not team_id)
+// and group_member, the membership the sync mirrors from the previous system
+// for every non-customer group (migration 0140).
 func groupMemberIDs(ctx context.Context, q crQuerier, groupID string) ([]string, error) {
-	rows, err := q.Query(ctx, `SELECT DISTINCT user_id::text FROM team_member WHERE group_id = $1::uuid`, groupID)
+	rows, err := q.Query(ctx, `
+		SELECT user_id::text FROM team_member WHERE group_id = $1::uuid
+		UNION
+		SELECT user_id::text FROM group_member WHERE group_id = $1::uuid`, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("list group members: %w", err)
 	}
@@ -547,19 +552,21 @@ func noInternalMembersError(ctx context.Context, q crQuerier, poolDescription, l
 // portal database itself (no admin screen, no schema of its own), and until somebody has done
 // that a stage that needs the group cannot be created, so the refusal names the group.
 func notMirroredGroupNote(groupName string) string {
-	return fmt.Sprintf("the sync from the previous system does not mirror the membership of the %q group: it is maintained in the portal database (one team_member row per approver, with group_id set to that group)", groupName)
+	return fmt.Sprintf("the sync from the previous system does not mirror the membership of the %q group: it is maintained in the portal database (one team_member row per approver, with group_id set to that group), and the group has no group_member rows either", groupName)
 }
 
 // namedGroup resolves a group by name: its id (preferring, when the mirror
 // produced several same-named rows, the one that actually has members) and
 // its distinct members. A member is anyone with team_member.group_id pointing
-// at a group of that name, or team_member.team_id pointing at a team of that
-// name (the CR-notice flow addresses these audiences by team name). exists is
+// at a group of that name, a group_member row of a group of that name, or
+// team_member.team_id pointing at a team of that name (the CR-notice flow
+// addresses these audiences by team name). exists is
 // false when no such group row exists at all.
 func namedGroup(ctx context.Context, q crQuerier, name string) (groupID string, members []string, exists bool, err error) {
 	err = q.QueryRow(ctx, `
 		SELECT g.id::text FROM "group" g WHERE g.name = $1
-		ORDER BY (SELECT COUNT(*) FROM team_member tm WHERE tm.group_id = g.id) DESC, g.created_on ASC, g.id ASC
+		ORDER BY (SELECT COUNT(*) FROM team_member tm WHERE tm.group_id = g.id)
+		       + (SELECT COUNT(*) FROM group_member gm WHERE gm.group_id = g.id) DESC, g.created_on ASC, g.id ASC
 		LIMIT 1`, name).Scan(&groupID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -568,9 +575,12 @@ func namedGroup(ctx context.Context, q crQuerier, name string) (groupID string, 
 		return "", nil, false, fmt.Errorf("resolve group %q: %w", name, err)
 	}
 	rows, err := q.Query(ctx, `
-		SELECT DISTINCT tm.user_id::text FROM team_member tm
+		SELECT tm.user_id::text FROM team_member tm
 		WHERE tm.group_id IN (SELECT id FROM "group" WHERE name = $1)
-		   OR tm.team_id  IN (SELECT id FROM team WHERE name = $1)`, name)
+		   OR tm.team_id  IN (SELECT id FROM team WHERE name = $1)
+		UNION
+		SELECT gm.user_id::text FROM group_member gm
+		WHERE gm.group_id IN (SELECT id FROM "group" WHERE name = $1)`, name)
 	if err != nil {
 		return "", nil, true, fmt.Errorf("list members of group %q: %w", name, err)
 	}

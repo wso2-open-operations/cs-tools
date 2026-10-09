@@ -308,6 +308,10 @@ export interface Playbook {
   activeRuns: number;
   createdOn: string;
   updatedOn: string;
+  /** Null for playbooks written before attribution existed. */
+  authoredBy: UserRef | null;
+  /** Who last edited it, which need not be the author. */
+  updatedBy: UserRef | null;
 }
 
 export interface PlaybookTaskInput {
@@ -636,6 +640,8 @@ export interface DashboardSummary {
   newRegistrations: number;
   pairingsNeedingAttention: number;
   trialsEndingSoon: number;
+  /** Rows in plg_ingest_failure nobody has marked resolved. Normally 0. */
+  unresolvedIngestFailures: number;
 }
 
 export interface DashboardAnalytics {

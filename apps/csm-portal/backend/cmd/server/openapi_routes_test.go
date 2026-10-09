@@ -43,7 +43,7 @@ func TestEveryRegisteredRouteIsInOpenAPI(t *testing.T) {
 	norm := func(p string) string { return param.ReplaceAllString(p, "{}") }
 
 	registered := map[string]bool{}
-	for _, m := range regexp.MustCompile(`(?:mux\.HandleFunc|mux\.Handle|route)\("([A-Z]+) ([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`(?:mux\.HandleFunc|mux\.Handle|routeAll|route)\("([A-Z]+) ([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
 		if m[2] == "/health" || strings.HasPrefix(m[2], "/health/") {
 			continue // liveness probes are not part of the public contract
 		}

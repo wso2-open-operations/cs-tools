@@ -283,35 +283,33 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 	return action, true
 }
 
-// callerIsNotifiedOnCurrentEscalation reports whether the caller is one of the
-// people notified about the case's current (most recent) escalation level --
-// the only people authorized to de-escalate it. Escalating stays open to any
-// authenticated user; only de-escalation is gated this way.
+// callerIsCaseTeamLead reports whether the caller is one of the case's ABT
+// team leads (entity-service's teamLeads: team_member role 'lead' on the
+// account's CRE team) -- the only people authorized to de-escalate it.
+// Escalating is open to any internal engineer (PermEscalate); only
+// de-escalation is gated this way.
 //
-// Fails closed (returns false) on any lookup/parse error or when the case has
-// no escalation history at all (nothing to de-escalate, nobody was notified).
-// Matches by the caller's platform user id first (GET /users/me's own id
-// against a notified user's id, both platform UUIDs), falling back to a
-// case-insensitive email match when either id is empty -- the notified-user
-// id can be empty when the backing data source could not resolve a platform
-// record for that recipient.
-func (h *CaseHandler) callerIsNotifiedOnCurrentEscalation(r *http.Request, caseID string, user *middleware.UserInfo) bool {
+// Fails closed (returns false) on any lookup/parse error or when the case's
+// team has no lead. Matches by the caller's platform user id first (GET
+// /users/me's own id against a lead's id, both platform UUIDs), falling back
+// to a case-insensitive email match when either id is empty.
+func (h *CaseHandler) callerIsCaseTeamLead(r *http.Request, caseID string, user *middleware.UserInfo) bool {
 	raw, err := h.entity.SearchCaseEscalations(r.Context(), caseID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
 		return false
 	}
 	var history struct {
-		CurrentNotifiedUsers []struct {
+		TeamLeads []struct {
 			ID    string `json:"id"`
 			Email string `json:"email"`
-		} `json:"currentNotifiedUsers"`
+		} `json:"teamLeads"`
 	}
 	if err := json.Unmarshal(raw, &history); err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchCaseEscalations: parse response failed while checking de-escalation authorization", "userID", user.UserID, "caseID", caseID, "err", err)
 		return false
 	}
-	if len(history.CurrentNotifiedUsers) == 0 {
+	if len(history.TeamLeads) == 0 {
 		return false
 	}
 
@@ -329,17 +327,17 @@ func (h *CaseHandler) callerIsNotifiedOnCurrentEscalation(r *http.Request, caseI
 		return false
 	}
 
-	for _, notified := range history.CurrentNotifiedUsers {
-		if caller.ID != "" && notified.ID != "" && caller.ID == notified.ID {
+	for _, lead := range history.TeamLeads {
+		if caller.ID != "" && lead.ID != "" && caller.ID == lead.ID {
 			return true
 		}
 		// Only fall back to email when an id is unavailable on either side --
 		// two different platform users must never be treated as the same
 		// person just because both ids happen to be missing and their emails
 		// happen to match by coincidence or staleness on one side.
-		if (caller.ID == "" || notified.ID == "") &&
-			caller.Email != "" && notified.Email != "" &&
-			strings.EqualFold(caller.Email, notified.Email) {
+		if (caller.ID == "" || lead.ID == "") &&
+			caller.Email != "" && lead.Email != "" &&
+			strings.EqualFold(caller.Email, lead.Email) {
 			return true
 		}
 	}
@@ -403,6 +401,18 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 
 	if !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// POST /cases is the one generic create route, and it creates an
+	// announcement (the dry-run case and every per-project case of a publish)
+	// just as readily as a support case, so the announcement-creator gate has to
+	// be applied to the body rather than the route. It is checked on top of the
+	// route's own PermWrite; a nil guard fails closed, like the Security Center
+	// check in SearchCases.
+	if caseCreateTargetsAnnouncement(body) && !(h.access != nil && h.access.Permits(PermCreateAnnouncement, user.Roles)) {
+		slog.WarnContext(r.Context(), "access denied: creating an announcement needs the announcement creator role", "userID", user.UserID)
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
@@ -720,6 +730,47 @@ const securityReportCaseType = "security_report_analysis"
 type caseFieldFilterFragment struct {
 	Field  string   `json:"field"`
 	Values []string `json:"values"`
+}
+
+// announcementCaseType is the case type entity-service creates an announcement
+// work item for. Compared case-insensitively below, which is wider than
+// entity-service's own exact-lowercase match on purpose: a guard may deny
+// too much, never too little.
+const announcementCaseType = "announcement"
+
+// caseCreateTargetsAnnouncement reports whether a POST /cases body asks for a
+// work item of type announcement. It reads the top-level keys as a token
+// stream, so EVERY "type" in the body is judged, not just the one a map would
+// keep: entity-service's decoder (encoding/json) matches a key to a field
+// without regard to case and reads a repeated one as the last reached, so a
+// guard that looked at one spelling, or only the winning one, could be walked
+// around by a body that names the field twice. Any of them being announcement
+// counts. A body that is not a JSON object, or a "type" that is not a string,
+// is left to entity-service to reject: neither can create an announcement there.
+func caseCreateTargetsAnnouncement(body []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return false
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		key, _ := keyTok.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return false
+		}
+		if !strings.EqualFold(key, "type") {
+			continue
+		}
+		var t string
+		if json.Unmarshal(raw, &t) == nil && strings.EqualFold(strings.TrimSpace(t), announcementCaseType) {
+			return true
+		}
+	}
+	return false
 }
 
 // caseSearchTargetsSecurityReports reports whether body's type filter --
@@ -1715,14 +1766,15 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsNotifiedOnCurrentEscalation(r, caseID, user) {
+	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
-	// This route's permission (PermEscalate) is escalator-or-admin only —
-	// cs_engineer never holds it — so every caller reaching this point may
-	// have no "user" row yet. See ensureUserProvisioned's own doc comment.
+	// This route's permission (PermEscalate) is also held by roles that
+	// never write anything else here (escalator), so a caller reaching this
+	// point may have no "user" row yet. See ensureUserProvisioned's own doc
+	// comment.
 	ensureUserProvisioned(r.Context(), h.entity, user)
 
 	result, err := h.entity.CreateCaseEscalation(r.Context(), caseID, body)
@@ -1895,7 +1947,7 @@ func (h *CaseHandler) SearchAllCallRequests(w http.ResponseWriter, r *http.Reque
 // Forwards the body unchanged to the entity service's PATCH /call-requests/{callRequestId}.
 //
 // This is the single mutation surface for call requests, including the agent-only
-// (WSO2 engineer) state transitions (schedule/reschedule, reject, conclude+notes)
+// (WSO2 engineer) state transitions (schedule/reschedule, reject, conclude with or without notes)
 // selected by the target `state` in the body. The backend has no role-based access
 // control layer yet, so any authenticated user may invoke them today; engineer-only
 // gating is a follow-up and MUST NOT be invented here.

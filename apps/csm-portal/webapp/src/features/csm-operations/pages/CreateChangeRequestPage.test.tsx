@@ -1479,6 +1479,35 @@ describe("CreateChangeRequestPage — customer project, deployments, deployment 
     expect(showErrorMock).toHaveBeenCalledWith(message, err);
   });
 
+  // The create is refused before ServiceNow is called when the chosen assignment group
+  // is not a ServiceNow group or the chosen person has no ServiceNow account. The
+  // entity service words each refusal for the person on the form (who or what, why, and
+  // which field to change); the form must show it as written, not a generic "not found".
+  it.each([
+    [
+      "an assignment group ServiceNow does not have",
+      'The assignment group "Example Approval Team" cannot be used: it is not an assignment group in ServiceNow, and a change request is created in ServiceNow first, so it cannot be assigned to it. Choose another group in "Assignment group".',
+    ],
+    [
+      "an assignee with no ServiceNow account",
+      'The change request was not created: Example User (example.user@example.com) has no ServiceNow account, so they cannot be assigned this change request. A change request is created in ServiceNow first, and ServiceNow does not know them. Choose someone else in "Assigned to".',
+    ],
+    [
+      "a record ServiceNow does not recognise",
+      "The change request was not created: ServiceNow did not recognise one of the records it refers to (the assignment group, the person it is assigned to, the requester, the service, the service offering or the configuration item). Change one of those fields and try again.",
+    ],
+  ])("shows the backend's explanation verbatim for %s", async (_name, message) => {
+    const { BackendApiError } = await import("@api/backend/client");
+    render(<CreateChangeRequestPage />);
+    fillSubject();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const [, options] = postChangeRequestMutateMock.mock.calls[0];
+    const err = new (BackendApiError as unknown as new (s: number, m: string) => Error)(400, message);
+    options.onError(err);
+    expect(showErrorMock).toHaveBeenCalledWith(message, err);
+    expect(showErrorMock).not.toHaveBeenCalledWith(expect.stringMatching(/Could not create the change request/), expect.anything());
+  });
+
   describe("Customer Group: the project's registered contacts, read-only", () => {
     it("is a locked, read-only field that says it is derived, and cannot be typed into", () => {
       render(<CreateChangeRequestPage />);

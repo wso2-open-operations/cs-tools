@@ -25,6 +25,7 @@ import (
 )
 
 // CreateIncidentRequest proxies entity-service's own contract verbatim; this service does not define its own incident shape.
+// It never carries an assignment group: entity-service sets that from the service's support group.
 type CreateIncidentRequest struct {
 	CallerID  string  `json:"callerId"`
 	Category  string  `json:"category"` // "INQUIRY" | "SERVICE_INTERRUPTION" | "SECURITY"
@@ -35,9 +36,7 @@ type CreateIncidentRequest struct {
 	WorkNotes *string `json:"workNotes,omitempty"`
 	// ContactType says how the incident was raised (entity-service's IncidentContactType); routing to the SRE escalation ladder reads it.
 	ContactType *string `json:"contactType,omitempty"`
-	// AssignmentGroupID is the group the incident is assigned to; the SRE ladder finds the owning SRE team from it.
-	AssignmentGroupID *string `json:"assignmentGroupId,omitempty"`
-	// CorrelationID is the dedup fingerprint tag on ServiceNow's own correlation_id field, so SearchIncidentByCorrelationID finds a prior create by exact match.
+	// CorrelationID tags the incident with its fingerprint generation on ServiceNow's correlation_id field, for tracing it back to alert-core.
 	CorrelationID *string `json:"correlationId,omitempty"`
 }
 
@@ -105,9 +104,7 @@ type searchIncidentsRequest struct {
 }
 
 type searchIncidentsFilters struct {
-	Number        string `json:"number,omitempty"`
-	SearchQuery   string `json:"searchQuery,omitempty"`
-	CorrelationID string `json:"correlationId,omitempty"`
+	Number string `json:"number,omitempty"`
 }
 
 type pagination struct {
@@ -129,8 +126,8 @@ type searchIncidentsResponse struct {
 // openIncidentStates copies entity-service's IncidentState values by hand (separate Go module, not importable) — keep in sync manually.
 var openIncidentStates = map[string]bool{"NEW": true, "IN_PROGRESS": true, "ON_HOLD": true}
 
-// IncidentState is authoritative for open/closed since only CSM/agents ever close incidents; found is false on no match.
-func (c *Client) IncidentState(ctx context.Context, number string) (open bool, found bool, err error) {
+// IncidentState is authoritative for open/closed since only CSM/agents ever close incidents; it looks up number exactly and accepts only the row whose id is incidentID; found is false on no match.
+func (c *Client) IncidentState(ctx context.Context, incidentID, number string) (open bool, found bool, err error) {
 	req := searchIncidentsRequest{
 		Filters:    searchIncidentsFilters{Number: number},
 		Pagination: pagination{Limit: 1, Offset: 0},
@@ -149,64 +146,16 @@ func (c *Client) IncidentState(ctx context.Context, number string) (open bool, f
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return false, false, fmt.Errorf("csm: decode incident search response: %w", err)
 	}
-	if len(resp.Incidents) == 0 || resp.Incidents[0].State == nil {
+	if len(resp.Incidents) == 0 {
 		return false, false, nil
 	}
-	return openIncidentStates[*resp.Incidents[0].State], true, nil
-}
-
-// SearchIncidentByCorrelationID is the pre-create dedup check (a lost create response must not cause a duplicate on retry), matching correlation_id exactly, falling back to legacy free-text search for pre-correlationId incidents.
-func (c *Client) SearchIncidentByCorrelationID(ctx context.Context, correlationID string) (id, number string, found bool, err error) {
-	hit, err := c.searchIncidents(ctx, searchIncidentsFilters{CorrelationID: correlationID})
-	if err != nil {
-		return "", "", false, err
-	}
-	if hit != nil {
-		return hit.ID, hit.Number, true, nil
-	}
-
-	hit, err = c.searchIncidents(ctx, searchIncidentsFilters{SearchQuery: correlationID})
-	if err != nil {
-		return "", "", false, err
-	}
-	if hit != nil {
-		return hit.ID, hit.Number, true, nil
-	}
-	return "", "", false, nil
-}
-
-// foundIncident is the id/number pair for a search hit that passed presence validation.
-type foundIncident struct {
-	ID     string
-	Number string
-}
-
-// searchIncidents runs one /incidents/search call and returns the first valid hit, or nil if none.
-func (c *Client) searchIncidents(ctx context.Context, filters searchIncidentsFilters) (*foundIncident, error) {
-	req := searchIncidentsRequest{
-		Filters:    filters,
-		Pagination: pagination{Limit: 1, Offset: 0},
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("csm: marshal SearchIncidentsRequest: %w", err)
-	}
-
-	respBody, err := c.do(ctx, http.MethodPost, "/incidents/search", body)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp searchIncidentsResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("csm: decode incident search response: %w", err)
-	}
-	if len(resp.Incidents) == 0 {
-		return nil, nil
-	}
 	hit := resp.Incidents[0]
-	if hit.ID == nil || *hit.ID == "" || hit.Number == nil || *hit.Number == "" {
-		return nil, nil
+	// Another incident's row means the number filter was not applied; its state says nothing about this incident.
+	if hit.ID == nil || *hit.ID != incidentID || hit.Number == nil || *hit.Number != number {
+		return false, false, fmt.Errorf("csm: incident search for %s returned a different incident, number filter not applied", number)
 	}
-	return &foundIncident{ID: *hit.ID, Number: *hit.Number}, nil
+	if hit.State == nil {
+		return false, false, nil
+	}
+	return openIncidentStates[*hit.State], true, nil
 }

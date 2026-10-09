@@ -101,6 +101,12 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if id := correlationIDFromContext(ctx); id != "" {
 		req.Header.Set(correlationIDHeader, id)
 	}
+	// Forward the caller's id token so entity-service can attribute the request
+	// to a person. Absent it, its own request log records callerId=- for every
+	// PLG call, because all it can see is this backend's service credentials.
+	if token := userIDTokenFromContext(ctx); token != "" {
+		req.Header.Set(userIDTokenHeader, token)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

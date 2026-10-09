@@ -156,7 +156,13 @@ func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Contex
 		return domain.CreateAttachmentResponse{}, err
 	}
 
-	a, err := s.repo.CreateCaseAttachmentFromServiceNow(ctx, req, snResp.Attachment.ID, snResp.Attachment.SizeBytes, user.ID, snResp.Attachment.CreatedOn)
+	// snResp.Attachment.CreatedOn is deliberately not stored: ServiceNow's reply
+	// carries a zone-less timestamp that is not UTC (it is rendered in a
+	// ServiceNow-side timezone, +5:30 for the Colombo uploader this was found
+	// with), and parsing it as UTC put the row hours in the future. The row
+	// takes the database's own clock instead, which is what the response below
+	// reports back too.
+	a, err := s.repo.CreateCaseAttachmentFromServiceNow(ctx, req, snResp.Attachment.ID, snResp.Attachment.SizeBytes, user.ID)
 	if err != nil {
 		// ServiceNow already has the attachment at this point -- this is now
 		// real drift (ServiceNow has it, Postgres doesn't) needing operator

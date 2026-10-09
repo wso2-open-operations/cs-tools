@@ -560,6 +560,45 @@ describe("buildChangeRequestWorkflowStages", () => {
     } as never);
     expect(workflowStages.find((s) => s.current)?.name).toBe("Customer Approval");
   });
+
+  it("marks Customer Approval completed once moved past Customer Approval (e.g. Scheduled)", () => {
+    const { workflowStages } = buildChangeRequestWorkflowStages({
+      state: { id: "-2", label: "Scheduled" },
+      hasCustomerApproved: false,
+      hasCustomerReviewed: false,
+    } as never);
+    const customerApproval = workflowStages.find((s) => s.name === "Customer Approval");
+    expect(customerApproval).toMatchObject({
+      completed: true,
+      current: false,
+      disabled: false,
+      description: "Customer approval received",
+    });
+  });
+
+  it("marks Customer Approval and Customer Review completed when Closed", () => {
+    const { workflowStages } = buildChangeRequestWorkflowStages({
+      state: { id: "3", label: "Closed" },
+      hasCustomerApproved: false,
+      hasCustomerReviewed: false,
+    } as never);
+    const approval = workflowStages.find((s) => s.name === "Customer Approval");
+    const review = workflowStages.find((s) => s.name === "Customer Review");
+    expect(approval).toMatchObject({ completed: true, disabled: false });
+    expect(review).toMatchObject({ completed: true, disabled: false });
+  });
+
+  it("marks Customer Review disabled and not completed when Rollback", () => {
+    const { workflowStages } = buildChangeRequestWorkflowStages({
+      state: { id: "-7", label: "Rollback" },
+      hasCustomerApproved: false,
+      hasCustomerReviewed: false,
+    } as never);
+    const approval = workflowStages.find((s) => s.name === "Customer Approval");
+    const review = workflowStages.find((s) => s.name === "Customer Review");
+    expect(approval).toMatchObject({ completed: true, disabled: false });
+    expect(review).toMatchObject({ completed: false, disabled: true });
+  });
 });
 
 describe("buildChangeRequestWorkflowStages and a proposed time", () => {
@@ -599,9 +638,9 @@ describe("buildChangeRequestWorkflowStages and a proposed time", () => {
     );
     expect(step).toMatchObject({ completed: true, current: false, disabled: false });
     expect(step?.description).toBe("Proposed time accepted by WSO2");
-    // Without the accepted proposal the same change shows the step not done.
+    // Without a proposed time the change still shows Customer Approval done once in Scheduled.
     const without = stageOf({ ...base, state: scheduled }, "Customer Approval");
-    expect(without).toMatchObject({ completed: false });
+    expect(without).toMatchObject({ completed: true, current: false, disabled: false });
     expect(without?.description).toBe("Customer approval received");
   });
 
@@ -616,14 +655,14 @@ describe("buildChangeRequestWorkflowStages and a proposed time", () => {
     expect(step?.description).not.toMatch(/accepted/i);
   });
 
-  it("does not grey the step out in Implement or Review after an accepted proposal", () => {
+  it("does not grey the step out in Implement or Review after an accepted proposal or regular approval", () => {
     for (const state of [{ id: "-1", label: "Implement" }, { id: "0", label: "Review" }]) {
       const accepted = stageOf(
         { ...base, state, customerProposal: { startDate: "2030-03-01 09:00:00", answer: "agreed" } },
         "Customer Approval",
       );
       expect(accepted, state.label).toMatchObject({ completed: true, disabled: false });
-      expect(stageOf({ ...base, state }, "Customer Approval"), state.label).toMatchObject({ disabled: true });
+      expect(stageOf({ ...base, state }, "Customer Approval"), state.label).toMatchObject({ completed: true, disabled: false });
     }
   });
 

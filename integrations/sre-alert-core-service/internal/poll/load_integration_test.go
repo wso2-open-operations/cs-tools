@@ -50,7 +50,9 @@ func (chatOnly) NotifyCSM(context.Context, model.Incident, string) (string, stri
 func (chatOnly) NotifyChat(context.Context, model.Incident) bool                   { return true }
 func (chatOnly) NotifyChatAnnotation(context.Context, model.Incident, string) bool { return true }
 func (chatOnly) PushWorkNote(context.Context, string, string) error                { return nil }
-func (chatOnly) IncidentState(context.Context, string) (bool, bool, error)         { return true, true, nil }
+func (chatOnly) IncidentState(context.Context, string, string) (bool, bool, error) {
+	return true, true, nil
+}
 
 // TestLoad_FoldsBurstExactly loads LOAD_ALERTS alerts (default 5000) into a throwaway database, runs one poller until all are processed, and checks every incident count.
 func TestLoad_FoldsBurstExactly(t *testing.T) {

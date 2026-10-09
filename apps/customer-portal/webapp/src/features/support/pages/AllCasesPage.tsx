@@ -285,7 +285,6 @@ export default function AllCasesPage(): JSX.Element {
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchTerm("");
     setPage(1);
     if (statusFilter) {
       setSearchParams((prev) => {

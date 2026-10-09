@@ -835,8 +835,8 @@ type CaseGithubIssueService interface {
 type CaseEscalationService interface {
 	// SearchCaseEscalations returns the full escalation history for the given
 	// case, newest first, plus CurrentNotifiedUsers (the most recent record's
-	// notified-users list — who is authorized to de-escalate the case's
-	// current level). A ValidationError is returned for a malformed case UUID.
+	// notified-users list) and TeamLeads (the case's ABT team leads, who may
+	// de-escalate it). A ValidationError is returned for a malformed case UUID.
 	SearchCaseEscalations(ctx context.Context, caseID string) (domain.CaseEscalationHistory, error)
 	// CreateCaseEscalation escalates or de-escalates the given case, then
 	// records a work note on the case (verified live against SN dev data that
@@ -892,7 +892,10 @@ type CallRequestService interface {
 	SearchAllCallRequests(ctx context.Context, req domain.SearchAllCallRequestsRequest) (domain.SearchCallRequestsResponse, error)
 	// UpdateCallRequest updates the state or other fields of a call request.
 	// The target state selects the behaviour (customer/agent transitions, scheduling,
-	// rejection, conclusion with notes). A ValidationError is returned for invalid
+	// rejection, conclusion). Notes are optional when concluding: on the Postgres
+	// data source a conclude without them ("Mark as completed") is staff-only (a
+	// ForbiddenError otherwise) and only applies to a scheduled or notes-pending
+	// call (a ConflictError otherwise). A ValidationError is returned for invalid
 	// input; a NotFoundError if no call request matches.
 	UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest) (domain.UpdateCallRequestResponse, error)
 }
@@ -1169,6 +1172,11 @@ type IncidentService interface {
 	// empty when the service has only one specialist team, so the dialog
 	// offers no choice. An empty serviceID lists every sub-team.
 	ListSpecialistHandoffTeams(ctx context.Context, serviceID string) (domain.SpecialistHandoffTeamsResponse, error)
+	// GetIncidentCreateDefaults returns the default service
+	// (INCIDENT_DEFAULT_SERVICE_ID) and its support group: the group
+	// CreateIncident assigns when the incident's own service has none. Read
+	// only; the group is null when the default is unset, missing or groupless.
+	GetIncidentCreateDefaults(ctx context.Context) (domain.IncidentCreateDefaults, error)
 }
 
 // ProblemService defines the operations available on the problems entity.
@@ -1433,8 +1441,13 @@ type CloudStatusService interface {
 	PendingWebhooks(ctx context.Context) (domain.PendingCloudStatusWebhooksResponse, error)
 
 	// RecordDelivery stamps the outcome of one attempt. A ValidationError is
-	// returned when a failure is reported without an error message.
+	// returned when a failure is reported without an error message, a
+	// ConflictError when there is no open attempt to record it against.
 	RecordDelivery(ctx context.Context, req domain.RecordCloudStatusDeliveryRequest) error
+
+	// ClaimWebhook starts the attempt to post one webhook under the claim
+	// token outage.status_page_due carried. A ConflictError means do not post.
+	ClaimWebhook(ctx context.Context, req domain.ClaimCloudStatusWebhookRequest) error
 
 	// HandleOutages re-derives the current transition for the named outages.
 	// The record-triggered counterpart to Sweep, reaching the same conclusions

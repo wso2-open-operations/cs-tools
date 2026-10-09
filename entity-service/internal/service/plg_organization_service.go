@@ -12,7 +12,7 @@ import (
 type OrganizationService interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) (domain.SearchOrganizationsResponse, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
-	Patch(ctx context.Context, req domain.PatchOrganizationRequest) (*domain.OrganizationDetail, error)
+	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) (*domain.OrganizationDetail, error)
 }
 
 type organizationService struct {
@@ -81,7 +81,12 @@ func (s *organizationService) Get(ctx context.Context, id string) (*domain.Organ
 // entity-service's job is to store what it is told and keep referential
 // integrity, and a later caller with a legitimate reason to unassign should not
 // have to fight a rule that belongs to someone else's product.
-func (s *organizationService) Patch(ctx context.Context, req domain.PatchOrganizationRequest) (*domain.OrganizationDetail, error) {
+func (s *organizationService) Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) (*domain.OrganizationDetail, error) {
+	// Same rule as every other attributed write: an owner change that records
+	// nobody is worse than one that is refused.
+	if err := validateActor(actorID); err != nil {
+		return nil, err
+	}
 	if err := validateUUID("organizationId", req.ID); err != nil {
 		return nil, err
 	}
@@ -90,7 +95,9 @@ func (s *organizationService) Patch(ctx context.Context, req domain.PatchOrganiz
 			return nil, err
 		}
 	}
-	if err := s.repo.Patch(ctx, req); err != nil {
+	err := s.repo.Patch(ctx, req, actorID)
+	plgAudit(ctx, "set owner", actorID, err, "organizationId", req.ID)
+	if err != nil {
 		return nil, err
 	}
 	// Returns the reloaded detail: the caller's response is the whole

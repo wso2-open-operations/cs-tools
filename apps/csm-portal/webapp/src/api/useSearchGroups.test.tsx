@@ -27,7 +27,7 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
 
-import { useSearchGroups } from "@api/useSearchGroups";
+import { useSearchGroups, useSearchSupportGroups } from "@api/useSearchGroups";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -58,5 +58,52 @@ describe("useSearchGroups", () => {
   it("does not fire while the caller keeps it disabled (dropdown closed)", () => {
     renderHook(() => useSearchGroups("", false), { wrapper });
     expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("sends exactly the old body when no options are given", async () => {
+    const { result } = renderHook(() => useSearchGroups("ops", true), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock).toHaveBeenCalledWith("/groups/search", {
+      filters: { searchQuery: "ops" },
+      pagination: { offset: 0, limit: 20 },
+    });
+  });
+
+  it("ignores a string third argument (AsyncEntitySelect's searchExtra)", async () => {
+    const { result } = renderHook(() => useSearchGroups("ops", true, "extra"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock).toHaveBeenCalledWith(
+      "/groups/search",
+      expect.objectContaining({ filters: { searchQuery: "ops" } }),
+    );
+  });
+
+  it("adds supportGroupsOnly to the filters when asked", async () => {
+    const { result } = renderHook(
+      () => useSearchGroups("ops", true, { supportGroupsOnly: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock).toHaveBeenCalledWith(
+      "/groups/search",
+      expect.objectContaining({ filters: { searchQuery: "ops", supportGroupsOnly: true } }),
+    );
+  });
+
+  it("caches the narrowed search separately from the plain one", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const shared = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const plain = renderHook(() => useSearchGroups("", true), { wrapper: shared });
+    await waitFor(() => expect(plain.result.current.isSuccess).toBe(true));
+    const narrowed = renderHook(() => useSearchSupportGroups("", true), { wrapper: shared });
+    await waitFor(() => expect(narrowed.result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(2);
+    expect(postMock).toHaveBeenLastCalledWith(
+      "/groups/search",
+      expect.objectContaining({ filters: { searchQuery: "", supportGroupsOnly: true } }),
+    );
   });
 });

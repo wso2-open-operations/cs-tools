@@ -52,7 +52,7 @@ interface MyWeekStripProps {
    *  nothing on it, which is the one thing it is not. */
   myAbsences?: ScheduleAbsence[];
   absenceKinds?: ScheduleAbsenceKind[];
-  /** Open a day in "Who is working today". Clicking a card does this when it
+  /** Open a day in "Who is on today". Clicking a card does this when it
    *  is given -- the reader wants that day's full view -- and the card's own
    *  "Who's on" cue still lists the day in place. */
   onShowDay?: (iso: string) => void;
@@ -163,12 +163,12 @@ export default function MyWeekStrip({
               role="button"
               tabIndex={0}
               aria-label={
-                onShowDay ? `${d.toDateString()}: open in Who is working today` : d.toDateString()
+                onShowDay ? `${d.toDateString()}: open in Who is on today` : d.toDateString()
               }
               onMouseEnter={() => hoverOpen(iso)}
               onMouseLeave={cancelHover}
               onFocus={() => setOpenDay(iso)}
-              // The card opens the day in "Who is working today", which is
+              // The card opens the day in "Who is on today", which is
               // where a reader clicking a day wants to go. Without that view
               // to go to, it lists the day in place as it always did.
               onClick={() => (onShowDay ? onShowDay(iso) : setOpenDay(openDay === iso ? null : iso))}
@@ -257,7 +257,7 @@ export default function MyWeekStrip({
           <span>
             <b>See who's on rotation with you.</b>{" "}
             {onShowDay
-              ? "Hover over a day above, or tap Who's on, to list everyone rostered that day. Click a day to open it in Who is working today."
+              ? "Hover over a day above, or tap Who's on, to list everyone rostered that day. Click a day to open it in Who is on today."
               : "Hover over a day above, or tap it, to list everyone rostered that day."}
           </span>
         </div>
@@ -270,7 +270,7 @@ export default function MyWeekStrip({
         {openDay ? (
           <span className="grp hint">
             {onShowDay
-              ? "Who's on again, or ×, to close it · click a day to open it in Who is working today"
+              ? "Who's on again, or ×, to close it · click a day to open it in Who is on today"
               : "Click the open day again, or ×, to close it"}
           </span>
         ) : null}

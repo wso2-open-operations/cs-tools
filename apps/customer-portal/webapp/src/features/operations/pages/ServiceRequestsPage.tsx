@@ -266,7 +266,6 @@ export default function ServiceRequestsPage(): JSX.Element {
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchTerm("");
     setPage(1);
   };
 

@@ -85,9 +85,18 @@ function toStateIds(states: MetadataItem[]): number[] {
   return states.map((s) => Number(s.id)).filter((id) => Number.isFinite(id));
 }
 
-/** Labels of CR states excluded from the "outstanding" view. */
+/**
+ * Labels of CR states excluded from the "outstanding" view.
+ *
+ * Mirrors entity-service's own customer-facing crOutstandingStates
+ * (crOutstandingStatesFor, project_stats_service.go): NEW and ASSESS are
+ * pre-approval states that haven't reached the customer yet, so they are
+ * not outstanding; ROLLBACK is WSO2 engineering work in progress and IS
+ * outstanding (not excluded), matching that same source of truth.
+ */
 const EXCLUDED_OUTSTANDING_CR_STATE_LABELS = new Set<string>([
-  ChangeRequestStates.ROLLBACK,
+  ChangeRequestStates.NEW,
+  ChangeRequestStates.ASSESS,
   ChangeRequestStates.CLOSED,
   ChangeRequestStates.CANCELED,
 ]);

@@ -152,6 +152,17 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if p.CaseID != entityID {
 			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
 		}
+	case TypeWorkaroundProvided:
+		var p WorkaroundProvidedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.CaseID == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.CaseID != entityID {
+			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
+		}
 	case TypeSeverityChanged:
 		var p SeverityChangedPayload
 		if err := decodeStrict(raw, &p); err != nil {
@@ -306,6 +317,43 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		}
 		if !validOutageKind[t][p.Kind] {
 			return fmt.Errorf("events: %s has unknown kind %q", t, p.Kind)
+		}
+		if !validRecipients(p.Recipients) {
+			return fmt.Errorf("events: invalid recipients for %s", t)
+		}
+	case TypeOutageStatusPageDue:
+		var p OutageStatusPageDuePayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.WebhookID == "" || p.ClaimToken == "" || p.OutageID == "" || p.Cloud == "" || p.Timestamp == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if !validStatusPageCloud[p.Cloud] {
+			return fmt.Errorf("events: %s has unknown cloud %q", t, p.Cloud)
+		}
+		if _, err := time.Parse(statusPageTimestampLayout, p.Timestamp); err != nil {
+			return fmt.Errorf("events: %s timestamp %q is not ISO-8601 UTC with milliseconds", t, p.Timestamp)
+		}
+		if p.OutageID != entityID {
+			return fmt.Errorf("events: payload outageId %q does not match entityId %q", p.OutageID, entityID)
+		}
+		if !validStatusPageEvent[p.Event] {
+			return fmt.Errorf("events: %s has unknown event %q", t, p.Event)
+		}
+	case TypeCaseEscalated:
+		var p CaseEscalatedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.CaseID == "" || p.CaseNumber == "" || p.EscalationID == "" || p.ActorEmail == "" || p.EscalatedOn == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if p.CaseID != entityID {
+			return fmt.Errorf("events: payload caseId %q does not match entityId %q", p.CaseID, entityID)
+		}
+		if p.CurrentLevel < 1 || p.CurrentLevel > 5 || p.PreviousLevel < 0 || p.PreviousLevel >= p.CurrentLevel {
+			return fmt.Errorf("events: %s levels EL%d -> EL%d are not an escalation", t, p.PreviousLevel, p.CurrentLevel)
 		}
 		if !validRecipients(p.Recipients) {
 			return fmt.Errorf("events: invalid recipients for %s", t)

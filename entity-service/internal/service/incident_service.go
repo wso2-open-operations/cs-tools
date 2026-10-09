@@ -19,7 +19,6 @@ package service
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -295,6 +294,11 @@ type incidentService struct {
 	// actually depend on has even been attempted). See
 	// publishIncidentCreatedEvent's doc comment for the full reasoning.
 	eventPublisher EventPublisherService
+	// defaultServiceID is INCIDENT_DEFAULT_SERVICE_ID: the service whose
+	// support group an incident gets when its own service has none
+	// (resolveAssignmentGroup). Empty: such an incident is created unassigned.
+	// Set with WithIncidentDefaultService.
+	defaultServiceID string
 	// updatable is set by the constructors whose instance may write an incident update
 	// (NewIncidentServiceWithPublisher, NewIncidentServiceWithSNMirror). NewIncidentService stays
 	// read-only for updates whatever it is given.
@@ -461,10 +465,11 @@ func (s *incidentService) SearchIncidentActivities(ctx context.Context, req doma
 // delegates to createIncidentSNFirst -- see that method's own doc comment.
 // Otherwise it is createIncidentPortal, the native Postgres create.
 func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentResponse, error) {
-	var err error
-	if req, err = s.withAssignmentGroupFromService(ctx, req); err != nil {
+	decision, err := resolveAssignmentGroup(ctx, req, s.defaultServiceID, s.assignmentGroupLookups())
+	if err != nil {
 		return domain.CreateIncidentResponse{}, err
 	}
+	req = withAssignmentGroup(req, decision)
 	if s.snMirror != nil {
 		// ConfigurationItemID has no backing column on this data source at
 		// all (unlike Subcategory/AssignedEngineerID/WatchList/
@@ -489,32 +494,29 @@ func (s *incidentService) CreateIncident(ctx context.Context, req domain.CreateI
 	return s.createIncidentPortal(ctx, req)
 }
 
-// withAssignmentGroupFromService sets an incident's assignment group to its
-// service's support group.
-//
-// *** THE ONLY PLACE THE GROUP IS CHOSEN. *** The create request has no
-// assignmentGroupId (see domain.CreateIncidentRequest.AssignmentGroupID), so
-// the portal, the microapp, alert-born incidents from sre-alert-core-service
-// and any M2M client all get the same group from one call, read live from the
-// service as ServiceNow's alert business rule does. Done before either create
-// path, so in dual-write mode ServiceNow and Postgres get the same group.
-//
-// A service with no support group leaves the incident unassigned. An invalid
-// service id is left for request validation to reject.
-func (s *incidentService) withAssignmentGroupFromService(ctx context.Context, req domain.CreateIncidentRequest) (domain.CreateIncidentRequest, error) {
-	req.AssignmentGroupID = nil
-	serviceID := strings.TrimSpace(req.ServiceID)
-	if serviceID == "" || validateUUIDs("serviceId", []string{serviceID}) != nil || s.repo == nil {
-		return req, nil
+// assignmentGroupLookups reads services and groups from Postgres for
+// resolveAssignmentGroup (see that function for the rule). In dual-write mode
+// this is the only lookup: the ServiceNow mirror sends the group chosen here
+// and never looks one up itself.
+func (s *incidentService) assignmentGroupLookups() assignmentGroupLookups {
+	if s.repo == nil {
+		// Only a test builds one without a repository; it finds no service and no group.
+		return assignmentGroupLookups{
+			supportGroupOf: func(context.Context, string) (repository.ServiceSupportGroup, error) {
+				return repository.ServiceSupportGroup{}, nil
+			},
+			isSupportGroup: func(context.Context, string) (bool, error) { return false, nil },
+		}
 	}
-	group, err := s.repo.SupportGroupOfService(ctx, serviceID)
-	if err != nil {
-		return req, err
+	return assignmentGroupLookups{
+		supportGroupOf: s.repo.SupportGroupOfService,
+		isSupportGroup: s.repo.IsSupportGroup,
 	}
-	if group != "" {
-		req.AssignmentGroupID = &group
-	}
-	return req, nil
+}
+
+// GetIncidentCreateDefaults implements IncidentService.
+func (s *incidentService) GetIncidentCreateDefaults(ctx context.Context) (domain.IncidentCreateDefaults, error) {
+	return incidentCreateDefaults(ctx, s.defaultServiceID, s.assignmentGroupLookups())
 }
 
 // createIncidentPortal implements CreateIncident's plain-Postgres path

@@ -61,12 +61,20 @@ func (r *analyticsRepository) Dashboard(ctx context.Context, rng domain.Analytic
 		  (SELECT COUNT(*)::INT FROM plg_org_platform
 		    WHERE plg_current_period_end_date(subscription_tier, trial_end_date,
 		                                      trial_extended_date)
-		          BETWEEN CURRENT_DATE AND CURRENT_DATE + 14)`
+		          BETWEEN CURRENT_DATE AND CURRENT_DATE + 14),
+		  -- Registrations the ingest refused and nobody has cleared. The same
+		  -- predicate failureRepository.OpenCount uses, and the one
+		  -- idx_plg_ingest_failure_open is partial on. Not period-scoped: these
+		  -- are a backlog, and bounding them by the dashboard's date range would
+		  -- hide the oldest ones, which are the ones that have been waiting
+		  -- longest.
+		  (SELECT COUNT(*)::INT FROM plg_ingest_failure WHERE resolved_on IS NULL)`
 
 	s := &out.Summary
 	if err := r.db.QueryRow(ctx, summaryQ, from, to).Scan(
 		&s.TotalOrganizations, &s.TotalRegistrations, &s.NewRegistrations,
-		&s.PairingsNeedingAttention, &s.TrialsEndingSoon); err != nil {
+		&s.PairingsNeedingAttention, &s.TrialsEndingSoon,
+		&s.UnresolvedIngestFailures); err != nil {
 		return nil, fmt.Errorf("load dashboard summary: %w", err)
 	}
 

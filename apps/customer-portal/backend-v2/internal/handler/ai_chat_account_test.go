@@ -62,6 +62,23 @@ type convEntity struct {
 	project     entity.ProjectDetailsView
 	projectErr  error
 	createCalls int
+
+	// createdState is what CreateConversation reports back as the
+	// just-created conversation's own State (entity.CreatedConversation.State)
+	// -- nil by default, matching a plain-Postgres deployment's "starts
+	// ACTIVE" intent never needing a correction. Set to a pointer to "OPEN"
+	// to simulate the dual-write path, where ServiceNow's own initial state
+	// overrides it.
+	createdState *string
+	// conversationState is what GetConversation reports as the conversation's
+	// current state -- consulted by SendConversationMessage/handleMessage
+	// before deciding whether to auto-activate it.
+	conversationState *string
+	conversationErr   error
+	// updatedStates records every state UpdateConversation was asked to set,
+	// in order, so a test can assert a transition happened (or didn't)
+	// without caring about its own response.
+	updatedStates []string
 }
 
 func (e *convEntity) GetProject(_ context.Context, _ string) (entity.ProjectDetailsView, error) {
@@ -71,7 +88,7 @@ func (e *convEntity) GetProject(_ context.Context, _ string) (entity.ProjectDeta
 func (e *convEntity) CreateConversation(_ context.Context, _ entity.CreateConversationRequest) (entity.CreateConversationResponse, error) {
 	e.createCalls++
 	return entity.CreateConversationResponse{
-		Conversation: entity.CreatedConversation{ID: testConversationID},
+		Conversation: entity.CreatedConversation{ID: testConversationID, State: e.createdState},
 	}, nil
 }
 
@@ -88,10 +105,11 @@ func (e *convEntity) CreateComment(_ context.Context, _ entity.CreateCommentRequ
 }
 
 func (e *convEntity) GetConversation(_ context.Context, _ string) (entity.ConversationDetails, error) {
-	return entity.ConversationDetails{}, nil
+	return entity.ConversationDetails{State: e.conversationState}, e.conversationErr
 }
 
-func (e *convEntity) UpdateConversation(_ context.Context, _ string, _ entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error) {
+func (e *convEntity) UpdateConversation(_ context.Context, _ string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error) {
+	e.updatedStates = append(e.updatedStates, req.State)
 	return entity.UpdateConversationResponse{}, nil
 }
 

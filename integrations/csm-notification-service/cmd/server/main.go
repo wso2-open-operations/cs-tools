@@ -44,6 +44,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/slaengine"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/statuspage"
 )
 
 func main() {
@@ -348,6 +349,33 @@ func main() {
 
 	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultOnCallNumber, defaultCSMEmailCC).
 		WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient))
+
+	// Status page webhooks (outage.status_page_due on sre-events): posted here
+	// the moment entity-service publishes them, reported back to
+	// entity-service. CLOUD_STATUS_WEBHOOK_URLS / _SECRETS take exactly
+	// csm-scheduled-tasks' values. Unset, each event is reported undelivered
+	// and csm-scheduled-tasks posts it on its next tick, as before. A value
+	// that does not parse stops startup: every event would otherwise fail.
+	if raw := strings.TrimSpace(os.Getenv("CLOUD_STATUS_WEBHOOK_URLS")); raw != "" {
+		var urls, secrets map[string]string
+		if err := json.Unmarshal([]byte(raw), &urls); err != nil {
+			slog.Error("CLOUD_STATUS_WEBHOOK_URLS is not a JSON object of cloud slug to base URL")
+			os.Exit(1)
+		}
+		if err := json.Unmarshal([]byte(os.Getenv("CLOUD_STATUS_WEBHOOK_SECRETS")), &secrets); err != nil {
+			slog.Error(`CLOUD_STATUS_WEBHOOK_SECRETS is not a JSON object, e.g. {"default":"Secret <token>"}`)
+			os.Exit(1)
+		}
+		statusPage, err := statuspage.New(urls, secrets)
+		if err != nil {
+			slog.Error("invalid status page webhook configuration", "err", err)
+			os.Exit(1)
+		}
+		dispatcher = dispatcher.WithStatusPage(statusPage, customerEntityClient)
+		slog.Info("status page webhooks enabled", "clouds", len(urls))
+	} else {
+		dispatcher = dispatcher.WithStatusPage(nil, customerEntityClient)
+	}
 	// escalationClient is a *escalation.Client, not the escalationDetector
 	// interface itself -- passing it through WithFrustrationDetection
 	// unconditionally when nil would store a non-nil interface wrapping a
@@ -1042,8 +1070,8 @@ func main() {
 // AUTH_INTERNAL_CLIENT_IDS for that endpoint.
 func loadOnboardingConfig(steps *entity.CustomerEntityClient, emailClient *notifications.EmailClient) dispatch.OnboardingConfig {
 	// CSM_MIGRATION_* flags are opt-in: off unless exactly "true".
-	identityEnabled := envBool("CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED", false)
-	emailEnabled := envBool("CSM_MIGRATION_ONBOARD_EMAIL_ENABLED", false)
+	identityEnabled := envBool("CSM_MIGRATION_ONBOARD_IDENTITY_ENABLED", true)
+	emailEnabled := envBool("CSM_MIGRATION_ONBOARD_EMAIL_ENABLED", true)
 
 	scimBaseURL := os.Getenv("SCIM_BASE_URL")
 	if identityEnabled && scimBaseURL == "" {

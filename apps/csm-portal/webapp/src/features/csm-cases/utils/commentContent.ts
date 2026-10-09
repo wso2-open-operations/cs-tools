@@ -160,20 +160,120 @@ export function isMarkdownComment(comment: CsmCaseComment): boolean {
   return comment.authorRole === "chatbot" || comment.bodyFormat === "markdown";
 }
 
+// Block-level and line-break elements. Whitespace next to one of these is never
+// content: a block starts its own line whatever surrounds it.
+const BLOCK_TAGS =
+  "p|div|ul|ol|li|dl|dt|dd|table|thead|tbody|tfoot|tr|th|td|caption|h[1-6]|blockquote|pre|br|hr";
+const HTML_STRUCTURE_TAG = new RegExp(`<(?:${BLOCK_TAGS})\\b[^<>]*>`, "i");
+// A newline with the indentation and blank space around it.
+const NEWLINE_WHITESPACE = "[ \\t]*[\\r\\n][ \\t\\r\\n]*";
+// `<pre>`/`<code>` content is whitespace-sensitive by design (a snippet's own
+// line breaks and indentation), so it is matched whole and left untouched.
+const PRESERVED_ELEMENT = "(?<kept><(?<tag>pre|code)\\b[\\s\\S]*?<\\/\\k<tag>\\s*>)";
+const NEWLINE_AROUND_BLOCK = new RegExp(
+  `${PRESERVED_ELEMENT}|${NEWLINE_WHITESPACE}(?=<\\/?(?:${BLOCK_TAGS})\\b)|(?<=<\\/?(?:${BLOCK_TAGS})\\b[^<>]*>)${NEWLINE_WHITESPACE}`,
+  "gi",
+);
+const NEWLINE_IN_TEXT = new RegExp(`${PRESERVED_ELEMENT}|${NEWLINE_WHITESPACE}`, "gi");
+
 /**
- * Cleans a comment's raw `bodyHtml` the same way `CsmCaseCommentBubble`'s own
- * `preprocessed` memo does before rendering it — unwraps `[code]` wrapper
- * tags into real HTML (or renders bot/chatbot Markdown to HTML) and strips
- * the backend's "Customer comment added" label. Exists so a consumer that
- * needs the same cleaned-up content but isn't rendering the bubble itself
- * (e.g. the PDF report generators, which turn the result into plain text via
- * `stripHtmlTags`) doesn't have to reimplement this pipeline — reported live
- * when the PDF export instead showed the raw, unstripped "Customer comment
- * added" label as if it were the comment's actual content.
+ * Removes the whitespace that only exists because HTML *source* was laid out
+ * for reading — the newlines and indentation between `<ul>`, `<li>`, `<p>` and
+ * `<br>`, and the line wraps inside a paragraph — so it is not printed.
+ *
+ * The comment container keeps `white-space: pre-wrap` (editor-authored comments
+ * no longer carry their own per-run `pre-wrap`, and plain-text notes rely on it
+ * for their line breaks), which prints every one of those newlines literally:
+ * blank gaps between bullets, ragged indented continuation lines. A browser, and
+ * ServiceNow, treat a newline in HTML source as an ordinary space.
+ *
+ * Deliberately narrow, so nothing else changes:
+ * - Only content with real block/`<br>` markup is touched; plain text keeps its
+ *   newlines (they are its line breaks).
+ * - Only whitespace that contains a newline is touched; runs of spaces typed in
+ *   the editor are kept.
+ * - `<pre>` and `<code>` content is never touched, so code snippets keep their
+ *   line breaks and indentation.
+ * - A newline inside text becomes a space only when the source also has a
+ *   newline next to a block tag (the sign of laid-out source), so a note that
+ *   mixes a stray `<br>` with intentional line breaks keeps them.
+ */
+export function collapseHtmlSourceWhitespace(html: string): string {
+  if (!html || !HTML_STRUCTURE_TAG.test(html)) return html;
+  let sawLaidOutSource = false;
+  const withoutEdgeNewlines = html
+    .replace(/^[ \t]*[\r\n][ \t\r\n]*/, "")
+    .replace(/[ \t\r\n]*[\r\n][ \t]*$/, "")
+    .replace(NEWLINE_AROUND_BLOCK, (match, ...args) => {
+      const groups = args[args.length - 1] as { kept?: string };
+      if (groups.kept !== undefined) return match;
+      sawLaidOutSource = true;
+      return "";
+    });
+  if (!sawLaidOutSource) return withoutEdgeNewlines;
+  return withoutEdgeNewlines.replace(NEWLINE_IN_TEXT, (match, ...args) => {
+    const groups = args[args.length - 1] as { kept?: string };
+    return groups.kept !== undefined ? match : " ";
+  });
+}
+
+/**
+ * {@link collapseHtmlSourceWhitespace} applied to the inside of each
+ * `[code]...[/code]` block and, separately, to the text around the blocks. ServiceNow's
+ * `[code]` marks a stretch as raw HTML; text outside it is normally plain, and
+ * plain text is left alone by the helper (its newlines are line breaks), but HTML
+ * source laid out outside a block is cleaned the same way as inside one. The
+ * markers themselves are kept exactly as written, legacy escaped ones
+ * (`[\code]`, `[\/code]`) included, so the unwrapping functions see the same
+ * input they always did.
+ */
+export function collapseCodeBlockWhitespace(content: string): string {
+  const codeBlock = /(\[\\?code\])([\s\S]*?)(\[\\?\/code\])/gi;
+  const collapseBlock = (_match: string, open: string, inner: string, close: string): string =>
+    `${open}${collapseHtmlSourceWhitespace(inner)}${close}`;
+  // Each block is swapped for a placeholder so the text around it is cleaned in
+  // one pass with the right context (a newline on either side of a block is
+  // judged against its neighbours, not cut off at the marker) and so markup
+  // inside a block never decides whether the outside is laid-out HTML.
+  if (/[\uE000\uE001]/.test(content)) return content.replace(codeBlock, collapseBlock);
+  const blocks: string[] = [];
+  const masked = content.replace(codeBlock, (...args) => {
+    blocks.push(collapseBlock(...(args as [string, string, string, string])));
+    return `\uE000${blocks.length - 1}\uE001`;
+  });
+  return collapseHtmlSourceWhitespace(masked).replace(
+    /\uE000(\d+)\uE001/g,
+    (_match, index: string) => blocks[Number(index)],
+  );
+}
+
+/**
+ * Cleans the layout whitespace out of a raw comment body before its `[code]`
+ * markers are unwrapped: inside each `[code]` block when the body has any, else
+ * across the whole body. See {@link collapseHtmlSourceWhitespace}.
+ */
+export function collapseCommentSourceWhitespace(content: string): string {
+  if (!content || typeof content !== "string") return "";
+  return /\[\\?\/?code\]/i.test(content)
+    ? collapseCodeBlockWhitespace(content)
+    : collapseHtmlSourceWhitespace(content);
+}
+
+/**
+ * Cleans a comment's raw `bodyHtml` the same way `CsmCaseCommentBubble`
+ * renders it — unwraps `[code]` wrapper tags into real HTML (or renders
+ * bot/chatbot Markdown to HTML), drops the newlines and indentation of
+ * laid-out HTML source (see {@link collapseHtmlSourceWhitespace}) and strips
+ * the backend's "Customer comment added" label. The bubble calls this itself,
+ * and so does any consumer that needs the same cleaned-up content without
+ * rendering the bubble (e.g. the PDF report generators, which turn the result
+ * into plain text via `stripHtmlTags`) — reported live when the PDF export
+ * instead showed the raw, unstripped "Customer comment added" label as if it
+ * were the comment's actual content.
  */
 export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
   if (isMarkdownComment(comment)) return markdownToHtml(comment.bodyHtml);
-  const raw = comment.bodyHtml ?? "";
+  const raw = collapseCommentSourceWhitespace(comment.bodyHtml ?? "");
   const isFullCodeWrap = hasSingleCodeWrapper(raw);
   const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
   const afterCode = isFullCodeWrap

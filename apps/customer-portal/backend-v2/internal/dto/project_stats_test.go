@@ -17,6 +17,7 @@
 package dto
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -362,5 +363,143 @@ func TestMapProjectChangeRequestStats_ServiceNowDropsNewAssessAndAuthorizeCounts
 	}
 	if got.TotalCount != 22 {
 		t.Errorf("TotalCount = %d, want ServiceNow's own figure passed through (22)", got.TotalCount)
+	}
+}
+
+// Support's Active Chats card reads the Active count out of the conversation state
+// breakdown by ServiceNow's numeric id ("2"), and the Active Chats list behind it
+// filters on that same key. On the Postgres data source entity-service sends the raw
+// enum label as the id, so without normalization the lookup found nothing, the count
+// was omitted and the card read 0 while the list held every active conversation
+// (digiops-cs#3390).
+func TestMapConversationStats_PostgresEnumLabels(t *testing.T) {
+	resp := entity.ProjectConversationStatsResponse{
+		TotalCount:  12,
+		ActiveCount: 7, // entity-service's own OPEN + ACTIVE; the card's contract is the Active state alone
+		StateCount: []entity.ChoiceListItem{
+			{ID: "OPEN", Label: "OPEN", Count: intPtr(4)},
+			{ID: "ACTIVE", Label: "ACTIVE", Count: intPtr(3)},
+			{ID: "RESOLVED", Label: "RESOLVED", Count: intPtr(2)},
+			{ID: "ABANDONED", Label: "ABANDONED", Count: intPtr(1)},
+			{ID: "CLOSE", Label: "CLOSE", Count: intPtr(2)},
+		},
+	}
+
+	got := MapConversationStats(resp)
+
+	for name, c := range map[string]struct {
+		got  *int
+		want int
+	}{
+		"openCount":      {got.OpenCount, 4},
+		"activeCount":    {got.ActiveCount, 3},
+		"resolvedCount":  {got.ResolvedCount, 2},
+		"abandonedCount": {got.AbandonedCount, 1},
+	} {
+		if c.got == nil {
+			t.Errorf("%s is absent, want %d", name, c.want)
+		} else if *c.got != c.want {
+			t.Errorf("%s = %d, want %d", name, *c.got, c.want)
+		}
+	}
+}
+
+// The ServiceNow data source already sends numeric ids; they must keep working.
+func TestMapConversationStats_ServiceNowNumericIDs(t *testing.T) {
+	resp := entity.ProjectConversationStatsResponse{
+		StateCount: []entity.ChoiceListItem{
+			{ID: "1", Label: "Open", Count: intPtr(4)},
+			{ID: "2", Label: "Active", Count: intPtr(3)},
+			{ID: "3", Label: "Resolved", Count: intPtr(2)},
+			{ID: "5", Label: "Abandoned", Count: intPtr(1)},
+		},
+	}
+
+	got := MapConversationStats(resp)
+
+	if got.ActiveCount == nil || *got.ActiveCount != 3 || got.OpenCount == nil || *got.OpenCount != 4 ||
+		got.ResolvedCount == nil || *got.ResolvedCount != 2 || got.AbandonedCount == nil || *got.AbandonedCount != 1 {
+		t.Errorf("counts = open %v / active %v / resolved %v / abandoned %v, want 4/3/2/1",
+			got.OpenCount, got.ActiveCount, got.ResolvedCount, got.AbandonedCount)
+	}
+}
+
+// BuildProjectSupportStats is what the Support page's cards come from: Active Chats and
+// Resolved via Chat must be the Active and Resolved counts, on either data source.
+func TestBuildProjectSupportStats_ChatCardsFromPostgresLabels(t *testing.T) {
+	got := BuildProjectSupportStats(nil, &entity.ProjectConversationStatsResponse{
+		StateCount: []entity.ChoiceListItem{
+			{ID: "ACTIVE", Label: "ACTIVE", Count: intPtr(281)},
+			{ID: "RESOLVED", Label: "RESOLVED", Count: intPtr(10)},
+		},
+	})
+
+	if got.ActiveChats == nil || *got.ActiveChats != 281 {
+		t.Errorf("activeChats = %v, want 281", got.ActiveChats)
+	}
+	if got.ResolvedChats == nil || *got.ResolvedChats != 10 {
+		t.Errorf("resolvedChats = %v, want 10", got.ResolvedChats)
+	}
+}
+
+// Resolved via Chat (Last 30d) is the 30-day figure when entity-service sends one, and
+// falls back to the Resolved entry of the state breakdown (not limited to any period) when it does
+// not: a build that predates the figure, and the ServiceNow data source.
+func TestBuildProjectSupportStats_ResolvedChatsIsTheThirtyDayFigure(t *testing.T) {
+	states := []entity.ChoiceListItem{
+		{ID: "ACTIVE", Label: "ACTIVE", Count: intPtr(281)},
+		{ID: "RESOLVED", Label: "RESOLVED", Count: intPtr(10)},
+	}
+
+	got := BuildProjectSupportStats(nil, &entity.ProjectConversationStatsResponse{StateCount: states, ResolvedPastThirtyDays: intPtr(3)})
+	if got.ResolvedChats == nil || *got.ResolvedChats != 3 {
+		t.Errorf("resolvedChats = %v, want the 30-day figure 3", got.ResolvedChats)
+	}
+	if got.ActiveChats == nil || *got.ActiveChats != 281 {
+		t.Errorf("activeChats = %v, want 281", got.ActiveChats)
+	}
+
+	// Zero is a real answer, not "absent".
+	got = BuildProjectSupportStats(nil, &entity.ProjectConversationStatsResponse{StateCount: states, ResolvedPastThirtyDays: intPtr(0)})
+	if got.ResolvedChats == nil || *got.ResolvedChats != 0 {
+		t.Errorf("resolvedChats = %v, want 0 when nothing was resolved in the window", got.ResolvedChats)
+	}
+
+	got = BuildProjectSupportStats(nil, &entity.ProjectConversationStatsResponse{StateCount: states})
+	if got.ResolvedChats == nil || *got.ResolvedChats != 10 {
+		t.Errorf("resolvedChats = %v, want the breakdown's 10 when no 30-day figure is sent", got.ResolvedChats)
+	}
+}
+
+// The "Resolved via Chat (Last 30d)" list sends its window as RFC 3339 updated-date bounds; they reach
+// entity-service as sent, a missing bound stays absent, and a bound that is not a date is refused.
+func TestBuildEntitySearchConversationsRequest_UpdatedDateWindow(t *testing.T) {
+	const projectID = "11111111-1111-4111-8111-111111111111"
+
+	req := ConversationSearchRequest{Filters: ConversationSearchFilters{
+		StateKeys:        []int{3},
+		StartUpdatedDate: "2026-09-09T10:00:00Z",
+		EndUpdatedDate:   "2026-10-09T10:00:00Z",
+	}}
+	got, err := BuildEntitySearchConversationsRequest(projectID, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Filters.StartUpdatedDate == nil || *got.Filters.StartUpdatedDate != "2026-09-09T10:00:00Z" ||
+		got.Filters.EndUpdatedDate == nil || *got.Filters.EndUpdatedDate != "2026-10-09T10:00:00Z" {
+		t.Errorf("window = %v .. %v, want it passed through", got.Filters.StartUpdatedDate, got.Filters.EndUpdatedDate)
+	}
+
+	got, err = BuildEntitySearchConversationsRequest(projectID, ConversationSearchRequest{Filters: ConversationSearchFilters{StateKeys: []int{3}}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Filters.StartUpdatedDate != nil || got.Filters.EndUpdatedDate != nil {
+		t.Errorf("window = %v .. %v, want none when none was sent", got.Filters.StartUpdatedDate, got.Filters.EndUpdatedDate)
+	}
+
+	_, err = BuildEntitySearchConversationsRequest(projectID, ConversationSearchRequest{Filters: ConversationSearchFilters{StartUpdatedDate: "last week"}})
+	if !errors.Is(err, ErrInvalidConversationDate) {
+		t.Errorf("a bound that is not a date = %v, want ErrInvalidConversationDate", err)
 	}
 }

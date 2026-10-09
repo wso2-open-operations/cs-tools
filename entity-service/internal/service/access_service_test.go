@@ -307,3 +307,40 @@ func TestAccessService_CSMPortalBackendClientID_OverlapWithM2M(t *testing.T) {
 		t.Fatalf("ResolveScope() = %T (%v), want *apierror.ForbiddenError -- the domain gate must survive being also listed in M2MClientIDs", err, err)
 	}
 }
+
+// ViaCustomerPortal marks where a request came from, and nothing else: it is set for every
+// caller the customer portal's backend forwards (a customer and WSO2 staff alike), the data
+// scope is still the user's, and no other client sets it.
+func TestAccessService_ResolveScope_ViaCustomerPortal(t *testing.T) {
+	tests := []struct {
+		name          string
+		id            auth.Identity
+		users         []repository.AccessUser
+		wantAll       bool
+		wantViaPortal bool
+	}{
+		{"a customer through the customer portal", auth.Identity{Validated: true, ClientID: "customer-portal", UserEmail: "c@example.com"},
+			[]repository.AccessUser{userOf("EXTERNAL", true)}, false, true},
+		{"WSO2 staff through the customer portal keeps full data scope, and is marked", auth.Identity{Validated: true, ClientID: "customer-portal", UserEmail: "s@wso2.com"},
+			[]repository.AccessUser{userOf("INTERNAL", true)}, true, true},
+		{"staff through the CSM portal is not marked", auth.Identity{Validated: true, ClientID: "csm-portal", UserEmail: "s@wso2.com"},
+			nil, true, false},
+		{"a machine client is not marked", auth.Identity{Validated: true, ClientID: "csm-backend"}, nil, true, false},
+		{"a user token with no client is not marked", auth.Identity{Validated: true, UserEmail: "s@wso2.com"},
+			[]repository.AccessUser{userOf("INTERNAL", true)}, true, false},
+	}
+	for _, tt := range tests {
+		repo := &fakeAccessRepo{users: tt.users, projects: []string{"p1"}}
+		scope, err := NewAccessService(repo, testClientConfig).ResolveScope(idCtx(tt.id))
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", tt.name, err)
+			continue
+		}
+		if scope.ViaCustomerPortal != tt.wantViaPortal {
+			t.Errorf("%s: ViaCustomerPortal = %v, want %v", tt.name, scope.ViaCustomerPortal, tt.wantViaPortal)
+		}
+		if scope.Unrestricted != tt.wantAll {
+			t.Errorf("%s: Unrestricted = %v, want %v -- the data scope must not change", tt.name, scope.Unrestricted, tt.wantAll)
+		}
+	}
+}

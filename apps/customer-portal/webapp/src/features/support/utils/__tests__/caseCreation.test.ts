@@ -24,6 +24,7 @@ import {
   findMatchingDeploymentLabel,
   shouldAddClassificationProductToOptions,
   getBaseProductOptions,
+  filterDeploymentProductsByCategory,
   isUnknownPlaceholderProductLabel,
   getBaseDeploymentOptions,
   formatChatHistoryForClassification,
@@ -415,6 +416,71 @@ describe("caseCreation utils", () => {
       expect(getBaseProductOptions(products)).toEqual([
         { id: "2", label: "WSO2 API Manager 4.2.0" },
       ]);
+    });
+  });
+
+  describe("filterDeploymentProductsByCategory", () => {
+    const products: DeploymentProductItem[] = [
+      {
+        id: "1",
+        createdOn: "",
+        updatedOn: "",
+        description: null,
+        product: { id: "p1", label: "WSO2 API Manager" },
+        deployment: { id: "d1", label: "Dev" },
+        category: "ms",
+      },
+      {
+        id: "2",
+        createdOn: "",
+        updatedOn: "",
+        description: null,
+        product: { id: "p2", label: "WSO2 Identity Server" },
+        deployment: { id: "d1", label: "Dev" },
+        category: "pc",
+      },
+      {
+        id: "3",
+        createdOn: "",
+        updatedOn: "",
+        description: null,
+        product: { id: "p3", label: "WSO2 Enterprise Integrator" },
+        deployment: { id: "d1", label: "Dev" },
+        category: null,
+      },
+      {
+        id: "4",
+        createdOn: "",
+        updatedOn: "",
+        description: null,
+        product: { id: "p4", label: "WSO2 Micro Integrator" },
+        deployment: { id: "d1", label: "Dev" },
+        category: "cl",
+      },
+    ];
+
+    it("returns every item unchanged when allowedCategories is undefined", () => {
+      expect(filterDeploymentProductsByCategory(products, undefined)).toEqual(
+        products,
+      );
+    });
+
+    it("returns every item unchanged when allowedCategories is empty", () => {
+      expect(filterDeploymentProductsByCategory(products, [])).toEqual(
+        products,
+      );
+    });
+
+    it("keeps only items whose category is in the allow-list, excluding NULL-category items", () => {
+      expect(
+        filterDeploymentProductsByCategory(products, ["ms", "pc"]),
+      ).toEqual([products[0], products[1]]);
+    });
+
+    it("excludes every item when none match the allow-list", () => {
+      expect(filterDeploymentProductsByCategory(products, ["ps"])).toEqual(
+        [],
+      );
     });
   });
 

@@ -38,6 +38,7 @@ import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useGetUserById } from "@features/csm-users/api/useGetUserById";
 import { useSearchRoles } from "@features/csm-admin/api/useSearchRoles";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
+import { grantableRoleLabel } from "@features/csm-users/utils/grantableRoleLabels";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import {
   INTERNAL_USER_ROLES,
@@ -272,10 +273,56 @@ function ExternalAccountMetaCell({
 }
 
 /**
- * Roles and (for internal users) groups as two side-by-side chip clusters in
- * one card, rather than three separate cards — a user rarely has enough
- * groups to justify a card of its own, and putting roles and groups next to
- * each other reads as "what can this person do" at a glance.
+ * A plain (non-navigating) chip cluster — for a role vocabulary with no
+ * directory page of its own to link to (see {@link PermissionsCard}'s CSM
+ * Platform roles section). Mirrors {@link ChipCluster}'s layout exactly,
+ * minus the `DirectoryEntityChip` navigation.
+ */
+function PlainChipCluster({
+  labels,
+  emptyMessage,
+}: {
+  labels: string[];
+  emptyMessage: string;
+}): JSX.Element {
+  if (labels.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        {emptyMessage}
+      </Typography>
+    );
+  }
+  return (
+    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+      {labels.map((label) => (
+        <Chip key={label} size="small" label={label} variant="outlined" color="primary" />
+      ))}
+    </Box>
+  );
+}
+
+/**
+ * Roles and (for internal users) groups as side-by-side chip clusters in one
+ * card, rather than separate cards — a user rarely has enough groups to
+ * justify a card of its own, and putting roles and groups next to each other
+ * reads as "what can this person do" at a glance.
+ *
+ * `user.roles` (entity-service's own role data, what the Customer Portal's
+ * access is modeled on) and `user.csmPlatformRoles` (this CSM portal's own
+ * Asgardeo-backed role assignment — viewer/escalator/cs_engineer/admin/...)
+ * are two unrelated vocabularies describing the same person. For a wso2.com
+ * email (`isWso2Email`, not `userType` — a wso2.com account can be
+ * mistakenly tagged `external` and still have a real Asgardeo CSM role
+ * assignment worth showing) both are shown side by side, relabeled
+ * "Customer Portal roles" / "CSM Platform roles" so neither reads as the
+ * other; every other user keeps the single, unrelabeled "Platform roles"
+ * section exactly as before, since there is nothing to show alongside it. An
+ * earlier version replaced "Platform roles" outright with the Asgardeo
+ * vocabulary for every internal target, which both hid the
+ * Customer-Portal-relevant roles and, for a target holding no configured
+ * Asgardeo role at all, made the whole section look empty instead of showing
+ * what entity-service already had. Matches the backend's own gating on
+ * `GetUser`'s `csmPlatformRoles` field.
  */
 function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element {
   const { data: rolesData } = useSearchRoles({ pagination: { limit: BE_MAX_PAGE_LIMIT } });
@@ -300,16 +347,36 @@ function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element 
     routeBase: "/admin/groups",
   }));
 
+  const showCsmPlatformRoles = isWso2Email(user.email);
+  // Absent (SCIM lookup failed, or no AccessGuard wired) must read differently
+  // from a present-but-empty array (the user genuinely holds no CSM Platform
+  // role) -- collapsing both to [] here would tell the viewer "no roles"
+  // when the truth is "couldn't check", the same distinction
+  // ExternalAccountMetaCell already makes for its own best-effort SCIM status.
+  const csmPlatformRolesAvailable = user.csmPlatformRoles !== undefined;
+  const csmPlatformRoleLabels = (user.csmPlatformRoles ?? []).map((r) => grantableRoleLabel(r));
+
   return (
     <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
       <Typography variant="subtitle2">Permissions & assignments</Typography>
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
         <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Platform roles ({roleRows.length})
+            {showCsmPlatformRoles ? "Customer Portal roles" : "Platform roles"} ({roleRows.length})
           </Typography>
           <ChipCluster rows={roleRows} emptyMessage="No roles assigned." />
         </Box>
+        {showCsmPlatformRoles && (
+          <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              CSM Platform roles{csmPlatformRolesAvailable ? ` (${csmPlatformRoleLabels.length})` : ""}
+            </Typography>
+            <PlainChipCluster
+              labels={csmPlatformRoleLabels}
+              emptyMessage={csmPlatformRolesAvailable ? "No CSM Platform roles assigned." : "Unavailable"}
+            />
+          </Box>
+        )}
         {internal && (
           <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>

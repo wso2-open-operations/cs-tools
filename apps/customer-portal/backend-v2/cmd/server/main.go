@@ -176,7 +176,7 @@ func main() {
 	// CSM_MIGRATION_* flags belong to the ServiceNow-to-CSM cutover: opt-in,
 	// off unless the value is exactly "true", and off means the portal
 	// behaves exactly as it does today.
-	csmMigrationFirstAccess := os.Getenv("CSM_MIGRATION_FIRST_ACCESS_ENABLED") == "true"
+	csmMigrationFirstAccess := !strings.EqualFold(strings.TrimSpace(os.Getenv("CSM_MIGRATION_FIRST_ACCESS_ENABLED")), "false")
 	if csmMigrationFirstAccess {
 		slog.Info("CSM_MIGRATION_FIRST_ACCESS_ENABLED=true; an invited user's first profile load will complete their onboarding")
 	}
@@ -186,7 +186,7 @@ func main() {
 	// entity-service, which updates Postgres and Salesforce in one
 	// transaction. Off, all of it goes to the pre-cutover onboarding service
 	// exactly as before, so this flag is the whole rollback.
-	csmMigrationPortalContacts := os.Getenv("CSM_MIGRATION_PORTAL_CONTACTS_ENABLED") == "true"
+	csmMigrationPortalContacts := !strings.EqualFold(strings.TrimSpace(os.Getenv("CSM_MIGRATION_PORTAL_CONTACTS_ENABLED")), "false")
 	if csmMigrationPortalContacts {
 		slog.Info("CSM_MIGRATION_PORTAL_CONTACTS_ENABLED=true; project contacts are read from the CSM database and written through the entity service")
 	}

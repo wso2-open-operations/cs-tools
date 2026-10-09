@@ -29,6 +29,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	integrationservice "github.com/wso2-open-operations/cs-tools/entity-service/internal/servicenow-integration-service"
 )
 
@@ -1335,6 +1336,71 @@ func TestSNCaseService_UpdateCase_CombinableFieldsCombineInSingleRequest(t *test
 		if got != want {
 			t.Fatalf("payload field %q: got %v, want %v", field, got, want)
 		}
+	}
+}
+
+// TestSNCaseService_UpdateCase_PublishesWorkaroundProvided is the
+// ServiceNow-data-source counterpart of
+// TestCaseService_UpdateCase_PublishesWorkaroundProvided (case_service_test.go):
+// setting workaroundProvided:true via PATCH must publish case.workaround_provided
+// regardless of which data source handled the write, since
+// csm-notification-service's own Redis-based SLA engine is the same single
+// consumer either way.
+func TestSNCaseService_UpdateCase_PublishesWorkaroundProvided(t *testing.T) {
+	workaroundProvided := true
+
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	pub := &mockEventPublisher{}
+	svc := NewServiceNowCaseService(client, nil, pub, nil, nil, "", nil)
+	req := domain.UpdateCaseRequest{ID: testDeploymentUUID, WorkaroundProvided: &workaroundProvided}
+
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	call, found := findPublishCall(pub.calls, events.TypeWorkaroundProvided)
+	if !found {
+		t.Fatalf("expected a case.workaround_provided publish, got %v", publishedTypes(pub.calls))
+	}
+	var payload events.WorkaroundProvidedPayload
+	if err := json.Unmarshal(call.payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.CaseID != testDeploymentUUID {
+		t.Errorf("payload caseId = %q, want %q", payload.CaseID, testDeploymentUUID)
+	}
+}
+
+// TestSNCaseService_UpdateCase_DoesNotPublishWorkaroundProvidedOnRecall is
+// the negative counterpart -- false (a recall) must not publish either.
+func TestSNCaseService_UpdateCase_DoesNotPublishWorkaroundProvidedOnRecall(t *testing.T) {
+	workaroundProvided := false
+
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	pub := &mockEventPublisher{}
+	svc := NewServiceNowCaseService(client, nil, pub, nil, nil, "", nil)
+	req := domain.UpdateCaseRequest{ID: testDeploymentUUID, WorkaroundProvided: &workaroundProvided}
+
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, found := findPublishCall(pub.calls, events.TypeWorkaroundProvided); found {
+		t.Errorf("expected no case.workaround_provided publish for a recall, got %v", publishedTypes(pub.calls))
 	}
 }
 

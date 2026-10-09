@@ -43,9 +43,11 @@ type ErrorResponse struct {
 
 // ValidationError signals a caller-side input problem that should be
 // reported as HTTP 400. Use errors.As in handlers to distinguish it from
-// infrastructure errors.
+// infrastructure errors. Code, when set, is the refusal's machine-readable
+// errorCode (codes.go); most 400s have none, and their body is unchanged.
 type ValidationError struct {
-	Msg string
+	Msg  string
+	Code string
 }
 
 // Error implements the error interface.

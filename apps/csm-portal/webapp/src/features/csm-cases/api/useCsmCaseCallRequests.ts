@@ -22,6 +22,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { invalidateCallRequestWidgetQueries } from "@features/csm-dashboard/utils/invalidateWidgetQueries";
 import { useBackendApi } from "@api/backend/client";
 import type {
   BeCallRequestStateKey,
@@ -123,7 +124,13 @@ export interface PatchCsmCaseCallRequestInput {
 
 /**
  * Update a call request state via `PATCH /cases/{caseId}/call-requests/{callRequestId}`.
- * Invalidates the call-requests list on success.
+ *
+ * On success the case's call-requests list is refetched BEFORE the mutation resolves
+ * (so the row on screen already shows its new state and its actions are right when
+ * the caller carries on), and every dashboard widget over call requests is marked
+ * stale. On failure the list is refetched too: a refusal usually means the row on
+ * screen is out of date (the call was cancelled or concluded by someone else), and
+ * leaving it would keep offering the same action.
  */
 export function usePatchCsmCaseCallRequest(): UseMutationResult<
   BeUpdateCallRequestResponse,
@@ -140,11 +147,19 @@ export function usePatchCsmCaseCallRequest(): UseMutationResult<
         input.patch,
       );
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
+      // Any change to a call request (scheduled, rejected, completed, ...) can move it
+      // on or off the dashboards' call-request lists. Not awaited: those widgets are
+      // not on screen here, and reloading them must not hold this action up.
+      void invalidateCallRequestWidgetQueries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CASE_CALL_REQUESTS, variables.caseId],
+      });
+    },
+    onError: (_error, variables) => {
       void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.CASE_CALL_REQUESTS, variables.caseId],
       });
     },
   });
 }
-

@@ -1266,16 +1266,18 @@ export interface BeCreatedCaseEscalation {
 }
 
 /** Response for `GET /cases/{id}/escalations` -- the case's full escalation
- * history, newest first, plus who's authorized to de-escalate the current
- * level. Deliberately not `BeSearchResponseBase`: the wire response carries
- * no `offset`/`limit`/`hasMore` fields. */
+ * history, newest first, plus who's authorized to de-escalate it.
+ * Deliberately not `BeSearchResponseBase`: the wire response carries no
+ * `offset`/`limit`/`hasMore` fields. */
 export interface BeCaseEscalationSearchResponse {
   escalations: BeCaseEscalation[];
   total: number;
   /** The notified-users list of the case's most recent escalation record
-   * (empty/absent when the case has never been escalated). Only someone on
-   * this list is authorized to de-escalate the case's current level. */
+   * (empty/absent when the case has never been escalated). */
   currentNotifiedUsers?: BeCaseEscalationNotifiedUser[];
+  /** The leads of the case's account's CRE (ABT) team -- the only users who
+   * may de-escalate the case. */
+  teamLeads?: BeCaseEscalationNotifiedUser[];
 }
 
 /**
@@ -2520,8 +2522,9 @@ export interface BeSearchCallRequestsResponse {
  *   required, `assignee` optional.
  * - `wso2_rejected` (agent reject) / `canceled`: `cancellationReason` optional
  *   (used as the reject/cancel reason).
- * - `concluded` (agent send notes): `notes` required, `plan`/`attendees`/
- *   `actionItems`/`actualDurationMin` optional.
+ * - `concluded`: agent "send call notes" supplies `notes` (plus optional
+ *   `plan`/`attendees`/`actionItems`/`actualDurationMin`); agent "mark as
+ *   completed" sends no notes at all.
  * - `pending_on_wso2` (reschedule request back to the customer): `utcTimes` +
  *   `durationInMinutes`.
  */
@@ -2537,7 +2540,9 @@ export interface BeUpdateCallRequestPayload {
   meetingDate?: string;
   /** Agent (or team) assigned to run the call; used for `scheduled`. */
   assignee?: string;
-  /** Call notes; required for `concluded`. */
+  /** Call notes for `concluded`. Optional: "Mark as completed" concludes a call
+   * with none (the backend then only accepts it for a scheduled / notes-pending
+   * call); "Send call notes" always supplies them. */
   notes?: string;
   /** Follow-up plan recorded alongside the call notes; used for `concluded`. */
   plan?: string;
@@ -3141,7 +3146,13 @@ export interface BeGroup {
 }
 
 export interface BeGroupSearchPayload {
-  filters?: { searchQuery?: string };
+  filters?: {
+    searchQuery?: string;
+    /** Only groups that are the support group of at least one service — the
+     * groups an incident may be assigned to on create. Omitted (not `false`)
+     * when unset, so older callers send the same body as before. */
+    supportGroupsOnly?: boolean;
+  };
   pagination: BePagination;
 }
 
@@ -3609,8 +3620,10 @@ export interface BeCreateIncidentPayload {
   contactType?: BeIncidentContactType;
   impact: BeIncidentImpact;
   urgency: BeIncidentUrgency;
-  // No assignmentGroupId: the backend sets the group from `serviceId`'s
-  // support group, and refuses a create that sends one.
+  /** Optional. When sent it must be the support group of some service (the
+   * backend 400s otherwise). When omitted the backend uses `serviceId`'s
+   * support group, else the Default service's support group. */
+  assignmentGroupId?: string;
   assignedEngineerId?: string;
   subject: string;
   watchList?: string[];
@@ -3626,6 +3639,16 @@ export interface BeCreateIncidentPayload {
   problemId?: string;
   causedById?: string;
   environment?: string;
+}
+
+/**
+ * `GET /incidents/create-defaults` — what the create form falls back to when
+ * the picked Service has no support group of its own: the Default service and
+ * its support group (the "default team"). Either is `null` when not configured.
+ */
+export interface BeIncidentCreateDefaults {
+  defaultServiceId: string | null;
+  defaultGroup: BeEntityRef | null;
 }
 
 /** `POST /incidents` response — the created identifiers. */

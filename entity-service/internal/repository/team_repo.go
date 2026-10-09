@@ -19,8 +19,10 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // TeamMemberRow is one row of a team's roster, joined to "user".
@@ -42,6 +44,9 @@ type TeamRepository interface {
 	TeamExists(ctx context.Context, teamID string) (bool, error)
 	// GetTeamMembers returns every member of the given team, ordered by name.
 	GetTeamMembers(ctx context.Context, teamID string) ([]TeamMemberRow, error)
+	// SearchTeams returns a name-filtered, paginated slice of the team table
+	// together with the total count of matching rows before pagination.
+	SearchTeams(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Team, int, error)
 }
 
 type teamRepo struct {
@@ -92,4 +97,43 @@ func (r *teamRepo) GetTeamMembers(ctx context.Context, teamID string) ([]TeamMem
 		return nil, fmt.Errorf("iterate team members: %w", err)
 	}
 	return members, nil
+}
+
+// SearchTeams implements TeamRepository. The search query is a
+// case-insensitive substring match on the team's name.
+func (r *teamRepo) SearchTeams(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Team, int, error) {
+	where := ""
+	args := []any{}
+	if searchQuery != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(searchQuery)
+		args = append(args, "%"+escaped+"%")
+		where = " WHERE name ILIKE $1 ESCAPE '\\'"
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM team"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count teams: %w", err)
+	}
+
+	dataArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := r.db.Query(ctx, fmt.Sprintf(
+		`SELECT id::text, name, type FROM team%s ORDER BY name, id LIMIT $%d OFFSET $%d`,
+		where, len(args)+1, len(args)+2), dataArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query teams: %w", err)
+	}
+	defer rows.Close()
+
+	teams := make([]domain.Team, 0, limit)
+	for rows.Next() {
+		var t domain.Team
+		if err := rows.Scan(&t.ID, &t.Name, &t.Type); err != nil {
+			return nil, 0, fmt.Errorf("scan team: %w", err)
+		}
+		teams = append(teams, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate teams: %w", err)
+	}
+	return teams, total, nil
 }

@@ -39,6 +39,7 @@ import {
   useProducts,
   useReplacePlaybookTasks,
 } from "@features/plg/api/hooks";
+import { formatDate } from "@features/plg/utils/format";
 import {
   MIN_CHECKLIST_OPTIONS,
   TASK_VALUE_TYPES,
@@ -669,6 +670,41 @@ function PlaybookCardReadOnly({ playbook }: { playbook: Playbook }) {
           </Grid>
           <Grid size={12}>
             <Field label="Description" value={playbook.description || "—"} />
+          </Grid>
+
+          {/* Who wrote it, and who last changed it.
+
+              Two fields rather than one "last touched by": any admin may edit
+              any playbook, so the author and the last editor are routinely
+              different people, and they answer different questions -- "whose
+              play is this?" against "who changed it under me?".
+
+              Both read "—" on playbooks created before these columns existed.
+              That is the honest answer: nothing recorded it, and crediting the
+              author with an edit they may never have made would be worse than a
+              dash. The date beside each name is the row's own created_at /
+              updated_at, which is why it is shown only when there is a name to
+              attach it to -- an unattributed timestamp invites the reader to
+              assume the wrong person. */}
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Field
+              label="Authored by"
+              value={
+                playbook.authoredBy
+                  ? `${playbook.authoredBy.name} · ${formatDate(playbook.createdOn)}`
+                  : "—"
+              }
+            />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Field
+              label="Last edited by"
+              value={
+                playbook.updatedBy
+                  ? `${playbook.updatedBy.name} · ${formatDate(playbook.updatedOn)}`
+                  : "—"
+              }
+            />
           </Grid>
         </Grid>
 

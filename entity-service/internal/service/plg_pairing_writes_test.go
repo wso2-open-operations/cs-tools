@@ -31,7 +31,7 @@ func (f *fakeOrgPlatformRepo) Acknowledge(context.Context, domain.AcknowledgeReq
 func (f *fakeOrgPlatformRepo) AttachPlaybook(context.Context, domain.AttachPlaybookRequest, string) error {
 	panic("not reached")
 }
-func (f *fakeOrgPlatformRepo) DetachRun(context.Context, string) (domain.WriteResult, string, string, error) {
+func (f *fakeOrgPlatformRepo) DetachRun(context.Context, string, string) (domain.WriteResult, string, string, error) {
 	panic("not reached")
 }
 func (f *fakeOrgPlatformRepo) PatchRunTask(context.Context, domain.PatchRunTaskRequest, string) (string, string, error) {

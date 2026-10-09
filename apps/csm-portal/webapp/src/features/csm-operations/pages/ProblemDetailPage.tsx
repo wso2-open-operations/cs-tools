@@ -30,7 +30,7 @@ import ProblemTransitionRequirementDialog, {
   type ProblemRequirementTransition,
 } from "@features/csm-operations/components/ProblemTransitionRequirementDialog";
 import { problemStateColor, problemStateLabel } from "@features/csm-operations/utils/problems";
-import { sanitizeDescriptionHtml } from "@utils/sanitizeHtml";
+import { looksLikeHtml, sanitizeDescriptionHtml } from "@utils/sanitizeHtml";
 import type { BeEntityRef, BeProblemRef, BeUpdateProblemPayload } from "@api/backend/types";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
@@ -99,18 +99,13 @@ function ProblemRefItem({
   );
 }
 
-// A tag anywhere means the description is the rich-text editor's HTML (a
-// problem created from an incident or case carries that one's); anything
-// else is plain text, e.g. synced from ServiceNow.
-const HTML_TAG = /<\/?[a-z][\s\S]*>/i;
-
 /**
  * A problem's description: rich-text HTML rendered through the shared
  * description sanitiser (as the case and time-card views render theirs),
  * plain text as-is with its line breaks.
  */
 function ProblemDescription({ text }: { text: string }): JSX.Element {
-  if (!HTML_TAG.test(text)) {
+  if (!looksLikeHtml(text)) {
     return (
       <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
         {text}

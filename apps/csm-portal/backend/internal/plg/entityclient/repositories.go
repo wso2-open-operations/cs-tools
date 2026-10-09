@@ -113,9 +113,9 @@ func (c *Client) Get(ctx context.Context, id string) (*domain.OrganizationDetail
 	return &out, nil
 }
 
-func (c *Client) Patch(ctx context.Context, req domain.PatchOrganizationRequest) error {
+func (c *Client) Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error {
 	return c.patch(ctx, "/plg/organizations/"+esc(req.ID),
-		map[string]any{"ownerId": req.OwnerID}, nil)
+		map[string]any{"ownerId": req.OwnerID, "actorId": actorID}, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -197,9 +197,13 @@ func (c *Client) AttachPlaybook(ctx context.Context, req domain.AttachPlaybookRe
 
 // DetachRun removes a run. Zero rows means it was closed, and closed runs are
 // not detachable — that would erase a recorded outcome.
-func (c *Client) DetachRun(ctx context.Context, runID string) (string, string, error) {
+func (c *Client) DetachRun(ctx context.Context, runID, actorID string) (string, string, error) {
 	var out writeResult
-	if err := c.delete(ctx, "/plg/playbook-runs/"+esc(runID), &out); err != nil {
+	// actorId as a query parameter, because a DELETE has no body. url.Values
+	// does the escaping rather than string concatenation, which is where an id
+	// that is not the UUID it is assumed to be would otherwise reach the path.
+	q := url.Values{"actorId": {actorID}}
+	if err := c.delete(ctx, "/plg/playbook-runs/"+esc(runID)+"?"+q.Encode(), &out); err != nil {
 		return "", "", err
 	}
 	if out.RowsAffected == 0 {
@@ -310,22 +314,38 @@ func (c *Client) GetPlaybook(ctx context.Context, id string) (*domain.Playbook, 
 	return &out, nil
 }
 
-func (c *Client) CreatePlaybook(ctx context.Context, req domain.CreatePlaybookRequest) (string, error) {
+// The playbook writes wrap their request in an anonymous struct embedding it
+// alongside actorId. Embedding keeps the JSON flat -- the request's own fields
+// promote -- so the body is the one entity-service already accepted plus
+// actorId, rather than a nested shape its decoder would reject.
+func (c *Client) CreatePlaybook(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (string, error) {
 	var out struct {
 		PlaybookID string `json:"playbookId"`
 	}
-	if err := c.post(ctx, "/plg/products/"+esc(req.ProductCode)+"/playbooks", req, &out); err != nil {
+	body := struct {
+		domain.CreatePlaybookRequest
+		ActorID string `json:"actorId"`
+	}{req, actorID}
+	if err := c.post(ctx, "/plg/products/"+esc(req.ProductCode)+"/playbooks", body, &out); err != nil {
 		return "", err
 	}
 	return out.PlaybookID, nil
 }
 
-func (c *Client) PatchPlaybook(ctx context.Context, req domain.PatchPlaybookRequest) error {
-	return c.patch(ctx, "/plg/playbooks/"+esc(req.ID), req, nil)
+func (c *Client) PatchPlaybook(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) error {
+	body := struct {
+		domain.PatchPlaybookRequest
+		ActorID string `json:"actorId"`
+	}{req, actorID}
+	return c.patch(ctx, "/plg/playbooks/"+esc(req.ID), body, nil)
 }
 
-func (c *Client) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) error {
-	return c.put(ctx, "/plg/playbooks/"+esc(req.PlaybookID)+"/tasks", req, nil)
+func (c *Client) ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) error {
+	body := struct {
+		domain.ReplacePlaybookTasksRequest
+		ActorID string `json:"actorId"`
+	}{req, actorID}
+	return c.put(ctx, "/plg/playbooks/"+esc(req.PlaybookID)+"/tasks", body, nil)
 }
 
 func (c *Client) DeletePlaybook(ctx context.Context, id string) error {

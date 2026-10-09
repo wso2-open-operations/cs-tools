@@ -2211,3 +2211,214 @@
 .csm-ts .tw.roster.split thead tr:first-child th.day:not(.today) .d {
   display: inline;
 }
+
+/* ── Day view: the rotation reads before the people on it ─────────────────
+   A card's heading -- its hours, its name and how many are on it -- was set
+   smaller and greyer than the names under it, so a glance found people first
+   and had to hunt for which rotation they were on. The heading is now the
+   largest, darkest line on the card, and the other headings of the day view
+   (a tier row, a crowded card's team list, an off-rota card's kind) step up
+   with it, each still above the names it heads. */
+.csm-ts .ladder .zbh {
+  font-size: 13px;
+  column-gap: 8px;
+}
+.csm-ts .ladder .zbh .chip.sm {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.csm-ts .ladder .zbh > b.zbt {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.csm-ts .ladder .zbh .zbn {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.csm-ts .ladder .zsl {
+  font-size: 11px;
+  line-height: 15px;
+}
+.csm-ts .ladder .zsl b {
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.csm-ts .ladder .zblk .teamlist .tl {
+  font-size: 12.5px;
+}
+.csm-ts .ladder .zblk .teamlist .tl b {
+  font-weight: 800;
+}
+.csm-ts .ladder .zblk .tlph {
+  font-size: 11px;
+}
+.csm-ts .ladder .offh .offl {
+  font-size: 12px;
+  font-weight: 700;
+}
+.csm-ts .ladder .offh b {
+  font-size: 12.5px;
+}
+
+/* A crowded card opens on its team list alone; the pane says how to see a
+   team instead of standing empty. */
+.csm-ts .ladder .zblk .tlhint {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  min-height: 24px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--muted);
+}
+.csm-ts .ladder .zblk .teamsplit .tl {
+  cursor: pointer;
+}
+
+/* ── Day view: a card's names along its width, on call set apart ──────────
+   A small card laid its names out in 150px columns, so a two-word name broke
+   onto a second line while the rest of the card stood empty. The columns are
+   now wide enough for a whole name and share the card's width between them,
+   so names stay lined up in columns down a full card and spread across a
+   small one. Only a name wider than its column is cut (its tooltip has it in
+   full). */
+.csm-ts .ladder .zsec.zflow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 2px 16px;
+}
+.csm-ts .ladder .zsec.zflow .lnm {
+  max-width: 100%;
+}
+.csm-ts .ladder .lane .zblk .zsec.zflow .lnm .who {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Someone on call is not working the hours, only reachable if an emergency
+   comes up. They get a column of their own at the card's right, behind a
+   dashed rule and under an "On-call" heading (its tooltip says what that
+   means), with the avatar ringed in dashes like the on-call chip; those who
+   work the hours sit side by side on the left. */
+.csm-ts .ladder .zblk .zsplit {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 0;
+}
+.csm-ts .ladder .zblk .zsplit .zwork {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.csm-ts .ladder .zblk .zoc {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
+  border-left: 1px dashed color-mix(in srgb, var(--oc-fg) 45%, var(--line));
+}
+.csm-ts .ladder .zblk .zoc .zocl {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--oc-fg);
+  white-space: nowrap;
+  cursor: help;
+}
+.csm-ts .ladder .zblk .zoc .lnm .who {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+.csm-ts .ladder .zblk .zoc .av {
+  outline: 1.5px dashed var(--oc-fg);
+  outline-offset: 1px;
+}
+/* A card with someone on call reads like the other cards' columns: the people
+   working the hours fill a column downwards first -- the morning's two stacked
+   one above the other -- three to a column (what a three-hour card has room
+   for) before starting the next, each column as wide as a column of names
+   anywhere else; the on-call column follows straight after them, not pushed
+   out to the card's far edge. */
+.csm-ts .ladder .zblk .zsplit.hasoc .zwork {
+  flex: 0 0 auto;
+}
+.csm-ts .ladder .zblk .zsplit.hasoc .zsec.zflow {
+  grid-template-columns: none;
+  grid-template-rows: repeat(3, auto);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(min(200px, 40cqi), max-content);
+}
+
+/* Room between a card's heading and the people under it: at 4px the names
+   pressed up against the heading and the card read as stuffed. */
+.csm-ts .ladder .zblk .zbp {
+  margin-top: 10px;
+}
+
+/* A name sits level with its avatar. The day view's rows were aligned to the
+   avatar's top so a name that wrapped onto a second line started beside it;
+   but most names fit on one line, and top-aligned they rode about 4px above
+   the avatar's middle. Centred, a one-line name is level with it and a
+   two-line one is balanced on either side of it. */
+.csm-ts .ladder .lane .zblk .lnm,
+.csm-ts .ladder .offlane .lnm {
+  align-items: center;
+}
+.csm-ts .ladder .lane .zblk .zsec.zflow .lnm .who,
+.csm-ts .ladder .lane .zblk .zoc .lnm .who {
+  line-height: 1.2;
+}
+
+/* A big shift with someone on call: its team list takes the room that is
+   left, and the on-call column keeps its place beside it. */
+.csm-ts .ladder .zblk .zsplit.hasoc.crowd {
+  flex: 1;
+  min-height: 0;
+}
+.csm-ts .ladder .zblk .zsplit.hasoc.crowd .zwork {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* A narrow card -- a lane split between several cards, or a small screen --
+   has no room for name columns side by side with an on-call column. A column
+   of names never asks for more than the card's own width, and below 420px the
+   on-call column moves under the people working, behind a dashed rule on top
+   instead of at its side. */
+.csm-ts .ladder .zblk {
+  container-type: inline-size;
+}
+@container (max-width: 420px) {
+  .csm-ts .ladder .zblk .zsplit.hasoc {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .csm-ts .ladder .zblk .zsplit.hasoc .zwork {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .csm-ts .ladder .zblk .zsplit.hasoc .zsec.zflow {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-flow: row;
+  }
+  .csm-ts .ladder .zblk .zoc {
+    max-width: none;
+    padding-left: 0;
+    padding-top: 4px;
+    border-left: 0;
+    border-top: 1px dashed color-mix(in srgb, var(--oc-fg) 45%, var(--line));
+  }
+}

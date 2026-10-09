@@ -97,4 +97,12 @@ const (
 	// request's own creator, or a field a customer may not set. The caller may
 	// not do this here, now or later.
 	CodeChangeRequestForbidden = "change_request_forbidden"
+
+	// CodeIncidentAssignmentGroupNotAllowed is the 400 for POST /incidents with an
+	// assignmentGroupId that is not an active support group of any service: the
+	// group the create form offered may have been retired or unlinked since it
+	// was listed. Nothing was created; listing the groups again
+	// (POST /groups/search with supportGroupsOnly) shows the current ones. A
+	// value that is not a UUID is a plain 400 with no code.
+	CodeIncidentAssignmentGroupNotAllowed = "incident_assignment_group_not_allowed"
 )

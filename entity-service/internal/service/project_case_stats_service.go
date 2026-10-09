@@ -47,6 +47,11 @@ const (
 // same numbers during the migration.
 var caseStatsResolvedStates = []string{caseStateClosed, caseStateSolutionProposed}
 
+// caseStatsActionRequiredStates are the case states waiting on the customer:
+// the project's actionRequiredCount, and the Action Required number the
+// project list shows (see globalService.GlobalSearch).
+var caseStatsActionRequiredStates = []string{caseStateAwaitingInfo, caseStateSolutionProposed}
+
 // projectCaseStatsService is the Postgres-backed ProjectCaseStatsService.
 //
 // It reproduces ServiceNow's ProjectStatsUtils.getProjectScopeCaseStats
@@ -215,14 +220,17 @@ func (s *projectCaseStatsService) GetProjectCaseStats(
 		incrementCount(resp.SeverityCount, row.Severity, row.Count)
 
 		// Active and outstanding are deliberately the same set: every state
-		// except CLOSED. See the type's doc comment.
-		if row.State != caseStateClosed {
+		// except CLOSED. See the type's doc comment. A row with no state of
+		// its own type (an extension row that is missing, or that belongs to
+		// another type; see caseLikeOwnStateColumn) is neither: no list can
+		// show it, so a card that links to a list must not count it.
+		if row.State != "" && row.State != caseStateClosed {
 			resp.ActiveCount += row.Count
 			resp.OutstandingCount += row.Count
 			incrementCount(resp.OutstandingSeverityCount, row.Severity, row.Count)
 		}
 
-		if row.State == caseStateAwaitingInfo || row.State == caseStateSolutionProposed {
+		if containsString(caseStatsActionRequiredStates, row.State) {
 			resp.ActionRequiredCount += row.Count
 		}
 
@@ -233,7 +241,9 @@ func (s *projectCaseStatsService) GetProjectCaseStats(
 
 	for _, row := range engagementTypes {
 		incrementCount(resp.EngagementTypeCount, row.EngagementType, row.Count)
-		if row.State != caseStateClosed {
+		// Same rule as the state counts above: a row with no state of its own
+		// type is not outstanding.
+		if row.State != "" && row.State != caseStateClosed {
 			incrementCount(resp.OutstandingEngagementTypeCount, row.EngagementType, row.Count)
 		}
 	}

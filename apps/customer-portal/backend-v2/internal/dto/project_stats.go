@@ -392,8 +392,16 @@ type ConversationStats struct {
 
 // MapConversationStats builds the portal response from entity-service's
 // ProjectConversationStatsResponse.
+//
+// StateCount is normalised first (normalizeConversationStateChoices): on the
+// Postgres data source entity-service returns the raw enum label as the id
+// ({"id":"ACTIVE"}), so a lookup by ServiceNow's numeric id ("2") found nothing
+// and every count came back absent. Support's Active Chats card then showed 0
+// while the Active Chats list behind it (which filters on that same numeric
+// state key) held hundreds of conversations. Ids that are already numeric
+// (the ServiceNow data source) pass through untouched.
 func MapConversationStats(r entity.ProjectConversationStatsResponse) ConversationStats {
-	stateCount := mapChoiceListItems(r.StateCount)
+	stateCount := normalizeConversationStateChoices(mapChoiceListItems(r.StateCount))
 	return ConversationStats{
 		OpenCount:      countForState(stateCount, conversationStateIDOpen),
 		ActiveCount:    countForState(stateCount, conversationStateIDActive),
@@ -425,7 +433,15 @@ func BuildProjectSupportStats(caseStats *entity.ProjectCaseStatsResponse, conver
 	if conversationStats != nil {
 		mapped := MapConversationStats(*conversationStats)
 		out.ActiveChats = mapped.ActiveCount
+		// Resolved via Chat (Last 30d): the 30-day figure when entity-service sends one,
+		// else the Resolved count of the state breakdown (not limited to any period),
+		// which is what a build that predates the 30-day figure, and the ServiceNow data
+		// source, still send.
 		out.ResolvedChats = mapped.ResolvedCount
+		if conversationStats.ResolvedPastThirtyDays != nil {
+			resolved := *conversationStats.ResolvedPastThirtyDays
+			out.ResolvedChats = &resolved
+		}
 	}
 	return out
 }

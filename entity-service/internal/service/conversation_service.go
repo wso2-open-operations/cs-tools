@@ -62,6 +62,9 @@ func (s *conversationService) SearchConversations(ctx context.Context, req domai
 	if err := validateUUIDs("filters.projectIds", req.Filters.ProjectIDs); err != nil {
 		return domain.SearchConversationsResponse{}, err
 	}
+	if start, end := req.Filters.StartUpdatedDate, req.Filters.EndUpdatedDate; start != nil && end != nil && end.Before(*start) {
+		return domain.SearchConversationsResponse{}, &apierror.ValidationError{Msg: "filters.endUpdatedDate must not be before filters.startUpdatedDate"}
+	}
 
 	// callerEmail is only needed to resolve filters.createdByMe -- a request
 	// that doesn't set it works fine with no caller identity at all, so a

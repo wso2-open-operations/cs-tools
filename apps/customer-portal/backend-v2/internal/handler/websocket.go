@@ -476,6 +476,20 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 		}
 	}
 
+	if agentMessageText != "" {
+		// Same gap, same fix as AIChatHandler.SendConversationMessage's own
+		// call site -- see createEntityStateActive's doc comment there for
+		// why an unconditional PATCH isn't safe and a fresh read is needed
+		// first. A separate read from the resolved-branch's own GetConversation
+		// below (not combined): that one is conditional on resolved and this
+		// one isn't, and both are already best-effort, non-blocking checks.
+		if conv, err := h.entity.GetConversation(ctx, conversationID); err != nil {
+			slog.WarnContext(ctx, "entity GetConversation failed while checking state for auto-activate", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+		} else {
+			maybeActivateConversation(ctx, h.entity, user.UserID, conversationID, conv.State)
+		}
+	}
+
 	var resolved bool
 	if raw, ok := result["resolved"]; ok {
 		_ = json.Unmarshal(raw, &resolved)

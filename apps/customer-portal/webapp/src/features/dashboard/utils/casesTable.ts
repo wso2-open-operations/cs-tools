@@ -57,13 +57,42 @@ export const getSeverityColor = (label?: string): string => {
   }
 };
 
+/** Matches a raw backend enum value: only upper-case letters, digits, and underscores. */
+const RAW_ENUM_LABEL_PATTERN = /^[A-Z0-9_]+$/;
+
+/**
+ * Formats a case state label for display. Only normalizes a raw,
+ * Postgres-sourced UPPER_SNAKE_CASE value ("WORK_IN_PROGRESS" -> "Work In
+ * Progress") -- anything else is returned exactly as given. This matters
+ * because a blind lower-case-then-title-case pass is NOT safe on an already
+ * human-readable label: it would capitalize a lowercase word that belongs
+ * lowercase ("Waiting On WSO2" -> "Waiting On Wso2", destroying the acronym),
+ * and it never capitalizes a word right after a non-whitespace character like
+ * "(" ("On Hold (Customer)" -> "On Hold (customer)"). Detecting a raw enum
+ * first and leaving everything else untouched avoids both.
+ */
+export function formatCaseStatusLabel(label?: string | null): string {
+  if (!label) return "--";
+  const trimmed = label.trim();
+  if (!trimmed) return "--";
+  if (!RAW_ENUM_LABEL_PATTERN.test(trimmed)) return trimmed;
+  const formatted = trimmed
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/(^|\s)([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+  // A raw value made up entirely of underscores (e.g. "___") passes the enum
+  // check but turns into pure whitespace once underscores become spaces --
+  // fall back to the placeholder rather than rendering a blank cell.
+  return formatted.trim() ? formatted : "--";
+}
+
 /**
  * Get status color based on label.
  * @param label - Status label
  * @returns Color string
  */
 export const getStatusColor = (label?: string): string => {
-  const normalized = label?.toLowerCase() || "";
+  const normalized = formatCaseStatusLabel(label).toLowerCase();
   switch (true) {
     case normalized.includes(CaseStatus.OPEN.toLowerCase()):
     case normalized.includes(CaseStatus.REOPENED.toLowerCase()):

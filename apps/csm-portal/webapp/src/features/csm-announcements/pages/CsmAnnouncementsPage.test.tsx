@@ -78,8 +78,12 @@ vi.mock("@features/csm-cases/components/AsyncProjectMultiSelect", () => ({
 // The signed-in user's profile/id-token claims aren't relevant to this page's
 // own behavior — only the column picker's storage key derives from them
 // (see useColumnPreferences.test.ts for that logic).
+// Mutable so the "New announcement" tests below can sign in with different
+// portal roles; the page derives its capabilities from these through the real
+// usePortalAccess.
+let mockRoles: string[] = [];
 vi.mock("@context/current-user/CurrentUserContext", () => ({
-  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+  useCurrentUser: () => ({ user: { id: "user-1", roles: mockRoles }, isLoading: false, isError: false }),
 }));
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ email: "user@example.test" }),
@@ -156,6 +160,10 @@ const PENDING_REQUEST: AnnouncementRequest = {
 };
 
 beforeEach(() => {
+  // Default to a caller who can create announcements, since most of this file
+  // exercises the creators' Requests tab; the visibility tests below sign in
+  // other roles explicitly.
+  mockRoles = ["cs_engineer", "announcement_creator"];
   mockedUseSearch.mockReset();
   mockedUseSearchRequests.mockReset();
   mockedUseSearchRequests.mockReturnValue({
@@ -168,7 +176,95 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+// Creating an announcement needs the announcement_creator role on top of write
+// access (the backend refuses it with a 403 otherwise), so the entry point is
+// only offered to callers who can actually use it.
+describe("CsmAnnouncementsPage — New announcement button", () => {
+  beforeEach(() => {
+    mockResult({ data: { rows: [], total: 0, limit: 20, offset: 0, hasMore: false } });
+  });
+
+  it("is offered to a CS engineer who holds the announcement creator role", () => {
+    mockRoles = ["cs_engineer", "announcement_creator"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.getByRole("button", { name: /new announcement/i })).toBeInTheDocument();
+  });
+
+  it("is offered to admin without the role", () => {
+    mockRoles = ["admin"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.getByRole("button", { name: /new announcement/i })).toBeInTheDocument();
+  });
+
+  it("is hidden from a CS engineer without the role, who can still read the list", () => {
+    mockRoles = ["cs_engineer"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.queryByRole("button", { name: /new announcement/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no announcements found/i)).toBeInTheDocument();
+  });
+
+  it("is hidden from a holder of the role who cannot write", () => {
+    mockRoles = ["viewer", "announcement_creator"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.queryByRole("button", { name: /new announcement/i })).not.toBeInTheDocument();
+  });
+});
+
+// The Requests tab (drafts and requests awaiting approval) is the creators'
+// workspace: everyone else sees only the published announcements, and the page
+// does not even ask the backend for the request list, which it refuses to them.
+describe("CsmAnnouncementsPage — Requests tab visibility", () => {
+  beforeEach(() => {
+    mockResult({ data: { rows: [ROW], total: 1, limit: 20, offset: 0, hasMore: false } });
+  });
+
+  it("shows both tabs to a creator and runs the request search", () => {
+    mockRoles = ["cs_engineer", "announcement_creator"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.getByRole("tab", { name: "Announcements" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Requests" })).toBeInTheDocument();
+    expect(mockedUseSearchRequests.mock.calls.at(-1)?.[3]).toEqual({ enabled: true });
+  });
+
+  it("shows admin both tabs without the role", () => {
+    mockRoles = ["admin"];
+    render(<CsmAnnouncementsPage />);
+    expect(screen.getByRole("tab", { name: "Requests" })).toBeInTheDocument();
+  });
+
+  for (const [label, roles] of [
+    ["a CS engineer without the role", ["cs_engineer"]],
+    ["a view-only role", ["viewer"]],
+    ["a holder of the role who cannot write", ["viewer", "announcement_creator"]],
+  ] as const) {
+    it(`hides the tab bar from ${label}, who still sees the published announcements`, () => {
+      mockRoles = [...roles];
+      render(<CsmAnnouncementsPage />);
+      expect(screen.queryByRole("tab", { name: "Requests" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+      expect(screen.getByText("Scheduled maintenance on Choreo")).toBeInTheDocument();
+    });
+  }
+
+  it("does not ask the backend for the request list when the caller cannot see it", () => {
+    mockRoles = ["cs_engineer"];
+    render(<CsmAnnouncementsPage />);
+    expect(mockedUseSearchRequests.mock.calls.length).toBeGreaterThan(0);
+    for (const call of mockedUseSearchRequests.mock.calls) {
+      expect(call[3]).toEqual({ enabled: false });
+    }
+  });
+
+  it("keeps a ?tab=pending link on the Announcements tab for a caller without access", () => {
+    mockRoles = ["cs_engineer"];
+    render(<CsmAnnouncementsPage />, "/announcements?tab=pending");
+    expect(screen.getByText("Scheduled maintenance on Choreo")).toBeInTheDocument();
+    expect(screen.queryByText("Upcoming maintenance")).not.toBeInTheDocument();
+  });
+});
+
 describe("CsmAnnouncementsPage — list states", () => {
+
   it("renders a row from the search result", () => {
     mockResult({
       data: { rows: [ROW], total: 1, limit: 20, offset: 0, hasMore: false },

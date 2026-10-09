@@ -8,13 +8,23 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/domain"
 )
 
+// testActorID stands in for the "user" id PLG's identity middleware resolves.
+const testActorID = "33333333-3333-3333-3333-333333333333"
+
 type fakePlaybookRepo struct {
 	created []domain.CreatePlaybookRequest
-	got     domain.Playbook
+	// createdBy and patchedBy record the actor each call carried, so a test can
+	// assert the caller reaches the repository rather than only that the call
+	// compiled with an extra argument.
+	createdBy       []string
+	patchedBy       []string
+	tasksReplacedBy []string
+	got             domain.Playbook
 }
 
-func (f *fakePlaybookRepo) Create(_ context.Context, req domain.CreatePlaybookRequest) (string, error) {
+func (f *fakePlaybookRepo) Create(_ context.Context, req domain.CreatePlaybookRequest, actorID string) (string, error) {
 	f.created = append(f.created, req)
+	f.createdBy = append(f.createdBy, actorID)
 	return "22222222-2222-2222-2222-222222222222", nil
 }
 func (f *fakePlaybookRepo) Get(_ context.Context, _ string) (*domain.Playbook, error) {
@@ -28,11 +38,13 @@ func (f *fakePlaybookRepo) ListByProduct(context.Context, string) ([]domain.Play
 func (f *fakePlaybookRepo) ListForStage(context.Context, string, domain.LifecycleStage, []domain.PlaybookType) ([]domain.Playbook, error) {
 	panic("not reached")
 }
-func (f *fakePlaybookRepo) Patch(context.Context, domain.PatchPlaybookRequest) error {
-	panic("not reached")
+func (f *fakePlaybookRepo) Patch(_ context.Context, _ domain.PatchPlaybookRequest, actorID string) error {
+	f.patchedBy = append(f.patchedBy, actorID)
+	return nil
 }
-func (f *fakePlaybookRepo) ReplaceTasks(context.Context, domain.ReplacePlaybookTasksRequest) error {
-	panic("not reached")
+func (f *fakePlaybookRepo) ReplaceTasks(_ context.Context, _ domain.ReplacePlaybookTasksRequest, actorID string) error {
+	f.tasksReplacedBy = append(f.tasksReplacedBy, actorID)
+	return nil
 }
 func (f *fakePlaybookRepo) Delete(context.Context, string) error { panic("not reached") }
 
@@ -77,7 +89,7 @@ func TestCreatePlaybookRequiresNameKindAndStage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakePlaybookRepo{}
 			svc := NewPlaybookService(repo)
-			_, err := svc.Create(context.Background(), createReq(tc.mutate))
+			_, err := svc.Create(context.Background(), createReq(tc.mutate), testActorID)
 			if err == nil {
 				t.Fatal("expected a validation error, got none")
 			}
@@ -102,7 +114,7 @@ func TestCreatePlaybookAcceptsEveryKind(t *testing.T) {
 			svc := NewPlaybookService(repo)
 			_, err := svc.Create(context.Background(), createReq(func(r *domain.CreatePlaybookRequest) {
 				r.PlaybookType = kind
-			}))
+			}), testActorID)
 			if err != nil {
 				t.Fatalf("%s was rejected: %v", kind, err)
 			}
@@ -132,7 +144,7 @@ func TestTaskOptionsAreRequiredByListTypesAndRefusedByTheRest(t *testing.T) {
 			svc := NewPlaybookService(repo)
 			_, err := svc.Create(context.Background(), createReq(func(r *domain.CreatePlaybookRequest) {
 				r.Tasks = []domain.PlaybookTaskInput{{Name: "A task", ValueType: vt, Options: opts}}
-			}))
+			}), testActorID)
 			if needsOptions && err != nil {
 				t.Fatalf("%s carries options by definition but was rejected: %v", vt, err)
 			}
@@ -146,7 +158,7 @@ func TestTaskOptionsAreRequiredByListTypesAndRefusedByTheRest(t *testing.T) {
 			svc := NewPlaybookService(repo)
 			_, err := svc.Create(context.Background(), createReq(func(r *domain.CreatePlaybookRequest) {
 				r.Tasks = []domain.PlaybookTaskInput{{Name: "A task", ValueType: vt}}
-			}))
+			}), testActorID)
 			if needsOptions && err == nil {
 				t.Fatalf("%s needs an answer list, but none was required", vt)
 			}
@@ -169,7 +181,7 @@ func TestListTasksNeedAtLeastTwoOptions(t *testing.T) {
 					ValueType: vt,
 					Options:   []domain.ChecklistOption{{Code: "ONLY", Label: "The only one"}},
 				}}
-			}))
+			}), testActorID)
 			if err == nil {
 				t.Fatalf("%s was accepted with a single option", vt)
 			}
@@ -186,7 +198,7 @@ func TestBookendsAreAddedAroundTheAuthorsTasks(t *testing.T) {
 		r.Tasks = []domain.PlaybookTaskInput{
 			{Name: "Company profile", ValueType: domain.ValueString},
 		}
-	}))
+	}), testActorID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,5 +214,70 @@ func TestBookendsAreAddedAroundTheAuthorsTasks(t *testing.T) {
 	}
 	if tasks[1].Name != "Company profile" {
 		t.Errorf("the author's task is not in the middle: %q", tasks[1].Name)
+	}
+}
+
+// TestPlaybookWritesCarryTheActor pins that the caller reaches the repository.
+//
+// Threading an argument through four layers compiles whether or not the right
+// value arrives: a handler passing "" , or a service passing its own parameter
+// to the wrong position, both build. The repository is where the value stops
+// being plumbing and becomes a column, so that is where this asserts.
+func TestPlaybookWritesCarryTheActor(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		repo := &fakePlaybookRepo{}
+		svc := NewPlaybookService(repo)
+		if _, err := svc.Create(context.Background(), createReq(func(*domain.CreatePlaybookRequest) {}), testActorID); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(repo.createdBy) != 1 {
+			t.Fatalf("expected one create, got %d", len(repo.createdBy))
+		}
+		if repo.createdBy[0] != testActorID {
+			t.Errorf("repository received actor %q, want %q", repo.createdBy[0], testActorID)
+		}
+	})
+
+	t.Run("patch", func(t *testing.T) {
+		repo := &fakePlaybookRepo{}
+		svc := NewPlaybookService(repo)
+		name := "renamed"
+		if _, err := svc.Patch(context.Background(),
+			domain.PatchPlaybookRequest{ID: "11111111-1111-1111-1111-111111111111", Name: &name},
+			testActorID); err != nil {
+			t.Fatalf("patch: %v", err)
+		}
+		if len(repo.patchedBy) != 1 {
+			t.Fatalf("expected one patch, got %d", len(repo.patchedBy))
+		}
+		if repo.patchedBy[0] != testActorID {
+			t.Errorf("repository received actor %q, want %q", repo.patchedBy[0], testActorID)
+		}
+	})
+}
+
+// TestReplaceTasksCarriesTheActor covers the third write on a playbook.
+//
+// Tasks are edited far more often than the playbook row itself -- adding one,
+// reordering, retiring one -- and any admin may do it to any playbook, so this
+// is the attribution that answers "who changed the checklist".
+func TestReplaceTasksCarriesTheActor(t *testing.T) {
+	repo := &fakePlaybookRepo{}
+	svc := NewPlaybookService(repo)
+	_, err := svc.ReplaceTasks(context.Background(), domain.ReplacePlaybookTasksRequest{
+		PlaybookID: "11111111-1111-1111-1111-111111111111",
+		Tasks: []domain.PlaybookTaskInput{
+			{Code: "INITIATE", Name: "Initiate", ValueType: domain.ValueBoolean},
+			{Code: "CLOSE_PLAYBOOK", Name: "Close", ValueType: domain.ValueBoolean},
+		},
+	}, testActorID)
+	if err != nil {
+		t.Fatalf("replace tasks: %v", err)
+	}
+	if len(repo.tasksReplacedBy) != 1 {
+		t.Fatalf("expected one call, got %d", len(repo.tasksReplacedBy))
+	}
+	if repo.tasksReplacedBy[0] != testActorID {
+		t.Errorf("repository received actor %q, want %q", repo.tasksReplacedBy[0], testActorID)
 	}
 }

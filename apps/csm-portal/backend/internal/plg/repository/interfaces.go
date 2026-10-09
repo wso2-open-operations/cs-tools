@@ -32,7 +32,7 @@ type ReferenceRepository interface {
 type OrganizationRepository interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
-	Patch(ctx context.Context, req domain.PatchOrganizationRequest) error
+	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
 }
 
 // OrgPlatformRepository serves the product tab.
@@ -42,7 +42,7 @@ type OrgPlatformRepository interface {
 	Acknowledge(ctx context.Context, req domain.AcknowledgeRequest, actor string) error
 
 	AttachPlaybook(ctx context.Context, req domain.AttachPlaybookRequest, actor string) error
-	DetachRun(ctx context.Context, runID string) (orgID, productCode string, err error)
+	DetachRun(ctx context.Context, runID, actorID string) (orgID, productCode string, err error)
 	PatchRunTask(ctx context.Context, req domain.PatchRunTaskRequest, actor string) (orgID, productCode string, err error)
 	RunTaskShape(ctx context.Context, taskID string) (domain.RunTaskShape, error)
 
@@ -58,9 +58,9 @@ type PlaybookRepository interface {
 	ListByProduct(ctx context.Context, productCode string) ([]domain.Playbook, error)
 	ListForStage(ctx context.Context, productID string, stage domain.LifecycleStage, kinds []domain.PlaybookType) ([]domain.Playbook, error)
 	Get(ctx context.Context, id string) (*domain.Playbook, error)
-	Create(ctx context.Context, req domain.CreatePlaybookRequest) (string, error)
-	Patch(ctx context.Context, req domain.PatchPlaybookRequest) error
-	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest) error
+	Create(ctx context.Context, req domain.CreatePlaybookRequest, actorID string) (string, error)
+	Patch(ctx context.Context, req domain.PatchPlaybookRequest, actorID string) error
+	ReplaceTasks(ctx context.Context, req domain.ReplacePlaybookTasksRequest, actorID string) error
 	Delete(ctx context.Context, id string) error
 }
 

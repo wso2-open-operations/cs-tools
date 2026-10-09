@@ -38,14 +38,22 @@ func (s *groupService) SearchGroups(ctx context.Context, req domain.SearchGroups
 		return domain.SearchGroupsResponse{}, err
 	}
 	searchQuery := ""
+	supportGroupsOnly := false
 	if req.Filters != nil {
 		if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 			return domain.SearchGroupsResponse{}, err
 		}
 		searchQuery = req.Filters.SearchQuery
+		supportGroupsOnly = req.Filters.SupportGroupsOnly
 	}
 
-	groups, total, err := s.repo.SearchGroups(ctx, searchQuery, req.Pagination.Limit, req.Pagination.Offset)
+	search := s.repo.SearchGroups
+	if supportGroupsOnly {
+		// The groups an incident may be created in: "group" rows, not the
+		// team registry (GroupRepository.SearchSupportGroups).
+		search = s.repo.SearchSupportGroups
+	}
+	groups, total, err := search(ctx, searchQuery, req.Pagination.Limit, req.Pagination.Offset)
 	if err != nil {
 		return domain.SearchGroupsResponse{}, err
 	}

@@ -171,7 +171,9 @@ func parseActualDurationMin(raw *string) *int {
 //     request that supplies one rather than silently dropping it.
 //   - closed_on/closed_by_id are never set by UpdateCallRequest: which states
 //     count as "closed" isn't specified anywhere.
-//   - State transitions are not validated against the current state.
+//   - State transitions are not validated against the current state, except that
+//     concluding without notes needs a scheduled or notes-pending call (see
+//     UpdateCallRequest).
 type CallRequestRepository interface {
 	// CreateCallRequest inserts a call request for req.CaseID in state
 	// pending_on_wso2, opened by callerID/callerEmail. Returns a NotFoundError
@@ -545,6 +547,22 @@ func (r *callRequestRepo) CreateCallRequestFromServiceNow(ctx context.Context, r
 //
 // Every optional field is applied with COALESCE, so an absent field leaves the
 // stored value untouched. The state is always written.
+//
+// One transition is guarded: concluding a call WITHOUT post-call notes ("Mark as
+// completed", digiops-cs#3350) only applies to a call that is scheduled or notes
+// pending. Nothing else here validates the current state, so without the guard a
+// stale screen (or a direct caller) could turn a cancelled, rejected or
+// never-scheduled call into a completed one. The check is part of the UPDATE's own
+// WHERE clause, so it is atomic with the write; a call that fails it comes back as
+// a ConflictError naming its current state, not as a misleading not-found.
+// Concluding WITH notes ("Send call notes") is unchanged and not guarded.
+//
+// That same transition is also staff-only. Before notes became optional the notes
+// requirement was the only thing stopping an external caller from concluding a
+// call: the customer portal's backend forwards any state key it is given, cannot
+// send notes, and RLS lets a project member update their own project's calls. So a
+// notes-less conclude from anyone but an internal (Unrestricted) caller is a
+// ForbiddenError, answered before any lookup so it says nothing about the call.
 func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.UpdateCallRequestRequest, assigneeID *string, callerEmail string) (domain.UpdateCallRequestResponse, error) {
 	var finalTimes *string
 	if req.UTCTimes != nil {
@@ -576,6 +594,24 @@ func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.Upda
 		caseID = &req.CaseID
 	}
 
+	// nil (SQL NULL) means "any current state"; set only for a notes-less conclude.
+	// That path also never writes the notes column (blank notes included), so
+	// completing a call cannot erase what is already recorded on it.
+	notes := req.Notes
+	completableFrom := []string{
+		callRequestStateToEnum(domain.CallRequestStateScheduled),
+		callRequestStateToEnum(domain.CallRequestStateNotesPending),
+	}
+	var onlyFromStates any
+	if req.State == domain.CallRequestStateConcluded && (req.Notes == nil || strings.TrimSpace(*req.Notes) == "") {
+		scope, ok := CallerIdentityFromContext(ctx)
+		if !ok || !scope.Unrestricted {
+			return domain.UpdateCallRequestResponse{}, &apierror.ForbiddenError{Msg: "only WSO2 staff can mark a call request as completed"}
+		}
+		notes = nil
+		onlyFromStates = completableFrom
+	}
+
 	const query = `
 		UPDATE customer_call SET
 			state = $2::text::customer_call_state_enum,
@@ -592,6 +628,7 @@ func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.Upda
 			actual_call_duration = COALESCE($12::text, actual_call_duration)
 		WHERE id = $1::text::uuid
 		  AND ($13::text::uuid IS NULL OR work_item_id = $13::text::uuid)
+		  AND ($14::text[] IS NULL OR state::text = ANY($14::text[]))
 		RETURNING id, updated_on`
 
 	var id string
@@ -599,8 +636,36 @@ func (r *callRequestRepo) UpdateCallRequest(ctx context.Context, req domain.Upda
 	err := r.db.QueryRow(ctx, query,
 		req.ID, callRequestStateToEnum(req.State), callerEmail,
 		finalTimes, req.DurationMinutes, scheduledOn, assigneeID,
-		req.Notes, req.Plan, req.Attendees, req.ActionItems, actual, caseID,
+		notes, req.Plan, req.Attendees, req.ActionItems, actual, caseID, onlyFromStates,
 	).Scan(&id, &updatedOn)
+	if errors.Is(err, pgx.ErrNoRows) && onlyFromStates != nil {
+		// No row matched. Either the call does not exist (not found), or it is in a state
+		// this conclude is not allowed from (conflict): look it up to tell which, so a
+		// stale "Mark as completed" gets an accurate answer instead of "not found".
+		var current *string
+		lookup := r.db.QueryRow(ctx,
+			`SELECT state::text FROM customer_call
+			 WHERE id = $1::text::uuid AND ($2::text::uuid IS NULL OR work_item_id = $2::text::uuid)`,
+			req.ID, caseID).Scan(&current)
+		switch {
+		case lookup == nil:
+			if current != nil && (*current == completableFrom[0] || *current == completableFrom[1]) {
+				// It became completable between the UPDATE and this lookup (a concurrent
+				// reschedule, say): saying "not allowed from <state>" would be wrong.
+				return domain.UpdateCallRequestResponse{}, &apierror.ConflictError{Msg: "the call request changed while this was being applied; please try again"}
+			}
+			label := "in an unknown state"
+			if current != nil {
+				label = "currently " + CallRequestStateFromEnum(*current).Label
+			}
+			return domain.UpdateCallRequestResponse{}, &apierror.ConflictError{Msg: "a call request can only be marked completed while it is scheduled or notes pending (this one is " + label + ")"}
+		case errors.Is(lookup, pgx.ErrNoRows):
+			// Not visible or not there: fall through to not found below.
+		default:
+			// A failed lookup is a failure, not a missing call.
+			return domain.UpdateCallRequestResponse{}, fmt.Errorf("look up call request after refused conclude: %w", lookup)
+		}
+	}
 	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {
 		if caseID != nil {
 			return domain.UpdateCallRequestResponse{}, &apierror.NotFoundError{Msg: "call request not found for this case"}

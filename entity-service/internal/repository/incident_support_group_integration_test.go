@@ -25,8 +25,9 @@ import (
 )
 
 // TestSupportGroupOfServiceLive checks the repository SQL against a real
-// database. It seeds its own group and two services -- one with that group as
-// its support group, one with none -- so both cases are checked on every run
+// database. It seeds its own groups and services -- a service with an active
+// support group, one whose support group is inactive, one with none, and a
+// group that supports no service -- so every case is checked on every run
 // whatever the database already holds, and deletes them afterwards.
 func TestSupportGroupOfServiceLive(t *testing.T) {
 	dsn := os.Getenv("PG_OUTAGE_TEST_DSN")
@@ -42,41 +43,74 @@ func TestSupportGroupOfServiceLive(t *testing.T) {
 	repo := NewIncidentRepository(NewScoped(pool))
 
 	const (
-		group     = "5e5e5e5e-0000-4000-8000-000000000001"
-		withGroup = "5e5e5e5e-0000-4000-8000-000000000002"
-		without   = "5e5e5e5e-0000-4000-8000-000000000003"
+		group        = "5e5e5e5e-0000-4000-8000-000000000001"
+		withGroup    = "5e5e5e5e-0000-4000-8000-000000000002"
+		without      = "5e5e5e5e-0000-4000-8000-000000000003"
+		inactive     = "5e5e5e5e-0000-4000-8000-000000000004"
+		withInactive = "5e5e5e5e-0000-4000-8000-000000000005"
+		unused       = "5e5e5e5e-0000-4000-8000-000000000006"
 	)
 	// Registered before the inserts so a half-seeded run is still cleaned up;
-	// services first, since they reference the group.
+	// services first, since they reference the groups.
 	defer func() {
 		bg := context.Background()
-		if _, err := pool.Exec(bg, `DELETE FROM service WHERE id IN ($1::uuid, $2::uuid)`, withGroup, without); err != nil {
-			t.Errorf("CLEANUP FAILED, delete services %s, %s by hand: %v", withGroup, without, err)
+		if _, err := pool.Exec(bg, `DELETE FROM service WHERE id IN ($1::uuid, $2::uuid, $3::uuid)`, withGroup, without, withInactive); err != nil {
+			t.Errorf("CLEANUP FAILED, delete services %s, %s, %s by hand: %v", withGroup, without, withInactive, err)
 		}
-		if _, err := pool.Exec(bg, `DELETE FROM "group" WHERE id = $1::uuid`, group); err != nil {
-			t.Errorf("CLEANUP FAILED, delete group %s by hand: %v", group, err)
+		if _, err := pool.Exec(bg, `DELETE FROM "group" WHERE id IN ($1::uuid, $2::uuid, $3::uuid)`, group, inactive, unused); err != nil {
+			t.Errorf("CLEANUP FAILED, delete groups %s, %s, %s by hand: %v", group, inactive, unused, err)
 		}
 	}()
+	// is_active NULL on the first group: NULL counts as active.
 	if _, err := pool.Exec(ctx, `
-INSERT INTO "group" (id, created_on, updated_on, created_by, updated_by, name)
-VALUES ($1::uuid, now(), now(), 'test', 'test', 'support-group live test')`, group); err != nil {
-		t.Fatalf("seed group: %v", err)
+INSERT INTO "group" (id, created_on, updated_on, created_by, updated_by, name, is_active)
+VALUES ($1::uuid, now(), now(), 'test', 'test', 'support-group live test', NULL),
+       ($2::uuid, now(), now(), 'test', 'test', 'support-group live test (inactive)', FALSE),
+       ($3::uuid, now(), now(), 'test', 'test', 'support-group live test (unused)', TRUE)`, group, inactive, unused); err != nil {
+		t.Fatalf("seed groups: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 INSERT INTO service (id, created_on, updated_on, created_by, updated_by, name, number, support_group_id)
-VALUES ($1::uuid, now(), now(), 'test', 'test', 'support-group live test (with)',    'SVC-TEST-1', $3::uuid),
-       ($2::uuid, now(), now(), 'test', 'test', 'support-group live test (without)', 'SVC-TEST-2', NULL)`,
-		withGroup, without, group); err != nil {
+VALUES ($1::uuid, now(), now(), 'test', 'test', 'support-group live test (with)',     'SVC-TEST-1', $4::uuid),
+       ($2::uuid, now(), now(), 'test', 'test', 'support-group live test (without)',  'SVC-TEST-2', NULL),
+       ($3::uuid, now(), now(), 'test', 'test', 'support-group live test (inactive)', 'SVC-TEST-3', $5::uuid)`,
+		withGroup, without, withInactive, group, inactive); err != nil {
 		t.Fatalf("seed services: %v", err)
 	}
 
-	for _, c := range []struct{ name, serviceID, want string }{
-		{"service with a support group", withGroup, group},
-		{"service without one", without, ""},
-		{"unknown service", "00000000-0000-0000-0000-000000000001", ""},
+	for _, c := range []struct {
+		name, serviceID string
+		want            ServiceSupportGroup
+	}{
+		{"service with a support group", withGroup, ServiceSupportGroup{Found: true, ServiceName: "support-group live test (with)", GroupID: group, GroupName: "support-group live test"}},
+		{"service without one", without, ServiceSupportGroup{Found: true, ServiceName: "support-group live test (without)"}},
+		{"unknown service", "00000000-0000-0000-0000-000000000001", ServiceSupportGroup{}},
 	} {
 		if got, err := repo.SupportGroupOfService(ctx, c.serviceID); err != nil || got != c.want {
-			t.Errorf("%s: got %q err %v, want %q", c.name, got, err, c.want)
+			t.Errorf("%s: got %+v err %v, want %+v", c.name, got, err, c.want)
 		}
+	}
+
+	for _, c := range []struct {
+		name, groupID string
+		want          bool
+	}{
+		{"active (NULL) support group", group, true},
+		{"inactive support group", inactive, false},
+		{"group that supports no service", unused, false},
+		{"unknown group", "00000000-0000-0000-0000-000000000001", false},
+	} {
+		if got, err := repo.IsSupportGroup(ctx, c.groupID); err != nil || got != c.want {
+			t.Errorf("IsSupportGroup %s: got %v err %v, want %v", c.name, got, err, c.want)
+		}
+	}
+
+	// The picker lists exactly what the create accepts.
+	groups, total, err := NewGroupRepository(pool).SearchSupportGroups(ctx, "support-group live test", 50, 0)
+	if err != nil {
+		t.Fatalf("SearchSupportGroups: %v", err)
+	}
+	if total != 1 || len(groups) != 1 || groups[0].ID != group || !groups[0].Active {
+		t.Errorf("SearchSupportGroups = %+v (total %d), want only the active support group %s", groups, total, group)
 	}
 }

@@ -210,18 +210,14 @@ export default function DashboardPage(): JSX.Element {
   // This ensures the Action Required / Outstanding card counts match what is visible on the page.
   // Note: chart-specific queries (defaultCaseStats, serviceRequestStats, engagementStats) remain
   // separate because stateCount here is aggregated and cannot be split back per type.
+  // Security Report Analysis is deliberately excluded: the Dashboard has no chart for it, and
+  // its own Outstanding count is shown on the Security Center page instead.
   const combinedCaseTypes = useMemo(() => {
     const types: string[] = [CaseType.DEFAULT_CASE];
     if (permissions.hasSR) types.push(CaseType.SERVICE_REQUEST);
     if (permissions.hasEngagements) types.push(CaseType.ENGAGEMENT);
-    if (permissions.hasSecurityReportAnalysis)
-      types.push(CaseType.SECURITY_REPORT_ANALYSIS);
     return types;
-  }, [
-    permissions.hasSR,
-    permissions.hasEngagements,
-    permissions.hasSecurityReportAnalysis,
-  ]);
+  }, [permissions.hasSR, permissions.hasEngagements]);
 
   const {
     data: combinedCasesStats,

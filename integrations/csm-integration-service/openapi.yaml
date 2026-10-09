@@ -2403,10 +2403,8 @@ components:
           type: string
           format: uuid
           description: >-
-            The incident's assignment group is set from this service's support
-            group; there is no assignmentGroupId on create. A service with no
-            support group creates the incident unassigned. Reassign afterwards
-            with PATCH.
+            When no assignmentGroupId is sent, the incident's assignment group
+            is this service's support group (see assignmentGroupId).
         serviceOfferingId:
           type: string
           format: uuid
@@ -2441,6 +2439,21 @@ components:
             correlation_id field. Look it up via SearchIncidentsRequest filters.correlationId
             to find an incident this caller already created, without depending on
             free-text search over subject or workNotes.
+        assignmentGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional; forwarded unchanged to the entity service, which decides
+            the group once for every caller. Sent: used when it is an active
+            group that is the support group of at least one service, otherwise
+            400 (a value that is not a UUID is a 400 too; blank counts as not
+            sent). Not sent: the service's support group; when the service has
+            none, the support group of the entity service's default service
+            (INCIDENT_DEFAULT_SERVICE_ID); with no default group either, the
+            incident is created unassigned. A failed lookup fails the request
+            and nothing is created. A work note records where the group came
+            from, after any workNotes sent.
         assignedEngineerId:
           type: string
           format: uuid

@@ -105,7 +105,12 @@ func (h *PlgPairingHandler) AttachPlaybook(w http.ResponseWriter, r *http.Reques
 
 // DetachRun serves DELETE /plg/playbook-runs/{playbookRunId}. (W4)
 func (h *PlgPairingHandler) DetachRun(w http.ResponseWriter, r *http.Request) {
-	res, orgID, code, err := h.svc.DetachRun(r.Context(), r.PathValue("playbookRunId"))
+	// actorId travels as a query parameter: this is a DELETE, and a request
+	// body on one is accepted by some proxies and silently dropped by others.
+	// Every other attributed write here reads it from the body because every
+	// other one has a body to read.
+	res, orgID, code, err := h.svc.DetachRun(r.Context(),
+		r.PathValue("playbookRunId"), r.URL.Query().Get("actorId"))
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

@@ -140,7 +140,13 @@ func (s *accessService) ResolveScope(ctx context.Context) (AccessScope, error) {
 			if id.UserEmail == "" {
 				return AccessScope{}, &apierror.UnauthorizedError{Msg: "a user token (x-user-id-token) is required for this client"}
 			}
-			return s.scopeForUser(ctx, id.UserEmail)
+			scope, err := s.scopeForUser(ctx, id.UserEmail)
+			if err != nil {
+				return AccessScope{}, err
+			}
+			// Only marks where the request came from; the data scope is the user's.
+			scope.ViaCustomerPortal = true
+			return scope, nil
 		case s.client.CSMPortalBackendClientID != "" && id.ClientID == s.client.CSMPortalBackendClientID:
 			if id.UserEmail != "" && s.isCSMPortalUserDomain(id.UserEmail) {
 				return AccessScope{Unrestricted: true, ViewerEmail: id.UserEmail, HasInternalAccess: true}, nil

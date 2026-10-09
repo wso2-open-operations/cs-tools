@@ -99,6 +99,10 @@ type caseService struct {
 	// catalog answers when the caller sent none (fillServiceRequestText). nil
 	// unless wired via WithServiceRequestCatalog.
 	srCatalog srCatalogReader
+	// typeTransfer backs UpdateCase's type transfer (see transferCaseType). nil
+	// unless wired via WithCaseTypeTransfer, in which case a request carrying a
+	// type is refused as it was before the transfer existed.
+	typeTransfer repository.CaseTypeTransferRepository
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -621,10 +625,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err := s.validateDeployedProductCategoryForType(ctx, req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	// Before both create paths: the dual-write path's Postgres copy
-	// (CreateCaseFromServiceNow) stores req.Subject too, and the ServiceNow
-	// payload for a service request never carries it, so ServiceNow still
-	// derives its own.
+	// Before both create paths: derive subject and description for a service
+	// request if not already provided, and forward both onto ServiceNow and
+	// Postgres.
 	s.fillServiceRequestText(ctx, &req)
 
 	if s.snMirror != nil {
@@ -1481,8 +1484,15 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
-	// Fields with no Postgres implementation at all: a full type transfer,
-	// and everything sn_case_service.go's own UpdateCase only ever accepts
+	// A type transfer has its own path: it moves the case between extension
+	// tables (and, under dual-write, asks ServiceNow first inside the same
+	// transaction) -- see transferCaseType. Without the wiring it falls through
+	// to the refusal below, exactly as before.
+	if req.Type != nil && s.typeTransfer != nil {
+		return s.transferCaseType(ctx, req)
+	}
+	// Fields with no Postgres implementation at all: a full type transfer
+	// (unless wired, above), and everything sn_case_service.go's own UpdateCase only ever accepts
 	// as PART of one -- engagementType/engagementPaymentType/issueType/
 	// catalogId/catalogItemId/variables are rejected there too whenever
 	// req.Type is nil ("... are only allowed when type is also provided").
@@ -2587,6 +2597,15 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	// gap rather than a fix worth building speculatively.
 	if s.slaEngine != nil && req.WorkaroundProvided != nil && *req.WorkaroundProvided {
 		s.slaEngine.CompleteWorkaroundClock(ctx, req.ID)
+	}
+	// Deliberately independent of s.slaEngine above -- this is the signal
+	// csm-notification-service's own Redis-based SLA engine needs to
+	// complete ITS OWN workaround clock, a different tracker in a
+	// different process from the SLAEngineService call just above; see
+	// events.WorkaroundProvidedPayload's own doc comment for why nothing
+	// published this before.
+	if req.WorkaroundProvided != nil && *req.WorkaroundProvided {
+		publishWorkaroundProvidedEvent(ctx, s.publisher, req.ID)
 	}
 	// Checked via GetCaseEtaSharedOn, not a request field -- eta_shared_on
 	// has no ServiceNow equivalent and no guaranteed connection to this

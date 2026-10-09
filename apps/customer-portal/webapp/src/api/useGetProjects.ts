@@ -24,6 +24,7 @@ import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiError } from "@utils/ApiError";
 import { CORRELATION_ID_HEADER, newCorrelationId } from "@utils/correlationId";
 import { useLogger } from "@hooks/useLogger";
+import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type {
   SearchProjectsResponse,
@@ -54,6 +55,8 @@ export default function useInfiniteProjects({
   const logger = useLogger();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
   const authFetch = useAuthApiClient();
+  // /users/me completes a first sign-in's registration, so projects load after it.
+  const { isSuccess: isUserLoaded } = useGetUserDetails();
 
   const normalizedSearchQuery = searchQuery?.trim() || undefined;
 
@@ -64,7 +67,7 @@ export default function useInfiniteProjects({
       normalizedSearchQuery,
       pageSize,
     ],
-    enabled: enabled && isSignedIn && !isAuthLoading,
+    enabled: enabled && isSignedIn && !isAuthLoading && isUserLoaded,
     queryFn: async ({ pageParam = 0 }): Promise<SearchProjectsResponse> => {
       logger.debug(
         `[useInfiniteProjects] Fetching projects... offset: ${pageParam}, limit: ${pageSize}, searchQuery: ${normalizedSearchQuery || "none"}`,

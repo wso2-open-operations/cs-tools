@@ -17,11 +17,35 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import CreateServiceRequestPage from "@features/operations/pages/CreateServiceRequestPage";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+});
+
+// Mutable fixture state read by the mocks below, so a single test can drive
+// the page into the "project has a chosen deployment and restricts SR product
+// categories" scenario without re-declaring every vi.mock factory per test.
+const testState = vi.hoisted(() => ({
+  projectTypeLabel: undefined as string | undefined,
+  srProductCategories: undefined as string[] | undefined,
+  deployments: [] as Record<string, unknown>[],
+  searchParams: new URLSearchParams(),
+}));
+
+const { productsSearchAllSpy, productsSearchInfiniteSpy } = vi.hoisted(() => ({
+  productsSearchAllSpy: vi.fn(),
+  productsSearchInfiniteSpy: vi.fn(),
+}));
+
+afterEach(() => {
+  testState.projectTypeLabel = undefined;
+  testState.srProductCategories = undefined;
+  testState.deployments = [];
+  testState.searchParams = new URLSearchParams();
+  productsSearchAllSpy.mockClear();
+  productsSearchInfiniteSpy.mockClear();
 });
 
 vi.mock("react-router", async (importOriginal) => {
@@ -29,7 +53,7 @@ vi.mock("react-router", async (importOriginal) => {
   return {
     ...actual,
     useParams: () => ({ projectId: "proj-1" }),
-    useSearchParams: () => [new URLSearchParams(), vi.fn()],
+    useSearchParams: () => [testState.searchParams, vi.fn()],
     useLocation: () => ({ pathname: "/projects/proj-1/operations/service-requests/create", state: null }),
   };
 });
@@ -39,7 +63,16 @@ vi.mock("@hooks/useModifierAwareNavigate", () => ({
 }));
 
 vi.mock("@api/useGetProjectDetails", () => ({
-  default: () => ({ data: { name: "Demo", account: { name: "Acct" } }, isLoading: false }),
+  default: () => ({
+    data: {
+      name: "Demo",
+      account: { name: "Acct" },
+      type: testState.projectTypeLabel
+        ? { label: testState.projectTypeLabel }
+        : undefined,
+    },
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@api/useGetProjectFilters", () => ({
@@ -58,7 +91,11 @@ vi.mock("@features/operations/api/useGetCatalogItemVariables", () => ({
 }));
 
 vi.mock("@features/operations/api/usePostCase", () => ({
-  usePostCase: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  usePostCase: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@features/support/api/usePostAttachments", () => ({
+  usePostAttachments: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
 
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
@@ -75,14 +112,18 @@ vi.mock("@hooks/useLogger", () => ({
 
 vi.mock("@api/useGetProjectFeatures", () => ({
   default: () => ({
-    data: { hasServiceRequestReadAccess: true, acceptedSeverityValues: [] },
+    data: {
+      hasServiceRequestReadAccess: true,
+      acceptedSeverityValues: [],
+      srProductCategories: testState.srProductCategories,
+    },
     isLoading: false,
   }),
 }));
 
 vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
   usePostProjectDeploymentsSearchInfinite: () => ({
-    data: { pages: [] },
+    data: { pages: [{ deployments: testState.deployments }] },
     isLoading: false,
     isFetchingNextPage: false,
     hasNextPage: false,
@@ -91,14 +132,31 @@ vi.mock("@api/usePostProjectDeploymentsSearch", () => ({
 }));
 
 vi.mock("@features/project-details/api/usePostDeploymentProductsSearch", () => ({
-  usePostDeploymentProductsSearchInfinite: () => ({
-    data: { pages: [] },
-    isLoading: false,
-    isError: false,
-    isFetchingNextPage: false,
-    hasNextPage: false,
-    fetchNextPage: vi.fn(),
-  }),
+  usePostDeploymentProductsSearchInfinite: (
+    id: string,
+    opts: Record<string, unknown>,
+  ) => {
+    productsSearchInfiniteSpy(id, opts);
+    return {
+      data: { pages: [] },
+      isLoading: false,
+      isError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+    };
+  },
+  usePostDeploymentProductsSearchAll: (
+    id: string,
+    opts: Record<string, unknown>,
+  ) => {
+    productsSearchAllSpy(id, opts);
+    return {
+      data: [],
+      isLoading: false,
+      isError: false,
+    };
+  },
   extractDeploymentProducts: () => [],
 }));
 
@@ -132,5 +190,82 @@ describe("CreateServiceRequestPage", () => {
       </QueryClientProvider>,
     );
     expect(screen.getByText(/Create Service Request/i)).toBeInTheDocument();
+  });
+
+  it("fetches the full product list exhaustively, instead of lazily paging it, once a project restricts SR product categories", () => {
+    // Regression guard: lazy, scroll-triggered pagination can strand eligible
+    // products on a later page once the client-side category filter is
+    // applied (a fetched page made entirely of NULL-category products
+    // filters down to an empty, unscrollable menu while more pages remain).
+    // A deployment selected via the ?deploymentId= prefill (no UI
+    // interaction needed) must switch the page onto the exhaustive
+    // usePostDeploymentProductsSearchAll hook and disable the lazy infinite
+    // one, rather than feeding it a filter it can never fully page through.
+    testState.projectTypeLabel = "Managed Cloud Subscription";
+    testState.srProductCategories = ["ms", "pc"];
+    testState.deployments = [
+      {
+        id: "d1",
+        name: "Prod",
+        description: null,
+        url: null,
+        project: { id: "proj-1", label: "Demo" },
+        type: { id: "t1", label: "Primary Production" },
+      },
+    ];
+    testState.searchParams = new URLSearchParams({ deploymentId: "d1" });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreateServiceRequestPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(productsSearchAllSpy).toHaveBeenCalledWith(
+      "d1",
+      expect.objectContaining({
+        enabled: true,
+        request: { filters: { productCategories: ["ms", "pc"] } },
+      }),
+    );
+    expect(productsSearchInfiniteSpy).toHaveBeenCalledWith(
+      "d1",
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it("uses the lazy infinite product list when the project has no category restriction", () => {
+    testState.projectTypeLabel = "Managed Cloud Subscription";
+    testState.srProductCategories = undefined;
+    testState.deployments = [
+      {
+        id: "d1",
+        name: "Prod",
+        description: null,
+        url: null,
+        project: { id: "proj-1", label: "Demo" },
+        type: { id: "t1", label: "Primary Production" },
+      },
+    ];
+    testState.searchParams = new URLSearchParams({ deploymentId: "d1" });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreateServiceRequestPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(productsSearchInfiniteSpy).toHaveBeenCalledWith(
+      "d1",
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(productsSearchAllSpy).toHaveBeenCalledWith(
+      "d1",
+      expect.objectContaining({ enabled: false }),
+    );
   });
 });

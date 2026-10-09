@@ -72,6 +72,7 @@ func ResolveGrantableRoles(cfg AccessConfig, idsByRoleName map[string]string) []
 		{"dashboard_designer", cfg.DashboardDesigner},
 		{"sales_solutions", cfg.SalesSolutions},
 		{"worknote_creator", cfg.WorknoteCreator},
+		{"announcement_creator", cfg.AnnouncementCreator},
 	}
 
 	resolved := make([]GrantableRole, 0, len(candidates))

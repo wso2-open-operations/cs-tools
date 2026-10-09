@@ -181,6 +181,10 @@ func TestNew_RejectsDuplicates(t *testing.T) {
 	if _, err := New(dupName, DefaultRoles); err == nil {
 		t.Error("duplicate display name was accepted")
 	}
+	dupNameCase, _ := ParseTeamRegistry("alpha|Alpha Team,beta|alpha team")
+	if _, err := New(dupNameCase, DefaultRoles); err == nil {
+		t.Error("display names differing only in case were accepted")
+	}
 	// Two teams configured with the same backing CreGroupID would shadow each
 	// other in byCreGroupID exactly as a duplicate key would in byKey.
 	dupGroupID, _ := ParseTeamRegistry(

@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -72,6 +74,9 @@ func (s *snGroupService) SearchGroups(ctx context.Context, req domain.SearchGrou
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
+	if req.Filters != nil && req.Filters.SupportGroupsOnly {
+		return s.searchSupportGroups(ctx, token, req.Filters.SearchQuery, req.Pagination)
+	}
 
 	var filters snGroupFilters
 	if req.Filters != nil {
@@ -114,4 +119,56 @@ func (s *snGroupService) SearchGroups(ctx context.Context, req domain.SearchGrou
 		Limit:  req.Pagination.Limit,
 		Offset: req.Pagination.Offset,
 	}, nil
+}
+
+// searchSupportGroups is SearchGroups with supportGroupsOnly: the support
+// groups of ServiceNow's services, the set an explicit assignmentGroupId must
+// belong to on DATA_SOURCE=servicenow (snIncidentService.assignmentGroupLookups).
+//
+// ServiceNow's group search has no such filter, so the set is built from one
+// complete scan of the services (scanSNServices: an inconclusive scan is an
+// error, never a partial list), then matched against searchQuery
+// (case-insensitive, anywhere in the name), sorted by name and paged here.
+// The service list carries no group's active flag, so every group is reported
+// active and an inactive one is not left out.
+func (s *snGroupService) searchSupportGroups(ctx context.Context, token, searchQuery string, p domain.Pagination) (domain.SearchGroupsResponse, error) {
+	byID := map[string]domain.Group{}
+	if _, err := scanSNServices(ctx, s.client, token, "listing the support groups of ServiceNow's services",
+		func(svc snITService) bool {
+			if svc.SupportGroup == nil || svc.SupportGroup.ID == "" {
+				return false
+			}
+			id := sysidToUUID(svc.SupportGroup.ID)
+			if _, seen := byID[id]; !seen {
+				byID[id] = domain.Group{ID: id, Name: nameOrID(svc.SupportGroup.Label, id), Active: true}
+			}
+			return false
+		}); err != nil {
+		return domain.SearchGroupsResponse{}, err
+	}
+
+	query := strings.ToLower(strings.TrimSpace(searchQuery))
+	matched := make([]domain.Group, 0, len(byID))
+	for _, g := range byID {
+		if query == "" || strings.Contains(strings.ToLower(g.Name), query) {
+			matched = append(matched, g)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		a, b := strings.ToLower(matched[i].Name), strings.ToLower(matched[j].Name)
+		if a != b {
+			return a < b
+		}
+		return matched[i].ID < matched[j].ID
+	})
+
+	page := []domain.Group{}
+	if p.Offset < len(matched) {
+		end := p.Offset + p.Limit
+		if end > len(matched) {
+			end = len(matched)
+		}
+		page = matched[p.Offset:end]
+	}
+	return domain.SearchGroupsResponse{Groups: page, Total: len(matched), Limit: p.Limit, Offset: p.Offset}, nil
 }

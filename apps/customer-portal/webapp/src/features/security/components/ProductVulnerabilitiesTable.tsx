@@ -184,7 +184,6 @@ const ProductVulnerabilitiesTable = ({
 
   const handleClearFilters = () => {
     setFilters({});
-    setSearchInput("");
     setPage(0);
   };
 

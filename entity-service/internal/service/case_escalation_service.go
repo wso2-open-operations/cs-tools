@@ -40,6 +40,26 @@ const caseEscalationSearchPageSize = 50
 type caseEscalationService struct {
 	escalations EscalationService
 	caseSvc     CaseService
+	// teamLeads resolves the case's ABT team leads for TeamLeads. nil unless
+	// wired via WithCaseTeamLeads (a Postgres-backed deployment); TeamLeads
+	// is then always empty.
+	teamLeads caseTeamLeadReader
+}
+
+// caseTeamLeadReader is what caseEscalationService needs from
+// repository.EscalationRepository for TeamLeads.
+type caseTeamLeadReader interface {
+	CaseTeamLeads(ctx context.Context, caseID string) ([]domain.EscalationNotifiedUser, error)
+}
+
+// WithCaseTeamLeads attaches the ABT team-lead lookup GET
+// /cases/{id}/escalations returns as TeamLeads -- who may de-escalate. A
+// no-op if svc is not a *caseEscalationService or r is nil.
+func WithCaseTeamLeads(svc CaseEscalationService, r caseTeamLeadReader) CaseEscalationService {
+	if cs, ok := svc.(*caseEscalationService); ok && r != nil {
+		cs.teamLeads = r
+	}
+	return svc
 }
 
 // NewCaseEscalationService constructs a CaseEscalationService: a case-scoped
@@ -86,10 +106,20 @@ func (s *caseEscalationService) SearchCaseEscalations(ctx context.Context, caseI
 		currentNotifiedUsers = escalations[0].NotificationSentTo
 	}
 
+	teamLeads := []domain.EscalationNotifiedUser{}
+	if s.teamLeads != nil {
+		leads, err := s.teamLeads.CaseTeamLeads(ctx, caseID)
+		if err != nil {
+			return domain.CaseEscalationHistory{}, err
+		}
+		teamLeads = leads
+	}
+
 	return domain.CaseEscalationHistory{
 		Escalations:          escalations,
 		Total:                total,
 		CurrentNotifiedUsers: currentNotifiedUsers,
+		TeamLeads:            teamLeads,
 	}, nil
 }
 

@@ -734,6 +734,7 @@ func (m *mockEntityProductClient) GetProductRepoMapping(ctx context.Context, nam
 
 type mockEntityIncidentClient struct {
 	listSpecialistHandoffTeamsFn func(ctx context.Context, serviceID string) ([]byte, error)
+	getIncidentCreateDefaultsFn  func(ctx context.Context) ([]byte, error)
 	searchIncidentsFn            func(ctx context.Context, body []byte) ([]byte, error)
 	aggregateIncidentsFn         func(ctx context.Context, body []byte) ([]byte, error)
 	createIncidentFn             func(ctx context.Context, body []byte) ([]byte, error)
@@ -817,6 +818,14 @@ func (m *mockEntityIncidentClient) ListSpecialistHandoffTeams(ctx context.Contex
 		return m.listSpecialistHandoffTeamsFn(ctx, serviceID)
 	}
 	return []byte(`{"teams":[]}`), nil
+}
+
+// GetIncidentCreateDefaults returns the mock's canned create-defaults body or error.
+func (m *mockEntityIncidentClient) GetIncidentCreateDefaults(ctx context.Context) ([]byte, error) {
+	if m.getIncidentCreateDefaultsFn != nil {
+		return m.getIncidentCreateDefaultsFn(ctx)
+	}
+	return []byte(`{"defaultServiceId":null,"defaultGroup":null}`), nil
 }
 
 func (m *mockEntityIncidentClient) HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error) {

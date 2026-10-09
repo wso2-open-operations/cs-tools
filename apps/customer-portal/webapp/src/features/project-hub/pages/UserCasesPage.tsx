@@ -43,7 +43,11 @@ import { useGetGlobalSearch } from "@api/useGetGlobalSearch";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { PROJECT_HUB_SEARCH_DEBOUNCE_MS } from "@features/project-hub/constants/projectHubConstants";
 import { getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
-import { formatCasesTableCaseIdentifier, getStatusColor } from "@features/dashboard/utils/casesTable";
+import {
+  formatCasesTableCaseIdentifier,
+  formatCaseStatusLabel,
+  getStatusColor,
+} from "@features/dashboard/utils/casesTable";
 import { mapSeverityToDisplay } from "@features/support/utils/support";
 import { getCaseNavigationPath, getCaseTypeChipProps } from "@features/project-hub/utils/globalSearchNavigation";
 import {
@@ -424,7 +428,7 @@ export default function UserCasesPage(): JSX.Element {
                             }}
                           />
                           <Typography variant="body2">
-                            {c.state?.label ?? "--"}
+                            {formatCaseStatusLabel(c.state?.label)}
                           </Typography>
                         </Box>
                       </TableCell>

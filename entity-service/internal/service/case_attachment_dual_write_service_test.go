@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -85,12 +86,16 @@ func validDualWriteCreateAttachmentRequest() domain.CreateAttachmentRequest {
 
 // TestCaseAttachmentDualWriteService_CreateCaseAttachment_Succeeds proves the
 // SN-first/synchronous create path: on ServiceNow success, the Postgres
-// metadata insert uses EXACTLY the id/sizeBytes/createdOn ServiceNow
-// returned (not anything generated locally), and uploadedBy is the resolved
-// actor's Postgres user id, not any ServiceNow identity string.
+// metadata insert uses EXACTLY the id/sizeBytes ServiceNow returned (not
+// anything generated locally), and uploadedBy is the resolved actor's Postgres
+// user id, not any ServiceNow identity string. created_on is the exception:
+// the insert gets no timestamp from ServiceNow at all (see
+// TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn),
+// and the response reports the stored value.
 func TestCaseAttachmentDualWriteService_CreateCaseAttachment_Succeeds(t *testing.T) {
 	const snAttachmentID = "33333333-3333-3333-3333-333333333333"
 	snCreatedOn := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	storedOn := time.Date(2026, 9, 21, 6, 30, 1, 0, time.UTC)
 	downloadURL := "https://example.invalid/download"
 
 	mirror := &stubCaseAttachmentSNMirror{
@@ -112,16 +117,15 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_Succeeds(t *testing
 	var mu sync.Mutex
 	var gotID, gotUploadedBy string
 	var gotSizeBytes int
-	var gotCreatedOn time.Time
 	repo := &stubCaseRepo{
-		createCaseAttachmentFromSN: func(_ context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string, createdOn time.Time) (domain.Attachment, error) {
+		createCaseAttachmentFromSN: func(_ context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
 			mu.Lock()
-			gotID, gotSizeBytes, gotUploadedBy, gotCreatedOn = id, sizeBytes, uploadedBy, createdOn
+			gotID, gotSizeBytes, gotUploadedBy = id, sizeBytes, uploadedBy
 			mu.Unlock()
 			return domain.Attachment{
 				ID:        id,
 				SizeBytes: sizeBytes,
-				CreatedOn: createdOn,
+				CreatedOn: storedOn,
 				Status:    domain.AttachmentStatusComplete,
 				CreatedBy: domain.NewUserReference(uploadedBy, "", ""),
 			}, nil
@@ -147,14 +151,111 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_Succeeds(t *testing
 	if gotUploadedBy != "user-jane" {
 		t.Errorf("repo got uploadedBy %q, want the resolved actor id %q (not a ServiceNow identity string)", gotUploadedBy, "user-jane")
 	}
-	if !gotCreatedOn.Equal(snCreatedOn) {
-		t.Errorf("repo got createdOn %v, want %v", gotCreatedOn, snCreatedOn)
+	if !resp.Attachment.CreatedOn.Equal(storedOn) {
+		t.Errorf("response CreatedOn = %v, want the stored row's %v, not ServiceNow's %v", resp.Attachment.CreatedOn, storedOn, snCreatedOn)
 	}
 	if resp.Attachment.ID != snAttachmentID {
 		t.Errorf("response id = %q, want %q", resp.Attachment.ID, snAttachmentID)
 	}
 	if resp.Attachment.DownloadURL == nil || *resp.Attachment.DownloadURL != downloadURL {
 		t.Errorf("response DownloadURL = %v, want %q (ServiceNow's own reply, not the Postgres row)", resp.Attachment.DownloadURL, downloadURL)
+	}
+}
+
+// TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn
+// is the regression test for attachments showing "uploaded 5h from now" on
+// csm-dev. ServiceNow's attachment-create reply carries createdOn as a
+// zone-less "YYYY-MM-DD HH:MM:SS" in a ServiceNow-side timezone (+5:30 for the
+// Colombo uploader it was found with), and snCaseService parses that layout as
+// UTC, so the value it hands up is 5h30 ahead of the real upload moment. Storing
+// it put case_attachment.created_on in the future (19:42:05 against a real
+// 14:12:05 UTC).
+//
+// This runs the real snCaseService (against a fake ServiceNow that answers with
+// that exact zone-less value) under the dual-write service, with only Postgres
+// stubbed. The stub plays the database: it stamps the row with its own clock,
+// as the column default does, and the repository takes no timestamp from the
+// caller. The response must report that stored time, never ServiceNow's.
+func TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn(t *testing.T) {
+	var (
+		snSysid = sysid32('c')
+		// What ServiceNow answered: the uploader's local wall clock, no zone.
+		snCreatedOnText = "2026-10-08 19:42:05"
+		// What snCaseService makes of it: the same digits, taken as UTC.
+		misreadAsUTC = time.Date(2026, 10, 8, 19, 42, 5, 0, time.UTC)
+		// The real upload moment (Colombo is UTC+5:30), as the database's own
+		// clock records it a moment after ServiceNow accepted the file.
+		databaseNow = time.Date(2026, 10, 8, 14, 12, 6, 0, time.UTC)
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/attachments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		_, _ = w.Write([]byte(`{
+			"message": "Attachment created successfully.",
+			"attachment": {
+				"id": "` + snSysid + `",
+				"sizeBytes": 5,
+				"createdOn": "` + snCreatedOnText + `",
+				"createdBy": "jane.doe@example.com",
+				"downloadUrl": "https://example.invalid/download"
+			}
+		}`))
+	})
+	mirror := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil, "", nil)
+
+	var (
+		mu    sync.Mutex
+		calls int
+		gotID string
+	)
+	repo := &stubCaseRepo{
+		createCaseAttachmentFromSN: func(_ context.Context, _ domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
+			mu.Lock()
+			calls++
+			gotID = id
+			mu.Unlock()
+			return domain.Attachment{
+				ID:        id,
+				SizeBytes: sizeBytes,
+				CreatedOn: databaseNow,
+				Status:    domain.AttachmentStatusComplete,
+				CreatedBy: domain.NewUserReference(uploadedBy, "", ""),
+			}, nil
+		},
+	}
+
+	base := NewCaseService(repo, actorUserRepo(t), nil, alwaysUnrestrictedAccess{}, nil)
+	svc := NewCaseAttachmentDualWriteService(base, mirror, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	// Guard the premise: the value the service layer receives from ServiceNow
+	// really is the misread one, so the assertions below prove something.
+	snResp, err := mirror.CreateCaseAttachment(ctx, validDualWriteCreateAttachmentRequest())
+	if err != nil {
+		t.Fatalf("mirror CreateCaseAttachment returned error: %v", err)
+	}
+	if !snResp.Attachment.CreatedOn.Equal(misreadAsUTC) {
+		t.Fatalf("premise: ServiceNow createdOn parsed to %v, want %v (zone-less text read as UTC)", snResp.Attachment.CreatedOn, misreadAsUTC)
+	}
+
+	resp, err := svc.CreateCaseAttachment(ctx, validDualWriteCreateAttachmentRequest())
+	if err != nil {
+		t.Fatalf("CreateCaseAttachment returned error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 || gotID != sysidToUUID(snSysid) {
+		t.Fatalf("repo insert: %d call(s) with id %q, want exactly one with %q", calls, gotID, sysidToUUID(snSysid))
+	}
+	if resp.Attachment.CreatedOn.Equal(misreadAsUTC) {
+		t.Errorf("response CreatedOn = %v is ServiceNow's zone-less wall clock read as UTC (5h30 in the future); it must be the stored row's time", resp.Attachment.CreatedOn)
+	}
+	if !resp.Attachment.CreatedOn.Equal(databaseNow) {
+		t.Errorf("response CreatedOn = %v, want the stored row's %v", resp.Attachment.CreatedOn, databaseNow)
 	}
 }
 
@@ -269,7 +370,7 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_PostgresInsertFailu
 		},
 	}
 	repo := &stubCaseRepo{
-		createCaseAttachmentFromSN: func(context.Context, domain.CreateAttachmentRequest, string, int, string, time.Time) (domain.Attachment, error) {
+		createCaseAttachmentFromSN: func(context.Context, domain.CreateAttachmentRequest, string, int, string) (domain.Attachment, error) {
 			return domain.Attachment{}, errors.New("insert failed: connection reset")
 		},
 	}

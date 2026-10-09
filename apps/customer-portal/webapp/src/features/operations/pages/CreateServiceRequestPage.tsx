@@ -35,6 +35,7 @@ import { usePostProjectDeploymentsSearchInfinite } from "@api/usePostProjectDepl
 import type { ProductCategory, ProjectDeploymentItem } from "@features/project-details/types/deployments";
 import {
   extractDeploymentProducts,
+  usePostDeploymentProductsSearchAll,
   usePostDeploymentProductsSearchInfinite,
 } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
@@ -58,6 +59,7 @@ import { resolveDisplayTimeZone } from "@utils/dateTime";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import useGetProjectContacts from "@features/settings/api/useGetProjectContacts";
 import {
+  filterDeploymentProductsByCategory,
   getBaseDeploymentOptions,
   getBaseProductOptions,
   getDeploymentProductDisplayLabel,
@@ -82,6 +84,13 @@ import UploadAttachmentModal from "@features/support/components/case-details/att
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseType } from "@features/support/constants/supportConstants";
+import { usePostAttachments } from "@features/support/api/usePostAttachments";
+import { useLogger } from "@hooks/useLogger";
+import {
+  uploadServiceRequestAttachments,
+  fileToBase64,
+  ATTACHMENT_UPLOAD_WAIT_MS,
+} from "@features/operations/utils/serviceRequestAttachments";
 
 function getCreateServiceRequestLoadingState(
   isProjectLoading: boolean,
@@ -201,6 +210,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const { showSuccess } = useSuccessBanner();
   const queryClient = useQueryClient();
   const authFetch = useAuthApiClient();
+  const logger = useLogger();
+  const postAttachments = usePostAttachments();
   const { data: userDetails } = useGetUserDetails();
   const userTimeZone = userDetails?.timeZone?.trim() || resolveDisplayTimeZone();
 
@@ -285,34 +296,63 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const selectedDeploymentId = selectedDeploymentMatch?.id ?? "";
 
   const srProductCategories = (projectFeatures?.srProductCategories ?? undefined) as ProductCategory[] | undefined;
+  // A category restriction is a client-side exclusion (the server deliberately
+  // still returns NULL-category products — see filterDeploymentProductsByCategory),
+  // so lazy, scroll-triggered pagination can strand eligible products on a later
+  // page: a fetched page made entirely of NULL-category products filters down to
+  // an empty, unscrollable menu while more pages remain. usePostDeploymentProductsSearchAll
+  // fetches every page up front instead, which is safe here since a restricted
+  // deployment's eligible product set is small; the plain, unrestricted infinite
+  // hook (the common case) keeps its lazy pagination unchanged.
+  const hasProductCategoryRestriction =
+    !!srProductCategories && srProductCategories.length > 0;
   const deploymentProductsQuery = usePostDeploymentProductsSearchInfinite(
     selectedDeploymentId,
     {
       pageSize: 10,
-      enabled: !!selectedDeploymentId,
-      request: srProductCategories
+      enabled: !!selectedDeploymentId && !hasProductCategoryRestriction,
+    },
+  );
+  const deploymentProductsAllQuery = usePostDeploymentProductsSearchAll(
+    selectedDeploymentId,
+    {
+      pageSize: 50,
+      enabled: !!selectedDeploymentId && hasProductCategoryRestriction,
+      request: hasProductCategoryRestriction
         ? { filters: { productCategories: srProductCategories } }
         : undefined,
     },
   );
-  const deploymentProductsLoading = deploymentProductsQuery.isLoading;
-  const deploymentProductsData = useMemo(
-    () =>
+  const deploymentProductsLoading = hasProductCategoryRestriction
+    ? deploymentProductsAllQuery.isLoading
+    : deploymentProductsQuery.isLoading;
+  const deploymentProductsData = useMemo(() => {
+    if (hasProductCategoryRestriction) {
+      return deploymentProductsAllQuery.data ?? [];
+    }
+    return (
       deploymentProductsQuery.data?.pages.flatMap((p) =>
         extractDeploymentProducts(p),
-      ) ?? [],
-    [deploymentProductsQuery.data],
-  );
+      ) ?? []
+    );
+  }, [
+    hasProductCategoryRestriction,
+    deploymentProductsAllQuery.data,
+    deploymentProductsQuery.data,
+  ]);
 
   const allDeploymentProducts = useMemo(
     () =>
-      (deploymentProductsData ?? []).filter((item) => {
-        const label = getDeploymentProductDisplayLabel(item);
-        return (
-          Boolean(label.trim()) && !isUnknownPlaceholderProductLabel(label)
-        );
-      }),
-    [deploymentProductsData],
+      filterDeploymentProductsByCategory(
+        (deploymentProductsData ?? []).filter((item) => {
+          const label = getDeploymentProductDisplayLabel(item);
+          return (
+            Boolean(label.trim()) && !isUnknownPlaceholderProductLabel(label)
+          );
+        }),
+        srProductCategories,
+      ),
+    [deploymentProductsData, srProductCategories],
   );
   const baseProductOptions = getBaseProductOptions(allDeploymentProducts);
   const sortedProductOptions = useMemo(
@@ -351,7 +391,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
     [contactsData],
   );
 
-  const { mutate: postCase, isPending: isCreatePending } = usePostCase();
+  const { mutateAsync: postCase, isPending: isCreatePending } = usePostCase();
 
   const isInitialLoading = getCreateServiceRequestLoadingState(
     isProjectLoading,
@@ -459,6 +499,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   };
 
   const handleBack = () => {
+    if (isCreatePending || isNavigatingAfterCreate) return;
     const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
     if (returnTo) {
       navigate(returnTo);
@@ -466,18 +507,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
     }
     navigate(-1);
   };
-
-  const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const s = typeof reader.result === "string" ? reader.result : "";
-        const i = s.indexOf(",");
-        resolve(i >= 0 ? s.slice(i + 1) : s);
-      };
-      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      reader.readAsDataURL(file);
-    });
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -542,21 +571,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
       })
       .filter((v) => v.value !== "");
 
-    let encodedAttachments: Array<{ name: string; file: string }> = [];
-    if (attachments.length > 0) {
-      try {
-        encodedAttachments = await Promise.all(
-          attachments.map(async (item) => ({
-            name: attachmentNamesRef.current.get(item.id) || item.file.name,
-            file: await fileToBase64(item.file),
-          })),
-        );
-      } catch {
-        showError("Failed to process attachments. Please try again.");
-        return;
-      }
-    }
-
     const payload: CreateServiceRequestPayload = {
       type: "service_request",
       projectId,
@@ -565,45 +579,76 @@ export default function CreateServiceRequestPage(): JSX.Element {
       catalogId: selectedCatalogId,
       catalogItemId: selectedCatalogItemId,
       variables: variablePayload,
-      ...(encodedAttachments.length > 0 && { attachments: encodedAttachments }),
       ...(watchList.length > 0 && { watchList }),
     };
 
-    postCase(payload, {
-      onSuccess: async (data) => {
-        setIsNavigatingAfterCreate(true);
-        const srNumber = (data as { number?: string }).number;
+    setIsNavigatingAfterCreate(true);
+    try {
+      const data = await postCase(payload);
+      const srNumber = (data as { number?: string }).number;
 
-        if (projectId) {
-          await triggerPostCreationApiCalls(
-            authFetch,
-            projectId,
-            CaseType.SERVICE_REQUEST,
-          );
-          await refreshCaseQueriesAfterCreation(
-            queryClient,
-            projectId,
-            CaseType.SERVICE_REQUEST,
-          );
+      if (attachments.length > 0) {
+        const uploadPromise = uploadServiceRequestAttachments({
+          caseId: data.id,
+          attachments,
+          attachmentNames: attachmentNamesRef.current,
+          uploadAttachment: postAttachments.mutateAsync,
+          encodeFile: fileToBase64,
+          logger,
+        });
+        const timedOut = await Promise.race([
+          uploadPromise.then(() => false),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(true), ATTACHMENT_UPLOAD_WAIT_MS),
+          ),
+        ]);
+        if (timedOut) {
+          void uploadPromise.then((failed) => {
+            if (failed.length > 0) {
+              showError(
+                `Failed to upload: ${failed.join(", ")}. You can retry from the Attachments tab.`,
+              );
+            }
+          });
+        } else {
+          const failed = await uploadPromise;
+          if (failed.length > 0) {
+            showError(
+              `The service request was created, but ${failed.length} attachment${failed.length === 1 ? "" : "s"} failed to upload. You can retry from the Attachments tab.`,
+            );
+          }
         }
+      }
 
-        navigate(
-          `/projects/${projectId}/${basePath}/service-requests/${data.id}`,
+      if (projectId) {
+        await triggerPostCreationApiCalls(
+          authFetch,
+          projectId,
+          CaseType.SERVICE_REQUEST,
         );
-        showSuccess(
-          srNumber
-            ? `Service request ${srNumber} created successfully`
-            : "Service request created successfully",
+        await refreshCaseQueriesAfterCreation(
+          queryClient,
+          projectId,
+          CaseType.SERVICE_REQUEST,
         );
-      },
-      onError: (error) => {
-        setIsNavigatingAfterCreate(false);
-        const msg =
-          error?.message?.trim() ||
-          "We couldn't create your service request. Please try again.";
-        showError(msg);
-      },
-    });
+      }
+
+      navigate(
+        `/projects/${projectId}/${basePath}/service-requests/${data.id}`,
+      );
+      showSuccess(
+        srNumber
+          ? `Service request ${srNumber} created successfully`
+          : "Service request created successfully",
+      );
+    } catch (error) {
+      setIsNavigatingAfterCreate(false);
+      const msg =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : "We couldn't create your service request. Please try again.";
+      showError(msg);
+    }
   };
 
   const projectDisplay = projectDetails?.name ?? "";
@@ -682,14 +727,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
           isFetchingMoreDeployments={deploymentsQuery.isFetchingNextPage}
           onLoadMoreProducts={() => {
             if (
+              !hasProductCategoryRestriction &&
               deploymentProductsQuery.hasNextPage &&
               !deploymentProductsQuery.isFetchingNextPage
             ) {
               void deploymentProductsQuery.fetchNextPage();
             }
           }}
-          hasMoreProducts={!!deploymentProductsQuery.hasNextPage}
-          isFetchingMoreProducts={deploymentProductsQuery.isFetchingNextPage}
+          hasMoreProducts={
+            !hasProductCategoryRestriction && !!deploymentProductsQuery.hasNextPage
+          }
+          isFetchingMoreProducts={
+            !hasProductCategoryRestriction &&
+            deploymentProductsQuery.isFetchingNextPage
+          }
           projectTypeLabel={projectDetails?.type?.label}
         >
           <Autocomplete
@@ -763,7 +814,12 @@ export default function CreateServiceRequestPage(): JSX.Element {
         />
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5 }}>
-          <Button variant="outlined" color="inherit" onClick={handleBack}>
+          <Button
+            variant="outlined"
+            color="inherit"
+            onClick={handleBack}
+            disabled={isCreatePending || isNavigatingAfterCreate}
+          >
             Cancel
           </Button>
           <Button

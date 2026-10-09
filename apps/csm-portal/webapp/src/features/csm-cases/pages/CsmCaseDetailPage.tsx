@@ -710,25 +710,25 @@ export default function CsmCaseDetailPage(): JSX.Element {
   const findMyOngoingCases = useFindMyOngoingCases();
   const recordView = useRecordRecentView();
   const claims = useIdTokenClaims();
-  // De-escalating is restricted to whoever was notified on the case's
-  // current escalation level (the backend enforces the same check -- this is
-  // a client-side affordance only, matching every other role/permission
-  // check in this app). Matched by platform id first (currentUser.id against
-  // a notified user's own id, the same identity space the backend's own
-  // check uses), falling back to a case-insensitive email match against the
-  // signed-in user's ID token claim when either id is unavailable -- mirrors
-  // the BFF's own callerIsNotifiedOnCurrentEscalation exactly.
+  // De-escalating is restricted to the case's ABT team leads (the backend
+  // enforces the same check -- this is a client-side affordance only,
+  // matching every other role/permission check in this app). Matched by
+  // platform id first (currentUser.id against a lead's own id, the same
+  // identity space the backend's own check uses), falling back to a
+  // case-insensitive email match against the signed-in user's ID token claim
+  // when either id is unavailable -- mirrors the BFF's own
+  // callerIsCaseTeamLead exactly.
   const callerId = currentUser?.id;
   const callerEmail = claims?.email?.toLowerCase();
-  const callerIsNotifiedOnCurrentEscalation = (
-    escalationHistory?.currentNotifiedUsers ?? []
-  ).some((u) => {
-    if (callerId && u.id && callerId === u.id) return true;
-    if ((!callerId || !u.id) && callerEmail && u.email) {
-      return u.email.toLowerCase() === callerEmail;
-    }
-    return false;
-  });
+  const callerIsCaseTeamLead = (escalationHistory?.teamLeads ?? []).some(
+    (u) => {
+      if (callerId && u.id && callerId === u.id) return true;
+      if ((!callerId || !u.id) && callerEmail && u.email) {
+        return u.email.toLowerCase() === callerEmail;
+      }
+      return false;
+    },
+  );
   // Display name for comments authored in this session, resolved from the
   // signed-in user's ID token. Falls back to the email local part so a token
   // without name claims still attributes the comment to the right person.
@@ -1746,7 +1746,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
               sticky: true,
             });
           },
-          onError: (err) => showError("Could not change the case type.", err),
+          onError: (err) => {
+            // A refused transfer carries its reason (ServiceNow turning down a
+            // missing catalog answer, a case that cannot move to another type
+            // yet, a caller who may not do it) -- surface a 4xx message verbatim
+            // rather than the generic fallback, same treatment as every other
+            // 4xx on this page. Without it the engineer only ever saw "Could
+            // not change the case type." whatever the cause.
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not change the case type.";
+            showError(msg, err);
+          },
         },
       );
     },
@@ -2998,7 +3010,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onDeescalate={
               canEscalate &&
               canDeescalate(c.escalationLevel) &&
-              callerIsNotifiedOnCurrentEscalation
+              callerIsCaseTeamLead
                 ? () => setEscalationDialogAction("DEESCALATE")
                 : undefined
             }

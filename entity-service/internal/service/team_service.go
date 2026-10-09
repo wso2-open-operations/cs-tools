@@ -35,6 +35,9 @@ type TeamService interface {
 	// returned when no team with that id exists; an empty roster on an
 	// existing team is not an error.
 	GetTeamMembers(ctx context.Context, teamID string) (domain.GetTeamMembersResponse, error)
+	// SearchTeams returns a paginated list of teams from the `team` table,
+	// filtered by an optional name search.
+	SearchTeams(ctx context.Context, req domain.SearchTeamsRequest) (domain.SearchTeamsResponse, error)
 }
 
 type teamService struct {
@@ -80,4 +83,28 @@ func (s *teamService) GetTeamMembers(ctx context.Context, teamID string) (domain
 		})
 	}
 	return domain.GetTeamMembersResponse{Members: members}, nil
+}
+
+func (s *teamService) SearchTeams(ctx context.Context, req domain.SearchTeamsRequest) (domain.SearchTeamsResponse, error) {
+	if err := normalizePagination(&req.Pagination); err != nil {
+		return domain.SearchTeamsResponse{}, err
+	}
+	searchQuery := ""
+	if req.Filters != nil {
+		if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
+			return domain.SearchTeamsResponse{}, err
+		}
+		searchQuery = req.Filters.SearchQuery
+	}
+
+	teams, total, err := s.repo.SearchTeams(ctx, searchQuery, req.Pagination.Limit, req.Pagination.Offset)
+	if err != nil {
+		return domain.SearchTeamsResponse{}, err
+	}
+	return domain.SearchTeamsResponse{
+		Teams:  teams,
+		Total:  total,
+		Limit:  req.Pagination.Limit,
+		Offset: req.Pagination.Offset,
+	}, nil
 }

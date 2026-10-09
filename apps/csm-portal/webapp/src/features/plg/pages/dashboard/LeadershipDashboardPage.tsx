@@ -40,6 +40,10 @@ export default function LeadershipDashboardPage(): JSX.Element {
 
   if (error) return <ErrorBlock error={error} />;
 
+  // Drives both whether the third tile renders and whether the first two share
+  // the row three ways or two, so the row cannot end up with a gap or a wrap.
+  const showFailures = (data?.summary.unresolvedIngestFailures ?? 0) > 0;
+
   return (
     // One root element, because csm-portal's AppLayout renders <Outlet /> into
     // a column flex box: a fragment would make each child its own flex item,
@@ -56,7 +60,7 @@ export default function LeadershipDashboardPage(): JSX.Element {
         <LoadingBlock height={120} />
       ) : (
         <Grid container spacing={2} mb={3}>
-          <Grid size={{ xs: 12, sm: 6, md: 6 }}>
+          <Grid size={{ xs: 12, sm: 6, md: showFailures ? 4 : 6 }}>
             <StatTile
               label="Organisations"
               value={data.summary.totalOrganizations}
@@ -64,7 +68,7 @@ export default function LeadershipDashboardPage(): JSX.Element {
               onClick={() => navigate("/plg/organizations")}
             />
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 6 }}>
+          <Grid size={{ xs: 12, sm: 6, md: showFailures ? 4 : 6 }}>
             <StatTile
               label="Registrations"
               value={data.summary.totalRegistrations}
@@ -72,6 +76,26 @@ export default function LeadershipDashboardPage(): JSX.Element {
               onClick={() => navigate("/plg/organizations")}
             />
           </Grid>
+          {/* Shown only when there is something to act on.
+
+              A tile reading 0 on every ordinary day is one people stop seeing,
+              which is the opposite of what this is for -- that it appears at
+              all is the signal. Nothing is lost by hiding it: zero failures is
+              exactly the state needing no attention.
+
+              Deliberately not clickable. The other two lead somewhere; there is
+              no screen for these, which is the reason the count is here at all.
+              A tile that looks clickable and is not would be worse than one
+              that plainly is not, so the hint names the source instead. */}
+          {showFailures ? (
+            <Grid size={{ xs: 12, sm: 12, md: 4 }}>
+              <StatTile
+                label="Ingest failures"
+                value={data.summary.unresolvedIngestFailures}
+                hint="Ingest failure records from Moesif"
+              />
+            </Grid>
+          ) : null}
         </Grid>
       )}
 

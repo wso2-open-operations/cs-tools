@@ -145,9 +145,9 @@ export interface CaseEscalationRecord {
   reason?: string | null;
 }
 
-/** A user notified about the case's current escalation level -- the people
- * authorized to de-escalate it. `id` can be empty when the backing data
- * source couldn't resolve a platform user record; match by `email` then. */
+/** A user on a case's escalation (notified, or one of its ABT team leads).
+ * `id` can be empty when the backing data source couldn't resolve a platform
+ * user record; match by `email` then. */
 export interface CaseEscalationNotifiedUser {
   id?: string | null;
   name?: string | null;
@@ -155,10 +155,12 @@ export interface CaseEscalationNotifiedUser {
 }
 
 /** The response for `GET /cases/{id}/escalations`: the case's full escalation
- * history plus who's authorized to de-escalate its current level. */
+ * history, who was notified of its current level, and its ABT team leads --
+ * the only people authorized to de-escalate it. */
 export interface CaseEscalationHistory {
   escalations: CaseEscalationRecord[];
   currentNotifiedUsers: CaseEscalationNotifiedUser[];
+  teamLeads: CaseEscalationNotifiedUser[];
 }
 
 export interface CsmCasesListResponse {

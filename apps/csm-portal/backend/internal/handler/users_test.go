@@ -452,6 +452,212 @@ func TestPatchMe(t *testing.T) {
 		}
 	})
 
+	t.Run("phone mirrors to entity after SCIM with the stored value", func(t *testing.T) {
+		var order []string
+		var entityBody []byte
+		stored := "+15555550123"
+		scimClient := &mockSCIMClient{
+			updateUserPhoneFn: func(_ context.Context, _, _ string) (*string, error) {
+				order = append(order, "scim")
+				return &stored, nil
+			},
+		}
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				order = append(order, "entity")
+				entityBody = body
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":" +1 555 555 0123"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if strings.Join(order, ",") != "scim,entity" {
+			t.Errorf("call order = %v, want scim then entity", order)
+		}
+		if string(entityBody) != `{"phone":"+15555550123"}` {
+			t.Errorf("entity body = %s", entityBody)
+		}
+		resp := decodeJSON[struct {
+			PhoneNumber *string `json:"phoneNumber"`
+		}](t, w)
+		if resp.PhoneNumber == nil || *resp.PhoneNumber != stored {
+			t.Errorf("phoneNumber = %v, want %q", resp.PhoneNumber, stored)
+		}
+	})
+
+	t.Run("phone falls back to requested value when SCIM returns none", func(t *testing.T) {
+		var entityBody []byte
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				entityBody = body
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"+15555550123"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if string(entityBody) != `{"phone":"+15555550123"}` {
+			t.Errorf("entity body = %s", entityBody)
+		}
+	})
+
+	t.Run("empty phone clears via entity", func(t *testing.T) {
+		var entityBody []byte
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				entityBody = body
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":""}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if string(entityBody) != `{"phone":""}` {
+			t.Errorf("entity body = %s", entityBody)
+		}
+	})
+
+	t.Run("phone and timeZone share one entity call", func(t *testing.T) {
+		calls := 0
+		var entityBody []byte
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				calls++
+				entityBody = body
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"+15555550123","timeZone":"UTC"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if calls != 1 {
+			t.Errorf("entity calls = %d, want 1", calls)
+		}
+		if string(entityBody) != `{"phone":"+15555550123","timeZone":"UTC"}` {
+			t.Errorf("entity body = %s", entityBody)
+		}
+		resp := decodeJSON[struct {
+			TimeZone *string `json:"timeZone"`
+		}](t, w)
+		if resp.TimeZone == nil || *resp.TimeZone != "UTC" {
+			t.Errorf("timeZone = %v", resp.TimeZone)
+		}
+	})
+
+	t.Run("timeZone only does not call SCIM", func(t *testing.T) {
+		scimCalled := false
+		scimClient := &mockSCIMClient{
+			updateUserPhoneFn: func(_ context.Context, _, _ string) (*string, error) {
+				scimCalled = true
+				return nil, nil
+			},
+		}
+		var entityBody []byte
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, body []byte) ([]byte, error) {
+				entityBody = body
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"timeZone":"UTC"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if scimCalled {
+			t.Error("SCIM must not be called for timeZone only")
+		}
+		if string(entityBody) != `{"timeZone":"UTC"}` {
+			t.Errorf("entity body = %s", entityBody)
+		}
+	})
+
+	t.Run("rejects empty or blank timeZone without upstream calls", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"empty with phone": `{"phoneNumber":"+15555550123","timeZone":""}`,
+			"empty alone":      `{"timeZone":""}`,
+			"whitespace only":  `{"timeZone":"   "}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				called := false
+				scimClient := &mockSCIMClient{
+					updateUserPhoneFn: func(_ context.Context, _, _ string) (*string, error) {
+						called = true
+						return nil, nil
+					},
+				}
+				entityClient := &mockEntityUserClient{
+					patchUserMeFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						called = true
+						return []byte(`{}`), nil
+					},
+				}
+				h := NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(body)))
+				w := httptest.NewRecorder()
+				h.PatchMe(w, r)
+				assertStatus(t, w, http.StatusBadRequest)
+				assertErrorMessage(t, w, "timeZone must not be empty.")
+				if called {
+					t.Error("no SCIM or entity call expected")
+				}
+			})
+		}
+	})
+
+	t.Run("SCIM failure does not call entity", func(t *testing.T) {
+		entityCalled := false
+		scimClient := &mockSCIMClient{
+			updateUserPhoneFn: func(_ context.Context, _, _ string) (*string, error) {
+				return nil, errors.New("boom")
+			},
+		}
+		entityClient := &mockEntityUserClient{
+			patchUserMeFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				entityCalled = true
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"+15555550123","timeZone":"UTC"}`)))
+		w := httptest.NewRecorder()
+		h.PatchMe(w, r)
+		if w.Code < 400 {
+			t.Errorf("status = %d, want error", w.Code)
+		}
+		if entityCalled {
+			t.Error("entity must not be called after SCIM failure")
+		}
+	})
+
+	t.Run("entity errors after SCIM success are mapped", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update phone number.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				entityClient := &mockEntityUserClient{
+					patchUserMeFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, nil)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"+15555550123"}`)))
+				w := httptest.NewRecorder()
+				h.PatchMe(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+
 	t.Run("upstream errors from SCIM are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrors("Failed to update phone number.") {
 			t.Run(tc.name, func(t *testing.T) {

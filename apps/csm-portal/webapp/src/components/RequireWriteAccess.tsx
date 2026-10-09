@@ -24,6 +24,12 @@ interface RequireWriteAccessProps {
    * hidden for them, so a direct URL visit lands back on familiar ground
    * rather than a bare 404. */
   to: string;
+  /**
+   * Which capability the route needs. `canWrite` (CS engineer/admin) is the
+   * default; an announcement create route passes `canCreateAnnouncement`, which
+   * additionally needs the announcement creator role.
+   */
+  capability?: "canWrite" | "canCreateAnnouncement";
   children: ReactNode;
 }
 
@@ -37,9 +43,13 @@ interface RequireWriteAccessProps {
  * `<Route>` level in `App.tsx` rather than inside each page component so
  * every create route gets the same treatment from one place.
  */
-export default function RequireWriteAccess({ to, children }: RequireWriteAccessProps): JSX.Element {
-  const { canWrite } = usePortalAccess();
-  if (!canWrite) {
+export default function RequireWriteAccess({
+  to,
+  capability = "canWrite",
+  children,
+}: RequireWriteAccessProps): JSX.Element {
+  const access = usePortalAccess();
+  if (!access[capability]) {
     return <Navigate to={to} replace />;
   }
   return <>{children}</>;

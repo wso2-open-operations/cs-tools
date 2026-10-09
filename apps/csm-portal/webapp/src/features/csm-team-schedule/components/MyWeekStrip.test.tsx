@@ -123,7 +123,7 @@ describe("MyWeekStrip: a day card opens that day's view", () => {
       onShowDay,
       everyone: [assignment({ name: "Asela", rotaDate: "2026-09-23", shiftCode: EVENING.code })],
     });
-    fireEvent.click(screen.getByRole("button", { name: /Wed Sep 23 2026: open in Who is working today/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Wed Sep 23 2026: open in Who is on today/ }));
     expect(onShowDay).toHaveBeenCalledWith("2026-09-23");
 
     onShowDay.mockClear();

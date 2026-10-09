@@ -176,6 +176,9 @@ export type ConversationSearchFilters = {
   searchQuery?: string;
   stateKeys?: number[];
   createdByMe?: boolean;
+  // Bounds on the conversation's last update time (RFC 3339, inclusive).
+  startUpdatedDate?: string;
+  endUpdatedDate?: string;
 };
 
 // Request type for searching conversations.

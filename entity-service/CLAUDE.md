@@ -79,6 +79,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `REDIS_URL` | no | — | `rediss://:<key>@<host>:<port>` (TLS, Azure Managed Redis); wins over `REDIS_ADDR`. Turns on the user cache (see "User cache (Redis)" below). `Validate` requires a `redis`/`rediss` scheme and a host, and never echoes the URL |
 | `REDIS_ADDR` / `REDIS_PASSWORD` | no | — | Plain, non-TLS Redis for local runs. Either this or `REDIS_URL` makes `Config.HasRedis` true |
 | `USER_CACHE_TTL` | no | `10m` | Backstop lifetime of a cached user; an unparseable or non-positive value falls back to `10m` |
+| `INCIDENT_DEFAULT_SERVICE_ID` | no | — | UUID of the service whose support group a new incident gets when no `assignmentGroupId` is sent and its own service has no support group (logged WARN each time). Unset / missing / groupless: such incidents are created unassigned (logged ERROR). A non-UUID refuses to start; checked at startup, log only. See "Incident assignment group on create" |
 | `CR_STRICT_VISIBILITY_FROM` | no | — | RFC 3339 instant **with a zone**: change requests created at or after it are visible to a customer only when designated to them; earlier ones are "legacy" and keep today's visibility. Unset/empty = no cutover, every change request is legacy (the safe default and the rollback; a WARN is logged at startup). An unparsable value refuses to start. Set once per environment at release and never move it — see "Customer visibility and the cutover" |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
@@ -225,6 +226,11 @@ Chat cards in the SR's SRE-team space.
 - `sr.created`: every SR created on the plain-Postgres path
   (`caseService.CreateCase`). Under dual-write the SR is created in ServiceNow
   first and its own flow still runs there, so nothing happens here.
+  **An SR created from a GitHub issue** (`githubSyncService`, the `SR-GH-`
+  series) gets the same `OnCreated` -- assignment, acknowledgement and
+  `sr.created` -- in every mode (`WithGithubSRNotices`, routes.go): it exists
+  only in Postgres, so no ServiceNow flow ever announces it. Only a new record;
+  a delivery that finds the issue's record already there announces nothing.
 - `sr.acknowledged`: when the SR's account SRE team is in
   `SR_ALERT_SRE_TEAM_IDS`, the SR is first assigned to that team, then gets
   ServiceNow's acknowledgement comment (word for word) and is moved to OPEN --
@@ -2176,6 +2182,35 @@ regardless of severity.
   does **not** reopen a completed clock; `SLAEngineRepository` has no
   "uncomplete" operation, and a recall is rare enough that this stays a
   known, accepted gap rather than something built speculatively.
+- **That only fixed this engine's own Postgres-side clock — reported live as
+  a separate, distinct gap: `csm-notification-service`'s own, independent
+  Redis-based SLA engine had no way to hear about a workaround being
+  provided at all.** Setting `workaroundProvided:true` published no event
+  whatsoever — `updateCaseFields`/`snCaseService.UpdateCase`'s own
+  `CompleteWorkaroundClock` call above is deliberately independent of
+  `s.publisher` (it never touches Event Hub), and no other code path
+  published anything either, unlike response (a qualifying comment, already
+  carried by `case.comment_added`'s own `IsSupportEngineerResponse`) or
+  resolution (a status change to Closed, already carried by
+  `case.status_changed`). So that service's own workaround clock could still
+  fire a breach alert well after a workaround had genuinely been provided —
+  the exact bug class `ApplyStateEffects`'s own "pause, don't complete"
+  workaround treatment on close was already confirmed safe against (see
+  that repo's own `CLAUDE.md`), just via a different trigger this time.
+  Fixed with a new, minimal event, `case.workaround_provided`
+  (`events.WorkaroundProvidedPayload`, carrying only the case id — no
+  `Recipients`/email reaction and no Chat alert, a pure tracking signal),
+  published by the shared `publishWorkaroundProvidedEvent` function
+  (`sn_case_service.go`) from both `caseService.updateCaseFields` and
+  `snCaseService.UpdateCase`, in the identical place and under the identical
+  `WorkaroundProvided != nil && *req.WorkaroundProvided` gate as the
+  `CompleteWorkaroundClock` call above, but independent of it — `false` is
+  never published either, matching that call's own "no uncomplete
+  operation" posture. `csm-notification-service` consumes it directly via a
+  new `dispatch.handleWorkaroundProvided` → `slaengine.Engine.
+  CompleteWorkaroundClock`, the same direct-call wiring `RegisterClocks`/
+  `ApplyStateEffects`/`CompleteResponseClock` already get — see that repo's
+  own `CLAUDE.md` for the consuming side.
 - **Sharing a fix ETA with the customer completes BOTH the workaround and
   resolution clocks, not just one.** The webapp's "Share fix ETA with
   customer" action (`SetFixEtaDialog.tsx`, ServiceNow-only on the wire —
@@ -2842,11 +2877,9 @@ the variable names (`exclusiveCount`/`combinableCount` in both files' own
   `sn_case_service.go` only accepts them when `type` is also provided (a
   full type transfer) -- `"engagementType, engagementPaymentType, issueType,
   catalogId, catalogItemId, and variables are only allowed when type is also
-  provided"`. `type` itself has no Postgres implementation (a real type
-  transfer would mean moving a row between `"case"`/`engagement`/
-  `service_request`/etc, each a physically separate extension table --
-  genuinely larger, separate work, not attempted here), so none of its five
-  companions have anywhere to go either. `addPublicComment`/`product`/
+  provided"`. Those companions ride only with a type transfer, which now has
+  its own path (see "Case type transfer" below); sent without `type`, or to a
+  build where that path is not wired, they are still refused. `addPublicComment`/`product`/
   `publicTicket` (the "Share Fix ETA" comment-posting side effect) remain
   rejected too. `autocloseHoldUntil` is **not** in this list: it was, on the
   belief that no column backed it, but every case-like extension table has
@@ -2911,6 +2944,145 @@ resolution fields silently ignored -- never validated, never written. The
 check now runs immediately after the `exclusiveCount`/`combinableCount`
 validation and before any branch (`WatchList`/`AssigneeEmail`/`ParentID`/
 `Acknowledge`/the combinable bundle) gets a chance to return early.
+
+## Case type transfer (`PATCH /cases/{id}` with `type`)
+
+The CSM portal's "Change case type" sends `{type, ...companions}` and used to fail
+on every case on the `postgres` and `postgres-servicenow-dual-write` data sources:
+`caseService.UpdateCase` refused any `type` ("... are only supported for the
+ServiceNow data source"), because only `snCaseService` could transfer one, and the
+portal showed only its generic "Could not change the case type." Code:
+`case_type_transfer_service.go` (`caseService.transferCaseType`, wired by
+`service.WithCaseTypeTransfer` in `routes.go`) and
+`repository/case_type_transfer_repo.go` (`TransferCaseType`). Without the wiring the
+old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
+
+- **Internal callers only** (`RequireInternalCaller`, 403 otherwise). ServiceNow decides
+  this by the roles it holds; here there is no such layer, and a customer's session must
+  not be able to re-type a case through whatever PATCH the customer portal forwards.
+- **One transaction, ServiceNow asked inside it.** The Postgres statements run first, the
+  dual-write service's remote step (`snMirror.UpdateCase`, which validates and PATCHes
+  ServiceNow) runs after them and before the commit. ServiceNow refusing rolls Postgres
+  back; a Postgres failure (a missing row, a constraint) is found before ServiceNow is
+  asked. Only a failed COMMIT after ServiceNow succeeded leaves the two stores apart; it
+  is logged at ERROR with the case id and the next sync of the case corrects Postgres.
+  This is the opposite order from the Postgres-first, asynchronously mirrored updates on
+  purpose: a transfer has no "stale field, retry later" form, and ServiceNow's own
+  validation (catalog item, missing answers) is something the engineer must see.
+  The state ServiceNow reports afterwards is written to the new row.
+- **What a transfer does to the rows.** `work_item.type` moves; the extension row of the
+  old type is deleted and one of the new type inserted with what every case-like row has in
+  common (state, work state, close notes, cause, resolution code, closed by/on, resolved on,
+  auto-closure step/time). The four state enums share one label set and the four cause enums
+  another, so the copy goes through text. What is type-specific is dropped or supplied: the
+  severity and issue type of a `"case"`, the type and payment type of an engagement. The
+  number, id, project, deployment, watchers, tags, comments, attachments and time cards live
+  on `work_item` and stay. **Only the ticket being converted changes**: tickets that name it as
+  their related case, its child cases, its change requests and the ticket it relates to are not
+  converted and not touched. The related-case link needed a migration for that to hold:
+  `"case".related_case_id` was a foreign key into `"case"` with `ON DELETE SET NULL` and was read
+  through a `"case"` join, so replacing the converted ticket's `"case"` row would have cleared the
+  link on every other ticket pointing at it (about 2.5% of cases carry one on staging) and, in
+  dual-write, left ServiceNow holding a link Postgres could no longer store.
+  `0211_case_related_case_references_work_item.sql` points it at `work_item(id)` (same
+  `ON DELETE SET NULL`; found by what it references, `NOT VALID` then validated, idempotent), the
+  two case reads (`GetCaseByID`, the list search) read the related ticket straight from
+  `work_item` (so it shows as an engagement once converted), and `UpdateCaseFields` checks that a
+  `relatedCaseId` is a case-like ticket (the key now accepts any work item). Until 0211 is applied
+  the transfer notices the old key (`pg_constraint`) and refuses a ticket others relate to, with a
+  409 naming them, before ServiceNow is asked anything; with 0211 it goes through. The converted
+  ticket's OWN outgoing related link is not carried (an engagement has no column for it, as a
+  native one never has; ServiceNow keeps it).
+- **Incident (S0-S3) and Query (S4) are both a `"case"`.** Postgres has no separate type;
+  severity decides which one ServiceNow makes. Both directions are tested for both. S4 has
+  two consequences: time cards (the same LOW/S4 line `UpdateCase` applies on a severity
+  change: moving an S4 case out of `"case"`, or any case into S4, re-marks them via
+  `recomputeTimeCardsBillable`, in a savepoint inside the transfer) and SLA clocks (moving
+  INTO `"case"` calls `ReviseCaseClocks` with the new severity, a Query only gets the
+  response clock; moving OUT calls it with no severity, which cancels the CSM clocks).
+- **Validation is the ServiceNow service's, restated** (`validateCaseTypeTransfer`): type
+  aliases resolved first; nothing else rides along but the transfer's own companions;
+  `case` needs severity AND issue type, `engagement` needs both engagement fields,
+  `service_request` needs a catalog, a catalog item and at least one answer (the answers are
+  not stored on plain Postgres, as on create), `security_report_analysis` takes none.
+  `announcement` and the `hosting_*` types are never a source or a target; the same type is
+  refused.
+- **Attachments needed a migration.** `case_attachment.case_id` referenced `"case"(id)` with
+  no cascade (the constraint is `case_attachment_case_id_fkey` where created by 0106 and
+  `case_attachments_case_id_fkey` where renamed from the plural table), so an attachment
+  pinned its `"case"` row and a case with one could not be moved: replacing the row was
+  refused. Moving to Security Report Analysis needs an attachment, so every such transfer was
+  affected. `0210_case_attachment_references_work_item.sql` points it at `work_item(id)`
+  (found by what it references, `NOT VALID` then validated, idempotent). Until it is applied
+  a transfer of a case with attachments answers a 409 and changes nothing. **Deploy the
+  entity-service build first and apply the migrations after it**: the build is safe without them
+  (0210: a case with attachments gets a 409; 0211: a ticket others relate to gets a 409), but 0210
+  without the build leaves a window with no owner-type check, and 0211 without the build leaves
+  the old build reading the link through `"case"`. The old key was
+  also the only thing keeping an attachment off every other kind of work item (the announcement
+  tables' row-level security relies on an announcement never owning one), so the two insert
+  paths (`CreateCaseAttachment`, `CreateCaseAttachmentFromServiceNow`) now check in SQL that the
+  work item is a case, engagement, service request or security report analysis, and answer the
+  same "one or more referenced IDs do not exist" as the key did for anything else. The effect
+  is that the three non-case types can own attachments, which the old target made impossible.
+- **A slow or failing ServiceNow call does not decide the outcome by guessing.** The call is
+  bounded so about 20 s of the request's deadline remain afterwards. A refusal (400/401/403/
+  404/409 from the integration service) is final and rolls back. Anything else (a deadline, a
+  dropped connection, a 5xx) does not say whether ServiceNow applied the transfer, so the
+  service asks ServiceNow for the case, on a context detached from the request's cancellation
+  (the request may be what just ran out of time) with its own 10 s bound: if ServiceNow already
+  holds the new type the transfer completes in Postgres, otherwise it rolls back and the
+  original error is returned. This removes the worst outcome, a case that is one type in
+  ServiceNow and another in the portal because of a timeout. The transaction (and a row lock on
+  that one work item) stays open for the length of the ServiceNow call.
+- **After the commit, best-effort, never undoing it:** an activity entry ("Type: Case ->
+  Engagement") and the SLA clocks above. No event is published (there is no `case.type_changed`).
+  A GitHub-linked service request still gets the one "record created" notice its insert
+  trigger always sends.
+- **Known gap, not caused by the transfer:** `GetCaseByID` does not return `engagementType`
+  for any engagement on this data source (only the list search selects `eng.type`), so
+  anything keyed on it from the detail read, such as the Migration reminder wording of "Request
+  update", sees nothing for native and transferred Migration tickets alike. The stored type and
+  payment type are correct.
+- Tests: `case_type_transfer_service_test.go` (validation rules, internal-only, ServiceNow
+  inside the transaction and its refusal leaving nothing, ambiguous ServiceNow failures, SLA per
+  direction), `case_type_transfer_repo_integration_test.go` (real Postgres as a non-superuser,
+  run with `CASE_STATS_TEST_DSN`; every source type to every target, Incident and Query, carried
+  columns, billable flag, attachments, remote state, rollback, who may own an attachment) and
+  `case_type_transfer_production_integration_test.go` (another ticket's related link, linked
+  change requests / child cases / watchers / tags / comments untouched, a ticket with thousands
+  of comments and time cards, a transferred Migration ticket through its normal life).
+
+## Attachment `created_on` under dual-write is the database's clock, not ServiceNow's
+
+`DATA_SOURCE=postgres-servicenow-dual-write` mirrors an uploaded attachment into
+`case_attachment` after ServiceNow accepts it (`caseAttachmentDualWriteService.CreateCaseAttachment`).
+The ServiceNow create reply carries `createdOn` as a zone-less `YYYY-MM-DD HH:MM:SS`, and that
+value is **not UTC** -- it is rendered in a ServiceNow-side timezone. `snCaseService` parses it with
+`snCreatedOnLayout`, which has no zone and so reads it as UTC. The mirror used to store that value
+unchanged, so an upload from Colombo (UTC+5:30) landed 5h30 in the future and the portal showed
+"uploaded 5h from now" (found on csm-dev, ticket CS0450306: stored 19:42:05 against a real
+14:12 UTC; the same skew also puts the row at the top of the case Activity feed, which orders by
+`created_on`).
+
+`CaseRepository.CreateCaseAttachmentFromServiceNow` therefore takes **no timestamp**: the insert
+leaves `created_on` to the column default (`NOW()`), the same clock the plain-Postgres
+`CreateCaseAttachment` uses, a network round trip after ServiceNow accepted the file. The response's
+`createdOn` is the stored value. Do not put a ServiceNow-supplied time back into this insert; if a
+ServiceNow instant is ever needed it has to come from a source that states its zone (the Table API's
+`sys_created_on` is UTC) and be converted explicitly.
+
+Tests: `TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn`
+(real `snCaseService` against a fake ServiceNow answering with a zone-less createdOn),
+`TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey` (real Postgres, asserts
+`created_on` falls inside the database clock's own window around the insert).
+
+**Not verified, same shape:** `CreateDeploymentFromServiceNow`, `CreateDeployedProductFromServiceNow`
+and `CreateCallRequestFromServiceNow` also store a `createdOn` that `time.Parse(snCreatedOnLayout, ...)`
+read from a ServiceNow reply (the call request writes the same value into `updated_on` as well, so
+that column cannot serve as an independent clock there). Whether those replies are zone-skewed too has
+not been checked; compare a freshly created row's `created_on` with the real time of the request on a
+dual-write database before assuming either way.
 
 ## Auto-closure hold (`autocloseHoldUntil`) on the Postgres data sources
 
@@ -3748,15 +3920,17 @@ pool, like `GET /teams/{id}/members`).
   Approval / Customer Review stages** (recorded against no group: their approvers are
   the project's registered contacts) and for any stage with no group. Additive:
   `approverName` is unchanged, and the ServiceNow data source always returns `null`.
-* **`GET /groups/{id}`** (`id` is a `"group"` id, **not** a `team` id -- `POST
-  /groups/search` lists the `team` registry) returns `{id, name, description, email,
+* **`GET /groups/{id}`** (`id` is a `"group"` id -- the same id space `POST
+  /groups/search` lists, since both read the `"group"` table; not a `team` id) returns `{id, name, description, email,
   manager: {id, name}|null, members: [{id, name, email, userType, role}], total}`;
   absent parts are `null`, `members` is `[]` for a group nobody is in, `total` =
   `len(members)`. Unknown id is a 404, a malformed one a 400.
-* **Who is listed is who the approval pools provision from**, so the page and the
-  stage agree (apart from per-change exclusions such as the creator, who is
-  provisioned cancelled but is still *in* the group). There are two shapes of pool and
-  the page follows each: an **assigned group** (the Peer and Review stages) is
+* **Who is listed is the group's `group_member` rows (migration 0140) plus who the
+  approval pools provision from.** The `group_member` rows are always included for the
+  group's own id, so the page can list members who are not approvers and the stage
+  does not provision them. The `team_member` shapes below still apply on top (apart
+  from per-change exclusions such as the creator, who is provisioned cancelled but is
+  still *in* the group). There are two shapes of pool and the page follows each: an **assigned group** (the Peer and Review stages) is
   `team_member.group_id = <the group's id>` and nothing else (`groupMemberIDs`) -- a
   `team` that merely shares the group's name adds nobody, because its members are not in
   the peer pool either (the seed's Jane Doe sits in the *team* "Example Corp ABT" and in no
@@ -3895,6 +4069,63 @@ ServiceNow-only service refuses `projectId`/`deploymentIds` instead of dropping 
 Wire them once the ServiceNow field names are known. A change request created in
 dual-write mode also gets its comment rows in PostgreSQL; if csm-sync-service syncs
 the ServiceNow journal back it may add its own copies.
+
+### Assignment group and assignee on create (dual-write)
+
+`POST /change-requests` under `DATA_SOURCE=postgres-servicenow-dual-write` creates in ServiceNow
+first, so every id it sends must be one ServiceNow issued. Two ids the form could offer were not
+always: **a group** (the group picker used to list the hand-curated `team` registry, and a team
+added by hand, such as an approval team, had no `"group"` row and no ServiceNow group; since
+`POST /groups/search` reads `"group"` itself the picker only offers real groups, but a stale form
+or a direct API call can still send one) and **a person** (`"user".id` is the ServiceNow sys_id only
+for a row synced from there; a user created in this database, a load-test user or one added through
+`POST /users`, has a random id). ServiceNow answers either with a bare 404, which the portal backend
+shows as "The requested resource was not found!" with nothing naming the field. Found live (CAB
+Approval as the group; a `dev-load` user as the assignee), each alone is enough to fail the create.
+
+- **Group** (`groupId`): checked with the rest of the links (`resolveChangeRequestLinks`,
+  `ChangeRequestLinkSelection.AssignmentGroupID`) in both the plain-Postgres and the
+  ServiceNow-first create, ahead of the write: it must be a row of `"group"`, else a 400 worded
+  for the person on the form (`unusableAssignmentGroupMessage`): `The selected assignment group
+  cannot be used: it is not an assignment group in ServiceNow, and a change request is created in
+  ServiceNow first, so it cannot be assigned to it. Choose another group in "Assignment group".`
+  Before this the plain path surfaced the foreign key's own message, which quotes the table.
+- **People** (`assignedEngineerId`, `requestedById`), dual-write only
+  (`resolveServiceNowPeople`, `WithChangeRequestSNUserLookup`, wired in `routes.go`): one
+  ServiceNow user search by id for the distinct ids; an id ServiceNow knows (a deactivated user
+  included: an id lookup lifts the active-only default) is sent as it is, so nothing that worked
+  can start failing. Any other id is looked up by the `"user"` row's email in ServiceNow (active
+  users only) and that account's id is sent instead; none found is a 400 that says who, why and
+  which field to change: `The change request was not created: <name> (<email>) has no ServiceNow
+  account, so they cannot be assigned this change request. A change request is created in
+  ServiceNow first, and ServiceNow does not know them. Choose someone else in "Assigned to".`
+  (`... the requester of this change request ... "Requested by"` for `requestedById`; a `"user"` row
+  that no longer exists says so). PostgreSQL keeps the caller's own ids (the foreign key is to
+  `"user"`). Cost: one extra ServiceNow call per create that names a person (a second only for one
+  ServiceNow does not know by id). Only a positive "ServiceNow has no such person" refuses: a lookup
+  that fails or cannot answer (ServiceNow slow or down, an upstream error, the `"user"` row
+  unreadable) is logged and that id goes to ServiceNow exactly as the caller sent it (not trimmed,
+  not lower-cased), as before this check existed, so it cannot stop a create that used to work. A
+  refusal is its own return value, not an error: the ServiceNow client reports an upstream 400 as a
+  `ValidationError` too, which must not be taken for one. The lookups share a bound of their own
+  (`snPeopleLookupTimeout`, 8s) so a slow user search cannot eat the request's 60s that the create
+  needs. An id that is padded or not a UUID is refused up front, as the create always refused it, so
+  ServiceNow never gets a clean id while PostgreSQL gets padded text.
+- **Whatever ServiceNow still does not recognise**: a "not found" from ServiceNow's create cannot
+  be about the change request (it does not exist yet), so `createChangeRequestSNFirst` returns it
+  as a 400 (`serviceNowUnknownRecordMsg`: "ServiceNow did not recognise one of the records it refers
+  to (the assignment group, the person ..., the service, the service offering or the configuration
+  item) ... Change one of those fields and try again.") instead of letting the portal show "The
+  requested resource was not found!". Nothing has been written to PostgreSQL at that point. Every
+  other ServiceNow failure passes through unchanged.
+- **Not covered**: `PATCH` `assignedEngineerId` / `assignedTeamId` is Postgres-first with an
+  asynchronous ServiceNow mirror, so a person or group ServiceNow lacks is recorded as a failed
+  write-back rather than shown to the user (a team without a `"group"` row is refused by the foreign
+  key as `assignedTeamId does not refer to an existing record`). The incident and problem create
+  and edit forms use the same group picker and are not changed here.
+- Tests: `change_request_sn_people_test.go` (every branch, against a fake ServiceNow directory),
+  `change_request_links_group_test.go`, and, against real Postgres (`CHANGE_REQUEST_TEST_DSN`),
+  `TestChangeRequestCreateIntegration_AGroupThatIsNotAServiceNowGroupIsRefusedInWords`.
 
 ### Customer Approval / Customer Review checkboxes
 
@@ -5279,7 +5510,7 @@ both fixed here:**
 **`team_member.group_id` is the real column for this, and it is distinct
 from `team_member.team_id`.** `team_member` carries both: `team_id`
 (`NOT NULL`) is the hand-curated internal team registry's own FK (`team`,
-migration 0033 — what `POST /groups/search`/`GetUserGroups` read), while
+migration 0033 — what `GetUserGroups` reads; `POST /groups/search` now reads `"group"`), while
 `group_id` (nullable) is a separate FK into the same `"group"` table
 `work_item.assignment_group_id`/`approval_stage.assignment_group_id`
 reference. These are two distinct tables with two distinct id spaces in
@@ -6425,17 +6656,59 @@ the tables to back them already existed and were queried elsewhere:
 `user_role`/`role` and `team_member`/`team` respectively for the caller's
 own id.
 
-**`POST /groups/search`** is now Postgres-backed too (`group_repo.go`),
-against `team` (migration 0033) — "mirror[s] a hand-curated allow-list of
-ServiceNow's OOB sys_user_group / sys_user_grmember tables" per that
-migration's own comment, the same concept `GroupService` searches.
-`domain.Group.Active` has no backing column and is hardcoded `true`;
-`Parent` has no hierarchy column on `team` and is always `nil`.
+**`POST /groups/search`** is Postgres-backed (`group_repo.go`), against the
+`"group"` table (migration 0074, mirrored from ServiceNow's `sys_user_group`),
+so its ids are the same ones `GET /groups/{id}` and
+`approval_stage.assignment_group_id` use. `Active` is `"group".is_active`
+(NULL = active); `Parent` is resolved from `parent_id`. Members on
+`GET /groups/{id}` come from `group_member` (migration 0140, mirrored from
+`sys_user_grmember`) plus the `team_member` shapes described there. It used to
+read the curated `team` registry, whose ids `GET /groups/{id}` could not resolve.
+
+**`POST /teams/search`** (`team_repo.go` `SearchTeams`, Postgres only, registered
+beside `GET /teams/{id}/members`) lists the `team` table — `{id, name, type}`,
+ordered by name, with an optional case-insensitive substring `searchQuery` on the
+name. The CSM portal backend calls it for its own `POST /teams/search` and enriches
+rows from its configured registry.
+
+`POST /users/search` keeps the two id spaces apart: `filters.groupIds` are `"group"`
+ids matched against `group_member`, `filters.teamIds` are `team` ids matched against
+`team_member.team_id`, and `filters.groupNames` matches `team.name` through
+`team_member` (the portal resolves registry team keys to those names).
 
 **Not wired up**: `project_type` has no corresponding field anywhere on
 `domain.Project`/`ProjectDetail` today, so there is nothing to populate
 without first adding a new response field — left alone pending that
 decision, not overlooked.
+
+## Incident assignment group on create
+
+`POST /incidents` decides the incident's group once, before anything is written, in
+`resolveAssignmentGroup` (`internal/service/incident_assignment_group.go`), the same for
+every caller and every `DATA_SOURCE`:
+
+1. `assignmentGroupId` sent: used when it is in the **support-group set**, else 400
+   `assignmentGroupId must be the active support group of a service` with `errorCode`
+   `incident_assignment_group_not_allowed`, which the CSM portal BFF passes through
+   (non-UUID: 400 without a code; blank: not sent).
+2. Not sent: the service's support group (`service.support_group_id`).
+3. The service has none (or does not exist): the support group of `INCIDENT_DEFAULT_SERVICE_ID`, slog WARN.
+4. No default group (unset, missing, groupless): unassigned, slog ERROR. Not a request failure.
+5. A lookup failure returns its error; nothing is created.
+
+The **support-group set** is `supportGroupSetSQL` (`support_group_repo.go`): active `"group"` rows
+(`is_active` NULL counts as active) that are the support group of at least one service. The create
+check (`IncidentRepository.IsSupportGroup`) and `POST /groups/search` with
+`filters.supportGroupsOnly` (`GroupRepository.SearchSupportGroups`, which reads `"group"`, not the
+`team` registry) share it. A work note records the choice ("Assignment group set from service X's
+support group" / "Assignment group chosen by <actor>" / "Service X has no support group; assigned
+to the default team (G)"), after the caller's own `workNotes`. Dual-write decides on Postgres before
+the ServiceNow create (the mirror never looks one up), so both stores get the same group and a
+refused group never reaches ServiceNow; Postgres keeps no create work notes in that mode (an older
+gap), so the note lands in ServiceNow only. `DATA_SOURCE=servicenow` uses the same function over
+ServiceNow's services (`scanSNServices`: only a complete scan may conclude "not there"); the service
+list carries no group's active flag, so that set cannot leave out an inactive group.
+`GET /incidents/create-defaults` (internal only) reports the default service and its group.
 
 ## IT services (CMDB services)
 
@@ -7305,9 +7578,11 @@ not one shared allow-list -- see `AccessClientConfig`'s own doc comment:
   case-like work items; `sortBy` accepts `name`/`createdOn`/`updatedOn` only
   (mapped to fixed columns, never interpolated). Case `state`/`severity` use
   the raw enum labels as id and label (same vocabulary as project metadata).
-  `activeChatsCount`/`actionRequiredCount`/`outstandingCount` are 0 -- their
-  definition lives in ServiceNow-side logic with no Postgres equivalent yet
-  (TODO).
+  `activeChatsCount`/`actionRequiredCount`/`outstandingCount` on each project
+  are the figures the project's own dashboard shows, computed for the page of
+  projects returned (see "Project list counts on `POST /search`" below). They
+  used to be hard-coded 0 on Postgres, so the customer portal's project list
+  showed 0 in all three columns (digiops-cs#3373).
 - `GET /projects/{id}` / `GET /cases/{id}` -- a project or case outside scope
   is a 404, indistinguishable from one that doesn't exist at all (never a 403
   that would reveal it exists). The scope filter is folded straight into the
@@ -7373,6 +7648,141 @@ above as not-yet-wired. Every OTHER case mutation (`UpdateCase`, `AddCaseTag`,
 `AcknowledgeCase`, `CreateCaseComment`, ...) remains unscoped -- this is a
 narrow, deliberately inconsistent fix for one endpoint under active review,
 not a decision that case mutations are scoped now.
+
+## Project list counts on `POST /search`
+
+The customer portal's project list (the table behind "View more", and the project results of its search box) shows **Action Required**, **Outstanding** and **Active Chats** for each project. On the Postgres
+data source they used to be hard-coded to 0 (`activeChatsCount` / `actionRequiredCount` / `outstandingCount`
+on `GlobalSearchProject`, left as a TODO), so every project read 0 in all three (digiops-cs#3373).
+
+`globalService.fillProjectActivityCounts` now fills them for the page of projects a search returns, from
+`GlobalSearchRepository.ProjectActivityCounts`: three grouped queries for the whole page (not three per
+project), run concurrently, through `Scoped` with the caller's identity (the same scope the search itself
+used). They are the numbers the project's own dashboard shows, from the same state groupings, so the two
+cannot drift:
+
+| Count | Made of | States (the project stats constants, passed in) |
+|---|---|---|
+| Outstanding | cases, service requests, engagements, security report analyses + change requests | cases: every state **but `CLOSED`**, an item with no state of its own type left out (`caseStateClosed`; the dashboard tile's rule, `projectCaseStatsService`; see "Cards count what their lists show"); change requests `crOutstandingStatesFor(scope)` (a customer's Authorize counts, and so does a staff user's on the customer portal; staff anywhere else do not) |
+| Action Required | the same items waiting on the customer | `caseStatsActionRequiredStates` (Awaiting Info, Solution Proposed); change requests Customer Approval, Customer Review |
+| Active Chats | conversations | `conversationActiveStates` (OPEN, ACTIVE) |
+
+- **Outstanding is "not closed", not "in an open state".** A state added to the enum is outstanding without
+  being listed anywhere. It counts only an item that has a state **of its own type** (below), the same
+  definition as the dashboard's Outstanding tile (`GET /projects/{id}/stats/cases`). Until digiops-cs#3390 this
+  line said the opposite (a state-less item counted, to match the tile, which then read higher than the list
+  behind it); the tile, the dashboard chart, the Support card and this list now all leave it out.
+- **Announcements are not counted**, as on the dashboard (its tiles combine case, service request,
+  engagement and security report analysis only).
+- **Change requests apply the customer visibility rule** (`CRVisibility.andClause`, see "Customer visibility
+  and the cutover"): a customer's row counts only the change requests they may see, exactly as the stat
+  cards do. `NewGlobalSearchRepository` therefore takes the `CRVisibility` like `NewProjectStatsRepository`
+  does, wired in `routes.go`. The new query touches `change_request`, so it also has to pass
+  `TestChangeRequestVisibilityLint_*`.
+- **A failed count never fails the search.** The service logs a warning and leaves the three at 0: the list is
+  the portal's way into a project. That makes a failure look like a real zero, so look for the
+  `global search: project counts degraded to zero` warning before trusting a column of zeros.
+- **Not narrowed by the caller's role.** The dashboard also drops a type the user's role cannot use
+  (`hasSR`, `hasCR`, ...), which is not known per project here, so a user without access to a type still has
+  its items in the list's totals.
+- **Cost, and the narrowing for callers on many projects.** Only the customer portal calls `POST /search` (the
+  CSM portal does not), so staff are unaffected, and the queries are over the page's projects only. Measured on
+  a staging-like copy (409k work items) as the non-superuser application role: staff, a page of 50 of the
+  heaviest projects ~31 ms; a customer on 3-4 projects 10-75 ms. Every row-level-security policy re-parses
+  `app.viewer_project_ids` (the viewer's whole project list) into a `uuid[]` for each row it checks, so the cost
+  per item grows with the length of that list: a synthetic customer registered on the 50 heaviest projects took
+  ~300-360 ms for a page of 10, ~350-380 ms for 25 and ~430-470 ms for 50 when nothing was done about it.
+  `ProjectActivityCounts` therefore serves a **non-staff caller registered on more than 10 projects
+  (`projectActivityChunkSize`) in chunks of 10 projects, each in its own `Scoped` transaction whose
+  `app.viewer_project_ids` is first narrowed to the chunk** (`narrowViewerProjectIDsSQL`). Same customer after:
+  page of 10 ~115 ms, 25 ~160 ms, 50 ~240 ms. Everyone else (staff, a customer on 10 projects or fewer) takes
+  the single-statement path exactly as before.
+  **This does not weaken row-level security**, and the tests are built to prove it rather than assume it:
+  the narrowing is an *intersection computed in the database* with the list `Scoped` established one statement
+  earlier in the same transaction (from `project_contact`, `REGISTERED`), so it can only remove projects from
+  what the policies let through, never add one, and nothing caller-supplied is trusted as membership
+  (`scope.ProjectIDs` only decides whether narrowing is worth doing); it is `set_config(..., true)`, so it
+  reverts at commit and cannot reach another statement on the connection; policies, `Scoped`, `runSearch` and
+  every other repository are untouched; an internal caller's list is `{}` and is never narrowed. For the rows
+  the query asks for, the result is identical to the un-narrowed one (checked against the dashboard's own
+  repositories for all 50 projects: 0 mismatches). Mutation-checked: making the narrowing widen, or making it
+  session-level, each fails `TestProjectActivityCountsIntegration`.
+- **The list's CSV/PDF export** used to read `POST /projects/search`, whose response has no
+  `actionRequiredCount` / `outstandingCount` / `activeChatsCount` (the customer portal backend maps only
+  `activeCasesCount`), so every exported row said 0. `fetchAllProjectsForExport` (customer portal webapp,
+  `projectsExport.ts`) now reads `POST /search` (projects only), the request the Projects tables themselves use,
+  for the user's, the partner's and the Projects-page exports alike. The status column keeps its old format
+  (`Open`, `Read Only`, `Pending Notified`): `POST /search` returns the raw lowercase value, the endpoint the
+  export used to read title-cased it, so the export does the same. **Still on `POST /projects/search`**: the
+  home page's project card grid and `ProjectListTable`, which `ProjectHub` shows only for a non-partner user with
+  one project or whose projects are all suspended (everyone else gets `UserGlobalSearch` / `PartnerGlobalSearch`,
+  which read `POST /search`), so they still show their placeholder / 0; a separate, rarely reached gap.
+- **A request that runs out of time during the counts fails**, like the search itself would, instead of
+  answering 200 with zeros (`fillProjectActivityCounts` returns the context's error; only a lookup failure that
+  is not the request ending degrades to zero).
+- Tests: `TestGlobalSearch_*Count*` (service: the states handed over, per caller, not asked for a cases-only
+  search, a failure leaves the list intact, a request that ends during the lookup fails), `TestProjectActivityCountsIntegration` (real Postgres, run as the
+  non-superuser application role and as a superuser; `CASE_STATS_TEST_DSN`: staff and customer callers,
+  strict and legacy change request visibility, announcements excluded, an item with no state of its own type (none at all, or an engagement's row under a CASE) left out,
+  another customer's project, the search's own ids keying the result, and a partner on 12 projects: chunked and
+  narrowed gives the same numbers as un-narrowed, a project they are not a member of stays at zero even inside a
+  chunk of members, and the narrowed list does not outlive the call on a reused connection). The webapp's export:
+  `projectsExport.test.ts`.
+
+## Cards count what their lists show (digiops-cs#3390)
+
+The customer portal's dashboard and Support cards (Outstanding, Closed (Last 30d), Active Chats) each link to a
+list and a customer compares the two. They are built from different code (the stats repositories for the card,
+`SearchCases` / `SearchConversations` with the filters the portal sends for the list), and on a Managed Cloud
+project of the dev database (Customer 3 Project) they disagreed three ways: Outstanding 602 against 578, Closed
+(Last 30d) 30 against 23, Active Chats 0 against 281.
+
+- **State of its own type: `caseLikeOwnStateColumn`.** A list filtered by state matches each type in its own
+  extension table (`caseLikeStateLookupTables`), while `caseLikeStateColumn` COALESCEs the five tables. Synced data
+  has work items the two read differently: 830 of 11,977 `CASE` rows have a state in no extension table at all, 63 are typed
+  `CASE` with a state only in another type's table (on dev, the 24 behind the 602 / 578 gap: 21 and 3). Neither shows in
+  any list filtered by state, so every count a card shows reads the state through `caseLikeOwnStateColumn`:
+  `StateSeverityCounts`, `StateEngagementTypeCounts`, `ResolvedBuckets` (`projectCaseStatsRepo`), `OutstandingCounts`
+  (`GET /projects/{id}/stats`' per-type counts) and `ProjectActivityCounts` (the project list). Such a row comes back
+  with an empty `State`; `projectCaseStatsService` keeps it in `totalCount` and leaves it out of
+  `activeCount` / `outstandingCount` (`State != "" && != CLOSED`), so the dashboard's Outstanding card, its
+  Outstanding Support Cases chart (which has always skipped it: no severity) and the list agree. Not changed:
+  `ClosedByCreatedWindow` (a change-rate figure with no list) and `SLAStatusInputs`.
+- **`closedOn` filter reads the extension table of the item's own type.** `buildCaseSearchWhere` used to match
+  `"case".closed_on` only, so the Closed (Last 30d) list never found a closed service request or engagement although
+  the card (`ResolvedBuckets`) counts them. Both now use `caseLikeOwnClosedOnColumn` (the closure time of the table
+  of `wi.type`, like `caseLikeOwnStateColumn`), so a CASE-typed item whose only extension row is an engagement's does
+  not match on the engagement's date. `GetCaseByID` keeps `caseLikeClosedOnColumn` (it shows whatever closure time
+  the item has). `resolvedOn`
+  is still `"case".resolved_on` only (nothing links a card to it). Same plan cost as before on the staging-like copy
+  (the extension joins were already in the query): 55-69 ms for the heaviest project's closed-in-30-days count,
+  either way.
+- **Change requests for staff on the customer portal.** `crOutstandingStatesFor` counts Authorize as outstanding for
+  a customer only, but the customer portal's change request list shows Authorize to a staff user as well, so a staff
+  account saw 7 on the Outstanding card and 16 in the list. `AccessScope.ViaCustomerPortal` (set in `ResolveScope` for
+  the customer portal backend's client id, whoever the user is; the data scope is unchanged) makes the card count
+  Authorize for staff on that path too. Staff on the CSM portal, and machine clients, keep the ServiceNow grouping.
+  Without `CUSTOMER_PORTAL_BACKEND_CLIENT_ID` configured the flag is never set (no change). Tests:
+  `TestAccessService_ResolveScope_ViaCustomerPortal`,
+  `TestProjectChangeRequestStats_AuthorizeIsOutstandingForStaffOnTheCustomerPortal`.
+- **Test:** `TestCardsAgreeWithTheirListsIntegration` (real Postgres, `CASE_STATS_TEST_DSN`) seeds the three kinds of
+  row and asserts card = list for case, service request and engagement; against the old code it fails on all three.
+  `TestGetProjectCaseStats_RowsWithoutAStateAreNotOutstanding` is the service half.
+- **Active Chats** is the customer portal backend's: it read the Active count by ServiceNow's numeric id out of a
+  state breakdown whose ids are raw enum labels on this data source, so the card was absent/0 (see
+  `apps/customer-portal/backend-v2/CLAUDE.md`). entity-service's `activeCount` here is Open + Active; the portal
+  card and its list use the Active state alone.
+- **Resolved via Chat (Last 30d) is really 30 days.** A conversation has no resolved-on column, so "resolved in the
+  last 30 days" is state `RESOLVED` and `work_item.updated_on` within 30 days (a resolved chat is rarely touched
+  again). The card is `ProjectConversationStatsResponse.ResolvedPastThirtyDays` (`ResolvedConversationsPastThirtyDays`,
+  Postgres only; a pointer, absent on ServiceNow and on older builds, where the portal backend falls back to the
+  Resolved entry of `stateCount`, which has no period). The list is `SearchConversations` with
+  `filters.startUpdatedDate` / `endUpdatedDate` (inclusive; an end before the start is a 400; the ServiceNow-backed
+  search does not forward them). The customer portal's list sends only the start. Test:
+  `TestConversationResolvedWindowIntegration`.
+- **Deploy:** entity-service first (card counts, the closed-date filter, the 30-day figure and filter), then the
+  customer portal backend (Active Chats, Resolved via Chat), then the webapp (the list's window). Entity-service
+  rejects unknown request fields, so the backend must not go out before it. No migration.
 
 ## Call requests and the service-request catalog (migrations 000067-000072)
 
@@ -7476,7 +7886,33 @@ migration file). Timestamps are RFC3339 UTC like the rest of the Postgres code.
   reason -- note the customer portal passes it through, so cancelling *with* a
   reason fails on this data source until a column exists); `closed_on`/`closed_by_id`
   are never set (which states count as "closed" is unspecified); state
-  transitions aren't validated against the current state.
+  transitions aren't validated against the current state, with one exception.
+- **"Mark as completed" (digiops-cs#3350)** is `PATCH state: concluded` with no
+  notes, one click in the CSM portal. The "notes is required when state is
+  concluded" rule was dropped for it (in `callRequestService` and in
+  `snCallRequestService`, whose local validation also runs for the dual-write
+  mirror, so keeping it there would fail every such mirror before ServiceNow saw
+  it). What replaces it, in `callRequestRepo.UpdateCallRequest`, on the Postgres
+  data source:
+  - **Staff only.** A conclude with no (or blank) notes from anyone but an
+    internal (`Unrestricted`) caller is a `ForbiddenError` (403), answered before
+    any lookup. This matters: the customer portal's backend forwards whatever
+    state key it is given (key 8 is `concluded`), cannot send notes, and RLS lets
+    a project member update their own project's calls, so the notes rule had been
+    the only thing stopping a customer from concluding a call.
+  - **Only from `scheduled` or `notes_pending`**, enforced in the UPDATE's own
+    WHERE clause (atomic with the write); anything else (pending, rejected,
+    canceled, already concluded, NULL) is a `ConflictError` (409) naming the
+    current state. If the call became completable between the UPDATE and the
+    lookup the 409 says it changed and to retry; a failed lookup is an error, not
+    a 404.
+  - **Blank notes are none**: never written, so completing a call cannot erase the
+    notes it already has. Concluding WITH notes ("Send call notes") is not guarded.
+  - **The pure ServiceNow data source has neither the staff-only rule nor the state
+    guard** -- it forwards to ServiceNow, which applies its own rules. Whether
+    ServiceNow accepts a notes-less conclude is its decision; under dual-write the
+    Postgres change commits first and a refused mirror is only recorded in
+    `sn_writeback_failures`, so check that table after rolling this out.
 
 ### Service-request catalog -- `catalog_repo.go`/`catalog_service.go`
 
@@ -7971,6 +8407,10 @@ added by the sync-mirrored `0122_user_add_timezone.sql` — it was first confirm
 directly against the live database, before that migration was mirrored. The
 `timezone` reference table it points at is the sync's too (see "GET /metadata and
 GET /projects/{id}/metadata" above).
+`"user".phone` (`VARCHAR(32)`, nullable, sync-mirrored `0141_user_add_phone.sql`) is returned
+as `phone` by `GET /users/me` only, omitted when NULL: `GetUserByEmail` appends it to
+`userColumns`, while the by-id and list reads do not select it. `PATCH /users/me` also writes it
+(see below).
 `GetMe` was already wiring `domain.User.Timezone` through to its own response
 (`GetUserMeResponse.TimeZone`) before this was fixed — it just always came
 back `nil`, since `userColumns`/`prefixUserColumns`/`scanUser` never selected
@@ -7990,8 +8430,18 @@ path's own scoping. This service does not check the value against the
 `timezone` reference table, so any non-empty value passes the service; on a database
 with the sync's `0122` shape (the column REFERENCES `timezone(value)`) a value that is
 not in that table is refused by the foreign key (`user_timezone_fkey`, SQLSTATE 23503)
-and surfaces as a 500. Only a blank value is rejected up front (`"timeZone is required"`, mirroring
-`snUserService.PatchMe`'s own validation).
+and surfaces as a 500.
+`PATCH /users/me` body is `{"timeZone"?: string, "phone"?: string|null}` (Postgres source;
+`UpdateUserProfile` replaced `UpdateUserTimeZone`). At least one field is required (else 400
+`at least one of timeZone or phone is required`); an omitted or null field is left untouched
+(absent and null are not distinguished, matching the existing `timeZone` convention, and
+`timeZone` cannot be cleared). `phone` is whitespace-trimmed, no format check, over 32 characters
+is a 400 (not a DB error), and an empty/blank value clears it to NULL. The 200 body is
+`{"message", "user": {"id", "updatedBy", "updatedOn", "timeZone"?, "phone"?}}` with `timeZone`/`phone`
+being the stored values after the write (omitted when NULL). The alternate (non-Postgres) data source applies
+`timeZone` and accepts but ignores `phone` (callers update the identity provider first and then send
+phone here too, so rejecting it would fail after the phone was saved and drop a combined timeZone
+update); a phone-only request there is a no-op 200 with a message and empty `user` fields.
 
 ## POST /users creates a new "user" row (Postgres-only)
 
@@ -8476,7 +8926,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 
 `apierror.WriteJSON(w, status, msg)` writes `{"code": <status>, "message": "<msg>"}`.
 
-**Machine-readable `errorCode`.** The `message` is wording for people and changes as it is improved, so a client must never branch on it. A refusal a client has to tell apart from the others of its status carries a stable `errorCode` string beside the message: `{"code": 409, "message": "...", "errorCode": "change_request_on_hold"}` (`apierror.ErrorResponse.ErrorCode`, written by `apierror.WriteJSONWithCode`; omitted when there is none, so an unnamed refusal's body is exactly what it always was). Only `*ConflictError` and `*ForbiddenError` have a `Code` field today (set where the refusal is raised, `Code: apierror.CodeChangeRequestOnHold`; `writeServiceError` writes it). Rules: **no database change** (it is attached in code, nothing is stored); the status and the message of the refusal are untouched by naming it; the constants live in `internal/apierror/codes.go`, are lower `snake_case`, are **only ever added to, never renamed or reused for another meaning** (`TestCodes_AreStableLowerSnakeCase` pins them), and the OpenAPI `ErrorResponse.errorCode` description lists them (deliberately not a closed enum, so a client treats a value it does not know as "no more specific than the status"). The customer portal's PATCH `/change-requests/{id}` (a customer's answer or proposed implementation time) and the approvals decision route name these:
+**Machine-readable `errorCode`.** The `message` is wording for people and changes as it is improved, so a client must never branch on it. A refusal a client has to tell apart from the others of its status carries a stable `errorCode` string beside the message: `{"code": 409, "message": "...", "errorCode": "change_request_on_hold"}` (`apierror.ErrorResponse.ErrorCode`, written by `apierror.WriteJSONWithCode`; omitted when there is none, so an unnamed refusal's body is exactly what it always was). `*ConflictError`, `*ForbiddenError` and `*ValidationError` have a `Code` field (set where the refusal is raised, `Code: apierror.CodeChangeRequestOnHold`; `writeServiceError` writes it). Rules: **no database change** (it is attached in code, nothing is stored); the status and the message of the refusal are untouched by naming it; the constants live in `internal/apierror/codes.go`, are lower `snake_case`, are **only ever added to, never renamed or reused for another meaning** (`TestCodes_AreStableLowerSnakeCase` pins them), and the OpenAPI `ErrorResponse.errorCode` description lists them (deliberately not a closed enum, so a client treats a value it does not know as "no more specific than the status"). The customer portal's PATCH `/change-requests/{id}` (a customer's answer or proposed implementation time) and the approvals decision route name these:
 
 | Refusal | `errorCode` | Status |
 |---|---|---|
@@ -8489,6 +8939,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, or a genuine proposal that a later write to the change replaced as its last writer): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
 | A registered contact holding no `REQUESTED` row on the customer stage that is LIVE (registered after the request went out, or a row of theirs cancelled directly): proposing, or answering on it. A request that was withdrawn (a sibling's answer settled the stage) leaves no live stage and is a 409 instead: `change_request_approval_not_pending` for an answer, `change_request_not_proposable` for a proposal | `change_request_not_asked` | 403 |
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
+| `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
 
 `TestWriteServiceError_CarriesTheMachineReadableCode` (handler) and `TestChangeRequestErrorCodesIntegration_*` (repository, against a real database) pin each code to its refusal. customer-portal `backend-v2` and the CSM portal BFF pass the code through with the status they give it; the customer webapp classifies a refusal by it (`describeChangeRequestActionError`), and a 409 with a code it does not know, or none (an older entity-service), is "something went wrong, refresh", never "already answered".
 
@@ -8499,7 +8950,20 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 Migrations live in `migrations/` as plain SQL files, numbered `NNNN_<description>.sql` (4-digit, single file, no separate `.up`/`.down`) — matching `operations/csm-sync-service`'s own convention exactly, since that service and this one migrate against the same shared Postgres database. This replaces the older `000NNN_<description>.up.sql`/`.down.sql` convention (6-digit, up/down pairs) this file used to document; every migration under the old convention was renumbered/consolidated into the new one, not left running side by side with it.
 
 - **Each file is a complete, forward-only migration** — there is no scripted rollback. A change that needs undoing is a new forward migration, not a `.down.sql`. `IF NOT EXISTS`/`IF EXISTS` guards (already this repo's convention) make every file safe to re-run.
-- **A migration file itself carries no tracking statement.** `make migrate` (Makefile) creates `csm_migration_applied_migration` (`filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()`) if absent, then for each `migrations/*.sql` file, in ascending order: skips it if its name is already in that table, otherwise applies it (`psql -f`) and only then records it with a separate `INSERT INTO csm_migration_applied_migration (filename) VALUES (...)` — this exactly mirrors `operations/csm-sync-service`'s own `make migrate` loop, since both services must track migrations against the same shared database the same way. `scripts/generate_schema_bootstrap.sh` (a combined-file generator for a from-scratch DB, also ported from that service, supporting `--since`/`--from`/`--to` for a delta) is the one thing that *does* append the tracking insert per migration — necessary there because a single concatenated file has no per-statement loop to do it externally.
+- **A migration file itself carries no tracking statement.** `make migrate` (Makefile) creates `csm_migration_applied_migration` (`filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()`) if absent, then for each `migrations/*.sql` file, in the three-phase order below: skips it if its name is already in that table, otherwise applies it (`psql -f`) and only then records it with a separate `INSERT INTO csm_migration_applied_migration (filename) VALUES (...)` — this exactly mirrors `operations/csm-sync-service`'s own `make migrate` loop, since both services must track migrations against the same shared database the same way. `scripts/generate_schema_bootstrap.sh` (a combined-file generator for a from-scratch DB, also ported from that service, supporting `--since`/`--from`/`--to` for a delta) is the one thing that *does* append the tracking insert per migration — necessary there because a single concatenated file has no per-statement loop to do it externally. It writes **two** files, not one — see "The RLS migration track" below — a schema file and an RLS file, with the schema file's own header saying to run it first.
+- **File order is NOT a plain alphabetical glob — three phases, always in this order:**
+  1. Every 4-digit `NNNN_*.sql` file (the convention above), ascending.
+  2. Every 6-digit `1NNNNN_*.sql` file numbered `100000` or above — the dedicated RLS migration track, see below.
+  3. The legacy 6-digit `0NNNNN_*.up.sql` stragglers numbered below `100000` (`000020`–`000105`: old-style KB tables, `cloud_status_events`, `outage_communications` — predate the `NNNN_*.sql` convention and were never renumbered into it). `*.down.sql` files are rollbacks and are never applied by anything in this repo.
+
+  A plain `migrations/*.sql` glob sorts every 6-digit file in the `000020`–`000105` range *before* `0001` (leading zeros: `"000020..."` < `"0001..."` as strings) — this is what `make migrate` and `scripts/generate_schema_bootstrap.sh` both actually did for a long time, and it is a real, not theoretical, failure mode: on a from-scratch database the dependencies these files need don't exist yet (e.g. `000087` triggers on `outage`, created by `0083`), and on a database that already has them applied by hand with no tracking row, the whole run stops dead on the first one with no way to reach anything after it — which is exactly how `000085_announcement_visibility_rls.up.sql` (now `100001_announcement_visibility_rls.sql`) was discovered blocking a real deploy. Both tools now build their file list as three separate sorted globs concatenated in the order above, and must stay in agreement with each other — `scripts/csm-compose/migrate-and-seed.sh`'s own `apply_pending_migrations` independently arrived at the identical phase-1-then-phase-3 shape (it has no RLS track of its own) for the same reason; read its comment for the historical reasoning this repo's own tools now also follow.
+- **The RLS migration track (`migrations/1NNNNN_*.sql`, starting at `100001`)** is every migration that defines or supports an RLS policy: `CREATE POLICY` / `ALTER POLICY` / `ENABLE|FORCE ROW LEVEL SECURITY`, plus the `is_project_member()`-family helper functions that exist only to serve those policies. It is a **deliberately separate number space from the 4-digit schema sequence**, not a continuation of it — picking the next free 4-digit number for a new RLS migration is wrong; the next RLS migration is `100024` (increment from the current highest `1NNNNN` file), regardless of what the 4-digit sequence is up to. This exists because an RLS migration almost always needs its protected table to already exist, which the three-phase order above guarantees (phase 2 always runs after every phase-1 file) with no interleaving — but it is still the author's job to confirm a NEW RLS migration's own dependencies (the table it protects, any function it calls) are satisfied by "every current 4-digit file has already run," same as any migration depends on what came before it.
+
+  Moved into this track, in one pass (`scripts/renumber_rls_migrations.sh`, a one-shot script, not meant to run again): `100001`–`100023` — everything that used to be `000085`/`0141`–`0154`/`0175`–`0178`/`0190` (both of them)/`0191_comment_work_notes_internal_only.sql`/`0205`. Every cross-reference comment between these files (`"migration 0147"`, `"0141's own"`, `"see 0175"`, ...) was updated to the new number at the same time — grepped and rewritten by hand, not a blind find-and-replace, since a bare 4-digit number can coincidentally appear in unrelated prose. `100024_change_request_project_links_rls.sql` was added in a second, follow-up pass (by hand, not the script): `0191_change_request_project_links.sql` originally created `change_request_deployment`/`change_request_environment`/`change_request_deployed_product` *and* enabled/policed them in the same file — the one genuinely mixed schema+RLS migration in this codebase, and the one file the renumbering script's own comment explicitly left alone. Once it was clear every other RLS statement lived in this track, the RLS half (the three `ENABLE`/`FORCE ROW LEVEL SECURITY` pairs and their nine policies) was cut from `0191` and moved to `100024`, leaving `0191` schema-only. This is safe precisely because `CREATE POLICY` has no dependency on another policy on the same table, or on `ENABLE`/`FORCE ROW LEVEL SECURITY` having already run against it — `100024` runs after `100023` (`change_request_deployment`'s own extra `UPDATE` policy, added separately), and that ordering has no effect on the end state. **Still left out, for a different reason:** the `000020`–`000105` legacy cluster above, which is not RLS at all and — for the `000020`–`000027` KB sub-range specifically — references tables (`products`, `users`, `cases`, plural) that have never existed in this schema, so renumbering it needs its own dependency audit against real database state, not a rename.
+
+  Every migration in this track is idempotent by construction: `DROP POLICY IF EXISTS` immediately before each `CREATE POLICY` (Postgres has no `CREATE POLICY IF NOT EXISTS` — this is the only way), `ALTER POLICY` (idempotent on its own, replaces the expression in place), or an introspection-driven `DO` block that only acts on whatever is actually still unfixed. This is what makes the rename itself safe: whether or not a given policy's effect was already live in production under the old filename (most were, applied by hand historically — see `scripts/record_manually_applied_rls_migrations.sql`'s own doc comment), re-applying it once more under the new, previously-untracked name is a harmless no-op, never a hard failure.
+
+  `make migrate` also writes two `dist/` review bundles on every run — `dist/rls_migrations_<timestamp>.sql` (phase 2 only) and `dist/schema_migrations_<timestamp>.sql` (phases 1 and 3) — of whatever that run *actually applied*, not the full history, so a deploy has a standalone artifact of exactly what security-policy SQL shipped, separate from everything else. `scripts/generate_schema_bootstrap.sh` mirrors this with its own two output files, `schema_bootstrap_<timestamp>.sql` and `rls_bootstrap_<timestamp>.sql`, for the full-history case — the schema file's own header says to run it first. Both tools skip writing a bundle/file entirely when a run or range has nothing for that bucket, rather than producing an empty one.
 - **Numbers `0001`–`0102` are a byte-for-byte, contiguous mirror of `operations/csm-sync-service`'s own `migrations/0001`–`0102`**, including its control-plane tables (`migration_job`/`migration_run`/`sync_checkpoint`/`schema_version`, renamed to the `csm_migration_` prefix at `0091`) — entity-service's own Go code never queries those tables, but the file is kept here anyway so `make migrate` produces the *identical* resulting schema whichever repo it's run from, not just an overlapping subset. A handful of these (e.g. `0025`/`0033`/`0098`) are no-ops against this repo's own already-correct `CREATE TABLE` statements (guarded by `IF EXISTS`/`IF NOT EXISTS`/an already-true condition) — kept anyway, for the same reason. Beyond `0102`, this repo has its own entity-specific migrations that only exist on this side (`0103`+ covers GitHub integration, announcement requests, onboarding steps, the Team Schedule tables, and more — none of it sync-service's concern) — **but a shared-table migration from sync-service is still pulled in verbatim under its own real filename whenever one lands, even at a number this repo has already used for something else of its own.** `0090_outage_affected_ci_table.sql` and `0103`–`0108` (`product_name_unit_unique`, `project_add_onboarding_owner`, `product_version_deployment_profile_unique`, `incident_category_add_missing_values`, `incident_resolution_code_add_resolved_by_caller`, `case_cause_add_user_mistake`) are exactly this: sync-service migrations mirrored in unchanged, coexisting at the same leading number as this repo's own unrelated files there — normal per "Duplicate migration numbers are normal here" in the top-level `cs-tools/CLAUDE.md`, since the tracking key is the full basename. **Never rename a mirrored file to avoid the collision or to fit this repo's own sequence** — the filename is what `csm_migration_applied_migration` tracks it by, so a rename makes `make migrate` treat an already-applied sync-service migration as brand new and re-run it from scratch against a database where the real, differently-named version already ran.
 - **Mirroring a file means copying its SQL, never its license header.** `operations/csm-sync-service` is a proprietary repo and every file there opens with WSO2's proprietary "All Rights Reserved" copyright block; this repo is the open-source mirror (`fork-repos/OpenSource/cs-tools`) and every file here — no exception, migrations included — opens with the Apache 2.0 header instead (see any existing migration for the exact text). A plain `cp` of a new file from sync-service carries the wrong header over; this was missed across ~30 files in one pass before being caught and fixed in bulk (`592fcb844`). When adding a migration that's missing here entirely, replace the copyright block (everything up to the first blank line) with this repo's own Apache header before saving it — never copy the file as-is. A sync-service file with no header at all (some genuinely have none) still gets the Apache header added, matching every other file in this directory.
 - **Whenever a new migration touches a shared table (not something entity-service-only), check `operations/csm-sync-service/migrations/` directly for the next real number before picking one here** — its migrations are the authoritative record of what actually runs against the shared database, and it has continued past whatever this file's own highest number was at any given time. Picking a number here that sync-service has already used for something else creates two same-numbered-but-different migrations across the two repos; `make migrate` from either repo would then apply both under different filenames with no conflict *detected*, silently leaving whichever repo didn't get involved missing the other's columns/tables. When sync-service adds a migration for a table entity-service also cares about (or its own control-plane numbering advances), mirror the file here at the same number, the same way `0101`/`0102` (`account_support_fields`/`work_item_feedback_table`) were pulled in.

@@ -67,8 +67,9 @@ interface DashboardItemsPageProps {
 
 /**
  * Combined summary page for Action Required / Outstanding Interactions dashboard cards.
- * Shows Cases, Service Requests, SRA, and Change Requests in accordion sections,
- * pre-filtered by the relevant statuses for the selected mode.
+ * Shows Cases, Service Requests, Engagements, and Change Requests in accordion sections,
+ * pre-filtered by the relevant statuses for the selected mode. Security Report Analysis is
+ * deliberately excluded here too, matching the Dashboard tiles it breaks down.
  *
  * @param {DashboardItemsPageProps} props - Page mode.
  * @returns {JSX.Element} The rendered page.
@@ -110,8 +111,16 @@ export default function DashboardItemsPage({
         .map((s) => Number(s.id));
     }
     if (mode === "closed-last-30d") {
+      // Matches entity-service's own caseStatsResolvedStates (the Dashboard's
+      // "Closed (Last 30d)" tile): Solution Proposed counts as resolved too,
+      // deliberately reproducing the same overlap with "outstanding"/"action
+      // required" that ServiceNow's own implementation has.
       return filterMetadata.caseStates
-        .filter((s) => s.label === CaseStatus.CLOSED)
+        .filter(
+          (s) =>
+            s.label === CaseStatus.CLOSED ||
+            s.label === CaseStatus.SOLUTION_PROPOSED,
+        )
         .map((s) => Number(s.id));
     }
     return filterMetadata.caseStates
@@ -139,11 +148,6 @@ export default function DashboardItemsPage({
   const casesEnabled = !!projectId && !isProjectLoading && hasStatusIds;
   const srEnabled =
     !!projectId && !isProjectLoading && hasStatusIds && permissions.hasSR;
-  const sraEnabled =
-    !!projectId &&
-    !isProjectLoading &&
-    hasStatusIds &&
-    permissions.hasSecurityReportAnalysis;
   const engEnabled =
     !!projectId &&
     !isProjectLoading &&
@@ -205,25 +209,6 @@ export default function DashboardItemsPage({
   );
 
   const {
-    data: sraQueryData,
-    isLoading: isSraQuerying,
-    isError: isSraError,
-  } = useGetProjectCasesPage(
-    projectId || "",
-    {
-      filters: {
-        caseTypes: [CaseType.SECURITY_REPORT_ANALYSIS],
-        statusIds: apiStatusIds,
-        ...closedLast30dRange,
-      },
-      sortBy: listSortBy,
-    },
-    0,
-    10,
-    { enabled: sraEnabled },
-  );
-
-  const {
     data: engQueryData,
     isLoading: isEngQuerying,
     isError: isEngError,
@@ -275,12 +260,6 @@ export default function DashboardItemsPage({
     permissions.hasSR &&
     (!filterMetadataLoaded || (srEnabled && isSrQuerying && !srQueryData));
 
-  const sraItems = sraQueryData?.cases ?? [];
-  const sraTotal = sraQueryData?.totalRecords ?? 0;
-  const isSraLoading =
-    permissions.hasSecurityReportAnalysis &&
-    (!filterMetadataLoaded || (sraEnabled && isSraQuerying && !sraQueryData));
-
   const engagements = engQueryData?.cases ?? [];
   const engTotal = engQueryData?.totalRecords ?? 0;
   const isEngLoading =
@@ -295,7 +274,7 @@ export default function DashboardItemsPage({
 
   // --- Accordion state ---
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    () => new Set(["cases", "sr", "sra", "eng", "cr"]),
+    () => new Set(["cases", "sr", "eng", "cr"]),
   );
   const toggleSection = useCallback((id: string) => {
     setExpandedSections((prev) => {
@@ -323,16 +302,6 @@ export default function DashboardItemsPage({
       navigateOrOpenNewTab(`../../operations/service-requests/${item.id}`, {
         relative: "path",
       });
-    },
-    [navigateOrOpenNewTab],
-  );
-
-  const handleSraClick = useCallback(
-    (item: CaseListItem) => {
-      navigateOrOpenNewTab(
-        `../../security-center/security-report-analysis/${item.id}`,
-        { relative: "path" },
-      );
     },
     [navigateOrOpenNewTab],
   );
@@ -421,21 +390,6 @@ export default function DashboardItemsPage({
       viewAllPath: "../../operations/service-requests",
       viewAllLabel: "View all service requests",
       onItemClick: handleSrClick,
-    },
-    {
-      id: "sra",
-      label: "Security Report Analysis",
-      isLoading: isSraLoading,
-      isError: isSraError,
-      total: sraTotal,
-      hasPermission: permissions.hasSecurityReportAnalysis,
-      isCr: false,
-      items: sraItems,
-      hideSeverity: false,
-      entityName: "security reports",
-      viewAllPath: "../../security-center",
-      viewAllLabel: "View all security reports",
-      onItemClick: handleSraClick,
     },
     {
       id: "eng",

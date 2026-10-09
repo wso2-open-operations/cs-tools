@@ -250,7 +250,7 @@ function renderRegistryCell(id: AnnouncementColumnId, row: AnnouncementRegistryR
  */
 export default function CsmAnnouncementsPage(): JSX.Element {
   const navigate = useNavTransition();
-  const { canWrite } = usePortalAccess();
+  const { canCreateAnnouncement } = usePortalAccess();
   const [searchParams] = useSearchParams();
   // Seeded once from `?tab=pending` (e.g. the create form's post-save
   // redirect landing straight on the request just saved), not kept in sync
@@ -260,6 +260,12 @@ export default function CsmAnnouncementsPage(): JSX.Element {
   const [tab, setTab] = useState<RegistryTabId>(
     searchParams.get("tab") === "pending" ? "pending" : "announcements",
   );
+  // The Requests tab is the creators' workspace (drafts and requests awaiting
+  // approval, none of it customer-facing yet): only a caller who can create
+  // announcements sees it. Derived rather than stored so a `?tab=pending` link
+  // still lands on it once the caller's roles have loaded, and a caller without
+  // the capability is never left on a tab that is not shown.
+  const activeTab: RegistryTabId = canCreateAnnouncement ? tab : "announcements";
   const [filters, setFilters] = useState<AnnouncementFilters>(DEFAULT_ANNOUNCEMENT_FILTERS);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -281,7 +287,9 @@ export default function CsmAnnouncementsPage(): JSX.Element {
   // show" the same way it already does for a legacy published request with
   // no publishedCaseIds at all.
   const [selectedCaseMembers, setSelectedCaseMembers] = useState<AnnouncementRegistryCaseMember[]>([]);
-  const pendingSearch = useSearchAnnouncementRequests(pendingStates, pendingPage, PENDING_ROWS_PER_PAGE);
+  const pendingSearch = useSearchAnnouncementRequests(pendingStates, pendingPage, PENDING_ROWS_PER_PAGE, {
+    enabled: canCreateAnnouncement,
+  });
   const pendingRequests = pendingSearch.data?.requests ?? [];
   const pendingTotal = pendingSearch.data?.total ?? 0;
 
@@ -332,7 +340,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          {canWrite && (
+          {canCreateAnnouncement && (
             <Button
               variant="contained"
               color="primary"
@@ -361,16 +369,18 @@ export default function CsmAnnouncementsPage(): JSX.Element {
         </Box>
       </Box>
 
-      <Tabs
-        value={tab}
-        onChange={(_, v) => setTab(v as RegistryTabId)}
-        sx={{ borderBottom: 1, borderColor: "divider" }}
-      >
-        <Tab value="announcements" label="Announcements" />
-        <Tab value="pending" label="Requests" />
-      </Tabs>
+      {canCreateAnnouncement && (
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setTab(v as RegistryTabId)}
+          sx={{ borderBottom: 1, borderColor: "divider" }}
+        >
+          <Tab value="announcements" label="Announcements" />
+          <Tab value="pending" label="Requests" />
+        </Tabs>
+      )}
 
-      {tab === "announcements" && (
+      {activeTab === "announcements" && (
         <>
       {/* Filters — search + state + project, all "show all" by default */}
       <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
@@ -578,7 +588,7 @@ export default function CsmAnnouncementsPage(): JSX.Element {
         </>
       )}
 
-      {tab === "pending" && (
+      {activeTab === "pending" && (
         <>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
             <Box sx={{ flex: "1 1 220px", minWidth: 200 }}>

@@ -2276,6 +2276,7 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (createdChangeRequestRow, error) {
 		links, err := resolveChangeRequestLinks(ctx, tx, domain.ChangeRequestLinkSelection{
 			ProjectID:            req.ProjectID,
+			AssignmentGroupID:    req.GroupID,
 			DeploymentIDs:        req.DeploymentIDs,
 			DeploymentProductIDs: req.DeploymentProductIDs,
 		}, resolveLinkOpts{})

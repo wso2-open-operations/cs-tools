@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS incidents_processed (
   delivery_due_at         timestamptz,
   fold_version            bigint NOT NULL DEFAULT 0,
   created_at              timestamptz NOT NULL DEFAULT now(),
-  -- The first alert's routing signals (an alarm-named group, the SNS topic, the AWS account); see notify.assignmentGroup.
+  -- The first alert's routing signals (an alarm-named group, the SNS topic, the AWS account), recorded for reference; not used for routing (entity-service assigns the group from the service).
   assignment_group        text NOT NULL DEFAULT '',
   source_topic            text NOT NULL DEFAULT '',
   source_account          text NOT NULL DEFAULT '',

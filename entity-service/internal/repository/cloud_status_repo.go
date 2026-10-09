@@ -19,7 +19,10 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,11 +54,47 @@ type CloudStatusRepository interface {
 	CandidatesByOutage(ctx context.Context, parentServiceIDs, outageIDs []string) ([]CloudStatusCandidate, error)
 	ClaimChanges(ctx context.Context, entityTypes []string, limit int) ([]OutboxChange, error)
 	Record(ctx context.Context, c CloudStatusCandidate) (bool, error)
+	// RecordAndReserve is Record for a transition about to be published: the
+	// new row is reserved under a fresh claim token until lease runs out, so
+	// only the holder of that token may start the attempt to post it.
+	RecordAndReserve(ctx context.Context, c CloudStatusCandidate, lease time.Duration) (id, token string, recorded bool, err error)
+	// ReleaseReservation frees a reservation no attempt was started under --
+	// nothing was sent -- so the scheduled task may post the row.
+	ReleaseReservation(ctx context.Context, id, token string) error
+	// PendingByID reads one undelivered row, claim token included; nil when
+	// it is delivered or gone.
+	PendingByID(ctx context.Context, id string) (*domain.PendingCloudStatusWebhook, error)
+	// StartAttempt turns the reservation held under token into an attempt.
+	// False when the row is delivered, or no longer reserved under token.
+	StartAttempt(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	AffectedMonitors(ctx context.Context, outageID string) ([]string, error)
 	AffectedClouds(ctx context.Context, outageID string, parentServiceIDs []string) ([]string, error)
 	SetMonitorStatus(ctx context.Context, monitorIDs []string, status domain.CloudMonitorStatus) (int64, error)
-	Pending(ctx context.Context, limit, maxAttempts int) ([]domain.PendingCloudStatusWebhook, error)
-	RecordDelivery(ctx context.Context, id string, delivered bool, errMsg string) error
+	// ClaimPending claims up to limit rows for an attempt by the caller (the
+	// scheduled task) and returns them. A row is claimable when it is free, or
+	// reserved with no attempt started and the reservation has run out.
+	ClaimPending(ctx context.Context, limit, maxAttempts int, lease time.Duration) ([]domain.PendingCloudStatusWebhook, error)
+	// UnknownOutcomes lists rows whose attempt ended without a known outcome:
+	// they are never claimed again, and need a person to check.
+	UnknownOutcomes(ctx context.Context, limit int) ([]domain.PendingCloudStatusWebhook, error)
+	// RecordDelivery records an attempt's outcome. False when there is no
+	// open attempt to record it against: the row is already delivered, or
+	// the token is not the attempt's.
+	RecordDelivery(ctx context.Context, id string, o DeliveryOutcome) (bool, error)
+}
+
+// DeliveryOutcome is the result of one attempt to post a webhook.
+type DeliveryOutcome struct {
+	Delivered bool
+	// Unknown: the request was sent and no answer came back (a timeout, a
+	// reset). The dashboard may have taken it, so the row is never posted
+	// again automatically.
+	Unknown bool
+	Error   string
+	// ClaimToken fences the report to the attempt it belongs to. Empty is
+	// accepted for a caller that predates tokens (csm-scheduled-tasks): it can
+	// only ever report attempts it claimed itself, which nobody else can hold.
+	ClaimToken string
 }
 
 type cloudStatusRepository struct {
@@ -207,6 +246,27 @@ const recordSQL = `
     RETURNING id
 `
 
+// recordAndReserveSQL is recordSQL with a reservation (migration 0213).
+const recordAndReserveSQL = `
+    INSERT INTO cloud_status_events (outage_id, event, cloud, claim_token, claimed_until)
+    VALUES ($1::uuid, $2::cloud_status_event_enum, $3, gen_random_uuid(), NOW() + make_interval(secs => $4))
+    ON CONFLICT (outage_id, event, cloud) DO NOTHING
+    RETURNING id::text, claim_token::text
+`
+
+// RecordAndReserve implements CloudStatusRepository.
+func (r *cloudStatusRepository) RecordAndReserve(ctx context.Context, c CloudStatusCandidate, lease time.Duration) (string, string, bool, error) {
+	var id, token string
+	err := r.db.QueryRow(ctx, recordAndReserveSQL, c.OutageID, string(c.Event), c.Cloud, lease.Seconds()).Scan(&id, &token)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("record cloud status event: %w", err)
+	}
+	return id, token, true, nil
+}
+
 // Record inserts the transition if it is new. The bool reports whether a row
 // was created.
 func (r *cloudStatusRepository) Record(ctx context.Context, c CloudStatusCandidate) (bool, error) {
@@ -221,14 +281,15 @@ func (r *cloudStatusRepository) Record(ctx context.Context, c CloudStatusCandida
 	return true, nil
 }
 
-// pendingSQL reads transitions still owed a successful delivery.
+// webhookColumns reads a cloud_status_events row (e) with its outage (o) for
+// posting.
 //
 // The outage is re-joined for its number and its instants rather than copying
 // them onto the event row. The event row records the DECISION; the outage
 // remains the source of truth for the facts, and a corrected begin time should
 // be reported correctly by a webhook that has not gone out yet.
-const pendingSQL = `
-    SELECT e.id::text,
+const webhookColumns = `
+           e.id::text,
            e.outage_id::text,
            COALESCE(o.number, ''),
            e.event::text,
@@ -239,65 +300,185 @@ const pendingSQL = `
                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
            ),
            e.attempt_count,
-           COALESCE(e.last_error, '')
-      FROM cloud_status_events e
-      JOIN outage o ON o.id = e.outage_id
-     WHERE e.delivered IS FALSE
-       AND e.attempt_count < $2
-     ORDER BY e.created_on
-     LIMIT $1
+           COALESCE(e.last_error, ''),
+           COALESCE(e.claim_token::text, ''),
+           e.created_on
 `
 
-// Pending returns up to limit undelivered webhooks that have not yet exhausted
-// maxAttempts.
-func (r *cloudStatusRepository) Pending(ctx context.Context, limit, maxAttempts int) ([]domain.PendingCloudStatusWebhook, error) {
-	rows, err := r.db.Query(ctx, pendingSQL, limit, maxAttempts)
-	if err != nil {
-		return nil, fmt.Errorf("query pending cloud status webhooks: %w", err)
-	}
-	defer rows.Close()
+func scanWebhook(row pgx.Row) (domain.PendingCloudStatusWebhook, error) {
+	var w domain.PendingCloudStatusWebhook
+	err := row.Scan(&w.ID, &w.OutageID, &w.Number, &w.Event, &w.Cloud,
+		&w.Timestamp, &w.AttemptCount, &w.LastError, &w.ClaimToken, &w.CreatedOn)
+	return w, err
+}
 
+func scanWebhooks(rows pgx.Rows) ([]domain.PendingCloudStatusWebhook, error) {
+	defer rows.Close()
 	out := make([]domain.PendingCloudStatusWebhook, 0)
 	for rows.Next() {
-		var w domain.PendingCloudStatusWebhook
-		if err := rows.Scan(&w.ID, &w.OutageID, &w.Number, &w.Event, &w.Cloud,
-			&w.Timestamp, &w.AttemptCount, &w.LastError); err != nil {
-			return nil, fmt.Errorf("scan pending cloud status webhook: %w", err)
+		w, err := scanWebhook(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan cloud status webhook: %w", err)
 		}
 		out = append(out, w)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate pending cloud status webhooks: %w", err)
+		return nil, fmt.Errorf("iterate cloud status webhooks: %w", err)
 	}
 	return out, nil
 }
 
-// recordDeliverySQL stamps the outcome of one attempt.
-//
-// attempt_count increments on both outcomes, success included. It counts what
-// was tried, not what failed; a webhook that succeeded on its third attempt
-// should still read as having taken three.
-const recordDeliverySQL = `
-    UPDATE cloud_status_events
-       SET delivered       = $2,
-           attempt_count   = attempt_count + 1,
-           last_error      = CASE WHEN $2 THEN NULL ELSE NULLIF($3, '') END,
-           last_attempt_on = NOW(),
-           delivered_on    = CASE WHEN $2 THEN NOW() ELSE delivered_on END,
-           updated_on      = NOW()
-     WHERE id = $1::uuid
+// claimPendingSQL claims rows for an attempt by the scheduled task, in one
+// statement: FOR UPDATE SKIP LOCKED keeps two concurrent callers apart, and
+// the claim conditions keep it away from any row another sender reserved or
+// attempted. An attempt that ran out with no outcome is NOT claimable -- its
+// post may have landed -- which is what makes a second post impossible.
+const claimPendingSQL = `
+    WITH due AS (
+        SELECT e.id
+          FROM cloud_status_events e
+         WHERE e.delivered IS FALSE
+           AND e.attempt_count < $2
+           AND (e.claim_token IS NULL
+                OR (e.attempt_started_on IS NULL AND e.claimed_until <= NOW()))
+         ORDER BY e.created_on
+         LIMIT $1
+           FOR UPDATE SKIP LOCKED
+    )
+    UPDATE cloud_status_events e
+       SET claim_token        = gen_random_uuid(),
+           attempt_started_on = NOW(),
+           claimed_until      = NOW() + make_interval(secs => $3),
+           updated_on         = NOW()
+      FROM due, outage o
+     WHERE e.id = due.id
+       AND o.id = e.outage_id
+    RETURNING` + webhookColumns
+
+// ClaimPending implements CloudStatusRepository.
+func (r *cloudStatusRepository) ClaimPending(ctx context.Context, limit, maxAttempts int, lease time.Duration) ([]domain.PendingCloudStatusWebhook, error) {
+	rows, err := r.db.Query(ctx, claimPendingSQL, limit, maxAttempts, lease.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("claim pending cloud status webhooks: %w", err)
+	}
+	out, err := scanWebhooks(rows)
+	if err != nil {
+		return nil, err
+	}
+	// UPDATE ... RETURNING has no order of its own.
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedOn.Before(out[j].CreatedOn) })
+	return out, nil
+}
+
+const unknownOutcomesSQL = `
+    SELECT` + webhookColumns + `
+      FROM cloud_status_events e
+      JOIN outage o ON o.id = e.outage_id
+     WHERE e.delivered IS FALSE
+       AND e.attempt_started_on IS NOT NULL
+       AND e.claimed_until <= NOW()
+     ORDER BY e.created_on
+     LIMIT $1
 `
 
-// RecordDelivery stamps the outcome of one webhook attempt.
-func (r *cloudStatusRepository) RecordDelivery(ctx context.Context, id string, delivered bool, errMsg string) error {
-	tag, err := r.db.Exec(ctx, recordDeliverySQL, id, delivered, errMsg)
+// UnknownOutcomes implements CloudStatusRepository.
+func (r *cloudStatusRepository) UnknownOutcomes(ctx context.Context, limit int) ([]domain.PendingCloudStatusWebhook, error) {
+	rows, err := r.db.Query(ctx, unknownOutcomesSQL, limit)
 	if err != nil {
-		return fmt.Errorf("record cloud status delivery: %w", err)
+		return nil, fmt.Errorf("query cloud status webhooks with unknown outcome: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+	return scanWebhooks(rows)
+}
+
+const pendingByIDSQL = `
+    SELECT` + webhookColumns + `
+      FROM cloud_status_events e
+      JOIN outage o ON o.id = e.outage_id
+     WHERE e.id = $1::uuid
+       AND e.delivered IS FALSE
+`
+
+// PendingByID implements CloudStatusRepository.
+func (r *cloudStatusRepository) PendingByID(ctx context.Context, id string) (*domain.PendingCloudStatusWebhook, error) {
+	w, err := scanWebhook(r.db.QueryRow(ctx, pendingByIDSQL, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read cloud status webhook %s: %w", id, err)
+	}
+	return &w, nil
+}
+
+// ReleaseReservation implements CloudStatusRepository. Only a reservation
+// with no attempt started can be released: once a sender has won the right
+// to post, the row's outcome is that sender's to report.
+func (r *cloudStatusRepository) ReleaseReservation(ctx context.Context, id, token string) error {
+	const q = `
+    UPDATE cloud_status_events
+       SET claim_token = NULL, claimed_until = NULL, updated_on = NOW()
+     WHERE id = $1::uuid AND claim_token = $2::uuid
+       AND attempt_started_on IS NULL AND delivered IS FALSE`
+	if _, err := r.db.Exec(ctx, q, id, token); err != nil {
+		return fmt.Errorf("release cloud status reservation: %w", err)
 	}
 	return nil
+}
+
+// StartAttempt implements CloudStatusRepository.
+func (r *cloudStatusRepository) StartAttempt(ctx context.Context, id, token string, lease time.Duration) (bool, error) {
+	const q = `
+    UPDATE cloud_status_events
+       SET attempt_started_on = NOW(),
+           claimed_until      = NOW() + make_interval(secs => $3),
+           updated_on         = NOW()
+     WHERE id = $1::uuid AND claim_token = $2::uuid
+       AND attempt_started_on IS NULL AND delivered IS FALSE
+       AND claimed_until > NOW()`
+	tag, err := r.db.Exec(ctx, q, id, token, lease.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("start cloud status attempt: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// recordDeliverySQL stamps the outcome of one attempt.
+//
+// attempt_count increments on every outcome, success included. It counts what
+// was tried, not what failed; a webhook that succeeded on its third attempt
+// should still read as having taken three.
+//
+// FENCED: only an open attempt can be recorded, and only by the holder of its
+// token when one is given. A recorded success is never downgraded by a late
+// report, and a stale sender cannot write over another's attempt.
+//
+// Delivered or a definite failure closes the attempt (a failure is then the
+// scheduled task's to retry). An unknown outcome keeps it open but expired,
+// which is exactly the state ClaimPending never touches.
+const recordDeliverySQL = `
+    UPDATE cloud_status_events
+       SET delivered          = $2,
+           attempt_count      = attempt_count + 1,
+           last_error         = CASE WHEN $2 THEN NULL ELSE NULLIF($3, '') END,
+           last_attempt_on    = NOW(),
+           delivered_on       = CASE WHEN $2 THEN NOW() ELSE delivered_on END,
+           claim_token        = CASE WHEN $4 THEN claim_token ELSE NULL END,
+           attempt_started_on = CASE WHEN $4 THEN attempt_started_on ELSE NULL END,
+           claimed_until      = CASE WHEN $4 THEN NOW() ELSE NULL END,
+           updated_on         = NOW()
+     WHERE id = $1::uuid
+       AND delivered IS FALSE
+       AND attempt_started_on IS NOT NULL
+       AND ($5 = '' OR claim_token::text = $5)
+`
+
+// RecordDelivery implements CloudStatusRepository.
+func (r *cloudStatusRepository) RecordDelivery(ctx context.Context, id string, o DeliveryOutcome) (bool, error) {
+	tag, err := r.db.Exec(ctx, recordDeliverySQL, id, o.Delivered, o.Error, o.Unknown, o.ClaimToken)
+	if err != nil {
+		return false, fmt.Errorf("record cloud status delivery: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // affectedMonitorsSQL resolves one outage's affected configuration items to

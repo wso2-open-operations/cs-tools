@@ -35,13 +35,34 @@ type srCatalogReader interface {
 
 // WithServiceRequestCatalog attaches the catalog CreateCase derives a service
 // request's subject and description from (fillServiceRequestText), the same
-// post-construction wiring as WithCSEngineerRole. A no-op if svc is not a
-// *caseService or catalog is nil.
+// post-construction wiring as WithCSEngineerRole. A no-op if svc is neither a
+// *caseService nor a *snCaseService, or if catalog is nil.
 func WithServiceRequestCatalog(svc CaseService, catalog CatalogService) CaseService {
 	if cs, ok := svc.(*caseService); ok && catalog != nil {
 		cs.srCatalog = catalog
 	}
+	if sn, ok := svc.(*snCaseService); ok && catalog != nil {
+		sn.srCatalog = catalog
+	}
 	return svc
+}
+
+// titleQuestionRank returns a priority rank (lower is better, >0 means it is a title question)
+// for question labels that serve as the case title/topic.
+func titleQuestionRank(label string) int {
+	clean := strings.ToLower(strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(label), "*")))
+	switch clean {
+	case "title":
+		return 1
+	case "short description":
+		return 2
+	case "request details":
+		return 3
+	case "summary", "subject":
+		return 4
+	default:
+		return 0
+	}
 }
 
 // fillServiceRequestText gives a service request raised from the catalog form
@@ -52,17 +73,16 @@ func WithServiceRequestCatalog(svc CaseService, catalog CatalogService) CaseServ
 // case.created and case.comment_added (both require the title), so no email
 // goes out for it at all.
 //
-//   - Subject: the answer to the item's "Title" question -- the question the
-//     customer portal's own form already treats as the title (isTitleField:
-//     question text "Title", ignoring a leading "*" and case) -- else the
-//     catalog item's name.
+//   - Subject: the answer to the item's "Title" question (or, if absent,
+//     "Short Description", "Request Details", "Summary", or "Subject") -- else
+//     the catalog item's name.
 //   - Description: every other answered question, in the item's question
 //     order, one "<question>: <answer>" paragraph each.
 //
 // A subject or description the caller did send is never replaced. Best
 // effort: a catalog lookup failure is logged and the SR is created as sent.
-func (s *caseService) fillServiceRequestText(ctx context.Context, req *domain.CreateCaseRequest) {
-	if s.srCatalog == nil || req.Type != "service_request" {
+func fillServiceRequestText(ctx context.Context, srCatalog srCatalogReader, req *domain.CreateCaseRequest) {
+	if srCatalog == nil || req.Type != "service_request" {
 		return
 	}
 	needSubject := strings.TrimSpace(req.Subject) == ""
@@ -78,27 +98,56 @@ func (s *caseService) fillServiceRequestText(ctx context.Context, req *domain.Cr
 		}
 	}
 
+	catalogID := req.CatalogID
+	resolvedCatalogID, itemName := findCatalogItem(ctx, srCatalog, req)
+	if resolvedCatalogID != "" {
+		catalogID = resolvedCatalogID
+	}
+
 	var questions []domain.CatalogItemVariable
-	if vars, err := s.srCatalog.GetCatalogItemVariables(ctx, req.CatalogID, req.CatalogItemID); err != nil {
-		slog.WarnContext(ctx, "create service request: catalog variables lookup failed; title/description not derived",
-			"catalogId", req.CatalogID, "catalogItemId", req.CatalogItemID, "error", err)
+	if vars, err := srCatalog.GetCatalogItemVariables(ctx, catalogID, req.CatalogItemID); err != nil {
+		if resolvedCatalogID != "" && req.CatalogID != "" && req.CatalogID != resolvedCatalogID {
+			if fallbackVars, fallbackErr := srCatalog.GetCatalogItemVariables(ctx, req.CatalogID, req.CatalogItemID); fallbackErr == nil {
+				questions = fallbackVars.Variables
+			} else {
+				slog.WarnContext(ctx, "create service request: catalog variables lookup failed; title/description not derived",
+					"catalogId", catalogID, "catalogItemId", req.CatalogItemID, "error", err)
+			}
+		} else {
+			slog.WarnContext(ctx, "create service request: catalog variables lookup failed; title/description not derived",
+				"catalogId", catalogID, "catalogItemId", req.CatalogItemID, "error", err)
+		}
 	} else {
 		questions = vars.Variables
 	}
 	sort.SliceStable(questions, func(i, j int) bool { return questions[i].Order < questions[j].Order })
 
+	var bestTitleRank int
+	var titleQuestionID string
 	var title string
+	for _, q := range questions {
+		answer, ok := answers[q.ID]
+		if !ok || answer == "" {
+			continue
+		}
+		rank := titleQuestionRank(q.QuestionText)
+		if rank > 0 && (bestTitleRank == 0 || rank < bestTitleRank) {
+			bestTitleRank = rank
+			titleQuestionID = q.ID
+			title = answer
+		}
+	}
+
 	var paragraphs []string
 	for _, q := range questions {
 		answer, ok := answers[q.ID]
 		if !ok {
 			continue
 		}
-		label := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(q.QuestionText), "*"))
-		if title == "" && strings.EqualFold(label, "title") {
-			title = answer
+		if q.ID == titleQuestionID {
 			continue
 		}
+		label := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(q.QuestionText), "*"))
 		if label == "" {
 			label = "Answer"
 		}
@@ -108,7 +157,7 @@ func (s *caseService) fillServiceRequestText(ctx context.Context, req *domain.Cr
 
 	if needSubject {
 		if title == "" {
-			title = s.serviceRequestItemName(ctx, req)
+			title = itemName
 		}
 		req.Subject = title
 	}
@@ -117,28 +166,41 @@ func (s *caseService) fillServiceRequestText(ctx context.Context, req *domain.Cr
 	}
 }
 
-// serviceRequestItemName is the catalog item's name, the subject of last
-// resort for a service request whose form has no "Title" question. "" when it
-// cannot be found.
-func (s *caseService) serviceRequestItemName(ctx context.Context, req *domain.CreateCaseRequest) string {
-	res, err := s.srCatalog.SearchCatalogs(ctx, domain.SearchCatalogsRequest{
-		DeployedProductID: req.DeployedProductID,
-		Pagination:        domain.Pagination{Limit: 100},
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "create service request: catalog lookup failed; no subject derived",
-			"catalogItemId", req.CatalogItemID, "error", err)
-		return ""
+func (s *caseService) fillServiceRequestText(ctx context.Context, req *domain.CreateCaseRequest) {
+	fillServiceRequestText(ctx, s.srCatalog, req)
+}
+
+// findCatalogItem searches catalogs for the request's deployed product to locate
+// the catalog item. It returns the enclosing catalog's ID (for ServiceNow, the
+// sc_catalog sys_id rather than the category ID in req.CatalogID) and the item's
+// name. Both return values are "" if not found.
+func findCatalogItem(ctx context.Context, srCatalog srCatalogReader, req *domain.CreateCaseRequest) (catalogID string, itemName string) {
+	if req.DeployedProductID == "" || req.CatalogItemID == "" {
+		return "", ""
 	}
-	for _, c := range res.Catalogs {
-		if c.ID != req.CatalogID {
-			continue
+	limit := 50
+	offset := 0
+	for {
+		res, err := srCatalog.SearchCatalogs(ctx, domain.SearchCatalogsRequest{
+			DeployedProductID: req.DeployedProductID,
+			Pagination:        domain.Pagination{Limit: limit, Offset: offset},
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "create service request: catalog lookup failed",
+				"catalogItemId", req.CatalogItemID, "error", err)
+			return "", ""
 		}
-		for _, item := range c.CatalogItems {
-			if item.ID == req.CatalogItemID {
-				return item.Name
+		for _, c := range res.Catalogs {
+			for _, item := range c.CatalogItems {
+				if item.ID == req.CatalogItemID {
+					return c.ID, item.Name
+				}
 			}
 		}
+		offset += len(res.Catalogs)
+		if offset >= res.Total || len(res.Catalogs) == 0 {
+			break
+		}
 	}
-	return ""
+	return "", ""
 }

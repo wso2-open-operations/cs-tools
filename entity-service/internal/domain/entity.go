@@ -106,9 +106,13 @@ type SearchUsersFilters struct {
 	// GroupIDs restricts the search to members of these groups -- on
 	// ServiceNow, resolved to a user-ID set before the upstream call, since
 	// that data source cannot join users against group membership in one
-	// query; on Postgres, a plain EXISTS against team_member (migration
-	// 000028), matched directly in the same query.
+	// query; on Postgres, a plain EXISTS against group_member (migration
+	// 0140), matched directly in the same query. These are "group" ids, not
+	// `team` ids -- see TeamIDs for those.
 	GroupIDs []string `json:"groupIds"`
+	// TeamIDs restricts the search to members of these `team` rows (a plain
+	// EXISTS against team_member.team_id). Postgres data source only.
+	TeamIDs []string `json:"teamIds"`
 	// GroupNames restricts the search to members of the groups with these exact display
 	// names, resolved the same way GroupIDs is on each data source. It exists alongside
 	// GroupIDs because the caller's team registry is keyed by group name: group ids
@@ -350,6 +354,8 @@ type GetUserMeResponse struct {
 	FirstName *string `json:"firstName,omitempty"`
 	LastName  string  `json:"lastName"`
 	TimeZone  *string `json:"timeZone,omitempty"`
+	// Phone is the user's phone number as populated by the data sync; omitted when NULL.
+	Phone *string `json:"phone,omitempty"`
 	// UserType distinguishes staff from customer/partner contacts, matching SNUser's own
 	// field. Exposed for the same reason it is on SNUser -- a caller may need to tell them
 	// apart -- and also drives whether Groups below is populated.
@@ -363,8 +369,23 @@ type GetUserMeResponse struct {
 }
 
 // PatchUserMeRequest is the request body for PATCH /users/me.
+//
+// Both fields are optional on the Postgres data source, but at least one must be
+// present. An absent (or null) field is left untouched; "absent" and null are not
+// distinguished. TimeZone cannot be cleared, so an empty value counts as absent.
+// Phone is trimmed, at most 32 characters, and an empty (after trimming) value
+// clears it. The alternate (non-Postgres) data source applies TimeZone and accepts but
+// ignores Phone (a phone-only request is a no-op there).
 type PatchUserMeRequest struct {
-	TimeZone string `json:"timeZone"`
+	TimeZone string  `json:"timeZone"`
+	Phone    *string `json:"phone"`
+}
+
+// UserProfileUpdate is the row state UpdateUserProfile returns after the write.
+type UserProfileUpdate struct {
+	UpdatedOn time.Time
+	Timezone  *string
+	Phone     *string
 }
 
 // PatchUserMeUpdated contains the key fields returned after a successful user update.
@@ -372,6 +393,10 @@ type PatchUserMeUpdated struct {
 	ID        string `json:"id"`
 	UpdatedBy string `json:"updatedBy"`
 	UpdatedOn string `json:"updatedOn"`
+	// TimeZone and Phone are the profile's values after the update, omitted when
+	// NULL. Filled by the Postgres data source only.
+	TimeZone *string `json:"timeZone,omitempty"`
+	Phone    *string `json:"phone,omitempty"`
 }
 
 // PatchUserMeResponse is the response for PATCH /users/me.
@@ -1680,6 +1705,13 @@ type ProjectConversationStatsResponse struct {
 	TotalCount  int              `json:"totalCount"`
 	ActiveCount int              `json:"activeCount"`
 	StateCount  []ChoiceListItem `json:"stateCount"`
+	// ResolvedPastThirtyDays is the number of conversations in the Resolved
+	// state that were last updated in the past 30 days: a conversation has no
+	// resolved-on column, so the last update stands in for it (a resolved chat
+	// is rarely touched again). Present on the Postgres data source only; absent
+	// on ServiceNow, whose callers then fall back to the Resolved entry of
+	// StateCount, which is not limited to any period.
+	ResolvedPastThirtyDays *int `json:"resolvedPastThirtyDays,omitempty"`
 }
 
 // ProjectDeploymentStatsResponse is the response for GET /projects/{id}/deployments/stats.
@@ -4602,6 +4634,12 @@ type PatchChangeRequestResponse struct {
 // It is what the repository validates and derives from.
 type ChangeRequestLinkSelection struct {
 	ProjectID *string
+	// AssignmentGroupID is the group the change is assigned to (the create
+	// form's "Assignment group"). When stated it must be a row of "group", the
+	// table work_item.assignment_group_id references and the one ServiceNow's
+	// groups are mirrored into. It is checked here, ahead of the write, so a
+	// group that is not one is refused in words naming the field.
+	AssignmentGroupID *string
 	// DeploymentIDs are the chosen deployments, in the order given.
 	DeploymentIDs []string
 	// DeploymentProductIDs is nil when the caller did not state them. Deployment
@@ -5297,6 +5335,12 @@ type GroupDetail struct {
 // SearchGroupsFilters holds optional filter criteria for group searches.
 type SearchGroupsFilters struct {
 	SearchQuery string `json:"searchQuery,omitempty"`
+	// SupportGroupsOnly limits the result to the groups an incident can be
+	// created in with an explicit assignmentGroupId: active groups that are
+	// the support group of at least one service. Their ids are "group" ids
+	// (the ones assignmentGroupId takes), not team-registry ids, which the
+	// search returns without this filter on the Postgres data source.
+	SupportGroupsOnly bool `json:"supportGroupsOnly,omitempty"`
 }
 
 // SearchGroupsRequest is the input for POST /groups/search.
@@ -5311,6 +5355,32 @@ type SearchGroupsResponse struct {
 	Total  int     `json:"total"`
 	Offset int     `json:"offset"`
 	Limit  int     `json:"limit"`
+}
+
+// Team is one row of the `team` table as listed by POST /teams/search.
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// SearchTeamsFilters are the optional filters of POST /teams/search.
+type SearchTeamsFilters struct {
+	SearchQuery string `json:"searchQuery,omitempty"`
+}
+
+// SearchTeamsRequest is the input for POST /teams/search.
+type SearchTeamsRequest struct {
+	Filters    *SearchTeamsFilters `json:"filters,omitempty"`
+	Pagination Pagination          `json:"pagination"`
+}
+
+// SearchTeamsResponse is the paginated result of a teams search.
+type SearchTeamsResponse struct {
+	Teams  []Team `json:"teams"`
+	Total  int    `json:"total"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
 }
 
 // ServiceOfferingServiceRef is the parent service reference within a service offering.
@@ -6037,11 +6107,17 @@ type CreateIncidentRequest struct {
 	ContactType         *IncidentContactType `json:"contactType,omitempty"`
 	Impact              IncidentImpact       `json:"impact"`
 	Urgency             IncidentUrgency      `json:"urgency"`
-	// AssignmentGroupID is never read from the request body: an incident's
-	// assignment group is its service's support group, set by the incident
-	// service before either create path runs. One rule, one place -- a
-	// caller that sends assignmentGroupId gets a 400 for an unknown field.
-	AssignmentGroupID  *string  `json:"-"`
+	// AssignmentGroupID is optional. The incident service decides the group
+	// once, before either create path runs (resolveAssignmentGroup), the same
+	// way for every caller and DATA_SOURCE:
+	//   - sent: used if it is an active group that is the support group of at
+	//     least one service, else 400 (blank counts as not sent);
+	//   - not sent: the service's support group;
+	//   - the service has none: the support group of the default service
+	//     (INCIDENT_DEFAULT_SERVICE_ID), logged as a warning;
+	//   - no default group either: unassigned, logged as an error.
+	// A creation work note records which of these chose the group.
+	AssignmentGroupID  *string  `json:"assignmentGroupId,omitempty"`
 	AssignedEngineerID *string  `json:"assignedEngineerId,omitempty"`
 	Subject            string   `json:"subject"`
 	WatchList          []string `json:"watchList,omitempty"`
@@ -6065,6 +6141,16 @@ type CreateIncidentRequest struct {
 	// (max length 40; name kept as ServiceNow spells it, misspelling
 	// included). Also persisted on this service's own Postgres incident row.
 	Environment *string `json:"environment,omitempty"`
+}
+
+// IncidentCreateDefaults is the output for GET /incidents/create-defaults:
+// what POST /incidents falls back to when the incident's service has no
+// support group. DefaultServiceID is INCIDENT_DEFAULT_SERVICE_ID (null when
+// unset); DefaultGroup is that service's support group (null when the
+// variable is unset, the service does not exist or it has no support group).
+type IncidentCreateDefaults struct {
+	DefaultServiceID *string    `json:"defaultServiceId"`
+	DefaultGroup     *EntityRef `json:"defaultGroup"`
 }
 
 // CreateIncidentResponse is the output for POST /incidents.
@@ -6630,6 +6716,15 @@ type SearchConversationsFilters struct {
 	// addresses (optional). Independent of CreatedByMe, which always scopes
 	// to the caller.
 	CreatedBy []string `json:"createdBy,omitempty"`
+	// StartUpdatedDate / EndUpdatedDate bound the conversation's last update
+	// time, inclusive (optional). A conversation has no resolved-on column, so
+	// "resolved in the last 30 days" is States [resolved] with a
+	// StartUpdatedDate 30 days back, the same definition
+	// ProjectConversationStatsResponse.ResolvedPastThirtyDays counts. Applied by
+	// the Postgres data source only; the ServiceNow-backed search does not
+	// forward them.
+	StartUpdatedDate *time.Time `json:"startUpdatedDate,omitempty"`
+	EndUpdatedDate   *time.Time `json:"endUpdatedDate,omitempty"`
 }
 
 // TotalNotComputed is the total a search response reports when the request set
@@ -7497,19 +7592,22 @@ type SearchEscalationsResponse struct {
 }
 
 // CaseEscalationHistory is the response for GET /cases/{id}/escalations: a
-// single case's full escalation history (newest first), plus who is
-// authorized to de-escalate its current level.
+// single case's full escalation history (newest first), who was notified of
+// its current level, and the team leads who may de-escalate it.
 type CaseEscalationHistory struct {
 	Escalations []Escalation `json:"escalations"`
 	Total       int          `json:"total"`
 	// CurrentNotifiedUsers is the NotifiedUsers list of the most recent
 	// record in Escalations (i.e. who was notified about the case's current
 	// escalation level). Always present (an empty array, never omitted/null)
-	// when the case has never been escalated. Only someone on this list is
-	// authorized to de-escalate the case's current level -- surfaced as its
-	// own field so callers don't each re-derive "the first record's notified
-	// list" independently.
+	// when the case has never been escalated.
 	CurrentNotifiedUsers []EscalationNotifiedUser `json:"currentNotifiedUsers"`
+	// TeamLeads are the leads of the case's account's CRE (ABT) team
+	// (team_member role 'lead' on account.cre_team_id) -- the only internal
+	// users who may de-escalate the case. Always present, an empty array when
+	// the account has no CRE team, the team has no lead, or the data source
+	// cannot resolve them.
+	TeamLeads []EscalationNotifiedUser `json:"teamLeads"`
 }
 
 // --- case-grouped time cards (ServiceNow data source only) ---

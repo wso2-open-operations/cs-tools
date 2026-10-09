@@ -37,18 +37,29 @@ export const PORTAL_ROLE = {
   // PermissionProvider.tsx's canAddWorkNotes for the one capability this
   // backs.
   worknoteCreator: "worknote_creator",
+  // Grants PermCreateAnnouncement on the backend (internal/handler/access.go)
+  // -- creating and sending a customer announcement, ON TOP OF write access.
+  // See canCreateAnnouncement below.
+  announcementCreator: "announcement_creator",
 } as const;
 
-const ALL_PORTAL_ROLES: readonly string[] = Object.values(PORTAL_ROLE);
+// Roles that, held alone, let someone use the portal at all. announcement_creator
+// is left out on purpose: it only narrows who among the people who can already
+// write may send an announcement (see canCreateAnnouncement), so on its own it
+// grants nothing, and counting it would let a caller holding nothing else in
+// past the "no access" screen into a portal where every call is a 403.
+const ROLES_THAT_GRANT_ACCESS: readonly string[] = Object.values(PORTAL_ROLE).filter(
+  (role) => role !== PORTAL_ROLE.announcementCreator,
+);
 
 export interface PortalAccess {
   /** Holds at least one portal role — the minimum to use the portal at all. */
   hasAnyRole: boolean;
   /**
-   * Escalating or de-escalating a case. `admin` and `escalator` only —
-   * `cs_engineer` does NOT hold it, mirroring the backend's `PermEscalate`.
-   * Escalation is a dedicated responsibility, not something being a CS
-   * engineer alone grants.
+   * Escalating or de-escalating a case: `admin`, `cs_engineer` and
+   * `escalator`, mirroring the backend's `PermEscalate` -- any internal
+   * engineer may escalate, as in ServiceNow. De-escalating also requires
+   * being one of the case's ABT team leads.
    */
   canEscalate: boolean;
   canDownloadAttachment: boolean;
@@ -113,14 +124,26 @@ export interface PortalAccess {
    * for them.
    */
   canManagePlaybooks: boolean;
+  /**
+   * Creating and sending a customer announcement: the New announcement page and
+   * button, and every action that edits, submits, schedules, publishes or
+   * updates a request. `admin`, or a caller who has write access
+   * ({@link canWrite}) AND the `announcement_creator` role -- mirroring the
+   * backend's `PermCreateAnnouncement`, which is checked on top of `PermWrite`
+   * rather than instead of it. A `cs_engineer` without the role does not get
+   * it (that is the point of the role), and the role on its own does not make
+   * anyone a writer. Marking a request as approved is not gated by this: it
+   * stays under {@link canWrite}.
+   */
+  canCreateAnnouncement: boolean;
 }
 
 /**
  * What a user's `GET /users/me` roles let them see and do. Matched
  * case-insensitively. `admin` can do everything; `cs_engineer` can do
- * everything EXCEPT escalate a case (a dedicated responsibility, held only
- * by `escalator` plus `admin` — see `canEscalate`'s own doc comment) —
- * approving a time card is a similarly dedicated responsibility, but it
+ * everything except admin-only actions, escalating included (see
+ * `canEscalate`'s own doc comment) — approving a time card is a dedicated
+ * responsibility, but it
  * isn't a flag on this type at all, see `canUseTimeCardsAndUpdates`'s own
  * doc comment for why; `attachment_downloader` adds just that one ability;
  * `worknote_creator` also adds internal work notes (see `canAddWorkNotes`);
@@ -149,6 +172,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canUseSecurityCenter: true,
       canUsePlg: true,
       canManagePlaybooks: true,
+      canCreateAnnouncement: true,
     };
   }
   const held = new Set((roles ?? []).map((r) => r.toLowerCase()));
@@ -156,10 +180,10 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
   const isAdmin = has(PORTAL_ROLE.admin);
   const full = isAdmin || has(PORTAL_ROLE.csEngineer);
   return {
-    hasAnyRole: ALL_PORTAL_ROLES.some(has),
-    // canEscalate deliberately checks isAdmin, not full: cs_engineer alone
-    // must not grant it (see its own doc comment above).
-    canEscalate: isAdmin || has(PORTAL_ROLE.escalator),
+    hasAnyRole: ROLES_THAT_GRANT_ACCESS.some(has),
+    // Any internal engineer may escalate, as in ServiceNow; de-escalating is
+    // further limited to the case's ABT team leads (CsmCaseDetailPage).
+    canEscalate: full || has(PORTAL_ROLE.escalator),
     canDownloadAttachment: full || has(PORTAL_ROLE.attachmentDownloader),
     canUseOperations: full,
     canUseTimeCardsAndUpdates: full || has(PORTAL_ROLE.timecardApprover),
@@ -169,5 +193,6 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canUseSecurityCenter: full,
     canUsePlg: full,
     canManagePlaybooks: isAdmin,
+    canCreateAnnouncement: full && (isAdmin || has(PORTAL_ROLE.announcementCreator)),
   };
 }

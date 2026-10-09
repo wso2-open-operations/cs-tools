@@ -257,6 +257,9 @@ func (s *userService) SearchUsers(ctx context.Context, req domain.SearchUsersReq
 	if err := validateUUIDs("groupIds", req.Filters.GroupIDs); err != nil {
 		return domain.SearchUsersResponse{}, err
 	}
+	if err := validateUUIDs("teamIds", req.Filters.TeamIDs); err != nil {
+		return domain.SearchUsersResponse{}, err
+	}
 	if req.SortBy.Field != "" && !validUserSortField[req.SortBy.Field] {
 		return domain.SearchUsersResponse{}, &apierror.ValidationError{Msg: "sortBy.field contains invalid value: " + string(req.SortBy.Field)}
 	}
@@ -346,6 +349,7 @@ func (s *userService) GetMe(ctx context.Context) (domain.GetUserMeResponse, erro
 		FirstName: &firstName,
 		LastName:  user.LastName,
 		TimeZone:  user.Timezone,
+		Phone:     user.Phone,
 		Roles:     roles,
 		Groups:    groups,
 	}, nil
@@ -382,9 +386,24 @@ func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (domain.G
 // does (x-user-id-token's email claim -> GetUserByEmail), so there is no
 // caller-supplied id to trust -- a user can only ever update their own
 // timezone through this endpoint.
+// maxPhoneLen is the width of "user".phone (migration 0141); checked up front
+// so an over-long value is a 400, not a database error.
+const maxPhoneLen = 32
+
 func (s *userService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest) (domain.PatchUserMeResponse, error) {
-	if req.TimeZone == "" {
-		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "timeZone is required"}
+	var timezone, phone *string
+	if req.TimeZone != "" {
+		timezone = &req.TimeZone
+	}
+	if req.Phone != nil {
+		trimmed := strings.TrimSpace(*req.Phone)
+		if utf8.RuneCountInString(trimmed) > maxPhoneLen {
+			return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("phone must be at most %d characters", maxPhoneLen)}
+		}
+		phone = &trimmed
+	}
+	if timezone == nil && phone == nil {
+		return domain.PatchUserMeResponse{}, &apierror.ValidationError{Msg: "at least one of timeZone or phone is required"}
 	}
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
@@ -399,7 +418,7 @@ func (s *userService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest
 		return domain.PatchUserMeResponse{}, err
 	}
 
-	updatedOn, err := s.repo.UpdateUserTimeZone(ctx, user.ID, req.TimeZone)
+	updated, err := s.repo.UpdateUserProfile(ctx, user.ID, timezone, phone)
 	if err != nil {
 		return domain.PatchUserMeResponse{}, err
 	}
@@ -409,7 +428,9 @@ func (s *userService) PatchMe(ctx context.Context, req domain.PatchUserMeRequest
 		User: domain.PatchUserMeUpdated{
 			ID:        user.ID,
 			UpdatedBy: email,
-			UpdatedOn: updatedOn.UTC().Format(time.RFC3339),
+			UpdatedOn: updated.UpdatedOn.UTC().Format(time.RFC3339),
+			TimeZone:  updated.Timezone,
+			Phone:     updated.Phone,
 		},
 	}, nil
 }

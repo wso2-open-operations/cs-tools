@@ -49,7 +49,8 @@ interface AsyncProjectMultiSelectProps {
  * Project filter that searches the backend as the user types instead of
  * loading the whole project catalogue up front. Selected project names are
  * remembered (captured at selection time, plus any seed) so the chips stay
- * labelled even after the search results change.
+ * labelled even after the search results change. Input handling follows
+ * SearchableMultiSelect's own uncontrolled pattern (see onInputChange below).
  */
 export default function AsyncProjectMultiSelect({
   id = "cases-filter-project",
@@ -102,18 +103,36 @@ export default function AsyncProjectMultiSelect({
     return m;
   }, [nameSeed, projects, pickedNames]);
 
+  // Stable identity unless the selected ids themselves, or one of their
+  // resolved names, actually changes — deliberately NOT keyed on `values`/
+  // `nameById` directly, since `nameById` gets a new Map identity on every
+  // new page of search results (see its own useMemo above), including ones
+  // about other, not-yet-selected projects. MUI's Autocomplete resets its
+  // own (uncontrolled) input text whenever the `value` prop's reference
+  // changes while focused (see useAutocomplete's own value-changed effect,
+  // `if (focused && !valueChange) return;`) — so without this, typing a
+  // search term got wiped out from under the user mid-search the moment a
+  // new page of results came back, found live.
+  const selectedKey = values.join("\u0000");
+  const selectedNamesKey = values.map((v) => nameById.get(v) ?? v).join("\u0000");
   const selectedOptions: ProjectOption[] = useMemo(
     () => values.map((v) => ({ id: v, name: nameById.get(v) ?? v })),
-    [values, nameById],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedKey/selectedNamesKey capture everything that should trigger a recompute; depending on values/nameById directly would defeat the point of this memo (see comment above).
+    [selectedKey, selectedNamesKey],
   );
 
-  // Pool = current selection (so the field can render its chips) + the search
-  // results, de-duplicated by id.
-  const options: ProjectOption[] = useMemo(() => {
-    const results = projects.map((p) => ({ id: p.id, name: p.name || p.id }));
-    const seen = new Set(values);
-    return [...selectedOptions, ...results.filter((o) => !seen.has(o.id))];
-  }, [projects, values, selectedOptions]);
+  // The dropdown's own pool is just the live search results — not the
+  // current selection prepended in front of them (a previous version did
+  // this "so the field can render its chips", but renderTags/nameById
+  // already resolve a chip's label independently of what's in `options`,
+  // via `pickedNames`/`nameSeed`, so nothing actually needed it). Prepending
+  // the selection meant option 0 — what Enter/the default highlight acts on
+  // — was always an already-picked project instead of the top real search
+  // match, which is what made Enter appear to "select the wrong item."
+  const options: ProjectOption[] = useMemo(
+    () => projects.map((p) => ({ id: p.id, name: p.name || p.id })),
+    [projects],
+  );
 
   return (
     <Autocomplete<ProjectOption, true>
@@ -153,12 +172,14 @@ export default function AsyncProjectMultiSelect({
         });
         onChange(next.map((o) => o.id));
       }}
-      inputValue={input}
-      onInputChange={(_event, value, reason) => {
-        // Keep the typed term after a selection (reason "reset") so the user can
-        // pick several from one search; clear only on explicit input/clear.
-        if (reason === "input" || reason === "clear") setInput(value);
-      }}
+      // Deliberately NOT a controlled `inputValue` (see SearchableMultiSelect,
+      // mirrored here) — letting Autocomplete own the input lets it reset
+      // itself after each pick same as any plain search box. A previous
+      // version controlled it to keep a typed term across picks, which
+      // caused the leftover text, the stray cursor, and Enter's unpredictable
+      // target all at once. `onInputChange` just observes the typed query
+      // for the debounced search below; it's never fed back as `inputValue`.
+      onInputChange={(_event, value) => setInput(value)}
       noOptionsText={
         isError
           ? "Couldn't load projects. Try again."
@@ -167,6 +188,18 @@ export default function AsyncProjectMultiSelect({
             : "No projects found"
       }
       renderTags={(value) => {
+        // Suppressed while the user has live text in the box — found live,
+        // after the previous commit made this unconditional again: picking
+        // a *first* project is fine (the box empties right back out, so
+        // there's nothing for the summary to collide with), but picking a
+        // *second* one meant typing a new query right next to an
+        // already-shown summary, on the same non-wrapping line — the exact
+        // overlap this component was first fixed for, just reached a
+        // different way. Keyed on `input` itself, not `open`: opening the
+        // dropdown to browse without typing anything should still show the
+        // summary immediately (that's the whole point of the previous
+        // commit), it's only live typed text that needs to hide it.
+        if (input) return null;
         const displayText = value.map((o) => o.name).join(", ");
         const content = (
           <Box

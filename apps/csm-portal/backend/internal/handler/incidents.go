@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
@@ -39,6 +40,7 @@ type entityIncidentClient interface {
 	SearchIncidentActivities(ctx context.Context, id string, body []byte) ([]byte, error)
 	HandOffIncidentToSpecialist(ctx context.Context, id string, body []byte) ([]byte, error)
 	ListSpecialistHandoffTeams(ctx context.Context, serviceID string) ([]byte, error)
+	GetIncidentCreateDefaults(ctx context.Context) ([]byte, error)
 	// GetUserMe resolves the caller's own platform user record — needed by
 	// the close-ownership guard in PatchIncident; see resolveCurrentUserID
 	// (cases.go), shared with CaseHandler's own identical use.
@@ -106,23 +108,27 @@ const maxHandoffEscalationTeamLen = 64
 // CreateIncidentPayload schema. It is decoded only to validate those fields at the
 // boundary; the original raw body is still forwarded to the entity service unchanged.
 type createIncidentRequest struct {
-	CallerID            string   `json:"callerId"`
-	Category            string   `json:"category"`
-	Subcategory         string   `json:"subcategory"`
-	ServiceID           string   `json:"serviceId"`
-	ServiceOfferingID   string   `json:"serviceOfferingId"`
-	ConfigurationItemID string   `json:"configurationItemId"`
-	ContactType         string   `json:"contactType"`
-	Impact              string   `json:"impact"`
-	Urgency             string   `json:"urgency"`
-	AssignedEngineerID  string   `json:"assignedEngineerId"`
-	Subject             string   `json:"subject"`
-	WatchList           []string `json:"watchList"`
-	ParentID            string   `json:"parentId"`
-	ParentIncidentID    string   `json:"parentIncidentId"`
-	ChangeRequestID     string   `json:"changeRequestId"`
-	ProblemID           string   `json:"problemId"`
-	CausedByID          string   `json:"causedById"`
+	CallerID            string `json:"callerId"`
+	Category            string `json:"category"`
+	Subcategory         string `json:"subcategory"`
+	ServiceID           string `json:"serviceId"`
+	ServiceOfferingID   string `json:"serviceOfferingId"`
+	ConfigurationItemID string `json:"configurationItemId"`
+	ContactType         string `json:"contactType"`
+	Impact              string `json:"impact"`
+	Urgency             string `json:"urgency"`
+	// AssignmentGroupID is optional. Only its shape is checked here; whether
+	// the group may be chosen (an active support group of some service) is
+	// the entity service's rule, answered there with 400.
+	AssignmentGroupID  string   `json:"assignmentGroupId"`
+	AssignedEngineerID string   `json:"assignedEngineerId"`
+	Subject            string   `json:"subject"`
+	WatchList          []string `json:"watchList"`
+	ParentID           string   `json:"parentId"`
+	ParentIncidentID   string   `json:"parentIncidentId"`
+	ChangeRequestID    string   `json:"changeRequestId"`
+	ProblemID          string   `json:"problemId"`
+	CausedByID         string   `json:"causedById"`
 }
 
 // validateCreateIncidentBody checks the required fields, enum fields (category, subcategory,
@@ -158,6 +164,9 @@ func validateCreateIncidentBody(body []byte) bool {
 		return false
 	}
 	if !validIncidentUrgencies[req.Urgency] {
+		return false
+	}
+	if req.AssignmentGroupID != "" && !uuidRe.MatchString(req.AssignmentGroupID) {
 		return false
 	}
 	if req.AssignedEngineerID != "" && !uuidRe.MatchString(req.AssignedEngineerID) {
@@ -493,11 +502,33 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 	result, err := h.entity.CreateIncident(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateIncident failed", "userID", user.UserID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to create incident.")
+		mapCreateIncidentError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// errCodeIncidentAssignmentGroupNotAllowed is the entity service's errorCode
+// for an assignmentGroupId that is not an active support group of any service.
+const errCodeIncidentAssignmentGroupNotAllowed = "incident_assignment_group_not_allowed"
+
+// mapCreateIncidentError maps a failed create. The one refusal the create form
+// has to show as such -- the chosen group is no longer an active support group
+// (errorCode incident_assignment_group_not_allowed) -- keeps its 400, its
+// message and its errorCode. Every other upstream error goes through
+// mapUpstreamErrorGeneric unchanged, so no other entity-service 400 message
+// (some quote database details) reaches the caller.
+func mapCreateIncidentError(w http.ResponseWriter, err error) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+		upstreamErrorCode(apiErr.Body) == errCodeIncidentAssignmentGroupNotAllowed {
+		if msg := upstreamErrorMessageStrict(apiErr.Body, ""); msg != "" {
+			writeErrorCode(w, http.StatusBadRequest, msg, errCodeIncidentAssignmentGroupNotAllowed)
+			return
+		}
+	}
+	mapUpstreamErrorGeneric(w, err, "Failed to create incident.")
 }
 
 // GetIncident handles GET /incidents/{id}.
@@ -867,6 +898,26 @@ func (h *IncidentHandler) ListSpecialistHandoffTeams(w http.ResponseWriter, r *h
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ListSpecialistHandoffTeams failed", "userID", user.UserID, "err", err)
 		mapUpstreamError(w, err, "Failed to load the specialist teams.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetIncidentCreateDefaults handles GET /incidents/create-defaults: the
+// entity service's default service and its support group -- the team an
+// incident is assigned to when no group is chosen and its service has none --
+// so the create form can show it. Passed through untouched:
+// {"defaultServiceId": uuid|null, "defaultGroup": {"id","name"}|null}.
+func (h *IncidentHandler) GetIncidentCreateDefaults(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	result, err := h.entity.GetIncidentCreateDefaults(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetIncidentCreateDefaults failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to load the incident defaults.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

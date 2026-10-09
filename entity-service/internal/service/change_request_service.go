@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -68,6 +69,10 @@ type changeRequestService struct {
 	// the correct ServiceNow record.
 	snMirror    ChangeRequestService
 	snWriteback *SNWritebackDispatcher
+	// snUsers is optional and only used by the dual-write create path, to check
+	// that the people a change is assigned to exist in ServiceNow before it is
+	// called -- see resolveServiceNowPeople. Set by WithChangeRequestSNUserLookup.
+	snUsers snUserSearcher
 }
 
 // NewChangeRequestService constructs a ChangeRequestService backed by
@@ -541,8 +546,12 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	// The project / deployments / deployment products are validated BEFORE
 	// ServiceNow is called: once ServiceNow has created the change request, a
 	// refusal on the Postgres side would strand it there.
+	// The assignment group is checked here too: a group that is not one of
+	// "group" (a hand-made team the picker used to list) is not a ServiceNow group
+	// either, and ServiceNow answers it with a bare 404.
 	if _, err := s.repo.ValidateChangeRequestLinks(ctx, domain.ChangeRequestLinkSelection{
-		ProjectID: req.ProjectID, DeploymentIDs: req.DeploymentIDs, DeploymentProductIDs: req.DeploymentProductIDs,
+		ProjectID: req.ProjectID, AssignmentGroupID: req.GroupID,
+		DeploymentIDs: req.DeploymentIDs, DeploymentProductIDs: req.DeploymentProductIDs,
 	}); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -563,12 +572,27 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedEndDate)
 		mirrorReq.PlannedEndDate = &v
 	}
+	// The people named are made ServiceNow ones (or refused in words) before
+	// ServiceNow is called: its answer to an unknown user is a bare 404.
+	if err := s.resolveServiceNowPeople(ctx, &mirrorReq); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	snResp, err := s.snMirror.CreateChangeRequest(ctx, mirrorReq)
 	if err != nil {
 		// ServiceNow never accepted the change request -- nothing is
 		// written to Postgres at all, by construction
 		// (s.repo.CreateChangeRequestFromServiceNow is simply never called
 		// on this path). No orphan gets created.
+		//
+		// A "not found" here cannot be about the change request (it does not
+		// exist yet): ServiceNow does not know a record it was handed. The portal
+		// shows a 404 as "The requested resource was not found!", which says
+		// nothing, so it is reported as the 400 it is.
+		var notFound *apierror.NotFoundError
+		if errors.As(err, &notFound) {
+			slog.WarnContext(ctx, "sn create change request: ServiceNow did not recognise a record the change request refers to", "error", err)
+			return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: serviceNowUnknownRecordMsg}
+		}
 		return domain.CreateChangeRequestResponse{}, err
 	}
 
@@ -585,6 +609,15 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	}
 	return resp, nil
 }
+
+// serviceNowUnknownRecordMsg is what a create is refused with when ServiceNow answers
+// "not found": one of the records the form refers to is not one it knows, and it does
+// not say which. The people and the assignment group are checked before ServiceNow is
+// called, so what is left is mostly the service, the service offering and the
+// configuration item.
+const serviceNowUnknownRecordMsg = "The change request was not created: ServiceNow did not recognise one of the records it refers to " +
+	"(the assignment group, the person it is assigned to, the requester, the service, the service offering or the configuration item). " +
+	"Change one of those fields and try again."
 
 // GetChangeRequestApprovals implements ChangeRequestService. Reads always
 // stay on Postgres regardless of data source -- config.go's own doc comment

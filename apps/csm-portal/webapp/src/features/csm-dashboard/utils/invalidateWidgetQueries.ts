@@ -47,3 +47,26 @@ export function invalidateWidgetQueries(
     },
   });
 }
+
+/**
+ * Mark every dashboard widget that shows call requests stale (and refetch the ones on
+ * screen), whatever its id, shape or filters. Widget data is cached for five minutes,
+ * so without this a call request that was just completed, scheduled or rejected would
+ * stay on "My Call Requests" / "Calls To Attend" (and keep counting in a pie or bar
+ * over them) until the cache expired. Keyed on the resource type in the query key, so
+ * no other widget is reloaded. The count/list shape is `[WIDGET_DATA, widgetId,
+ * resourceType, ...]`; the pie/bar slice and group-by shapes lead with a marker and
+ * carry the resource type one slot later (`[WIDGET_DATA, "pie-slice", widgetId,
+ * resourceType, ...]`) -- the same special-casing `invalidateWidgetQueries` does for
+ * the widget id above. The feedback trend is case feedback, not call requests.
+ */
+export function invalidateCallRequestWidgetQueries(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      if (key[0] !== ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA) return false;
+      const resourceType = key[1] === "pie-slice" || key[1] === "group-by" ? key[3] : key[2];
+      return resourceType === "call_request";
+    },
+  });
+}

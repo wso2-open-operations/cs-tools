@@ -315,3 +315,128 @@ func TestSNCaseService_CreateCase_Announcement(t *testing.T) {
 		t.Fatalf("expected empty deployedProductId in payload for announcement, got %v", v)
 	}
 }
+
+// TestSNCaseService_CreateCase_ServiceRequest_ForwardsTitleAndDescription verifies
+// that a service_request with caller-provided subject and description sets the
+// title and description fields in the ServiceNow payload.
+func TestSNCaseService_CreateCase_ServiceRequest_ForwardsTitleAndDescription(t *testing.T) {
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{
+			"message": "Case created successfully",
+			"case": {"id": "` + testWLCaseSysid + `", "number": "CS0000004", "createdBy": "engineer@example.com", "createdOn": "2026-01-02 10:00:00", "state": {"id": 1, "label": "Open"}}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
+	req := domain.CreateCaseRequest{
+		Type:              "service_request",
+		ProjectID:         testProjectUUID,
+		DeploymentID:      testDeploymentUUID,
+		DeployedProductID: testDeployedProdID,
+		Subject:           "Pre-set Topic",
+		Description:       "Pre-set Description",
+		CatalogID:         "44444444-4444-4444-4444-444444444444",
+		CatalogItemID:     "55555555-5555-5555-5555-555555555555",
+		Variables: []domain.Variable{
+			{ID: "66666666-6666-6666-6666-666666666667", Value: "answer"},
+		},
+	}
+
+	resp, err := svc.CreateCase(contextWithUserIDToken("token"), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Case.Number != "CS0000004" {
+		t.Fatalf("unexpected case number: %s", resp.Case.Number)
+	}
+	if gotBody["title"] != "Pre-set Topic" {
+		t.Fatalf("payload title: got %v, want %q", gotBody["title"], "Pre-set Topic")
+	}
+	if gotBody["description"] != "Pre-set Description" {
+		t.Fatalf("payload description: got %v, want %q", gotBody["description"], "Pre-set Description")
+	}
+	if gotBody["type"] != "service_request" {
+		t.Fatalf("payload type: got %v, want %q", gotBody["type"], "service_request")
+	}
+}
+
+// TestSNCaseService_CreateCase_ServiceRequest_DerivesTitleAndDescriptionFromCatalog
+// verifies that when a service_request has no caller-provided subject or description,
+// but WithServiceRequestCatalog is configured, CreateCase derives the topic and
+// description HTML from the catalog variables and forwards them in the ServiceNow payload.
+func TestSNCaseService_CreateCase_ServiceRequest_DerivesTitleAndDescriptionFromCatalog(t *testing.T) {
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{
+			"message": "Case created successfully",
+			"case": {"id": "` + testWLCaseSysid + `", "number": "CS0000005", "createdBy": "engineer@example.com", "createdOn": "2026-01-02 10:00:00", "state": {"id": 1, "label": "Open"}}
+		}`))
+	})
+
+	const varShortID = "66666666-6666-6666-6666-666666666667"
+	const varDetailsID = "66666666-6666-6666-6666-666666666668"
+
+	cat := fakeSRCatalog{
+		vars: []domain.CatalogItemVariable{
+			{ID: varShortID, QuestionText: "Short Description", Order: 1},
+			{ID: varDetailsID, QuestionText: "Details", Order: 2},
+		},
+		items: []domain.Catalog{
+			{
+				ID: "cat-1",
+				CatalogItems: []domain.CatalogItem{
+					{ID: "55555555-5555-5555-5555-555555555555", Name: "Information Request"},
+				},
+			},
+		},
+	}
+
+	rawSvc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
+	svc := WithServiceRequestCatalog(rawSvc, cat)
+
+	req := domain.CreateCaseRequest{
+		Type:              "service_request",
+		ProjectID:         testProjectUUID,
+		DeploymentID:      testDeploymentUUID,
+		DeployedProductID: testDeployedProdID,
+		CatalogID:         "44444444-4444-4444-4444-444444444444",
+		CatalogItemID:     "55555555-5555-5555-5555-555555555555",
+		Variables: []domain.Variable{
+			{ID: varShortID, Value: "Need production traffic metrics"},
+			{ID: varDetailsID, Value: "For Q3 review"},
+		},
+	}
+
+	resp, err := svc.CreateCase(contextWithUserIDToken("token"), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Case.Number != "CS0000005" {
+		t.Fatalf("unexpected case number: %s", resp.Case.Number)
+	}
+	if gotBody["title"] != "Need production traffic metrics" {
+		t.Fatalf("payload title: got %v, want %q", gotBody["title"], "Need production traffic metrics")
+	}
+	wantDesc := "<p><strong>Details</strong>: For Q3 review</p>"
+	if gotBody["description"] != wantDesc {
+		t.Fatalf("payload description: got %v, want %q", gotBody["description"], wantDesc)
+	}
+}
+

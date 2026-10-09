@@ -26,7 +26,7 @@ func TestLoadAccessConfig(t *testing.T) {
 		"AUTH_VIEWER_ROLES", "AUTH_ESCALATOR_ROLES",
 		"AUTH_ATTACHMENT_DOWNLOADER_ROLES", "AUTH_USAGE_METRICS_VIEWER_ROLES",
 		"AUTH_SUPPORT_ENGINEER_ROLES", "AUTH_ADMIN_ROLES", "AUTH_TIMECARD_APPROVER_ROLES",
-		"AUTH_DASHBOARD_DESIGNER_ROLES",
+		"AUTH_DASHBOARD_DESIGNER_ROLES", "AUTH_ANNOUNCEMENT_CREATOR_ROLES",
 	}
 	resetEnv := func(t *testing.T) {
 		for _, name := range envs {
@@ -42,6 +42,7 @@ func TestLoadAccessConfig(t *testing.T) {
 			"AttachmentDownloader": got.AttachmentDownloader, "UsageMetricsViewer": got.UsageMetricsViewer,
 			"CsEngineer": got.CsEngineer, "Admin": got.Admin,
 			"TimecardApprover": got.TimecardApprover, "DashboardDesigner": got.DashboardDesigner,
+			"AnnouncementCreator": got.AnnouncementCreator,
 		} {
 			if len(roles) != 0 {
 				t.Errorf("%s = %v, want no names when the variable is unset", name, roles)
@@ -79,6 +80,21 @@ func TestLoadAccessConfig(t *testing.T) {
 		t.Setenv("AUTH_ADMIN_ROLES", " , ,")
 		if got := loadAccessConfig().Admin; len(got) != 0 {
 			t.Errorf("Admin = %v, want empty", got)
+		}
+	})
+
+	// Creating an announcement needs this role on top of write access, so an
+	// unset variable means only admin can create one -- see
+	// handler.AccessConfig.AnnouncementCreator.
+	t.Run("the announcement creator role reads its own variable", func(t *testing.T) {
+		resetEnv(t)
+		t.Setenv("AUTH_ANNOUNCEMENT_CREATOR_ROLES", " test-announcers , test-leads ")
+		got := loadAccessConfig()
+		if want := []string{"test-announcers", "test-leads"}; !slices.Equal(got.AnnouncementCreator, want) {
+			t.Errorf("AnnouncementCreator = %v, want %v", got.AnnouncementCreator, want)
+		}
+		if len(got.CsEngineer) != 0 || len(got.Admin) != 0 {
+			t.Errorf("CsEngineer = %v, Admin = %v, want both untouched by this variable", got.CsEngineer, got.Admin)
 		}
 	})
 }

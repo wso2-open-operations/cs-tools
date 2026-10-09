@@ -109,8 +109,56 @@ import { useReportCaseTabDraft } from "@features/case-tabs/hooks/useReportCaseTa
 import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-operations/utils/changeRequests";
 import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
 import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
+import { looksLikeHtml, sanitizeStructuredHtml } from "@utils/sanitizeHtml";
+import { linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
+
+/**
+ * An incident's description: an incident raised by a monitoring webhook (an
+ * Azure Monitor alert arrives as nested tables of its payload) or from a case
+ * carries HTML, anything else is plain text (typed in the create form, synced
+ * from the previous system). HTML goes through the restricted structured
+ * policy (tables kept; styles, images and form elements dropped; links open in
+ * a new tab) and bare URLs are linkified as in comments. Plain text is shown
+ * as-is with its line breaks.
+ */
+function IncidentDescription({ text }: { text: string }): JSX.Element {
+  const html = useMemo(
+    () => (looksLikeHtml(text) ? linkifyBareUrls(sanitizeStructuredHtml(text)) : null),
+    [text],
+  );
+  if (html === null) {
+    return (
+      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+        {text}
+      </Typography>
+    );
+  }
+  return (
+    <Box
+      data-testid="incident-description-html"
+      sx={{
+        typography: "body2",
+        overflowWrap: "anywhere",
+        "& p:first-of-type": { mt: 0 },
+        "& p:last-child": { mb: 0 },
+        "& ul, & ol": { my: 0.5, pl: 3 },
+        "& a": { color: "primary.main" },
+        "& table": { borderCollapse: "collapse", width: "100%", my: 0.5 },
+        "& th, & td": {
+          border: 1,
+          borderColor: "divider",
+          px: 1,
+          py: 0.5,
+          textAlign: "left",
+          verticalAlign: "top",
+        },
+      }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
 
 /**
  * A single confirmed-live upstream limitation of `PATCH /incidents/{id}`
@@ -746,9 +794,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       {incident.description && (
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1 }}>
           <Typography variant="subtitle2">Description</Typography>
-          <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-            {incident.description}
-          </Typography>
+          <IncidentDescription text={incident.description} />
         </Card>
       )}
 

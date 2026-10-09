@@ -65,10 +65,15 @@ import (
 // DATA_SOURCE=postgres-servicenow-dual-write's SN-first incident creation,
 // where identity comes from ServiceNow rather than being generated here.
 type IncidentRepository interface {
-	// SupportGroupOfService returns the service's support group id, or ""
-	// when the service has none or does not exist. CreateIncident uses it to
-	// derive an incident's assignment group from its service.
-	SupportGroupOfService(ctx context.Context, serviceID string) (string, error)
+	// SupportGroupOfService returns the service's name and support group
+	// (Found false when no service has the id, GroupID "" when it has no
+	// support group). CreateIncident uses it to derive an incident's
+	// assignment group from its service, or from the default service.
+	SupportGroupOfService(ctx context.Context, serviceID string) (ServiceSupportGroup, error)
+	// IsSupportGroup reports whether groupID is an active group that is the
+	// support group of at least one service (supportGroupSetSQL): the only
+	// groups CreateIncident accepts as an explicit assignmentGroupId.
+	IsSupportGroup(ctx context.Context, groupID string) (bool, error)
 	// SearchIncidents returns a filtered, sorted, paginated slice of
 	// incidents together with the total count of matching rows before
 	// pagination. priorities/states are the already-mapped Postgres enum
@@ -250,16 +255,36 @@ type incidentRepo struct {
 }
 
 // SupportGroupOfService implements IncidentRepository.
-func (r *incidentRepo) SupportGroupOfService(ctx context.Context, serviceID string) (string, error) {
-	var group *string
-	err := r.db.QueryRow(ctx, `SELECT support_group_id::text FROM service WHERE id = $1::uuid`, serviceID).Scan(&group)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && group == nil) {
-		return "", nil
+func (r *incidentRepo) SupportGroupOfService(ctx context.Context, serviceID string) (ServiceSupportGroup, error) {
+	var name, group, groupName *string
+	err := r.db.QueryRow(ctx, `
+		SELECT s.name, s.support_group_id::text, g.name
+		FROM service s
+		LEFT JOIN "group" g ON g.id = s.support_group_id
+		WHERE s.id = $1::uuid`, serviceID).Scan(&name, &group, &groupName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ServiceSupportGroup{}, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read support group of service %s: %w", serviceID, err)
+		return ServiceSupportGroup{}, fmt.Errorf("read support group of service %s: %w", serviceID, err)
 	}
-	return *group, nil
+	return ServiceSupportGroup{
+		Found:       true,
+		ServiceName: stringOrEmpty(name),
+		GroupID:     stringOrEmpty(group),
+		GroupName:   stringOrEmpty(groupName),
+	}, nil
+}
+
+// IsSupportGroup implements IncidentRepository.
+func (r *incidentRepo) IsSupportGroup(ctx context.Context, groupID string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (`+supportGroupSetSQL+` AND g.id = $1::uuid)`, groupID).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("check support group %s: %w", groupID, err)
+	}
+	return ok, nil
 }
 
 // NewIncidentRepository constructs an IncidentRepository backed by the given connection pool.

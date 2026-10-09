@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -54,7 +55,13 @@ func (s *ingestService) Register(ctx context.Context, req domain.IngestRegistrat
 			// Logged and recorded, never fatal to the batch. The event is already
 			// gone from the queue — consuming deletes — so a registration that
 			// cannot land has nowhere else to exist.
-			log.Printf("plg ingest: %q failed: %v", reg.OrganizationName, err)
+			//
+			// Identified by its Moesif company id: that is the column the row is
+			// stored under (plg_organization.moesif_company_id, unique), so it
+			// is what someone recovering a failure looks it up by. The full
+			// record is in plg_ingest_failure.payload.
+			log.Printf("plg ingest: registration failed: moesif_company_id=%s: %v",
+				companyIDForLog(reg.CompanyID), err)
 			out.Results = append(out.Results, domain.IngestResult{
 				Status:           "FAILED",
 				OrganizationName: reg.OrganizationName,
@@ -92,4 +99,18 @@ func (s *ingestService) RecordFailure(ctx context.Context, req domain.RecordInge
 		return domain.RecordIngestFailureResult{}, err
 	}
 	return domain.RecordIngestFailureResult{}, nil
+}
+
+// companyIDForLog renders a Moesif company id for a log line, naming the empty
+// case rather than printing nothing.
+//
+// companyId is not one of the source map's RequiredPortalFields, so a map that
+// does not carry it yields an empty string here. Logging that bare would read as
+// a truncated line or a formatting bug; saying so explicitly makes it clear the
+// record arrived without the identifier, which is itself the thing to fix.
+func companyIDForLog(id string) string {
+	if strings.TrimSpace(id) == "" {
+		return "(unmapped)"
+	}
+	return id
 }

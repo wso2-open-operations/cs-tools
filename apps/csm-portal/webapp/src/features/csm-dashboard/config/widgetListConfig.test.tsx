@@ -40,6 +40,7 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
 }));
 
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 
 function LocationProbe() {
   const location = useLocation();
@@ -354,5 +355,76 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     fireEvent.click(screen.getByText("CALL0000001"));
     expect(screen.getByTestId("location-probe")).toHaveTextContent("/cases/case-1");
+  });
+});
+
+describe("call_request list: the Scheduled / preferred column", () => {
+  const dateTime = (value: string): string =>
+    formatBackendTimestampForDisplay(value, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }) as string;
+
+  function renderCalls(items: Record<string, unknown>[]) {
+    const Renderer = WIDGET_LIST_RENDERERS.call_request;
+    return renderRenderer(
+      <Renderer resourceType="call_request" items={items as never} isLoading={false} />,
+      "/cases/:id",
+    );
+  }
+
+  const base = { reason: "Walk through the upgrade", case: { id: "case-1", number: "CS0001" } };
+
+  it("shows the preferred time of a call nobody has scheduled yet, instead of a dash", () => {
+    renderCalls([{ ...base, id: "c1", preferredTimes: ["2026-10-07T13:15:00Z"] }]);
+    expect(screen.getByText(`Preferred: ${dateTime("2026-10-07T13:15:00Z")}`)).toBeInTheDocument();
+  });
+
+  it("shows the scheduled time, not the preferred one, once the call is scheduled", () => {
+    renderCalls([
+      {
+        ...base,
+        id: "c1",
+        scheduleTime: "2026-10-08T09:00:00Z",
+        preferredTimes: ["2026-10-07T13:15:00Z"],
+      },
+    ]);
+    expect(screen.getByText(dateTime("2026-10-08T09:00:00Z"))).toBeInTheDocument();
+    expect(screen.queryByText(/preferred:/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the first preferred time with a count of the others, and lists them all on hover", () => {
+    renderCalls([
+      {
+        ...base,
+        id: "c1",
+        preferredTimes: ["2026-10-07T13:15:00Z", "2026-10-08T10:00:00Z", "2026-10-09T10:00:00Z"],
+      },
+    ]);
+    const cell = screen.getByText(`Preferred: ${dateTime("2026-10-07T13:15:00Z")} (+2)`);
+    expect(cell).toHaveAttribute("title", expect.stringContaining("Preferred by the customer:"));
+    expect(cell.getAttribute("title")?.split("; ")).toHaveLength(3);
+  });
+
+  it("keeps a dash when there is no scheduled or preferred time", () => {
+    renderCalls([{ ...base, id: "c1" }, { ...base, id: "c2", preferredTimes: [] }]);
+    expect(screen.queryByText(/preferred:/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("skips a preferred time that is not a date rather than printing it", () => {
+    renderCalls([
+      { ...base, id: "c1", preferredTimes: ["Error: Missing parameters", "2026-10-07T13:15:00Z"] },
+    ]);
+    expect(screen.getByText(`Preferred: ${dateTime("2026-10-07T13:15:00Z")}`)).toBeInTheDocument();
+    expect(screen.queryByText(/Missing parameters/)).not.toBeInTheDocument();
+  });
+
+  it("labels the column for both uses", () => {
+    renderCalls([{ ...base, id: "c1" }]);
+    expect(screen.getByText("Scheduled / preferred")).toBeInTheDocument();
   });
 });
