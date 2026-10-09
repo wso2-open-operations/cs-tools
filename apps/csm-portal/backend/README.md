@@ -290,9 +290,9 @@ configured at all, nobody can use the portal.
 | Variable | Grants |
 |---|---|
 | `AUTH_VIEWER_ROLES` | view |
-| `AUTH_ESCALATOR_ROLES` | view, escalate (`cs_engineer` does NOT grant this — escalation is a dedicated responsibility) |
+| `AUTH_ESCALATOR_ROLES` | view, escalate (`cs_engineer` and `admin` also escalate; de-escalating additionally requires being one of the case's ABT team leads) |
 | `AUTH_ATTACHMENT_DOWNLOADER_ROLES` | view, download_attachment |
-| `AUTH_SUPPORT_ENGINEER_ROLES` | view, view_operations, time_cards_and_updates, download_attachment, write (which includes posting comments), security_center — everything except `admin`-only routes, escalating a case, and approving a time card (each a dedicated responsibility held only by its own role plus admin). Grants the `cs_engineer` portal role (renamed from `support_engineer`; the env var name was deliberately left as-is to avoid a coordinated deployment config change) |
+| `AUTH_SUPPORT_ENGINEER_ROLES` | view, view_operations, time_cards_and_updates, download_attachment, write (which includes posting comments), security_center — everything except `admin`-only routes and approving a time card (a dedicated responsibility held only by its own role plus admin). Includes escalating a case, as in ServiceNow, where any internal engineer may escalate. Grants the `cs_engineer` portal role (renamed from `support_engineer`; the env var name was deliberately left as-is to avoid a coordinated deployment config change) |
 | `AUTH_ADMIN_ROLES` | everything, including `admin`-only routes no other role holds |
 | `AUTH_USAGE_METRICS_VIEWER_ROLES` | view |
 | `AUTH_TIMECARD_APPROVER_ROLES` | view, time_cards_and_updates, and approving/rejecting a time card (`PATCH /time-cards/{id}` with `state` set — `cs_engineer` does NOT grant this) |

@@ -52,8 +52,8 @@ type entityUserProvisioningClient interface {
 // A cs_engineer or admin is assumed already provisioned -- call sites skip
 // invoking this for them entirely (see hasFullWrite in CreateCaseComment) to
 // avoid an extra round trip on the overwhelmingly common path. CreateCaseEscalation
-// has no equivalent skip: cs_engineer never holds PermEscalate at all, so every
-// caller who reaches it is, by construction, exactly the audience this exists for.
+// has no equivalent skip: a cs_engineer now holds PermEscalate too, but escalating
+// is rare enough that calling this for every escalator costs nothing worth saving.
 //
 // FirstName/LastName/Email come straight off the caller's own validated token
 // (middleware.UserInfo) -- never client-supplied. The created user is always
