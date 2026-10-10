@@ -42,6 +42,28 @@ type stubChangeRequestRepo struct {
 	decideChangeRequestApproval       func(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
 	validateChangeRequestLinks        func(ctx context.Context, sel domain.ChangeRequestLinkSelection) (domain.ChangeRequestLinkSet, error)
 	getChangeRequestLinkOptions       func(ctx context.Context, req domain.ChangeRequestLinkOptionsRequest) (domain.ChangeRequestLinkOptionsResponse, error)
+	// The two state-reporting variants the dual-write service calls. When
+	// unset they fall back to patchChangeRequest / decideChangeRequestApproval
+	// with no state move reported, which is what every test written before
+	// the state rule existed means.
+	patchChangeRequestStates          func(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, repository.ChangeRequestStates, error)
+	decideChangeRequestApprovalStates func(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, repository.ChangeRequestStates, error)
+}
+
+func (s *stubChangeRequestRepo) PatchChangeRequestStates(ctx context.Context, id string, req domain.PatchChangeRequestRequest, email string) (domain.ChangeRequest, repository.ChangeRequestStates, error) {
+	if s.patchChangeRequestStates != nil {
+		return s.patchChangeRequestStates(ctx, id, req, email)
+	}
+	cr, err := s.PatchChangeRequest(ctx, id, req, email)
+	return cr, repository.ChangeRequestStates{}, err
+}
+
+func (s *stubChangeRequestRepo) DecideChangeRequestApprovalStates(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, repository.ChangeRequestStates, error) {
+	if s.decideChangeRequestApprovalStates != nil {
+		return s.decideChangeRequestApprovalStates(ctx, id, approverUserID, decision, actorEmail)
+	}
+	approvalID, err := s.DecideChangeRequestApproval(ctx, id, approverUserID, decision, actorEmail)
+	return approvalID, repository.ChangeRequestStates{}, err
 }
 
 // ValidateChangeRequestLinks defaults to accepting everything: most tests do

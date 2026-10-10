@@ -536,6 +536,14 @@ func (c *CustomerEntityClient) DecideChangeRequestApproval(ctx context.Context, 
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/change-requests/%s/approvals/decision", url.PathEscape(id)), body)
 }
 
+// ReplayChangeRequestMirrorFailure calls POST /sn-writeback-failures/{id}/replay
+// on the entity service: re-sends one write of a change request the previous
+// system is still missing (one entry of the detail's mirrorFailures, by its
+// id) and clears it when the re-send succeeds. Response is returned as raw JSON.
+func (c *CustomerEntityClient) ReplayChangeRequestMirrorFailure(ctx context.Context, failureID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/sn-writeback-failures/%s/replay", url.PathEscape(failureID)), nil)
+}
+
 // SearchTimeCards calls POST /time-cards/search on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchTimeCards(ctx context.Context, body []byte) ([]byte, error) {

@@ -629,6 +629,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /change-requests/{id}/mirror-failures/{failureId}/replay:
+    post:
+      summary: >-
+        Re-send one write of the change request the previous system is still
+        missing (an entry of the detail's mirrorFailures; dual-write data source
+        only). Passed through to the entity service's replay, which re-runs the
+        recorded write synchronously and clears the entry only when the records
+        are in step. A 409 means this service declined to send it again (the
+        previous system's change model does not allow the move from the state its
+        record is in, or the records still diverge) and says why; a 500 means the
+        previous system rejected it again, the reason then being on the refreshed
+        detail's entry.
+      operationId: replayChangeRequestMirrorFailure
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the change request.
+          schema:
+            type: string
+            format: uuid
+        - name: failureId
+          in: path
+          required: true
+          description: The entry's id from mirrorFailures.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The write reached the previous system; the entry is cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestMirrorReplayResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: The entry is gone (already cleared).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Declined again, with the reason; the entry stays.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Rejected again by the previous system; the entry stays.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /change-requests/{id}/comments:
     post:
       summary: Create a comment on a change request.
@@ -19392,6 +19466,20 @@ components:
                 customer's review before it is closed.
             customerProposal:
               $ref: '#/components/schemas/ChangeRequestCustomerProposal'
+            mirrorFailures:
+              type: array
+              nullable: true
+              items:
+                $ref: '#/components/schemas/ChangeRequestMirrorFailure'
+              description: >-
+                Passed through from the entity service: the writes of this change
+                request the previous system is still missing under the dual-write
+                data source (oldest first, the order to replay them in). An empty
+                array when nothing is outstanding; null on every other data source
+                and when the entity service could not read them. The webapp shows
+                each as "This change could not be mirrored to the previous system:
+                <operation>: <error>" with the replay action
+                (POST /change-requests/{id}/mirror-failures/{failureId}/replay).
             deployments:
               type: array
               items:
@@ -19448,6 +19536,40 @@ components:
                 canceled] -- never "closed": only the CUSTOMER's own review closes
                 the change -- or [canceled] while the customer group's review
                 request is pending. Terminal states: none.
+
+    ChangeRequestMirrorFailure:
+      description: >-
+        One write of a change request the previous system is still missing, as
+        the entity service lists it on the detail (dual-write data source only).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The entry, for the replay route.
+        operation:
+          type: string
+          description: >-
+            patch (the fields of a PATCH), state (a state move this service
+            writes), state_check (a move left to the previous system's own engine,
+            read back), approval_decision (an approval decision).
+        payload:
+          description: The write as it was dispatched.
+        error:
+          type: string
+          description: The reason, in words a person can act on.
+        createdOn:
+          type: string
+          format: date-time
+
+    ChangeRequestMirrorReplayResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        failure:
+          $ref: '#/components/schemas/ChangeRequestMirrorFailure'
+          description: The entry that was cleared.
 
     ChangeRequestCustomerProposal:
       type: object

@@ -951,6 +951,14 @@ type mockEntityChangeRequestClient struct {
 	createCommentFn               func(ctx context.Context, body []byte) ([]byte, error)
 	searchCommentsFn              func(ctx context.Context, body []byte) ([]byte, error)
 	decideChangeRequestApprovalFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	replayMirrorFailureFn         func(ctx context.Context, failureID string) ([]byte, error)
+}
+
+func (m *mockEntityChangeRequestClient) ReplayChangeRequestMirrorFailure(ctx context.Context, failureID string) ([]byte, error) {
+	if m.replayMirrorFailureFn != nil {
+		return m.replayMirrorFailureFn(ctx, failureID)
+	}
+	return []byte(`{"message":"Mirror write replayed; the failure record is cleared","failure":{"id":"` + failureID + `"}}`), nil
 }
 
 func (m *mockEntityChangeRequestClient) CreateChangeRequest(ctx context.Context, body []byte) ([]byte, error) {

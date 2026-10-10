@@ -90,9 +90,9 @@ func NewChangeRequestService(repo repository.ChangeRequestRepository, userRepo r
 // CREATE: a synchronous, ServiceNow-first creation path -- see
 // createChangeRequestSNFirst's own doc comment for the full reasoning
 // (identical to incidentService.createIncidentSNFirst's: a Postgres-first
-// async create could leave a permanent orphan). This mode has no change
-// request UPDATE mirror -- PatchChangeRequest stays exactly as it is in
-// every other mode; only CREATE is in scope for this pilot extension.
+// async create could leave a permanent orphan). With no dispatcher this
+// constructor gives no UPDATE mirror -- PatchChangeRequest stays exactly as
+// it is in every other mode; NewChangeRequestServiceWithSNWriteback adds it.
 //
 // mirror is the ServiceNow-backed ChangeRequestService (from
 // NewServiceNowChangeRequestService) whose CreateChangeRequest performs the
@@ -110,8 +110,25 @@ func NewChangeRequestServiceWithSNMirror(repo repository.ChangeRequestRepository
 // NewChangeRequestServiceWithSNMirror's own signature: several existing
 // tests construct that one directly with dispatcher/writeback out of scope,
 // and keeping it as-is means they keep working unchanged.
+//
+// Beyond the fields a PATCH names, this mode keeps the previous system in
+// step with every STATE move PostgreSQL commits (changeRequestStateMirror:
+// the one post-commit rule, applied to PatchChangeRequest and
+// DecideChangeRequestApproval here and to the GitHub sync's SetState through
+// MirrorGithubStateChanges), lists what of a change request the previous
+// system is missing on its detail (domain.ChangeRequest.MirrorFailures) and
+// registers with the dispatcher how each recorded failure is replayed.
 func NewChangeRequestServiceWithSNWriteback(repo repository.ChangeRequestRepository, userRepo repository.UserRepository, mirror ChangeRequestService, dispatcher *SNWritebackDispatcher) ChangeRequestService {
-	return &changeRequestService{repo: repo, userRepo: userRepo, snMirror: mirror, snWriteback: dispatcher}
+	s := &changeRequestService{repo: repo, userRepo: userRepo, snMirror: mirror, snWriteback: dispatcher}
+	s.stateMirror().registerReplays()
+	return s
+}
+
+// stateMirror is the post-commit state rule and the failure reads, over this
+// service's mirror and dispatcher (both nil outside dual-write: every method
+// of it is then a no-op).
+func (s *changeRequestService) stateMirror() changeRequestStateMirror {
+	return changeRequestStateMirror{snMirror: s.snMirror, snWriteback: s.snWriteback}
 }
 
 // currentUser resolves the caller's full user record from their
@@ -214,11 +231,24 @@ func (s *changeRequestService) AggregateChangeRequests(ctx context.Context, req 
 }
 
 // GetChangeRequest implements ChangeRequestService.
+//
+// Under DATA_SOURCE=postgres-servicenow-dual-write the detail also lists what
+// of the change request the previous system is still missing
+// (MirrorFailures, from sn_writeback_failures by this id) -- for an internal
+// caller only: a customer is not told about the mirror. Reads stay on
+// PostgreSQL in every mode.
 func (s *changeRequestService) GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error) {
 	if err := validateUUIDs("id", []string{id}); err != nil {
 		return domain.ChangeRequest{}, err
 	}
-	return s.repo.GetChangeRequestByID(ctx, id)
+	cr, err := s.repo.GetChangeRequestByID(ctx, id)
+	if err != nil {
+		return domain.ChangeRequest{}, err
+	}
+	if s.snWriteback != nil && !repository.IsExternalCaller(ctx) {
+		cr.MirrorFailures = s.stateMirror().mirrorFailuresOf(ctx, cr.ID)
+	}
+	return cr, nil
 }
 
 // PatchChangeRequest implements ChangeRequestService.
@@ -294,12 +324,12 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
 	}
 
-	cr, err := s.repo.PatchChangeRequest(ctx, id, req, email)
+	cr, states, err := s.repo.PatchChangeRequestStates(ctx, id, req, email)
 	if err != nil {
 		return domain.PatchChangeRequestResponse{}, err
 	}
 
-	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
+	// Best-effort mirror write to the previous system, DATA_SOURCE=postgres-servicenow-dual-write
 	// only (snWriteback is nil otherwise -- see changeRequestService's own
 	// doc comment on snWriteback). Postgres has already committed by this
 	// point; this fires after, asynchronously, and never affects this
@@ -310,36 +340,30 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	// (unlike case's UpdateCase, which needed patchCaseFields specifically
 	// to avoid snCaseService.UpdateCase's own read-before-write behavior).
 	//
-	// customerApprovalRequired / customerReviewRequired are stripped first:
-	// the creation form's two checkboxes have no field in ServiceNow's change
-	// request API that this service can name (the scripted API only exposes
-	// isCustomerApproved / isCustomerReviewed, the customer's OUTCOME, which
-	// are a different thing), so they stay Postgres-only. A PATCH that carried
-	// nothing else has nothing to mirror.
+	// Two jobs, in this order, both only when they have something to say:
+	//   1. the FIELDS the previous system's API accepts, exactly as sent
+	//      (mirrorablePatchFields is the whole list of what is kept and what
+	//      is deliberately not), with the state taken out;
+	//   2. the STATE PostgreSQL committed, only when it differs from the state
+	//      the transaction found (changeRequestStateMirror, the one rule for
+	//      every cause of a state move, which reads the record and obeys the
+	//      previous system's change model).
+	// So a resend of the state the change is in mirrors nothing, Request
+	// Approval mirrors as the previous system's own requestApproval, the
+	// customer's answer mirrors the answer and then reads the move back, and
+	// Accept proposed time mirrors the window and then tries Scheduled where
+	// the model allows it.
 	//
-	// deploymentIds / deploymentProductIds are stripped too: ServiceNow's change
-	// request API carries a single deployment and a single deployed product on
-	// a PATCH, and its deployment products are ServiceNow records whose ids are
-	// not the ones PostgreSQL derives -- the field names and reference tables
-	// behind them are not discoverable here, so rather than guess they stay
-	// Postgres-only. projectId, category, comment and workNote are forwarded as
-	// before. customerGroupId and environmentIds are no longer accepted at all
-	// (refused above), so there is nothing of them to forward: the Customer
-	// Group is derived from the project's registered contacts in PostgreSQL.
-	mirrorReq := req
-	mirrorReq.CustomerApprovalRequired, mirrorReq.CustomerReviewRequired = nil, nil
-	mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil
-	// The conversation about a time the customer proposed (confirmCustomerUpdatedDate,
-	// expectedCustomerUpdatedOn) has no field in the previous system's change request API: it stays
-	// PostgreSQL-only. What of it changes the change request itself is mirrored from what
-	// PostgreSQL COMMITTED, and whether a window is a customer's PROPOSAL (never mirrored) is
-	// decided from the request's CALLER (mirrorOfTheTimeConversation), never from a read of the
-	// committed row alone: that read runs after the commit, in another transaction, and its
+	// What of the proposal conversation changes the change request itself is
+	// mirrored from what PostgreSQL COMMITTED, and whether a window is a
+	// customer's PROPOSAL (never mirrored) is decided from the request's CALLER
+	// (mirrorOfTheTimeConversation), never from a read of the committed row
+	// alone: that read runs after the commit, in another transaction, and its
 	// failure is logged and swallowed.
-	mirrorReq.ConfirmCustomerUpdatedDate, mirrorReq.ExpectedCustomerUpdatedOn = nil, nil
+	mirrorReq := mirrorablePatchFields(req)
 	mirrorReq = mirrorOfTheTimeConversation(req, mirrorReq, cr, repository.IsExternalCaller(ctx))
 	// PostgreSQL has accepted the window, in either of the layouts it takes (RFC
-	// 3339, or "YYYY-MM-DD HH:MM:SS" in UTC); ServiceNow's API takes only the
+	// 3339, or "YYYY-MM-DD HH:MM:SS" in UTC); the previous system's API takes only the
 	// second, so the mirror gets it in that one (what was sent in it is unchanged).
 	if mirrorReq.PlannedStartOn != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartOn)
@@ -349,18 +373,25 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedEndOn)
 		mirrorReq.PlannedEndOn = &v
 	}
-	// The window a customer's answer was given for is a precondition checked
-	// against PostgreSQL only; there is nothing of it to mirror.
-	mirrorReq.ExpectedPlannedStartOn, mirrorReq.ExpectedPlannedEndOn = nil, nil
 	if s.snWriteback != nil && !reflect.DeepEqual(mirrorReq, domain.PatchChangeRequestRequest{}) {
 		mirrorID := id
-		s.snWriteback.Dispatch(ctx, "change_request", id, "patch", mirrorReq,
+		s.snWriteback.Dispatch(ctx, snWritebackEntityChangeRequest, id, snWritebackOpPatch, mirrorReq,
 			func(writeCtx context.Context) error {
 				_, err := s.snMirror.PatchChangeRequest(writeCtx, mirrorID, mirrorReq)
 				return err
 			},
 		)
 	}
+	// The customer's own answer (isCustomerApproved / isCustomerReviewed) is
+	// mirrored above as the previous system's own path; its engine makes the
+	// move, so the state is read back and compared, never written. Every
+	// other move a PATCH makes is written by this service, as its change
+	// model allows (changeRequestStateMirror).
+	mode := stateMirrorWrite
+	if req.IsCustomerApproved != nil || req.IsCustomerReviewed != nil {
+		mode = stateMirrorCheck
+	}
+	s.stateMirror().mirrorStateMove(ctx, id, states, "PatchChangeRequest", mode)
 
 	return domain.PatchChangeRequestResponse{
 		Message:       "Change request updated successfully",
@@ -368,9 +399,11 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	}, nil
 }
 
-// mirrorOfTheTimeConversation adjusts the best-effort mirror of a PATCH to the previous system for the
-// acts of the customer's-proposed-time conversation, and ONLY for them: every other PATCH
-// mirrors exactly what it always did (mirror comes back unchanged).
+// mirrorOfTheTimeConversation adjusts the best-effort mirror of a PATCH's fields to the previous
+// system for the acts of the customer's-proposed-time conversation, and ONLY for them: every
+// other PATCH mirrors exactly what it always did (mirror comes back unchanged). mirror carries
+// no state (mirrorablePatchFields took it out): the state the previous system gets is the one
+// PostgreSQL committed, sent after the fields by changeRequestStateMirror only when it moved.
 //
 // externalCaller is whether the PATCH came from a customer (repository.IsExternalCaller: the
 // very test the repository used to decide what the request WAS), so what a window is, is
@@ -378,23 +411,23 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 //
 //   - A PATCH from an external caller never mirrors its window. The repository accepts exactly
 //     two things from a customer (classifyExternalPatch): their answer (isCustomerApproved /
-//     isCustomerReviewed, mirrored as before) and a proposed window (plannedStartOn /
-//     plannedEndOn), which PostgreSQL did NOT apply as the plan: it waits for WSO2 in
-//     customer_updated_on, and the previous system has no field for it. Everything else is refused (403)
-//     before this runs. This does not depend on the committed read model: the detail read
-//     (GetChangeRequestByID -> fillCustomerProposal) runs after the commit, in a separate
-//     transaction, logs and swallows its errors (CustomerProposal then stays nil) and can see
-//     a conversation that has moved on (WSO2 answered in between), and a customer's proposed
-//     time must never reach the previous system as the plan because of either.
+//     isCustomerReviewed, mirrored as before, followed by the move it made) and a proposed window
+//     (plannedStartOn / plannedEndOn), which PostgreSQL did NOT apply as the plan: it waits for
+//     WSO2 in customer_updated_on, and the previous system has no field for it. Everything else
+//     is refused (403) before this runs. This does not depend on the committed read model: the
+//     detail read (GetChangeRequestByID -> fillCustomerProposal) runs after the commit, in a
+//     separate transaction, logs and swallows its errors (CustomerProposal then stays nil) and
+//     can see a conversation that has moved on (WSO2 answered in between), and a customer's
+//     proposed time must never reach the previous system as the plan because of either.
 //   - Accept proposed time (confirmCustomerUpdatedDate): the previous system has no field for the
-//     answer, but the change moved to Scheduled with a new planned window, so that is what is
-//     mirrored, read from what PostgreSQL committed. UNVERIFIED that the previous system accepts a
-//     manual Scheduled out of Customer Approval: if it refuses, PostgreSQL stays committed and the
-//     refused payload lands in the write-back failure record.
+//     answer, but the change moved to Scheduled with a new planned window, so the window is what
+//     is mirrored here, read from what PostgreSQL committed, and Scheduled follows it from the
+//     state rule. UNVERIFIED that the previous system accepts a direct Scheduled out of Customer
+//     Approval: if it refuses, PostgreSQL stays committed and the refused payload lands in the
+//     write-back failure record, visible on the detail and replayable.
 //   - A Re-schedule / counter-proposal / decline names {state: "authorize"} but the change STAYS in
-//     Customer Approval: forwarding the state would put the previous system in Authorize while
-//     PostgreSQL is not, so the state is dropped (the window, when there is one, is mirrored as
-//     always).
+//     Customer Approval: the state rule sees no move and sends nothing, so the previous system
+//     stays where PostgreSQL stays (the window, when there is one, is mirrored as always).
 //   - Second guard, for any caller: a window equal to the proposal the committed row still shows as
 //     pending, that is not the committed plan, is the proposal and is not mirrored either. It can
 //     only ever ADD to what the caller rule keeps out (it needs the read model to be there).
@@ -404,14 +437,9 @@ func mirrorOfTheTimeConversation(req, mirror domain.PatchChangeRequestRequest, c
 		return mirror
 	}
 	if req.ConfirmCustomerUpdatedDate != nil {
-		scheduled := domain.ChangeRequestStateScheduled
-		return domain.PatchChangeRequestRequest{State: &scheduled, PlannedStartOn: committed.PlannedStartOn, PlannedEndOn: committed.PlannedEndOn}
+		return domain.PatchChangeRequestRequest{PlannedStartOn: committed.PlannedStartOn, PlannedEndOn: committed.PlannedEndOn}
 	}
-	if mirror.State != nil && strings.EqualFold(string(*mirror.State), string(domain.ChangeRequestStateAuthorize)) &&
-		committed.State != nil && strings.EqualFold(*committed.State, string(domain.ChangeRequestStateCustomerApproval)) {
-		mirror.State = nil
-	}
-	if mirror.State == nil && mirror.PlannedStartOn != nil && committed.CustomerProposal != nil && committed.CustomerProposal.Answer == "pending" &&
+	if mirror.PlannedStartOn != nil && committed.CustomerProposal != nil && committed.CustomerProposal.Answer == "pending" &&
 		sameMirroredInstant(*mirror.PlannedStartOn, committed.CustomerProposal.StartOn) &&
 		(committed.PlannedStartOn == nil || !sameMirroredInstant(*mirror.PlannedStartOn, *committed.PlannedStartOn)) {
 		mirror.PlannedStartOn, mirror.PlannedEndOn = nil, nil
@@ -706,12 +734,12 @@ func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, 
 		return domain.ChangeRequestApprovalDecisionResponse{}, err
 	}
 
-	approvalID, err := s.repo.DecideChangeRequestApproval(ctx, id, user.ID, decision, user.Email)
+	approvalID, states, err := s.repo.DecideChangeRequestApprovalStates(ctx, id, user.ID, decision, user.Email)
 	if err != nil {
 		return domain.ChangeRequestApprovalDecisionResponse{}, err
 	}
 
-	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
+	// Best-effort mirror write to the previous system, DATA_SOURCE=postgres-servicenow-dual-write
 	// only (snWriteback is nil otherwise) -- exact same shape as
 	// PatchChangeRequest's own dispatch above: Postgres has already
 	// committed by this point, this fires after, asynchronously, and never
@@ -720,15 +748,23 @@ func (s *changeRequestService) DecideChangeRequestApproval(ctx context.Context, 
 	// comment on snWriteback): change request CREATE is ServiceNow-first
 	// under this data source, so id round-trips to the real ServiceNow
 	// sys_id via uuidToSysid.
+	//
+	// The decision first, then -- when this decision resolved a stage and the
+	// cascade moved the change (Assess -> Authorize, Authorize -> Scheduled /
+	// Customer Approval, a customer stage's outcome) -- a read-back of the
+	// previous system's record by the one state rule (changeRequestStateMirror):
+	// its own engine makes the cascade from the mirrored decision, and a
+	// record that did not follow is a visible "state divergence" failure.
 	if s.snWriteback != nil {
 		mirrorID, mirrorDecision := id, decision
-		s.snWriteback.Dispatch(ctx, "change_request", id, "approval_decision", decision,
+		s.snWriteback.Dispatch(ctx, snWritebackEntityChangeRequest, id, snWritebackOpDecision, decision,
 			func(writeCtx context.Context) error {
 				_, err := s.snMirror.DecideChangeRequestApproval(writeCtx, mirrorID, mirrorDecision)
 				return err
 			},
 		)
 	}
+	s.stateMirror().mirrorStateMove(ctx, id, states, "DecideChangeRequestApproval", stateMirrorCheck)
 
 	return domain.ChangeRequestApprovalDecisionResponse{
 		ID:    approvalID,

@@ -151,6 +151,13 @@ type ChangeRequestRepository interface {
 	// identified by id, using actorEmail as work_item.updated_by. Returns a
 	// NotFoundError if id does not exist.
 	PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, error)
+	// PatchChangeRequestStates is PatchChangeRequest that also reports the
+	// state the transaction found and the state it committed, both read
+	// under the row lock inside the transaction (see ChangeRequestStates).
+	// For the dual-write mirror, which sends the previous system every
+	// state move PostgreSQL commits, whatever caused it. Same validation,
+	// same writes, same errors as PatchChangeRequest.
+	PatchChangeRequestStates(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, ChangeRequestStates, error)
 	// CreateChangeRequest inserts a new change request row (both work_item
 	// and change_request) for the plain-Postgres data source (no ServiceNow
 	// at all) -- createChangeRequestPortalQuery's own doc comment has the
@@ -252,6 +259,12 @@ type ChangeRequestRepository interface {
 	// buildChangeRequestApprovals) -- see this method's own doc comment for
 	// the full reasoning and its deliberately narrow scope.
 	DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error)
+	// DecideChangeRequestApprovalStates is DecideChangeRequestApproval that
+	// also reports the state the transaction found and the state it
+	// committed (the cascade's move, when the decision resolved a stage),
+	// both read under the row lock inside the transaction (see
+	// ChangeRequestStates). For the dual-write mirror.
+	DecideChangeRequestApprovalStates(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, ChangeRequestStates, error)
 }
 
 type changeRequestRepo struct {
@@ -1125,8 +1138,17 @@ var changeRequestPatchCRFKField = map[string]string{
 }
 
 // PatchChangeRequest implements ChangeRequestRepository.
+//
+// crvis: delegates to PatchChangeRequestStates, whose transaction runs requireVisibleChangeRequest first
 func (r *changeRequestRepo) PatchChangeRequest(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, error) {
+	cr, _, err := r.PatchChangeRequestStates(ctx, id, req, actorEmail)
+	return cr, err
+}
+
+// PatchChangeRequestStates implements ChangeRequestRepository.
+func (r *changeRequestRepo) PatchChangeRequestStates(ctx context.Context, id string, req domain.PatchChangeRequestRequest, actorEmail string) (domain.ChangeRequest, ChangeRequestStates, error) {
 	ctx = withCRVisibility(ctx, r.vis)
+	var states ChangeRequestStates
 	wiID, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		// FIRST statement of the transaction, before the request is classified
 		// or anything is locked or written: a customer who may not see this
@@ -1136,12 +1158,33 @@ func (r *changeRequestRepo) PatchChangeRequest(ctx context.Context, id string, r
 		if err := r.vis.requireVisibleChangeRequest(ctx, tx, id); err != nil {
 			return "", err
 		}
-		return patchChangeRequestTx(ctx, tx, id, req, actorEmail)
+		// The state the change is in, fixed for this transaction by the locks
+		// every PATCH takes (work_item, then change_request) -- see
+		// lockChangeRequestStateForPatch. Everything patchChangeRequestTx
+		// locks below is then a re-lock of a row this transaction holds.
+		prior, err := lockChangeRequestStateForPatch(ctx, tx, id)
+		if err != nil {
+			return "", err
+		}
+		wiID, err := patchChangeRequestTx(ctx, tx, id, req, actorEmail)
+		if err != nil {
+			return "", err
+		}
+		committed, err := readCommittedChangeRequestState(ctx, tx, id)
+		if err != nil {
+			return "", err
+		}
+		states = ChangeRequestStates{Prior: prior, Committed: committed}
+		return wiID, nil
 	})
 	if err != nil {
-		return domain.ChangeRequest{}, err
+		return domain.ChangeRequest{}, ChangeRequestStates{}, err
 	}
-	return r.GetChangeRequestByID(ctx, wiID)
+	cr, err := r.GetChangeRequestByID(ctx, wiID)
+	if err != nil {
+		return domain.ChangeRequest{}, ChangeRequestStates{}, err
+	}
+	return cr, states, nil
 }
 
 // patchChangeRequestTx is PatchChangeRequest's body, extracted so it can run
@@ -3045,14 +3088,31 @@ func cancelSiblingApprovalStageApprovers(ctx context.Context, tx pgx.Tx, stageID
 // from. The cascade is keyed on both the state AND the kind of the decided
 // stage, so approving a CAB stage never advances a change that is somehow still
 // reading Assess.
+//
+// crvis: delegates to DecideChangeRequestApprovalStates, whose transaction runs requireVisibleChangeRequest first
 func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, error) {
+	approvalID, _, err := r.DecideChangeRequestApprovalStates(ctx, id, approverUserID, decision, actorEmail)
+	return approvalID, err
+}
+
+// DecideChangeRequestApprovalStates implements ChangeRequestRepository.
+func (r *changeRequestRepo) DecideChangeRequestApprovalStates(ctx context.Context, id, approverUserID, decision, actorEmail string) (string, ChangeRequestStates, error) {
 	ctx = withCRVisibility(ctx, r.vis)
+	var states ChangeRequestStates
 	// InTxReturning: Scoped stamps the caller identity on the transaction's
 	// own session (the base branch's r.db.Begin is not available on Scoped).
-	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
+	approvalID, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		// First statement: a change request the caller may not see has nothing
 		// for them to decide (404), before any lock is taken.
 		if err := r.vis.requireVisibleChangeRequest(ctx, tx, id); err != nil {
+			return "", err
+		}
+		// The state the change is in, fixed for this transaction by the
+		// change_request row lock -- the very lock decideChangeRequestApprovalTx
+		// takes as its first statement, taken a little earlier so the legacy
+		// stage below and the decision see one and the same state.
+		prior, err := lockChangeRequestState(ctx, tx, id)
+		if err != nil {
 			return "", err
 		}
 		// A legacy change request already sitting in Customer Approval / Review
@@ -3063,8 +3123,21 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 		if err := ensureCustomerStageForLegacy(ctx, tx, id, actorEmail); err != nil {
 			return "", err
 		}
-		return decideChangeRequestApprovalTx(ctx, tx, id, approverUserID, decision, actorEmail)
+		approvalID, err := decideChangeRequestApprovalTx(ctx, tx, id, approverUserID, decision, actorEmail)
+		if err != nil {
+			return "", err
+		}
+		committed, err := readCommittedChangeRequestState(ctx, tx, id)
+		if err != nil {
+			return "", err
+		}
+		states = ChangeRequestStates{Prior: prior, Committed: committed}
+		return approvalID, nil
 	})
+	if err != nil {
+		return "", ChangeRequestStates{}, err
+	}
+	return approvalID, states, nil
 }
 
 // decideChangeRequestApprovalTx is DecideChangeRequestApproval's body, run in a

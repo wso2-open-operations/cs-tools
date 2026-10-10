@@ -177,6 +177,25 @@ type EventPublishFailureService interface {
 	SearchEventPublishFailures(ctx context.Context, req domain.SearchEventPublishFailuresRequest) (domain.SearchEventPublishFailuresResponse, error)
 }
 
+// SNWritebackFailureService is the operator's view of sn_writeback_failures
+// under DATA_SOURCE=postgres-servicenow-dual-write: what the previous system
+// is missing (see domain.SNWritebackFailure) and the replay that re-sends one
+// row and clears it only when the re-send succeeds. Implemented by
+// SNWritebackDispatcher, which owns the table and the replayers.
+type SNWritebackFailureService interface {
+	// ListSNWritebackFailures returns the outstanding rows, newest first,
+	// optionally narrowed to an entity type and/or id, at most limit of them
+	// (0 = the server's cap).
+	ListSNWritebackFailures(ctx context.Context, entityType, entityID string, limit int) (domain.SNWritebackFailureListResponse, error)
+	// ReplaySNWritebackFailure re-sends the row's write synchronously and
+	// removes the row when it succeeds; when it fails again the row stays,
+	// its error replaced by the new reason, and that reason is returned (a
+	// refusal by the previous system as the 4xx it was). A ValidationError
+	// for a malformed id or a row with no registered replay; a NotFoundError
+	// for a row that is gone.
+	ReplaySNWritebackFailure(ctx context.Context, id string) (domain.SNWritebackReplayResponse, error)
+}
+
 // EventPublisherService publishes domain events to the case-events Event Hub
 // topic for csm-notification-service (and any other future consumer) to
 // react to — see eventPublisherService's doc comment for the wire format and

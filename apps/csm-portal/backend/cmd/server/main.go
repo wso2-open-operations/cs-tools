@@ -560,6 +560,7 @@ func main() {
 	route("GET /change-requests/{id}/approvals", handler.PermViewOperations, changeRequestHandler.GetChangeRequestApprovals)
 	route("POST /change-requests/{id}/approvals/decision", handler.PermWrite, changeRequestHandler.DecideChangeRequestApproval)
 	route("PATCH /change-requests/{id}", handler.PermWrite, changeRequestHandler.PatchChangeRequest)
+	route("POST /change-requests/{id}/mirror-failures/{failureId}/replay", handler.PermWrite, changeRequestHandler.ReplayChangeRequestMirrorFailure)
 	route("POST /change-requests/search", handler.PermViewOperations, changeRequestHandler.SearchChangeRequests)
 	route("POST /change-requests/aggregate", handler.PermViewOperations, changeRequestHandler.AggregateChangeRequests)
 	route("POST /change-requests/link-options", handler.PermViewOperations, changeRequestHandler.GetChangeRequestLinkOptions)

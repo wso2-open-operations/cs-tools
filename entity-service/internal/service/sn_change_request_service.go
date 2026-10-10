@@ -994,6 +994,25 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 }
 
 // snCRPatchStateIDMap maps domain ChangeRequestState enums to SN numeric state IDs for PATCH.
+//
+// Every state of change_request_state_enum has a key here, but a key is not
+// a licence to write it: ServiceNow enforces its change model on EVERY write
+// (verified on the dev instance against the scoped API the Choreo
+// pass-through calls), so a raw stateKey is accepted only for a move its
+// model allows from ITS current state, and a refused one comes back as a
+// bare 500 ("Failed to update change request" / "The update operation did
+// not complete successfully."), which the pass-through turns into a generic
+// error. The dual-write mirror (changeRequestStateMirror) therefore never
+// writes a state blindly: it reads ServiceNow's current state first and
+// consults snChangeModelMoves, sends Request Approval as requestApproval
+// (never stateKey -4), lets ServiceNow's own engine make the approval
+// cascades and the customer's outcomes (mirroring the decision / the answer,
+// then reading back and recording a divergence), and records every move it
+// cannot send as a visible write-back failure that names the state and the
+// reason. "scheduled" is never a MANUAL transition on either side (see
+// withoutCustomerOutcomeStates and the PATCH's own refusal in the
+// repository): the mirror sends it only as the result of a move PostgreSQL
+// itself made, and only from a state the model allows it from.
 var snCRPatchStateIDMap = map[domain.ChangeRequestState]int{
 	domain.ChangeRequestStateNew:              -5,
 	domain.ChangeRequestStateAssess:           -4,
@@ -1006,6 +1025,67 @@ var snCRPatchStateIDMap = map[domain.ChangeRequestState]int{
 	domain.ChangeRequestStateClosed:           3,
 	domain.ChangeRequestStateCanceled:         4,
 	domain.ChangeRequestStateCustomerApproval: 5,
+}
+
+// snMirrorableState turns a committed change_request.state label ("ASSESS",
+// as PostgreSQL reports it) into the state the mirror sends, and says whether
+// ServiceNow's PATCH has a key for it (snCRPatchStateIDMap). "" (a NULL
+// state) has none.
+func snMirrorableState(label string) (domain.ChangeRequestState, bool) {
+	st := domain.ChangeRequestState(strings.ToLower(strings.TrimSpace(label)))
+	_, ok := snCRPatchStateIDMap[st]
+	return st, ok
+}
+
+// snChangeModelMoves is the previous system's change model as a direct state
+// write sees it: from each of ITS states, the states a stateKey write may
+// name (verified on the dev instance: from Assess, Scheduled and Customer
+// Approval are refused and Canceled accepted; the Normal model lists
+// New -> Assess / Authorize / Scheduled / Canceled, Assess -> Authorize
+// (automatic) / Canceled / New, Authorize -> Scheduled (automatic) /
+// Implement / Review / Closed / Canceled / New, Scheduled -> Implement /
+// Canceled, Implement -> Review / Closed / Canceled, Review -> Closed /
+// Authorize / Canceled). The two "automatic" edges are the engine's own
+// (the approval cascades) and are not written directly. Customer Approval,
+// Customer Review and Rollback are NOT in the model: the scoped application
+// reaches them only through its own paths, so no direct write names them
+// (snStateInModel). Canceled is allowed from every non-final state, Customer
+// Approval and Customer Review included; Closed, Canceled and Rollback are
+// final there as here.
+var snChangeModelMoves = map[domain.ChangeRequestState][]domain.ChangeRequestState{
+	domain.ChangeRequestStateNew:              {domain.ChangeRequestStateAssess, domain.ChangeRequestStateAuthorize, domain.ChangeRequestStateScheduled, domain.ChangeRequestStateCanceled},
+	domain.ChangeRequestStateAssess:           {domain.ChangeRequestStateCanceled, domain.ChangeRequestStateNew},
+	domain.ChangeRequestStateAuthorize:        {domain.ChangeRequestStateImplement, domain.ChangeRequestStateReview, domain.ChangeRequestStateClosed, domain.ChangeRequestStateCanceled, domain.ChangeRequestStateNew},
+	domain.ChangeRequestStateScheduled:        {domain.ChangeRequestStateImplement, domain.ChangeRequestStateCanceled},
+	domain.ChangeRequestStateImplement:        {domain.ChangeRequestStateReview, domain.ChangeRequestStateClosed, domain.ChangeRequestStateCanceled},
+	domain.ChangeRequestStateReview:           {domain.ChangeRequestStateClosed, domain.ChangeRequestStateAuthorize, domain.ChangeRequestStateCanceled},
+	domain.ChangeRequestStateCustomerApproval: {domain.ChangeRequestStateCanceled},
+	domain.ChangeRequestStateCustomerReview:   {domain.ChangeRequestStateCanceled},
+}
+
+// snStateInModel reports whether the previous system's change model has a
+// direct move INTO st at all (see snChangeModelMoves).
+func snStateInModel(st domain.ChangeRequestState) bool {
+	for _, targets := range snChangeModelMoves {
+		for _, t := range targets {
+			if t == st {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// snDirectStateMoveAllowed reports whether the previous system's change model
+// accepts a direct write of `to` on a record that is in `from` (its own
+// state, as snCRStateLabelToString reports it; "" for an unknown one).
+func snDirectStateMoveAllowed(from, to domain.ChangeRequestState) bool {
+	for _, t := range snChangeModelMoves[from] {
+		if t == to {
+			return true
+		}
+	}
+	return false
 }
 
 // snPatchChangeRequestPayload mirrors the Choreo PATCH /change-requests/{id} request body.

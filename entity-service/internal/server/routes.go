@@ -195,6 +195,51 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc))
 	}
 
+	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
+	// active services stay Postgres-backed (see the case wiring below), but
+	// its best-effort mirror writes to the previous system still need this
+	// client. config.Validate requires the same four credentials for both
+	// modes. Built here, ahead of the GitHub sync, because that sync's state
+	// writes are mirrored too (snChangeRequestMirrorSvc below).
+	var serviceNowIntegrationServiceClient *integrationservice.Client
+	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
+		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
+			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
+			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
+			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
+			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
+		}, cfg.UpstreamClientTimeout)
+	}
+
+	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
+	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
+	// write (see SNWritebackDispatcher's own doc comment) -- one dispatcher,
+	// one small worker pool, reused by every entity's mirror rather than each
+	// constructing its own: the GitHub sync's change request state writes
+	// (immediately below), project, and case, call_request, time_card,
+	// comment, change_request, and case tags/watch list (all further below,
+	// riding on the case dispatch). nil in every other mode. Originally
+	// constructed only inline for the case pilot; hoisted once a second
+	// entity (project) needed the same instance, and again ahead of the
+	// GitHub sync.
+	//
+	// snChangeRequestMirrorSvc is the previous system's change request
+	// service the dual-write mode mirrors change request writes onto
+	// (CreateChangeRequest / PatchChangeRequest / DecideChangeRequestApproval
+	// are the only methods of it ever called); it is never the active
+	// service -- reads stay on Postgres. nil in every other mode.
+	var snWritebackDispatcher *service.SNWritebackDispatcher
+	var snChangeRequestMirrorSvc service.ChangeRequestService
+	var snWritebackFailureHandler *handler.SNWritebackFailureHandler
+	if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
+		snWritebackDispatcher = service.NewSNWritebackDispatcher(repository.NewSNWritebackFailureRepository(db))
+		snChangeRequestMirrorSvc = service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient)
+		// The operator's view of what the previous system is missing and the
+		// replay of one recorded write (internal callers only, registered
+		// further down with the other Postgres-only operator routes).
+		snWritebackFailureHandler = handler.NewSNWritebackFailureHandler(snWritebackDispatcher)
+	}
+
 	// scheduled_task_run has no ServiceNow equivalent either — same
 	// reasoning as sla_clocks/event_publish_failures above. Backs
 	// operations/csm-scheduled-tasks; see that component's own CLAUDE.md
@@ -243,9 +288,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				Token:   cfg.GithubToken,
 			})
 			githubLabelSet = githubLabels
+			// Under dual-write a state the sync writes on a change request is
+			// mirrored to the previous system like a staff PATCH's would be
+			// (the one state rule: service.MirrorGithubStateChanges).
+			githubMutations := repository.NewGithubMutationRepository(repository.NewScoped(db))
+			if snWritebackDispatcher != nil {
+				githubMutations = service.MirrorGithubStateChanges(githubMutations, snChangeRequestMirrorSvc, snWritebackDispatcher)
+			}
 			githubSyncSvc := service.NewGithubSyncServiceWriting(
 				githubSyncRepo,
-				repository.NewGithubMutationRepository(repository.NewScoped(db)),
+				githubMutations,
 				githubClient,
 				cfg.GithubIntegrationLogin,
 				githubLabels,
@@ -535,20 +587,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			cfg.M2MClientIDs)
 	}
 
-	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
-	// active services stay Postgres-backed (see the case wiring below), but
-	// its best-effort ServiceNow mirror writes still need this client.
-	// config.Validate requires the same four credentials for both modes.
-	var serviceNowIntegrationServiceClient *integrationservice.Client
-	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
-			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
-			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
-			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
-			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
-		}, cfg.UpstreamClientTimeout)
-	}
-
 	var snAccountHandler *handler.SNAccountHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		snAccountHandler = handler.NewSNAccountHandler(service.NewServiceNowAccountService(serviceNowIntegrationServiceClient))
@@ -576,20 +614,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		opportunityHandler = handler.NewOpportunityHandler(service.NewOpportunityService(sfReadRepo, accessSvc))
 		invoiceHandler = handler.NewInvoiceHandler(service.NewInvoiceService(sfReadRepo, accessSvc))
 		projectOpportunityLinkHandler = handler.NewProjectOpportunityLinkHandler(service.NewProjectOpportunityLinkService(sfReadRepo, accessSvc))
-	}
-
-	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
-	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
-	// write (see SNWritebackDispatcher's own doc comment) -- one dispatcher,
-	// one small worker pool, reused by every entity's mirror rather than each
-	// constructing its own: project (immediately below), and case,
-	// call_request, time_card, comment, change_request, and case tags/watch
-	// list (all further below, riding on the case dispatch). nil in every
-	// other mode. Originally constructed only inline for the case pilot;
-	// hoisted here once a second entity (project) needed the same instance.
-	var snWritebackDispatcher *service.SNWritebackDispatcher
-	if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
-		snWritebackDispatcher = service.NewSNWritebackDispatcher(repository.NewSNWritebackFailureRepository(db))
 	}
 
 	projectRepo := repository.NewProjectRepository(repository.NewScoped(db))
@@ -1058,13 +1082,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Pilot extension: change request CREATE (ServiceNow-first,
 		// synchronous -- see changeRequestService.createChangeRequestSNFirst's
 		// own doc comment), PatchChangeRequest's best-effort asynchronous
-		// ServiceNow mirror write, and DecideChangeRequestApproval's
-		// best-effort asynchronous mirror write (see those methods' own doc
-		// comments). Reads (GetChangeRequest, GetChangeRequestApprovals)
-		// stay on Postgres in this mode; snChangeRequestMirrorSvc's
-		// CreateChangeRequest/PatchChangeRequest/DecideChangeRequestApproval
-		// are the only methods of it this mode ever calls.
-		snChangeRequestMirrorSvc := service.NewServiceNowChangeRequestService(serviceNowIntegrationServiceClient)
+		// mirror write to the previous system, DecideChangeRequestApproval's
+		// best-effort asynchronous mirror write, and the mirror of every
+		// state move either commits (see those methods' own doc comments and
+		// changeRequestStateMirror). Reads (GetChangeRequest,
+		// GetChangeRequestApprovals) stay on Postgres in this mode;
+		// snChangeRequestMirrorSvc (built above, shared with the GitHub
+		// sync's state mirror) is never the active service.
 		activeChangeRequestSvc = service.NewChangeRequestServiceWithSNWriteback(changeRequestRepo, userRepo, snChangeRequestMirrorSvc, snWritebackDispatcher)
 		// Create checks the assignee and requester against ServiceNow first, which
 		// refuses a user it has never heard of with a bare 404.
@@ -1545,6 +1569,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
 		mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
 		mux.HandleFunc("POST /event-publish-failures/{id}/resolve", eventPublishFailureHandler.ResolveEventPublishFailure)
+	}
+	// sn_writeback_failures: DATA_SOURCE=postgres-servicenow-dual-write only
+	// (the dispatcher that records them exists in no other mode). Internal
+	// callers only: what the previous system is missing, and the replay, are
+	// operations concerns a customer is never shown.
+	if snWritebackFailureHandler != nil {
+		mux.HandleFunc("GET /sn-writeback-failures", internalOnly(accessSvc, snWritebackFailureHandler.ListSNWritebackFailures))
+		mux.HandleFunc("POST /sn-writeback-failures/{id}/replay", internalOnly(accessSvc, snWritebackFailureHandler.ReplaySNWritebackFailure))
 	}
 	if slaStatusHandler != nil {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -71,11 +72,14 @@ type snWritebackJob struct {
 // without waiting for it, and its own context is never cancelled by the
 // request completing (see snWritebackTimeout).
 //
-// No retry logic: a single attempt, and on failure a row is inserted into
-// sn_writeback_failures (SNWritebackFailureRepository) and a WARN is logged.
-// Nothing currently reads that table back automatically — it exists so an
-// operator can see, and manually replay, exactly what ServiceNow is missing
-// before treating it as a live rollback target.
+// No automatic retry: a single attempt, and on failure a row is inserted into
+// sn_writeback_failures (SNWritebackFailureRepository) and an ERROR is logged
+// with the record, the operation and the reason -- a failure is never silent.
+// Nothing reads that table back automatically. It is read back for people:
+// the record's own detail lists what of it the previous system is missing
+// (ListFailures; domain.ChangeRequest.MirrorFailures) and a row is re-sent on
+// request (Replay, through the replayer the owning service registered with
+// RegisterReplay), which clears it only when the re-send succeeds.
 type SNWritebackDispatcher struct {
 	failures repository.SNWritebackFailureRepository
 	jobs     chan snWritebackJob
@@ -84,7 +88,19 @@ type SNWritebackDispatcher struct {
 	// ordering state described on run and startOrQueue below.
 	keyMu     sync.Mutex
 	keyQueues map[string][]snWritebackJob
+
+	// replayMu guards replayers, keyed "entityType:operation" -- see
+	// RegisterReplay.
+	replayMu  sync.RWMutex
+	replayers map[string]SNWritebackReplayFunc
 }
+
+// SNWritebackReplayFunc re-sends one recorded failure: the entity's id and
+// the payload exactly as the failure row stored it (the marshaled payload the
+// original Dispatch was given). It is registered per entity type and operation
+// by the service that owns that write (RegisterReplay), so the dispatcher
+// itself never needs to know what a payload means.
+type SNWritebackReplayFunc func(ctx context.Context, entityID string, payload json.RawMessage) error
 
 // NewSNWritebackDispatcher constructs an SNWritebackDispatcher and starts
 // its fixed pool of background workers. failures must not be nil — the
@@ -96,11 +112,96 @@ func NewSNWritebackDispatcher(failures repository.SNWritebackFailureRepository) 
 		failures:  failures,
 		jobs:      make(chan snWritebackJob, snWritebackQueueSize),
 		keyQueues: make(map[string][]snWritebackJob),
+		replayers: make(map[string]SNWritebackReplayFunc),
 	}
 	for i := 0; i < snWritebackWorkers; i++ {
 		go d.worker()
 	}
 	return d
+}
+
+// RegisterReplay registers how a recorded failure of entityType/operation is
+// re-sent (see Replay). The last registration for a pair wins; the services
+// that own the writes register theirs at construction.
+func (d *SNWritebackDispatcher) RegisterReplay(entityType, operation string, fn SNWritebackReplayFunc) {
+	d.replayMu.Lock()
+	defer d.replayMu.Unlock()
+	d.replayers[entityType+":"+operation] = fn
+}
+
+func (d *SNWritebackDispatcher) replayer(entityType, operation string) (SNWritebackReplayFunc, bool) {
+	d.replayMu.RLock()
+	defer d.replayMu.RUnlock()
+	fn, ok := d.replayers[entityType+":"+operation]
+	return fn, ok
+}
+
+// ListFailures returns the outstanding failure rows of one entity, oldest
+// first: the order the writes were made in, which is the order to replay them.
+func (d *SNWritebackDispatcher) ListFailures(ctx context.Context, entityType, entityID string) ([]domain.SNWritebackFailure, error) {
+	return d.failures.ListByEntity(ctx, entityType, entityID)
+}
+
+// ListSNWritebackFailures implements SNWritebackFailureService: the
+// outstanding rows newest first, optionally narrowed to one entity type and
+// id, at most limit (the repository caps it).
+func (d *SNWritebackDispatcher) ListSNWritebackFailures(ctx context.Context, entityType, entityID string, limit int) (domain.SNWritebackFailureListResponse, error) {
+	rows, err := d.failures.List(ctx, entityType, entityID, limit)
+	if err != nil {
+		return domain.SNWritebackFailureListResponse{}, err
+	}
+	return domain.SNWritebackFailureListResponse{Failures: rows}, nil
+}
+
+// ReplaySNWritebackFailure implements SNWritebackFailureService: it re-sends
+// the recorded write SYNCHRONOUSLY, with the registered replayer for its
+// entity type and operation, and clears the row only when the re-send
+// succeeds. A re-send that fails again leaves the row, with its error replaced
+// by the new reason, and returns that reason (a refusal by the previous system
+// comes back as the 4xx it was, so the caller sees why). A row no replayer is
+// registered for is a 400 naming the pair. Bounded by snWritebackTimeout like a
+// dispatched write.
+//
+// A replay is for a quiet record: it runs outside the dispatcher's per-entity
+// ordering, so replay once no write of that record is still queued (the
+// failure rows of one record are listed in dispatch order; replay them in that
+// order).
+func (d *SNWritebackDispatcher) ReplaySNWritebackFailure(ctx context.Context, id string) (domain.SNWritebackReplayResponse, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.SNWritebackReplayResponse{}, err
+	}
+	f, err := d.failures.GetByID(ctx, id)
+	if err != nil {
+		return domain.SNWritebackReplayResponse{}, err
+	}
+	fn, ok := d.replayer(f.EntityType, f.Operation)
+	if !ok {
+		return domain.SNWritebackReplayResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf(
+			"mirror write failure %s cannot be replayed: no replay is registered for %s/%s on this data source", f.ID, f.EntityType, f.Operation)}
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, snWritebackTimeout)
+	defer cancel()
+	if err := fn(writeCtx, f.EntityID, f.Payload); err != nil {
+		slog.ErrorContext(ctx, "sn writeback: replay of a mirror write failed again",
+			"failureId", f.ID, "entityType", f.EntityType, "entityId", f.EntityID, "operation", f.Operation, "error", err)
+		if uerr := d.failures.UpdateError(ctx, f.ID, err.Error()); uerr != nil {
+			slog.ErrorContext(ctx, "sn writeback: replay failed and recording the new reason also failed",
+				"failureId", f.ID, "entityType", f.EntityType, "entityId", f.EntityID, "operation", f.Operation, "writeErr", err, "recordErr", uerr)
+		}
+		return domain.SNWritebackReplayResponse{}, err
+	}
+	if err := d.failures.Delete(ctx, f.ID); err != nil {
+		// The write reached the previous system; the row is the only thing
+		// left wrong. Said loudly: a stale row would be replayed once more,
+		// which for an idempotent PATCH is harmless and for a journal entry
+		// is a duplicate.
+		slog.ErrorContext(ctx, "sn writeback: replay succeeded but the failure row could not be cleared",
+			"failureId", f.ID, "entityType", f.EntityType, "entityId", f.EntityID, "operation", f.Operation, "error", err)
+		return domain.SNWritebackReplayResponse{}, err
+	}
+	slog.InfoContext(ctx, "sn writeback: mirror write replayed and the failure row cleared",
+		"failureId", f.ID, "entityType", f.EntityType, "entityId", f.EntityID, "operation", f.Operation)
+	return domain.SNWritebackReplayResponse{Message: "Mirror write replayed; the failure record is cleared", Failure: f}, nil
 }
 
 func (d *SNWritebackDispatcher) worker() {
@@ -182,10 +283,17 @@ func (d *SNWritebackDispatcher) runOne(job snWritebackJob) {
 	if err == nil {
 		return
 	}
+	d.record(writeCtx, job, err)
+}
 
-	slog.WarnContext(writeCtx, "sn writeback: best-effort ServiceNow mirror write failed",
-		"entityType", job.entityType, "entityId", job.entityID, "operation", job.operation, "error", err)
-
+// record writes the failure row for job and logs it at ERROR with everything
+// a person needs to find it: the record, the operation, the reason (the
+// previous system's status and message, as the client reports them, or this
+// service's own reason for not sending it) and the row's id, which the
+// replay takes. Every path that ends in a failure -- a refused or failed
+// write, a write a job declined to send, a full queue -- comes through here,
+// so none is quieter than another.
+func (d *SNWritebackDispatcher) record(ctx context.Context, job snWritebackJob, err error) {
 	payload, marshalErr := json.Marshal(job.payload)
 	if marshalErr != nil {
 		// The payload itself couldn't be recorded — still record the
@@ -196,16 +304,20 @@ func (d *SNWritebackDispatcher) runOne(job snWritebackJob) {
 		err = fmt.Errorf("%w (payload could not be marshaled for the failure record: %v)", err, marshalErr)
 	}
 
-	if _, recErr := d.failures.Create(writeCtx, domain.CreateSNWritebackFailureRequest{
+	f, recErr := d.failures.Create(ctx, domain.CreateSNWritebackFailureRequest{
 		EntityType: job.entityType,
 		EntityID:   job.entityID,
 		Operation:  job.operation,
 		Payload:    payload,
 		Error:      err.Error(),
-	}); recErr != nil {
-		slog.ErrorContext(writeCtx, "sn writeback: ServiceNow mirror write failed and recording the failure also failed",
+	})
+	if recErr != nil {
+		slog.ErrorContext(ctx, "sn writeback: mirror write to the previous system failed and recording the failure also failed",
 			"entityType", job.entityType, "entityId", job.entityID, "operation", job.operation, "writeErr", err, "recordErr", recErr)
+		return
 	}
+	slog.ErrorContext(ctx, "sn writeback: mirror write to the previous system failed; recorded for replay",
+		"failureId", f.ID, "entityType", job.entityType, "entityId", job.entityID, "operation", job.operation, "error", err)
 }
 
 // Dispatch queues writeFn to run on the background worker pool and returns

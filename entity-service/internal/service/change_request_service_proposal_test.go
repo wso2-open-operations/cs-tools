@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,27 +86,45 @@ const (
 )
 
 // runMirror sends req (as nobody in particular, see callerCtx) through the dual-write service whose
-// repository answers with committed, and returns what the mirror to the previous system was asked to PATCH (nil
-// when it was not called at all, within the wait expect gives: see mirrorExpectation).
-func runMirror(t *testing.T, expect mirrorExpectation, req domain.PatchChangeRequestRequest, committed domain.ChangeRequest) *domain.PatchChangeRequestRequest {
+// repository answers with committed (and reports no state move: the state rule is
+// change_request_state_mirror_test.go's), and returns what the mirror to the previous system was
+// asked to PATCH, in order (nil when it was not called at all, within the wait expect gives: see
+// mirrorExpectation).
+func runMirror(t *testing.T, expect mirrorExpectation, req domain.PatchChangeRequestRequest, committed domain.ChangeRequest) []domain.PatchChangeRequestRequest {
 	t.Helper()
 	return runMirrorAs(t, callerCtx(t, nil), expect, req, committed)
 }
 
 // runMirrorAs is runMirror for the caller ctx carries.
-func runMirrorAs(t *testing.T, ctx context.Context, expect mirrorExpectation, req domain.PatchChangeRequestRequest, committed domain.ChangeRequest) *domain.PatchChangeRequestRequest {
+func runMirrorAs(t *testing.T, ctx context.Context, expect mirrorExpectation, req domain.PatchChangeRequestRequest, committed domain.ChangeRequest) []domain.PatchChangeRequestRequest {
 	t.Helper()
-	called := make(chan domain.PatchChangeRequestRequest, 1)
-	mirror := &stubMirrorChangeRequestService{
-		patchChangeRequest: func(_ context.Context, _ string, r domain.PatchChangeRequestRequest) (domain.PatchChangeRequestResponse, error) {
-			called <- r
-			return domain.PatchChangeRequestResponse{}, nil
-		},
+	prior := ""
+	if committed.State != nil {
+		prior = *committed.State
 	}
+	return runMirrorFrom(t, ctx, expect, req, prior, committed)
+}
+
+// runMirrorFrom is runMirrorAs with the state the repository FOUND (prior, as the column reads
+// it: "customer_approval" / "CUSTOMER_APPROVAL" alike), so a committed state that differs is a
+// move the state rule mirrors after the fields.
+func runMirrorFrom(t *testing.T, ctx context.Context, expect mirrorExpectation, req domain.PatchChangeRequestRequest, prior string, committed domain.ChangeRequest) []domain.PatchChangeRequestRequest {
+	t.Helper()
+	// The previous system's record is where ours was before the move.
+	mirror := &mirrorRecorder{snState: strings.ToLower(prior)}
 	repo := &stubChangeRequestRepo{
-		patchChangeRequest: func(_ context.Context, id string, _ domain.PatchChangeRequestRequest, _ string) (domain.ChangeRequest, error) {
+		patchChangeRequestStates: func(_ context.Context, id string, _ domain.PatchChangeRequestRequest, _ string) (domain.ChangeRequest, repository.ChangeRequestStates, error) {
 			committed.ID = id
-			return committed, nil
+			var p, c *string
+			if prior != "" {
+				v := strings.ToUpper(prior)
+				p = &v
+			}
+			if committed.State != nil {
+				v := strings.ToUpper(*committed.State)
+				c = &v
+			}
+			return committed, repository.ChangeRequestStates{Prior: p, Committed: c}, nil
 		},
 	}
 	failures := &recordingSNWritebackFailures{}
@@ -113,19 +132,25 @@ func runMirrorAs(t *testing.T, ctx context.Context, expect mirrorExpectation, re
 	if _, err := svc.PatchChangeRequest(ctx, testUUID, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wait := mirrorQuietPeriod
+	// A write is handed to the dispatcher's worker at once, but under -race on a loaded machine
+	// "at once" can be a while: a positive case waits up to the ceiling for the first write, then
+	// a quiet period for any that follows; a negative case waits the quiet period only.
 	if expect == expectMirrorWrite {
-		wait = mirrorWriteCeiling
+		deadline := time.Now().Add(mirrorWriteCeiling)
+		for time.Now().Before(deadline) && len(mirror.calls()) == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
-	select {
-	case got := <-called:
-		return &got
-	case <-time.After(wait):
+	time.Sleep(mirrorQuietPeriod)
+	mirror.mu.Lock()
+	defer mirror.mu.Unlock()
+	if len(mirror.patches) == 0 {
 		if n := failures.count(); n != 0 {
 			t.Fatalf("nothing was dispatched but %d write-back failures were recorded", n)
 		}
 		return nil
 	}
+	return append([]domain.PatchChangeRequestRequest(nil), mirror.patches...)
 }
 
 // customerProposals are the shapes of a customer's proposed window, as the portal sends them.
@@ -158,21 +183,21 @@ func TestChangeRequestService_PatchChangeRequest_TheTimeConversationMirror(t *te
 		for name, req := range customerProposals {
 			got := runMirrorAs(t, callerCtx(t, &customerCaller), expectNoMirrorWrite, req, withProposal(committedAt("customer_approval", planStart, planEnd), "2030-03-08T09:00:00Z"))
 			if got != nil {
-				t.Fatalf("%s: the mirror was asked to PATCH %+v: the plan did not move, the proposal has no field in the previous system", name, *got)
+				t.Fatalf("%s: the mirror was asked to PATCH %+v: the plan did not move, the proposal has no field in the previous system", name, got)
 			}
 		}
 	})
 
-	t.Run("Accept mirrors Scheduled and the committed window, in the previous system's layout", func(t *testing.T) {
+	t.Run("Accept mirrors the committed window, in the previous system's layout; Scheduled follows from the state rule", func(t *testing.T) {
+		// (The state rule then tries Scheduled only where the previous system's change model allows
+		// it from the state its record is in, and records a visible failure otherwise:
+		// TestChangeRequestStateMirror_AcceptProposedTimeMirrorsTheWindowThenTriesScheduled.)
 		req := domain.PatchChangeRequestRequest{ConfirmCustomerUpdatedDate: sPtr("agree"), ExpectedCustomerUpdatedOn: sPtr("2030-03-08T09:00:00Z"),
 			ExpectedPlannedStartOn: sPtr(planStart), ExpectedPlannedEndOn: sPtr(planEnd)}
-		got := runMirror(t, expectMirrorWrite, req, committedAt("scheduled", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"))
-		if got == nil {
-			t.Fatal("Accept was not mirrored")
-		}
-		want := domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateScheduled), PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}
-		if !reflect.DeepEqual(*got, want) {
-			t.Fatalf("Accept mirrored %+v, want exactly {state: scheduled, plannedStartOn, plannedEndOn} %+v", *got, want)
+		got := runMirrorFrom(t, callerCtx(t, nil), expectMirrorWrite, req, "customer_approval", committedAt("scheduled", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"))
+		want := []domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Accept mirrored %+v, want exactly {plannedStartOn, plannedEndOn}: %+v", got, want)
 		}
 	})
 
@@ -183,12 +208,9 @@ func TestChangeRequestService_PatchChangeRequest_TheTimeConversationMirror(t *te
 				ExpectedCustomerUpdatedOn: sPtr("2030-03-05T09:00:00Z"), ExpectedPlannedStartOn: sPtr(planStart), ExpectedPlannedEndOn: sPtr(planEnd)},
 		} {
 			got := runMirror(t, expectMirrorWrite, req, committedAt("customer_approval", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"))
-			if got == nil {
-				t.Fatalf("%s: nothing mirrored", name)
-			}
-			want := domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}
-			if !reflect.DeepEqual(*got, want) {
-				t.Fatalf("%s: mirrored %+v, want the window only %+v (the previous system stays where PostgreSQL stays)", name, *got, want)
+			want := []domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s: mirrored %+v, want the window only %+v (the previous system stays where PostgreSQL stays)", name, got, want)
 			}
 		}
 	})
@@ -197,7 +219,7 @@ func TestChangeRequestService_PatchChangeRequest_TheTimeConversationMirror(t *te
 		req := domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAuthorize), ExpectedCustomerUpdatedOn: sPtr("2030-03-08T09:00:00Z"),
 			ExpectedPlannedStartOn: sPtr(planStart), ExpectedPlannedEndOn: sPtr(planEnd)}
 		if got := runMirror(t, expectNoMirrorWrite, req, committedAt("customer_approval", planStart, planEnd)); got != nil {
-			t.Fatalf("a decline mirrored %+v", *got)
+			t.Fatalf("a decline mirrored %+v", got)
 		}
 	})
 
@@ -253,18 +275,18 @@ func TestChangeRequestService_PatchChangeRequest_ACustomersWindowIsNeverMirrored
 	} {
 		for shape, req := range customerProposals {
 			if got := runMirrorAs(t, callerCtx(t, &customerCaller), expectNoMirrorWrite, req, committed); got != nil {
-				t.Fatalf("%s / %s: the mirror was asked to PATCH %+v: a customer's window is a proposal, the previous system has no field for it and must not get it as the plan", name, shape, *got)
+				t.Fatalf("%s / %s: the mirror was asked to PATCH %+v: a customer's window is a proposal, the previous system has no field for it and must not get it as the plan", name, shape, got)
 			}
 		}
 	}
 
-	t.Run("the customer's own answer is mirrored as before, and its window is not", func(t *testing.T) {
+	t.Run("the customer's own answer is mirrored as before (the move it made is their engine's, read back), and its window is not", func(t *testing.T) {
 		yes := true
 		withWindowShown := domain.PatchChangeRequestRequest{IsCustomerApproved: &yes, ExpectedPlannedStartOn: sPtr(planStart), ExpectedPlannedEndOn: sPtr(planEnd)}
-		want := domain.PatchChangeRequestRequest{IsCustomerApproved: &yes}
+		want := []domain.PatchChangeRequestRequest{{IsCustomerApproved: &yes}}
 		for name, ctx := range map[string]context.Context{"a customer": callerCtx(t, &customerCaller), "nobody in particular": callerCtx(t, nil)} {
-			got := runMirrorAs(t, ctx, expectMirrorWrite, withWindowShown, committedAt("scheduled", planStart, planEnd))
-			if got == nil || !reflect.DeepEqual(*got, want) {
+			got := runMirrorFrom(t, ctx, expectMirrorWrite, withWindowShown, "scheduled", committedAt("scheduled", planStart, planEnd))
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("%s: the answer was mirrored as %+v, want exactly %+v", name, got, want)
 			}
 		}
@@ -284,7 +306,7 @@ func TestChangeRequestService_PatchChangeRequest_ACustomersWindowIsNeverMirrored
 					"a proposal answered in between": proposedAt(committedAt("customer_approval", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"), "agreed", proposed),
 				} {
 					got := runMirrorAs(t, callerCtx(t, scope), expectMirrorWrite, req, committed)
-					if got == nil || got.PlannedStartOn == nil || *got.PlannedStartOn != "2030-03-08 09:00:00" {
+					if len(got) != 1 || got[0].PlannedStartOn == nil || *got[0].PlannedStartOn != "2030-03-08 09:00:00" {
 						t.Fatalf("%s / %s / %s: mirrored %+v, want the window as the previous system takes it (the plan was applied)", who, shape, name, got)
 					}
 				}
@@ -294,56 +316,63 @@ func TestChangeRequestService_PatchChangeRequest_ACustomersWindowIsNeverMirrored
 }
 
 // Every other PATCH is mirrored exactly as it was before the conversation existed: the same
-// fields, the same values, the state included -- the acts above are the only exceptions, and they
-// are recognised by who sent the request (a customer's window) and by what PostgreSQL committed
-// (what WSO2 did), never by the shape of the request alone.
+// fields, the same values -- and the state PostgreSQL committed after them, when it moved (the one
+// state rule, change_request_state_mirror_test.go) -- the acts above are the only exceptions, and
+// they are recognised by who sent the request (a customer's window) and by what PostgreSQL
+// committed (what WSO2 did), never by the shape of the request alone.
 func TestChangeRequestService_PatchChangeRequest_EveryOtherPatchMirrorsAsBefore(t *testing.T) {
 	const planStart, planEnd = "2030-03-01T09:00:00Z", "2030-03-01T11:00:00Z"
 	title := "renamed"
 	for _, tc := range []struct {
 		name      string
 		req       domain.PatchChangeRequestRequest
+		prior     string
 		committed domain.ChangeRequest
-		want      domain.PatchChangeRequestRequest
+		want      []domain.PatchChangeRequestRequest
 	}{
-		{"a title", domain.PatchChangeRequestRequest{Title: &title}, committedAt("new", "", ""), domain.PatchChangeRequestRequest{Title: &title}},
-		{"Request Approval", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAssess)}, committedAt("assess", "", ""),
-			domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAssess)}},
-		{"a resend of authorize on a change that is in Authorize (state kept: the change IS in Authorize)", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAuthorize)},
-			committedAt("authorize", "", ""), domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAuthorize)}},
-		{"Cancel", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled)}, committedAt("canceled", "", ""),
-			domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled)}},
+		{"a title", domain.PatchChangeRequestRequest{Title: &title}, "new", committedAt("new", "", ""), []domain.PatchChangeRequestRequest{{Title: &title}}},
+		{"Request Approval (the previous system's own action, never a state write)", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAssess)}, "new", committedAt("assess", "", ""),
+			[]domain.PatchChangeRequestRequest{{RequestApproval: boolPtr(true)}}},
+		{"Cancel", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled)}, "scheduled", committedAt("canceled", "", ""),
+			[]domain.PatchChangeRequestRequest{{State: statePtr(domain.ChangeRequestStateCanceled)}}},
 		{"a staff edit of the window", domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-08T14:30:00+05:30"), PlannedEndOn: sPtr("2030-03-08 11:00:00")},
-			committedAt("customer_approval", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"),
-			domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}},
+			"customer_approval", committedAt("customer_approval", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"),
+			[]domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-08 09:00:00"), PlannedEndOn: sPtr("2030-03-08 11:00:00")}}},
 		{"a staff edit of the window to exactly the time the customer proposed (it IS applied: mirrored)", domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-08 09:00:00")},
-			func() domain.ChangeRequest {
+			"customer_approval", func() domain.ChangeRequest {
 				cr := committedAt("customer_approval", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z")
 				cr.CustomerProposal = &domain.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", Answer: "unanswered"}
 				return cr
-			}(), domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-08 09:00:00")}},
+			}(), []domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-08 09:00:00")}}},
 		{"a window edit while a proposal waits that moves to another time", domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-20 09:00:00")},
-			func() domain.ChangeRequest {
+			"customer_approval", func() domain.ChangeRequest {
 				cr := committedAt("customer_approval", "2030-03-20T09:00:00Z", "2030-03-20T11:00:00Z")
 				cr.CustomerProposal = &domain.ChangeRequestCustomerProposal{StartOn: "2030-03-08T09:00:00Z", Answer: "pending"}
 				return cr
-			}(), domain.PatchChangeRequestRequest{PlannedStartOn: sPtr("2030-03-20 09:00:00")}},
-		{"a window edit with a state", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled), PlannedStartOn: sPtr("2030-03-08 09:00:00")},
-			committedAt("canceled", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"),
-			domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled), PlannedStartOn: sPtr("2030-03-08 09:00:00")}},
-		{"a comment", domain.PatchChangeRequestRequest{Comment: sPtr("hello")}, committedAt("customer_approval", planStart, planEnd), domain.PatchChangeRequestRequest{Comment: sPtr("hello")}},
+			}(), []domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-20 09:00:00")}}},
+		{"a window edit with a state: the window, then the state", domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateCanceled), PlannedStartOn: sPtr("2030-03-08 09:00:00")},
+			"scheduled", committedAt("canceled", "2030-03-08T09:00:00Z", "2030-03-08T11:00:00Z"),
+			[]domain.PatchChangeRequestRequest{{PlannedStartOn: sPtr("2030-03-08 09:00:00")}, {State: statePtr(domain.ChangeRequestStateCanceled)}}},
+		{"a comment", domain.PatchChangeRequestRequest{Comment: sPtr("hello")}, "customer_approval", committedAt("customer_approval", planStart, planEnd), []domain.PatchChangeRequestRequest{{Comment: sPtr("hello")}}},
 	} {
 		// ...whoever of WSO2 (or nobody) sends it: only a CUSTOMER's window is held back.
 		for who, scope := range everyNonCustomerCall {
-			got := runMirrorAs(t, callerCtx(t, scope), expectMirrorWrite, tc.req, tc.committed)
+			got := runMirrorFrom(t, callerCtx(t, scope), expectMirrorWrite, tc.req, tc.prior, tc.committed)
 			if got == nil {
 				t.Fatalf("%s as %s: nothing was mirrored, want %+v", tc.name, who, tc.want)
 			}
-			if !reflect.DeepEqual(*got, tc.want) {
-				t.Fatalf("%s as %s: mirrored %+v, want exactly what it always was: %+v", tc.name, who, *got, tc.want)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("%s as %s: mirrored %+v, want exactly what it always was: %+v", tc.name, who, got, tc.want)
 			}
 		}
 	}
+	// A resend of the state the change is in moves nothing and so mirrors nothing: the previous
+	// system is told a state only when PostgreSQL changed it.
+	t.Run("a resend of authorize on a change that is in Authorize mirrors nothing", func(t *testing.T) {
+		if got := runMirror(t, expectNoMirrorWrite, domain.PatchChangeRequestRequest{State: statePtr(domain.ChangeRequestStateAuthorize)}, committedAt("authorize", "", "")); got != nil {
+			t.Fatalf("a resend mirrored %+v", got)
+		}
+	})
 }
 
 // The data source that talks to the previous system directly has no PostgreSQL columns to hold the

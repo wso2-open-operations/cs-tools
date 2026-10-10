@@ -581,6 +581,121 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /sn-writeback-failures:
+    get:
+      summary: >-
+        List the mirror writes the previous system is still missing
+        (sn_writeback_failures), newest first. DATA_SOURCE=postgres-servicenow-dual-write
+        only (404 elsewhere), internal callers only. A row is one failed or
+        declined best-effort mirror write; it lives until a replay of it
+        succeeds.
+      operationId: listSNWritebackFailures
+      parameters:
+        - name: entityType
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Narrow to one entity type, e.g. change_request.
+        - name: entityId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Narrow to one record.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: At most this many rows (0 or absent = the server's cap, 200).
+      responses:
+        "200":
+          description: The outstanding rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SNWritebackFailureListResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sn-writeback-failures/{id}/replay:
+    post:
+      summary: >-
+        Re-send one recorded mirror write to the previous system, synchronously,
+        and clear the row only when the re-send succeeds. A re-send the previous
+        system refuses again keeps the row (its error replaced by the new
+        reason) and returns that reason: a 409 when this service declined to
+        send it (the previous system's change model does not allow the move
+        from the state its record is in, or has no direct move into the state;
+        a state divergence after a mirrored decision or answer), a 500 with the
+        previous system's own message when it rejected the write. A row whose
+        job finds the records already in step is cleared without a write.
+        DATA_SOURCE=postgres-servicenow-dual-write only, internal callers only.
+      operationId: replaySNWritebackFailure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The write reached the previous system; the row is cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SNWritebackReplayResponse'
+        "400":
+          description: Malformed id, or a row no replay is registered for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Row not found (already cleared).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Declined again by this service; the row stays with the reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Rejected again by the previous system, or an internal error; the row stays.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sla-status:
     get:
       summary: >-
@@ -18145,6 +18260,21 @@ components:
                 Absent means unknown, which is not false. Never on search rows.
             customerProposal:
               $ref: '#/components/schemas/ChangeRequestCustomerProposal'
+            mirrorFailures:
+              type: array
+              nullable: true
+              items:
+                $ref: '#/components/schemas/ChangeRequestMirrorFailure'
+              description: >-
+                DATA_SOURCE=postgres-servicenow-dual-write only: the writes of
+                this change request the previous system is still missing
+                (rows of sn_writeback_failures for this id, oldest first --
+                the order to replay them in). Nothing is stored on the change
+                request itself. An array (empty when nothing is outstanding)
+                for an internal caller on the dual-write data source; null for
+                a customer, on every other data source and when the table could
+                not be read. Never on search rows. Each entry is cleared by a
+                successful POST /sn-writeback-failures/{id}/replay.
             approvedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
@@ -25887,6 +26017,83 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    SNWritebackFailure:
+      description: >
+        One best-effort mirror write to the previous system that failed or
+        was declined under DATA_SOURCE=postgres-servicenow-dual-write
+        (sn_writeback_failures). PostgreSQL has already committed; the row
+        says what the previous system is missing and why, and lives until a
+        replay of it succeeds. Always backed by Postgres.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityType:
+          type: string
+          description: e.g. change_request.
+        entityId:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          description: >-
+            For a change request: "patch" (the fields of a PATCH), "state" (a
+            state move this service writes: {"state": ..., "after": <cause>}),
+            "state_check" (a move left to the previous system's own engine
+            after a mirrored decision or answer, read back), "approval_decision"
+            (the decision string).
+        payload:
+          description: The write, as it was dispatched (what a replay re-sends).
+        error:
+          type: string
+          description: >-
+            Why: the previous system's status and message as the client reports
+            them, or this service's own reason for not sending it (the state and
+            the state the record is in).
+        createdOn:
+          type: string
+          format: date-time
+
+    SNWritebackFailureListResponse:
+      type: object
+      properties:
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNWritebackFailure'
+
+    SNWritebackReplayResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        failure:
+          $ref: '#/components/schemas/SNWritebackFailure'
+          description: The row that was cleared.
+
+    ChangeRequestMirrorFailure:
+      description: >
+        One write of a change request the previous system is still missing,
+        as the change request detail lists it (see ChangeRequest.mirrorFailures):
+        an SNWritebackFailure of this change request without its entity fields.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The sn_writeback_failures row, for POST /sn-writeback-failures/{id}/replay.
+        operation:
+          type: string
+          description: patch, state, state_check or approval_decision.
+        payload:
+          description: The write as it was dispatched.
+        error:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
 
     CreateEventPublishFailureRequest:
       type: object

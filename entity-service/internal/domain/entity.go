@@ -4918,6 +4918,16 @@ type ChangeRequest struct {
 	// and the approver rows; nothing extra is stored for it.
 	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
 
+	// MirrorFailures lists the writes of this change request the previous
+	// system is still missing (DATA_SOURCE=postgres-servicenow-dual-write
+	// only), oldest first -- the order to replay them in. Derived from
+	// sn_writeback_failures by this change request's id, nothing is stored
+	// on the change request itself. An array (empty when nothing is
+	// outstanding) for an internal caller on the dual-write data source;
+	// null for a customer, on every other data source and when the table
+	// could not be read (logged). Never on search rows.
+	MirrorFailures []ChangeRequestMirrorFailure `json:"mirrorFailures"`
+
 	// The fields below are change-request field-parity additions. All 20 are
 	// present on GET /change-requests/{id} and the PATCH receipt (both share
 	// the same mapper); none are on the search response, which was
@@ -7935,6 +7945,36 @@ type CreateSNWritebackFailureRequest struct {
 	Operation  string          `json:"operation"`
 	Payload    json.RawMessage `json:"payload"`
 	Error      string          `json:"error"`
+}
+
+// SNWritebackFailureListResponse is the body of GET /sn-writeback-failures:
+// the rows still outstanding, newest first.
+type SNWritebackFailureListResponse struct {
+	Failures []SNWritebackFailure `json:"failures"`
+}
+
+// SNWritebackReplayResponse is the body of POST /sn-writeback-failures/{id}/replay
+// when the re-sent write succeeded: the row it cleared.
+type SNWritebackReplayResponse struct {
+	Message string             `json:"message"`
+	Failure SNWritebackFailure `json:"failure"`
+}
+
+// ChangeRequestMirrorFailure is one write of this change request the previous
+// system is still missing under DATA_SOURCE=postgres-servicenow-dual-write: a
+// row of sn_writeback_failures for it (see SNWritebackFailure), as the detail
+// response lists them so the portal can say so and offer the replay. Cleared
+// only when a replay (POST /sn-writeback-failures/{id}/replay) succeeds.
+type ChangeRequestMirrorFailure struct {
+	ID string `json:"id"`
+	// Operation is what failed: "patch" (fields), "state" (a state move),
+	// "approval_decision" (an approval decision).
+	Operation string          `json:"operation"`
+	Payload   json.RawMessage `json:"payload"`
+	// Error is the reason, as the previous system gave it (its status and
+	// message) or as this service refused to send it.
+	Error     string    `json:"error"`
+	CreatedOn time.Time `json:"createdOn"`
 }
 
 // SLAStatus is one case-like work item's current standing against one SLA

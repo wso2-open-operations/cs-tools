@@ -4151,6 +4151,129 @@ Wire them once the ServiceNow field names are known. A change request created in
 dual-write mode also gets its comment rows in PostgreSQL; if csm-sync-service syncs
 the ServiceNow journal back it may add its own copies.
 
+### Dual-write: the state mirror, what is and is not mirrored, visible failures, replay
+
+Under `DATA_SOURCE=postgres-servicenow-dual-write` PostgreSQL is written first and the
+previous system is kept in step afterwards, asynchronously and best-effort, through the
+shared `SNWritebackDispatcher` (one record's writes run in dispatch order). The previous
+system stays a usable fallback: nothing is sent that its own flow could not continue
+from, and nothing that fails is silent. Code: `changeRequestStateMirror`
+(`change_request_state_mirror.go`), `mirrorablePatchFields`, `snChangeModelMoves`
+(`sn_change_request_service.go`), `SNWritebackDispatcher` (`sn_writeback.go`).
+
+**The one state rule.** `PatchChangeRequestStates` / `DecideChangeRequestApprovalStates`
+(repository, `change_request_states.go`) report the state the transaction FOUND and the
+state it COMMITTED, both read under the `change_request` row lock inside the transaction
+-- never from a read before the call (racy) nor from the detail read after the commit
+(another transaction). After the commit, when the two differ, ONE job for that move is
+dispatched after the fields the same call mirrored. When they do not differ nothing is
+dispatched: a resend of the state the change is in, a field edit, the Re-schedule /
+counter-proposal / decline wire (`{state: "authorize"}` out of Customer Approval does not
+move the state), a customer's proposed window, a refused request. The GitHub sync's
+`SetState` is wrapped the same way (`MirrorGithubStateChanges`, routes.go): its `changed`
+is the same comparison under the same lock. The rule is therefore idempotent: a state the
+sync from the previous system already wrote back equal to ours never passes through a
+service call (a sync write is not a service call) and is never re-sent; a job that finds
+the previous system's record already in our state writes nothing.
+
+**How a move is sent depends on its cause**, because the previous system enforces its
+change model on EVERY write (verified on the dev instance against the scoped API the
+Choreo pass-through calls: from Assess a direct Scheduled or Customer Approval is refused
+and Canceled accepted; a refusal is a bare 500 "Failed to update change request" that the
+pass-through turns into a generic message). Every job reads the record first
+(`GetChangeRequest` on the mirror service, a background read of the mirror, not a served
+read) and:
+
+| cause (PostgreSQL move) | sent to the previous system |
+|---|---|
+| Request Approval, Normal (New -> Assess) | `requestApproval: true` -- its own action; its record moves to Assess and its policy provisions its stage. Never `stateKey` Assess |
+| Request Approval, Emergency / Standard (New -> Authorize / Scheduled) | a direct state write: the model allows both from New (unverified on the dev instance for these types) |
+| Request Approval, Standard needing the customer (New -> Customer Approval) | not sent: the model has no direct move into Customer Approval; recorded |
+| a staff move: Scheduled -> Implement, Implement -> Review, Review -> Closed, Cancel from any non-final state | a direct state write, only if the model allows it from the state THEIR record is in (`snChangeModelMoves`); otherwise recorded as "transition not allowed ... from <their state>" |
+| Review -> Customer Review, -> Rollback | not sent: no direct move into either (the scoped app reaches them through its own paths, which this client has no field for); recorded |
+| Accept proposed time (Customer Approval -> Scheduled, with the window) | the window is mirrored; Scheduled is tried only where the model allows it from their state -- from Customer Approval it does not, so it is recorded (this path could not be driven on the dev instance: unverified) |
+| the approval cascade (peer: Assess -> Authorize; CAB: Authorize -> Scheduled / Customer Approval; a customer stage's outcome through the decision route) | NO state write. The decision is mirrored (`decideApproval`); their engine moves their record; a `state_check` job reads it back and records "state divergence: ours=<x> theirs=<y>" when it did not follow (no retry: a person decides) |
+| the customer's own answer through the PATCH (`isCustomerApproved` / `isCustomerReviewed`: Customer Approval -> Scheduled / Canceled, Customer Review -> Closed / Rollback) | the answer as before (their own path); then the same read-back |
+| the GitHub sync's `SetState` (Implement, Closed, Canceled, Rollback) | as a staff move (Rollback: recorded) |
+| the Re-schedule / counter / decline wire, a customer's proposal, a resend | nothing |
+
+The model table encodes the Normal model as verified: New -> Assess / Authorize /
+Scheduled / Canceled; Assess -> Canceled / New (Authorize is the engine's); Authorize ->
+Implement / Review / Closed / Canceled / New (Scheduled is the engine's); Scheduled ->
+Implement / Canceled; Implement -> Review / Closed / Canceled; Review -> Closed /
+Authorize / Canceled; Canceled from Customer Approval / Customer Review too. Customer
+Approval, Customer Review and Rollback are not in it. A record with no assignment group
+aborts every write there ("Mandatory Assignment Group" business rule): create mirrors the
+group (`groupId`) and PATCH mirrors `assignedTeamId`, and a write that still hits the rule
+is recorded with the message that came through.
+
+**Fields.** Every field the previous system's PATCH accepts is mirrored exactly as sent
+(title, description, projectId, caseId, deploymentId, deployedProductId,
+assignedEngineerId, assignedTeamId, plannedStartOn / plannedEndOn in its layout, impact,
+type, justification, impactDescription, serviceOutage, communicationPlan, rollbackPlan,
+testPlan, isCustomerApproved, isCustomerReviewed, requestApproval,
+isPlanningVisibleToCustomers, implementationPlan, priority, category, requestedById,
+affectedServicesText, affectedComponentsText, rollbackDurationText, comment, workNote).
+Deliberately NOT mirrored, because that API has no field (`mirrorablePatchFields` is the
+list, pinned by `TestMirrorablePatchFields_EveryFieldIsClassified` so a new field cannot
+slip through unclassified): the proposal conversation (`confirmCustomerUpdatedDate`,
+`expectedCustomerUpdatedOn`, `expectedPlannedStartOn` / `expectedPlannedEndOn`, and a
+customer's proposed window itself), the two requirement checkboxes
+`customerApprovalRequired` / `customerReviewRequired`, `deploymentIds` /
+`deploymentProductIds`, `customerGroupId` / `environmentIds`, `onHold` / `onHoldReason`,
+`serviceId` / `serviceOfferingId`, the request's own `state` (only the committed state
+goes, by the rule above), and our approval stage rows (never written there; its approvals
+follow the mirrored decision).
+
+**Failures are visible.** Every failed or declined write is one row of
+`sn_writeback_failures` (existing table, no new column: `entity_type`, `entity_id`,
+`operation` = `patch` / `state` / `state_check` / `approval_decision`, `payload`, `error`)
+and one ERROR log line (`sn writeback: mirror write to the previous system failed;
+recorded for replay`, with `failureId`, the record, the operation and the reason). The
+change request detail (`GET /change-requests/{id}`) carries them for an INTERNAL caller as
+`mirrorFailures: [{id, operation, payload, error, createdOn}]`, oldest first, derived
+from the table by id; `null` for a customer, on other data sources and when the table
+could not be read; `[]` when nothing is outstanding. The CSM BFF passes it through and
+offers the replay (`POST /change-requests/{id}/mirror-failures/{failureId}/replay`); a
+customer never sees it.
+
+**Replay.** `GET /sn-writeback-failures[?entityType=&entityId=&limit=]` lists the rows,
+newest first; `POST /sn-writeback-failures/{id}/replay` re-runs the row's job
+SYNCHRONOUSLY (`patch` re-sends the fields; `state` reads the record and writes as the
+model allows; `state_check` compares again; `approval_decision` re-sends the decision) and
+clears the row ONLY when it succeeds -- a job that finds the records already in step
+counts as success. A replay that fails again keeps the row with the new reason and returns
+it: 409 when this service declined to send (the model, a divergence), 500 with the
+previous system's message when it rejected the write, 400 for a row with no registered
+replay, 404 once cleared. Both routes are `internalOnly` and exist only on the dual-write
+data source. Replay the rows of one record in their listed order, once no write of it is
+still queued. The replayers are registered by the owning service
+(`SNWritebackDispatcher.RegisterReplay`; the change request's in
+`NewChangeRequestServiceWithSNWriteback`); a row of an entity with none is refused by
+name and kept.
+
+**The sync from the previous system (csm-sync-service), until cutover.** While it runs,
+its approval mappings (`sysapproval_group` -> `approval_stage`, `sysapproval_approver` ->
+`approval_stage_approver`) have `delete_sync` on: rows of ours that do not exist on the
+previous system are DELETED on sync, and `change_request.state` and the requirement flags
+are overwritten from there. **Native approval stages do not survive that sync while
+`delete_sync` is on**, and a state it brings back replaces ours. The mirror does not try
+to solve this (the coexistence rule is the user's decision): it only guarantees that a
+sync-written state is never re-sent (the hook sees service calls only, and a job that
+finds the records equal writes nothing). After cutover the sync stops, dual-write
+continues with the previous system as a fallback and nothing syncs back: that is the
+steady state the mirror is designed for.
+
+Tests: `change_request_state_mirror_test.go` (one per rule, with the recording mirror:
+exactly what is written, in order, and what is recorded; the 500-as-refusal row; the
+divergence row and its clearing; the replay of every operation; nothing for a resend, a
+field edit, the authorize wire, a proposal, no dispatcher), the mirror tests in
+`change_request_service_proposal_test.go`, `sn_writeback_failure_handler_test.go`, and
+`TestChangeRequestStatesIntegration_*` (real Postgres, as a superuser and as `csm_app`:
+the report on a staff move, Request Approval on Normal and Standard, the cascade, the
+customer's answer, a NULL-state migrated row, a refused request). Removing any of the
+three hooks (`PatchChangeRequest`, `DecideChangeRequestApproval`, `SetState`) fails them.
+
 ### Assignment group and assignee on create (dual-write)
 
 `POST /change-requests` under `DATA_SOURCE=postgres-servicenow-dual-write` creates in ServiceNow
