@@ -25,6 +25,7 @@ package httpsec
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -68,4 +69,21 @@ func isLoopback(host string) bool {
 // 3xx response is returned to the caller as-is instead.
 func RefuseRedirects(req *http.Request, via []*http.Request) error {
 	return http.ErrUseLastResponse
+}
+
+// ReadBounded reads all of r, refusing to read more than max bytes. It
+// returns an error when the body is larger, instead of buffering an
+// arbitrarily large response: both clients read whole response bodies into
+// memory, so without a cap a buggy or compromised upstream could exhaust the
+// task's memory (security assessment 2026-10-08, CWE-400). Error bodies are
+// already capped separately, at 256 bytes.
+func ReadBounded(r io.Reader, max int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("response body exceeds %d bytes", max)
+	}
+	return data, nil
 }

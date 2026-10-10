@@ -386,3 +386,58 @@ func TestResolveDueInvoices_ReturnsAllEligibleSortedByDueDate(t *testing.T) {
 		t.Errorf("invoices = %v, want %v (all eligible, earliest due first, no duplicates)", ids, want)
 	}
 }
+
+// TestResolveDueInvoice_LinksPagingStopsAtTotal: if the upstream keeps
+// answering hasMore: true, paging still stops once "total" rows have been
+// read, as Run's project paging does, instead of looping until the job
+// timeout (security assessment 2026-10-08, item 1).
+func TestResolveDueInvoice_LinksPagingStopsAtTotal(t *testing.T) {
+	calls := 0
+	reader := &mockEntityReader{
+		searchProjectOpportunityLinksFn: func(ctx context.Context, body []byte) ([]byte, error) {
+			calls++
+			if calls > 50 {
+				return []byte(`{"links":[],"hasMore":false}`), nil // test safety stop
+			}
+			return []byte(`{"links":[{"id":"l","opportunity":{"id":"opp1"}}],"total":3,"hasMore":true}`), nil
+		},
+		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
+			return []byte(`{"id":"opp1","name":"Opp","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+		},
+	}
+
+	if _, err := resolveDueInvoice(context.Background(), reader, project{ID: "p1"}); err != nil {
+		t.Fatalf("resolveDueInvoice() error = %v, want nil", err)
+	}
+	if calls != 3 {
+		t.Errorf("SearchProjectOpportunityLinks called %d times, want 3 (stop once total rows are read)", calls)
+	}
+}
+
+// TestResolveDueInvoice_InvoicePagingStopsAtTotal: the same bound for the
+// invoices search.
+func TestResolveDueInvoice_InvoicePagingStopsAtTotal(t *testing.T) {
+	calls := 0
+	reader := &mockEntityReader{
+		searchProjectOpportunityLinksFn: func(ctx context.Context, body []byte) ([]byte, error) {
+			return oppLinksResponse("p1", "opp1"), nil
+		},
+		getOpportunityFn: func(ctx context.Context, id string) ([]byte, error) {
+			return []byte(`{"id":"opp1","name":"Opp","stage":"50 - Closed Won","eulaVersion":"EULA 3.4","eulaVersionDecimal":"3.4"}`), nil
+		},
+		searchInvoicesFn: func(ctx context.Context, body []byte) ([]byte, error) {
+			calls++
+			if calls > 50 {
+				return []byte(`{"invoices":[],"hasMore":false}`), nil // test safety stop
+			}
+			return []byte(`{"invoices":[{"id":"inv","invoiceDate":"2026-01-01","invoicedDueDate":"2026-03-01"}],"total":3,"hasMore":true}`), nil
+		},
+	}
+
+	if _, err := resolveDueInvoice(context.Background(), reader, project{ID: "p1"}); err != nil {
+		t.Fatalf("resolveDueInvoice() error = %v, want nil", err)
+	}
+	if calls != 3 {
+		t.Errorf("SearchInvoices called %d times, want 3 (stop once total rows are read)", calls)
+	}
+}

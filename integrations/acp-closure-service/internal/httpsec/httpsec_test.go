@@ -16,7 +16,10 @@
 
 package httpsec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestRequireHTTPS covers the startup URL check both OAuth2 clients use.
 // Anything that would send the client secret or bearer token in cleartext
@@ -43,6 +46,31 @@ func TestRequireHTTPS(t *testing.T) {
 			err := RequireHTTPS("TokenURL", tt.url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RequireHTTPS(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestReadBounded(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		max     int64
+		wantErr bool
+	}{
+		{"under the limit", "abc", 5, false},
+		{"exactly the limit", "abcde", 5, false},
+		{"over the limit", "abcdef", 5, true},
+		{"empty", "", 5, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ReadBounded(strings.NewReader(tt.body), tt.max)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ReadBounded() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && string(got) != tt.body {
+				t.Errorf("ReadBounded() = %q, want %q", got, tt.body)
 			}
 		})
 	}

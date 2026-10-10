@@ -121,6 +121,11 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// maxResponseBody caps a successful response body (1 MiB):
+// the email service only returns a small JSON acknowledgement, so anything larger is treated as an error rather than read into
+// memory (see httpsec.ReadBounded).
+const maxResponseBody = 1 << 20
+
 // do executes an authenticated HTTP request against the email notification
 // service and returns the raw JSON response body. The caller owns the
 // returned slice.
@@ -153,7 +158,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := httpsec.ReadBounded(resp.Body, maxResponseBody)
 	if err != nil {
 		return nil, fmt.Errorf("emailservice: read response body: %w", err)
 	}

@@ -17,6 +17,7 @@
 package emailservice
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -191,6 +192,36 @@ func TestSendEmail_Success(t *testing.T) {
 // recipient (to) is required") — checked client-side before ever making the
 // request, so a caller gets an immediate, specific error instead of a vague
 // upstream rejection.
+// TestSendEmail_RejectsOversizedSuccessBody: a successful (2xx) response
+// larger than the client's limit is rejected instead of being read into
+// memory (security assessment 2026-10-08, CWE-400). The email service
+// returns a tiny JSON body, so its limit is small.
+func TestSendEmail_RejectsOversizedSuccessBody(t *testing.T) {
+	const limit = 1 << 20 // 1 MiB
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), limit+1))
+	}))
+	defer upstream.Close()
+
+	tokenSrv := tokenServer(t)
+	client, err := NewClient(Config{
+		BaseURL:      upstream.URL,
+		TokenURL:     tokenSrv.URL,
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+		FromAddress:  "no-reply@wso2.com",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v, want nil", err)
+	}
+
+	err = client.SendEmail(context.Background(), []string{"to@wso2.example"}, nil, "Test Subject", "<p>Test body</p>")
+	if err == nil {
+		t.Fatalf("SendEmail() error = nil, want an error for a response body over %d bytes", limit)
+	}
+}
+
 func TestSendEmail_RequiresAtLeastOneRecipient(t *testing.T) {
 	client, err := NewClient(Config{
 		BaseURL:      "https://unused.invalid",
