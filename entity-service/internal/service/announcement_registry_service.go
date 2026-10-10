@@ -41,6 +41,14 @@ type AnnouncementRegistryService interface {
 	// Pagination and sort in req are ignored: the registry groups the whole
 	// set before it paginates. Internal callers only.
 	SearchRegistryCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error)
+
+	// SearchRegistryRows returns one page of the grouped registry (one row per
+	// published announcement request, plus one per case no published request
+	// owns), newest first. Grouping, ordering and paging run in the database,
+	// so there is no row cap. It supersedes SearchRegistryCases for the
+	// registry list. req.Pagination applies to the grouped rows. Internal
+	// callers only.
+	SearchRegistryRows(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchAnnouncementRegistryRowsResponse, error)
 }
 
 type announcementRegistryService struct {
@@ -53,13 +61,16 @@ func NewAnnouncementRegistryService(repo repository.AnnouncementRegistryReposito
 	return &announcementRegistryService{repo: repo, access: access}
 }
 
-// SearchRegistryCases implements AnnouncementRegistryService.
-func (s *announcementRegistryService) SearchRegistryCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
+// prepareRegistryRequest is the validation shared by both registry reads:
+// internal callers only, no anyOf, type forced to announcement, then the same
+// filter parsing as /cases/search. It returns the prepared request and the
+// caller's scope.
+func (s *announcementRegistryService) prepareRegistryRequest(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesRequest, repository.SearchScope, error) {
 	if err := RequireInternalCaller(ctx, s.access, "the announcement registry is only available to internal callers"); err != nil {
-		return domain.SearchCasesResponse{}, err
+		return domain.SearchCasesRequest{}, repository.SearchScope{}, err
 	}
 	if len(req.Filters.AnyOf) > 0 {
-		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "anyOf is not supported by the announcement registry search"}
+		return domain.SearchCasesRequest{}, repository.SearchScope{}, &apierror.ValidationError{Msg: "anyOf is not supported by the announcement registry search"}
 	}
 
 	// This endpoint is announcements only, whatever the caller sent for type.
@@ -77,9 +88,19 @@ func (s *announcementRegistryService) SearchRegistryCases(ctx context.Context, r
 	// means exactly what it means there.
 	prepared, err := prepareCaseSearchFilters(ctx, req)
 	if err != nil {
-		return domain.SearchCasesResponse{}, err
+		return domain.SearchCasesRequest{}, repository.SearchScope{}, err
 	}
 	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return domain.SearchCasesRequest{}, repository.SearchScope{}, err
+	}
+
+	return prepared, scope, nil
+}
+
+// SearchRegistryCases implements AnnouncementRegistryService.
+func (s *announcementRegistryService) SearchRegistryCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error) {
+	prepared, scope, err := s.prepareRegistryRequest(ctx, req)
 	if err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
@@ -94,4 +115,17 @@ func (s *announcementRegistryService) SearchRegistryCases(ctx context.Context, r
 		return domain.SearchCasesResponse{}, err
 	}
 	return domain.SearchCasesResponse{Cases: cases, Total: len(cases), Limit: len(cases), Offset: 0}, nil
+}
+
+// SearchRegistryRows implements AnnouncementRegistryService.
+func (s *announcementRegistryService) SearchRegistryRows(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchAnnouncementRegistryRowsResponse, error) {
+	prepared, scope, err := s.prepareRegistryRequest(ctx, req)
+	if err != nil {
+		return domain.SearchAnnouncementRegistryRowsResponse{}, err
+	}
+	// Pagination applies to the grouped rows: default 20 per page, at most 50.
+	if err := normalizePagination(&prepared.Pagination); err != nil {
+		return domain.SearchAnnouncementRegistryRowsResponse{}, err
+	}
+	return s.repo.SearchAnnouncementRegistryRows(ctx, prepared, scope)
 }

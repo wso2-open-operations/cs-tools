@@ -1872,6 +1872,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		announcementRegistryHandler := handler.NewAnnouncementRegistryHandler(
 			service.NewAnnouncementRegistryService(repository.NewAnnouncementRegistryRepository(repository.NewScoped(db)), accessSvc))
 		mux.HandleFunc("POST /announcements/registry/cases", internalOnly(accessSvc, announcementRegistryHandler.SearchRegistryCases))
+		// The registry list itself: the same announcements grouped into
+		// batches, ordered and paged in SQL, so no row cap applies. Replaces
+		// the one-shot read above for the registry list. Internal callers only.
+		mux.HandleFunc("POST /announcements/registry/rows", internalOnly(accessSvc, announcementRegistryHandler.SearchRegistryRows))
 	}
 	mux.HandleFunc("POST /cases/aggregate", caseHandler.AggregateCases)
 	mux.HandleFunc("POST /cases/feedback/search", feedbackHandler.SearchFeedback)

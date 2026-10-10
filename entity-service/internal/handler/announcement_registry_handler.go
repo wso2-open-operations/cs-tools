@@ -51,3 +51,20 @@ func (h *AnnouncementRegistryHandler) SearchRegistryCases(w http.ResponseWriter,
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// SearchRegistryRows handles POST /announcements/registry/rows. The body is
+// the same shape as POST /cases/search; pagination applies to the grouped
+// rows in the response, not to the cases behind them.
+func (h *AnnouncementRegistryHandler) SearchRegistryRows(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchCasesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchRegistryRows(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

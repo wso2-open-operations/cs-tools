@@ -8412,6 +8412,58 @@ type SearchAnnouncementRequestsResponse struct {
 	HasMore  bool                  `json:"hasMore"`
 }
 
+// AnnouncementRegistryRow kinds.
+const (
+	// AnnouncementRegistryRowKindBatch is one published announcement request,
+	// standing for every case it delivered.
+	AnnouncementRegistryRowKindBatch = "batch"
+	// AnnouncementRegistryRowKindCase is an announcement case that no
+	// published request owns (sent before requests existed, or by another path).
+	AnnouncementRegistryRowKindCase = "case"
+)
+
+// AnnouncementRegistryCaseMember is one case within a batch row.
+type AnnouncementRegistryCaseMember struct {
+	CaseID      string `json:"caseId"`
+	CaseNumber  string `json:"caseNumber"`
+	WSO2CaseID  string `json:"wso2CaseId"`
+	ProjectName string `json:"projectName"`
+}
+
+// AnnouncementRegistryRow is one row of the grouped announcement registry:
+// either a "batch" or a "case" (see the Kind constants). Kind says which of
+// the per-kind fields are populated; the others are omitted from the JSON.
+type AnnouncementRegistryRow struct {
+	Kind      string `json:"kind"`
+	Subject   string `json:"subject"`
+	CreatedBy string `json:"createdBy,omitempty"`
+	CreatedOn string `json:"createdOn,omitempty"`
+	UpdatedOn string `json:"updatedOn,omitempty"`
+
+	// Batch-only.
+	AnnouncementRequestID  string                           `json:"announcementRequestId,omitempty"`
+	ProjectCount           int                              `json:"projectCount,omitempty"`
+	Cases                  []AnnouncementRegistryCaseMember `json:"cases,omitempty"`
+	IsSecurityAnnouncement bool                             `json:"isSecurityAnnouncement,omitempty"`
+
+	// Case-only.
+	CaseID      string `json:"caseId,omitempty"`
+	CaseNumber  string `json:"caseNumber,omitempty"`
+	WSO2CaseID  string `json:"wso2CaseId,omitempty"`
+	State       string `json:"state,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+}
+
+// SearchAnnouncementRegistryRowsResponse is the response for POST
+// /announcements/registry/rows. Total counts grouped rows, not cases.
+type SearchAnnouncementRegistryRowsResponse struct {
+	Rows    []AnnouncementRegistryRow `json:"rows"`
+	Total   int                       `json:"total"`
+	Limit   int                       `json:"limit"`
+	Offset  int                       `json:"offset"`
+	HasMore bool                      `json:"hasMore"`
+}
+
 // AnnouncementRequestDeliveryStatus is the outcome of one project's attempt
 // within an announcement request's Publish fan-out. There is no "pending"
 // value — a project with no recorded delivery yet simply has no row (see

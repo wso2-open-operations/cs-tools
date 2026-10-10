@@ -4488,6 +4488,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /announcements/registry/rows:
+    post:
+      summary: One page of the grouped announcement registry.
+      description: >
+        Internal callers only. Backs the CSM announcement registry list. Returns
+        the announcement cases matching the filters collapsed into registry rows:
+        one "batch" row per published announcement request (all of that request's
+        matching cases become a single row) and one "case" row per matching case
+        no published request lists. Grouping, ordering and pagination all run in
+        the database, so there is no cap on how many announcements may match, and
+        this route replaces the capped read of POST /announcements/registry/cases
+        for the registry list. Request shape is POST /cases/search's: filters (state
+        and projectId with op in, and searchQuery) behave exactly as there, type is
+        always announcement whatever the request says, anyOf is rejected, groupBy,
+        skipTotal and countOnly are ignored, and sortBy is validated but does not
+        change the order. pagination applies to the
+        grouped rows (limit defaults to 20 and may not exceed 50; a negative
+        offset is treated as 0). Rows are ordered newest first: a row sits where
+        its most recently updated matching case would sit in an updatedOn
+        descending, id ascending list. total counts rows, not cases. A batch lists
+        every case in its request's published case ids, in that order, whatever the
+        filters were (a filter picks which rows appear, never which members a
+        listed batch shows); ids with no visible announcement case are skipped. A
+        case listed by more than one published request belongs to the oldest of
+        them. Available on the Postgres data source only; on any other data source
+        the route does not exist.
+      operationId: searchAnnouncementRegistryRows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCasesRequest'
+      responses:
+        "200":
+          description: One page of grouped registry rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAnnouncementRegistryRowsResponse'
+        "400":
+          description: A filter or the pagination is invalid (for example limit above 50, or anyOf was sent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: A token is invalid or expired, or neither a user token nor an authorized internal client credential was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be resolved to a scope (for example no verified identity on the request).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/aggregate:
     post:
       summary: >-
@@ -27790,6 +27861,105 @@ components:
             $ref: '#/components/schemas/AnnouncementRequest'
         total:
           type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    AnnouncementRegistryCaseMember:
+      type: object
+      description: One case within a batch row.
+      required: [caseId, caseNumber, wso2CaseId, projectName]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        caseNumber:
+          type: string
+        wso2CaseId:
+          type: string
+          description: The case's internal WSO2 reference; empty when it has none.
+        projectName:
+          type: string
+          description: Empty when the case has no project.
+
+    AnnouncementRegistryRow:
+      type: object
+      description: >
+        One registry row. kind "batch" is one published announcement request and
+        carries announcementRequestId, projectCount, isSecurityAnnouncement and
+        cases; kind "case" is one announcement case no published request lists and
+        carries caseId, caseNumber, wso2CaseId, state and projectName. Fields that
+        do not apply to the row's kind, and empty values, are omitted.
+      required: [kind, subject]
+      properties:
+        kind:
+          type: string
+          enum: [batch, case]
+        subject:
+          type: string
+        createdBy:
+          type: string
+          description: >-
+            Batch: the request's creator email, or its creator id when no email
+            was recorded. Case: the creator's name, or email when there is no name.
+        createdOn:
+          type: string
+          format: date-time
+          description: Batch rows carry the request's timestamp, case rows the case's. RFC 3339, UTC.
+        updatedOn:
+          type: string
+          format: date-time
+          description: Batch rows carry the request's timestamp, case rows the case's. RFC 3339, UTC.
+        announcementRequestId:
+          type: string
+          format: uuid
+          description: Batch only.
+        projectCount:
+          type: integer
+          description: >-
+            Batch only. The request's resolved project count when set, else the
+            number of case ids it published. Omitted when zero.
+        isSecurityAnnouncement:
+          type: boolean
+          description: Batch only. Omitted when false.
+        cases:
+          type: array
+          description: >-
+            Batch only. Every case the request published, in published order,
+            regardless of the search filters. Omitted when empty.
+          items:
+            $ref: '#/components/schemas/AnnouncementRegistryCaseMember'
+        caseId:
+          type: string
+          format: uuid
+          description: Case only.
+        caseNumber:
+          type: string
+          description: Case only.
+        wso2CaseId:
+          type: string
+          description: Case only. Omitted when empty.
+        state:
+          type: string
+          description: Case only. The case state in lower case, for example open or closed.
+        projectName:
+          type: string
+          description: Case only. Omitted when empty.
+
+    SearchAnnouncementRegistryRowsResponse:
+      type: object
+      required: [rows, total, limit, offset, hasMore]
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnnouncementRegistryRow'
+        total:
+          type: integer
+          description: Number of grouped rows matching the filters, not the number of cases.
         limit:
           type: integer
         offset:

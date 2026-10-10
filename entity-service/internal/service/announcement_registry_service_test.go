@@ -35,6 +35,7 @@ type fakeRegistryRepo struct {
 	cases    []domain.SearchCaseView
 	err      error
 	gotScope repository.SearchScope
+	rowsResp domain.SearchAnnouncementRegistryRowsResponse
 }
 
 func (f *fakeRegistryRepo) SearchAnnouncementCases(_ context.Context, req domain.SearchCasesRequest, scope repository.SearchScope, maxRows int) ([]domain.SearchCaseView, error) {
@@ -43,6 +44,13 @@ func (f *fakeRegistryRepo) SearchAnnouncementCases(_ context.Context, req domain
 	f.gotScope = scope
 	f.gotMax = maxRows
 	return f.cases, f.err
+}
+
+func (f *fakeRegistryRepo) SearchAnnouncementRegistryRows(_ context.Context, req domain.SearchCasesRequest, scope repository.SearchScope) (domain.SearchAnnouncementRegistryRowsResponse, error) {
+	f.called = true
+	f.gotReq = req
+	f.gotScope = scope
+	return f.rowsResp, f.err
 }
 
 // The registry is staff data: a non-internal caller is refused before the
@@ -153,5 +161,77 @@ func TestAnnouncementRegistryResultAndErrors(t *testing.T) {
 		SearchRegistryCases(context.Background(), domain.SearchCasesRequest{})
 	if !errors.Is(err, boom) {
 		t.Fatalf("want the repository error to pass through, got %v", err)
+	}
+}
+
+// The grouped read has the same gates as the case read: internal callers
+// only, no anyOf, announcements only, and the repository is not reached for a
+// rejected request.
+func TestAnnouncementRegistryRowsGates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	repo := &fakeRegistryRepo{}
+	_, err := NewAnnouncementRegistryService(repo, restrictedAccess{}).SearchRegistryRows(ctx, domain.SearchCasesRequest{})
+	var forbidden *apierror.ForbiddenError
+	if !errors.As(err, &forbidden) || repo.called {
+		t.Fatalf("non-internal caller: want ForbiddenError without a repository call, got err=%v called=%v", err, repo.called)
+	}
+
+	repo = &fakeRegistryRepo{}
+	anyOf := domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{AnyOf: []domain.CaseFilterBranch{{}}}}
+	_, err = NewAnnouncementRegistryService(repo, alwaysUnrestrictedAccess{}).SearchRegistryRows(ctx, anyOf)
+	var validation *apierror.ValidationError
+	if !errors.As(err, &validation) || repo.called {
+		t.Fatalf("anyOf: want ValidationError without a repository call, got err=%v called=%v", err, repo.called)
+	}
+
+	repo = &fakeRegistryRepo{}
+	req := domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{Filters: []domain.CaseFieldFilter{
+		{Field: "type", Op: "in", Values: []string{"case"}},
+	}}}
+	if _, err := NewAnnouncementRegistryService(repo, alwaysUnrestrictedAccess{}).SearchRegistryRows(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if types := repo.gotReq.Parsed.Types; len(types) != 1 || !strings.EqualFold(types[0], "announcement") {
+		t.Fatalf("repository got Types=%v, want only announcement", types)
+	}
+}
+
+// Pagination applies to grouped rows: default 20, max 50, negative offset
+// clamped to 0.
+func TestAnnouncementRegistryRowsPagination(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name               string
+		in                 domain.Pagination
+		wantLimit, wantOff int
+		wantErr            bool
+	}{
+		{"defaults", domain.Pagination{}, 20, 0, false},
+		{"explicit", domain.Pagination{Limit: 30, Offset: 60}, 30, 60, false},
+		{"max", domain.Pagination{Limit: 50}, 50, 0, false},
+		{"negative offset", domain.Pagination{Limit: 5, Offset: -3}, 5, 0, false},
+		{"over max", domain.Pagination{Limit: 51}, 0, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRegistryRepo{}
+			_, err := NewAnnouncementRegistryService(repo, alwaysUnrestrictedAccess{}).
+				SearchRegistryRows(context.Background(), domain.SearchCasesRequest{Pagination: tc.in})
+			if tc.wantErr {
+				var validation *apierror.ValidationError
+				if !errors.As(err, &validation) || repo.called {
+					t.Fatalf("want ValidationError without a repository call, got err=%v called=%v", err, repo.called)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := repo.gotReq.Pagination; got.Limit != tc.wantLimit || got.Offset != tc.wantOff {
+				t.Fatalf("repository got pagination %+v, want limit %d offset %d", got, tc.wantLimit, tc.wantOff)
+			}
+		})
 	}
 }

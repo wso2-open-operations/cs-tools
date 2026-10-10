@@ -45,6 +45,16 @@ func (c *CustomerEntityClient) SearchAnnouncementRegistryCases(ctx context.Conte
 	return c.do(ctx, http.MethodPost, "/announcements/registry/cases", body)
 }
 
+// SearchAnnouncementRegistryRows calls POST /announcements/registry/rows on the
+// entity service: the announcement registry already grouped (published request
+// batches plus ungrouped cases), ordered and paginated by the database. The
+// body is the /cases/search shape (filters plus pagination over the grouped
+// rows). Entity services that predate the route answer 404; callers fall back
+// to grouping in the BFF.
+func (c *CustomerEntityClient) SearchAnnouncementRegistryRows(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/announcements/registry/rows", body)
+}
+
 // AggregateCases calls POST /cases/aggregate on the entity service: a
 // server-side aggregation of cases by a single field (e.g. account, state),
 // capped to the top maxGroups buckets with the remainder folded into

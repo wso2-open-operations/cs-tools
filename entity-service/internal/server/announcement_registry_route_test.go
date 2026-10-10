@@ -71,3 +71,29 @@ func TestAnnouncementRegistryCasesRouteOnPostgres(t *testing.T) {
 		t.Fatalf("GET status = %d, want 405: the route is POST only", rec.Code)
 	}
 }
+
+const announcementRegistryRowsPath = "/announcements/registry/rows"
+
+// The grouped registry read is Postgres-only like the case read: absent on any
+// other data source, POST only on Postgres, and an anonymous caller is
+// refused before anything is read.
+func TestAnnouncementRegistryRowsRoute(t *testing.T) {
+	sn := newDBLessServiceNowRouter(t)
+	rec := httptest.NewRecorder()
+	sn.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, announcementRegistryRowsPath, strings.NewReader(`{}`)))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("non-Postgres data source: status = %d, want 404", rec.Code)
+	}
+
+	router := newPostgresRouterForRegistry(t)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, announcementRegistryRowsPath, strings.NewReader(`{}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("POST status = %d, want 401 for an anonymous caller", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, announcementRegistryRowsPath, nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET status = %d, want 405: the route is POST only", rec.Code)
+	}
+}

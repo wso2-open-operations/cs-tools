@@ -8368,6 +8368,60 @@ from before this entity existed; there is deliberately no persisted
 per-project delivery ledger here either — that belongs to a future batch
 entity, not this one.
 
+## POST /announcements/registry/rows: the grouped registry, paged in SQL
+
+The CSM announcement registry shows one row per published announcement request (a "batch") plus
+one row per announcement case no published request lists. `POST /announcements/registry/cases`
+returns every matching case so the portal backend can group them itself, which needs a row cap
+(`maxAnnouncementRegistryRows`, 10,000): with no filter the default view exceeds it and the read
+fails with a 400. `POST /announcements/registry/rows` does the grouping, ordering and pagination
+in one SQL statement instead, so **no cap applies**, and the registry list should read it.
+The cases route is unchanged and stays for callers that still want the flat case list.
+
+Internal callers only (`internalOnly` on the route plus `RequireInternalCaller` in the service),
+registered on the Postgres data source only, and read through `repository.Scoped` like the cases
+route. Request: the `POST /cases/search` body; `type` is forced to announcement, `anyOf` is
+rejected, `pagination` applies to the grouped rows (`normalizePagination`: default 20, max 50).
+Response: `{rows, total, limit, offset, hasMore}`; `total` counts rows, not cases.
+
+Rules the query implements (all in `announcement_registry_repo.go`):
+
+- A case belongs to a batch when its id is in `published_case_ids` (JSONB array of id strings) of
+  an `announcement_requests` row with state `published`. One batch row per request, however many
+  of its cases match the filters. Elements that are not UUIDs are ignored (the cast sits inside a
+  `CASE`, so one bad element never fails the query).
+- A case listed by two published requests belongs to the **oldest** (`created_on`, then the
+  greater `id`): the owner the previous client-side grouping ended with. It never appears twice.
+- Row order equals the previous walk over cases in `updated_on DESC NULLS LAST, id` order, with a
+  group placed at its first matching case: groups are keyed by owner and ordered by that first
+  case's `(updated_on, id)`.
+- A batch lists **all** of its request's `published_case_ids`, in that order, independent of the
+  filters (filters choose which rows appear, never which members a row shows). Members are
+  resolved for the returned page only; ids with no visible announcement case are skipped.
+- Batch fields come from the request (creator email, else creator id; the request's timestamps;
+  `resolved_project_count`, else the number of published ids; security flag from
+  `announcement_type`). Case rows carry the case's own fields with the state lower-cased.
+- The total comes from the same statement (a `tot` CTE left-joined to the page), so an empty page, from an offset past the end or a search with no hits, still returns one row that carries the total and no extra query runs. `hasMore` is never true for an empty page.
+- The repository refuses any scope that is not `Unrestricted` with a `ForbiddenError`, in addition to the service and route checks.
+
+Cost: the statement reads every matching case and every published request's id list once, so it
+is linear in announcements plus published members and does not depend on the offset. Measured on
+75,000 announcement cases and 1,200 published requests of 50 members (16,200 rows), as a role
+without BYPASSRLS and `work_mem` at 4 MB, it takes about 210 ms for page 0 and for deep or past-the-end
+offsets alike. The `OFFSET 0` inside the `owners` lateral subquery is a deliberate planner fence: it makes
+the strict UUID check (regex plus cast) run once per published id instead of for the filter and again for
+the sort key (about 310 ms before). The strict regex stays on purpose: `pg_input_is_valid` would also
+accept braced and hyphen-less ids and change which cases group. No index is needed or added: what is
+left is the sort over the unnested member ids, which no index on these tables avoids.
+
+Tests: `announcement_registry_rows_integration_test.go` (needs
+`ANNOUNCEMENT_VISIBILITY_TEST_DSN`, skipped without it) ports the old client-side grouping as an
+oracle and requires identical rows, order, total and members across filters and pages, plus the
+member rule, the two-owners rule, a 12,500-announcement volume case, an empty-page total check and the 403. Assertions are scoped to
+the tests' own seeded projects, so they hold on a database that already holds other announcements
+(only the pre-existing paged-search equivalence test depends on the total announcement count staying
+under the old 10,000 cap).
+
 ## POST /users/search sortBy on the Postgres data source
 
 `userService.SearchUsers` used to reject any `sortBy` on Postgres ("only supported
@@ -9015,7 +9069,7 @@ func (h *WidgetHandler) CreateWidget(w http.ResponseWriter, r *http.Request) {
 - Wrap unexpected errors with `fmt.Errorf("operation name: %w", err)` for traceability
 - PostgreSQL enum casts are required for enum columns (e.g. `$1::case_state_enum`)
 - For queries that need both a COUNT and a SELECT, run them concurrently with `errgroup` (see `SearchCases` and `SearchCaseComments` in `case_repo.go`)
-- A search whose caller never shows a total sets `skipTotal` on its request (`domain.SearchCasesRequest`, `SearchIncidentsRequest`, `SearchChangeRequestsRequest`, `SearchProblemsRequest`, `SearchConversationsRequest`): the repository then skips the COUNT entirely and the response's `total` is `domain.TotalNotComputed` (-1), not a lower bound. Three paths ignore the flag and keep reporting a total: the ServiceNow data source, a case search with `groupBy` (bucket counts) and `POST /announcements/registry/cases` (the number returned), so a consumer treats -1 as "no total" and must not assume the reverse. Global search (the CSM portal's quick-nav palette) sends it; the COUNT costs as much as the page query and holds a second pool connection. The default is unchanged. Request bodies are decoded with `DisallowUnknownFields`, so a caller must not send `skipTotal` to a build that predates it (the portal webapp falls back to the plain search on a 400). `search_skip_total_integration_test.go` records the statements each repository sends to prove the COUNT is not run and the page is identical.
+- A search whose caller never shows a total sets `skipTotal` on its request (`domain.SearchCasesRequest`, `SearchIncidentsRequest`, `SearchChangeRequestsRequest`, `SearchProblemsRequest`, `SearchConversationsRequest`): the repository then skips the COUNT entirely and the response's `total` is `domain.TotalNotComputed` (-1), not a lower bound. Four paths ignore the flag and keep reporting a total: the ServiceNow data source, a case search with `groupBy` (bucket counts), `POST /announcements/registry/cases` (the number returned) and `POST /announcements/registry/rows` (the number of grouped rows), so a consumer treats -1 as "no total" and must not assume the reverse. Global search (the CSM portal's quick-nav palette) sends it; the COUNT costs as much as the page query and holds a second pool connection. The default is unchanged. Request bodies are decoded with `DisallowUnknownFields`, so a caller must not send `skipTotal` to a build that predates it (the portal webapp falls back to the plain search on a 400). `search_skip_total_integration_test.go` records the statements each repository sends to prove the COUNT is not run and the page is identical.
 
 ## Domain types
 

@@ -19,11 +19,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
@@ -50,6 +52,23 @@ type registryOneShotCasesClient interface {
 // changed signature on the real client would silently send every registry load
 // back through the slow paged loop. This makes that a compile error instead.
 var _ registryOneShotCasesClient = (*entity.CustomerEntityClient)(nil)
+
+// registryRowsClient is implemented by an entity client that can return the
+// registry already grouped and paginated by the entity service. Optional for
+// the same reason registryOneShotCasesClient is: a client without it keeps the
+// legacy fetch-and-group path.
+type registryRowsClient interface {
+	SearchAnnouncementRegistryRows(ctx context.Context, body []byte) ([]byte, error)
+}
+
+// Compile-time guard: a rename or changed signature on the real client would
+// otherwise silently route every request through the legacy path.
+var _ registryRowsClient = (*entity.CustomerEntityClient)(nil)
+
+// registryRowsMaxLimit is the largest page the entity service accepts on the
+// grouped-rows route (its shared pagination rejects anything above 50 with a
+// 400). The BFF clamps to it rather than surfacing that 400.
+const registryRowsMaxLimit = 50
 
 // AnnouncementRegistryHandler backs the Announcements tab's registry list —
 // see SearchAnnouncementRegistry's own doc comment for what it actually does
@@ -522,15 +541,80 @@ func (h *AnnouncementRegistryHandler) SearchAnnouncementRegistry(w http.Response
 		return
 	}
 
+	if rowsClient, ok := h.entity.(registryRowsClient); ok {
+		resp, err := h.searchRegistryRows(r.Context(), rowsClient, req)
+		if err == nil {
+			writeJSONValue(w, http.StatusOK, resp)
+			return
+		}
+		// Fall back ONLY when the route does not exist (older entity
+		// service: the BFF and entity service deploy independently). Any
+		// other failure, and a cancelled request, is reported as is.
+		// TODO: delete this fallback and the legacy path below once
+		// /announcements/registry/rows is deployed everywhere.
+		var apiErr *apierror.Error
+		if r.Context().Err() != nil || !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+			slog.ErrorContext(r.Context(), "search announcement registry rows failed", "userID", user.UserID, "err", summarizeErr(err))
+			mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
+			return
+		}
+		slog.WarnContext(r.Context(), "announcement registry rows route missing on entity service, falling back to grouping in the BFF")
+	}
+	h.searchRegistryLegacy(w, r, user.UserID, req)
+}
+
+// searchRegistryRows asks the entity service for the grouped, paginated
+// registry and decodes it into the public response shape.
+func (h *AnnouncementRegistryHandler) searchRegistryRows(ctx context.Context, client registryRowsClient, req registrySearchRequest) (registrySearchResponse, error) {
+	filters := []map[string]any{}
+	if len(req.States) > 0 {
+		filters = append(filters, map[string]any{"field": "state", "op": "in", "values": req.States})
+	}
+	if len(req.ProjectIDs) > 0 {
+		filters = append(filters, map[string]any{"field": "projectId", "op": "in", "values": req.ProjectIDs})
+	}
+	filterGroup := map[string]any{"filters": filters}
+	if req.Search != "" {
+		filterGroup["searchQuery"] = req.Search
+	}
+	limit := req.Pagination.Limit
+	if limit > registryRowsMaxLimit {
+		limit = registryRowsMaxLimit
+	}
+	body, err := json.Marshal(map[string]any{
+		"filters":    filterGroup,
+		"pagination": map[string]int{"offset": req.Pagination.Offset, "limit": limit},
+	})
+	if err != nil {
+		return registrySearchResponse{}, fmt.Errorf("marshal registry rows request: %w", err)
+	}
+	raw, err := client.SearchAnnouncementRegistryRows(ctx, body)
+	if err != nil {
+		return registrySearchResponse{}, err
+	}
+	var resp registrySearchResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return registrySearchResponse{}, fmt.Errorf("decode registry rows response: %w", err)
+	}
+	if resp.Rows == nil {
+		resp.Rows = []registryRow{}
+	}
+	return resp, nil
+}
+
+// searchRegistryLegacy is the original implementation: fetch every matching
+// case and every published request, group them here, then paginate. Kept only
+// as the fallback for an entity service without the grouped-rows route.
+func (h *AnnouncementRegistryHandler) searchRegistryLegacy(w http.ResponseWriter, r *http.Request, userID string, req registrySearchRequest) {
 	cases, err := h.fetchAllMatchingCases(r.Context(), req)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch all matching cases for registry failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch all matching cases for registry failed", "userID", userID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}
 	requests, err := h.fetchAllPublishedRequests(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch all published announcement requests for registry failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch all published announcement requests for registry failed", "userID", userID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}
@@ -632,7 +716,7 @@ func (h *AnnouncementRegistryHandler) SearchAnnouncementRegistry(w http.Response
 	// N projects" and omit their CS numbers entirely.
 	memberLookup, err := h.registryCaseLookup(r.Context(), filteredByID, needed)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "fetch unfiltered cases for registry batch members failed", "userID", user.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "fetch unfiltered cases for registry batch members failed", "userID", userID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search announcements.")
 		return
 	}
