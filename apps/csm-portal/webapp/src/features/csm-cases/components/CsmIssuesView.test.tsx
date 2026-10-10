@@ -48,6 +48,9 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: vi.fn() }),
 }));
+vi.mock("@context/success-banner/SuccessBannerContext", () => ({
+  useSuccessBanner: () => ({ showSuccess: vi.fn() }),
+}));
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ email: "user@example.test" }),
 }));

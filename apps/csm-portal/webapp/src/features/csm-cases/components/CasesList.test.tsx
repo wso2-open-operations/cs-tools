@@ -458,6 +458,157 @@ describe("CasesList optional columns", () => {
   });
 });
 
+// Regression/coverage for the "Export selected" feature (digiops-cs#3388):
+// a leading checkbox column, off by default, that a caller opts into via
+// `selectable` + the three selection props.
+describe("CasesList row selection", () => {
+  it("renders no checkbox column at all when selectable is omitted (default, unchanged behavior)", () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/cases" element={<CasesList cases={[CASE]} isLoading={false} />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("calls onToggleRow with the row when its checkbox is clicked, without navigating", () => {
+    const onToggleRow = vi.fn();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE]}
+              isLoading={false}
+              selectable
+              selectedIds={new Set()}
+              onToggleRow={onToggleRow}
+              onToggleAllOnPage={vi.fn()}
+            />
+          }
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select CS-1007" }));
+
+    expect(onToggleRow).toHaveBeenCalledWith(CASE);
+    expect(screen.queryByTestId("from-state")).not.toBeInTheDocument();
+  });
+
+  it("reflects a selected row's checkbox as checked", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE]}
+              isLoading={false}
+              selectable
+              selectedIds={new Set([CASE.id])}
+              onToggleRow={vi.fn()}
+              onToggleAllOnPage={vi.fn()}
+            />
+          }
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    expect(screen.getByRole("checkbox", { name: "Select CS-1007" })).toBeChecked();
+  });
+
+  it("header 'select all' checkbox calls onToggleAllOnPage(true, rows) when none are selected yet", () => {
+    const otherCase: CsmCaseRow = { ...CASE, id: "case-2", caseNumber: "CS-1008" };
+    const onToggleAllOnPage = vi.fn();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE, otherCase]}
+              isLoading={false}
+              selectable
+              selectedIds={new Set()}
+              onToggleRow={vi.fn()}
+              onToggleAllOnPage={onToggleAllOnPage}
+            />
+          }
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows on this page" }));
+
+    expect(onToggleAllOnPage).toHaveBeenCalledWith(true, [CASE, otherCase]);
+  });
+
+  it("header checkbox is checked when every row on the page is selected, and unchecking it calls onToggleAllOnPage(false, rows)", () => {
+    const otherCase: CsmCaseRow = { ...CASE, id: "case-2", caseNumber: "CS-1008" };
+    const onToggleAllOnPage = vi.fn();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE, otherCase]}
+              isLoading={false}
+              selectable
+              selectedIds={new Set([CASE.id, otherCase.id])}
+              onToggleRow={vi.fn()}
+              onToggleAllOnPage={onToggleAllOnPage}
+            />
+          }
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const headerCheckbox = screen.getByRole("checkbox", { name: "Select all rows on this page" });
+    expect(headerCheckbox).toBeChecked();
+
+    fireEvent.click(headerCheckbox);
+    expect(onToggleAllOnPage).toHaveBeenCalledWith(false, [CASE, otherCase]);
+  });
+
+  it("header checkbox is indeterminate when only some rows on the page are selected", () => {
+    const otherCase: CsmCaseRow = { ...CASE, id: "case-2", caseNumber: "CS-1008" };
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={
+            <CasesList
+              cases={[CASE, otherCase]}
+              isLoading={false}
+              selectable
+              selectedIds={new Set([CASE.id])}
+              onToggleRow={vi.fn()}
+              onToggleAllOnPage={vi.fn()}
+            />
+          }
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const headerCheckbox = screen.getByRole("checkbox", {
+      name: "Select all rows on this page",
+    }) as HTMLInputElement;
+    expect(headerCheckbox).not.toBeChecked();
+    expect(headerCheckbox.indeterminate).toBe(true);
+  });
+});
+
 describe("CasesList sortable headers", () => {
   function renderSortable(
     initialField: "createdOn" | "updatedOn" | "severity" | "state" | "assignee",

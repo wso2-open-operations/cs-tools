@@ -15,7 +15,7 @@
 // under the License.
 
 import { Box, Button, Chip, TablePagination, Typography } from "@wso2/oxygen-ui";
-import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Download } from "@wso2/oxygen-ui-icons-react";
 import {
   useCallback,
   useEffect,
@@ -28,6 +28,7 @@ import {
 } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
@@ -40,6 +41,7 @@ import { useFilterBarCollapsed } from "@hooks/useFilterBarCollapsed";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { downloadCsv } from "@utils/csvExport";
 import { useBackendApi } from "@api/backend/client";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
 import CasesFilterBar, {
@@ -287,6 +289,40 @@ export default function CsmIssuesView({
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  // Bulk row selection, backing the "Export selected" action — see
+  // digiops-cs#3388's "Export Selected Cases" ask: a user ticks specific rows
+  // (possibly across more than one page) and exports only those, rather than
+  // the whole current filter. Keyed by row id -> the row itself (not just a
+  // `Set<string>` of ids), since a selected row may scroll off the current
+  // page as the user pages/sorts/re-filters — holding the row data itself is
+  // what lets "Export selected" build a CSV with no extra fetch, from
+  // whatever page(s) each selected row was actually seen on. Deliberately not
+  // cleared on filter/sort/page changes; only the explicit "Clear selection"
+  // action resets it, so selecting across several pages of the same filter
+  // actually works.
+  const [selectedRows, setSelectedRows] = useState<Map<string, CsmCaseRow>>(
+    () => new Map(),
+  );
+  const selectedRowIds = useMemo(() => new Set(selectedRows.keys()), [selectedRows]);
+  const toggleRow = useCallback((row: CsmCaseRow): void => {
+    setSelectedRows((prev) => {
+      const next = new Map(prev);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.set(row.id, row);
+      return next;
+    });
+  }, []);
+  const toggleAllOnPage = useCallback((checked: boolean, rows: CsmCaseRow[]): void => {
+    setSelectedRows((prev) => {
+      const next = new Map(prev);
+      rows.forEach((row) => {
+        if (checked) next.set(row.id, row);
+        else next.delete(row.id);
+      });
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback((): void => setSelectedRows(new Map()), []);
   const [sortField, setSortField] = useState<CasesSortField>(
     DEFAULT_CASES_SORT.field,
   );
@@ -528,6 +564,19 @@ export default function CsmIssuesView({
     "Updated",
   ];
 
+  const { showSuccess } = useSuccessBanner();
+  // Export selected: no paging needed — every selected row's data is already
+  // held in `selectedRows` (see its own doc comment), so this builds and
+  // downloads the CSV directly, unlike the filtered "Export CSV" action
+  // above, which has to page the search endpoint to exhaust the filter.
+  const handleExportSelected = useCallback((): void => {
+    const rows = Array.from(selectedRows.values()).map(caseToCsvRow);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `${entityNoun.replace(/\s+/g, "-")}-selected-export-${timestamp}.csv`;
+    downloadCsv(exportHeader, rows, filename);
+    showSuccess(`Exported ${rows.length.toLocaleString()} selected ${entityNoun} to CSV.`);
+  }, [selectedRows, caseToCsvRow, exportHeader, entityNoun, showSuccess]);
+
   useEffect(() => {
     if (isError && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true;
@@ -656,12 +705,35 @@ export default function CsmIssuesView({
         showEngagementTypeFilter={showEngagementTypeFilter}
       />
 
+      {canWrite && selectedRows.size > 0 && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+          <Typography variant="body2" color="text.secondary">
+            {selectedRows.size.toLocaleString()} selected
+          </Typography>
+          <Button size="small" variant="text" onClick={clearSelection}>
+            Clear selection
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Download size={14} />}
+            onClick={handleExportSelected}
+          >
+            {`Export selected (${selectedRows.size.toLocaleString()})`}
+          </Button>
+        </Box>
+      )}
+
       <CasesList
         cases={cases}
         isLoading={isLoading || isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
         hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        selectable={canWrite}
+        selectedIds={selectedRowIds}
+        onToggleRow={toggleRow}
+        onToggleAllOnPage={toggleAllOnPage}
         optionalColumns={
           enableColumnCustomization
             ? columnPrefs.visibleColumns.map((c) => c.id as CaseOptionalColumnId)
