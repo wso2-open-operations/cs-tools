@@ -881,15 +881,17 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	}
 
 	payload := snCreateIncidentPayload{
-		CallerID:           uuidToSysid(req.CallerID),
-		CategoryKey:        snIncidentCategoryKeyMap[req.Category],
-		ServiceID:          uuidToSysid(req.ServiceID),
-		ImpactKey:          snIncidentImpactKeyMap[req.Impact],
-		UrgencyKey:         snIncidentUrgencyKeyMap[req.Urgency],
-		Subject:            req.Subject,
-		WatchList:          watchList,
-		AdditionalComments: req.AdditionalComments,
-		WorkNotes:          req.WorkNotes,
+		CallerID:    uuidToSysid(req.CallerID),
+		CategoryKey: snIncidentCategoryKeyMap[req.Category],
+		ServiceID:   uuidToSysid(req.ServiceID),
+		ImpactKey:   snIncidentImpactKeyMap[req.Impact],
+		UrgencyKey:  snIncidentUrgencyKeyMap[req.Urgency],
+		Subject:     req.Subject,
+		WatchList:   watchList,
+		// Wrapped in [code]/[/code] so ServiceNow renders this HTML-sourced
+		// content instead of showing the tags literally -- see sn_code_block.go.
+		AdditionalComments: wrapCodeBlock(req.AdditionalComments),
+		WorkNotes:          wrapCodeBlock(req.WorkNotes),
 		CorrelationID:      req.CorrelationID,
 		Environment:        req.Environment,
 	}
@@ -1270,10 +1272,12 @@ func (s *snIncidentService) GetIncidentByID(ctx context.Context, id string) (dom
 // Shared by GetIncidentByID and UpdateIncident since both endpoints return the full incident detail.
 func mapSNIncidentToView(sn snGetIncidentResponse) domain.IncidentView {
 	view := domain.IncidentView{
-		OpenedOn:           sn.OpenedOn,
-		Subject:            sn.Subject,
-		AdditionalComments: sn.AdditionalComments,
-		WorkNotes:          sn.WorkNotes,
+		OpenedOn: sn.OpenedOn,
+		Subject:  sn.Subject,
+		// Strips the [code]/[/code] wrapper CreateIncident/UpdateIncident add
+		// on write -- see sn_code_block.go.
+		AdditionalComments: trimCodeBlock(sn.AdditionalComments),
+		WorkNotes:          trimCodeBlock(sn.WorkNotes),
 		CreatedOn:          sn.CreatedOn,
 		CreatedBy:          sn.CreatedBy,
 		UpdatedOn:          sn.UpdatedOn,
@@ -1533,11 +1537,13 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snUpdateIncidentPayload{
-		Subject:            req.Subject,
-		ResolutionNotes:    req.ResolutionNotes,
-		IncidentReport:     req.IncidentReport,
-		AdditionalComments: req.AdditionalComments,
-		WorkNotes:          req.WorkNotes,
+		Subject:         req.Subject,
+		ResolutionNotes: req.ResolutionNotes,
+		IncidentReport:  req.IncidentReport,
+		// Wrapped in [code]/[/code] so ServiceNow renders this HTML-sourced
+		// content instead of showing the tags literally -- see sn_code_block.go.
+		AdditionalComments: wrapCodeBlock(req.AdditionalComments),
+		WorkNotes:          wrapCodeBlock(req.WorkNotes),
 	}
 	if req.Environment != nil {
 		var v any
