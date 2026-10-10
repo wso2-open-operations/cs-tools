@@ -19,16 +19,26 @@
 # so the service can run in the docker-compose stack described in
 # apps/csm-portal/README.md.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to the patch level the go.mod directive asks for, with toolchain
+# downloads disabled, so the build is hermetic: a stale or lagging base
+# image fails loudly instead of fetching a toolchain mid-build.
+FROM golang:1.26.6-alpine AS builder
+
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o /out/entity-service ./cmd/api
+# -trimpath keeps build-machine paths out of the binary; -s -w drop the
+# symbol and DWARF tables. Neither changes behaviour; both shrink the image.
+# The cache mounts keep module and compile caches across rebuilds.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags="-s -w" -o /out/entity-service ./cmd/api
 
 FROM alpine:3.20
 
@@ -55,5 +65,11 @@ RUN adduser \
     "csmdev"
 
 USER 10101
+
+# The health probe listens on its own port (HEALTH_PORT, 8081 by default --
+# see internal/config/config.go), separate from the API listener. busybox
+# wget ships with alpine.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
+  CMD wget -qO- "http://127.0.0.1:${HEALTH_PORT:-8081}/health" >/dev/null || exit 1
 
 ENTRYPOINT ["./entity-service"]

@@ -1,0 +1,233 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+# Build, vet, test and vulnerability-scan every CSM component on pull
+# requests and on pushes to the integration branches. A first job works out
+# which modules the change actually touches, so a webapp-only PR does not
+# compile six Go services and vice versa; a change to this workflow file
+# runs everything.
+
+name: CSM CI
+
+on:
+  pull_request:
+    paths:
+      - "entity-service/**"
+      - "apps/csm-portal/backend/**"
+      - "apps/csm-portal/webapp/**"
+      - "apps/csm-portal/microapp/**"
+      - "integrations/csm-integration-service/**"
+      - "integrations/csm-notification-service/**"
+      - "integrations/csm-portal-activity-stream-service/**"
+      - "operations/csm-scheduled-tasks/**"
+      - ".github/workflows/csm-ci.yml"
+  push:
+    branches:
+      - main
+      - "dev-*"
+    paths:
+      - "entity-service/**"
+      - "apps/csm-portal/backend/**"
+      - "apps/csm-portal/webapp/**"
+      - "apps/csm-portal/microapp/**"
+      - "integrations/csm-integration-service/**"
+      - "integrations/csm-notification-service/**"
+      - "integrations/csm-portal-activity-stream-service/**"
+      - "operations/csm-scheduled-tasks/**"
+      - ".github/workflows/csm-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: csm-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # setup-go installs exactly the version each module's go.mod asks for; a
+  # mismatch should fail loudly here rather than download a toolchain mid-job.
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+    outputs:
+      go_modules: ${{ steps.detect.outputs.go_modules }}
+      webapp: ${{ steps.detect.outputs.webapp }}
+      microapp: ${{ steps.detect.outputs.microapp }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          go_modules="entity-service apps/csm-portal/backend integrations/csm-integration-service integrations/csm-notification-service integrations/csm-portal-activity-stream-service operations/csm-scheduled-tasks"
+          webapp_dir="apps/csm-portal/webapp"
+          microapp_dir="apps/csm-portal/microapp"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"; head="$PR_HEAD_SHA"
+          else
+            base="$PUSH_BEFORE_SHA"; head="$PUSH_HEAD_SHA"
+          fi
+
+          # Unknown base (first push of a branch, force-push, manual re-run):
+          # run everything rather than guess.
+          run_all=0
+          changed=""
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            run_all=1
+          else
+            changed="$(git diff --name-only "$base" "$head")"
+          fi
+          # Here-strings, not `printf | grep -q`: under pipefail grep -q exits at its
+          # first match, printf then dies of SIGPIPE on a long file list, and the
+          # pipeline reports failure for exactly the modules that sort early.
+          if grep -qx '.github/workflows/csm-ci.yml' <<<"$changed"; then
+            run_all=1
+          fi
+
+          touched() { # touched <dir> -> exit 0 if any changed path is under <dir>
+            [ "$run_all" = 1 ] || grep -q "^$1/" <<<"$changed"
+          }
+
+          go_json="["; sep=""
+          for m in $go_modules; do
+            if touched "$m"; then go_json="$go_json$sep\"$m\""; sep=","; fi
+          done
+          go_json="$go_json]"
+          webapp=false; microapp=false
+          touched "$webapp_dir" && webapp=true
+          touched "$microapp_dir" && microapp=true
+
+          echo "go_modules=$go_json" >> "$GITHUB_OUTPUT"
+          echo "webapp=$webapp" >> "$GITHUB_OUTPUT"
+          echo "microapp=$microapp" >> "$GITHUB_OUTPUT"
+          echo "go modules: $go_json | webapp: $webapp | microapp: $microapp"
+
+  go:
+    name: Go (${{ matrix.module }})
+    needs: changes
+    if: needs.changes.outputs.go_modules != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go_modules) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -short -count=1 ./...
+
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  webapp:
+    name: CSM portal webapp
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/csm-portal/webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: apps/csm-portal/webapp/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm exec tsc -b
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm exec vite build
+
+  microapp:
+    name: CSM portal microapp
+    needs: changes
+    if: needs.changes.outputs.microapp == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/csm-portal/microapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/csm-portal/microapp/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc -b
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Build
+        run: npm run build

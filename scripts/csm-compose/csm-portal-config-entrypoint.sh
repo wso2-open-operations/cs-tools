@@ -19,15 +19,37 @@
 # from environment variables set in docker-compose.yml, since this app reads
 # window.config at browser runtime (see public/config.js.example), never at
 # build time. All values here are local-dev placeholders, never real secrets.
+#
+# Every environment value is escaped before it is placed inside a JavaScript
+# string literal, and the static part of the file is a quoted heredoc, so a
+# value containing a double quote, a backslash or a newline cannot break the
+# rendered file (which would leave the SPA with no window.config at all).
 set -eu
 
-cat > /usr/share/nginx/html/config.js <<EOF
-window.config = {
-  CSM_PORTAL_AUTH_BASE_URL: "${CSM_PORTAL_AUTH_BASE_URL}",
-  CSM_PORTAL_AUTH_CLIENT_ID: "${CSM_PORTAL_AUTH_CLIENT_ID}",
-  CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "${CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL}",
-  CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "${CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL}",
-  CSM_PORTAL_BACKEND_BASE_URL: "${CSM_PORTAL_BACKEND_BASE_URL}",
+# Fail fast with a named variable rather than serving a page that boots
+# without the setting.
+: "${CSM_PORTAL_AUTH_BASE_URL:?must be set}"
+: "${CSM_PORTAL_AUTH_CLIENT_ID:?must be set}"
+: "${CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL:?must be set}"
+: "${CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL:?must be set}"
+: "${CSM_PORTAL_BACKEND_BASE_URL:?must be set}"
+
+# json_escape prints $1 escaped for use inside a double-quoted JS/JSON string:
+# backslash and double quote are backslash-escaped, newlines become \n.
+json_escape() {
+  printf '%s' "$1" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+    | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g'
+}
+
+{
+  printf 'window.config = {\n'
+  printf '  CSM_PORTAL_AUTH_BASE_URL: "%s",\n' "$(json_escape "$CSM_PORTAL_AUTH_BASE_URL")"
+  printf '  CSM_PORTAL_AUTH_CLIENT_ID: "%s",\n' "$(json_escape "$CSM_PORTAL_AUTH_CLIENT_ID")"
+  printf '  CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "%s",\n' "$(json_escape "$CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL")"
+  printf '  CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "%s",\n' "$(json_escape "$CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL")"
+  printf '  CSM_PORTAL_BACKEND_BASE_URL: "%s",\n' "$(json_escape "$CSM_PORTAL_BACKEND_BASE_URL")"
+  cat <<'EOF'
   CSM_PORTAL_STREAM_ENABLED: false,
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "DEBUG",
@@ -39,5 +61,6 @@ window.config = {
   CSM_PORTAL_MOBILE_APP_PROMPT_ENABLED: false,
 };
 EOF
+} > "${CONFIG_JS_PATH:-/usr/share/nginx/html/config.js}"
 
-echo "[csm-portal webapp] rendered /usr/share/nginx/html/config.js"
+echo "[csm-portal webapp] rendered ${CONFIG_JS_PATH:-/usr/share/nginx/html/config.js}"

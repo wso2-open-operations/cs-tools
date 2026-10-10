@@ -14,19 +14,35 @@
 # specific language governing permissions and limitations
 # under the License.
 #
-# LOCAL DEV ONLY -- builds the mock OIDC provider used by the docker-compose
-# stack in apps/csm-portal/README.md so contributors can run the CSM
-# platform without access to a real identity provider.
+# LOCAL DEV ONLY -- builds the mock OIDC provider (scripts/csm-compose/
+# mock-oidc) used by the docker-compose stack in apps/csm-portal/README.md
+# so contributors can run the CSM platform without access to a real
+# identity provider. The binary refuses to start unless
+# MOCK_OIDC_LOCAL_DEV=1 is set; docker-compose.yml sets it.
 
-FROM golang:1.26-alpine AS builder
+# Pinned to the patch level the go.mod directive asks for, with toolchain
+# downloads disabled, so the build is hermetic.
+FROM golang:1.26.6-alpine AS builder
+
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
+
 WORKDIR /app
+
 COPY go.mod ./
-COPY main.go ./
-RUN CGO_ENABLED=0 go build -o /out/mock-oidc .
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags="-s -w" -o /out/mock-oidc .
 
 FROM alpine:3.20
+
 RUN apk add --no-cache ca-certificates
+
 WORKDIR /app
+
 COPY --from=builder /out/mock-oidc ./mock-oidc
 
 RUN adduser \

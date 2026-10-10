@@ -77,7 +77,7 @@ type genProductVersion struct {
 }
 
 type genDeployedProduct struct {
-	id, projectID, deploymentID, productID, versionID string
+	id, deploymentID, productID, versionID string
 }
 
 type genSLAPolicy struct {

@@ -1,6 +1,6 @@
 module github.com/wso2-open-operations/cs-tools/scripts/csm-compose/seed-generator
 
-go 1.25.0
+go 1.26.6
 
 require github.com/jackc/pgx/v5 v5.11.0
 

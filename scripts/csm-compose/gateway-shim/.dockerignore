@@ -1,0 +1,8 @@
+# Build context for docker/local/gateway-shim.Dockerfile.
+.git
+.env
+.env.*
+*_test.go
+*.md
+# A `go build` run in this directory drops the binary here.
+gateway-shim
