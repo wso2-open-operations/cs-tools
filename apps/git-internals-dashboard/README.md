@@ -102,6 +102,13 @@ Security. The issue body is read transiently during ingest solely to derive ABT 
 opened-by, then discarded. Labels are read transiently to derive priority, then discarded.
 Assignees and status-event actors are never fetched or stored.
 
+## Security Scanning
+
+SAST, SCA, secrets, and IaC config scanning run in CI on every PR and push, plus a weekly
+schedule, via `.github/workflows/git-internals-dashboard-security.yml`. DAST runs on demand
+against a non-production environment via `.github/workflows/git-internals-dashboard-dast.yml`;
+`scripts/dast-local.sh` runs the same active scan against a local instance.
+
 ## Reporting Issues
 
 ### 1. Opening an issue
