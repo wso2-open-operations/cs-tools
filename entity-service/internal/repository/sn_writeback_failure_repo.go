@@ -18,21 +18,39 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // SNWritebackFailureRepository defines the persistence operations for the
-// sn_writeback_failures table. This is a pilot mechanism (see
-// service.SNWritebackDispatcher): a single insert method is enough today —
-// nothing reads this table back through the API yet, the same starting
-// shape EventPublishFailureRepository had before Search/MarkResolved were
-// added for its own operator-facing endpoints.
+// sn_writeback_failures table (see service.SNWritebackDispatcher). A row is
+// one mirror write the previous system is missing; it lives until a replay
+// of it succeeds (Delete) -- the table has no "resolved" column and none is
+// added, the row's absence is the resolution. Read back by entity so the
+// record's own detail can show what of it is not mirrored (see
+// domain.ChangeRequest.MirrorFailures).
 type SNWritebackFailureRepository interface {
 	// Create inserts a new failure row.
 	Create(ctx context.Context, req domain.CreateSNWritebackFailureRequest) (domain.SNWritebackFailure, error)
+	// GetByID returns one row, or a NotFoundError.
+	GetByID(ctx context.Context, id string) (domain.SNWritebackFailure, error)
+	// ListByEntity returns the rows of one entity, oldest first (the order
+	// the writes were made in, which is the order to replay them in).
+	ListByEntity(ctx context.Context, entityType, entityID string) ([]domain.SNWritebackFailure, error)
+	// List returns rows newest first, optionally filtered by entity type and
+	// id, at most limit of them.
+	List(ctx context.Context, entityType, entityID string, limit int) ([]domain.SNWritebackFailure, error)
+	// UpdateError replaces a row's error with the reason its latest replay
+	// failed. A NotFoundError when the row is gone.
+	UpdateError(ctx context.Context, id, errMsg string) error
+	// Delete removes a row -- a replay of it succeeded. A NotFoundError when
+	// the row is already gone.
+	Delete(ctx context.Context, id string) error
 }
 
 type snWritebackFailureRepo struct {
@@ -72,4 +90,89 @@ func (r *snWritebackFailureRepo) Create(ctx context.Context, req domain.CreateSN
 		return domain.SNWritebackFailure{}, fmt.Errorf("create sn_writeback_failure: %w", err)
 	}
 	return f, nil
+}
+
+// GetByID implements SNWritebackFailureRepository.
+func (r *snWritebackFailureRepo) GetByID(ctx context.Context, id string) (domain.SNWritebackFailure, error) {
+	f, err := scanSNWritebackFailure(r.db.QueryRow(ctx,
+		`SELECT `+snWritebackFailureColumns+` FROM sn_writeback_failures WHERE id = $1::uuid`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.SNWritebackFailure{}, &apierror.NotFoundError{Msg: "mirror write failure not found"}
+	}
+	if err != nil {
+		return domain.SNWritebackFailure{}, fmt.Errorf("get sn_writeback_failure: %w", err)
+	}
+	return f, nil
+}
+
+// ListByEntity implements SNWritebackFailureRepository.
+func (r *snWritebackFailureRepo) ListByEntity(ctx context.Context, entityType, entityID string) ([]domain.SNWritebackFailure, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT `+snWritebackFailureColumns+` FROM sn_writeback_failures
+		 WHERE entity_type = $1 AND entity_id = $2::uuid ORDER BY created_on ASC, id ASC`, entityType, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("list sn_writeback_failures by entity: %w", err)
+	}
+	defer rows.Close()
+	return collectSNWritebackFailures(rows)
+}
+
+// snWritebackFailureListMax caps List: an operator page, not a dump.
+const snWritebackFailureListMax = 200
+
+// List implements SNWritebackFailureRepository.
+func (r *snWritebackFailureRepo) List(ctx context.Context, entityType, entityID string, limit int) ([]domain.SNWritebackFailure, error) {
+	if limit <= 0 || limit > snWritebackFailureListMax {
+		limit = snWritebackFailureListMax
+	}
+	// NULLIF-ed text parameters: an empty filter matches everything. entity_id
+	// is a UUID column, so the comparison is on its text form.
+	rows, err := r.db.Query(ctx,
+		`SELECT `+snWritebackFailureColumns+` FROM sn_writeback_failures
+		 WHERE ($1 = '' OR entity_type = $1) AND ($2 = '' OR entity_id::text = $2)
+		 ORDER BY created_on DESC, id DESC LIMIT $3`, entityType, entityID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list sn_writeback_failures: %w", err)
+	}
+	defer rows.Close()
+	return collectSNWritebackFailures(rows)
+}
+
+func collectSNWritebackFailures(rows pgx.Rows) ([]domain.SNWritebackFailure, error) {
+	out := []domain.SNWritebackFailure{}
+	for rows.Next() {
+		f, err := scanSNWritebackFailure(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan sn_writeback_failure: %w", err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read sn_writeback_failures: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateError implements SNWritebackFailureRepository.
+func (r *snWritebackFailureRepo) UpdateError(ctx context.Context, id, errMsg string) error {
+	ct, err := r.db.Exec(ctx, `UPDATE sn_writeback_failures SET error = $2 WHERE id = $1::uuid`, id, errMsg)
+	if err != nil {
+		return fmt.Errorf("update sn_writeback_failure error: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return &apierror.NotFoundError{Msg: "mirror write failure not found"}
+	}
+	return nil
+}
+
+// Delete implements SNWritebackFailureRepository.
+func (r *snWritebackFailureRepo) Delete(ctx context.Context, id string) error {
+	ct, err := r.db.Exec(ctx, `DELETE FROM sn_writeback_failures WHERE id = $1::uuid`, id)
+	if err != nil {
+		return fmt.Errorf("delete sn_writeback_failure: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return &apierror.NotFoundError{Msg: "mirror write failure not found"}
+	}
+	return nil
 }

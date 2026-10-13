@@ -19,29 +19,114 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
+// recordingSNWritebackFailures is an in-memory sn_writeback_failures: every
+// Create is kept (calls, for the assertions written before the table was
+// read back) and also held as a row keyed by a generated id, so the reads,
+// the replay's Delete and UpdateError behave like the table does.
 type recordingSNWritebackFailures struct {
 	mu    sync.Mutex
 	calls []domain.CreateSNWritebackFailureRequest
+	rows  []domain.SNWritebackFailure
+	seq   int
 }
 
 func (r *recordingSNWritebackFailures) Create(_ context.Context, req domain.CreateSNWritebackFailureRequest) (domain.SNWritebackFailure, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, req)
-	return domain.SNWritebackFailure{ID: "f1"}, nil
+	r.seq++
+	// Ids are UUID-shaped, as the table's are (the replay validates its id).
+	f := domain.SNWritebackFailure{
+		ID: fmt.Sprintf("99999999-0000-4000-8000-f000000000%02x", r.seq), EntityType: req.EntityType, EntityID: req.EntityID, Operation: req.Operation,
+		Payload: req.Payload, Error: req.Error, CreatedOn: time.Now().Add(time.Duration(r.seq) * time.Millisecond),
+	}
+	r.rows = append(r.rows, f)
+	return f, nil
 }
 
 func (r *recordingSNWritebackFailures) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.calls)
+}
+
+func (r *recordingSNWritebackFailures) GetByID(_ context.Context, id string) (domain.SNWritebackFailure, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, f := range r.rows {
+		if f.ID == id {
+			return f, nil
+		}
+	}
+	return domain.SNWritebackFailure{}, &apierror.NotFoundError{Msg: "mirror write failure not found"}
+}
+
+func (r *recordingSNWritebackFailures) ListByEntity(_ context.Context, entityType, entityID string) ([]domain.SNWritebackFailure, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []domain.SNWritebackFailure{}
+	for _, f := range r.rows {
+		if f.EntityType == entityType && f.EntityID == entityID {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+func (r *recordingSNWritebackFailures) List(_ context.Context, entityType, entityID string, limit int) ([]domain.SNWritebackFailure, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []domain.SNWritebackFailure{}
+	for i := len(r.rows) - 1; i >= 0; i-- {
+		f := r.rows[i]
+		if (entityType == "" || f.EntityType == entityType) && (entityID == "" || f.EntityID == entityID) {
+			out = append(out, f)
+			if limit > 0 && len(out) == limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *recordingSNWritebackFailures) UpdateError(_ context.Context, id, errMsg string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.rows {
+		if r.rows[i].ID == id {
+			r.rows[i].Error = errMsg
+			return nil
+		}
+	}
+	return &apierror.NotFoundError{Msg: "mirror write failure not found"}
+}
+
+func (r *recordingSNWritebackFailures) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.rows {
+		if r.rows[i].ID == id {
+			r.rows = append(r.rows[:i], r.rows[i+1:]...)
+			return nil
+		}
+	}
+	return &apierror.NotFoundError{Msg: "mirror write failure not found"}
+}
+
+// outstanding is the rows still held (Create minus Delete).
+func (r *recordingSNWritebackFailures) outstanding() []domain.SNWritebackFailure {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]domain.SNWritebackFailure(nil), r.rows...)
 }
 
 // waitFor polls until cond returns true or the timeout elapses, failing the

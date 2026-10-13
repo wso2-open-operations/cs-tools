@@ -271,6 +271,26 @@ This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s ow
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
 reached the browser; this is what stops them being sent at all to a caller who shouldn't see them.
 
+## Change request mirror failures and their replay (dual-write, pass-through)
+
+Under the entity service's dual-write data source the change request detail
+(`GET /change-requests/{id}`) carries `mirrorFailures` -- the writes of that change
+request the previous system is still missing (one entry per `sn_writeback_failures` row:
+`{id, operation, payload, error, createdOn}`, oldest first; `[]` when nothing is
+outstanding; `null` on every other data source). This backend passes it through untouched
+(the detail is a raw `[]byte` passthrough, see "Response shape" below) and exposes the
+replay as `POST /change-requests/{id}/mirror-failures/{failureId}/replay` (`PermWrite`),
+proxied to the entity service's internal `POST /sn-writeback-failures/{id}/replay`
+(`CustomerEntityClient.ReplayChangeRequestMirrorFailure`): a 200 means the write reached the
+previous system and the entry is cleared; a 409 means the entity service declined to send it
+again (its message says why: the previous system's change model, or a divergence) and the
+entry stays; a 500 means the previous system rejected it again, the reason then being on
+the refreshed detail's entry. Both ids are validated for shape only. The webapp's red
+banner ("This change could not be mirrored to the previous system: <operation>: <error>",
+with the replay action) is a separate change. The entity service's own `CLAUDE.md`
+("Dual-write: the state mirror ...") is the contract. Tests: `TestGetChangeRequest`
+("passes mirrorFailures through") and `TestReplayChangeRequestMirrorFailure`.
+
 ## Change request create/patch validation (`internal/handler/change_requests.go`)
 
 `POST /change-requests` and `PATCH /change-requests/{id}` forward their JSON body

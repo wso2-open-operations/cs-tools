@@ -216,6 +216,35 @@ func TestGetChangeRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("passes mirrorFailures through", func(t *testing.T) {
+		// The entity service lists, on the dual-write data source, the writes of
+		// the change request the previous system is still missing; the detail is
+		// a raw passthrough, so the webapp's banner and replay action get them
+		// exactly as the entity service shaped them.
+		const failureID = "99999999-0000-4000-8000-f00000000001"
+		client := &mockEntityChangeRequestClient{
+			getChangeRequestFn: func(_ context.Context, id string) ([]byte, error) {
+				return []byte(`{"id":"` + testCRID + `","number":"CHG001","state":"scheduled","mirrorFailures":[{"id":"` + failureID +
+					`","operation":"state","payload":{"state":"scheduled","after":"PatchChangeRequest"},"error":"transition to \"scheduled\" is not allowed by the previous system's change model from its current state \"customer_approval\"; not sent","createdOn":"2026-10-09T10:00:00Z"}]}`), nil
+			},
+		}
+		h := NewChangeRequestHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/change-requests/"+testCRID, nil))
+		r.SetPathValue("id", testCRID)
+		w := httptest.NewRecorder()
+		h.GetChangeRequest(w, r)
+		assertStatus(t, w, http.StatusOK)
+		resp := decodeJSON[map[string]any](t, w)
+		failures, ok := resp["mirrorFailures"].([]any)
+		if !ok || len(failures) != 1 {
+			t.Fatalf("mirrorFailures = %v, want the one entry passed through", resp["mirrorFailures"])
+		}
+		entry := failures[0].(map[string]any)
+		if entry["id"] != failureID || entry["operation"] != "state" || !strings.Contains(entry["error"].(string), "customer_approval") {
+			t.Fatalf("entry = %v", entry)
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrorsGeneric("Failed to retrieve change request.") {
 			t.Run(tc.name, func(t *testing.T) {
@@ -230,6 +259,91 @@ func TestGetChangeRequest(t *testing.T) {
 				r.SetPathValue("id", testCRID)
 				w := httptest.NewRecorder()
 				h.GetChangeRequest(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestReplayChangeRequestMirrorFailure(t *testing.T) {
+	const failureID = "99999999-0000-4000-8000-f00000000001"
+	newReq := func(id, fid string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/change-requests/"+id+"/mirror-failures/"+fid+"/replay", nil)
+		r.SetPathValue("id", id)
+		r.SetPathValue("failureId", fid)
+		return r
+	}
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewChangeRequestHandler(&mockEntityChangeRequestClient{})
+		w := httptest.NewRecorder()
+		h.ReplayChangeRequestMirrorFailure(w, newReq(testCRID, failureID))
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects a malformed change request id or failure id", func(t *testing.T) {
+		for _, ids := range [][2]string{{"not-a-uuid", failureID}, {testCRID, "not-a-uuid"}, {"", failureID}, {testCRID, ""}} {
+			called := false
+			h := NewChangeRequestHandler(&mockEntityChangeRequestClient{replayMirrorFailureFn: func(context.Context, string) ([]byte, error) {
+				called = true
+				return nil, nil
+			}})
+			w := httptest.NewRecorder()
+			h.ReplayChangeRequestMirrorFailure(w, withUser(newReq(ids[0], ids[1])))
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, ErrMsgInvalidUUID)
+			if called {
+				t.Fatalf("%v: the entity service was called for a malformed id", ids)
+			}
+		}
+	})
+
+	t.Run("forwards the failure id to upstream and returns its body", func(t *testing.T) {
+		var captured string
+		client := &mockEntityChangeRequestClient{replayMirrorFailureFn: func(_ context.Context, fid string) ([]byte, error) {
+			captured = fid
+			return []byte(`{"message":"Mirror write replayed; the failure record is cleared","failure":{"id":"` + fid + `","operation":"state"}}`), nil
+		}}
+		h := NewChangeRequestHandler(client)
+		w := httptest.NewRecorder()
+		h.ReplayChangeRequestMirrorFailure(w, withUser(newReq(testCRID, failureID)))
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if captured != failureID {
+			t.Fatalf("upstream received failure id %q, want %q", captured, failureID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["failure"].(map[string]any)["id"] != failureID {
+			t.Fatalf("response = %v", resp)
+		}
+	})
+
+	t.Run("a 409 (declined again) reaches the caller with the entity service's reason", func(t *testing.T) {
+		const reason = `transition to "scheduled" is not allowed by the previous system's change model from its current state "customer_approval"; not sent`
+		client := &mockEntityChangeRequestClient{replayMirrorFailureFn: func(context.Context, string) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":` + jsonQuote(reason) + `}`}
+		}}
+		h := NewChangeRequestHandler(client)
+		w := httptest.NewRecorder()
+		h.ReplayChangeRequestMirrorFailure(w, withUser(newReq(testCRID, failureID)))
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, reason)
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to replay the mirror write to the previous system.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityChangeRequestClient{replayMirrorFailureFn: func(context.Context, string) ([]byte, error) {
+					return nil, tc.err
+				}}
+				h := NewChangeRequestHandler(client)
+				w := httptest.NewRecorder()
+				h.ReplayChangeRequestMirrorFailure(w, withUser(newReq(testCRID, failureID)))
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

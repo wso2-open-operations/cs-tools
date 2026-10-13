@@ -50,6 +50,7 @@ type entityChangeRequestClient interface {
 	CreateComment(ctx context.Context, body []byte) ([]byte, error)
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	DecideChangeRequestApproval(ctx context.Context, id string, body []byte) ([]byte, error)
+	ReplayChangeRequestMirrorFailure(ctx context.Context, failureID string) ([]byte, error)
 }
 
 // ChangeRequestHandler handles HTTP requests for change-request operations.
@@ -722,6 +723,41 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity DecideChangeRequestApproval failed", "userID", user.UserID, "id", id, "err", err)
 		mapApprovalDecisionError(w, err, "Failed to submit change request approval decision.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ReplayChangeRequestMirrorFailure handles
+// POST /change-requests/{id}/mirror-failures/{failureId}/replay: re-sends one
+// write of the change request the previous system is still missing (an entry
+// of the detail's `mirrorFailures`, dual-write data source only) through the
+// entity service's replay, which clears the entry only when the re-send
+// succeeds. The entity's 409 (declined again: the previous system's change
+// model does not allow the move from where its record is, or the records
+// still diverge) reaches the caller with its message; a rejection by the
+// previous system itself is a 500 whose reason is on the refreshed detail.
+// The change request id is validated for shape only: the failure row is the
+// entity service's, keyed by its own id.
+func (h *ChangeRequestHandler) ReplayChangeRequestMirrorFailure(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	failureID := r.PathValue("failureId")
+	if id == "" || !uuidRe.MatchString(id) || failureID == "" || !uuidRe.MatchString(failureID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.ReplayChangeRequestMirrorFailure(r.Context(), failureID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity ReplayChangeRequestMirrorFailure failed", "userID", user.UserID, "id", id, "failureId", failureID, "err", err)
+		mapUpstreamError(w, err, "Failed to replay the mirror write to the previous system.")
 		return
 	}
 
