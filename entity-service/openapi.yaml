@@ -1391,6 +1391,349 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /announcement-requests/{id}/attachments:
+    post:
+      summary: >-
+        Attach one file to an announcement request. It is held with the
+        request until publish, which copies it onto every case the request
+        creates (see POST /announcement-requests/{id}/cases/{caseId}/attachments
+        and auto-publish), where customers see it as an ordinary case
+        attachment. The file is a base64 data URI. Its type is derived from
+        its name, not from the declared `type`: only pdf, png, jpg, jpeg,
+        gif, doc, docx, xls, xlsx, ppt, pptx, txt and csv are accepted, the
+        bytes must be that kind of file, and a file is at most 10 MB. A
+        request carries at most 5 files and no two with the same name
+        (case-insensitively). A content edit like any other: allowed in draft
+        and approved, a pending_approval request goes back to draft (the
+        audience snapshot and dry run are cleared), a published request
+        cannot be changed. Once a case exists for any of the request's projects
+        (some projects have already received it) its files can no longer change,
+        because every case is given the request's files as they are at its turn
+        and a change would leave one announcement in two versions (409).
+        Needs a data source whose cases keep their files
+        in ServiceNow (503 otherwise: a file nobody could send is not stored).
+      operationId: createAnnouncementRequestAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnouncementRequestAttachmentRequest'
+      responses:
+        "201":
+          description: The stored file's metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequestAttachment'
+        "400":
+          description: "Bad request: an unsupported type, content that is not that kind of file, a file over 10 MB, a sixth file, a duplicate name."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No usable caller identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller. These routes are for the CSM portal backend and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is published, some projects have already received it (its files can no longer change), or its state changed while this was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: This data source cannot hold a case attachment for an announcement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: List the files attached to this request, oldest first. No pagination.
+      operationId: listAnnouncementRequestAttachments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The files (possibly none).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAnnouncementRequestAttachmentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No usable caller identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller. These routes are for the CSM portal backend and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/attachments/{attachmentId}/content:
+    get:
+      summary: >-
+        The bytes of one attached file. Always a download
+        (Content-Disposition: attachment); the Content-Type is the file's own
+        only when it is one of the types the case attachment content endpoint
+        forwards, application/octet-stream otherwise.
+      operationId: getAnnouncementRequestAttachmentContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No usable caller identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller. These routes are for the CSM portal backend and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request or file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/attachments/{attachmentId}:
+    delete:
+      summary: >-
+        Remove one attached file. The same state rules as attaching one: allowed
+        in draft and approved, a pending_approval request goes back to draft,
+        a published request cannot be changed, and neither can one whose projects
+        have already received it (409).
+      operationId: deleteAnnouncementRequestAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: actorId
+          in: query
+          required: true
+          description: The acting user's id (a DELETE carries no body).
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No usable caller identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller. These routes are for the CSM portal backend and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request or file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is published, some projects have already received it (its files can no longer change), or its state changed while this was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /announcement-requests/{id}/cases/{caseId}/attachments:
+    post:
+      summary: >-
+        Copy the request's attached files onto one case, from the server, so a
+        publish to many projects does not upload the same file from the browser
+        once per project. Called once per case by the browser-driven publish
+        (and for the dry-run case); the scheduled publish does the same
+        in-process. Only a case the request owns is accepted: its recorded
+        dry-run case while the request is a draft, an announcement case of one
+        of its resolved projects while it is approved. Idempotent: a file the
+        case already has (same name and size) is left alone, so a retry after a
+        partial failure attaches only what is missing. Runs under a longer
+        deadline than other routes (up to five 10 MB files, each a ServiceNow
+        round trip).
+      operationId: attachAnnouncementRequestAttachmentsToCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnouncementRequestActorRequest'
+      responses:
+        "200":
+          description: What this call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachAnnouncementRequestAttachmentsToCaseResponse'
+        "400":
+          description: "Bad request: the case is not an announcement case, is not one of the request's projects, or no acting user email was sent."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No usable caller identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller. These routes are for the CSM portal backend and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such request or case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The request is not a draft (with this case as its dry run) or approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: A file could not be attached (what was attached stays; retry).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: This data source cannot hold a case attachment for an announcement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cloud-status/monitors:
     get:
       summary: >-
@@ -29710,6 +30053,13 @@ components:
         status:
           type: string
           enum: [succeeded, tag_failed, failed]
+          description: >-
+            tag_failed: the case was created but a required follow-up step on
+            it did not complete — the mandatory security tag and/or the
+            request's attachments. A retry redoes that step on the existing
+            case (both are idempotent) and never creates a second case. The
+            value keeps its original name: it is stored and sent by deployed
+            clients.
         errorMessage:
           type: string
           nullable: true
@@ -29757,6 +30107,74 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AnnouncementRequestDelivery'
+
+    AnnouncementRequestAttachment:
+      description: >
+        The metadata of one file attached to an announcement request (the bytes
+        are read through the content endpoint). Always backed by Postgres.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        announcementRequestId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          description: The canonical MIME type of the file's extension.
+        sizeBytes:
+          type: integer
+        createdBy:
+          type: string
+        createdByEmail:
+          type: string
+          nullable: true
+          description: Optional display-only companion to createdBy — see AnnouncementRequest.createdByEmail.
+        createdOn:
+          type: string
+          format: date-time
+
+    CreateAnnouncementRequestAttachmentRequest:
+      type: object
+      required: [actorId, name, file]
+      additionalProperties: false
+      properties:
+        actorId:
+          type: string
+        actorEmail:
+          type: string
+          description: Optional display-only companion to actorId — see AnnouncementRequest.createdByEmail.
+        name:
+          type: string
+          maxLength: 255
+          description: The file name, with its extension (no path).
+        type:
+          type: string
+          description: Advisory only; the stored type is derived from the name.
+        file:
+          type: string
+          description: The file as a base64 data URI (data:application/pdf;base64,...), at most 10 MB decoded.
+
+    SearchAnnouncementRequestAttachmentsResponse:
+      type: object
+      properties:
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnnouncementRequestAttachment'
+
+    AttachAnnouncementRequestAttachmentsToCaseResponse:
+      type: object
+      properties:
+        attached:
+          type: integer
+          description: Files this call created on the case.
+        alreadyAttached:
+          type: integer
+          description: Files the case already had, left alone.
 
     SearchAnnouncementRequestsRequest:
       type: object

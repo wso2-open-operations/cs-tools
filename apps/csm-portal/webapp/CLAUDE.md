@@ -387,6 +387,59 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## Announcement attachments (files sent with an announcement)
+
+A sender can attach up to five files (a PDF above all) to an announcement; customers see them on
+every announcement case like any case attachment. This app only chooses and uploads the files:
+entity-service holds them with the request and copies them onto each case itself (its CLAUDE.md,
+"Announcement request attachments"), so nothing is uploaded once per project, and a request with no
+files goes through exactly the calls it made before files existed.
+
+- **One controller, one field.** `useAnnouncementAttachments(requestId)` (`csm-announcements/api`) is
+  what the create forms and the request dialog all use; `AnnouncementAttachmentsField` only draws what
+  it returns. With a `requestId` a picked file is uploaded at once (one at a time: the server counts
+  files and refuses a repeated name, so concurrent uploads would be judged against one stale list) and
+  removing one deletes it on the server. Without one (a create form before its draft exists) files are
+  only held in the form, and `flushStaged(id)` uploads them once the draft is saved. The type, size,
+  count and duplicate-name rules are repeated in `utils/announcementAttachments.ts` only so the sender is
+  told at once; entity-service checks them again, by the file's content, and its reason is what shows.
+- **The create forms** (`CreateCustomerAnnouncementForm`, `CreateEolAnnouncementForm`). Save as draft:
+  create or update the draft, `flushStaged`, then leave; a file the server refuses stops the save before
+  it navigates and keeps that file and the rest held, and the next click updates the same draft and
+  retries only what is left. Submit for approval: dry run, draft, `flushStaged`, record the dry run,
+  `attachToDryRunCase` (the approver reviews that case, so it carries the files), then submit; a failure
+  at any step stops before submit. `hasFiles` is captured before the first await and counts a file list
+  that failed to load (`loadFailed`) as "has files": the server copies whatever the request really has,
+  so an unreadable list must never read as none.
+- **The request dialog.** Files are editable in `draft`, `approved` and an unlocked `pending_approval`
+  (changing them sends that request back to draft, and the dialog says so), and listed read-only
+  otherwise (hidden when there are none, so older requests look as they did). They are saved the moment
+  they are added, not with "Save changes", which the dialog also says. Once a case exists for any
+  project (`publish.succeededProjectIds`, which includes a case still short of its follow-up) or a
+  project failed, the files are locked: every case is given the request's files as they are at its turn,
+  so a later change would send one announcement in two versions. The server refuses it too (409); the lock
+  only says why first. Download needs `canDownloadAttachment`; adding and removing needs
+  `canCreateAnnouncement`. Submit is disabled while an upload is in flight, without being labelled
+  "Submitting…".
+- **Publishing** (`usePublishAnnouncementRequest`). After each case is created the hook asks the server
+  to copy the request's files onto it (`useAttachAnnouncementRequestFilesToCase`), after the security tag
+  when there is one. Both steps are idempotent, so a failure of either is recorded exactly like a failed
+  tag always was (the delivery status `tag_failed`: the case exists, a follow-up is outstanding) and a
+  retry redoes both on the existing case, never creating another; `followUpLabel` ("security label",
+  "attachment(s)" or both) is what the button and messages call it. **Publish waits for the file list**
+  (`readyToPublish` includes it) and refuses while it could not be loaded (`attachmentsLoadFailed`,
+  `retryAttachments`): without the list the hook cannot know whether every case must be given files, and
+  sending without them would put the announcement out without the document it refers to. The list hook
+  reads a **404 as "no files"**: the request was just read, so a 404 can only be a backend that predates
+  this feature, which cannot hold any; without that a web app deployed ahead of its backend would block
+  every publish.
+- **Tests.** Every existing test of the forms, the dialog and the publish hook is unchanged apart from
+  what its mocks need (the new hooks default to "no files", so they keep proving the no-files path).
+  New: the util, the field, the six API hooks including the controller, the dialog's attachment
+  behaviour, the publish hook's file paths (copy, retry, hydration from the ledger, the gating), and
+  `CsmAnnouncementCreatePage.attachments.test.tsx` for both forms end to end through the real
+  controller, in a file of its own so the existing page test is untouched.
+
 ## Testing
 
 - Runner: Vitest (`jsdom` environment), configured inline in `vite.config.ts` — no separate `vitest.config.ts`.

@@ -168,12 +168,30 @@ func CaseResolutionCodeFromEnum(enumLabel string) domain.CaseResolutionCode {
 // through entirely different endpoints.
 // caseLikeNonAnnouncementTypes are the work item types that may own a case
 // attachment or be named as another case's related case: every case-like type
-// except an announcement, which has never been able to (it had no "case" row for
-// the old foreign keys to point at, and the row level security of the announcement
-// tables relies on that). Those foreign keys now point at work_item (migrations
-// 0210 and 0211) so a ticket keeps both after it is converted to another type, and
-// the statements that write either check this list instead.
+// except an announcement, which has never been able to be a related case (it had
+// no "case" row for the old foreign key to point at). Those foreign keys now
+// point at work_item (migrations 0210 and 0211) so a ticket keeps both after it
+// is converted to another type, and the statements that write either check this
+// list instead.
+//
+// An announcement CAN own an attachment since announcement requests gained files
+// (a PDF sent with the announcement), but only when an internal caller attaches
+// it: see canAttachToAnnouncement. The row level security of the announcement
+// tables is why the rule is not simply "any case-like type": case_attachment's
+// policies carry the announcement visibility check since migration 100025.
 const caseLikeNonAnnouncementTypes = `'{CASE,ENGAGEMENT,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS}'::work_item_type_enum[]`
+
+// canAttachToAnnouncement says whether the caller may put an attachment on an
+// announcement: only an internal caller (staff, or the service itself when it
+// copies an announcement request's files onto the cases it creates). A customer
+// reads an announcement but never adds to it, and the customer portal's
+// attachment upload reaches the same insert, so the rule is held here, in the
+// statement's own condition, and not only by the portal's UI. A request with no
+// resolved identity is refused: this decides for the caller, so it fails closed.
+func canAttachToAnnouncement(ctx context.Context) bool {
+	scope, ok := CallerIdentityFromContext(ctx)
+	return ok && (scope.Unrestricted || scope.HasInternalAccess)
+}
 
 const caseLikeWorkItemTypes = `'{CASE,ENGAGEMENT,SERVICE_REQUEST,SECURITY_REPORT_ANALYSIS,ANNOUNCEMENT}'::work_item_type_enum[]`
 
@@ -2807,14 +2825,15 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // CreateCaseAttachment implements CaseRepository.
 func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
 	// The EXISTS is the check the table's old foreign key to "case"(id) used to make
-	// for free: only a case-like work item (never an announcement, a change request,
-	// an incident...) owns an attachment. The key now points at work_item (migration
+	// for free: only a case-like work item (never a change request, an incident...)
+	// owns an attachment, and an announcement only when an internal caller attaches
+	// it (canAttachToAnnouncement, $9). The key now points at work_item (migration
 	// 0210) so a case that changes type keeps its attachments, which makes this
 	// the only thing keeping the narrower rule. A non-matching id inserts nothing.
 	const query = `
 		INSERT INTO case_attachment (case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
 		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, $8::text
-		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $1::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
+		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $1::uuid AND (w.type = ANY(` + caseLikeNonAnnouncementTypes + `) OR ($9::boolean AND w.type = 'ANNOUNCEMENT'::work_item_type_enum)))
 		RETURNING id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
 
 	var (
@@ -2824,6 +2843,7 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 	)
 	err := r.db.QueryRow(ctx, query,
 		req.ReferenceID, req.StorageKey, req.Name, req.Type, req.SizeBytes, req.Description, req.CreatedBy, req.Status,
+		canAttachToAnnouncement(ctx),
 	).Scan(
 		&a.ID, &a.ReferenceID, &storageKey, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
 		&uploadedByID, &a.CreatedOn, &a.Status,
@@ -2858,13 +2878,14 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 // follows -- id is supplied by the caller (ServiceNow's own attachment
 // sys_id, converted), not generated, and storage_key is always NULL.
 func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
-	// Same case-like-only rule as CreateCaseAttachment, for the same reason.
+	// Same case-like-only rule as CreateCaseAttachment, for the same reason
+	// (announcements for an internal caller only, $8).
 	// created_on is left out so the column default (NOW()) applies -- see the
 	// interface doc comment for why ServiceNow's own createdOn is not used.
 	const query = `
 		INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, description, uploaded_by, status)
 		SELECT $1::uuid, $2::uuid, NULL, $3::text, $4::text, $5::bigint, $6::text, $7::uuid, 'complete'
-		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $2::uuid AND w.type = ANY(` + caseLikeNonAnnouncementTypes + `))
+		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $2::uuid AND (w.type = ANY(` + caseLikeNonAnnouncementTypes + `) OR ($8::boolean AND w.type = 'ANNOUNCEMENT'::work_item_type_enum)))
 		RETURNING id, case_id, filename, mime_type, size_bytes, description, uploaded_by, created_on, status`
 
 	var (
@@ -2873,6 +2894,7 @@ func (r *caseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req d
 	)
 	err := r.db.QueryRow(ctx, query,
 		id, req.ReferenceID, req.Name, req.Type, sizeBytes, req.Description, uploadedBy,
+		canAttachToAnnouncement(ctx),
 	).Scan(
 		&a.ID, &a.ReferenceID, &a.Name, &a.Type, &a.SizeBytes, &a.Description,
 		&uploadedByID, &a.CreatedOn, &a.Status,
@@ -2949,7 +2971,13 @@ func (r *caseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (domain
 // activity feed, see SearchCaseActivities).
 //
 // The synced side is joined to work_item so that work_item's row-level
-// security scopes it like every other work item read. Its uploader is matched
+// security scopes it like every other work item read, and carries the
+// announcementVisibilityLeakGuard on top: work_item's policy only asks for project
+// membership, and work_item_attachment has none of its own, so without the guard the
+// synced file names of an announcement the caller is not cleared for (a security
+// announcement and a General Access contact) would be listed although native rows
+// of the same announcement are hidden by case_attachment's own policy (migration
+// 100025). Its uploader is matched
 // to a user by email with a LATERAL ... LIMIT 1 ("user".email has no unique
 // constraint, so a plain join would fan one attachment into several rows
 // while the count still counted it once); an unmatched uploader is still
@@ -2981,7 +3009,8 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		) su ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  AND NOT EXISTS (SELECT 1 FROM case_attachment dup WHERE dup.id = wa.id)`
+		  AND NOT EXISTS (SELECT 1 FROM case_attachment dup WHERE dup.id = wa.id)
+		  AND ` + announcementVisibilityLeakGuard
 	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
 	const dataQuery = `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
@@ -4889,8 +4918,16 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	// UUID (a change request, incident, ...) through this endpoint and read
 	// that record's comments/attachments/field changes instead. Same class
 	// of gap as IncidentRepository.SearchIncidentActivities' own fix.
+	//
+	// The same check also carries the announcementVisibilityLeakGuard, so an
+	// announcement the caller is not cleared for answers "case not found" exactly like
+	// its case detail does. The feed's other sources do not all know about that rule:
+	// comments and native attachments are hidden by their own policies (migrations
+	// 100016 and 100025), but the synced attachments (work_item_attachment, no policy)
+	// and the field-change history (work_item_activity, project membership only) are
+	// reached through work_item, which lets every project member through.
 	var exists bool
-	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM work_item WHERE id = $1 AND type = ANY(`+caseLikeWorkItemTypes+`))`, req.CaseID).Scan(&exists); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM work_item wi WHERE wi.id = $1 AND wi.type = ANY(`+caseLikeWorkItemTypes+`) AND `+announcementVisibilityLeakGuard+`)`, req.CaseID).Scan(&exists); err != nil {
 		return nil, 0, fmt.Errorf("check case exists: %w", err)
 	}
 	if !exists {

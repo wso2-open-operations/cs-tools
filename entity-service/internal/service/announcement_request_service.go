@@ -82,12 +82,18 @@ const autoPublishSecurityTagLabel = "Security Announcement"
 type caseFanOutClient interface {
 	CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error)
 	AddCaseTagAs(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error)
+	// GetCaseByID backs AttachToCase's check that the case it is asked to put
+	// a request's files on is one the request owns (see requireOwnedCase).
+	GetCaseByID(ctx context.Context, id string) (domain.CaseView, error)
 }
 
 type announcementRequestService struct {
 	repo   repository.AnnouncementRequestRepository
 	cases  caseFanOutClient
 	access AccessService
+	// attach copies a request's files onto cases. Nil unless set by
+	// WithAttachmentFanOut; see that function and requireAttachmentSupport.
+	attach CaseAttachmentFanOutClient
 }
 
 // NewAnnouncementRequestService constructs an AnnouncementRequestService
@@ -417,13 +423,27 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 	if len(current.ResolvedProjectIDs) == 0 {
 		return domain.AnnouncementRequest{}, &apierror.ConflictError{Msg: "this request has no resolved audience to publish to"}
 	}
-	if current.IsSecurityAnnouncement && (current.CreatedByEmail == nil || *current.CreatedByEmail == "") {
-		// AddCaseTagAs needs a real actor email -- there's no token on this
-		// caller's ctx to fall back to resolving one from (see
+	// The request's files, if any, are copied onto every case it creates (see
+	// AttachToCase), by the same actor the tag is attached as. Checked before
+	// the claim so a request this data source cannot send is refused without
+	// ever fanning out.
+	files, err := s.repo.ListAttachments(ctx, id)
+	if err != nil {
+		return domain.AnnouncementRequest{}, err
+	}
+	hasFiles := len(files) > 0
+	if hasFiles {
+		if err := s.requireAttachmentSupport(); err != nil {
+			return domain.AnnouncementRequest{}, err
+		}
+	}
+	if (current.IsSecurityAnnouncement || hasFiles) && (current.CreatedByEmail == nil || *current.CreatedByEmail == "") {
+		// AddCaseTagAs and the file copy both need a real actor email -- there's
+		// no token on this caller's ctx to fall back to resolving one from (see
 		// caseFanOutClient's own doc comment). Every request submitted since
 		// CreatedByEmail existed has one; a row from before that still
 		// wouldn't be safe to guess an actor for.
-		return domain.AnnouncementRequest{}, &apierror.ConflictError{Msg: "this security announcement has no recorded creator email to attach the tag as"}
+		return domain.AnnouncementRequest{}, &apierror.ConflictError{Msg: "this announcement has no recorded creator email to attach its tag or files as"}
 	}
 
 	current, err = s.repo.ClaimForAutoPublish(ctx, id, autoPublishClaimStaleAfter)
@@ -450,6 +470,26 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 	var actorEmail string
 	if current.CreatedByEmail != nil {
 		actorEmail = *current.CreatedByEmail
+	}
+
+	// finishCase is everything a case needs once it exists: the mandatory
+	// security tag (security announcements) and the request's files. Both steps
+	// are idempotent, so the same function serves the first attempt and every
+	// retry of a project whose case was created but not finished. A failure in
+	// either is recorded as tag_failed (see that status's doc comment), which
+	// keeps the project from counting as delivered and from being re-created.
+	finishCase := func(caseID string) error {
+		if current.IsSecurityAnnouncement {
+			if _, err := s.cases.AddCaseTagAs(ctx, caseID, autoPublishSecurityTagLabel, actorEmail); err != nil {
+				return err
+			}
+		}
+		if hasFiles {
+			if _, err := s.attachFilesToCase(ctx, id, caseID, actorEmail); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	succeeded := make(map[string]bool, len(deliveries))
@@ -530,7 +570,7 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 		go func(projectID, caseID string) {
 			defer tagRetryWG.Done()
 			defer func() { <-tagRetrySem }()
-			if _, err := s.cases.AddCaseTagAs(ctx, caseID, autoPublishSecurityTagLabel, actorEmail); err != nil {
+			if err := finishCase(caseID); err != nil {
 				mu.Lock()
 				stillFailingTags = append(stillFailingTags, projectID)
 				mu.Unlock()
@@ -589,21 +629,19 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 			mu.Lock()
 			caseIDByProject[projectID] = caseID
 			mu.Unlock()
-			if current.IsSecurityAnnouncement {
-				if _, err := s.cases.AddCaseTagAs(ctx, caseID, autoPublishSecurityTagLabel, actorEmail); err != nil {
-					// The case is real — this project must not be treated as
-					// delivered until the tag actually attaches (see the type
-					// doc comment on AnnouncementRequestDeliveryStatus), so it
-					// has to block MarkPublished below exactly like a retried
-					// tag failure does.
-					mu.Lock()
-					stillFailingTags = append(stillFailingTags, projectID)
-					mu.Unlock()
-					if err := recordNow(domain.RecordAnnouncementRequestDeliveryInput{ProjectID: projectID, CaseID: &caseID, Status: domain.AnnouncementRequestDeliveryStatusTagFailed}); err != nil {
-						recordFirstErr(err)
-					}
-					return
+			if err := finishCase(caseID); err != nil {
+				// The case is real — this project must not be treated as
+				// delivered until its tag and files are actually on it (see
+				// the type doc comment on AnnouncementRequestDeliveryStatus),
+				// so it has to block MarkPublished below exactly like a
+				// retried tag failure does.
+				mu.Lock()
+				stillFailingTags = append(stillFailingTags, projectID)
+				mu.Unlock()
+				if err := recordNow(domain.RecordAnnouncementRequestDeliveryInput{ProjectID: projectID, CaseID: &caseID, Status: domain.AnnouncementRequestDeliveryStatusTagFailed}); err != nil {
+					recordFirstErr(err)
 				}
+				return
 			}
 			if err := recordNow(domain.RecordAnnouncementRequestDeliveryInput{ProjectID: projectID, CaseID: &caseID, Status: domain.AnnouncementRequestDeliveryStatusSucceeded}); err != nil {
 				recordFirstErr(err)
@@ -618,7 +656,7 @@ func (s *announcementRequestService) AutoPublish(ctx context.Context, id string)
 
 	if deferredWork || len(stillFailingCases) > 0 || len(stillFailingTags) > 0 {
 		msg := fmt.Sprintf(
-			"not yet fully delivered — %d project(s) failed case creation, %d project(s) failed the security tag",
+			"not yet fully delivered — %d project(s) failed case creation, %d project(s) failed the security tag or attachments",
 			len(stillFailingCases), len(stillFailingTags),
 		)
 		if deferredWork {

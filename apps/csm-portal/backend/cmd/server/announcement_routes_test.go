@@ -33,6 +33,8 @@ import (
 // (the Requests tab: drafts and requests awaiting approval) is the creators'
 // workspace and needs both permissions. Approving stays PermWrite on purpose (it
 // only records a decision taken over email, see handler.PermCreateAnnouncement).
+// Attaching, removing and copying files are writes like the rest; listing them is
+// a read; fetching a file's bytes is a download (PermDownloadAttachment).
 func TestAnnouncementRequestRoutePermissions(t *testing.T) {
 	src, err := os.ReadFile("main.go")
 	if err != nil {
@@ -53,6 +55,10 @@ func TestAnnouncementRequestRoutePermissions(t *testing.T) {
 		var wantKind string
 		var wantPerms []string
 		switch {
+		case method == "GET" && strings.HasSuffix(path, "/content"):
+			// A file's bytes are a download, like a case attachment's, so they need the
+			// permission that route asks for, not just PermView.
+			wantKind, wantPerms = "route", []string{"PermDownloadAttachment"}
 		case method == "GET":
 			wantKind, wantPerms = "route", []string{"PermView"}
 		case method == "POST" && strings.HasSuffix(path, "/approve"):
@@ -82,6 +88,12 @@ func TestAnnouncementRequestRoutePermissions(t *testing.T) {
 	for _, want := range []string{
 		"POST /announcement-requests", "PATCH /announcement-requests/{id}",
 		"POST /announcement-requests/{id}/submit", "POST /announcement-requests/{id}/publish",
+		// The files sent with an announcement: changing them is a content edit.
+		"POST /announcement-requests/{id}/attachments",
+		"DELETE /announcement-requests/{id}/attachments/{attachmentId}",
+		"POST /announcement-requests/{id}/cases/{caseId}/attachments",
+		"GET /announcement-requests/{id}/attachments",
+		"GET /announcement-requests/{id}/attachments/{attachmentId}/content",
 	} {
 		found := false
 		for _, m := range matches {

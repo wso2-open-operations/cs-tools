@@ -46,7 +46,16 @@ type mockEntityAnnouncementRequestClient struct {
 	listUpdatesFn             func(ctx context.Context, id string) ([]byte, error)
 	recordDeliveriesFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
 	listDeliveriesFn          func(ctx context.Context, id string) ([]byte, error)
+	createAttachmentFn        func(ctx context.Context, id string, body []byte) ([]byte, error)
+	listAttachmentsFn         func(ctx context.Context, id string) ([]byte, error)
+	attachmentContentFn       func(ctx context.Context, id, attachmentID string) ([]byte, string, error)
+	deleteAttachmentFn        func(ctx context.Context, id, attachmentID, actorID string) ([]byte, error)
+	attachToCaseFn            func(ctx context.Context, id, caseID string, body []byte) ([]byte, error)
 
+	gotCreateAttachmentBody      []byte
+	gotAttachToCaseBody          []byte
+	gotAttachToCaseCaseID        string
+	gotDeleteAttachmentActorID   string
 	gotApproveBody               []byte
 	gotScheduleBody              []byte
 	gotPublishBody               []byte
@@ -170,7 +179,48 @@ func (m *mockEntityAnnouncementRequestClient) ListAnnouncementRequestDeliveries(
 	return []byte(`{"deliveries":[]}`), nil
 }
 
+func (m *mockEntityAnnouncementRequestClient) CreateAnnouncementRequestAttachment(ctx context.Context, id string, body []byte) ([]byte, error) {
+	m.gotCreateAttachmentBody = body
+	if m.createAttachmentFn != nil {
+		return m.createAttachmentFn(ctx, id, body)
+	}
+	return []byte(`{"id":"att-1"}`), nil
+}
+
+func (m *mockEntityAnnouncementRequestClient) ListAnnouncementRequestAttachments(ctx context.Context, id string) ([]byte, error) {
+	if m.listAttachmentsFn != nil {
+		return m.listAttachmentsFn(ctx, id)
+	}
+	return []byte(`{"attachments":[]}`), nil
+}
+
+func (m *mockEntityAnnouncementRequestClient) GetAnnouncementRequestAttachmentContent(ctx context.Context, id, attachmentID string) ([]byte, string, error) {
+	if m.attachmentContentFn != nil {
+		return m.attachmentContentFn(ctx, id, attachmentID)
+	}
+	return []byte("%PDF-"), "application/pdf", nil
+}
+
+func (m *mockEntityAnnouncementRequestClient) DeleteAnnouncementRequestAttachment(ctx context.Context, id, attachmentID, actorID string) ([]byte, error) {
+	m.gotDeleteAttachmentActorID = actorID
+	if m.deleteAttachmentFn != nil {
+		return m.deleteAttachmentFn(ctx, id, attachmentID, actorID)
+	}
+	return nil, nil
+}
+
+func (m *mockEntityAnnouncementRequestClient) AttachAnnouncementRequestAttachmentsToCase(ctx context.Context, id, caseID string, body []byte) ([]byte, error) {
+	m.gotAttachToCaseBody = body
+	m.gotAttachToCaseCaseID = caseID
+	if m.attachToCaseFn != nil {
+		return m.attachToCaseFn(ctx, id, caseID, body)
+	}
+	return []byte(`{"attached":1,"alreadyAttached":0}`), nil
+}
+
 const testAnnouncementRequestID = "11111111-1111-1111-1111-111111111111"
+const testAnnouncementAttachmentID = "22222222-2222-2222-2222-222222222222"
+const testAnnouncementCaseID = "33333333-3333-3333-3333-333333333333"
 
 // ----- auth required -----
 
@@ -196,6 +246,11 @@ func TestAnnouncementRequestHandler_RequiresAuth(t *testing.T) {
 		{"list-updates", http.MethodGet, "/announcement-requests/" + testAnnouncementRequestID + "/updates", "", h.ListAnnouncementRequestUpdates},
 		{"record-deliveries", http.MethodPost, "/announcement-requests/" + testAnnouncementRequestID + "/deliveries", `{"deliveries":[{"projectId":"p-1","status":"succeeded","caseId":"case-1"}]}`, h.RecordAnnouncementRequestDeliveries},
 		{"list-deliveries", http.MethodGet, "/announcement-requests/" + testAnnouncementRequestID + "/deliveries", "", h.ListAnnouncementRequestDeliveries},
+		{"create-attachment", http.MethodPost, "/announcement-requests/" + testAnnouncementRequestID + "/attachments", `{"name":"a.pdf","file":"data:application/pdf;base64,JVBERg=="}`, h.CreateAnnouncementRequestAttachment},
+		{"list-attachments", http.MethodGet, "/announcement-requests/" + testAnnouncementRequestID + "/attachments", "", h.ListAnnouncementRequestAttachments},
+		{"attachment-content", http.MethodGet, "/announcement-requests/" + testAnnouncementRequestID + "/attachments/" + testAnnouncementAttachmentID + "/content", "", h.GetAnnouncementRequestAttachmentContent},
+		{"delete-attachment", http.MethodDelete, "/announcement-requests/" + testAnnouncementRequestID + "/attachments/" + testAnnouncementAttachmentID, "", h.DeleteAnnouncementRequestAttachment},
+		{"attach-to-case", http.MethodPost, "/announcement-requests/" + testAnnouncementRequestID + "/cases/" + testAnnouncementCaseID + "/attachments", "", h.AttachAnnouncementRequestAttachmentsToCase},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -933,6 +988,261 @@ func TestSubmitAnnouncementRequest(t *testing.T) {
 		assertStatus(t, w, http.StatusBadRequest)
 		if client.searchProjectsCalls != 0 {
 			t.Fatalf("expected no project search for an unrecognized scope, got %d calls", client.searchProjectsCalls)
+		}
+	})
+}
+
+// ----- announcement request attachments -----
+
+func attachmentRequest(method, target, body string) *http.Request {
+	r := withUser(httptest.NewRequest(method, target, strings.NewReader(body)))
+	r.SetPathValue("id", testAnnouncementRequestID)
+	r.SetPathValue("attachmentId", testAnnouncementAttachmentID)
+	r.SetPathValue("caseId", testAnnouncementCaseID)
+	return r
+}
+
+func TestCreateAnnouncementRequestAttachment(t *testing.T) {
+	const target = "/announcement-requests/" + testAnnouncementRequestID + "/attachments"
+
+	t.Run("forwards the file and forces the actor to the authenticated caller", func(t *testing.T) {
+		client := &mockEntityAnnouncementRequestClient{}
+		h := NewAnnouncementRequestHandler(client, nil)
+		w := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(w, attachmentRequest(http.MethodPost, target,
+			`{"name":"advisory.pdf","type":"application/pdf","file":"data:application/pdf;base64,JVBERg==","actorId":"someone-else","actorEmail":"x@y.z"}`))
+		assertStatus(t, w, http.StatusCreated)
+
+		var got struct {
+			ActorID, ActorEmail, Name, Type, File string
+		}
+		var raw map[string]string
+		if err := json.Unmarshal(client.gotCreateAttachmentBody, &raw); err != nil {
+			t.Fatalf("decode forwarded body: %v", err)
+		}
+		got.ActorID, got.ActorEmail, got.Name, got.Type, got.File = raw["actorId"], raw["actorEmail"], raw["name"], raw["type"], raw["file"]
+		if got.ActorID != testUser.UserID || got.ActorEmail != testUser.Email {
+			t.Fatalf("actor = %q/%q, want the authenticated caller %q/%q — a client-supplied value must never be trusted", got.ActorID, got.ActorEmail, testUser.UserID, testUser.Email)
+		}
+		if got.Name != "advisory.pdf" || got.Type != "application/pdf" || got.File != "data:application/pdf;base64,JVBERg==" {
+			t.Fatalf("expected the file forwarded unchanged, got %+v", got)
+		}
+		if !strings.Contains(w.Body.String(), `"att-1"`) {
+			t.Fatalf("expected the upstream response returned, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("accepts a body past the 1 MiB generic cap and refuses one past 15 MiB", func(t *testing.T) {
+		h := NewAnnouncementRequestHandler(&mockEntityAnnouncementRequestClient{}, nil)
+		body := func(n int) string {
+			return `{"name":"a.pdf","file":"data:application/pdf;base64,` + strings.Repeat("A", n) + `"}`
+		}
+		w := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(w, attachmentRequest(http.MethodPost, target, body(3<<20)))
+		assertStatus(t, w, http.StatusCreated)
+
+		w = httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(w, attachmentRequest(http.MethodPost, target, body(16<<20)))
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+	})
+
+	t.Run("rejects a bad id, invalid JSON and a missing name or file without calling upstream", func(t *testing.T) {
+		client := &mockEntityAnnouncementRequestClient{}
+		h := NewAnnouncementRequestHandler(client, nil)
+
+		r := attachmentRequest(http.MethodPost, target, `{"name":"a.pdf","file":"x"}`)
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+
+		for _, body := range []string{`not json`, `{"file":"x"}`, `{"name":"a.pdf"}`, `{}`} {
+			w := httptest.NewRecorder()
+			h.CreateAnnouncementRequestAttachment(w, attachmentRequest(http.MethodPost, target, body))
+			assertStatus(t, w, http.StatusBadRequest)
+		}
+		if client.gotCreateAttachmentBody != nil {
+			t.Fatal("expected the entity client never to be called for a malformed request")
+		}
+	})
+
+	t.Run("shows the entity service's reason for a file it refuses", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to attach the file.") {
+			t.Run(tc.name, func(t *testing.T) {
+				client := &mockEntityAnnouncementRequestClient{
+					createAttachmentFn: func(context.Context, string, []byte) ([]byte, error) { return nil, tc.err },
+				}
+				h := NewAnnouncementRequestHandler(client, nil)
+				w := httptest.NewRecorder()
+				h.CreateAnnouncementRequestAttachment(w, attachmentRequest(http.MethodPost, target, `{"name":"a.pdf","file":"x"}`))
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
+func TestListAnnouncementRequestAttachments_Passthrough(t *testing.T) {
+	client := &mockEntityAnnouncementRequestClient{
+		listAttachmentsFn: func(_ context.Context, id string) ([]byte, error) {
+			if id != testAnnouncementRequestID {
+				t.Fatalf("id = %q", id)
+			}
+			return []byte(`{"attachments":[{"id":"a1","name":"one.pdf"}]}`), nil
+		},
+	}
+	h := NewAnnouncementRequestHandler(client, nil)
+	w := httptest.NewRecorder()
+	h.ListAnnouncementRequestAttachments(w, attachmentRequest(http.MethodGet, "/x", ""))
+	assertStatus(t, w, http.StatusOK)
+	if !strings.Contains(w.Body.String(), `"one.pdf"`) {
+		t.Fatalf("expected the upstream response forwarded, got %s", w.Body.String())
+	}
+
+	for _, tc := range upstreamErrorsGeneric("Failed to list the files attached to the announcement request.") {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &mockEntityAnnouncementRequestClient{
+				listAttachmentsFn: func(context.Context, string) ([]byte, error) { return nil, tc.err },
+			}
+			w := httptest.NewRecorder()
+			NewAnnouncementRequestHandler(c, nil).ListAnnouncementRequestAttachments(w, attachmentRequest(http.MethodGet, "/x", ""))
+			assertStatus(t, w, tc.wantCode)
+			assertErrorMessage(t, w, tc.wantMsg)
+		})
+	}
+}
+
+func TestGetAnnouncementRequestAttachmentContent(t *testing.T) {
+	for _, tc := range []struct{ upstream, want string }{
+		{"application/pdf", "application/pdf"},
+		{"application/pdf; charset=binary", "application/pdf"},
+		{"IMAGE/PNG", "image/png"},
+		{"text/html", "application/octet-stream"},
+		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream"},
+	} {
+		t.Run(tc.upstream, func(t *testing.T) {
+			client := &mockEntityAnnouncementRequestClient{
+				attachmentContentFn: func(_ context.Context, id, attachmentID string) ([]byte, string, error) {
+					if id != testAnnouncementRequestID || attachmentID != testAnnouncementAttachmentID {
+						t.Fatalf("ids = %q %q", id, attachmentID)
+					}
+					return []byte("bytes"), tc.upstream, nil
+				},
+			}
+			w := httptest.NewRecorder()
+			NewAnnouncementRequestHandler(client, nil).GetAnnouncementRequestAttachmentContent(w, attachmentRequest(http.MethodGet, "/x", ""))
+			assertStatus(t, w, http.StatusOK)
+			assertContentType(t, w, tc.want)
+			if cd := w.Header().Get("Content-Disposition"); cd != "attachment" {
+				t.Errorf("Content-Disposition = %q, want attachment", cd)
+			}
+			if w.Body.String() != "bytes" {
+				t.Errorf("body = %q", w.Body.String())
+			}
+		})
+	}
+
+	t.Run("rejects a bad id", func(t *testing.T) {
+		r := attachmentRequest(http.MethodGet, "/x", "")
+		r.SetPathValue("attachmentId", "nope")
+		w := httptest.NewRecorder()
+		NewAnnouncementRequestHandler(&mockEntityAnnouncementRequestClient{}, nil).GetAnnouncementRequestAttachmentContent(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("maps upstream errors generically", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to retrieve the attachment content.") {
+			t.Run(tc.name, func(t *testing.T) {
+				client := &mockEntityAnnouncementRequestClient{
+					attachmentContentFn: func(context.Context, string, string) ([]byte, string, error) { return nil, "", tc.err },
+				}
+				w := httptest.NewRecorder()
+				NewAnnouncementRequestHandler(client, nil).GetAnnouncementRequestAttachmentContent(w, attachmentRequest(http.MethodGet, "/x", ""))
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
+		}
+	})
+}
+
+func TestDeleteAnnouncementRequestAttachment(t *testing.T) {
+	t.Run("sends the authenticated caller as the actor and answers 204", func(t *testing.T) {
+		client := &mockEntityAnnouncementRequestClient{}
+		w := httptest.NewRecorder()
+		NewAnnouncementRequestHandler(client, nil).DeleteAnnouncementRequestAttachment(w, attachmentRequest(http.MethodDelete, "/x?actorId=someone-else", ""))
+		assertStatus(t, w, http.StatusNoContent)
+		if client.gotDeleteAttachmentActorID != testUser.UserID {
+			t.Fatalf("actor = %q, want the authenticated caller %q, not the query value", client.gotDeleteAttachmentActorID, testUser.UserID)
+		}
+		if w.Body.Len() != 0 {
+			t.Fatalf("a 204 must have no body, got %q", w.Body.String())
+		}
+	})
+
+	t.Run("rejects a bad id", func(t *testing.T) {
+		r := attachmentRequest(http.MethodDelete, "/x", "")
+		r.SetPathValue("id", "nope")
+		w := httptest.NewRecorder()
+		NewAnnouncementRequestHandler(&mockEntityAnnouncementRequestClient{}, nil).DeleteAnnouncementRequestAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("shows the entity service's reason (for example a published request)", func(t *testing.T) {
+		client := &mockEntityAnnouncementRequestClient{
+			deleteAttachmentFn: func(context.Context, string, string, string) ([]byte, error) {
+				return nil, &apierror.Error{StatusCode: http.StatusConflict, Body: `{"code":409,"message":"the files of a published announcement request cannot be changed"}`}
+			},
+		}
+		w := httptest.NewRecorder()
+		NewAnnouncementRequestHandler(client, nil).DeleteAnnouncementRequestAttachment(w, attachmentRequest(http.MethodDelete, "/x", ""))
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, "the files of a published announcement request cannot be changed")
+	})
+}
+
+func TestAttachAnnouncementRequestAttachmentsToCase(t *testing.T) {
+	t.Run("asks upstream to copy the files, as the authenticated caller, taking nothing from the client body", func(t *testing.T) {
+		client := &mockEntityAnnouncementRequestClient{}
+		w := httptest.NewRecorder()
+		NewAnnouncementRequestHandler(client, nil).AttachAnnouncementRequestAttachmentsToCase(w,
+			attachmentRequest(http.MethodPost, "/x", `{"actorId":"someone-else","actorEmail":"evil@example.com"}`))
+		assertStatus(t, w, http.StatusOK)
+		if client.gotAttachToCaseCaseID != testAnnouncementCaseID {
+			t.Fatalf("caseId = %q", client.gotAttachToCaseCaseID)
+		}
+		var raw map[string]string
+		if err := json.Unmarshal(client.gotAttachToCaseBody, &raw); err != nil {
+			t.Fatalf("decode forwarded body: %v", err)
+		}
+		if raw["actorId"] != testUser.UserID || raw["actorEmail"] != testUser.Email || len(raw) != 2 {
+			t.Fatalf("forwarded body = %v, want only the authenticated caller as the actor", raw)
+		}
+		if !strings.Contains(w.Body.String(), `"attached":1`) {
+			t.Fatalf("expected the upstream result returned, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("rejects a bad request or case id", func(t *testing.T) {
+		for _, field := range []string{"id", "caseId"} {
+			r := attachmentRequest(http.MethodPost, "/x", "")
+			r.SetPathValue(field, "nope")
+			w := httptest.NewRecorder()
+			NewAnnouncementRequestHandler(&mockEntityAnnouncementRequestClient{}, nil).AttachAnnouncementRequestAttachmentsToCase(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("shows the entity service's reason", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to attach the files to the case.") {
+			t.Run(tc.name, func(t *testing.T) {
+				client := &mockEntityAnnouncementRequestClient{
+					attachToCaseFn: func(context.Context, string, string, []byte) ([]byte, error) { return nil, tc.err },
+				}
+				w := httptest.NewRecorder()
+				NewAnnouncementRequestHandler(client, nil).AttachAnnouncementRequestAttachmentsToCase(w, attachmentRequest(http.MethodPost, "/x", ""))
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+			})
 		}
 	})
 }

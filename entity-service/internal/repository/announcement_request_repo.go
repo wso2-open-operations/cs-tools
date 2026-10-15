@@ -94,6 +94,22 @@ type AnnouncementRequestRepository interface {
 	UpsertDeliveries(ctx context.Context, announcementRequestID string, deliveries []domain.RecordAnnouncementRequestDeliveryInput) ([]domain.AnnouncementRequestDelivery, error)
 	// ListDeliveries returns every delivery recorded for announcementRequestID.
 	ListDeliveries(ctx context.Context, announcementRequestID string) ([]domain.AnnouncementRequestDelivery, error)
+	// AddAttachment stores one file on the request, in the same transaction as
+	// the state-conditioned write of the request row itself: with
+	// revertToDraft, a request in pending_approval goes back to draft exactly as
+	// an edit of its content does (clearing the audience snapshot and the dry
+	// run); without it, the request must still be in expectedState. Refuses a
+	// request that already holds domain.MaxAnnouncementRequestAttachments files
+	// or a file of the same name (case-insensitively) with a ValidationError.
+	AddAttachment(ctx context.Context, id string, expectedState domain.AnnouncementRequestState, revertToDraft bool, att domain.AnnouncementRequestAttachmentContent) (domain.AnnouncementRequestAttachment, error)
+	// DeleteAttachment removes one file, with the same state handling as
+	// AddAttachment. A NotFoundError is returned if the request has no such file.
+	DeleteAttachment(ctx context.Context, id, attachmentID string, expectedState domain.AnnouncementRequestState, revertToDraft bool) error
+	// ListAttachments returns the metadata of every file on the request, oldest first.
+	ListAttachments(ctx context.Context, id string) ([]domain.AnnouncementRequestAttachment, error)
+	// GetAttachmentContent returns one file with its bytes. A NotFoundError is
+	// returned if the request has no such file.
+	GetAttachmentContent(ctx context.Context, id, attachmentID string) (domain.AnnouncementRequestAttachmentContent, error)
 }
 
 type announcementRequestRepo struct {

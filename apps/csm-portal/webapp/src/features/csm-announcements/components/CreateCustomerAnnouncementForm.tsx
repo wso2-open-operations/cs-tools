@@ -29,12 +29,14 @@ import type { BeSubscriptionType } from "@api/backend/types";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { DRY_RUN_TAG_LABEL, useAnnouncementDryRun } from "@features/csm-announcements/api/useAnnouncementDryRun";
+import { useAnnouncementAttachments } from "@features/csm-announcements/api/useAnnouncementAttachments";
 import { useAnnouncementExcludedProjectKeys } from "@features/csm-announcements/api/useAnnouncementExcludedProjectKeys";
 import { useResolveAnnouncementAudience } from "@features/csm-announcements/api/useResolveAnnouncementAudience";
 import { useCreateAnnouncementRequest } from "@features/csm-announcements/api/useCreateAnnouncementRequest";
 import { useUpdateAnnouncementRequest } from "@features/csm-announcements/api/useUpdateAnnouncementRequest";
 import { useRecordAnnouncementRequestDryRun } from "@features/csm-announcements/api/useRecordAnnouncementRequestDryRun";
 import { useSubmitAnnouncementRequest } from "@features/csm-announcements/api/useSubmitAnnouncementRequest";
+import AnnouncementAttachmentsField from "@features/csm-announcements/components/AnnouncementAttachmentsField";
 import AudienceScopeControls, {
   type AnnouncementAudienceScope,
 } from "@features/csm-announcements/components/AudienceScopeControls";
@@ -119,12 +121,15 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
   const updateDraft = useUpdateAnnouncementRequest();
   const recordDryRun = useRecordAnnouncementRequestDryRun();
   const submitRequest = useSubmitAnnouncementRequest();
+  // Files picked here are held until the draft exists (saving or submitting creates it),
+  // then uploaded to it; once it exists they upload as they are picked.
+  const attachments = useAnnouncementAttachments(draftId);
 
   const dryRunTagLabels = useMemo(
     () => [DRY_RUN_TAG_LABEL, ...(isSecurityAnnouncement ? [SECURITY_ANNOUNCEMENT_TAG_LABEL] : [])],
     [isSecurityAnnouncement],
   );
-  const busy = savingDraft || submittingForApproval;
+  const busy = savingDraft || submittingForApproval || attachments.busy;
   const { runningDryRun, canRunDryRun, handleRunDryRun } = useAnnouncementDryRun({
     subject,
     description,
@@ -181,9 +186,10 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
     if (!canSaveDraft) return;
     setSavingDraft(true);
     try {
-      if (draftId) {
+      let id = draftId;
+      if (id) {
         await updateDraft.mutateAsync({
-          id: draftId,
+          id,
           subject: subject.trim(),
           description,
           isSecurityAnnouncement,
@@ -197,8 +203,12 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
           isSecurityAnnouncement,
           audienceDefinition,
         });
-        setDraftId(created.id);
+        id = created.id;
+        setDraftId(id);
       }
+      // The draft exists now: send the files picked before it did. One the server refuses
+      // stays on the form to be fixed (the error banner says which); the draft is kept either way.
+      if (!(await attachments.flushStaged(id))) return;
       navigate(PENDING_TARGET);
     } catch {
       showError("Could not save this draft. Please try again.");
@@ -209,6 +219,9 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
 
   const handleSubmitForApproval = async (): Promise<void> => {
     if (!canSubmitForApproval) return;
+    // Read before anything async: whether there are files to put on the dry-run case.
+    // When the saved list could not be loaded the count is unknown, so try anyway.
+    const hasFiles = attachments.count > 0 || attachments.loadFailed;
     setSubmittingForApproval(true);
     try {
       const result = await handleRunDryRun();
@@ -235,7 +248,12 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
         setDraftId(id);
       }
 
+      if (!(await attachments.flushStaged(id))) return;
+
       await recordDryRun.mutateAsync({ id, caseId: result.caseId });
+      // The approver reviews the dry-run case, so it carries the files too. Needs the dry run
+      // recorded first: the server only puts a draft's files on the case recorded as its dry run.
+      if (hasFiles && !(await attachments.attachToDryRunCase(id, result.caseId))) return;
       await submitRequest.mutateAsync({ id });
       navigate(PENDING_TARGET);
     } catch (error) {
@@ -334,6 +352,17 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
               disabled={busy}
             />
           </Box>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <AnnouncementAttachmentsField
+            items={attachments.items}
+            onAddFiles={(files) => void attachments.addFiles(files)}
+            onRemove={(item) => void attachments.remove(item)}
+            onDownload={(item) => void attachments.download(item)}
+            isLoading={attachments.isLoading}
+            loadFailed={attachments.loadFailed}
+            disabled={busy}
+          />
         </Grid>
       </Grid>
 

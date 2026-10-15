@@ -8787,6 +8787,101 @@ from before this entity existed; there is deliberately no persisted
 per-project delivery ledger here either — that belongs to a future batch
 entity, not this one.
 
+### Announcement request attachments
+
+An announcement can carry files, a PDF above all, that customers see on the announcement
+case exactly like an attachment on any other case. The files are chosen while the request is
+still being written and its cases do not exist until publish, so they are held with the
+request and copied onto each case as it is created.
+
+- **Storage.** `announcement_request_attachment` (migration 0226): the bytes in `BYTEA`, the
+  uploader, `ON DELETE CASCADE` with the request, no row-level security (like
+  `announcement_requests`: the CSM portal backend is the gate). It is only the pre-publish
+  holding area; what customers see are the per-case copies in `case_attachment`, written
+  through the ordinary case attachment path, which is ServiceNow-first under dual-write.
+- **Endpoints (internal callers only, enforced on the route).** `POST` and `GET
+  /announcement-requests/{id}/attachments`, `GET .../attachments/{attachmentId}/content`,
+  `DELETE .../attachments/{attachmentId}` and `POST /announcement-requests/{id}/cases/{caseId}/attachments`
+  (the copy), each registered behind `internalOnly`. A request's files can be an unreleased advisory, they
+  sit in a table with no row-level security, and an upload's actor is whatever the caller names, so only an
+  internal caller gets through: the CSM portal backend (its client id plus a staff user of
+  `CSM_PORTAL_USER_DOMAIN`) and internal machine clients; the customer portal's backend and anyone
+  else get 401/403 (`announcement_attachment_routes_test.go` pins both the refusals and that the
+  CSM backend still gets through). The in-process copy `AutoPublish` makes is not a route and is
+  unaffected. The entity's older announcement-request routes are not behind `internalOnly` (the CSM
+  backend is their gate) and are unchanged by this. The upload takes `{name, type?, file}` with `file` a
+  base64 data URI, like `POST /attachments`, under the same 15 MiB body limit.
+- **What is accepted** (`announcement_request_attachment_file.go`), judged by the file's
+  **name**, never its declared type: pdf, png, jpg, jpeg, gif, doc, docx, xls, xlsx, ppt, pptx,
+  txt, csv, and the bytes must be that kind of file (`%PDF-` in the first KiB, the image
+  headers, the OOXML `PK` or legacy OLE signature, valid UTF-8 without NUL for text). At most
+  10 MB decoded, at most 5 files per request, no two with the same name (case-insensitive), a
+  name of at most 255 characters with no path separators or control characters. The stored
+  type is the canonical type of the extension; the declared type is advisory.
+- **State rules** (`attachmentChangeMode`). Adding or removing a file is a content edit: allowed in
+  `draft` and `approved`; on a `pending_approval` request it sends the request back to `draft`
+  (clearing the audience snapshot, the dry run and the submission, in the same transaction as
+  the change); refused with 409 once `published`. Both are state-conditioned writes of the request
+  row itself (`guardRequestForAttachmentChange`), which also locks it, so two concurrent uploads
+  cannot race past the file count. **Once a case exists for any project** (a delivery recorded
+  `succeeded` or `tag_failed`) the files are frozen (409, `guardNoDeliveries`): every case is
+  given the request's files as they are at its turn, so a later change would leave one
+  announcement in two versions, between a fan-out's first projects and its last or between a
+  project and its own retry. A delivery recorded `failed` made no case and freezes nothing.
+- **Copying onto a case** (`AttachToCase`, `attachFilesToCase`). The case must be an announcement
+  and belong to the request: its dry-run case while the request is a draft, or a case in a project
+  of the frozen audience once it is approved. Each file is created with
+  `CaseAttachmentFanOutClient.CreateCaseAttachmentAs` under the request creator's email
+  (`announcement_requests.created_by_email`), because a scheduled publish has no end-user token to
+  resolve an actor from (the same reason `AddCaseTagAs` exists). It is **idempotent**: the case's
+  own attachments are listed first and a file whose name (case-insensitively) and size are already
+  there is skipped, so a retry only adds what is missing.
+- **Where it runs.** The browser publish calls the copy endpoint once per case it creates
+  (`usePublishAnnouncementRequest`), so the bytes never leave the server and a send to a thousand
+  projects does not upload one PDF a thousand times; `AutoPublish` (the scheduled publish) does
+  the same in process. A case that exists but could not be given its files is recorded with the
+  delivery status **`tag_failed`**, which now means "the case exists but a follow-up step, the
+  security tag and/or the files, is outstanding". Both steps are idempotent and a retry redoes them
+  on the existing case, never creating another. The status was not renamed nor its CHECK widened
+  for this (no migration); see the doc comment on `AnnouncementRequestDeliveryStatusTagFailed`.
+  `AutoPublish` looks at the request's files before it claims anything, so a request it cannot
+  send is refused without a fan-out.
+- **Data sources.** Only where a case's files are held in ServiceNow: `postgres-servicenow-dual-write`
+  and `servicenow`. Under plain `DATA_SOURCE=postgres` this service has no SFTPGo client, so an
+  upload is refused (503): a file nobody could send is not stored; `AutoPublish` likewise refuses (503)
+  a request that already holds files. A request **without** files behaves exactly as it did before, on
+  every data source (the same calls in the same order, plus one read of an empty list).
+- **Row-level security (migration 100025).** An announcement did not own attachments before, so
+  `case_attachment`'s policies (100016 left them out on purpose) had no announcement rule, and a
+  General Access contact could have read a security announcement's files by case id. 100025 gives the
+  four policies the same announcement predicate that comments and watchers have. Creating one is
+  limited to internal callers and the service itself (`canAttachToAnnouncement` in the SQL of
+  `CreateCaseAttachment` and `CreateCaseAttachmentFromServiceNow`, which fails closed with no resolved
+  identity); a customer session cannot attach to an announcement, even one it can see.
+- **Synced attachments (`work_item_attachment`) are read, never written, and cannot hold a draft's
+  files.** The table is the sync service's mirror of ServiceNow's attachment metadata for every work
+  item (migration 0085: names, sizes, no bytes), so entity-service never writes it, and a request's own
+  files cannot live there either: `work_item_id` is a NOT NULL foreign key to `work_item`, and a request
+  is not a work item until publish. Once the sync has mirrored a case's files, `SearchCaseAttachments`
+  and `SearchCaseActivities` merge those rows in (de-duplicated by id against `case_attachment`). The
+  table has no policy and `work_item`'s own policy only asks for project membership (a hidden
+  announcement's `work_item` row still shows its subject and description), so both reads carry the
+  `announcementVisibilityLeakGuard`: the attachment list on its synced branch (an empty list, like the
+  native rows hidden by 100025), and the activity feed at its entry (404, like the case detail, which
+  also covers `work_item_activity`, project membership only as well).
+- **Deploy order: apply 0226 and 100025 first, then the build.** The build reads
+  `announcement_request_attachment` on every publish of an approved request, and 100025 is what keeps a
+  security announcement's files from the contacts it is hidden from once files can exist. Both are safe
+  under the previous build (an added table; a rule that only bites for an announcement's attachments,
+  of which there are none yet).
+- **Tests.** `announcement_request_attachment_service_test.go` and the handler tests (state rules, the
+  copy, idempotence, the data-source refusal); against real Postgres as a non-superuser
+  (`ANNOUNCEMENT_VISIBILITY_TEST_DSN`) `announcement_attachment_integration_test.go`: who can read an
+  announcement's files by case id (each project group, an unknown email, an internal caller), that a customer and a
+  caller with no identity cannot attach, the repository's limits, the state rules, the freeze, and twelve
+  concurrent uploads; and `announcement_synced_attachment_integration_test.go` for the synced rows (the
+  attachment list and the activity feed, per project group).
+
 ## POST /announcements/registry/rows: the grouped registry, paged in SQL
 
 The CSM announcement registry shows one row per published announcement request (a "batch") plus

@@ -595,3 +595,116 @@ func TestCaseAttachmentDualWriteService_SearchCaseAttachments_InheritsEmbeddedPo
 		t.Fatalf("expected the Postgres-backed result to pass through unchanged, got %+v", resp.Attachments)
 	}
 }
+
+// attachmentFanOut reaches CreateCaseAttachmentAs the way production does: the
+// CaseService this package builds for the dual-write data source, asserted to the
+// narrow interface the announcement service takes.
+func attachmentFanOut(t *testing.T, svc CaseService) CaseAttachmentFanOutClient {
+	t.Helper()
+	client, ok := svc.(CaseAttachmentFanOutClient)
+	if !ok {
+		t.Fatalf("the dual-write attachment service must satisfy CaseAttachmentFanOutClient, got %T", svc)
+	}
+	return client
+}
+
+// TestCaseAttachmentDualWriteService_CreateCaseAttachmentAs covers the path the
+// scheduled publish of an announcement takes to put a request's files on the
+// cases it creates: no x-user-id-token on the context, the actor named by email.
+func TestCaseAttachmentDualWriteService_CreateCaseAttachmentAs(t *testing.T) {
+	const snAttachmentID = "44444444-4444-4444-4444-444444444444"
+	okMirror := func(created *int) *stubCaseAttachmentSNMirror {
+		return &stubCaseAttachmentSNMirror{
+			createCaseAttachment: func(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+				*created++
+				return domain.CreateAttachmentResponse{Attachment: domain.AttachmentDetail{ID: snAttachmentID, SizeBytes: 5, Status: domain.AttachmentStatusComplete}}, nil
+			},
+		}
+	}
+
+	t.Run("writes ServiceNow first, then mirrors the metadata as the actor looked up by email, with no token", func(t *testing.T) {
+		var created int
+		var gotUploadedBy, gotID string
+		repo := &stubCaseRepo{
+			createCaseAttachmentFromSN: func(_ context.Context, _ domain.CreateAttachmentRequest, id string, size int, uploadedBy string) (domain.Attachment, error) {
+				gotID, gotUploadedBy = id, uploadedBy
+				return domain.Attachment{ID: id, SizeBytes: size, Status: domain.AttachmentStatusComplete}, nil
+			},
+		}
+		svc := newDualWriteAttachmentService(repo, actorUserRepo(t), okMirror(&created), nil)
+
+		// context.Background(): no x-user-id-token, exactly like a scheduled caller.
+		resp, err := attachmentFanOut(t, svc).CreateCaseAttachmentAs(context.Background(), validDualWriteCreateAttachmentRequest(), "jane.doe@example.com")
+		if err != nil {
+			t.Fatalf("CreateCaseAttachmentAs: %v", err)
+		}
+		if created != 1 || gotID != snAttachmentID || gotUploadedBy != "user-jane" {
+			t.Fatalf("expected one ServiceNow create mirrored as the looked-up user, got created=%d id=%q uploadedBy=%q", created, gotID, gotUploadedBy)
+		}
+		if resp.Attachment.ID != snAttachmentID || resp.Attachment.CreatedBy != "jane.doe@example.com" {
+			t.Fatalf("unexpected response: %+v", resp.Attachment)
+		}
+	})
+
+	t.Run("an actor Postgres has no user for is refused before ServiceNow is reached", func(t *testing.T) {
+		repo := &stubCaseRepo{}
+		notFound := stubUserRepo{getUserByEmail: func(_ context.Context, _ string) (domain.User, error) {
+			return domain.User{}, &apierror.NotFoundError{Msg: "user not found"}
+		}}
+		// A mirror with nothing stubbed panics if ServiceNow is called.
+		svc := newDualWriteAttachmentService(repo, notFound, &stubCaseAttachmentSNMirror{}, nil)
+		_, err := attachmentFanOut(t, svc).CreateCaseAttachmentAs(context.Background(), validDualWriteCreateAttachmentRequest(), "ghost@example.com")
+		var nf *apierror.NotFoundError
+		if !errors.As(err, &nf) {
+			t.Fatalf("expected the NotFoundError, got %v", err)
+		}
+	})
+
+	t.Run("refuses a blank actor and any reference other than a case", func(t *testing.T) {
+		var created int
+		svc := newDualWriteAttachmentService(&stubCaseRepo{}, actorUserRepo(t), okMirror(&created), nil)
+		client := attachmentFanOut(t, svc)
+
+		var validation *apierror.ValidationError
+		if _, err := client.CreateCaseAttachmentAs(context.Background(), validDualWriteCreateAttachmentRequest(), "  "); !errors.As(err, &validation) {
+			t.Fatalf("expected a validation error for a blank actor, got %v", err)
+		}
+		req := validDualWriteCreateAttachmentRequest()
+		req.ReferenceType = domain.ReferenceTypeDeployment
+		if _, err := client.CreateCaseAttachmentAs(context.Background(), req, "jane.doe@example.com"); !errors.As(err, &validation) {
+			t.Fatalf("expected a validation error for a deployment reference, got %v", err)
+		}
+		if created != 0 {
+			t.Fatalf("ServiceNow must not be reached for a refused request, got %d calls", created)
+		}
+	})
+
+	t.Run("a ServiceNow refusal writes nothing to Postgres", func(t *testing.T) {
+		mirror := &stubCaseAttachmentSNMirror{createCaseAttachment: func(_ context.Context, _ domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+			return domain.CreateAttachmentResponse{}, errors.New("servicenow down")
+		}}
+		// stubCaseRepo with createCaseAttachmentFromSN unset would panic if reached.
+		svc := newDualWriteAttachmentService(&stubCaseRepo{}, actorUserRepo(t), mirror, nil)
+		if _, err := attachmentFanOut(t, svc).CreateCaseAttachmentAs(context.Background(), validDualWriteCreateAttachmentRequest(), "jane.doe@example.com"); err == nil {
+			t.Fatal("expected ServiceNow's error")
+		}
+	})
+
+	t.Run("the data sources report whether announcement attachments work on them", func(t *testing.T) {
+		if !attachmentFanOut(t, newDualWriteAttachmentService(&stubCaseRepo{}, stubUserRepo{}, &stubCaseAttachmentSNMirror{}, nil)).SupportsAnnouncementAttachments() {
+			t.Error("dual-write must support announcement attachments")
+		}
+		plain, ok := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil).(CaseAttachmentFanOutClient)
+		if !ok {
+			t.Fatal("the plain Postgres case service must satisfy CaseAttachmentFanOutClient (so routes can ask it)")
+		}
+		if plain.SupportsAnnouncementAttachments() {
+			t.Error("plain Postgres must not claim to support announcement attachments")
+		}
+		_, err := plain.CreateCaseAttachmentAs(context.Background(), validDualWriteCreateAttachmentRequest(), "jane.doe@example.com")
+		var unavailable *apierror.ServiceUnavailableError
+		if !errors.As(err, &unavailable) {
+			t.Fatalf("expected ServiceUnavailableError from plain Postgres, got %v", err)
+		}
+	})
+}

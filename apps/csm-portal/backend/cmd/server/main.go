@@ -530,6 +530,16 @@ func main() {
 	route("GET /announcement-requests/{id}/updates", handler.PermView, announcementRequestHandler.ListAnnouncementRequestUpdates)
 	routeAll("POST /announcement-requests/{id}/deliveries", announcementRequestHandler.RecordAnnouncementRequestDeliveries, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("GET /announcement-requests/{id}/deliveries", handler.PermView, announcementRequestHandler.ListAnnouncementRequestDeliveries)
+	// Files sent with an announcement. Changing them is a content edit, so it needs
+	// the same two permissions as every other write on a request; listing them
+	// is PermView like reading the request. The bytes are a download, so they
+	// need PermDownloadAttachment, the permission the case attachment content
+	// route asks for: the files become ordinary case attachments on publish.
+	routeAll("POST /announcement-requests/{id}/attachments", announcementRequestHandler.CreateAnnouncementRequestAttachment, handler.PermWrite, handler.PermCreateAnnouncement)
+	route("GET /announcement-requests/{id}/attachments", handler.PermView, announcementRequestHandler.ListAnnouncementRequestAttachments)
+	route("GET /announcement-requests/{id}/attachments/{attachmentId}/content", handler.PermDownloadAttachment, announcementRequestHandler.GetAnnouncementRequestAttachmentContent)
+	routeAll("DELETE /announcement-requests/{id}/attachments/{attachmentId}", announcementRequestHandler.DeleteAnnouncementRequestAttachment, handler.PermWrite, handler.PermCreateAnnouncement)
+	routeAll("POST /announcement-requests/{id}/cases/{caseId}/attachments", announcementRequestHandler.AttachAnnouncementRequestAttachmentsToCase, handler.PermWrite, handler.PermCreateAnnouncement)
 	route("POST /projects/{id}/contacts/search", handler.PermViewSharedEntity, projectHandler.SearchProjectContacts)
 	route("GET /projects/{id}/contacts/{contactId}", handler.PermView, projectHandler.GetProjectContact)
 	// Customer-onboarding status per project contact — off by default (see

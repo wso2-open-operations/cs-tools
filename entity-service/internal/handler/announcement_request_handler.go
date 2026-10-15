@@ -19,6 +19,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"mime"
 	"net/http"
 	"time"
 
@@ -46,6 +48,14 @@ const autoPublishHandlerTimeout = 11 * time.Minute
 // expire before the context timeout does (which would otherwise fail the
 // final response write even on a successful, on-time completion).
 const autoPublishWriteDeadlineBuffer = 30 * time.Second
+
+// attachToCaseHandlerTimeout bounds how long copying a request's files onto
+// one case may take: up to five 10 MB files, each a ServiceNow round trip.
+const attachToCaseHandlerTimeout = 3 * time.Minute
+
+// attachToCaseWriteDeadlineBuffer pads the write deadline past the timeout for
+// the reason autoPublishWriteDeadlineBuffer does.
+const attachToCaseWriteDeadlineBuffer = 30 * time.Second
 
 // AnnouncementRequestHandler handles HTTP requests for the
 // announcement_requests resource — see domain.AnnouncementRequest's doc
@@ -269,6 +279,97 @@ func (h *AnnouncementRequestHandler) RecordAnnouncementRequestDeliveries(w http.
 // GET /announcement-requests/{id}/deliveries.
 func (h *AnnouncementRequestHandler) ListAnnouncementRequestDeliveries(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.ListDeliveries(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeAnnouncementRequestJSON(w, http.StatusOK, resp)
+}
+
+// CreateAnnouncementRequestAttachment handles
+// POST /announcement-requests/{id}/attachments.
+//
+// The body carries the file as a base64 data URI, so it is read under the same
+// 15 MiB ceiling as a case attachment (a 10 MB file is about 13.3 MB encoded)
+// rather than the generic 1 MiB one.
+func (h *AnnouncementRequestHandler) CreateAnnouncementRequestAttachment(w http.ResponseWriter, r *http.Request) {
+	var req domain.CreateAnnouncementRequestAttachmentRequest
+	if !decodeRequestWithLimit(w, r, &req, maxAttachmentBodySize, attachmentTooLargeMsg) {
+		return
+	}
+	resp, err := h.svc.AddAttachment(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeAnnouncementRequestJSON(w, http.StatusCreated, resp)
+}
+
+// ListAnnouncementRequestAttachments handles
+// GET /announcement-requests/{id}/attachments.
+func (h *AnnouncementRequestHandler) ListAnnouncementRequestAttachments(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.ListAttachments(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeAnnouncementRequestJSON(w, http.StatusOK, resp)
+}
+
+// GetAnnouncementRequestAttachmentContent handles
+// GET /announcement-requests/{id}/attachments/{attachmentId}/content.
+// The Content-Type is forwarded only when it is in the same allowlist the case
+// attachment content endpoint uses, and every response is a download, so a
+// stored file can never be rendered by a browser in this service's origin.
+func (h *AnnouncementRequestHandler) GetAnnouncementRequestAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	att, err := h.svc.GetAttachmentContent(r.Context(), r.PathValue("id"), r.PathValue("attachmentId"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	ct := att.Type
+	if !safeAttachmentTypes[ct] {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": att.Name}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(att.Content) // #nosec G705 -- Content-Type is allowlisted above; Content-Disposition: attachment prevents inline rendering
+}
+
+// DeleteAnnouncementRequestAttachment handles
+// DELETE /announcement-requests/{id}/attachments/{attachmentId}?actorId=...
+// The acting user is a query parameter because a DELETE carries no body.
+func (h *AnnouncementRequestHandler) DeleteAnnouncementRequestAttachment(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.DeleteAttachment(r.Context(), r.PathValue("id"), r.PathValue("attachmentId"), r.URL.Query().Get("actorId"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// AttachAnnouncementRequestAttachmentsToCase handles
+// POST /announcement-requests/{id}/cases/{caseId}/attachments.
+//
+// Copying a request's files onto a case sends each of them to ServiceNow, so
+// like AutoPublishAnnouncementRequest it runs under its own, longer deadline
+// than the global request timeout rather than inheriting it (up to five files
+// of up to 10 MB each), and detached from the caller's cancellation: a caller
+// that gives up must not leave a file half recorded, which a retry would then
+// have to untangle.
+func (h *AnnouncementRequestHandler) AttachAnnouncementRequestAttachmentsToCase(w http.ResponseWriter, r *http.Request) {
+	var req domain.AnnouncementRequestActorRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(attachToCaseHandlerTimeout + attachToCaseWriteDeadlineBuffer)); err != nil {
+		slog.WarnContext(r.Context(), "announcement attach: could not extend the write deadline", "error", err)
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), attachToCaseHandlerTimeout)
+	defer cancel()
+
+	resp, err := h.svc.AttachToCase(ctx, r.PathValue("id"), r.PathValue("caseId"), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

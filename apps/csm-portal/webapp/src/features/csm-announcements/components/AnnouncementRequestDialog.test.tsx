@@ -31,6 +31,12 @@ import { useCreateAnnouncementRequestUpdate } from "@features/csm-announcements/
 import { useListAnnouncementRequestUpdates } from "@features/csm-announcements/api/useListAnnouncementRequestUpdates";
 import { usePostAnnouncementUpdateComments } from "@features/csm-announcements/api/usePostAnnouncementUpdateComments";
 import { useAnnouncementDryRun } from "@features/csm-announcements/api/useAnnouncementDryRun";
+import {
+  useAnnouncementAttachments,
+  type AnnouncementAttachmentItem,
+  type UseAnnouncementAttachments,
+} from "@features/csm-announcements/api/useAnnouncementAttachments";
+import type { UsePublishAnnouncementRequestResult } from "@features/csm-announcements/api/usePublishAnnouncementRequest";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import type { AnnouncementRequest } from "@features/csm-announcements/types/announcementRequests";
 
@@ -70,6 +76,9 @@ vi.mock("@features/csm-announcements/api/useListAnnouncementRequestUpdates", () 
 vi.mock("@features/csm-announcements/api/usePostAnnouncementUpdateComments", () => ({
   usePostAnnouncementUpdateComments: vi.fn(),
 }));
+vi.mock("@features/csm-announcements/api/useAnnouncementAttachments", () => ({
+  useAnnouncementAttachments: vi.fn(),
+}));
 vi.mock("@features/csm-announcements/api/useAnnouncementDryRun", () => ({
   DRY_RUN_TAG_LABEL: "Dry Run",
   useAnnouncementDryRun: vi.fn(),
@@ -85,11 +94,12 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
 // off; canWrite stays true throughout (a CS engineer without the announcement
 // creator role is exactly the caller those tests are about).
 let mockCanCreateAnnouncement = true;
+let mockCanDownloadAttachment = true;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
     canEscalate: true,
-    canDownloadAttachment: true,
+    canDownloadAttachment: mockCanDownloadAttachment,
     canUseOperations: true,
     canUseTimeCardsAndUpdates: true,
     canWrite: true,
@@ -134,6 +144,7 @@ const mockedCreateUpdate = vi.mocked(useCreateAnnouncementRequestUpdate);
 const mockedListUpdates = vi.mocked(useListAnnouncementRequestUpdates);
 const mockedPostUpdateComments = vi.mocked(usePostAnnouncementUpdateComments);
 const mockedDryRun = vi.mocked(useAnnouncementDryRun);
+const mockedAttachments = vi.mocked(useAnnouncementAttachments);
 const mockedIdTokenClaims = vi.mocked(useIdTokenClaims);
 
 const BASE_REQUEST: AnnouncementRequest = {
@@ -148,6 +159,66 @@ const BASE_REQUEST: AnnouncementRequest = {
   createdAt: "2026-07-01T10:00:00Z",
   updatedAt: "2026-07-01T10:00:00Z",
 };
+
+/** Every field of the publish hook's result, so a test only states what it is about. */
+function publishResult(
+  overrides: Partial<UsePublishAnnouncementRequestResult> = {},
+): UsePublishAnnouncementRequestResult {
+  return {
+    publishing: false,
+    progress: null,
+    succeededProjectIds: [],
+    failedProjectIds: [],
+    failedTagProjectIds: [],
+    followUpLabel: "",
+    published: null,
+    readyToPublish: true,
+    hydratingDeliveries: false,
+    hydrationFailed: false,
+    retryHydration: vi.fn(),
+    attachmentsLoadFailed: false,
+    retryAttachments: vi.fn(),
+    publishGivingUpOnFailed: vi.fn(),
+    handlePublish: vi.fn(),
+    ...overrides,
+  };
+}
+
+/** The attachments controller with nothing attached, unless a test says otherwise. */
+function attachmentsResult(overrides: Partial<UseAnnouncementAttachments> = {}): UseAnnouncementAttachments {
+  const items = overrides.items ?? [];
+  return {
+    items,
+    count: items.length,
+    isLoading: false,
+    loadFailed: false,
+    busy: false,
+    addFiles: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn().mockResolvedValue(undefined),
+    download: vi.fn().mockResolvedValue(undefined),
+    flushStaged: vi.fn().mockResolvedValue(true),
+    attachToDryRunCase: vi.fn().mockResolvedValue(true),
+    ...overrides,
+  };
+}
+
+function savedFile(name: string, id = `att-${name}`): AnnouncementAttachmentItem {
+  return {
+    key: id,
+    name,
+    sizeBytes: 2048,
+    status: "saved",
+    attachment: {
+      id,
+      announcementRequestId: "req-1",
+      name,
+      type: "application/pdf",
+      sizeBytes: 2048,
+      createdBy: "jane@example.com",
+      createdOn: "2026-07-01T10:00:00Z",
+    },
+  };
+}
 
 function mockGet(overrides: Partial<AnnouncementRequest> | null, extra: Record<string, unknown> = {}): void {
   mockedGet.mockReturnValue({
@@ -169,6 +240,7 @@ function render(ui: ReactElement): ReturnType<typeof rtlRender> {
 
 beforeEach(() => {
   mockCanCreateAnnouncement = true;
+  mockCanDownloadAttachment = true;
   mockedGet.mockReset();
   mockedUpdate.mockReset();
   mockedRecordDryRun.mockReset();
@@ -180,6 +252,7 @@ beforeEach(() => {
   mockedListUpdates.mockReset();
   mockedPostUpdateComments.mockReset();
   mockedDryRun.mockReset();
+  mockedAttachments.mockReset();
   mockedIdTokenClaims.mockReset();
 
   // Matches BASE_REQUEST.createdBy by default, so every existing test below
@@ -198,7 +271,7 @@ beforeEach(() => {
     canRunDryRun: true,
     handleRunDryRun: vi.fn(),
   });
-  mockedPublish.mockReturnValue({
+  mockedPublish.mockReturnValue(publishResult({
     publishing: false,
     progress: null,
     succeededProjectIds: [],
@@ -211,7 +284,8 @@ beforeEach(() => {
     retryHydration: vi.fn(),
     publishGivingUpOnFailed: vi.fn(),
     handlePublish: vi.fn(),
-  });
+  }));
+  mockedAttachments.mockReturnValue(attachmentsResult());
   mockedCreateUpdate.mockReturnValue(noopMutation() as ReturnType<typeof useCreateAnnouncementRequestUpdate>);
   mockedListUpdates.mockReturnValue({
     data: { updates: [] },
@@ -483,7 +557,7 @@ describe("AnnouncementRequestDialog — approved", () => {
   it("opens a confirmation popup before calling handlePublish, showing what's about to be sent", async () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
     const handlePublish = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: [],
@@ -496,7 +570,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish,
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /^publish$/i }));
@@ -513,7 +587,7 @@ describe("AnnouncementRequestDialog — approved", () => {
 
   it("shows live progress while publishing", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: true,
       progress: { completed: 1, total: 2 },
       succeededProjectIds: [],
@@ -526,7 +600,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     expect(screen.getByText("1/2")).toBeInTheDocument();
@@ -539,7 +613,7 @@ describe("AnnouncementRequestDialog — approved", () => {
     // pass nor the final /publish bookkeeping call touches it), but the
     // whole operation isn't done yet — publishing is still true.
     mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: true,
       progress: null,
       succeededProjectIds: ["p-1"],
@@ -552,7 +626,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     expect(screen.getByText(/sending announcement/i)).toBeInTheDocument();
@@ -562,7 +636,7 @@ describe("AnnouncementRequestDialog — approved", () => {
 
   it("offers a retry with only the failed projects listed after a partial failure", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: ["p-1"],
@@ -575,7 +649,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: /retry failed projects/i })).toBeInTheDocument();
@@ -592,7 +666,7 @@ describe("AnnouncementRequestDialog — approved", () => {
   it("offers Publish anyway for a partial failure, and confirming calls publishGivingUpOnFailed", async () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
     const publishGivingUpOnFailed = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: ["p-1"],
@@ -605,7 +679,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed,
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     // Resolved to its real short key ("P-2", per this file's own
@@ -638,7 +712,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       resolvedProjectCount: 2,
       isSecurityAnnouncement: true,
     });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: ["p-1", "p-2"],
@@ -651,7 +725,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /publish anyway/i })).not.toBeInTheDocument();
@@ -659,7 +733,7 @@ describe("AnnouncementRequestDialog — approved", () => {
 
   it("still shows the full succeeded tally once every project has been delivered", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: ["p-1", "p-2"],
@@ -672,7 +746,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
     expect(screen.getByText(/^announcement sent$/i)).toBeInTheDocument();
@@ -682,7 +756,7 @@ describe("AnnouncementRequestDialog — approved", () => {
 
   it("locks content while a failed-project retry is pending, so the retry can't diverge from what already succeeded", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 });
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: ["p-1"],
@@ -695,7 +769,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish: vi.fn(),
-    });
+    }));
 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
@@ -722,7 +796,7 @@ describe("AnnouncementRequestDialog — approved", () => {
   it("clicking Publish while there are unsaved changes does not call handlePublish", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
     const handlePublish = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: [],
@@ -735,7 +809,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish,
-    });
+    }));
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
     fireEvent.change(screen.getByDisplayValue("Scheduled maintenance"), {
@@ -753,7 +827,7 @@ describe("AnnouncementRequestDialog — approved", () => {
     // see the approved request (e.g. after approving it themselves).
     mockedIdTokenClaims.mockReturnValue({ userid: "someone-else@example.com" });
     const handlePublish = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: [],
@@ -766,7 +840,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish,
-    });
+    }));
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
     const publishBtn = screen.getByRole("button", { name: /^publish$/i });
@@ -786,7 +860,7 @@ describe("AnnouncementRequestDialog — approved", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
     mockedIdTokenClaims.mockReturnValue(undefined);
     const handlePublish = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: [],
@@ -799,7 +873,7 @@ describe("AnnouncementRequestDialog — approved", () => {
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish,
-    });
+    }));
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
     const publishBtn = screen.getByRole("button", { name: /^publish$/i });
@@ -1079,7 +1153,7 @@ describe("AnnouncementRequestDialog — without the announcement creator role", 
   it("disables Publish for the request's own creator and never starts the send", () => {
     mockGet({ state: "approved", resolvedProjectIds: ["p-1"], resolvedProjectCount: 1 });
     const handlePublish = vi.fn();
-    mockedPublish.mockReturnValue({
+    mockedPublish.mockReturnValue(publishResult({
       publishing: false,
       progress: null,
       succeededProjectIds: [],
@@ -1092,7 +1166,7 @@ describe("AnnouncementRequestDialog — without the announcement creator role", 
       retryHydration: vi.fn(),
       publishGivingUpOnFailed: vi.fn(),
       handlePublish,
-    });
+    }));
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
     const publishBtn = screen.getByRole("button", { name: /^publish$/i });
@@ -1118,5 +1192,280 @@ describe("AnnouncementRequestDialog — without the announcement creator role", 
     render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /cancel schedule/i })).toBeDisabled();
+  });
+});
+
+describe("AnnouncementRequestDialog — attachments", () => {
+  const fileInput = (): HTMLInputElement => document.querySelector('input[type="file"]') as HTMLInputElement;
+
+  /** A draft whose submit flow runs end to end, with the given attachments controller. */
+  function setUpSubmitFlow(attachments: Partial<UseAnnouncementAttachments> = {}) {
+    mockGet({ state: "draft" });
+    const handleRunDryRun = vi.fn().mockResolvedValue({ caseId: "case-123", displayId: "WSO2-1" });
+    mockedDryRun.mockReturnValue({ runningDryRun: false, dryRunResult: null, canRunDryRun: true, handleRunDryRun });
+    const recordDryRunMutateAsync = vi.fn().mockResolvedValue({});
+    mockedRecordDryRun.mockReturnValue({
+      mutate: vi.fn(),
+      mutateAsync: recordDryRunMutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useRecordAnnouncementRequestDryRun>);
+    const submitMutateAsync = vi.fn().mockResolvedValue({});
+    mockedSubmit.mockReturnValue({
+      mutate: vi.fn(),
+      mutateAsync: submitMutateAsync,
+      isPending: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useSubmitAnnouncementRequest>);
+    const controller = attachmentsResult(attachments);
+    mockedAttachments.mockReturnValue(controller);
+    return { recordDryRunMutateAsync, submitMutateAsync, controller };
+  }
+
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  describe("editing", () => {
+    it("lists a draft's files and lets them be added, removed and downloaded", () => {
+      const advisory = savedFile("advisory.pdf");
+      const controller = attachmentsResult({ items: [advisory, savedFile("notes.pdf")] });
+      mockedAttachments.mockReturnValue(controller);
+      mockGet({ state: "draft" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(screen.getByText("advisory.pdf")).toBeInTheDocument();
+      expect(screen.getByText("notes.pdf")).toBeInTheDocument();
+
+      const picked = new File(["%PDF-1.4"], "extra.pdf", { type: "application/pdf" });
+      fireEvent.change(fileInput(), { target: { files: [picked] } });
+      expect(controller.addFiles).toHaveBeenCalledWith([picked]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove advisory.pdf" }));
+      expect(controller.remove).toHaveBeenCalledWith(advisory);
+
+      fireEvent.click(screen.getByRole("button", { name: "Download advisory.pdf" }));
+      expect(controller.download).toHaveBeenCalledWith(advisory);
+    });
+
+    it("says files are saved as soon as they are added, not with Save changes", () => {
+      mockGet({ state: "draft" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByText(/saved as soon as you add or remove them, not with “Save changes”/i)).toBeInTheDocument();
+    });
+
+    it("does not offer Download without the permission to read attachments", () => {
+      mockCanDownloadAttachment = false;
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet({ state: "draft" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByText("advisory.pdf")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Download advisory.pdf" })).not.toBeInTheDocument();
+    });
+
+    it("cannot add or remove files without the announcement creator role", () => {
+      mockCanCreateAnnouncement = false;
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet({ state: "draft" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(fileInput()).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Remove advisory.pdf" })).toBeDisabled();
+    });
+
+    it("shows the loading state of the file list instead of an empty one", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ isLoading: true }));
+      mockGet({ state: "draft" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByText(/loading attachments/i)).toBeInTheDocument();
+    });
+
+    it("says that changing the files of a request in review sends it back to draft", () => {
+      mockGet({ state: "pending_approval" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /continue editing/i }));
+      expect(screen.getByText(/changing them sends this request back to draft/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("submit for approval", () => {
+    it("copies the files onto the dry-run case after recording it and before submitting", async () => {
+      const { recordDryRunMutateAsync, submitMutateAsync, controller } = setUpSubmitFlow({
+        items: [savedFile("advisory.pdf")],
+      });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /submit for approval/i }));
+
+      await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
+      expect(controller.attachToDryRunCase).toHaveBeenCalledWith("req-1", "case-123");
+      const order = (fn: { mock: { invocationCallOrder: number[] } }): number => fn.mock.invocationCallOrder[0];
+      expect(order(recordDryRunMutateAsync)).toBeLessThan(order(controller.attachToDryRunCase as never));
+      expect(order(controller.attachToDryRunCase as never)).toBeLessThan(order(submitMutateAsync));
+    });
+
+    it("does not submit when the files could not be copied onto the dry-run case", async () => {
+      const { submitMutateAsync, controller } = setUpSubmitFlow({
+        items: [savedFile("advisory.pdf")],
+        attachToDryRunCase: vi.fn().mockResolvedValue(false),
+      });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /submit for approval/i }));
+
+      await vi.waitFor(() => expect(controller.attachToDryRunCase).toHaveBeenCalled());
+      await flush();
+      expect(submitMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("leaves the dry-run case alone for a request with no files, exactly as before", async () => {
+      const { submitMutateAsync, controller } = setUpSubmitFlow();
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /submit for approval/i }));
+
+      await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalledWith({ id: "req-1" }));
+      expect(controller.attachToDryRunCase).not.toHaveBeenCalled();
+    });
+
+    it("still asks the server to copy when the file list could not be loaded, since it cannot be trusted as empty", async () => {
+      const { submitMutateAsync, controller } = setUpSubmitFlow({ loadFailed: true });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /submit for approval/i }));
+
+      await vi.waitFor(() => expect(submitMutateAsync).toHaveBeenCalled());
+      expect(controller.attachToDryRunCase).toHaveBeenCalledWith("req-1", "case-123");
+    });
+
+    it("waits for an upload in progress without calling it a submission", () => {
+      setUpSubmitFlow({ busy: true });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "Submit for approval" })).toBeDisabled();
+    });
+  });
+
+  describe("publishing", () => {
+    const approvedRequest = { state: "approved" as const, resolvedProjectIds: ["p-1", "p-2"], resolvedProjectCount: 2 };
+
+    it("keeps the files editable until a project has received the announcement", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet(approvedRequest);
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(fileInput()).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Remove advisory.pdf" })).not.toBeDisabled();
+    });
+
+    it("locks the files once a project already has its case, so every project gets the same ones", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet(approvedRequest);
+      mockedPublish.mockReturnValue(publishResult({ succeededProjectIds: ["p-1"] }));
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(fileInput()).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Remove advisory.pdf" })).toBeDisabled();
+      expect(screen.getByText(/some projects have already received this announcement/i)).toBeInTheDocument();
+    });
+
+    it("also locks the files while failed projects are waiting for a retry", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet(approvedRequest);
+      mockedPublish.mockReturnValue(publishResult({ failedProjectIds: ["p-2"] }));
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(fileInput()).toBeDisabled();
+    });
+
+    it("names what a retry redoes, and which projects are still short of it", () => {
+      mockGet({ ...approvedRequest, isSecurityAnnouncement: false });
+      mockedPublish.mockReturnValue(
+        publishResult({
+          succeededProjectIds: ["p-1", "p-2"],
+          failedTagProjectIds: ["p-2"],
+          followUpLabel: "attachments",
+        }),
+      );
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(screen.getByRole("button", { name: "Retry attachments" })).toBeInTheDocument();
+      expect(
+        screen.getByText(/the attachments couldn't be added for: p-2 — retry before this can be published/i),
+      ).toBeInTheDocument();
+    });
+
+    it("names the security label and the attachments when both are outstanding", () => {
+      mockGet({ ...approvedRequest, isSecurityAnnouncement: true });
+      mockedPublish.mockReturnValue(
+        publishResult({
+          succeededProjectIds: ["p-1", "p-2"],
+          failedTagProjectIds: ["p-1", "p-2"],
+          followUpLabel: "security label and attachments",
+        }),
+      );
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "Retry security label and attachments" })).toBeInTheDocument();
+    });
+
+    it("still reads as a security-label retry for a request with no files", () => {
+      mockGet({ ...approvedRequest, isSecurityAnnouncement: true });
+      mockedPublish.mockReturnValue(
+        publishResult({
+          succeededProjectIds: ["p-1", "p-2"],
+          failedTagProjectIds: ["p-2"],
+          followUpLabel: "security label",
+        }),
+      );
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "Retry security label" })).toBeInTheDocument();
+      expect(screen.getByText(/the security label couldn't be added for: p-2/i)).toBeInTheDocument();
+    });
+
+    it("blocks Publish and offers a retry when the attachments could not be loaded", () => {
+      const retryAttachments = vi.fn();
+      mockGet(approvedRequest);
+      mockedPublish.mockReturnValue(
+        publishResult({ attachmentsLoadFailed: true, readyToPublish: false, retryAttachments }),
+      );
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(screen.getByText(/publish is blocked until they load/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^publish$/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: /^retry$/i }));
+      expect(retryAttachments).toHaveBeenCalled();
+    });
+  });
+
+  describe("read-only views", () => {
+    it("lists the files of a request waiting for approval, with Download but no way to change them", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet({ state: "pending_approval" });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(screen.getByText("advisory.pdf")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Download advisory.pdf" })).toBeInTheDocument();
+      expect(screen.queryByText("Add files")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Remove advisory.pdf" })).not.toBeInTheDocument();
+    });
+
+    it("lists the files of a published request", () => {
+      mockedAttachments.mockReturnValue(attachmentsResult({ items: [savedFile("advisory.pdf")] }));
+      mockGet({
+        state: "published",
+        publishedAt: "2026-07-03T10:00:00Z",
+        publishedBy: "jane@example.com",
+        publishedCaseIds: ["case-1"],
+      });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+
+      expect(screen.getByText("advisory.pdf")).toBeInTheDocument();
+      expect(screen.queryByText("Add files")).not.toBeInTheDocument();
+    });
+
+    it("adds nothing to a request that has no files, as before", () => {
+      mockGet({
+        state: "published",
+        publishedAt: "2026-07-03T10:00:00Z",
+        publishedBy: "jane@example.com",
+        publishedCaseIds: ["case-1"],
+      });
+      render(<AnnouncementRequestDialog requestId="req-1" onClose={vi.fn()} />);
+      expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
+      expect(screen.queryByText(/no attachments/i)).not.toBeInTheDocument();
+    });
   });
 });

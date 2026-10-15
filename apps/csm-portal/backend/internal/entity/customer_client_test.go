@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -229,5 +230,95 @@ func TestNewCustomerEntityClientTimeout(t *testing.T) {
 		if c.http.Timeout != tc.want {
 			t.Errorf("%s: client timeout = %v, want %v", tc.name, c.http.Timeout, tc.want)
 		}
+	}
+}
+
+// TestAnnouncementRequestAttachmentClientCalls pins the five calls that carry
+// the files sent with an announcement: method, path (ids escaped into it), what
+// travels in the body or the query string, and that the content call returns the
+// raw bytes with the upstream Content-Type.
+func TestAnnouncementRequestAttachmentClientCalls(t *testing.T) {
+	t.Parallel()
+
+	const (
+		id    = "11111111-1111-4111-8111-111111111111"
+		att   = "22222222-2222-4222-8222-222222222222"
+		caseI = "33333333-3333-4333-8333-333333333333"
+	)
+	type seen struct {
+		method, path, query string
+		body                []byte
+	}
+	var got seen
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`))
+	})
+	mux.HandleFunc("/announcement-requests/", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = seen{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, body: body}
+		if strings.HasSuffix(r.URL.Path, "/content") {
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write([]byte("%PDF-bytes"))
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := NewCustomerEntityClient(CustomerEntityConfig{
+		BaseURL: srv.URL, TokenURL: srv.URL + "/token", ClientID: "c", ClientSecret: "s",
+	})
+	ctx := context.Background()
+
+	if _, err := client.CreateAnnouncementRequestAttachment(ctx, id, []byte(`{"name":"a.pdf"}`)); err != nil {
+		t.Fatalf("CreateAnnouncementRequestAttachment: %v", err)
+	}
+	if got.method != http.MethodPost || got.path != "/announcement-requests/"+id+"/attachments" || string(got.body) != `{"name":"a.pdf"}` {
+		t.Errorf("create: %+v", got)
+	}
+
+	if _, err := client.ListAnnouncementRequestAttachments(ctx, id); err != nil {
+		t.Fatalf("ListAnnouncementRequestAttachments: %v", err)
+	}
+	if got.method != http.MethodGet || got.path != "/announcement-requests/"+id+"/attachments" || len(got.body) != 0 {
+		t.Errorf("list: %+v", got)
+	}
+
+	content, ct, err := client.GetAnnouncementRequestAttachmentContent(ctx, id, att)
+	if err != nil {
+		t.Fatalf("GetAnnouncementRequestAttachmentContent: %v", err)
+	}
+	if got.method != http.MethodGet || got.path != "/announcement-requests/"+id+"/attachments/"+att+"/content" {
+		t.Errorf("content: %+v", got)
+	}
+	if string(content) != "%PDF-bytes" || ct != "application/pdf" {
+		t.Errorf("content = %q (%s), want the raw bytes and the upstream type", content, ct)
+	}
+
+	if _, err := client.DeleteAnnouncementRequestAttachment(ctx, id, att, "user 1&x=y"); err != nil {
+		t.Fatalf("DeleteAnnouncementRequestAttachment: %v", err)
+	}
+	if got.method != http.MethodDelete || got.path != "/announcement-requests/"+id+"/attachments/"+att {
+		t.Errorf("delete: %+v", got)
+	}
+	// The acting user is one query parameter and nothing a caller supplies can add another.
+	if got.query != "actorId=user+1%26x%3Dy" {
+		t.Errorf("delete query = %q, want the actor URL-encoded as a single parameter", got.query)
+	}
+
+	if _, err := client.AttachAnnouncementRequestAttachmentsToCase(ctx, id, caseI, []byte(`{"actorId":"u"}`)); err != nil {
+		t.Fatalf("AttachAnnouncementRequestAttachmentsToCase: %v", err)
+	}
+	if got.method != http.MethodPost || got.path != "/announcement-requests/"+id+"/cases/"+caseI+"/attachments" || string(got.body) != `{"actorId":"u"}` {
+		t.Errorf("attach to case: %+v", got)
 	}
 }

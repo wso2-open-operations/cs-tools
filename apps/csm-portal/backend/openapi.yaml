@@ -3526,6 +3526,330 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /announcement-requests/{id}/attachments:
+    post:
+      summary: Attach one file to an announcement request (a PDF to send with it).
+      description: >-
+        Sends the file with the announcement: it is held with the request, and
+        when the request is published (or its dry run is made) the server copies
+        it onto every case that is created, where customers see it among the
+        case's attachments. The body carries the file as a base64 data URI. Only
+        pdf, png, jpg, jpeg, gif, doc, docx, xls, xlsx, ppt, pptx, txt and csv
+        files are accepted; the file's type is derived from its name and its
+        content must be that kind of file, a file is at most 10 MB, and a request
+        carries at most 5 files and no two with the same name. Changing the files
+        is a content edit: allowed on a draft and on an approved request, a request
+        pending approval goes back to draft, a published request cannot be changed.
+        The acting user is always the authenticated caller.
+      operationId: createAnnouncementRequestAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnouncementRequestAttachmentPayload'
+      responses:
+        "201":
+          description: Created — the stored file's metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnouncementRequestAttachment'
+        "400":
+          description: "BadRequest — a file type that is not accepted, content that is not that kind of file, a file over 10 MB, a sixth file or a duplicate name. The reason is shown."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict — the request is published, some projects have already received it (its files can no longer change), or its state changed while this was applied."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: "RequestEntityTooLarge — the body is over 15 MiB."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "ServiceUnavailable — this deployment cannot send files with an announcement."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    get:
+      summary: List the files attached to an announcement request, oldest first.
+      operationId: listAnnouncementRequestAttachments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchAnnouncementRequestAttachmentsResponse'
+        "400":
+          description: "BadRequest — invalid id format."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/attachments/{attachmentId}/content:
+    get:
+      summary: Download one file attached to an announcement request.
+      operationId: getAnnouncementRequestAttachmentContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Raw file content. Content-Type is restricted to a safe allowlist; anything outside the allowlist is served as application/octet-stream. Content-Disposition is always attachment.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: "BadRequest — invalid id format."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/attachments/{attachmentId}:
+    delete:
+      summary: Remove one file attached to an announcement request.
+      description: >-
+        The same rules as attaching a file: allowed on a draft and on an approved
+        request, a request pending approval goes back to draft, a published request
+        cannot be changed. The acting user is always the authenticated caller.
+      operationId: deleteAnnouncementRequestAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: "BadRequest — invalid id format."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict — the request is published, some projects have already received it (its files can no longer change), or its state changed while this was applied."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /announcement-requests/{id}/cases/{caseId}/attachments:
+    post:
+      summary: Copy an announcement request's files onto one case, from the server.
+      description: >-
+        The publish flow calls this once for each case it creates (and for the
+        dry-run case), so a publish to many projects does not upload the same file
+        from the browser once per project. No body: the acting user is the
+        authenticated caller. Only a case the request owns is accepted (its
+        recorded dry-run case while it is a draft, a case of one of its resolved
+        projects while it is approved). Idempotent: a file the case already has is
+        left alone, so a retry after a partial failure attaches only what is missing.
+      operationId: attachAnnouncementRequestAttachmentsToCase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok — what this call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachAnnouncementRequestAttachmentsToCaseResponse'
+        "400":
+          description: "BadRequest — invalid id format, or the case is not one this request owns."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "Conflict — the request is neither a draft (with this case as its dry run) nor approved."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "InternalServerError — a file could not be attached; what was attached stays and a retry finishes the job."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "ServiceUnavailable — this deployment cannot send files with an announcement."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /projects/{id}/contacts/{contactId}:
     get:
       summary: Get one contact's attributes for a single project.
@@ -21878,6 +22202,65 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AnnouncementRequestDelivery'
+
+    AnnouncementRequestAttachment:
+      description: The metadata of one file attached to an announcement request (the bytes are fetched through the content endpoint).
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        announcementRequestId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          description: The canonical MIME type of the file's extension.
+        sizeBytes:
+          type: integer
+        createdBy:
+          type: string
+        createdByEmail:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+
+    CreateAnnouncementRequestAttachmentPayload:
+      type: object
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          description: The file name, with its extension (no path).
+        type:
+          type: string
+          description: Advisory only; the stored type is derived from the name.
+        file:
+          type: string
+          description: The file as a base64 data URI (data:application/pdf;base64,...), at most 10 MB decoded.
+
+    SearchAnnouncementRequestAttachmentsResponse:
+      type: object
+      properties:
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnnouncementRequestAttachment'
+
+    AttachAnnouncementRequestAttachmentsToCaseResponse:
+      type: object
+      properties:
+        attached:
+          type: integer
+          description: Files this call created on the case.
+        alreadyAttached:
+          type: integer
+          description: Files the case already had, left alone.
 
     SearchAnnouncementRequestsPayload:
       type: object

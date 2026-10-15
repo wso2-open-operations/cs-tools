@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -147,7 +148,39 @@ func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Contex
 	if err != nil {
 		return domain.CreateAttachmentResponse{}, err
 	}
+	return s.createCaseAttachmentAs(ctx, req, user)
+}
 
+// CreateCaseAttachmentAs is CreateCaseAttachment for a caller that already
+// knows who is acting and has no x-user-id-token to resolve one from -- the
+// scheduled publish of an announcement, which copies the request's files onto
+// the cases it creates (AnnouncementRequestService.AutoPublish). The actor is
+// looked up by email instead of by token; everything else, the ServiceNow-first
+// order included, is CreateCaseAttachment's. Only a case reference is
+// supported: it exists for the announcement fan-out, which never attaches to
+// anything else.
+func (s *caseAttachmentDualWriteService) CreateCaseAttachmentAs(ctx context.Context, req domain.CreateAttachmentRequest, actorEmail string) (domain.CreateAttachmentResponse, error) {
+	if req.ReferenceType != domain.ReferenceTypeCase {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "referenceType must be 'case'"}
+	}
+	if strings.TrimSpace(actorEmail) == "" {
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "an acting user is required to attach a file"}
+	}
+	user, err := s.userRepo.GetUserByEmail(ctx, actorEmail)
+	if err != nil {
+		return domain.CreateAttachmentResponse{}, err
+	}
+	return s.createCaseAttachmentAs(ctx, req, user)
+}
+
+// SupportsAnnouncementAttachments implements CaseAttachmentFanOutClient: this
+// data source holds a case's file bytes in ServiceNow, which a request's files
+// can be copied to as base64, whoever copies them.
+func (s *caseAttachmentDualWriteService) SupportsAnnouncementAttachments() bool { return true }
+
+// createCaseAttachmentAs is the ServiceNow-first write and the Postgres
+// metadata mirror, once the acting user is known.
+func (s *caseAttachmentDualWriteService) createCaseAttachmentAs(ctx context.Context, req domain.CreateAttachmentRequest, user domain.User) (domain.CreateAttachmentResponse, error) {
 	snResp, err := s.snMirror.CreateCaseAttachment(ctx, req)
 	if err != nil {
 		// ServiceNow never accepted the attachment -- nothing is written to

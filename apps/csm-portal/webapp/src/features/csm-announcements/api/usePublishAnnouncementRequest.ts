@@ -26,6 +26,8 @@ import {
   ANNOUNCEMENT_CASE_CREATE_CONCURRENCY_LIMIT,
   settleWithConcurrencyLimit,
 } from "@features/csm-announcements/utils/settleWithConcurrencyLimit";
+import { useAttachAnnouncementRequestFilesToCase } from "@features/csm-announcements/api/useAttachAnnouncementRequestFilesToCase";
+import { useListAnnouncementRequestAttachments } from "@features/csm-announcements/api/useListAnnouncementRequestAttachments";
 import { useListAnnouncementRequestDeliveries } from "@features/csm-announcements/api/useListAnnouncementRequestDeliveries";
 import { useRecordAnnouncementRequestDeliveries } from "@features/csm-announcements/api/useRecordAnnouncementRequestDeliveries";
 import type {
@@ -48,15 +50,20 @@ export interface UsePublishAnnouncementRequestResult {
   /** Only the projects still outstanding after the most recent attempt — call `handlePublish` again to retry just these. */
   failedProjectIds: string[];
   /**
-   * Projects whose case was created but the mandatory security-announcement
-   * tag failed to attach. Non-empty blocks `handlePublish` from reaching the
-   * final `/publish` call for a security announcement — a case that's
-   * missing its security tag once the request is `published` (terminal,
-   * no further edits or sends) has no in-app way to fix afterward. Calling
-   * `handlePublish` again retries just the tag attach for these, using the
-   * case already created — it never creates another one.
+   * Projects whose case was created but a required follow-up on it failed: the
+   * mandatory security-announcement tag, and/or copying the request's attachments
+   * onto it. Non-empty blocks `handlePublish` from reaching the final `/publish`
+   * call — a case that's missing its security tag or its files once the request is
+   * `published` (terminal, no further edits or sends) has no in-app way to fix
+   * afterward, and a customer would get an announcement without the document it
+   * refers to. Calling `handlePublish` again retries just those steps for these,
+   * using the case already created — it never creates another one. (The ledger
+   * records this as `tag_failed`, a name kept from before files existed: see that
+   * status's doc comment in the entity service.)
    */
   failedTagProjectIds: string[];
+  /** What a retry of {@link failedTagProjectIds} redoes, for wording: "security label", "attachments" or both. */
+  followUpLabel: string;
   /** Set once every resolved project has a case and the backend has marked the request published. */
   published: AnnouncementRequest | null;
   handlePublish: () => Promise<void>;
@@ -93,6 +100,14 @@ export interface UsePublishAnnouncementRequestResult {
   /** True once ledger hydration has failed for the current request — call `retryHydration` to try again. */
   hydrationFailed: boolean;
   retryHydration: () => void;
+  /**
+   * True once loading the request's attachments has failed. Publishing is blocked
+   * until they load: without the list, the hook cannot know whether every case
+   * must also be given files, and a publish that skipped them would send an
+   * announcement without its documents. Call `retryAttachments` to try again.
+   */
+  attachmentsLoadFailed: boolean;
+  retryAttachments: () => void;
 }
 
 /**
@@ -142,6 +157,18 @@ export function usePublishAnnouncementRequest(
     request?.id,
     request?.state === "approved" || request?.state === "published",
   );
+
+  // The request's files, so every case can be given them (see finishCase below).
+  // Needed only while a send is possible; Publish waits for it (readyToPublish).
+  const attachmentsQuery = useListAnnouncementRequestAttachments(request?.id, request?.state === "approved");
+  const attachToCase = useAttachAnnouncementRequestFilesToCase();
+  const attachmentCount = attachmentsQuery.data?.length ?? 0;
+  const followUpLabel = [
+    request?.isSecurityAnnouncement ? "security label" : null,
+    attachmentCount > 0 ? (attachmentCount === 1 ? "attachment" : "attachments") : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
 
   const [publishing, setPublishing] = useState(false);
   const [progress, setProgress] = useState<PublishProgress | null>(null);
@@ -210,12 +237,17 @@ export function usePublishAnnouncementRequest(
     }
   }, [request?.id, deliveriesQuery.data, deliveriesQuery.isSuccess]);
 
+  const attachmentsReady = !request || request.state !== "approved" || attachmentsQuery.isSuccess;
   const readyToPublish =
-    !request || request.state !== "approved" || hydratedRequestId === request.id;
-  const hydratingDeliveries = !readyToPublish && !deliveriesQuery.isError;
-  const hydrationFailed = !readyToPublish && deliveriesQuery.isError;
+    !request || request.state !== "approved" || (hydratedRequestId === request.id && attachmentsReady);
+  const hydratingDeliveries = !readyToPublish && !deliveriesQuery.isError && !attachmentsQuery.isError;
+  const hydrationFailed = request?.state === "approved" && hydratedRequestId !== request.id && deliveriesQuery.isError;
+  const attachmentsLoadFailed = request?.state === "approved" && attachmentsQuery.isError;
   const retryHydration = (): void => {
     void deliveriesQuery.refetch();
+  };
+  const retryAttachments = (): void => {
+    void attachmentsQuery.refetch();
   };
 
   /**
@@ -248,23 +280,36 @@ export function usePublishAnnouncementRequest(
     }
     const pendingProjectIds = allProjectIds.filter((id) => !succeededProjectIds.includes(id));
 
+    // What a case needs once it exists: the mandatory security tag (security
+    // announcements) and the request's files, which the server copies onto it so the
+    // browser never uploads them once per project. Both are idempotent, which is what
+    // lets one retry serve either failing, and a case that has both already is left alone.
+    const finishCase = async (caseId: string): Promise<void> => {
+      if (request.isSecurityAnnouncement) {
+        await addTag.mutateAsync({ caseId, label: SECURITY_ANNOUNCEMENT_TAG_LABEL });
+      }
+      if (attachmentCount > 0) {
+        await attachToCase.mutateAsync({ id: request.id, caseId });
+      }
+    };
+
     setPublishing(true);
 
-    // Retry any security-tag attach that failed on an *earlier* call first —
-    // the case already exists (see failedTagCaseIds), so this calls addTag
-    // directly rather than going through the case-create fan-out again
-    // (which would send a duplicate case to a project that already has
-    // one). This is attempted once per handlePublish call, same as the
-    // case-create fan-out below never retries its own failures within the
-    // same call — a tag that fails again here just blocks, it isn't looped.
-    if (request.isSecurityAnnouncement && failedTagProjectIds.length > 0) {
+    // Retry any follow-up (security tag, attachments) that failed on an *earlier*
+    // call first — the case already exists (see failedTagCaseIds), so this finishes
+    // it directly rather than going through the case-create fan-out again (which
+    // would send a duplicate case to a project that already has one). This is
+    // attempted once per handlePublish call, same as the case-create fan-out below
+    // never retries its own failures within the same call — a step that fails again
+    // here just blocks, it isn't looped.
+    if (failedTagProjectIds.length > 0) {
       const stillFailingTags: string[] = [];
       const tagRetryEntries: RecordAnnouncementRequestDeliveryEntry[] = [];
       for (const projectId of failedTagProjectIds) {
         const caseId = failedTagCaseIds[projectId];
         if (!caseId) continue;
         try {
-          await addTag.mutateAsync({ caseId, label: SECURITY_ANNOUNCEMENT_TAG_LABEL });
+          await finishCase(caseId);
           tagRetryEntries.push({ projectId, caseId, status: "succeeded" });
         } catch {
           stillFailingTags.push(projectId);
@@ -277,7 +322,7 @@ export function usePublishAnnouncementRequest(
       if (stillFailingTags.length > 0) {
         setPublishing(false);
         showError(
-          `The security label still couldn't be attached for project${
+          `The ${followUpLabel || "follow-up"} still couldn't be added for project${
             stillFailingTags.length === 1 ? "" : "s"
           } ${stillFailingTags.join(", ")}. Retry to try again — this won't resend the case${
             stillFailingTags.length === 1 ? "" : "s"
@@ -324,15 +369,13 @@ export function usePublishAnnouncementRequest(
           // tracked unconditionally so a later tag-only retry (which
           // reuses this same case rather than recreating it) still has it.
           caseIdsForPublish[projectId] = created.id;
-          if (request.isSecurityAnnouncement) {
-            try {
-              await addTag.mutateAsync({ caseId: created.id, label: SECURITY_ANNOUNCEMENT_TAG_LABEL });
-            } catch {
-              newlyFailedTagIds.push(projectId);
-              newlyFailedTagCaseIds[projectId] = created.id;
-              passEntries.push({ projectId, caseId: created.id, status: "tag_failed" });
-              return created;
-            }
+          try {
+            await finishCase(created.id);
+          } catch {
+            newlyFailedTagIds.push(projectId);
+            newlyFailedTagCaseIds[projectId] = created.id;
+            passEntries.push({ projectId, caseId: created.id, status: "tag_failed" });
+            return created;
           }
           passEntries.push({ projectId, caseId: created.id, status: "succeeded" });
           return created;
@@ -369,17 +412,17 @@ export function usePublishAnnouncementRequest(
         return;
       }
 
-      // A security announcement must not reach the terminal `published`
-      // state (no further edits or sends possible after) with any case
-      // still missing its security tag — block here and let the next call
-      // retry just the tag (handled by the retry pass at the top of this
-      // function), never re-creating the case.
+      // An announcement must not reach the terminal `published` state (no
+      // further edits or sends possible after) with any case still missing its
+      // security tag or its files — block here and let the next call retry just
+      // those steps (handled by the retry pass at the top of this function),
+      // never re-creating the case.
       if (newlyFailedTagIds.length > 0) {
         setPublishing(false);
         showError(
           `Sent to ${newlySucceeded.length} of ${pendingProjectIds.length} remaining project${
             pendingProjectIds.length === 1 ? "" : "s"
-          }, but the security label couldn't be attached for project${
+          }, but the ${followUpLabel || "follow-up"} couldn't be added for project${
             newlyFailedTagIds.length === 1 ? "" : "s"
           } ${newlyFailedTagIds.join(", ")}. Retry to try again — this won't resend the case${
             newlyFailedTagIds.length === 1 ? "" : "s"
@@ -448,6 +491,7 @@ export function usePublishAnnouncementRequest(
     succeededProjectIds,
     failedProjectIds,
     failedTagProjectIds,
+    followUpLabel,
     published,
     handlePublish,
     publishGivingUpOnFailed,
@@ -455,5 +499,7 @@ export function usePublishAnnouncementRequest(
     hydratingDeliveries,
     hydrationFailed,
     retryHydration,
+    attachmentsLoadFailed,
+    retryAttachments,
   };
 }

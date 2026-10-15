@@ -8661,6 +8661,76 @@ type SearchAnnouncementRequestUpdatesResponse struct {
 	Updates []AnnouncementRequestUpdate `json:"updates"`
 }
 
+// Limits on the files attached to one announcement request. They live here so
+// the service and the OpenAPI document quote one number.
+const (
+	// MaxAnnouncementRequestAttachments is how many files one request may
+	// carry. Every one of them is copied onto every case a publish creates, so
+	// the limit is also a bound on the work a large audience costs.
+	MaxAnnouncementRequestAttachments = 5
+	// MaxAnnouncementRequestAttachmentBytes is the decoded size of one file,
+	// the same ceiling a case attachment has (10 MB).
+	MaxAnnouncementRequestAttachmentBytes = 10 * 1024 * 1024
+)
+
+// AnnouncementRequestAttachment is the metadata of one file attached to an
+// announcement request. The bytes are never part of it: they are read through
+// their own endpoint (see AnnouncementRequestAttachmentContent). When the
+// request is published, every attachment is copied onto each case it creates,
+// where customers see it as an ordinary case attachment.
+// Always backed by Postgres, like the request itself.
+type AnnouncementRequestAttachment struct {
+	ID                    string `json:"id"`
+	AnnouncementRequestID string `json:"announcementRequestId"`
+	Name                  string `json:"name"`
+	// Type is the file's MIME type as this service stored it: the canonical
+	// type of its extension, which is what the file's bytes were checked against.
+	Type      string `json:"type"`
+	SizeBytes int    `json:"sizeBytes"`
+	// CreatedBy is the IdP account id of whoever attached the file;
+	// CreatedByEmail is its readable companion. See
+	// AnnouncementRequest.CreatedByEmail.
+	CreatedBy      string    `json:"createdBy"`
+	CreatedByEmail *string   `json:"createdByEmail,omitempty"`
+	CreatedOn      time.Time `json:"createdOn"`
+}
+
+// AnnouncementRequestAttachmentContent is one attachment with its bytes, as
+// the content endpoint and the copy onto a case read it.
+type AnnouncementRequestAttachmentContent struct {
+	AnnouncementRequestAttachment
+	Content []byte `json:"-"`
+}
+
+// CreateAnnouncementRequestAttachmentRequest attaches one file to a request.
+// File is a base64 data URI (data:<mime>;base64,<data>), the form the case
+// attachment endpoint takes too.
+type CreateAnnouncementRequestAttachmentRequest struct {
+	ActorID string `json:"actorId"`
+	// ActorEmail is optional — see AnnouncementRequest.CreatedByEmail's own
+	// doc comment for what it's for.
+	ActorEmail string `json:"actorEmail,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	File       string `json:"file"`
+}
+
+// SearchAnnouncementRequestAttachmentsResponse lists the files attached to one
+// request, oldest first (the order they are copied onto a case). No
+// pagination: a request holds at most MaxAnnouncementRequestAttachments.
+type SearchAnnouncementRequestAttachmentsResponse struct {
+	Attachments []AnnouncementRequestAttachment `json:"attachments"`
+}
+
+// AttachAnnouncementRequestAttachmentsToCaseResponse reports what copying a
+// request's files onto one case did. Attached counts files created on the case
+// by this call, AlreadyAttached the ones the case already carried (a retry
+// after a partial failure, or a second call) which are left alone.
+type AttachAnnouncementRequestAttachmentsToCaseResponse struct {
+	Attached        int `json:"attached"`
+	AlreadyAttached int `json:"alreadyAttached"`
+}
+
 // SearchAnnouncementRequestsRequest filters announcement_requests. State,
 // States and CreatedBy are all optional; omitting all of them returns every
 // row (subject to pagination) — there is no default filter, unlike some
@@ -8758,9 +8828,13 @@ const (
 	// and (for a security announcement) its mandatory tag attached.
 	AnnouncementRequestDeliveryStatusSucceeded AnnouncementRequestDeliveryStatus = "succeeded"
 	// AnnouncementRequestDeliveryStatusTagFailed means the case was created
-	// but attaching the mandatory security-announcement tag failed — the
-	// case is real (CaseID is set), but a retry must reattach the tag
-	// directly rather than creating a second case for the same project.
+	// but a required follow-up step on it failed — attaching the mandatory
+	// security-announcement tag, and/or copying the request's attachments onto
+	// it. The case is real (CaseID is set), but a retry must redo that
+	// follow-up directly (both steps are idempotent) rather than creating a
+	// second case for the same project. The value keeps its original name:
+	// it is stored in announcement_request_deliveries and sent by deployed
+	// clients, so it is not renamed for the files that were added later.
 	AnnouncementRequestDeliveryStatusTagFailed AnnouncementRequestDeliveryStatus = "tag_failed"
 	// AnnouncementRequestDeliveryStatusFailed means the case itself was
 	// never created — a retry must attempt case creation again.

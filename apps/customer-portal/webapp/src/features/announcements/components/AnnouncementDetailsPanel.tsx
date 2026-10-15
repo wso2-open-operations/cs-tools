@@ -35,6 +35,7 @@ import {
 } from "@features/support/utils/support";
 import ApiErrorState from "@components/error/ApiErrorState";
 import AnnouncementActivityPanel from "@features/announcements/components/AnnouncementActivityPanel";
+import AnnouncementAttachmentsPanel from "@features/announcements/components/AnnouncementAttachmentsPanel";
 import type { AnnouncementDetailsPanelProps } from "@features/announcements/types/announcements";
 import {
   ANNOUNCEMENT_DETAILS_BODY_EMPTY,
@@ -328,6 +329,8 @@ export default function AnnouncementDetailsPanel({
           </Typography>
         )}
       </Paper>
+
+      {caseId && <AnnouncementAttachmentsPanel caseId={caseId} />}
     </Box>
   );
 }

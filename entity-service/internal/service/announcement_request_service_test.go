@@ -85,6 +85,20 @@ type fakeAnnouncementRequestRepo struct {
 	gotListDeliveriesID  string
 	listDeliveriesResult []domain.AnnouncementRequestDelivery
 
+	// attachments is what the fake holds for ListAttachments /
+	// GetAttachmentContent, oldest first, with bytes.
+	attachments []domain.AnnouncementRequestAttachmentContent
+	// The last AddAttachment / DeleteAttachment call.
+	addAttachmentCalls      int
+	gotAddAttachment        domain.AnnouncementRequestAttachmentContent
+	gotAttachmentExpected   domain.AnnouncementRequestState
+	gotAttachmentRevert     bool
+	addAttachmentErr        error
+	deleteAttachmentCalls   int
+	gotDeleteAttachmentID   string
+	deleteAttachmentErr     error
+	getAttachmentContentErr error
+
 	gotClaimID    string
 	claimCalled   bool
 	claimResult   domain.AnnouncementRequest
@@ -231,12 +245,66 @@ func (f *fakeAnnouncementRequestRepo) ListDeliveries(_ context.Context, announce
 	return f.listDeliveriesResult, nil
 }
 
+func (f *fakeAnnouncementRequestRepo) AddAttachment(_ context.Context, id string, expectedState domain.AnnouncementRequestState, revertToDraft bool, att domain.AnnouncementRequestAttachmentContent) (domain.AnnouncementRequestAttachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addAttachmentCalls++
+	f.gotAddAttachment = att
+	f.gotAttachmentExpected = expectedState
+	f.gotAttachmentRevert = revertToDraft
+	if f.addAttachmentErr != nil {
+		return domain.AnnouncementRequestAttachment{}, f.addAttachmentErr
+	}
+	att.ID = fmt.Sprintf("att-%d", len(f.attachments)+1)
+	att.AnnouncementRequestID = id
+	f.attachments = append(f.attachments, att)
+	return att.AnnouncementRequestAttachment, nil
+}
+
+func (f *fakeAnnouncementRequestRepo) DeleteAttachment(_ context.Context, _, attachmentID string, expectedState domain.AnnouncementRequestState, revertToDraft bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteAttachmentCalls++
+	f.gotDeleteAttachmentID = attachmentID
+	f.gotAttachmentExpected = expectedState
+	f.gotAttachmentRevert = revertToDraft
+	return f.deleteAttachmentErr
+}
+
+func (f *fakeAnnouncementRequestRepo) ListAttachments(_ context.Context, _ string) ([]domain.AnnouncementRequestAttachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]domain.AnnouncementRequestAttachment, len(f.attachments))
+	for i, a := range f.attachments {
+		out[i] = a.AnnouncementRequestAttachment
+	}
+	return out, nil
+}
+
+func (f *fakeAnnouncementRequestRepo) GetAttachmentContent(_ context.Context, _, attachmentID string) (domain.AnnouncementRequestAttachmentContent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getAttachmentContentErr != nil {
+		return domain.AnnouncementRequestAttachmentContent{}, f.getAttachmentContentErr
+	}
+	for _, a := range f.attachments {
+		if a.ID == attachmentID {
+			return a, nil
+		}
+	}
+	return domain.AnnouncementRequestAttachmentContent{}, &apierror.NotFoundError{Msg: "attachment not found: " + attachmentID}
+}
+
 // fakeCaseFanOutClient stubs the narrow CreateCase/AddCaseTagAs subset
 // AutoPublish uses — every created case gets a sequential id ("case-1",
 // "case-2", ...) unless createCaseFn overrides that.
 type fakeCaseFanOutClient struct {
 	createCaseFn func(ctx context.Context, req domain.CreateCaseRequest) (domain.CreateCaseResponse, error)
 	addTagFn     func(ctx context.Context, caseID, label string) (domain.Tag, error)
+
+	// caseViews is what GetCaseByID returns, by case id; getCaseErr fails it.
+	caseViews  map[string]domain.CaseView
+	getCaseErr error
 
 	createdCases      []domain.CreateCaseRequest
 	taggedCases       []string
@@ -261,6 +329,18 @@ func (f *fakeCaseFanOutClient) CreateCase(ctx context.Context, req domain.Create
 		return fn(ctx, req)
 	}
 	return domain.CreateCaseResponse{Case: domain.CreateCaseDetails{ID: fmt.Sprintf("case-%d", caseNum)}}, nil
+}
+
+func (f *fakeCaseFanOutClient) GetCaseByID(_ context.Context, id string) (domain.CaseView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getCaseErr != nil {
+		return domain.CaseView{}, f.getCaseErr
+	}
+	if v, ok := f.caseViews[id]; ok {
+		return v, nil
+	}
+	return domain.CaseView{}, &apierror.NotFoundError{Msg: "case not found: " + id}
 }
 
 func (f *fakeCaseFanOutClient) AddCaseTagAs(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error) {

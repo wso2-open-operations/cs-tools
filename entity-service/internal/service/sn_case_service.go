@@ -4155,6 +4155,19 @@ func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.Cre
 	}, nil
 }
 
+// CreateCaseAttachmentAs implements CaseAttachmentFanOutClient. ServiceNow
+// attributes the upload to the caller's forwarded token (or to the service
+// account when there is none, as every other write this service makes without
+// one), so the acting email has no use here and is ignored.
+func (s *snCaseService) CreateCaseAttachmentAs(ctx context.Context, req domain.CreateAttachmentRequest, _ string) (domain.CreateAttachmentResponse, error) {
+	return s.CreateCaseAttachment(ctx, req)
+}
+
+// SupportsAnnouncementAttachments implements CaseAttachmentFanOutClient: a
+// case's files live in ServiceNow on this data source, which takes them as
+// base64.
+func (s *snCaseService) SupportsAnnouncementAttachments() bool { return true }
+
 // ConfirmCaseAttachment implements CaseService. ServiceNow's /attachments API
 // only ever returns fully-uploaded files -- there is no pending/in-progress
 // upload state to confirm -- so this is a CSM-native (Postgres) data

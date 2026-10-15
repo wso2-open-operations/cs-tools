@@ -29,6 +29,13 @@ vi.mock("@features/announcements/components/AnnouncementActivityPanel", () => ({
   default: () => <div data-testid="announcement-activity" />,
 }));
 
+// The attachments section reads the case's attachments through the authenticated API
+// client, which needs providers this test does not set up; its own behaviour is
+// covered by AnnouncementAttachmentsPanel.test.tsx.
+vi.mock("@features/announcements/components/AnnouncementAttachmentsPanel", () => ({
+  default: ({ caseId }: { caseId: string }) => <div data-testid="announcement-attachments" data-case-id={caseId} />,
+}));
+
 vi.mock("@utils/useDarkMode", () => ({
   useDarkMode: () => false,
 }));
@@ -54,6 +61,38 @@ describe("AnnouncementDetailsPanel", () => {
     expect(screen.getByText("Maintenance window")).toBeInTheDocument();
     expect(screen.getByText("Description")).toBeInTheDocument();
     expect(screen.getByText("Back")).toBeInTheDocument();
+  });
+
+  it("shows the announcement's attachments section for its own case", () => {
+    render(
+      <AnnouncementDetailsPanel
+        data={{
+          title: "Security advisory",
+          number: "ANN-103",
+          description: "<p>See the attached advisory.</p>",
+          status: { id: "1", label: "Open" },
+          createdOn: "2024-01-15T10:00:00Z",
+        } as never}
+        isLoading={false}
+        isError={false}
+        caseId="case-7"
+        projectId="proj-1"
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("announcement-attachments")).toHaveAttribute("data-case-id", "case-7");
+  });
+
+  it("shows no attachments section while the details are loading or failed to load", () => {
+    const { rerender } = render(
+      <AnnouncementDetailsPanel data={undefined} isLoading isError={false} caseId="case-7" projectId="proj-1" onBack={() => {}} />,
+    );
+    expect(screen.queryByTestId("announcement-attachments")).not.toBeInTheDocument();
+
+    rerender(
+      <AnnouncementDetailsPanel data={undefined} isLoading={false} isError caseId="case-7" projectId="proj-1" onBack={() => {}} />,
+    );
+    expect(screen.queryByTestId("announcement-attachments")).not.toBeInTheDocument();
   });
 
   it("renders a table in the description instead of stripping it", () => {

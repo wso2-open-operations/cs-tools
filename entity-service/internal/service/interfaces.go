@@ -450,6 +450,28 @@ type AnnouncementRequestService interface {
 	// ListDeliveries returns every delivery recorded for id. A NotFoundError
 	// is returned if the request itself doesn't exist.
 	ListDeliveries(ctx context.Context, id string) (domain.SearchAnnouncementRequestDeliveriesResponse, error)
+	// AddAttachment stores one file on the request (a base64 data URI; the
+	// type is derived from its name and checked against its bytes). It is a
+	// content edit, so it follows Update's state rules: allowed in draft and
+	// approved, sends a pending_approval request back to draft, a ConflictError
+	// when published. A ValidationError is returned for a type or content that
+	// is not accepted, a second file of the same name, or a sixth file; a
+	// ServiceUnavailableError on a data source whose cases cannot hold the
+	// file (a file nobody could send is not stored).
+	AddAttachment(ctx context.Context, id string, req domain.CreateAnnouncementRequestAttachmentRequest) (domain.AnnouncementRequestAttachment, error)
+	// DeleteAttachment removes one file, under the same state rules as AddAttachment.
+	DeleteAttachment(ctx context.Context, id, attachmentID, actorID string) error
+	// ListAttachments returns the files attached to the request, oldest
+	// first. A NotFoundError is returned if the request doesn't exist.
+	ListAttachments(ctx context.Context, id string) (domain.SearchAnnouncementRequestAttachmentsResponse, error)
+	// GetAttachmentContent returns one file with its bytes.
+	GetAttachmentContent(ctx context.Context, id, attachmentID string) (domain.AnnouncementRequestAttachmentContent, error)
+	// AttachToCase copies the request's files onto one case that the request
+	// owns (its recorded dry-run case while a draft, a case of one of its
+	// resolved projects while approved), skipping files the case already has.
+	// It is the browser-driven publish's step after creating each case; the
+	// scheduled publish does the same in-process (AutoPublish).
+	AttachToCase(ctx context.Context, id, caseID string, req domain.AnnouncementRequestActorRequest) (domain.AttachAnnouncementRequestAttachmentsToCaseResponse, error)
 }
 
 // SNAccountService defines the account operations backed by the ServiceNow data source.

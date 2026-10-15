@@ -1104,6 +1104,43 @@ func (c *CustomerEntityClient) ListAnnouncementRequestDeliveries(ctx context.Con
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/announcement-requests/%s/deliveries", url.PathEscape(id)), nil)
 }
 
+// CreateAnnouncementRequestAttachment calls POST /announcement-requests/{id}/attachments on the entity service.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) CreateAnnouncementRequestAttachment(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/attachments", url.PathEscape(id)), body)
+}
+
+// ListAnnouncementRequestAttachments calls GET /announcement-requests/{id}/attachments on the entity service.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) ListAnnouncementRequestAttachments(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/announcement-requests/%s/attachments", url.PathEscape(id)), nil)
+}
+
+// GetAnnouncementRequestAttachmentContent calls
+// GET /announcement-requests/{id}/attachments/{attachmentId}/content and
+// returns the raw binary body with its Content-Type.
+func (c *CustomerEntityClient) GetAnnouncementRequestAttachmentContent(ctx context.Context, id, attachmentID string) ([]byte, string, error) {
+	return c.doBinary(ctx, fmt.Sprintf("/announcement-requests/%s/attachments/%s/content", url.PathEscape(id), url.PathEscape(attachmentID)))
+}
+
+// DeleteAnnouncementRequestAttachment calls
+// DELETE /announcement-requests/{id}/attachments/{attachmentId} on the entity
+// service. The acting user travels as the actorId query parameter because a
+// DELETE carries no body.
+func (c *CustomerEntityClient) DeleteAnnouncementRequestAttachment(ctx context.Context, id, attachmentID, actorID string) ([]byte, error) {
+	q := url.Values{}
+	q.Set("actorId", actorID)
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/announcement-requests/%s/attachments/%s?%s", url.PathEscape(id), url.PathEscape(attachmentID), q.Encode()), nil)
+}
+
+// AttachAnnouncementRequestAttachmentsToCase calls
+// POST /announcement-requests/{id}/cases/{caseId}/attachments on the entity
+// service: it copies the request's files onto one case, server-side.
+// Response is returned as raw JSON.
+func (c *CustomerEntityClient) AttachAnnouncementRequestAttachmentsToCase(ctx context.Context, id, caseID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/announcement-requests/%s/cases/%s/attachments", url.PathEscape(id), url.PathEscape(caseID)), body)
+}
+
 // CreateScheduleAssignment calls POST /team-schedule/assignments on the entity
 // service. Lead edit; the entity service enforces that the caller leads the team.
 func (c *CustomerEntityClient) CreateScheduleAssignment(ctx context.Context, body []byte) ([]byte, error) {

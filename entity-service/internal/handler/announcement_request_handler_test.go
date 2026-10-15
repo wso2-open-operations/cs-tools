@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -122,6 +123,161 @@ func TestSearchAnnouncementRequests_RequestBodies(t *testing.T) {
 		rec, _ := post(t, `{"stateList":["draft"],"pagination":{"offset":0,"limit":10}}`)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+	})
+}
+
+// attachmentCapturingService records what the attachment endpoints hand the
+// service; every other method is left nil-embedded so reaching one fails loudly.
+type attachmentCapturingService struct {
+	service.AnnouncementRequestService
+
+	addID, deleteID, deleteAttachmentID, deleteActor string
+	addReq                                           domain.CreateAnnouncementRequestAttachmentRequest
+	contentResult                                    domain.AnnouncementRequestAttachmentContent
+	attachID, attachCaseID                           string
+	attachReq                                        domain.AnnouncementRequestActorRequest
+	err                                              error
+}
+
+func (s *attachmentCapturingService) AddAttachment(_ context.Context, id string, req domain.CreateAnnouncementRequestAttachmentRequest) (domain.AnnouncementRequestAttachment, error) {
+	s.addID, s.addReq = id, req
+	return domain.AnnouncementRequestAttachment{ID: "att-1", Name: req.Name}, s.err
+}
+
+func (s *attachmentCapturingService) DeleteAttachment(_ context.Context, id, attachmentID, actorID string) error {
+	s.deleteID, s.deleteAttachmentID, s.deleteActor = id, attachmentID, actorID
+	return s.err
+}
+
+func (s *attachmentCapturingService) GetAttachmentContent(_ context.Context, _, _ string) (domain.AnnouncementRequestAttachmentContent, error) {
+	return s.contentResult, s.err
+}
+
+func (s *attachmentCapturingService) AttachToCase(_ context.Context, id, caseID string, req domain.AnnouncementRequestActorRequest) (domain.AttachAnnouncementRequestAttachmentsToCaseResponse, error) {
+	s.attachID, s.attachCaseID, s.attachReq = id, caseID, req
+	return domain.AttachAnnouncementRequestAttachmentsToCaseResponse{Attached: 2}, s.err
+}
+
+func TestAnnouncementRequestAttachmentEndpoints(t *testing.T) {
+	t.Run("POST attachment decodes the body, hands the service the id and answers 201", func(t *testing.T) {
+		svc := &attachmentCapturingService{}
+		h := NewAnnouncementRequestHandler(svc)
+		req := httptest.NewRequest(http.MethodPost, "/announcement-requests/r1/attachments",
+			strings.NewReader(`{"actorId":"u1","actorEmail":"u1@example.com","name":"a.pdf","type":"application/pdf","file":"data:application/pdf;base64,JVBERg=="}`))
+		req.SetPathValue("id", "r1")
+		rec := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		if svc.addID != "r1" || svc.addReq.Name != "a.pdf" || svc.addReq.ActorID != "u1" || svc.addReq.File == "" {
+			t.Fatalf("unexpected call: id=%q req=%+v", svc.addID, svc.addReq)
+		}
+	})
+
+	t.Run("POST attachment accepts a body well past the generic 1 MiB cap, and refuses one past 15 MiB", func(t *testing.T) {
+		h := NewAnnouncementRequestHandler(&attachmentCapturingService{})
+		body := func(n int) string {
+			return `{"actorId":"u1","name":"a.pdf","file":"data:application/pdf;base64,` + strings.Repeat("A", n) + `"}`
+		}
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body(3<<20)))
+		req.SetPathValue("id", "r1")
+		rec := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("a 3 MiB body must be accepted, got %d: %s", rec.Code, rec.Body.String())
+		}
+		req = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body(16<<20)))
+		req.SetPathValue("id", "r1")
+		rec = httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "10 MB") {
+			t.Fatalf("a 16 MiB body must be refused naming the file-size limit, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("POST attachment rejects an unknown field", func(t *testing.T) {
+		h := NewAnnouncementRequestHandler(&attachmentCapturingService{})
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"actorId":"u1","name":"a.pdf","file":"x","extra":1}`))
+		rec := httptest.NewRecorder()
+		h.CreateAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	})
+
+	t.Run("GET content is always a download, with the file's own name and type only when the type is on the allowlist", func(t *testing.T) {
+		for _, tc := range []struct{ mime, wantType string }{
+			{"application/pdf", "application/pdf"},
+			{"image/png", "image/png"},
+			{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream"},
+			{"text/html", "application/octet-stream"},
+		} {
+			svc := &attachmentCapturingService{contentResult: domain.AnnouncementRequestAttachmentContent{
+				AnnouncementRequestAttachment: domain.AnnouncementRequestAttachment{Name: `Q3 "advisory".pdf`, Type: tc.mime},
+				Content:                       []byte("bytes"),
+			}}
+			h := NewAnnouncementRequestHandler(svc)
+			req := httptest.NewRequest(http.MethodGet, "/x", nil)
+			rec := httptest.NewRecorder()
+			h.GetAnnouncementRequestAttachmentContent(rec, req)
+			if rec.Code != http.StatusOK || rec.Body.String() != "bytes" {
+				t.Fatalf("%s: status=%d body=%q", tc.mime, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); got != tc.wantType {
+				t.Errorf("%s: Content-Type = %q, want %q", tc.mime, got, tc.wantType)
+			}
+			cd := rec.Header().Get("Content-Disposition")
+			if !strings.HasPrefix(cd, "attachment;") || !strings.Contains(cd, `filename="Q3 \"advisory\".pdf"`) {
+				t.Errorf("%s: Content-Disposition = %q, want an attachment with the quoted file name", tc.mime, cd)
+			}
+			if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Errorf("%s: missing nosniff", tc.mime)
+			}
+		}
+	})
+
+	t.Run("DELETE takes the actor from the query string and answers 204", func(t *testing.T) {
+		svc := &attachmentCapturingService{}
+		h := NewAnnouncementRequestHandler(svc)
+		req := httptest.NewRequest(http.MethodDelete, "/x?actorId=u9", nil)
+		req.SetPathValue("id", "r1")
+		req.SetPathValue("attachmentId", "a1")
+		rec := httptest.NewRecorder()
+		h.DeleteAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+			t.Fatalf("status = %d body=%q", rec.Code, rec.Body.String())
+		}
+		if svc.deleteID != "r1" || svc.deleteAttachmentID != "a1" || svc.deleteActor != "u9" {
+			t.Fatalf("unexpected call: %q %q %q", svc.deleteID, svc.deleteAttachmentID, svc.deleteActor)
+		}
+	})
+
+	t.Run("attach to case passes the request and case ids and the actor, and reports what was attached", func(t *testing.T) {
+		svc := &attachmentCapturingService{}
+		h := NewAnnouncementRequestHandler(svc)
+		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"actorId":"u1","actorEmail":"u1@example.com"}`))
+		req.SetPathValue("id", "r1")
+		req.SetPathValue("caseId", "c1")
+		rec := httptest.NewRecorder()
+		h.AttachAnnouncementRequestAttachmentsToCase(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"attached":2`) {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		if svc.attachID != "r1" || svc.attachCaseID != "c1" || svc.attachReq.ActorEmail != "u1@example.com" {
+			t.Fatalf("unexpected call: %q %q %+v", svc.attachID, svc.attachCaseID, svc.attachReq)
+		}
+	})
+
+	t.Run("a service error becomes its HTTP status", func(t *testing.T) {
+		svc := &attachmentCapturingService{err: &apierror.ConflictError{Msg: "published"}}
+		h := NewAnnouncementRequestHandler(svc)
+		req := httptest.NewRequest(http.MethodDelete, "/x?actorId=u1", nil)
+		rec := httptest.NewRecorder()
+		h.DeleteAnnouncementRequestAttachment(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
 		}
 	})
 }

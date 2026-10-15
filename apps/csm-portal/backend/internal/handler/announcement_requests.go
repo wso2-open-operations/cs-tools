@@ -24,6 +24,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
@@ -47,6 +48,11 @@ type entityAnnouncementRequestClient interface {
 	ListAnnouncementRequestUpdates(ctx context.Context, id string) ([]byte, error)
 	RecordAnnouncementRequestDeliveries(ctx context.Context, id string, body []byte) ([]byte, error)
 	ListAnnouncementRequestDeliveries(ctx context.Context, id string) ([]byte, error)
+	CreateAnnouncementRequestAttachment(ctx context.Context, id string, body []byte) ([]byte, error)
+	ListAnnouncementRequestAttachments(ctx context.Context, id string) ([]byte, error)
+	GetAnnouncementRequestAttachmentContent(ctx context.Context, id, attachmentID string) ([]byte, string, error)
+	DeleteAnnouncementRequestAttachment(ctx context.Context, id, attachmentID, actorID string) ([]byte, error)
+	AttachAnnouncementRequestAttachmentsToCase(ctx context.Context, id, caseID string, body []byte) ([]byte, error)
 }
 
 // AnnouncementRequestHandler handles HTTP requests for the Phase 2
@@ -616,6 +622,200 @@ func (h *AnnouncementRequestHandler) ListAnnouncementRequestDeliveries(w http.Re
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestDeliveries failed", "userID", user.UserID, "id", id, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to list deliveries for the announcement request.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateAnnouncementRequestAttachment handles
+// POST /announcement-requests/{id}/attachments. The body carries one file
+// ({name, type, file}: file is a base64 data URI), read under the same 15 MiB
+// ceiling as a case attachment because a 10 MB file is about 13.3 MB encoded.
+// The acting user is always the authenticated caller: the inbound struct has
+// no field for it, and the outbound one adds it back, like every other write
+// on this resource. The type and content checks (supported extensions, a file
+// that really is what its name says, 10 MB, five files, no duplicate name) are
+// the entity service's; its reason is shown (mapUpstreamError) because the
+// request just submitted is what is being refused and the user can act on it,
+// unlike the generic mapping the other creates use. The file's bytes are never
+// logged.
+func (h *AnnouncementRequestHandler) CreateAnnouncementRequestAttachment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		File string `json:"file"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.Name == "" || req.File == "" {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	upstreamBody, err := json.Marshal(struct {
+		ActorID    string `json:"actorId"`
+		ActorEmail string `json:"actorEmail,omitempty"`
+		Name       string `json:"name"`
+		Type       string `json:"type,omitempty"`
+		File       string `json:"file"`
+	}{ActorID: user.UserID, ActorEmail: user.Email, Name: req.Name, Type: req.Type, File: req.File})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.CreateAnnouncementRequestAttachment(r.Context(), id, upstreamBody)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity CreateAnnouncementRequestAttachment failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamError(w, err, "Failed to attach the file.")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// ListAnnouncementRequestAttachments handles
+// GET /announcement-requests/{id}/attachments — a plain passthrough of the
+// files' metadata, no actor injection needed for a read.
+func (h *AnnouncementRequestHandler) ListAnnouncementRequestAttachments(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.ListAnnouncementRequestAttachments(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity ListAnnouncementRequestAttachments failed", "userID", user.UserID, "id", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to list the files attached to the announcement request.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetAnnouncementRequestAttachmentContent handles
+// GET /announcement-requests/{id}/attachments/{attachmentId}/content. Always a
+// download: the Content-Type is forwarded only when it is on the same allowlist
+// the case attachment content endpoint uses, and the response is never rendered
+// inline (Content-Disposition: attachment, nosniff from SecurityHeaders).
+func (h *AnnouncementRequestHandler) GetAnnouncementRequestAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	attachmentID := r.PathValue("attachmentId")
+	if id == "" || !uuidRe.MatchString(id) || attachmentID == "" || !uuidRe.MatchString(attachmentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	content, contentType, err := h.entity.GetAnnouncementRequestAttachmentContent(r.Context(), id, attachmentID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetAnnouncementRequestAttachmentContent failed", "userID", user.UserID, "id", id, "attachmentID", attachmentID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to retrieve the attachment content.")
+		return
+	}
+
+	// Strip Content-Type parameters (e.g. charset) before the allowlist check.
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if !safeAttachmentTypes[ct] {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", "attachment")
+	_, _ = w.Write(content) // #nosec G705 -- Content-Type is allowlisted above; Content-Disposition: attachment prevents inline rendering
+}
+
+// DeleteAnnouncementRequestAttachment handles
+// DELETE /announcement-requests/{id}/attachments/{attachmentId}. The acting
+// user is the authenticated caller, sent upstream as the actorId query
+// parameter.
+func (h *AnnouncementRequestHandler) DeleteAnnouncementRequestAttachment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	attachmentID := r.PathValue("attachmentId")
+	if id == "" || !uuidRe.MatchString(id) || attachmentID == "" || !uuidRe.MatchString(attachmentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if _, err := h.entity.DeleteAnnouncementRequestAttachment(r.Context(), id, attachmentID, user.UserID); err != nil {
+		slog.ErrorContext(r.Context(), "entity DeleteAnnouncementRequestAttachment failed", "userID", user.UserID, "id", id, "attachmentID", attachmentID, "err", err)
+		mapUpstreamError(w, err, "Failed to remove the file.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// AttachAnnouncementRequestAttachmentsToCase handles
+// POST /announcement-requests/{id}/cases/{caseId}/attachments: the publish
+// flow's step after creating each case (and the dry-run case), asking the
+// entity service to copy the request's files onto it from the server, so the
+// browser never uploads the same file once per project. No request body: the
+// acting user is the authenticated caller. Idempotent upstream, so a retry
+// after a partial failure is safe; its reason is shown (mapUpstreamError) for
+// the same reason as attaching a file is.
+func (h *AnnouncementRequestHandler) AttachAnnouncementRequestAttachmentsToCase(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	caseID := r.PathValue("caseId")
+	if id == "" || !uuidRe.MatchString(id) || caseID == "" || !uuidRe.MatchString(caseID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	body, err := json.Marshal(struct {
+		ActorID    string `json:"actorId"`
+		ActorEmail string `json:"actorEmail,omitempty"`
+	}{ActorID: user.UserID, ActorEmail: user.Email})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.AttachAnnouncementRequestAttachmentsToCase(r.Context(), id, caseID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AttachAnnouncementRequestAttachmentsToCase failed", "userID", user.UserID, "id", id, "caseID", caseID, "err", err)
+		mapUpstreamError(w, err, "Failed to attach the files to the case.")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

@@ -32,11 +32,13 @@ import { useMemo, useState, type JSX } from "react";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useAnnouncementDryRun, DRY_RUN_TAG_LABEL } from "@features/csm-announcements/api/useAnnouncementDryRun";
+import { useAnnouncementAttachments } from "@features/csm-announcements/api/useAnnouncementAttachments";
 import { useResolveProductVersionAudience } from "@features/csm-announcements/api/useResolveProductVersionAudience";
 import { useCreateAnnouncementRequest } from "@features/csm-announcements/api/useCreateAnnouncementRequest";
 import { useUpdateAnnouncementRequest } from "@features/csm-announcements/api/useUpdateAnnouncementRequest";
 import { useRecordAnnouncementRequestDryRun } from "@features/csm-announcements/api/useRecordAnnouncementRequestDryRun";
 import { useSubmitAnnouncementRequest } from "@features/csm-announcements/api/useSubmitAnnouncementRequest";
+import AnnouncementAttachmentsField from "@features/csm-announcements/components/AnnouncementAttachmentsField";
 import ResolvedAudienceList from "@features/csm-announcements/components/ResolvedAudienceList";
 import type { EolAudienceDefinition } from "@features/csm-announcements/types/announcementRequests";
 import { useSearchProducts } from "@features/csm-projects/api/useSearchProducts";
@@ -83,6 +85,8 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
   const updateDraft = useUpdateAnnouncementRequest();
   const recordDryRun = useRecordAnnouncementRequestDryRun();
   const submitRequest = useSubmitAnnouncementRequest();
+  // See CreateCustomerAnnouncementForm: files are held until the draft exists, then uploaded to it.
+  const attachments = useAnnouncementAttachments(draftId);
 
   const { data: products, isLoading: productsLoading } = useSearchProducts();
   const { data: versions, isLoading: versionsLoading } = useSearchProductVersions(
@@ -99,7 +103,7 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
     productVersionId || undefined,
   );
 
-  const busy = savingDraft || submittingForApproval;
+  const busy = savingDraft || submittingForApproval || attachments.busy;
   const { runningDryRun, canRunDryRun, handleRunDryRun } = useAnnouncementDryRun({
     subject,
     description,
@@ -131,8 +135,9 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
     if (!canSaveDraft) return;
     setSavingDraft(true);
     try {
-      if (draftId) {
-        await updateDraft.mutateAsync({ id: draftId, subject: subject.trim(), description, audienceDefinition });
+      let id = draftId;
+      if (id) {
+        await updateDraft.mutateAsync({ id, subject: subject.trim(), description, audienceDefinition });
       } else {
         const created = await createDraft.mutateAsync({
           kind: "eol",
@@ -141,8 +146,11 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
           isSecurityAnnouncement: false,
           audienceDefinition,
         });
-        setDraftId(created.id);
+        id = created.id;
+        setDraftId(id);
       }
+      // The draft exists now: send the files picked before it did (see CreateCustomerAnnouncementForm).
+      if (!(await attachments.flushStaged(id))) return;
       navigate(PENDING_TARGET);
     } catch {
       showError("Could not save this draft. Please try again.");
@@ -158,6 +166,8 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
   // so there's no separate preview step to gain from).
   const handleSubmitForApproval = async (): Promise<void> => {
     if (!canSubmitForApproval) return;
+    // See CreateCustomerAnnouncementForm: read before anything async; unknown counts as "try".
+    const hasFiles = attachments.count > 0 || attachments.loadFailed;
     setSubmittingForApproval(true);
     try {
       const result = await handleRunDryRun();
@@ -178,7 +188,11 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
         setDraftId(id);
       }
 
+      if (!(await attachments.flushStaged(id))) return;
+
       await recordDryRun.mutateAsync({ id, caseId: result.caseId });
+      // The approver reviews the dry-run case, so it carries the files too.
+      if (hasFiles && !(await attachments.attachToDryRunCase(id, result.caseId))) return;
       await submitRequest.mutateAsync({ id });
       navigate(PENDING_TARGET);
     } catch (error) {
@@ -310,6 +324,17 @@ export default function CreateEolAnnouncementForm(): JSX.Element {
               disabled={busy}
             />
           </Box>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <AnnouncementAttachmentsField
+            items={attachments.items}
+            onAddFiles={(files) => void attachments.addFiles(files)}
+            onRemove={(item) => void attachments.remove(item)}
+            onDownload={(item) => void attachments.download(item)}
+            isLoading={attachments.isLoading}
+            loadFailed={attachments.loadFailed}
+            disabled={busy}
+          />
         </Grid>
       </Grid>
 

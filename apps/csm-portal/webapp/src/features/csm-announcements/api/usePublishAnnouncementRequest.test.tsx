@@ -25,6 +25,8 @@ const postCaseMutateAsyncMock = vi.fn();
 const addTagMutateAsyncMock = vi.fn();
 const recordDeliveriesMutateAsyncMock = vi.fn();
 const listDeliveriesMock = vi.fn();
+const listAttachmentsMock = vi.fn();
+const attachToCaseMutateAsyncMock = vi.fn();
 
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
@@ -47,6 +49,14 @@ vi.mock("@features/csm-announcements/api/useRecordAnnouncementRequestDeliveries"
 }));
 vi.mock("@features/csm-announcements/api/useListAnnouncementRequestDeliveries", () => ({
   useListAnnouncementRequestDeliveries: () => listDeliveriesMock(),
+}));
+// Same approach for the request's files: the list (what a send must carry) and the
+// server-side copy onto one case, so each test states only what it is about.
+vi.mock("@features/csm-announcements/api/useListAnnouncementRequestAttachments", () => ({
+  useListAnnouncementRequestAttachments: (...args: unknown[]) => listAttachmentsMock(...args),
+}));
+vi.mock("@features/csm-announcements/api/useAttachAnnouncementRequestFilesToCase", () => ({
+  useAttachAnnouncementRequestFilesToCase: () => ({ mutateAsync: attachToCaseMutateAsyncMock }),
 }));
 
 // Imported after the mocks above so the module picks them up.
@@ -73,6 +83,25 @@ const APPROVED_REQUEST: AnnouncementRequest = {
   updatedAt: "2026-07-01T10:00:00Z",
 };
 
+/** A successful read of the request's files (an empty list is a successful read too). */
+function attachmentList(names: string[]) {
+  return {
+    data: names.map((name) => ({
+      id: `att-${name}`,
+      announcementRequestId: "req-1",
+      name,
+      type: "application/pdf",
+      sizeBytes: 10,
+      createdBy: "jane@example.com",
+      createdOn: "2026-07-01T10:00:00Z",
+    })),
+    isLoading: false,
+    isError: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  };
+}
+
 beforeEach(() => {
   postMock.mockReset();
   showErrorMock.mockReset();
@@ -87,6 +116,13 @@ beforeEach(() => {
   // fetch — hydration must complete (and unblock handlePublish) for it,
   // not stay stuck treating "no rows yet" as still loading.
   listDeliveriesMock.mockReturnValue({ data: null, isLoading: false, isError: false, isSuccess: true });
+  attachToCaseMutateAsyncMock.mockReset();
+  attachToCaseMutateAsyncMock.mockResolvedValue({ attached: 1, alreadyAttached: 0 });
+  // No files by default: every test above this block was written for a request with
+  // none, and must keep passing unchanged, which is what proves a send without files
+  // behaves as it did before files existed.
+  listAttachmentsMock.mockReset();
+  listAttachmentsMock.mockReturnValue(attachmentList([]));
 });
 
 describe("usePublishAnnouncementRequest — guards", () => {
@@ -490,5 +526,288 @@ describe("usePublishAnnouncementRequest — readyToPublish gates handlePublish u
       { wrapper },
     );
     expect(result.current.readyToPublish).toBe(true);
+  });
+});
+
+describe("usePublishAnnouncementRequest — attachments", () => {
+  const secure = { ...APPROVED_REQUEST, isSecurityAnnouncement: true };
+  const published = { ...APPROVED_REQUEST, state: "published" as const };
+
+  function stubCases(): void {
+    postCaseMutateAsyncMock.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve({ id: `case-${projectId}`, internalId: "X-1", number: "N-1" }),
+    );
+  }
+
+  it("has the server copy the request's files onto every case it creates", async () => {
+    listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+    stubCases();
+    postMock.mockResolvedValue(published);
+
+    const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+    await act(async () => {
+      await result.current.handlePublish();
+    });
+
+    expect(attachToCaseMutateAsyncMock).toHaveBeenCalledTimes(2);
+    expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-p-1" });
+    expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-p-2" });
+    expect(addTagMutateAsyncMock).not.toHaveBeenCalled();
+    expect(result.current.published?.state).toBe("published");
+  });
+
+  it("never touches the copy endpoint for a request with no files", async () => {
+    stubCases();
+    postMock.mockResolvedValue(published);
+
+    const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+    await act(async () => {
+      await result.current.handlePublish();
+    });
+
+    expect(attachToCaseMutateAsyncMock).not.toHaveBeenCalled();
+    expect(result.current.published?.state).toBe("published");
+  });
+
+  it("tags a security announcement first, then copies its files", async () => {
+    listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+    postCaseMutateAsyncMock.mockResolvedValue({ id: "case-1", internalId: "X-1", number: "N-1" });
+    addTagMutateAsyncMock.mockResolvedValue({});
+    postMock.mockResolvedValue(published);
+
+    const { result } = renderHook(
+      () => usePublishAnnouncementRequest({ ...secure, resolvedProjectIds: ["p-1"] }),
+      { wrapper },
+    );
+    await act(async () => {
+      await result.current.handlePublish();
+    });
+
+    expect(addTagMutateAsyncMock).toHaveBeenCalledWith({ caseId: "case-1", label: "Security Announcement" });
+    expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-1" });
+    expect(addTagMutateAsyncMock.mock.invocationCallOrder[0]).toBeLessThan(
+      attachToCaseMutateAsyncMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  describe("when copying a case's files fails", () => {
+    function failCopyFor(caseId: string): void {
+      attachToCaseMutateAsyncMock.mockImplementation(({ caseId: id }: { caseId: string }) =>
+        id === caseId ? Promise.reject(new Error("boom")) : Promise.resolve({ attached: 1, alreadyAttached: 0 }),
+      );
+    }
+
+    it("records the case as created but unfinished, says what is missing, and does not publish", async () => {
+      listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+      stubCases();
+      failCopyFor("case-p-2");
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+
+      expect(result.current.failedTagProjectIds).toEqual(["p-2"]);
+      expect(result.current.failedProjectIds).toEqual([]);
+      expect(result.current.followUpLabel).toBe("attachment");
+      expect(result.current.published).toBeNull();
+      expect(postMock).not.toHaveBeenCalled();
+      expect(recordDeliveriesMutateAsyncMock).toHaveBeenCalledWith({
+        id: "req-1",
+        payload: {
+          deliveries: expect.arrayContaining([
+            { projectId: "p-1", caseId: "case-p-1", status: "succeeded" },
+            { projectId: "p-2", caseId: "case-p-2", status: "tag_failed" },
+          ]),
+        },
+      });
+      expect(showErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/attachment couldn't be added for project p-2/i),
+      );
+    });
+
+    it("retries only the copy, on the case that exists, and never creates another", async () => {
+      listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+      stubCases();
+      failCopyFor("case-p-2");
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+      postCaseMutateAsyncMock.mockClear();
+      attachToCaseMutateAsyncMock.mockClear();
+      recordDeliveriesMutateAsyncMock.mockClear();
+
+      attachToCaseMutateAsyncMock.mockResolvedValue({ attached: 1, alreadyAttached: 0 });
+      postMock.mockResolvedValueOnce(published);
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+
+      expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+      expect(attachToCaseMutateAsyncMock).toHaveBeenCalledTimes(1);
+      expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-p-2" });
+      expect(recordDeliveriesMutateAsyncMock).toHaveBeenCalledWith({
+        id: "req-1",
+        payload: { deliveries: [{ projectId: "p-2", caseId: "case-p-2", status: "succeeded" }] },
+      });
+      expect(result.current.failedTagProjectIds).toEqual([]);
+      expect(result.current.published?.state).toBe("published");
+    });
+
+    it("keeps blocking publish while the retry still fails", async () => {
+      listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+      stubCases();
+      failCopyFor("case-p-2");
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+      showErrorMock.mockClear();
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+
+      expect(result.current.failedTagProjectIds).toEqual(["p-2"]);
+      expect(result.current.published).toBeNull();
+      expect(postMock).not.toHaveBeenCalled();
+      expect(showErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/attachment still couldn't be added for project p-2/i),
+      );
+    });
+
+    it("redoes the security tag too on a retry (both steps are idempotent), then copies", async () => {
+      listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+      postCaseMutateAsyncMock.mockResolvedValue({ id: "case-1", internalId: "X-1", number: "N-1" });
+      addTagMutateAsyncMock.mockResolvedValue({});
+      attachToCaseMutateAsyncMock.mockRejectedValueOnce(new Error("boom"));
+
+      const { result } = renderHook(
+        () => usePublishAnnouncementRequest({ ...secure, resolvedProjectIds: ["p-1"] }),
+        { wrapper },
+      );
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+      expect(result.current.failedTagProjectIds).toEqual(["p-1"]);
+      expect(result.current.followUpLabel).toBe("security label and attachment");
+      addTagMutateAsyncMock.mockClear();
+      attachToCaseMutateAsyncMock.mockClear();
+
+      postMock.mockResolvedValueOnce(published);
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+
+      expect(addTagMutateAsyncMock).toHaveBeenCalledWith({ caseId: "case-1", label: "Security Announcement" });
+      expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-1" });
+      expect(result.current.published?.state).toBe("published");
+    });
+
+    it("a reopened dialog resumes from the ledger and retries only the copy", async () => {
+      listAttachmentsMock.mockReturnValue(attachmentList(["advisory.pdf"]));
+      listDeliveriesMock.mockReturnValue({
+        data: {
+          deliveries: [
+            { id: "d-1", announcementRequestId: "req-1", projectId: "p-1", caseId: "case-1", status: "tag_failed", createdOn: "x", updatedOn: "x" },
+          ],
+        },
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+      });
+      postMock.mockResolvedValue(published);
+
+      const { result } = renderHook(
+        () => usePublishAnnouncementRequest({ ...APPROVED_REQUEST, resolvedProjectIds: ["p-1"] }),
+        { wrapper },
+      );
+      expect(result.current.failedTagProjectIds).toEqual(["p-1"]);
+      expect(result.current.followUpLabel).toBe("attachment");
+
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+
+      expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+      expect(addTagMutateAsyncMock).not.toHaveBeenCalled();
+      expect(attachToCaseMutateAsyncMock).toHaveBeenCalledWith({ id: "req-1", caseId: "case-1" });
+      expect(result.current.published?.state).toBe("published");
+    });
+  });
+
+  describe("what a send waits for", () => {
+    it("waits for the files to load: an announcement must not go out without them", async () => {
+      listAttachmentsMock.mockReturnValue({ data: undefined, isLoading: true, isError: false, isSuccess: false, refetch: vi.fn() });
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+
+      expect(result.current.readyToPublish).toBe(false);
+      expect(result.current.hydratingDeliveries).toBe(true);
+      expect(result.current.attachmentsLoadFailed).toBe(false);
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+      expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to send when the files could not be loaded, and can retry the load", async () => {
+      const refetch = vi.fn();
+      listAttachmentsMock.mockReturnValue({ data: undefined, isLoading: false, isError: true, isSuccess: false, refetch });
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+
+      expect(result.current.readyToPublish).toBe(false);
+      expect(result.current.attachmentsLoadFailed).toBe(true);
+      expect(result.current.hydratingDeliveries).toBe(false);
+      expect(result.current.hydrationFailed).toBe(false);
+      await act(async () => {
+        await result.current.handlePublish();
+      });
+      expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
+
+      result.current.retryAttachments();
+      expect(refetch).toHaveBeenCalled();
+    });
+
+    it("only asks for the files of a request that can be published", () => {
+      renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+      expect(listAttachmentsMock).toHaveBeenLastCalledWith("req-1", true);
+
+      listAttachmentsMock.mockClear();
+      const { result } = renderHook(
+        () => usePublishAnnouncementRequest({ ...APPROVED_REQUEST, state: "draft" }),
+        { wrapper },
+      );
+      expect(listAttachmentsMock).toHaveBeenLastCalledWith("req-1", false);
+      expect(result.current.readyToPublish).toBe(true);
+    });
+
+    it("does not let a failed file list hide a failed ledger", () => {
+      listDeliveriesMock.mockReturnValue({ data: undefined, isLoading: false, isError: true, isSuccess: false, refetch: vi.fn() });
+      listAttachmentsMock.mockReturnValue({ data: undefined, isLoading: false, isError: true, isSuccess: false, refetch: vi.fn() });
+
+      const { result } = renderHook(() => usePublishAnnouncementRequest(APPROVED_REQUEST), { wrapper });
+
+      expect(result.current.hydrationFailed).toBe(true);
+      expect(result.current.attachmentsLoadFailed).toBe(true);
+      expect(result.current.readyToPublish).toBe(false);
+    });
+  });
+
+  describe("followUpLabel", () => {
+    it.each([
+      ["a plain request", APPROVED_REQUEST, [], ""],
+      ["a security announcement", secure, [], "security label"],
+      ["a request with one file", APPROVED_REQUEST, ["a.pdf"], "attachment"],
+      ["a request with two files", APPROVED_REQUEST, ["a.pdf", "b.pdf"], "attachments"],
+      ["a security announcement with files", secure, ["a.pdf", "b.pdf"], "security label and attachments"],
+    ])("for %s", (_name, request, files, label) => {
+      listAttachmentsMock.mockReturnValue(attachmentList(files));
+      const { result } = renderHook(() => usePublishAnnouncementRequest(request), { wrapper });
+      expect(result.current.followUpLabel).toBe(label);
+    });
   });
 });

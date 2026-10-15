@@ -3650,6 +3650,20 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 	}, nil
 }
 
+// CreateCaseAttachmentAs implements CaseAttachmentFanOutClient for the
+// CSM-native (Postgres) data source, where it can only refuse: a file's bytes
+// live in SFTPGo there, uploaded by the browser against a share the CSM
+// backend mints, and this service holds no SFTPGo client to copy a stored file
+// onto a case with. Announcement attachments therefore need a data source
+// whose cases keep their files in ServiceNow (see SupportsAnnouncementAttachments).
+func (s *caseService) CreateCaseAttachmentAs(_ context.Context, _ domain.CreateAttachmentRequest, _ string) (domain.CreateAttachmentResponse, error) {
+	return domain.CreateAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: announcementAttachmentsUnavailableMsg}
+}
+
+// SupportsAnnouncementAttachments implements CaseAttachmentFanOutClient: the
+// CSM-native (Postgres) data source cannot copy a request's files onto a case.
+func (s *caseService) SupportsAnnouncementAttachments() bool { return false }
+
 // ConfirmCaseAttachment implements CaseService for the CSM-native (Postgres)
 // data source. It is the second half of the two-step upload flow: the caller
 // (the CSM backend) registers a 'pending' row via CreateCaseAttachment

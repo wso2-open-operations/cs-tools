@@ -57,9 +57,11 @@ import { useUpdateAnnouncementRequest } from "@features/csm-announcements/api/us
 import { useRecordAnnouncementRequestDryRun } from "@features/csm-announcements/api/useRecordAnnouncementRequestDryRun";
 import { useSubmitAnnouncementRequest } from "@features/csm-announcements/api/useSubmitAnnouncementRequest";
 import { useApproveAnnouncementRequest } from "@features/csm-announcements/api/useApproveAnnouncementRequest";
+import { useAnnouncementAttachments } from "@features/csm-announcements/api/useAnnouncementAttachments";
 import { useScheduleAnnouncementRequest } from "@features/csm-announcements/api/useScheduleAnnouncementRequest";
 import { usePublishAnnouncementRequest } from "@features/csm-announcements/api/usePublishAnnouncementRequest";
 import { SECURITY_ANNOUNCEMENT_TAG_LABEL } from "@features/csm-announcements/components/CreateCustomerAnnouncementForm";
+import AnnouncementAttachmentsField from "@features/csm-announcements/components/AnnouncementAttachmentsField";
 import AnnouncementSendProgress, {
   type AnnouncementSendProgressState,
 } from "@features/csm-announcements/components/AnnouncementSendProgress";
@@ -150,13 +152,17 @@ export default function AnnouncementRequestDialog({
   // email); everything that edits, submits, schedules, publishes or updates a
   // request needs canCreateAnnouncement (announcement creator or admin, on top
   // of write access).
-  const { canWrite, canCreateAnnouncement } = usePortalAccess();
+  const { canWrite, canCreateAnnouncement, canDownloadAttachment } = usePortalAccess();
   const { data: request, isLoading, isError, refetch } = useGetAnnouncementRequest(requestId);
   const update = useUpdateAnnouncementRequest();
   const recordDryRun = useRecordAnnouncementRequestDryRun();
   const submit = useSubmitAnnouncementRequest();
   const approve = useApproveAnnouncementRequest();
   const publish = usePublishAnnouncementRequest(request);
+  // The request's own files. They are saved the moment they are added or removed
+  // (unlike the text fields, which wait for "Save changes"), and every announcement
+  // case gets a copy when the request is published.
+  const attachments = useAnnouncementAttachments(request?.id);
   // Publish is restricted to the request's own creator server-side (an
   // approver's job is only to approve, not to also trigger the real send) —
   // this mirrors that here so the button reflects reality instead of
@@ -401,6 +407,14 @@ export default function AnnouncementRequestDialog({
   // create forms' own immediate-send retry (PR #1834).
   const contentLockedForRetry = request?.state === "approved" && publish.failedProjectIds.length > 0;
 
+  // Every announcement case is given the request's files as they are at its turn,
+  // so once a case exists (even one still short of its security label or files) a
+  // change would leave the projects already sent with one set and the retried
+  // ones with another. The server refuses it too; this says why before it is tried.
+  const filesLockedForRetry =
+    request?.state === "approved" &&
+    (publish.failedProjectIds.length > 0 || publish.succeededProjectIds.length > 0);
+
   const handleSaveContent = (): void => {
     if (!request) return;
     update.mutate({
@@ -419,11 +433,16 @@ export default function AnnouncementRequestDialog({
   // already renders inline below, so a failure partway through just leaves
   // the button re-clickable rather than needing its own error handling here.
   const handleSubmitForApproval = async (): Promise<void> => {
-    if (!request || submittingForApproval || hasUnsavedChanges) return;
+    if (!request || submittingForApproval || attachments.busy || hasUnsavedChanges) return;
+    // Captured before any await: a failed list load must not read as "no files",
+    // since the server copies whatever the request really has.
+    const hasFiles = attachments.count > 0 || attachments.loadFailed;
     const result = await dryRun.handleRunDryRun();
     if (!result) return;
     try {
       await recordDryRun.mutateAsync({ id: request.id, caseId: result.caseId });
+      // The approver reviews the dry-run case, so it carries the files too.
+      if (hasFiles && !(await attachments.attachToDryRunCase(request.id, result.caseId))) return;
       await submit.mutateAsync({ id: request.id });
     } catch {
       /* surfaced inline via recordDryRun.isError / submit.isError below */
@@ -541,6 +560,22 @@ export default function AnnouncementRequestDialog({
                     disabled={contentLockedForRetry}
                   />
                 </Box>
+                <AnnouncementAttachmentsField
+                  items={attachments.items}
+                  onAddFiles={(files) => void attachments.addFiles(files)}
+                  onRemove={(item) => void attachments.remove(item)}
+                  onDownload={canDownloadAttachment ? (item) => void attachments.download(item) : undefined}
+                  disabled={filesLockedForRetry || !canCreateAnnouncement || attachments.busy}
+                  isLoading={attachments.isLoading}
+                  loadFailed={attachments.loadFailed}
+                  note={
+                    filesLockedForRetry
+                      ? "Files are locked: some projects have already received this announcement, and every project must get the same files."
+                      : request.state === "pending_approval"
+                        ? "Files are saved as soon as you add or remove them, and changing them sends this request back to draft."
+                        : "Files are saved as soon as you add or remove them, not with “Save changes”."
+                  }
+                />
                 {request.kind === "customer" && (
                   <FormControlLabel
                     control={
@@ -594,6 +629,15 @@ export default function AnnouncementRequestDialog({
                   sx={{ fontSize: "0.875rem", lineHeight: 1.5, wordBreak: "break-word" }}
                   dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(request.description) }}
                 />
+                {(attachments.items.length > 0 || attachments.isLoading || attachments.loadFailed) && (
+                  <AnnouncementAttachmentsField
+                    readOnly
+                    items={attachments.items}
+                    onDownload={canDownloadAttachment ? (item) => void attachments.download(item) : undefined}
+                    isLoading={attachments.isLoading}
+                    loadFailed={attachments.loadFailed}
+                  />
+                )}
               </>
             )}
 
@@ -737,6 +781,7 @@ export default function AnnouncementRequestDialog({
                   onClick={() => void handleSubmitForApproval()}
                   disabled={
                     submittingForApproval ||
+                    attachments.busy ||
                     hasUnsavedChanges ||
                     subject.trim().length === 0 ||
                     isEmptyHtml(description) ||
@@ -796,7 +841,7 @@ export default function AnnouncementRequestDialog({
                         : publish.failedProjectIds.length > 0
                           ? "Retry failed projects"
                           : publish.failedTagProjectIds.length > 0
-                            ? "Retry security label"
+                            ? `Retry ${publish.followUpLabel || "follow-up"}`
                             : "Publish"}
                   </Button>
                   {claimsReady &&
@@ -850,6 +895,22 @@ export default function AnnouncementRequestDialog({
                     </Button>
                   </Box>
                 )}
+                {claimsReady && isRequestCreator && !hasUnsavedChanges && publish.attachmentsLoadFailed && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Typography variant="caption" color="error">
+                      Couldn't load this request's attachments — Publish is blocked until they load, so
+                      no announcement goes out without its files.
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<RefreshCw size={14} />}
+                      onClick={publish.retryAttachments}
+                    >
+                      Retry
+                    </Button>
+                  </Box>
+                )}
                 {(publish.publishing || priorSucceededCount > 0 || publish.failedProjectIds.length > 0) && (
                   <AnnouncementSendProgress
                     progress={sendProgress}
@@ -866,8 +927,8 @@ export default function AnnouncementRequestDialog({
                 )}
                 {publish.failedTagProjectIds.length > 0 && (
                   <Typography variant="caption" color="warning.main">
-                    Security label couldn't be attached for: {publish.failedTagProjectIds.join(", ")} —
-                    retry before this can be published.
+                    The {publish.followUpLabel || "follow-up"} couldn't be added for:{" "}
+                    {publish.failedTagProjectIds.join(", ")} — retry before this can be published.
                   </Typography>
                 )}
 

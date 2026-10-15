@@ -74,6 +74,13 @@ export const ANNOUNCEMENTS_CLEAR_FILTERS_LABEL = "Clear Filters";
 /** Detail: description section heading. */
 export const ANNOUNCEMENT_DETAILS_DESCRIPTION_HEADING = "Description";
 
+/** Detail: attachments section heading. */
+export const ANNOUNCEMENT_DETAILS_ATTACHMENTS_HEADING = "Attachments";
+
+/** Detail: shown in the attachments section when the files could not be loaded. */
+export const ANNOUNCEMENT_DETAILS_ATTACHMENTS_ERROR =
+  "Could not load this announcement's attachments.";
+
 /** Detail: placeholder when HTML body is empty after normalization. */
 export const ANNOUNCEMENT_DETAILS_BODY_EMPTY = "Nothing";
 

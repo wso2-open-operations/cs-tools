@@ -509,8 +509,10 @@ func TestCaseTypeTransferIntegration_Refusals(t *testing.T) {
 // The table's old foreign key to "case"(id) was also what kept an attachment off
 // every work item that is not a case. It now points at work_item (migration 0210,
 // so a case that changes type keeps its attachments), and the insert itself keeps
-// the narrower rule: the four case-like types own attachments, an announcement, a
-// change request or an incident does not. This guards both insert paths.
+// the narrower rule: the four case-like types own attachments, an announcement
+// does too but only when an internal caller attaches it (a PDF sent with the
+// announcement; see canAttachToAnnouncement and migration 100025), and a change
+// request or an incident does not. This guards both insert paths.
 func TestCaseTypeTransferIntegration_OnlyCaseLikeWorkItemsOwnAttachments(t *testing.T) {
 	f := newCTFixture(t)
 	cases := repository.NewCaseRepository(f.scoped)
@@ -524,22 +526,26 @@ func TestCaseTypeTransferIntegration_OnlyCaseLikeWorkItemsOwnAttachments(t *test
 	}
 
 	key := "type-transfer-test"
-	create := func(id string) error {
-		_, err := cases.CreateCaseAttachment(f.ctx, domain.CreateAttachmentRequest{
+	createAs := func(ctx context.Context, id string) error {
+		_, err := cases.CreateCaseAttachment(ctx, domain.CreateAttachmentRequest{
 			ReferenceID: id, ReferenceType: domain.ReferenceTypeCase, Name: "b.txt", Type: "text/plain",
 			StorageKey: &key, SizeBytes: 1, CreatedBy: f.userID, Status: domain.AttachmentStatusComplete,
 		})
 		return err
 	}
-	fromServiceNow := func(id string) error {
-		_, err := cases.CreateCaseAttachmentFromServiceNow(f.ctx, domain.CreateAttachmentRequest{
+	fromServiceNowAs := func(ctx context.Context, id string) error {
+		_, err := cases.CreateCaseAttachmentFromServiceNow(ctx, domain.CreateAttachmentRequest{
 			ReferenceID: id, ReferenceType: domain.ReferenceTypeCase, Name: "c.txt", Type: "text/plain",
 		}, "92000000-0000-0000-0000-0000000000b0", 1, f.userID)
 		return err
 	}
+	create := func(id string) error { return createAs(f.ctx, id) }
+	fromServiceNow := func(id string) error { return fromServiceNowAs(f.ctx, id) }
 
 	owners := map[string]string{
 		"case": ctQueryID, "engagement": ctEngagementID, "service request": ctServiceReqID, "security report analysis": ctSRAID,
+		// An internal caller (f.ctx is the system identity) may attach to an announcement.
+		"announcement": ctAnnouncementID,
 	}
 	for name, id := range owners {
 		if err := create(id); err != nil {
@@ -551,7 +557,36 @@ func TestCaseTypeTransferIntegration_OnlyCaseLikeWorkItemsOwnAttachments(t *test
 	}
 	_, _ = f.scoped.Exec(f.ctx, `DELETE FROM case_attachment WHERE id = '92000000-0000-0000-0000-0000000000b0'`)
 
-	for name, id := range map[string]string{"announcement": ctAnnouncementID, "change request": ctChangeReqID, "incident": ctIncidentWIID, "unknown id": ctMissingID} {
+	if err := fromServiceNow(ctAnnouncementID); err != nil {
+		t.Errorf("a ServiceNow-sourced attachment on an announcement, by an internal caller: %v", err)
+	}
+	_, _ = f.scoped.Exec(f.ctx, `DELETE FROM case_attachment WHERE id = '92000000-0000-0000-0000-0000000000b0'`)
+	if got := f.attachments(t, ctAnnouncementID); got != 1 {
+		t.Errorf("announcement owns %d attachment(s) after the internal caller's, want 1", got)
+	}
+
+	// A customer is still refused on an announcement, on both insert paths,
+	// with the answer a non-owning work item gets.
+	customer := repository.WithCallerIdentity(context.Background(), repository.SearchScope{ProjectIDs: []string{"92000000-0000-0000-0000-0000000000c1"}, ViewerEmail: "customer@example.com"})
+	var ve *apierror.ValidationError
+	if err := createAs(customer, ctAnnouncementID); !errors.As(err, &ve) {
+		t.Errorf("create attachment on an announcement by a customer: want a ValidationError, got %v", err)
+	}
+	if err := fromServiceNowAs(customer, ctAnnouncementID); !errors.As(err, &ve) {
+		t.Errorf("from ServiceNow attachment on an announcement by a customer: want a ValidationError, got %v", err)
+	}
+	// A request with no identity at all is refused too (the scoped layer fails closed first).
+	if err := createAs(context.Background(), ctAnnouncementID); err == nil {
+		t.Error("create attachment on an announcement with no caller identity: want an error")
+	}
+	if err := fromServiceNowAs(context.Background(), ctAnnouncementID); err == nil {
+		t.Error("from ServiceNow attachment on an announcement with no caller identity: want an error")
+	}
+	if got := f.attachments(t, ctAnnouncementID); got != 1 {
+		t.Errorf("announcement owns %d attachment(s) after the refused callers, want still 1", got)
+	}
+
+	for name, id := range map[string]string{"change request": ctChangeReqID, "incident": ctIncidentWIID, "unknown id": ctMissingID} {
 		for path, do := range map[string]func(string) error{"create": create, "from ServiceNow": fromServiceNow} {
 			var ve *apierror.ValidationError
 			if err := do(id); !errors.As(err, &ve) {

@@ -212,3 +212,41 @@ export interface RecordAnnouncementRequestDeliveriesPayload {
 export interface SearchAnnouncementRequestDeliveriesResponse {
   deliveries: AnnouncementRequestDelivery[];
 }
+
+/**
+ * One file attached to an announcement request: metadata only (the bytes are
+ * fetched through the content endpoint). When the request is published the
+ * server copies every attachment onto each case it creates, where customers see
+ * it among the case's attachments.
+ */
+export interface AnnouncementRequestAttachment {
+  id: string;
+  announcementRequestId: string;
+  name: string;
+  /** The canonical MIME type of the file's extension. */
+  type: string;
+  sizeBytes: number;
+  createdBy: string;
+  /** Display-only companion to createdBy — see AnnouncementRequest.createdByEmail. */
+  createdByEmail?: string | null;
+  createdOn: string;
+}
+
+export interface SearchAnnouncementRequestAttachmentsResponse {
+  attachments: AnnouncementRequestAttachment[];
+}
+
+/** `file` is a base64 data URI (`data:application/pdf;base64,...`). */
+export interface CreateAnnouncementRequestAttachmentPayload {
+  name: string;
+  type?: string;
+  file: string;
+}
+
+/** What copying a request's files onto one case did. */
+export interface AttachAnnouncementRequestFilesToCaseResponse {
+  /** Files created on the case by this call. */
+  attached: number;
+  /** Files the case already had, left alone (a retry). */
+  alreadyAttached: number;
+}
