@@ -24,7 +24,8 @@
 -- WHEN: after the FINAL sync from the source system, with that sync stopped.
 -- The source system keeps allocating numbers until then; anything it
 -- allocates after this script runs is not accounted for. Re-run this script
--- after any late sync: it is idempotent and only ever moves values forward.
+-- after any late sync: it is idempotent and only ever moves values forward
+-- (but see step 6 below if an outlier series was corrected by hand).
 --
 -- USAGE (dry run is the default and only reads):
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed_native_numbering.sql
@@ -45,6 +46,46 @@
 --     and seed too LOW. app.is_internal = 'true' (the internal-staff branch
 --     of every visibility policy) is set for this transaction; check the
 --     per-source row counts printed below against the expected totals.
+--
+-- CUTOVER STEPS, in order, for the day the source system stops allocating
+-- numbers:
+--   1. Preconditions. PostgreSQL 18 everywhere migrations run; migrations 0179
+--      and 0180 applied. Applying them does NOT change which numbers the
+--      application issues: the create-case insert still calls the portal
+--      functions (next_portal_work_item_number / next_portal_wso2_id, migration
+--      0140), which produce CS-PORTAL-... and <key>-PORTAL-<n>. Before cutover
+--      the application must call next_work_item_number(type) and
+--      next_wso2_id(project) instead, behind a native-numbering setting, and
+--      insert ids without gen_random_uuid() (omit id, or use uuidv7()),
+--      otherwise the uuidv7() column defaults are bypassed. Not done as of
+--      this note.
+--   2. Freeze and sync. Stop creates in the source system, run the final
+--      sync, then stop the sync.
+--   3. Dry run (no flag). Check the per-source row counts against the expected
+--      totals, then read every series line: source_max, seq_before, next_number.
+--   4. Look for outliers BEFORE applying. A series whose source_max is far
+--      above its neighbours (for example a placeholder such as 99999999 in
+--      knowledge_article.number) would push every future number up. If there
+--      is one, find the real maximum.
+--   5. Apply (-v apply=1).
+--   6. Correct any outlier series by hand: select setval('<sequence>',
+--      <real max>, true). After that, do NOT run this script in apply mode
+--      again: it only moves values forward and would push the series back up
+--      to the outlier. A dry run is always safe.
+--   7. Read back without consuming a number: for each row of number_series,
+--      the sequence's last_value and is_called, plus project.wso2_id_counter.
+--      The next issued number is last_value + 1, formatted as PREFIX plus
+--      zero-padded digits.
+--   8. Series this script cannot seed, as of this note: ESC (no table stores
+--      an escalation number), and ALT, which is seeded from
+--      alert_incident_mapping.alert_number only in practice, because
+--      incident_alert numbers use the ICP prefix and no series covers it yet.
+--      Decide both before relying on them.
+--   9. Switch the data source / native-numbering setting, then create one
+--      record of each type and check its number, wso2_id and id.
+--  10. Rollback: records created natively after this point have no
+--      counterpart in the source system. Going back to the source system loses
+--      them unless they are backfilled first.
 
 \set ON_ERROR_STOP on
 \if :{?apply}
