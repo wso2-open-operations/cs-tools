@@ -16,13 +16,17 @@ Extracted from `apps/csm-portal/backend` (internal/stream, internal/caseevents, 
 entity-service ──▶ Event Hub "case-events" ──▶ this service (consumer group per replica) ──▶ BroadcastHub ──▶ browser EventSource
 ```
 
-Only `case.comment_added` and `case.status_changed` are broadcast. The payload is minimal: `{caseId, type, timestamp}` — no comment text or field values.
+Only `case.comment_added` and `case.status_changed` are broadcast. The payload is minimal: `{caseId, type, timestamp}` (`timestamp` = the record's time on the topic, RFC 3339 UTC, omitted if unknown) — no comment text or field values.
+
+SSE framing: each stream starts with `retry: 3000`; each `case_updated` carries `id: <hub-epoch>-<seq>`. On reconnect with `Last-Event-ID` the handler replays this case's missed events from the hub's in-memory ring (`stream.ReplayCapacity` = 256 events across all cases, `stream.ReplayWindow` = 2 min). Best-effort only: IDs are local to one process, so a reconnect to another replica, after a restart, or past the window gets no replay — clients still refresh on (re)connect. Consumer offsets are committed in 1 s batches (`CommitInterval`), not one synchronous commit per record.
 
 ## Auth
 
 The SSE endpoint validates `x-jwt-assertion` (and optional `x-user-id-token`) on every request via the same `middleware.Auth` chain as `csm-portal-backend`. There is no separate ticket/token-exchange step. The browser connects with these headers directly via an EventSource polyfill (`@sanity/eventsource`) — native `EventSource` cannot set custom headers.
 
 The incoming `x-user-id-token` is forwarded to the entity-service `GetCase` call (upstream ACL check) so a caller can only subscribe to a case they're authorized to read.
+
+**Stream lifetime.** A stream never outlives the credential that opened it: the handler derives a context deadline at `min(token exp, connect + STREAM_MAX_LIFETIME)` and repeats the `GetCase` access check every `STREAM_REAUTH_INTERVAL`. When either bound ends the stream the server writes a terminal `event: stream_closed` with `data: {"reason": "token_expired" | "max_lifetime" | "access_revoked"}` and closes; the browser polyfill reconnects with fresh headers (and gets a 401/403 if access really is gone). A transient upstream failure during re-authorization does not close the stream.
 
 ## Middleware chain
 
@@ -45,6 +49,10 @@ The incoming `x-user-id-token` is forwarded to the entity-service `GetCase` call
 | `EVENT_HUB_TOPIC` | Required once `EVENT_HUB_BROKER` is set | Event Hub name = Kafka topic (`case-events`) |
 | `EVENT_HUB_CONSUMER_GROUP` | No (default `csm-portal-activity-stream-service`) | Base consumer group name (suffixed per-replica with `-replica-<hostname>`) |
 | `STREAM_PORT` | No (default 9092) | Port the SSE listener binds to |
+| `STREAM_MAX_LIFETIME` | No (default `1h`) | Maximum lifetime of one SSE connection. A stream is closed at `min(token exp, connect + STREAM_MAX_LIFETIME)` with a terminal `stream_closed` event; the client reconnects with a fresh token |
+| `STREAM_MAX_CONNECTIONS_PER_USER` | No (default `8`) | Maximum concurrently open streams per authenticated user on one replica; excess connections get `429` with `Retry-After`. `0` disables the cap |
+| `STREAM_MAX_CONNECTIONS` | No (default `2000`) | Maximum concurrently open streams per replica; excess connections get `503` with `Retry-After`. `0` disables the cap |
+| `STREAM_REAUTH_INTERVAL` | No (default `10m`) | How often an open stream repeats the connect-time case-access check (entity-service `GetCase`). A definitive 401/403/404 closes the stream (`stream_closed`, reason `access_revoked`); transient upstream errors are logged and the stream kept open |
 | `STREAM_CORS_ALLOWED_ORIGINS` | No | Comma-separated browser Origins for the SSE endpoint; fail-closed |
 | `CORS_ALLOWED_ORIGINS` | No | Comma-separated browser Origins for the health listener (:8080); fail-closed |
 | `AUTH_JWKS_ENDPOINT` | Yes | JWKS URL for JWT validation |
@@ -79,9 +87,9 @@ See `.choreo/component.yaml` (two endpoints: health on :8080, SSE on :9092 with 
 ## Packages
 
 - `internal/apierror` — typed upstream error (mirrors csm-portal-backend/internal/apierror)
-- `internal/events` — `Envelope` + event types (hand-synced copy; keep in sync with csm-notification-service's and entity-service's own copies)
-- `internal/eventbus` — `Consumer` (simple: no retry/DLQ; commit after Handle; `LatestOffset`; per-replica group suffix)
-- `internal/stream` — `BroadcastHub` (in-process pub-sub per case ID; `subscriberBuffer=4`; non-blocking publish)
+- `internal/events` — `Envelope` + event type constants only (hand-synced copy; keep in sync with csm-notification-service's and entity-service's own copies). Payload structs are deliberately not copied — this service never reads payloads
+- `internal/eventbus` — `Consumer` (simple: no retry/DLQ; commit after Handle; `LatestOffset`; per-replica group suffix; `Run` returns an error, logged at Error, when its reader stops — `io.EOF` included) and `Supervisor` (replaces an exited consumer with exponential backoff, 1s doubling to 30s; `Running()` drives `/health`, which answers 503 `{"status":"unavailable"}` while the configured consumer is not running and stays 200 when Event Hub is not configured)
+- `internal/stream` — `BroadcastHub` (in-process pub-sub per case ID; `subscriberBuffer=4`; non-blocking publish; `CloseAll` is registered as the stream server's `RegisterOnShutdown` hook so SIGTERM ends every stream with a terminal `event: shutdown` and `Server.Shutdown` completes within its grace period)
 - `internal/caseevents` — `Handler` (consumes events, fans to BroadcastHub for the two SSE types)
 - `internal/entity` — minimal `CustomerEntityClient` (only `GetCase`, OAuth2 client-credentials, forwards `x-user-id-token` + correlation ID)
 - `internal/middleware` — `Auth`, `CORS`, `CorrelationID`, `Logger`, `SecurityHeaders` (mirrors csm-portal-backend)
@@ -89,9 +97,9 @@ See `.choreo/component.yaml` (two endpoints: health on :8080, SSE on :9092 with 
 
 ## Known limitations
 
-- No per-user/per-replica cap on concurrent SSE connections (same as csm-portal-backend's `StreamCaseActivities` doc comment). A hostile client could exhaust goroutines/FDs.
+- The concurrent-stream caps (`STREAM_MAX_CONNECTIONS_PER_USER`, `STREAM_MAX_CONNECTIONS`) are per replica and in-memory; there is no cluster-wide count, so a user's effective cap is the per-user cap multiplied by the replica count.
 - `Envelope` is hand-synced across three Go modules — changes must be propagated manually to csm-notification-service's and entity-service's own `internal/events`.
-- A redeploy (new pod/hostname) causes one-time replay of retained events (accepted tradeoff).
+- A redeploy (new pod/hostname) creates a new consumer group that starts at `LatestOffset`, so events published while no consumer was running are not broadcast (no replay of retained history); clients refresh on reconnect.
 - Consumer groups accumulate forever on the broker (no API to delete).
 
 ## Adding a new event type to SSE

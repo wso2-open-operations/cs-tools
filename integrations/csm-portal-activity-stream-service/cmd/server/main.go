@@ -69,7 +69,7 @@ func main() {
 	//   - starts a Consumer in its own per-replica consumer group (LatestOffset)
 	//   - runs the caseevents.Handler to fan case.comment_added / status_changed
 	//     to the BroadcastHub
-	var caseEventsConsumer *eventbus.Consumer
+	var consumerSupervisor *eventbus.Supervisor
 	var activityHub *stream.BroadcastHub
 
 	if broker := os.Getenv("EVENT_HUB_BROKER"); broker != "" {
@@ -101,20 +101,39 @@ func main() {
 		// call to delete a consumer group it's done with.
 		consumerGroupBase := envOrDefault("EVENT_HUB_CONSUMER_GROUP", "csm-portal-activity-stream-service")
 		consumerGroup := fmt.Sprintf("%s-replica-%s", consumerGroupBase, newReplicaID())
-		caseEventsConsumer = eventbus.NewConsumer(eventBusCfg, consumerGroup, eventbus.LatestOffset)
 		activityHub = stream.NewBroadcastHub()
+		// The supervisor owns the consumer: it builds a fresh one (same
+		// group, so a restart resumes from the committed offset) whenever
+		// the current one exits while the process is still running.
+		consumerSupervisor = eventbus.NewSupervisor(
+			func() *eventbus.Consumer {
+				return eventbus.NewConsumer(eventBusCfg, consumerGroup, eventbus.LatestOffset)
+			},
+			caseevents.NewHandler(activityHub).Handle,
+		)
 	}
 
-	// SSE handler — depends on entity client + optional hub.
-	streamHandler := handler.NewStreamHandler(customerEntityClient, activityHub)
+	// SSE handler — depends on entity client + optional hub. Stream lifetime
+	// bounds: see handler.StreamHandler's doc comment.
+	streamHandler := handler.NewStreamHandler(customerEntityClient, activityHub,
+		handler.WithMaxLifetime(envDuration("STREAM_MAX_LIFETIME", handler.DefaultMaxStreamLifetime)),
+		handler.WithReauthInterval(envDuration("STREAM_REAUTH_INTERVAL", handler.DefaultReauthInterval)),
+		handler.WithConnectionLimits(
+			envInt("STREAM_MAX_CONNECTIONS_PER_USER", handler.DefaultMaxStreamsPerUser),
+			envInt("STREAM_MAX_CONNECTIONS", handler.DefaultMaxStreamsTotal),
+		),
+	)
 
-	// Health check listener (:8080) — simple REST endpoint for Choreo liveness probe.
+	// Health check listener (:8080) — REST endpoint for Choreo's liveness
+	// probe. Reports 503 while the event consumer is configured but not
+	// running, so a replica that can no longer deliver events is not kept in
+	// rotation silently.
+	var consumerRunning func() bool
+	if consumerSupervisor != nil {
+		consumerRunning = consumerSupervisor.Running
+	}
 	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	healthMux.HandleFunc("GET /health", healthHandler(consumerRunning))
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -161,58 +180,72 @@ func main() {
 	}()
 	slog.Info("health server started", "addr", healthLn.Addr().String())
 
-	// Stream server (:9092) — only if Event Hub is configured (activityHub != nil).
-	// The SSE connection must stay open indefinitely, so WriteTimeout/IdleTimeout
-	// are disabled; mirror of csm-portal-backend's original stream listener.
-	var streamSrv *http.Server
-	var streamLn net.Listener
-	if activityHub != nil {
-		streamMux := http.NewServeMux()
-		streamMux.HandleFunc("GET /cases/{id}/activities/stream", streamHandler.StreamCaseActivities)
+	// Stream server (:9092) always binds and serves the route, whether or not
+	// Event Hub is configured: StreamCaseActivities itself returns the
+	// documented 503 when activityHub is nil. Binding only conditionally
+	// would refuse the connection before any handler runs, since Choreo's
+	// component config always exposes this port. Only the hub/consumer
+	// machinery above is conditional. The SSE connection must stay open
+	// indefinitely, so WriteTimeout/IdleTimeout are disabled.
+	streamMux := http.NewServeMux()
+	streamMux.HandleFunc("GET /cases/{id}/activities/stream", streamHandler.StreamCaseActivities)
 
-		streamAddr := ":" + mustPort("STREAM_PORT", "9092")
-		streamLn, err = (&net.ListenConfig{}).Listen(ctx, "tcp", streamAddr)
-		if err != nil {
-			slog.Error("failed to bind stream listener", "addr", streamAddr, "err", err)
-			os.Exit(1)
-		}
+	streamAddr := ":" + mustPort("STREAM_PORT", "9092")
+	streamLn, err := (&net.ListenConfig{}).Listen(ctx, "tcp", streamAddr)
+	if err != nil {
+		slog.Error("failed to bind stream listener", "addr", streamAddr, "err", err)
+		os.Exit(1)
+	}
 
-		streamSrv = &http.Server{
-			// SecurityHeaders must stay outermost so its headers are present
-			// on every response, including a CORS preflight — CORS runs
-			// next, still ahead of Auth: a browser preflight carries no
-			// x-jwt-assertion header, so Auth must never see it first. See
-			// middleware.CORS's doc comment.
-			// STREAM_CORS_ALLOWED_ORIGINS is a comma-separated allow-list;
-			// unset denies all cross-origin requests (fail-closed — see
-			// middleware.CORS's doc comment for why).
-			Handler: middleware.SecurityHeaders(
-				middleware.CORS(splitComma(os.Getenv("STREAM_CORS_ALLOWED_ORIGINS")))(
-					middleware.CorrelationID(
-						authMiddleware(
-							middleware.Logger(streamMux),
-						),
+	streamSrv := &http.Server{
+		// SecurityHeaders must stay outermost so its headers are present
+		// on every response, including a CORS preflight — CORS runs
+		// next, still ahead of Auth: a browser preflight carries no
+		// x-jwt-assertion header, so Auth must never see it first. See
+		// middleware.CORS's doc comment.
+		// STREAM_CORS_ALLOWED_ORIGINS is a comma-separated allow-list;
+		// unset denies all cross-origin requests (fail-closed — see
+		// middleware.CORS's doc comment for why).
+		Handler: middleware.SecurityHeaders(
+			middleware.CORS(splitComma(os.Getenv("STREAM_CORS_ALLOWED_ORIGINS")))(
+				middleware.CorrelationID(
+					authMiddleware(
+						middleware.Logger(streamMux),
 					),
 				),
 			),
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      0,
-			IdleTimeout:       0,
-		}
+		),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       0,
+	}
 
+	// Shutdown waits for connections to go idle, which an open SSE response
+	// never does; closing the hub ends every stream (each with a terminal
+	// `shutdown` event so the client reconnects to another replica) and lets
+	// Shutdown complete within its grace period instead of timing out.
+	if activityHub != nil {
+		streamSrv.RegisterOnShutdown(activityHub.CloseAll)
+	}
+
+	go func() {
+		if err := streamSrv.Serve(streamLn); err != nil && err != http.ErrServerClosed {
+			slog.Error("stream server exited", "err", err)
+			os.Exit(1)
+		}
+	}()
+	slog.Info("case-activity stream server started", "addr", streamLn.Addr().String(), "liveUpdates", activityHub != nil)
+
+	consumerDone := make(chan struct{})
+	if consumerSupervisor != nil {
 		go func() {
-			if err := streamSrv.Serve(streamLn); err != nil && err != http.ErrServerClosed {
-				slog.Error("stream server exited", "err", err)
-				os.Exit(1)
-			}
+			defer close(consumerDone)
+			consumerSupervisor.Run(ctx)
 		}()
-		slog.Info("case-activity stream server started", "addr", streamLn.Addr().String())
-
-		if caseEventsConsumer != nil {
-			go caseEventsConsumer.Run(ctx, caseevents.NewHandler(activityHub).Handle)
-			slog.Info("case-events consumer started")
-		}
+		slog.Info("case-events consumer started")
+	} else {
+		close(consumerDone)
 	}
 
 	<-ctx.Done()
@@ -224,13 +257,11 @@ func main() {
 	// Both listeners get the shutdown goroutine's own use of shutdownCtx,
 	// running concurrently rather than one after the other.
 	var wg sync.WaitGroup
-	if streamSrv != nil {
-		wg.Go(func() {
-			if err := streamSrv.Shutdown(shutdownCtx); err != nil {
-				slog.Error("stream server graceful shutdown failed", "err", err)
-			}
-		})
-	}
+	wg.Go(func() {
+		if err := streamSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("stream server graceful shutdown failed", "err", err)
+		}
+	})
 	var healthSrvErr error
 	wg.Go(func() {
 		healthSrvErr = healthSrv.Shutdown(shutdownCtx)
@@ -241,11 +272,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	if caseEventsConsumer != nil {
-		caseEventsConsumer.Close()
+	// The supervisor stops on ctx (already canceled) and closes its consumer
+	// on the way out; wait for that within the same grace period.
+	select {
+	case <-consumerDone:
+	case <-shutdownCtx.Done():
+		slog.Error("case-events consumer did not stop within the shutdown grace period")
 	}
 
 	slog.Info("CSM Activity Stream Service stopped")
+}
+
+// healthHandler serves GET /health. consumerRunning is nil when Event Hub is
+// not configured: the service is then in its documented degraded mode (the
+// stream endpoint answers 503) and health stays 200. Otherwise health is 503
+// whenever no consumer is running — before it starts, during a restart
+// backoff, or after it has stopped.
+func healthHandler(consumerRunning func() bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if consumerRunning != nil && !consumerRunning() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"unavailable"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}
 }
 
 func mustEnv(key string) string {
@@ -268,14 +321,16 @@ func envOrDefault(key, def string) string {
 // consumer group suffix (see the EVENT_HUB_BROKER block above), preferring
 // the container/pod hostname — in Kubernetes/Choreo this is the pod name by
 // default, requiring no extra deployment config — over a fresh random ID.
-// A random ID on every plain process restart would make Event Hub treat it
-// as a brand new, never-before-seen consumer group every time: NewConsumer
-// starts new groups at kafka.FirstOffset, so the restart would replay every
-// retained event and re-broadcast stale case_updated notifications to
-// whichever SSE clients happen to be connected. The hostname is only stable
-// within the same pod's lifetime, so an actual redeploy (new pod, new
-// hostname) still causes a one-time replay — an accepted, much rarer
-// tradeoff than replaying on every restart.
+// A random ID on every plain process restart (or every consumer restart by
+// eventbus.Supervisor, which reuses the same group) would create a brand new
+// consumer group each time; since the broker offers no API to delete one,
+// groups would pile up far faster than the one-per-pod they already do. A
+// stable suffix also lets a restarted consumer resume from the group's
+// committed offset instead of skipping whatever arrived while it was down.
+// Replay of old history is not the concern here: new groups start at
+// eventbus.LatestOffset (see the EVENT_HUB_BROKER block above). The hostname
+// is only stable within one pod's lifetime, so a redeploy (new pod, new
+// hostname) still creates a new group — the accepted tradeoff.
 //
 // Falls back to a random UUID v4 (deliberately duplicating
 // middleware.newCorrelationID's same crypto/rand-based approach rather than
@@ -294,6 +349,38 @@ func newReplicaID() string {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// envDuration returns the value of the given environment variable parsed as
+// a time.Duration ("30m", "1h30m"), or def if unset. Exits the process on an
+// unparseable or non-positive value rather than silently falling back.
+func envDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Error("environment variable must be a positive duration (e.g. \"30m\")", "key", key, "value", v)
+		os.Exit(1)
+	}
+	return d
+}
+
+// envInt returns the value of the given environment variable parsed as a
+// non-negative integer, or def if unset. Exits the process on an unparseable
+// or negative value rather than silently falling back.
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Error("environment variable must be a non-negative integer", "key", key, "value", v)
+		os.Exit(1)
+	}
+	return n
 }
 
 // mustPort returns the value of the given environment variable (or def if

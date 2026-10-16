@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-portal-activity-stream-service/internal/middleware"
 )
@@ -163,6 +164,10 @@ func TestAuth_UserInfoInjection(t *testing.T) {
 
 // ----- security headers -----
 
+// Security headers are owned by the SecurityHeaders middleware, which wraps
+// Auth in both production chains (cmd/server/main.go); Auth no longer sets
+// them a second time. This asserts the composed chain still puts them on
+// every response Auth produces — success, 401 and the /health bypass.
 func TestAuth_SecurityHeaders(t *testing.T) {
 	wantHeaders := map[string]string{
 		"X-Content-Type-Options":    "nosniff",
@@ -185,7 +190,8 @@ func TestAuth_SecurityHeaders(t *testing.T) {
 				r = httptest.NewRequest(http.MethodGet, "/health", nil)
 			}
 			tc.setup(r)
-			w := serve(r)
+			w := httptest.NewRecorder()
+			middleware.SecurityHeaders(middleware.Auth(testConfig())(noopHandler)).ServeHTTP(w, r)
 			for name, want := range wantHeaders {
 				if got := w.Header().Get(name); got != want {
 					t.Errorf("header %s = %q, want %q", name, got, want)
@@ -215,4 +221,53 @@ func TestAuth_ErrorResponse(t *testing.T) {
 			t.Error("expected non-empty message in error response")
 		}
 	})
+}
+
+// ----- token expiry -----
+
+func TestAuth_PopulatesExpiresAt(t *testing.T) {
+	exp := time.Now().Add(42 * time.Minute).Truncate(time.Second)
+	token := makeTestJWT(map[string]any{
+		"email":  "user@example.com",
+		"userid": "uid-123",
+		"exp":    exp.Unix(),
+	})
+
+	var got *middleware.UserInfo
+	capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = middleware.UserInfoFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.Header.Set("x-jwt-assertion", token)
+	w := httptest.NewRecorder()
+	middleware.Auth(testConfig())(capture).ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got == nil {
+		t.Fatal("UserInfo missing from context")
+	}
+	if !got.ExpiresAt.Equal(exp) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, exp)
+	}
+}
+
+func TestAuth_NoExpClaim_ExpiresAtZero(t *testing.T) {
+	var got *middleware.UserInfo
+	capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = middleware.UserInfoFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.Header.Set("x-jwt-assertion", validToken())
+	middleware.Auth(testConfig())(capture).ServeHTTP(httptest.NewRecorder(), r)
+
+	if got == nil {
+		t.Fatal("UserInfo missing from context")
+	}
+	if !got.ExpiresAt.IsZero() {
+		t.Errorf("ExpiresAt = %v, want zero for a token without exp", got.ExpiresAt)
+	}
 }

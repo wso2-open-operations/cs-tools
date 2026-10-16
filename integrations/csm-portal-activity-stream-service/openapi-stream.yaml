@@ -21,12 +21,36 @@ paths:
       summary: Live case-activity updates.
       description: >
         Opens a long-lived Server-Sent Events connection. Emits a
-        `case_updated` event (data: a compact JSON object, at minimum
-        `{caseId, type, timestamp}` — never comment text or field values)
+        `case_updated` event (data: a compact JSON object
+        `{caseId, type, timestamp}` — never comment text or field values;
+        `timestamp` is the event's time on the topic in RFC 3339 UTC and is
+        omitted if unknown)
         whenever the case gets a new comment or its status changes; a
         comment-only `: ping` heartbeat every 15s otherwise. Returns 503
         when Event Hub isn't configured on the service, since there would
         be nothing to broadcast.
+
+        The stream is bounded by the credential that opened it: the server
+        closes it at the token's `exp` or after a configured maximum
+        lifetime (default 1h), whichever comes first, and periodically
+        re-checks that the caller may still read the case. A server-side
+        close is announced with a terminal `event: stream_closed` whose
+        data is `{"reason": "token_expired" | "max_lifetime" |
+        "access_revoked"}`; clients should reconnect with a fresh token
+        (and expect 401/403 if access really is gone). When the serving
+        replica shuts down the stream ends with `event: shutdown`
+        (`{"reason": "shutdown"}`); reconnecting reaches a replica that
+        is still serving.
+
+        Every stream starts with an SSE `retry: 3000` field, and every
+        `case_updated` event carries an `id:`. A client reconnecting with
+        `Last-Event-ID` is sent the events for this case it missed, but
+        only best-effort: the replay window is short (the last 256 events
+        across all cases, at most 2 minutes old), held in memory, and
+        local to one replica and process, so a reconnect that lands on
+        another replica, after a restart, or after the window gets no
+        replay. Clients must still refresh their view of the case on every
+        (re)connect.
       operationId: getCasesIdActivitiesStream
       parameters:
         - name: id
@@ -36,6 +60,16 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: Last-Event-ID
+          in: header
+          description: >
+            The `id` of the last `case_updated` event the client received.
+            Best-effort resume; see the operation description. Unknown or
+            expired values are ignored.
+          required: false
+          schema:
+            type: string
+            maxLength: 64
         - name: x-user-id-token
           in: header
           description: >
@@ -70,8 +104,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: >
+            TooManyRequests: the caller already holds the maximum number of
+            concurrently open streams on this replica. Carries Retry-After.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "503":
-          description: ServiceUnavailable
+          description: >
+            ServiceUnavailable: live updates are not configured on the
+            service, or this replica is at its concurrent-stream capacity
+            (then with Retry-After).
           content:
             application/json:
               schema:

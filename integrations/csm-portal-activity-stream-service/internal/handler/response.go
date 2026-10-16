@@ -32,7 +32,11 @@ const (
 	ErrMsgBadRequest   = "Invalid request payload."
 	ErrMsgInternal     = "An internal server error occurred. Please try again later."
 	ErrMsgInvalidUUID  = "Invalid UUID format."
-	errMsgReadBody     = "Failed to read request body."
+	// ErrMsgTooManyStreams and ErrMsgStreamCapacity are the bodies of the
+	// 429 / 503 the stream handler's connection limiter returns.
+	ErrMsgTooManyStreams = "Too many open activity streams for this user. Close one and try again."
+	ErrMsgStreamCapacity = "Live updates are at capacity right now. Please try again shortly."
+	errMsgReadBody       = "Failed to read request body."
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.

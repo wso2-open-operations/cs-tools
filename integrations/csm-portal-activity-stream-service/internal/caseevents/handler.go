@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-portal-activity-stream-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-portal-activity-stream-service/internal/events"
@@ -85,21 +86,24 @@ func (h *Handler) Handle(ctx context.Context, record eventbus.Record) error {
 	}
 	switch env.Type {
 	case events.TypeCommentAdded, events.TypeStatusChanged:
-		h.broadcast(ctx, env)
+		h.broadcast(ctx, env, record.Time)
 	}
 	return nil
 }
 
-func (h *Handler) broadcast(ctx context.Context, env events.Envelope) {
-	var ts struct {
-		Timestamp string `json:"timestamp"`
+// broadcast publishes the minimal payload for env. timestamp is the
+// record's own time on the topic (the producer's payloads carry no
+// timestamp field of their own), written as RFC 3339 UTC; omitted when the
+// record has none.
+func (h *Handler) broadcast(ctx context.Context, env events.Envelope, at time.Time) {
+	var ts string
+	if !at.IsZero() {
+		ts = at.UTC().Format(time.RFC3339Nano)
 	}
-	_ = json.Unmarshal(env.Payload, &ts) // best-effort; empty Timestamp is fine
-
 	body, err := json.Marshal(broadcastPayload{
 		CaseID:    env.EntityID,
 		Type:      string(env.Type),
-		Timestamp: ts.Timestamp,
+		Timestamp: ts,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "caseevents: failed to encode broadcast payload", "err", err)
