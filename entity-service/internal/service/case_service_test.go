@@ -2706,6 +2706,59 @@ func TestCaseService_UpdateCase_MarkFixIssued_MirrorsToServiceNow(t *testing.T) 
 	}
 }
 
+// TestCaseService_UpdateCase_StateNoOp_DoesNotMirror proves a State PATCH
+// that re-sends the case's own current state (a no-op re-PATCH, legal
+// without a transition-table check per the state-transition guard above)
+// does not dispatch a ServiceNow mirror write at all. Before this fix, the
+// mirror dispatch fired on every req.State != nil regardless of whether the
+// state actually changed, unlike the sibling activity-log/publish guards in
+// the same method -- so two near-simultaneous callers both moving a case to
+// the same target state (e.g. applyCustomerReplyStateTransition racing
+// itself, see that method's own KNOWN GAP) each dispatched an identical
+// mirror PATCH, and the downstream data source's second one landed as a
+// self-transition most workflows don't allow (observed live: "Invalid
+// transition from 'Waiting On WSO2' to stateKey 1003. Allowed transitions:
+// Closed.").
+func TestCaseService_UpdateCase_StateNoOp_DoesNotMirror(t *testing.T) {
+	state := domain.CaseStateWaitingOnWSO2
+
+	mirrorCalled := false
+	mirror := &stubMirrorCaseService{
+		patchCaseFieldsFn: func(context.Context, string, *domain.CaseState, *domain.CaseSeverity, *domain.CaseWorkState, *bool, *caseResolutionFields, bool) (domain.UpdatedCase, error) {
+			mirrorCalled = true
+			return domain.UpdatedCase{}, nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+
+	repo := &stubCaseRepo{
+		getCaseByID: func(_ context.Context, id string, _ repository.SearchScope) (domain.CaseView, error) {
+			// Already in the requested state -- a no-op re-PATCH.
+			priorState := domain.CaseStateWaitingOnWSO2
+			return domain.CaseView{ID: id, State: &priorState}, nil
+		},
+		updateCase: func(_ context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error) {
+			return domain.Case{ID: req.ID, State: req.State}, nil, nil
+		},
+	}
+	svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil, dispatcher, mirror, nil, "")
+
+	if _, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, State: &state}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Give any wrongly-dispatched async mirror a moment to run before
+	// asserting it never did.
+	time.Sleep(50 * time.Millisecond)
+	if mirrorCalled {
+		t.Error("mirror.patchCaseFields must not be called for a no-op (already-in-that-state) State update")
+	}
+	if got := failures.count(); got != 0 {
+		t.Errorf("expected 0 sn_writeback_failures records, got %d", got)
+	}
+}
+
 // TestCaseService_UpdateCase_MarkFixIssued_AlreadySetIsNoOp proves a second
 // markFixIssued:true call on a case whose fix is already marked issued
 // succeeds without error and does NOT dispatch a second ServiceNow mirror

@@ -2483,6 +2483,32 @@ window is still set to `Waiting on WSO2`. Postgres could close it with a
 conditional `UPDATE`, but that lives on the `UpdateCase` path this rule
 deliberately reuses unchanged; flagged, not half-closed.
 
+**One concrete failure mode of this race is fixed, though, not just
+flagged: the dual-write mirror no longer re-sends a state the downstream
+data source already holds.** Reported live via a dual-write failure record:
+`Invalid transition from 'Waiting On WSO2' to stateKey 1003. Allowed
+transitions: Closed.` — stateKey 1003 is `Waiting On WSO2` itself, so this
+was a self-transition: the case was already in that state and a mirror
+PATCH tried to set it there again, which that system's own workflow
+doesn't list as a legal move (only `-> Closed` is). Root cause: `UpdateCase`'s
+dual-write mirror dispatch (the `switch` over `State`/`Severity`/`WorkState`
+a few paragraphs above "Customer tags/watch list/...") fired on every
+`req.State != nil`, with no "did the state actually change" guard — unlike
+the sibling activity-log and `case.status_changed`-publish blocks in the
+same method, which both already check `before.State != *req.State` first.
+Combined with this rule's own race above, two near-simultaneous customer
+replies (or a duplicate delivery of one) can both read the case as
+`Awaiting Info`/`Solution Proposed` and both call `UpdateCase` with the
+same target state before either write commits: the first mirror PATCH
+succeeds, and the second — now a same-state no-op against the downstream
+system — is rejected exactly as observed. The dispatch now skips the
+mirror call whenever `before.State` already equals the requested state, the
+same no-op check its sibling blocks use. This does not close the general
+race (a case moved to a genuinely *different* state in the window is still
+set back to `Waiting on WSO2`, per the gap above) — only the specific,
+reported self-transition case, which is also the one this rule's own
+duplicate-firing race actually produces.
+
 Tests: `case_service_customer_reply_test.go` (the recording repository: a
 CASE and a SERVICE_REQUEST in the same table, every state, work note, staff /
 mixed / M2M callers, unresolved identity, a failed move logged with the

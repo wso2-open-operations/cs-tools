@@ -2210,44 +2210,69 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 			// state that never actually changed.
 			case req.State != nil && (before == nil || before.State == nil || *before.State != *req.State):
 				state := *req.State
-				// closed/solution_proposed must carry resolutionCode, cause
-				// and closeNotes to the mirror: the downstream data source
-				// rejects the transition without all three. Postgres has
-				// already stored them above.
-				var resolution *caseResolutionFields
-				payload := map[string]any{"id": req.ID, "state": state}
-				if req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil {
-					resolution = &caseResolutionFields{Code: req.ResolutionCode, Cause: req.Cause, CloseNotes: req.CloseNotes}
-					payload["resolutionCode"], payload["cause"], payload["closeNotes"] = req.ResolutionCode, req.Cause, req.CloseNotes
+				// Only mirror a genuine state change, matching the
+				// activity-log/publish guards just above (before != nil &&
+				// derefState(before.State) != *req.State) -- before is
+				// guaranteed non-nil here whenever req.State != nil (the
+				// state-transition guard earlier in this function already
+				// returns before this point otherwise). Without this, a
+				// no-op re-PATCH (the case already in the requested state)
+				// still dispatched a PATCH that asked the downstream data
+				// source to move the case to the state it's already in --
+				// a self-transition most of that system's own workflows
+				// don't list as a legal move from that state (observed
+				// live: "Invalid transition from 'Waiting On WSO2' to
+				// stateKey 1003. Allowed transitions: Closed.", stateKey
+				// 1003 being Waiting On WSO2 itself), recorded as a
+				// dual-write failure for a change that was never a real
+				// transition in the first place. This also closes the
+				// specific race applyCustomerReplyStateTransition's own
+				// KNOWN GAP describes: two near-simultaneous customer
+				// replies can both read the case as Awaiting Info/Solution
+				// Proposed and both call UpdateCase with the same target
+				// state before either write commits -- the second mirror
+				// dispatch is now skipped as a no-op instead of retrying
+				// the identical, now-stale self-transition.
+				if before == nil || derefState(before.State) != state {
+					// closed/solution_proposed must carry resolutionCode,
+					// cause and closeNotes to the mirror: the downstream
+					// data source rejects the transition without all
+					// three. Postgres has already stored them above.
+					var resolution *caseResolutionFields
+					payload := map[string]any{"id": req.ID, "state": state}
+					if req.ResolutionCode != nil || req.Cause != nil || req.CloseNotes != nil {
+						resolution = &caseResolutionFields{Code: req.ResolutionCode, Cause: req.Cause, CloseNotes: req.CloseNotes}
+						payload["resolutionCode"], payload["cause"], payload["closeNotes"] = req.ResolutionCode, req.Cause, req.CloseNotes
+					}
+					// asSystemUser's condition is kept exactly as it was when
+					// introduced (case CS0378899) -- !isInternalCaller &&
+					// resolution != nil -- but the validation block above now
+					// refuses any external caller who supplies a non-nil
+					// resolutionCode/cause/closeNotes outright, before this
+					// code ever runs. So in practice, by the time control
+					// reaches here, an external caller's resolution is always
+					// nil (nothing to mirror, asSystemUser evaluates false) and
+					// an internal caller's is handled by the isInternalCaller
+					// branch (asSystemUser also false: they mirror under their
+					// own identity, as always). This condition is deliberately
+					// NOT simplified to `false` or removed: it is the one
+					// remaining guard against resolution ever reaching this
+					// dispatch as non-nil for a non-internal caller through
+					// some future code path that bypasses the validation
+					// block above -- keeping it is cheap insurance against
+					// silently reintroducing the exact bypass CodeRabbit
+					// caught (mirroring a customer-supplied resolution value
+					// under a system identity that lets it slip past
+					// ServiceNow's own rejection of it).
+					asSystemUser := !isInternalCaller && resolution != nil
+					s.snWriteback.Dispatch(ctx, "case", req.ID, "update",
+						payload,
+						func(writeCtx context.Context) error {
+							_, err := patcher.patchCaseFields(writeCtx, req.ID, &state, nil, nil, nil, resolution, asSystemUser)
+							return err
+						},
+					)
 				}
-				// asSystemUser's condition is kept exactly as it was when
-				// introduced (case CS0378899) -- !isInternalCaller &&
-				// resolution != nil -- but the validation block above now
-				// refuses any external caller who supplies a non-nil
-				// resolutionCode/cause/closeNotes outright, before this
-				// code ever runs. So in practice, by the time control
-				// reaches here, an external caller's resolution is always
-				// nil (nothing to mirror, asSystemUser evaluates false) and
-				// an internal caller's is handled by the isInternalCaller
-				// branch (asSystemUser also false: they mirror under their
-				// own identity, as always). This condition is deliberately
-				// NOT simplified to `false` or removed: it is the one
-				// remaining guard against resolution ever reaching this
-				// dispatch as non-nil for a non-internal caller through
-				// some future code path that bypasses the validation
-				// block above -- keeping it is cheap insurance against
-				// silently reintroducing the exact bypass CodeRabbit
-				// caught (mirroring a customer-supplied resolution value
-				// under a system identity that lets it slip past
-				// ServiceNow's own rejection of it).
-				asSystemUser := !isInternalCaller && resolution != nil
-				s.snWriteback.Dispatch(ctx, "case", req.ID, "update",
-					payload,
-					func(writeCtx context.Context) error {
-						_, err := patcher.patchCaseFields(writeCtx, req.ID, &state, nil, nil, nil, resolution, asSystemUser)
-						return err
-					},
-				)
 			case req.Severity != nil:
 				severity := *req.Severity
 				s.snWriteback.Dispatch(ctx, "case", req.ID, "update",
