@@ -59,7 +59,12 @@ function isCaseSearch(response: Response): boolean {
 function searchFilters(
   postData: string | null,
 ):
-  | { createdByMe?: boolean; statusIds?: number[]; severityIds?: number[] }
+  | {
+      createdByMe?: boolean;
+      statusIds?: number[];
+      severityIds?: number[];
+      engagementTypeKeys?: number[];
+    }
   | undefined {
   if (!postData) return undefined;
   try {
@@ -68,6 +73,7 @@ function searchFilters(
         createdByMe?: boolean;
         statusIds?: number[];
         severityIds?: number[];
+        engagementTypeKeys?: number[];
       };
     };
     return body.filters ?? {};
@@ -229,6 +235,66 @@ export function caseSearchWithSeverity(
         response.request().postData(),
       )?.severityIds;
       return !!severityIds && severityIds.includes(severityId);
+    },
+    { timeout: SEARCH_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Starts waiting for an engagement search filtered to one or more types.
+ *
+ * Call this **before** choosing the type, then await it after.
+ *
+ * The chosen type travels as numeric ids in `filters.engagementTypeKeys` — a
+ * breakdown entry can map to SEVERAL ids, since `engagementTypeOptions` groups
+ * every backend type sharing a display name into one comma-joined option. So
+ * this asserts the request carries the ids the UI offered, not a single id.
+ *
+ * Matching on the ids rather than the label is what proves the filter reached
+ * the backend rather than only ticking a checkbox in the menu.
+ *
+ * @param page - Test page.
+ * @param typeIds - Ids the request must carry, all of them.
+ * @returns Promise for the matching search response.
+ */
+export function caseSearchWithEngagementTypes(
+  page: Page,
+  typeIds: number[],
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      if (!isCaseSearch(response)) return false;
+      const keys = searchFilters(
+        response.request().postData(),
+      )?.engagementTypeKeys;
+      return (
+        !!keys && typeIds.every((id) => keys.includes(id))
+      );
+    },
+    { timeout: SEARCH_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Starts waiting for an engagement search carrying no type filter.
+ *
+ * Call this **before** clearing, then await it after — the initial unfiltered
+ * load matches this predicate too, so arming it beforehand is what ties the
+ * wait to the clearing rather than to the page load.
+ *
+ * @param page - Test page.
+ * @returns Promise for the matching search response.
+ */
+export function caseSearchWithoutEngagementTypes(
+  page: Page,
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      if (!isCaseSearch(response)) return false;
+      const keys = searchFilters(
+        response.request().postData(),
+      )?.engagementTypeKeys;
+      return !keys || keys.length === 0;
     },
     { timeout: SEARCH_TIMEOUT_MS },
   );

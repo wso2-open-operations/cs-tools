@@ -24,6 +24,7 @@ import {
   ADD_DEPLOYMENT,
   ADD_PRODUCT,
   CASE_DETAIL,
+  DEPLOYMENT_DOCUMENTS,
   DEPLOYMENTS_LIST,
   MUI_PAGINATION,
   DELETE_DEPLOYMENT,
@@ -579,6 +580,24 @@ export class ProjectDeploymentsPage {
    * @param name - Full deployment name.
    * @returns Locator for the card's header.
    */
+  /**
+   * The name on each deployment card, in list order.
+   *
+   * Read off the page rather than taken from a fixture: deployment names are
+   * project data and have changed under this suite before — a project that once
+   * had "Production" later carried only timestamped records. A spec that merely
+   * needs *a* deployment should ask the page which ones exist.
+   *
+   * @returns One name per card currently listed.
+   */
+  async deploymentNames(): Promise<string[]> {
+    const headers = this.main().getByRole("button", { expanded: false });
+    const texts = await headers.allInnerTexts();
+    return texts
+      .map((t) => t.split("\n")[0].trim())
+      .filter((t) => t.length > 0);
+  }
+
   deploymentSummary(name: string): Locator {
     return this.main()
       .getByRole("button")
@@ -1060,6 +1079,81 @@ export class ProjectDeploymentsPage {
         { timeout: LOAD_TIMEOUT_MS },
       ),
       this.productSubmitButton().click(),
+    ]);
+    return response;
+  }
+
+  //
+  // Documents, inside an expanded deployment card.
+  //
+
+  /** The Documents section of the expanded deployment. */
+  documentsSection(): Locator {
+    return this.main().getByText(DEPLOYMENT_DOCUMENTS.section, { exact: true });
+  }
+
+  /** The Upload control that opens the Add Document dialog. */
+  uploadDocumentButton(): Locator {
+    return this.main().getByRole("button", {
+      name: DEPLOYMENT_DOCUMENTS.uploadButton,
+      exact: true,
+    });
+  }
+
+  /** The upload dialog. Matched by its own title, which in deployment mode is
+   * "Add Document" rather than the case tab's "Upload Attachment". */
+  uploadDocumentDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: DEPLOYMENT_DOCUMENTS.uploadModal.title });
+  }
+
+  /** A document row, found by the file name it lists. */
+  documentRow(name: string): Locator {
+    return this.main().getByText(name, { exact: false });
+  }
+
+  /**
+   * Uploads a file to the expanded deployment's Documents section.
+   *
+   * Sets the file on the dropzone's hidden input rather than clicking "Choose
+   * file", which would open the OS picker that Playwright cannot drive.
+   *
+   * @param filePath - Path to the file to upload.
+   * @param documentName - Name to store it under.
+   * @returns The successful POST response, for asserting on the wire.
+   */
+  async uploadDocument(
+    filePath: string,
+    documentName: string,
+  ): Promise<Response> {
+    await expect(this.uploadDocumentButton()).toBeEnabled({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.uploadDocumentButton().click();
+
+    const dialog = this.uploadDocumentDialog();
+    await expect(dialog).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+
+    await dialog.locator('input[type="file"]').setInputFiles(filePath);
+    await dialog
+      .getByLabel(DEPLOYMENT_DOCUMENTS.uploadModal.nameField)
+      .fill(documentName);
+
+    const confirm = dialog.getByRole("button", {
+      name: DEPLOYMENT_DOCUMENTS.uploadModal.confirmButton,
+      exact: true,
+    });
+    await expect(confirm).toBeEnabled({ timeout: LOAD_TIMEOUT_MS });
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          /\/deployments\/[^/]+\/attachments$/.test(new URL(r.url()).pathname) &&
+          r.request().method() === "POST",
+        { timeout: LOAD_TIMEOUT_MS },
+      ),
+      confirm.click(),
     ]);
     return response;
   }

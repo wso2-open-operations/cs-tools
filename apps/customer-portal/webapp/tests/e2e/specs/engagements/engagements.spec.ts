@@ -49,6 +49,10 @@ import {
   ENGAGEMENTS,
 } from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
+import {
+  caseSearchWithEngagementTypes,
+  caseSearchWithoutEngagementTypes,
+} from "../../utils/listSearch";
 import { RECORD_ID_PATTERN, projectPathPattern } from "../../utils/ids";
 
 withSession(test);
@@ -259,6 +263,103 @@ test.describe("Engagements", () => {
 
     console.log(
       `Engagements: search narrowed ${before} rows and clearing restored them`,
+    );
+  });
+
+  test("filters the list by an engagement type breakdown entry", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+
+    const before = await engagements.rows().count();
+    test.skip(before === 0, `${ENGAGEMENT_INPUT.projectType} lists no engagements.`);
+
+    await engagements.openFilters();
+
+    // Which entries the breakdown offers is project data: the options come from
+    // `stats.engagementTypeCount` and a type the project has none of is left
+    // out entirely. So they are read rather than assumed.
+    const offered = await engagements.openEngagementTypeMenu();
+    test.skip(
+      offered.length === 0,
+      `${ENGAGEMENT_INPUT.projectType} offers no engagement types to filter by.`,
+    );
+
+    // Every entry is named and distinct. Deliberately NOT checked against a
+    // fixed list of display names: this repo's source keeps only four, while
+    // the deployed build offers five (see ENGAGEMENTS.engagementType), so
+    // pinning the set would assert the source tree rather than the app.
+    for (const label of offered) {
+      expect(label.trim(), "a breakdown entry should be named").not.toBe("");
+    }
+    expect(
+      new Set(offered).size,
+      "the breakdown should not repeat an entry",
+    ).toBe(offered.length);
+
+    // The ids behind the entry, read off the option: one display name can group
+    // several backend types, so the request carries every id the option stands
+    // for and they cannot be derived from the label.
+    const chosen = offered[0];
+    const typeIds = await engagements.engagementTypeIds(chosen);
+    expect(
+      typeIds.length,
+      `"${chosen}" should carry at least one engagement type id`,
+    ).toBeGreaterThan(0);
+
+    // Armed before the click: the filter applies as it changes, and a response
+    // awaited afterwards could be one already in flight.
+    const filteredSearch = caseSearchWithEngagementTypes(page, typeIds);
+    await engagements.chooseEngagementType(chosen);
+    const filteredResponse = await filteredSearch;
+    await expectSuccess(filteredResponse, `filter engagements by ${chosen}`);
+
+    // The menu stays open on a multi-select, and its backdrop covers the list.
+    await engagements.closeEngagementTypeMenu();
+
+    // One filter is active, which the control states in its own label.
+    await expect(engagements.clearFiltersButton(1)).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+
+    // The list is a subset. Not an equality or a strict decrease: the project
+    // may hold only this type, in which case filtering legitimately changes
+    // nothing — but it can never ADD rows.
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBeLessThanOrEqual(before);
+
+    // Whatever the response returned is what is rendered — the part a
+    // regression between the refetch and the list would break.
+    const payload = (await filteredResponse.json()) as {
+      cases?: unknown[];
+      totalRecords?: number;
+    };
+    const returned = payload.cases?.length ?? 0;
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBe(returned);
+
+    // Clearing restores the unfiltered list, which is what shows the narrowing
+    // was the filter rather than something that happened to coincide with it.
+    const clearedSearch = caseSearchWithoutEngagementTypes(page);
+    await engagements.clearFiltersButton(1).click();
+    await expectSuccess(await clearedSearch, "clear the engagement type filter");
+
+    await expect(engagements.filtersButton()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBe(before);
+
+    console.log(
+      `Engagements: type "${chosen}" (ids ${typeIds.join(",")}) narrowed ` +
+        `${before} → ${returned} rows; offered [${offered.join(", ")}]`,
     );
   });
 

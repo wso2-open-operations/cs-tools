@@ -79,6 +79,11 @@ export class SettingsPage {
     return this.main().getByRole("tab", { name: label, exact: true });
   }
 
+  /** Every tab on the Settings page, for asserting how many there are. */
+  tabs(): Locator {
+    return this.main().getByRole("tab");
+  }
+
   /**
    * Switches tab and waits for it to be selected.
    *
@@ -147,6 +152,191 @@ export class SettingsPage {
    */
   userTableHeader(label: string): Locator {
     return this.main().getByRole("columnheader", { name: label, exact: true });
+  }
+
+  /**
+   * The name, email and role labels a user row displays.
+   *
+   * Read off the ROW rather than taken from config, so the values are
+   * guaranteed to exist — a search built from a fixture that has since changed
+   * finds nothing and reads as a broken filter rather than stale data.
+   *
+   * The row renders the name and email stacked in the first cell and the roles
+   * as chips, so the text comes back line-separated; the email is picked out by
+   * shape and the roles by matching the known badge labels.
+   *
+   * @param row - The row to read.
+   * @returns Its displayed name, email and role labels.
+   */
+  async userRowDetails(
+    row: Locator,
+  ): Promise<{ name: string; email: string; roles: string[] }> {
+    const lines = (await row.innerText())
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    const emailIndex = lines.findIndex((line) => /^\S+@\S+$/.test(line));
+    const email = emailIndex >= 0 ? lines[emailIndex] : "";
+
+    // The name sits directly above the email. Falls back to empty rather than
+    // guessing, so a contact with no name does not silently yield the initials
+    // badge or a placeholder as its "name".
+    const nameLine = emailIndex > 0 ? lines[emailIndex - 1] : "";
+    const name = nameLine === SETTINGS.userManagement.nullPlaceholder ? "" : nameLine;
+
+    const roles = SETTINGS.userManagement.roleLabels.filter((label) =>
+      lines.includes(label),
+    );
+
+    return { name, email, roles };
+  }
+
+  //
+  // Add User. A two-step modal: an email that is validated server-side, then
+  // name and roles.
+  //
+
+  /** The Add User modal. */
+  addUserModal(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: SETTINGS.userManagement.addUserModal.title });
+  }
+
+  /** Opens the modal and waits for its first step. */
+  async openAddUserModal(): Promise<void> {
+    await expect(this.addUserButton()).toBeEnabled({ timeout: LOAD_TIMEOUT_MS });
+    await this.addUserButton().click();
+    await expect(this.addUserModal()).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+  }
+
+  /**
+   * Fills step 1 and advances, failing with the backend's own reason if the
+   * address is rejected.
+   *
+   * The email is validated server-side before step 2 opens, so a rejected
+   * address leaves the modal on step 1. Surfacing that message matters: the
+   * project enforces an allowed-domain list, and "the name field never
+   * appeared" would say nothing about why.
+   *
+   * @param email - Address to invite.
+   */
+  async submitAddUserEmail(email: string): Promise<void> {
+    const modal = this.addUserModal();
+    const addUser = SETTINGS.userManagement.addUserModal;
+
+    await modal.getByPlaceholder(addUser.emailPlaceholder).fill(email);
+
+    // Tied to the VALIDATE response rather than to the step changing.
+    //
+    // Both outcomes leave step 1 on screen for a moment — the button reads
+    // "Validating..." while the request is in flight — so a check made straight
+    // after the click reads a still-pending modal and reports a rejection that
+    // never happened. Waiting for the response first removes the race.
+    const [validation] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          r.request().method() === "POST" &&
+          new URL(r.url()).pathname.endsWith("/contacts/validate"),
+        { timeout: LOAD_TIMEOUT_MS },
+      ),
+      modal
+        .getByRole("button", { name: addUser.nextButton, exact: true })
+        .click(),
+    ]);
+
+    const firstName = modal.getByPlaceholder(addUser.firstNamePlaceholder);
+    const emailField = modal.getByPlaceholder(addUser.emailPlaceholder);
+
+    // Then for the modal to settle on one of its two states.
+    await expect(firstName.or(emailField).first()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await expect(
+      modal.getByRole("button", { name: addUser.validatingButton }),
+    ).toHaveCount(0, { timeout: LOAD_TIMEOUT_MS });
+
+    if ((await firstName.count()) === 0) {
+      const body = await validation.text().catch(() => "");
+      const reason = (await modal.innerText()).replace(/\s+/g, " ").trim();
+      throw new Error(
+        `"${email}" was rejected at the email step, so the user could not be ` +
+          `added. Validate returned ${validation.status()} ${body}. ` +
+          `The modal said: ${reason}`,
+      );
+    }
+  }
+
+  /**
+   * Completes step 2 and captures the create request.
+   *
+   * @param firstName - Given name.
+   * @param lastName - Family name.
+   * @returns The POST /contacts response.
+   */
+  async submitAddUserDetails(
+    firstName: string,
+    lastName: string,
+  ): Promise<Response> {
+    const modal = this.addUserModal();
+    const addUser = SETTINGS.userManagement.addUserModal;
+
+    // Overwritten rather than appended to: step 1 pre-fills these when the
+    // address already belongs to a known contact.
+    await modal.getByPlaceholder(addUser.firstNamePlaceholder).fill(firstName);
+    await modal.getByPlaceholder(addUser.lastNamePlaceholder).fill(lastName);
+
+    const submit = modal.getByRole("button", {
+      name: addUser.submitButton,
+      exact: true,
+    });
+    await expect(submit).toBeEnabled({ timeout: LOAD_TIMEOUT_MS });
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          r.request().method() === "POST" &&
+          new URL(r.url()).pathname.endsWith("/contacts"),
+        { timeout: LOAD_TIMEOUT_MS },
+      ),
+      submit.click(),
+    ]);
+    return response;
+  }
+
+  /**
+   * Removes a user through the per-row control and its confirmation.
+   *
+   * @param email - The user to remove.
+   * @returns The DELETE /contacts/{email} response.
+   */
+  async removeUser(email: string): Promise<Response> {
+    await expect(this.removeUserButton(email)).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.removeUserButton(email).click();
+
+    const confirm = this.page
+      .getByRole("dialog")
+      .filter({ hasText: SETTINGS.userManagement.removeUserModal.title });
+    await expect(confirm).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          r.request().method() === "DELETE" &&
+          new URL(r.url()).pathname.includes("/contacts/"),
+        { timeout: LOAD_TIMEOUT_MS },
+      ),
+      confirm
+        .getByRole("button", {
+          name: SETTINGS.userManagement.removeUserModal.confirmButton,
+          exact: true,
+        })
+        .click(),
+    ]);
+    return response;
   }
 
   /** Every user row currently listed, identified by their edit control.

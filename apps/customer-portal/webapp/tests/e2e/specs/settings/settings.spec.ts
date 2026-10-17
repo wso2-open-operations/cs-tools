@@ -37,9 +37,13 @@
 
 import { test, expect, withSession } from "../../fixtures/test";
 import { SettingsPage } from "../../pages/SettingsPage";
-import { PROJECTS, SETTINGS_USER_INPUT } from "../../config/testData";
+import {
+  PROJECTS,
+  SETTINGS_ADD_USER_INPUT,
+  SETTINGS_USER_INPUT,
+} from "../../config/testData";
 import { GET_HELP_BUTTON, SETTINGS } from "../../utils/selectors";
-import { expectSuccess } from "../../utils/caseFlows";
+import { expectSuccess, isSuccess } from "../../utils/caseFlows";
 import { projectPathPattern } from "../../utils/ids";
 
 withSession(test);
@@ -67,9 +71,21 @@ test.describe("Settings", () => {
     );
 
     // Soft, so one missing tab does not hide the state of the others.
-    for (const label of Object.values(SETTINGS.tabs)) {
+    const expected = Object.values(SETTINGS.tabs);
+    for (const label of expected) {
       await expect.soft(settings.tab(label)).toBeVisible();
     }
+
+    // Exactly four — a fifth tab appearing is as much a change as one going
+    // missing, and the loop above would not notice it. Note the tabs are NOT
+    // permission-gated the way the side-nav items are: a non-admin sees all
+    // four and finds the controls inside them disabled instead (see
+    // rbac/ai-assistant-access.spec.ts), so the count holds for every user type
+    // rather than only for an admin.
+    await expect(settings.tabs()).toHaveCount(expected.length);
+
+    // And in this order, which is the order a user reads them in.
+    await expect(settings.tabs()).toHaveText(expected);
   });
 
   test("lists users with their roles and per-row actions", async ({ page }) => {
@@ -106,6 +122,97 @@ test.describe("Settings", () => {
     console.log(`Settings: ${rowCount} users listed`);
   });
 
+  test("finds a user by name, by email and by role", async ({ page }) => {
+    test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+
+    const settings = new SettingsPage(page);
+    await settings.openViaSideNav(project.id);
+    await settings.openTab(SETTINGS.tabs.userManagement);
+
+    await expect(settings.anyUserRows().first()).toBeVisible({
+      timeout: 60_000,
+    });
+    const before = await settings.anyUserRows().count();
+
+    // The search terms come OFF THE PAGE, not from config: a fixture naming a
+    // user who has since been renamed or removed finds nothing, which reads as
+    // a broken filter rather than stale data.
+    const target = await settings.userRowDetails(
+      settings.anyUserRows().first(),
+    );
+    expect(target.email, "the first row should list an email").toMatch(/@/);
+
+    /**
+     * Searches, then checks the filter both kept the right row and dropped the
+     * rest honestly.
+     *
+     * The invariant works for every field because all four searchable ones are
+     * rendered in the row: whichever matched, a surviving row must DISPLAY the
+     * query. That is what distinguishes a filter from a list that ignored the
+     * box — and it holds without having to know which field did the matching,
+     * so a role query that also happens to appear in someone's email is not a
+     * false failure.
+     *
+     * @param field - Which field is being exercised, for the failure message.
+     * @param query - The term to type.
+     */
+    const search = async (field: string, query: string): Promise<number> => {
+      await settings.searchInput().fill(query);
+
+      // The target is still listed — it is what the query was taken from.
+      await expect(
+        settings.userRow(target.email),
+        `searching the ${field} "${query}" should keep ${target.email} listed`,
+      ).not.toHaveCount(0);
+
+      // Client-side over the loaded contacts, so this narrows rather than
+      // fetches and can never grow the list.
+      await expect
+        .poll(() => settings.anyUserRows().count(), { timeout: 30_000 })
+        .toBeLessThanOrEqual(before);
+
+      // Every surviving row shows the term somewhere.
+      const texts = await settings.anyUserRows().allInnerTexts();
+      for (const text of texts) {
+        expect(
+          text.toLowerCase(),
+          `a row survived the ${field} search for "${query}" without showing it`,
+        ).toContain(query.toLowerCase());
+      }
+      return texts.length;
+    };
+
+    // ── by name ──────────────────────────────────────────────────────────────
+    // The first name alone, so this matches on `firstName` rather than on the
+    // full string the row happens to render.
+    const firstName = target.name.split(/\s+/)[0] ?? "";
+    test.skip(
+      firstName.length === 0,
+      `The first listed user has no name to search by.`,
+    );
+    const byName = await search("name", firstName);
+
+    // ── by email ─────────────────────────────────────────────────────────────
+    const byEmail = await search("email", target.email);
+
+    // An email is unique, so it identifies exactly one user — the narrowest of
+    // the three, and the only one that can be pinned to a count.
+    expect(byEmail, `"${target.email}" should match exactly one user`).toBe(1);
+
+    // ── by role ──────────────────────────────────────────────────────────────
+    test.skip(
+      target.roles.length === 0,
+      `${target.email} shows no role badge to search by.`,
+    );
+    const role = target.roles[0];
+    const byRole = await search("role", role);
+
+    console.log(
+      `Settings search: ${before} users → name "${firstName}" ${byName}, ` +
+        `email ${byEmail}, role "${role}" ${byRole}`,
+    );
+  });
+
   test("searches the user list", async ({ page }) => {
     test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
 
@@ -138,6 +245,90 @@ test.describe("Settings", () => {
       .toBe(before);
 
     console.log(`Settings: search narrowed ${before} users and restored them`);
+  });
+
+  test("adds a user from the Add User button, then removes it", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+
+    const settings = new SettingsPage(page);
+    await settings.openViaSideNav(project.id);
+    await settings.openTab(SETTINGS.tabs.userManagement);
+
+    await expect(settings.anyUserRows().first()).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // Stamped per run, so repeat and overlapping runs never collide on an
+    // address — the backend rejects one that is already a contact, and a fixed
+    // value would work exactly once.
+    const email = `${SETTINGS_ADD_USER_INPUT.emailPrefix}-${Date.now()}@${
+      SETTINGS_ADD_USER_INPUT.emailDomain
+    }`;
+
+    // Add User is admin-only; the captured session is an admin, so its absence
+    // would mean the wrong identity rather than a missing feature.
+    await expect(
+      settings.addUserButton(),
+      "Add User is admin-only — if it is missing, the session is not an admin",
+    ).toBeVisible({ timeout: 60_000 });
+
+    await settings.openAddUserModal();
+    await settings.submitAddUserEmail(email);
+
+    let created = false;
+    try {
+      const response = await settings.submitAddUserDetails(
+        SETTINGS_ADD_USER_INPUT.firstName,
+        SETTINGS_ADD_USER_INPUT.lastName,
+      );
+      created = isSuccess(response.status());
+
+      expect(
+        created,
+        `adding ${email} failed (${response.status()}): ` +
+          `${await response.text()}`,
+      ).toBe(true);
+
+      // The address really is what was sent. The form shows it, but only the
+      // request proves the value that was stored.
+      const payload = response.request().postDataJSON() as {
+        contactEmail?: string;
+        contactFirstName?: string;
+      };
+      expect(payload.contactEmail).toBe(email);
+      expect(payload.contactFirstName).toBe(SETTINGS_ADD_USER_INPUT.firstName);
+
+      // And it is listed. The modal closing is not evidence of that — the list
+      // refetches separately, which is the part a regression would break.
+      await expect(settings.addUserModal()).toBeHidden({ timeout: 30_000 });
+      await expect(
+        settings.userRow(email),
+        "the new user should appear in the list",
+      ).not.toHaveCount(0);
+
+      console.log(`Settings: added ${email}`);
+    } finally {
+      // Always cleaned up, including when an assertion above failed after the
+      // contact was created. Without this the project accumulates a user per
+      // run, and `DELETE /contacts/{email}` is the only way back.
+      if (created) {
+        const removal = await settings
+          .removeUser(email)
+          .catch(() => undefined);
+        expect(
+          removal && isSuccess(removal.status()),
+          `cleanup failed — ${email} is still a contact on this project and ` +
+            `must be removed by hand`,
+        ).toBe(true);
+
+        await expect(settings.userRow(email)).toHaveCount(0, {
+          timeout: 30_000,
+        });
+        console.log(`Settings: removed ${email}`);
+      }
+    }
   });
 
   test("removes and restores a user's Lead role", async ({ page }) => {

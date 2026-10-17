@@ -213,9 +213,11 @@ export function withSession(t: typeof base, name: string = DEFAULT_SESSION): voi
 export const test = base;
 export { expect };
 export type {
+  BrowserContext,
   Download,
   Locator,
   Page,
+  Request,
   Response,
   TestInfo,
 } from "@playwright/test";
