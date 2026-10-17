@@ -239,6 +239,15 @@ type Config struct {
 	// from ServiceNow, an ingest-created row would make its insert fail on
 	// project.key forever. Turn on at cutover, when csm-sync-service stops.
 	CSMMigrationSalesforceProjectInsertEnabled bool
+	// CSMMigrationSalesforceProjectStateWritebackEnabled writes a project's
+	// overall closure state (Open / Suspended) to Salesforce Project__c
+	// State__c after PATCH /projects/{id} changes a closure field, from
+	// CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED=true. Unlike the
+	// other CSM_MIGRATION_* switches it is opt-in: only "true" (any case) turns
+	// it on, so nothing writes to Salesforce before the Sales Entity endpoint it
+	// calls is deployed. Needs the Sales Entity configuration and a database;
+	// without them it is logged and ignored.
+	CSMMigrationSalesforceProjectStateWritebackEnabled bool
 	// CSMMigrationSalesforcePartnerIngestEnabled turns on the partner-link
 	// refresh (account_relationship "Is Partner Of" / "Is Customer Of") that
 	// runs after Account events, after partner-contact membership events and
@@ -835,6 +844,7 @@ func Load() *Config {
 	cfg.CSMMigrationSalesforceOpportunityIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED")
 	cfg.CSMMigrationSalesforceProjectIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED")
 	cfg.CSMMigrationSalesforceProjectInsertEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED")
+	cfg.CSMMigrationSalesforceProjectStateWritebackEnabled = strings.EqualFold(strings.TrimSpace(os.Getenv("CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED")), "true")
 	cfg.CSMMigrationSalesforcePartnerIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED")
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))

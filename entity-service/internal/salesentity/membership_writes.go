@@ -252,6 +252,18 @@ func (c *Client) updateProjectContact(ctx context.Context, membershipSfID string
 	return out, nil
 }
 
+// UpdateProjectStatus writes a Salesforce Project__c's State__c (the overall
+// "Closure State": "Open" or "Suspended") via PATCH /projects/{id}. CSM calls
+// it when its closure process suspends or reopens a project. The response
+// body (the re-read project) is not needed and is discarded.
+func (c *Client) UpdateProjectStatus(ctx context.Context, projectSfID, status string) error {
+	if strings.TrimSpace(projectSfID) == "" {
+		return &apierror.ValidationError{Msg: "project id is required"}
+	}
+	body := map[string]string{"status": status}
+	return c.mutateWithRetry(ctx, http.MethodPatch, "/projects/"+url.PathEscape(projectSfID), body, "project", nil)
+}
+
 // mutateWithRetry POSTs/PATCHes body to path, refreshing the token once on
 // 401 — the same policy searchWithRetry applies to the read side.
 func (c *Client) mutateWithRetry(ctx context.Context, method, path string, body any, what string, out any) error {

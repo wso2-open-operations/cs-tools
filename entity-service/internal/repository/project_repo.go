@@ -84,6 +84,13 @@ type ProjectRepository interface {
 	// account (project.account_id IS NULL), or a ValidationError if a closure
 	// sub-state value isn't a valid Postgres enum label for that column.
 	UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error)
+	// SalesforceClosureState returns a project's Salesforce id (project.sf_id)
+	// and its current overall closure state in Title Case ("Open",
+	// "Suspended"), either nil when unset. The Salesforce closure-state
+	// writeback reads it when its job runs, not when the update committed, so
+	// the last job for a project always sends that project's latest state.
+	// Returns a NotFoundError if no such project exists.
+	SalesforceClosureState(ctx context.Context, id string) (sfID, closureState *string, err error)
 }
 
 type projectRepo struct {
@@ -601,6 +608,23 @@ func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.P
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (domain.ProjectUpdateResult, error) {
 		return updateProjectTx(ctx, tx, id, req, updatedBy)
 	})
+}
+
+// SalesforceClosureState implements ProjectRepository. It runs as the system:
+// project is not RLS-protected, and the caller (a background writeback) was
+// authorized when it updated the project.
+func (r *projectRepo) SalesforceClosureState(ctx context.Context, id string) (*string, *string, error) {
+	var sfID, closureState *string
+	err := r.db.QueryRow(WithSystemIdentity(ctx),
+		`SELECT sf_id, INITCAP(REPLACE(wso2_closure_state::TEXT, '_', ' ')) FROM project WHERE id = $1`, id,
+	).Scan(&sfID, &closureState)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, &apierror.NotFoundError{Msg: "project not found"}
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("read project salesforce closure state: %w", err)
+	}
+	return sfID, closureState, nil
 }
 
 // updateProjectTx is UpdateProject's body, run inside tx.

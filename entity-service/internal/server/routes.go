@@ -676,6 +676,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeProjectUpdateSvc = service.NewProjectUpdateService(projectRepo, userRepo, accessSvc)
 	}
+	// Salesforce closure-state writeback (Postgres data sources only): after a
+	// closure change, the overall state goes to Salesforce State__c through
+	// the Sales Entity client, on the shared dispatcher when there is one,
+	// else its own. Off unless the flag is set.
+	if cfg.CSMMigrationSalesforceProjectStateWritebackEnabled {
+		if db != nil && salesEntityClient != nil && cfg.DataSource != config.DataSourceServiceNow {
+			sfDispatcher := snWritebackDispatcher
+			if sfDispatcher == nil {
+				sfDispatcher = service.NewSNWritebackDispatcher(repository.NewSNWritebackFailureRepository(db))
+			}
+			activeProjectUpdateSvc = service.WithSalesforceProjectStateWriteback(activeProjectUpdateSvc, sfDispatcher, salesEntityClient)
+		} else {
+			slog.Warn("CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED is set but ignored: it needs a Postgres data source, a database and the SALES_ENTITY_* settings")
+		}
+	}
 	projectUpdateHandler := handler.NewProjectUpdateHandler(activeProjectUpdateSvc)
 
 	// referenceDataRepo backs GET /projects/{id}/metadata and GET /metadata's

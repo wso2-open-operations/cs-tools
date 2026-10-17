@@ -19,11 +19,14 @@ package salesentity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
 
 // newWriteTestClient starts a stub sales-entity-service with a working token
@@ -235,5 +238,43 @@ func TestSearchProjectContactFindsTheContactsMembership(t *testing.T) {
 	_, found, err = c.SearchProjectContact(context.Background(), "a0pxx", "003yy")
 	if err != nil || found {
 		t.Fatalf("found = %v, err = %v; want not found", found, err)
+	}
+}
+
+// TestUpdateProjectStatusPatchesTheStatus: the project closure-state write is
+// PATCH /projects/{id} with only the status, and a 404 is a NotFoundError.
+func TestUpdateProjectStatusPatchesTheStatus(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	c := newWriteTestClient(t, func(mux *http.ServeMux) {
+		mux.HandleFunc("/projects/", func(w http.ResponseWriter, r *http.Request) {
+			gotMethod, gotPath = r.Method, r.URL.Path
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &gotBody)
+			if r.URL.Path == "/projects/a0dmissing" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"a0dxx","status":"Suspended"}`))
+		})
+	})
+	if err := c.UpdateProjectStatus(context.Background(), "a0dxx", "Suspended"); err != nil {
+		t.Fatalf("UpdateProjectStatus: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/projects/a0dxx" {
+		t.Errorf("%s %s, want PATCH /projects/a0dxx", gotMethod, gotPath)
+	}
+	if !reflect.DeepEqual(gotBody, map[string]any{"status": "Suspended"}) {
+		t.Errorf("body = %v, want only the status", gotBody)
+	}
+
+	err := c.UpdateProjectStatus(context.Background(), "a0dmissing", "Open")
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Errorf("err = %v, want NotFoundError", err)
+	}
+	if err := c.UpdateProjectStatus(context.Background(), " ", "Open"); err == nil {
+		t.Error("blank project id: err = nil, want a validation error")
 	}
 }

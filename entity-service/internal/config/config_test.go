@@ -632,6 +632,21 @@ func TestLoad_CSMMigrationMembershipRegistrationEnabled(t *testing.T) {
 	}
 }
 
+// TestLoad_CSMMigrationSalesforceProjectStateWritebackEnabled pins that the
+// Salesforce closure-state writeback is opt-in, unlike the other
+// CSM_MIGRATION_* switches: unset or a typo leaves it off, so nothing writes
+// to Salesforce before the Sales Entity endpoint it calls is deployed.
+func TestLoad_CSMMigrationSalesforceProjectStateWritebackEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "TRUE": true, " true ": true, "": false, "1": false, "ture": false, "false": false,
+	} {
+		t.Setenv("CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED", value)
+		if got := Load().CSMMigrationSalesforceProjectStateWritebackEnabled; got != want {
+			t.Errorf("CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}
+
 // TestConfig_HasPortalMembershipWrites covers the whole gate, not just the
 // flag: the writes are a Postgres transaction whose other half is a
 // Salesforce call, so both the data source and a complete

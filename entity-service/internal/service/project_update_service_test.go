@@ -38,6 +38,15 @@ type stubProjectUpdateRepo struct {
 	gotID     string
 	gotReq    domain.ProjectUpdateRequest
 	gotByWhom string
+
+	// sfID/closureState are what SalesforceClosureState returns: the
+	// project's state at the moment the Salesforce writeback job reads it.
+	sfID         *string
+	closureState *string
+}
+
+func (r *stubProjectUpdateRepo) SalesforceClosureState(context.Context, string) (*string, *string, error) {
+	return r.sfID, r.closureState, nil
 }
 
 func (r *stubProjectUpdateRepo) SearchProjects(context.Context, domain.SearchProjectsRequest, repository.SearchScope) ([]domain.Project, int, error) {

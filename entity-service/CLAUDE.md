@@ -71,6 +71,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_MIGRATION_SALESFORCE_OPPORTUNITY_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Opportunity` envelopes (`sf_opportunity` plus its `sf_opportunity_product` line items, see "Salesforce Opportunity ingest" below) and `Linked_Opportunity__c`, `Invoice__c` and standalone `OpportunityLineItem` envelopes (`sf_opportunity_link`, `sf_invoice`, `sf_opportunity_product`); off, they are acknowledged and ignored. Keep it off while csm-sync-service still copies these tables from ServiceNow: the two writers use different row ids and `sf_id` is not unique, so both on means duplicate rows |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project__c` envelopes (see "Salesforce Project ingest" below); off, they are acknowledged and ignored. Update-only unless the insert switch is on too |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` | no | `false` | With the project flag on, lets the Project ingest and `EnsureProject` insert projects CSM does not have. Keep it off while csm-sync-service still inserts `project` rows (different id schemes and a UNIQUE `key`: its insert would fail forever); turn it on at cutover |
+| `CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED` | no | `false` | **Opt-in, unlike the other `CSM_MIGRATION_*` switches**: only `true` (any case) turns it on; unset or a typo is off. After `PATCH /projects/{id}` changes a closure field, write the project's overall closure state (Open / Suspended) to Salesforce `Project__c.State__c` through Sales Entity `PATCH /projects/{id}`. Asynchronous; needs a Postgres data source, a database and the `SALES_ENTITY_*` settings (else logged and ignored). See "Closure state back to Salesforce" |
 | `CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED` | no | `false` | Must be `"true"` for the partner-link refresh (`account_relationship` "Is Partner Of" / "Is Customer Of") to run after Account events and partner-contact membership events, and for `POST /salesforce/accounts/{sfId}/refresh-partners` to be registered (see "Salesforce partner relationships" below). Keep it off while csm-sync-service still copies `account_relationship` from ServiceNow |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
@@ -856,6 +857,41 @@ ignored). Code: `internal/service/salesforce_project_ingest.go` (`WithProjectIng
   project is fetched and upserted first. Otherwise `NotFoundError`. The membership ingest
   calls it when its upsert fails with "project not found" and retries the membership once;
   with inserts off it keeps the original error for the retry job.
+
+### Closure state back to Salesforce
+
+`CSM_MIGRATION_SALESFORCE_PROJECT_STATE_WRITEBACK_ENABLED=true` (opt-in: only `true` turns it on,
+unlike the other `CSM_MIGRATION_*` switches, so nothing writes to Salesforce before the Sales Entity
+endpoint is deployed) makes
+`PATCH /projects/{id}` write the project's overall closure state to Salesforce. It is how the
+ACP closure service's suspend and reopen reach Salesforce, which otherwise kept showing Open.
+Code: `WithSalesforceProjectStateWriteback` / `dispatchSalesforceProjectState` in
+`project_update_service.go`, `UpdateProjectStatus` in `internal/salesentity/membership_writes.go`,
+wired in `routes.go`.
+
+- **Only `State__c`**, the overall "Closure State", is written, from the project's current
+  `wso2_closure_state` (`OPEN` → `Open`, `SUSPENDED` → `Suspended`). The three `Closure_State_*`
+  picklists are not written: their values differ from CSM's (Salesforce's end-date list has
+  `CLOSED`, not `SUSPENDED`), and an end-date `Closed` and an invoice `Suspended` both mean
+  Suspended overall. `Restricted` is no longer used by the closure flow and Sales Entity refuses
+  it, so a Restricted (or empty) overall state is logged and not sent.
+- **Only when the request sets a closure field** (`endDateClosureState`,
+  `invoiceDueDateClosureState`, `complianceViolationClosureState`). A request that only stores
+  `suspensionProcessState` or the AI flags never calls Salesforce.
+- **After the commit, never failing the request**: the write is queued on an
+  `SNWritebackDispatcher` (the shared one under dual-write, else its own) under entity type
+  `salesforce_project`. One attempt; a failure is logged and recorded in `sn_writeback_failures`
+  with payload `{projectId}` for an operator to replay.
+- **The job reads the state when it runs, not when the update committed**
+  (`ProjectRepository.SalesforceClosureState`: `sf_id` and the current overall state). Jobs for one
+  project run one at a time in dispatch order and every committed closure change dispatches one,
+  so the last job always sends the latest state: two updates that commit in one order but dispatch
+  in the other (a suspend paused between its commit and its dispatch while a reopen goes through)
+  still leave Salesforce on CSM's state. A project with no `sf_id` is logged and skipped.
+- Sales Entity side: `PATCH /projects/{id}` with `{status}` (digiops-sales sales-entity-service),
+  which must be deployed before the flag is turned on. Whether org automation keeps `State__c`
+  as written is not known from code: its response is the re-read record, and a staging check
+  shows it.
 
 ### Invoice__c (same flag)
 
