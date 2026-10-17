@@ -31,11 +31,27 @@ let projectMetadataResult: {
   data: BeProjectMetadata | null | undefined;
   isLoading: boolean;
   isError: boolean;
+  refetch?: () => void;
 } = { data: undefined, isLoading: false, isError: false };
+
+// Router state, as the case page's "Create service request" action passes it
+// (project, deployment and deployed product carried over from the case).
+let locationState: unknown = undefined;
+
+// Three fixed deployed-product options spanning: a category matching the
+// project's srProductCategories restriction, a category that doesn't, and no
+// category at all — enough to exercise every branch of the client-side filter.
+const allDeployedProducts = [
+  { id: "dp-ms", label: "API Manager 4.3.0", category: "ms" },
+  { id: "dp-pc", label: "Choreo Connect 1.0", category: "pc" },
+  { id: "dp-none", label: "Unknown Product", category: null },
+];
+let deployedProductsData: { id: string; label: string; category: string | null }[] =
+  allDeployedProducts;
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
-  useLocation: () => ({ state: undefined }),
+  useLocation: () => ({ state: locationState }),
   useSearchParams: () => [new URLSearchParams()],
 }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
@@ -73,18 +89,12 @@ vi.mock("@features/csm-cases/api/useSearchDeployments", () => ({
     refetch: vi.fn(),
   }),
 }));
-// Three fixed deployed-product options spanning: a category matching the
-// project's srProductCategories restriction, a category that doesn't, and no
-// category at all — enough to exercise every branch of the client-side filter.
 vi.mock("@features/csm-cases/api/useDeployedProductOptions", () => ({
   useDeployedProductOptions: () => ({
-    data: [
-      { id: "dp-ms", label: "API Manager 4.3.0", category: "ms" },
-      { id: "dp-pc", label: "Choreo Connect 1.0", category: "pc" },
-      { id: "dp-none", label: "Unknown Product", category: null },
-    ],
+    data: deployedProductsData,
     isLoading: false,
     isError: false,
+    isSuccess: true,
     refetch: vi.fn(),
   }),
 }));
@@ -168,6 +178,8 @@ describe("CreateServiceRequestPage — deployed-product filtering by srProductCa
     postCaseMutateAsyncMock.mockReset();
     showErrorMock.mockReset();
     projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    locationState = undefined;
+    deployedProductsData = allDeployedProducts;
   });
 
   it("shows only deployed products whose category is in the project's srProductCategories", () => {
@@ -215,18 +227,72 @@ describe("CreateServiceRequestPage — deployed-product filtering by srProductCa
     expect(screen.getByRole("option", { name: "Unknown Product" })).toBeInTheDocument();
   });
 
-  it("fails open (shows every deployed product) when the metadata fetch itself errors", () => {
-    projectMetadataResult = { data: undefined, isLoading: false, isError: true };
+  // entity-service rejects a product outside the project type's categories
+  // (and an uncategorized one), so without the rule the picker can't know
+  // which products the create will accept: it offers none and says why.
+  it("fails closed (offers no product, shows a retryable error) when the metadata fetch errors", () => {
+    const refetch = vi.fn();
+    projectMetadataResult = { data: undefined, isLoading: false, isError: true, refetch };
     render(<CreateServiceRequestPage />);
     selectProjectAndDeployment();
 
-    fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
-    expect(screen.getByRole("option", { name: "API Manager 4.3.0" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Choreo Connect 1.0" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Unknown Product" })).toBeInTheDocument();
-    // A metadata-fetch failure must never surface as a form-blocking error —
-    // it's a narrowing-only feature, so it fails open silently.
-    expect(screen.queryByText(/failed to load deployed products/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/failed to load which products this project allows/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/deployed product/i)).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: /retry all/i }));
+    expect(refetch).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("offers no product while the metadata is still loading", () => {
+    projectMetadataResult = { data: undefined, isLoading: true, isError: false };
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    expect(screen.getByText(/loading products/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/deployed product/i)).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("explains, rather than showing an empty list, when no product in the deployment has an allowed category", () => {
+    projectMetadataResult = {
+      data: { features: { srProductCategories: ["ms", "pc"] } },
+      isLoading: false,
+      isError: false,
+    };
+    deployedProductsData = [{ id: "dp-none", label: "Unknown Product", category: null }];
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    expect(
+      screen.getByText(/no product in this deployment is categorized as MS or PC/i),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects a product carried in from a case when its category isn't allowed", () => {
+    projectMetadataResult = {
+      data: { features: { srProductCategories: ["ms", "pc"] } },
+      isLoading: false,
+      isError: false,
+    };
+    locationState = { projectId: "proj-1", deploymentId: "dep-1", deployedProductId: "dp-none" };
+    render(<CreateServiceRequestPage />);
+
+    expect(
+      screen.getByText(/the selected product isn't categorized as MS or PC/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("keeps a product carried in from a case when its category is allowed", () => {
+    projectMetadataResult = {
+      data: { features: { srProductCategories: ["ms", "pc"] } },
+      isLoading: false,
+      isError: false,
+    };
+    locationState = { projectId: "proj-1", deploymentId: "dep-1", deployedProductId: "dp-ms" };
+    render(<CreateServiceRequestPage />);
+
+    expect(screen.queryByText(/the selected product isn't/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^catalog(?!\s*item)/i)).not.toHaveAttribute("aria-disabled", "true");
   });
 });
 
@@ -236,6 +302,8 @@ describe("CreateServiceRequestPage — gating on hasServiceRequestReadAccess", (
     postCaseMutateAsyncMock.mockReset();
     showErrorMock.mockReset();
     projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    locationState = undefined;
+    deployedProductsData = allDeployedProducts;
   });
 
   it("blocks submission and shows the ineligibility error once metadata resolves hasServiceRequestReadAccess: false", () => {
@@ -270,15 +338,18 @@ describe("CreateServiceRequestPage — gating on hasServiceRequestReadAccess", (
     expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
   });
 
-  it("fails open (no error, not blocked on this check alone) while metadata is still undefined", () => {
+  it("shows no ineligibility error, but holds submission, while metadata is still undefined", () => {
     projectMetadataResult = { data: undefined, isLoading: false, isError: false };
     render(<CreateServiceRequestPage />);
-    selectFullFlow();
+    selectProjectAndDeployment();
 
     expect(
       screen.queryByText(/isn't eligible to raise service requests/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
+    // The product picker waits for the category rule, so nothing can be
+    // submitted yet.
+    expect(screen.getByLabelText(/deployed product/i)).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
   });
 });
 
