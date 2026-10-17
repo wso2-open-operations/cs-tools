@@ -24,6 +24,7 @@ import {
   Skeleton,
   Tab,
   Tabs,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, ChevronDown, Plus } from "@wso2/oxygen-ui-icons-react";
@@ -152,9 +153,6 @@ export default function CsmProjectDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavTransition();
   const location = useLocation();
-  // isSplAudience is unused while the Time report button below is
-  // temporarily disabled — restore it to the destructure above when
-  // re-enabling it.
   const { canWrite, canViewWorkItemsStaffView } = usePortalAccess();
   // Prefer wherever the caller came from (e.g. a case's Overview panel) over
   // the hardcoded projects list, so Back returns to that page instead of
@@ -251,26 +249,33 @@ export default function CsmProjectDetailPage(): JSX.Element {
           />
         </Box>
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", flexShrink: 0 }}>
-          {/* The Time report has no modern equivalent and is limited to the
-              viewer audience (a caller holding the viewer role, regardless of
-              what else they hold). See isSplAudience's own doc comment.
-              Outlined, not contained: the single contained CTA on this page
-              is Create, below.
-
-              Temporarily disabled: removed from view for the moment.
-              Re-enable by uncommenting this block and restoring
-              isSplAudience to the usePortalAccess() destructure above. */}
-          {/* {isSplAudience && (
-            <Button
-              variant="outlined"
-              size="small"
-              className="csm-print-hide"
-              component={RouterLink}
-              to={`/customers/projects/${p.id}/timelogs-report`}
-            >
-              Time Report
-            </Button>
-          )} */}
+          {/* Shown to anyone who can open this project. Outlined, not
+              contained: the single contained CTA on this page is Create. */}
+          <Tooltip title="Coming">
+            <Box component="span" className="csm-print-hide" sx={{ display: "inline-flex" }}>
+              <Button variant="outlined" size="small" disabled>
+                SLA Report — Coming soon
+              </Button>
+            </Box>
+          </Tooltip>
+          <Button
+            variant="outlined"
+            size="small"
+            className="csm-print-hide"
+            component={RouterLink}
+            to={`/customers/projects/${p.id}/timelogs-report`}
+          >
+            Time Report
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            className="csm-print-hide"
+            component={RouterLink}
+            to={`/customers/projects/${p.id}/cs-report/${p.id}`}
+          >
+            CS Report
+          </Button>
           {/* File any issue type already scoped to this project — every create
               form below locks the project field, so it can't be filed against
               the wrong one. */}

@@ -233,19 +233,11 @@ describe("CsmProjectDetailPage — tab state", () => {
   });
 });
 
-// Regression: the Time report button has no modern equivalent and must stay
-// limited to the viewer audience (isSplAudience), independently of canWrite
-// -- it must never appear for an ordinary cs_engineer/admin session that
-// doesn't separately hold the viewer role, and must appear for one that
-// does, even without write access.
-//
-// Temporarily disabled on the page itself (see CsmProjectDetailPage.tsx's own
-// comment) -- the button is hidden unconditionally right now, so the
-// isSplAudience-gating test below is skipped rather than deleted, to make
-// re-enabling the feature (and this assertion) a one-line change.
-describe("CsmProjectDetailPage — Time report button", () => {
+describe("CsmProjectDetailPage — report buttons", () => {
   beforeEach(() => {
     mockCanViewWorkItemsStaffView = true;
+    mockIsSplAudience = false;
+    mockCanWrite = false;
     mockUseGetProject.mockReturnValue({
       data: PROJECT,
       isLoading: false,
@@ -253,25 +245,11 @@ describe("CsmProjectDetailPage — Time report button", () => {
     });
   });
 
-  it("hides the Time report button for a caller without the viewer role", () => {
-    mockIsSplAudience = false;
-    renderPage();
-    expect(screen.queryByRole("link", { name: "Time Report" })).not.toBeInTheDocument();
-  });
-
-  // Rendered via component={RouterLink} (an in-app navigation, not a
-  // dialog/menu trigger), so it's an <a>, accessible role "link".
-  it.skip("shows the Time report button for a caller holding the viewer role, even without write access", () => {
-    mockIsSplAudience = true;
-    mockCanWrite = false;
+  it("shows Time and CS reports to anyone who can open the project, and keeps SLA disabled", () => {
     renderPage();
     expect(screen.getByRole("link", { name: "Time Report" })).toBeInTheDocument();
-  });
-
-  it("hides the Time report button even for a caller holding the viewer role, while temporarily disabled", () => {
-    mockIsSplAudience = true;
-    renderPage();
-    expect(screen.queryByRole("link", { name: "Time Report" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CS Report" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SLA Report — Coming soon" })).toBeDisabled();
   });
 });
 

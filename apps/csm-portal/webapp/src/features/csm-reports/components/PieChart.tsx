@@ -14,63 +14,74 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Ported from the source app's components/PieChart.tsx (consumed/remaining
-// query-hours donut used by the Timelogs report). The source draws it with
-// chart.js + react-chartjs-2; this app already standardizes on recharts
-// (chart.js isn't a dependency here), so this is a recharts reimplementation
-// of the same donut.
-import { Cell, Legend, Pie, PieChart as RechartsPieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { useTheme } from "@mui/material/styles";
-import { CONSUMED_QUERY_HOURS, HOURS, REAMAINING_QUERY_HOURS } from "../constants";
+// Query-hours donut for the time report. Same oxygen donut as the CS report
+// charts, with the dashboard composition hues for consumed and remaining.
+import { Box, Typography } from "@wso2/oxygen-ui";
+import { PieChart as HoursPie } from "@wso2/oxygen-ui-charts-react";
+import { paletteColor } from "@features/csm-dashboard/utils/paletteColor";
+import { CONSUMED_QUERY_HOURS, REAMAINING_QUERY_HOURS } from "../constants";
 
 type PieChartProps = {
   remainingQueryHours: string;
   totalQueryHours: string;
 };
 
-function parseTime(timeString: string): number {
-  const match = timeString.match(/(\d+)h\s*(\d*)m/);
-  if (match) {
-    const hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2] || "0", 10);
-    return hours + minutes / 60;
+const CHART_HEIGHT = 280;
+
+function parseHours(value: string): number {
+  const trimmed = value.trim();
+  const clock = trimmed.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+  if (clock) {
+    return parseInt(clock[1], 10) + parseInt(clock[2] || "0", 10) / 60;
   }
-  return 0;
+  const minutesOnly = trimmed.match(/^(\d+)\s*m$/i);
+  if (minutesOnly) return parseInt(minutesOnly[1], 10) / 60;
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 export default function PieChart({ remainingQueryHours, totalQueryHours }: PieChartProps) {
-  const remaining = parseTime(remainingQueryHours);
-  const total = parseTime(totalQueryHours);
-  const consumed = total - remaining;
-  const consumedPct = parseFloat(((consumed * 100) / total).toFixed(2));
-  const remainingPct = parseFloat(((remaining * 100) / total).toFixed(2));
-
+  const total = parseHours(totalQueryHours);
+  const remaining = Math.min(parseHours(remainingQueryHours), total);
+  const consumed = Math.max(total - remaining, 0);
+  const consumedPct = total > 0 ? parseFloat(((consumed * 100) / total).toFixed(1)) : 0;
+  const remainingPct = total > 0 ? parseFloat(((remaining * 100) / total).toFixed(1)) : 0;
   const rows = [
-    { name: `${CONSUMED_QUERY_HOURS} (${consumedPct}%)`, value: consumed, color: "#FF6384" },
-    { name: `${REAMAINING_QUERY_HOURS} (${remainingPct}%)`, value: remaining, color: "#36A2EB" },
-  ];
-  const theme = useTheme();
+    { name: `${CONSUMED_QUERY_HOURS} (${consumedPct}%)`, value: consumed },
+    { name: `${REAMAINING_QUERY_HOURS} (${remainingPct}%)`, value: remaining },
+  ].filter((row) => row.value > 0);
+  const colors = [paletteColor("red", 600, "#dc2626"), paletteColor("blue", 500, "#3b82f6")].slice(0, rows.length);
 
   return (
-    <div style={{ width: 300, height: 300, margin: "auto", paddingTop: 15 }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <RechartsPieChart>
-          <Pie data={rows} dataKey="value" nameKey="name">
-            {rows.map((row) => (
-              <Cell key={row.name} fill={row.color} />
-            ))}
-          </Pie>
-          <Tooltip
-            formatter={(value) => [`${value} ${HOURS}`, undefined]}
-            contentStyle={{
-              background: theme.palette.background.paper,
-              border: `1px solid ${theme.palette.divider}`,
-              color: theme.palette.text.primary,
-            }}
+    <Box className="report-chart" sx={{ width: "100%", minWidth: 0 }}>
+      <Typography component="p" variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+        Query hours
+      </Typography>
+      {rows.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+          No query hours for this project.
+        </Typography>
+      ) : (
+        <Box sx={{ width: "100%", height: CHART_HEIGHT }}>
+          <HoursPie
+            height={CHART_HEIGHT}
+            width="100%"
+            data={rows}
+            colors={colors}
+            nameKey="name"
+            innerRadius={58}
+            outerRadius={86}
+            paddingAngle={2}
+            startAngle={90}
+            endAngle={-270}
+            isAnimationActive={false}
+            pies={[{ dataKey: "value", nameKey: "name" }]}
+            margin={{ top: 4, right: 4, bottom: 0, left: 4 }}
+            legend={{ show: true, align: "center", verticalAlign: "bottom" }}
+            tooltip={{ show: true }}
           />
-          <Legend verticalAlign="bottom" />
-        </RechartsPieChart>
-      </ResponsiveContainer>
-    </div>
+        </Box>
+      )}
+    </Box>
   );
 }

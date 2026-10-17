@@ -33,6 +33,7 @@ export interface TimeLogBreakdownDetails extends DataStruct {
 }
 
 export interface TimeLogBreakdownCase extends DataStruct {
+  caseSysId: string;
   caseNumber: string;
   caseId: string;
   caseType: string;

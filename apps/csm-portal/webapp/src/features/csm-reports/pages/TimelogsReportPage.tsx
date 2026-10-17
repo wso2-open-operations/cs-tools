@@ -14,398 +14,426 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Ported from apps/support-portal-lite/webapp's TimelogsReportPage
-// (itself via one-wso2, from SupportPortalLite's TimelogsReport.tsx). UI/JSX
-// unchanged; data layer rewritten onto useBackendApi()/React Query — see
-// useGetTimelogsBreakdown.ts. No SplShell wrapper. Route:
-// customers/projects/:projectId/timelogs-report.
-//
-// Deviation from source: MainView/ToggleReport were inline function
-// components (recreated every render) in the source file. This app's lint
-// config (react-hooks/static-components, React Compiler compatibility)
-// forbids that — hoisted both to module scope.
-import { useState, type JSX, type SyntheticEvent } from "react";
+// Time report. The data and the PDF export are the Support Portal Lite
+// report; the page uses the same oxygen-ui cards, tables, and type as the
+// CS report and the rest of CSM.
+import { useState, type JSX, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import {
   Alert,
   Box,
   Button,
-  LinearProgress,
-  Paper,
-  Tab,
+  Card,
+  Chip,
+  Skeleton,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
-  Tabs,
-  Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
-} from "@mui/material";
-import { ThemeProvider } from "@mui/material/styles";
-import { reportPaperTheme } from "@features/csm-reports/reportPaperTheme";
-import DownloadIcon from "@mui/icons-material/Download";
+} from "@wso2/oxygen-ui";
+import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useParams } from "react-router";
-import { BackendApiError } from "@api/backend/client";
+import QueryErrorState from "@components/QueryErrorState";
 import { useGetTimelogsBreakdown } from "@features/csm-reports/api/useGetTimelogsBreakdown";
 import PieChart from "@features/csm-reports/components/PieChart";
-import type { DataStruct, TimeCardDetails, TimeLogBreakdownDetails } from "@features/csm-reports/api/reportTypes";
+import type { TimeCardDetails, TimeLogBreakdownCase, TimeLogBreakdownDetails } from "@features/csm-reports/api/reportTypes";
 import { sysidToUuid } from "@features/csm-cases/utils/inlineImages";
-import "@features/csm-reports/styles/TimelogsReport.css";
+import { useNavTransition } from "@hooks/useNavTransition";
 
-function downloadPDF() {
-  const input = document.getElementById("timelogs-report");
-  if (!input) return;
-  html2canvas(input, { scale: 2 }).then((canvas) => {
-    const imgData = canvas.toDataURL("image/png", 1.0);
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    const imgProps = pdf.getImageProperties(imgData);
-    const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    let heightLeft = imgHeight;
-    let position = 0;
-    pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-    heightLeft -= pdfHeight;
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-      heightLeft -= pdfHeight;
-    }
-    pdf.save("Timelogs_Report.pdf");
-  });
+function display(value?: string | null): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : "—";
 }
 
-function MainView({
-  data,
-  showReport,
-  isCustomerReport,
-  onRowClick,
-}: {
-  data: TimeLogBreakdownDetails | undefined;
-  showReport: boolean;
-  isCustomerReport: boolean;
-  onRowClick: (row: DataStruct) => void;
-}) {
-  const casesColNameArray = [
-    "Case Number",
-    "Case Id",
-    "Case Type",
-    "Short Description",
-    "State",
-    isCustomerReport ? "Consumed Query Time" : "Total Time",
-  ];
-  const casesColAttributeArray = [
-    "caseNumber",
-    "caseId",
-    "caseType",
-    "shortDescription",
-    "state",
-    isCustomerReport ? "consumedQueryHours" : "totalHours",
-  ];
-  const timecardColNameArray = ["Logged On", "Logged By", isCustomerReport ? "" : "State", "Billable", "Total Time"];
-  const timecardColAttributeArray = ["createdOn", "createdBy", isCustomerReport ? "" : "state", "isBillable", "total"];
+function formatProjectType(value?: string): string {
+  if (!value?.trim()) return "—";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-  const filteredCases = isCustomerReport ? data?.cases.filter((c) => c.caseType === "Query") : data?.cases;
+function yesNo(value: string): string {
+  if (value === "true") return "Yes";
+  if (value === "false") return "No";
+  return display(value);
+}
 
-  const filterBillableAndApproved = (timeCards: TimeCardDetails[]) =>
-    isCustomerReport ? timeCards.filter((tc) => tc.isBillable === "true" && tc.state === "Approved") : timeCards;
+function isApproved(state: string): boolean {
+  return state.trim().toLowerCase() === "approved";
+}
 
+function MetaCell({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
-    <>
-      {showReport && (
-        <Box
-          flex={2}
-          display="flex"
-          justifyContent="flex-end"
-          p={1}
-          marginBottom="-80px"
-          marginRight="30px"
-          sx={{ position: "fixed", top: "100px", right: "30px", zIndex: 2000 }}
-        >
-          <Tooltip title="Download Report">
-            <Button
-              variant="contained"
-              sx={{
-                color: "white",
-                ":hover": { bgcolor: "#e96900", borderColor: "primary.main", color: "white" },
-                borderRadius: "7px",
-              }}
-              onClick={downloadPDF}
-            >
-              <DownloadIcon />
-            </Button>
-          </Tooltip>
-        </Box>
-      )}
-      {/* A printable document (captured to PDF by downloadPDF above) —
-          kept a fixed light "paper" theme regardless of the app's own
-          light/dark mode. See reportPaperTheme.ts. */}
-      <ThemeProvider theme={reportPaperTheme}>
-      <div id="timelogs-report">
-        <Box width="80%" padding="3%" margin="auto" sx={{ backgroundColor: "#f7f7f6", marginTop: "15px" }}>
-          <Box className="tl-header">
-            <Typography variant="h4" className="tl-header-title">
-              {isCustomerReport ? "Query Hours Consumption Report" : "Time Report"}
-            </Typography>
-          </Box>
-
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-            <Box className="tl-table-container tl-table-info" sx={{ width: "60%" }}>
-              <TableContainer component={Paper}>
-                <Table size="small">
-                  <TableBody className="tl-table-body">
-                    <TableRow>
-                      <TableCell>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          Project Name
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{data?.projectName}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          Project Key
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{data?.projectKey}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          Project Type
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{data?.projectType}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          Remaining Query Hours
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{data?.remainingQueryHours}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          Total Query Hours
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{data?.totalQueryHours}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-            <Box sx={{ width: "30%", marginLeft: "20px" }}>
-              <PieChart
-                remainingQueryHours={data?.remainingQueryHours || "0h 0m"}
-                totalQueryHours={data?.totalQueryHours || "0h 0m"}
-              />
-            </Box>
-          </Box>
-
-          <Box className="tl-table-container">
-            <Typography variant="h6" className="tl-subheading">
-              Project Cases
-            </Typography>
-            <TableContainer component={Paper}>
-              <Table className="tl-case-table">
-                <TableHead className="tl-table-header">
-                  <TableRow>
-                    {casesColNameArray.map((value, index) => (
-                      <TableCell key={index}>{value}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {!filteredCases || filteredCases.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={casesColNameArray.length} align="center">
-                        No data available.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredCases.map((dataRow, index) => (
-                      <TableRow key={index}>
-                        {casesColAttributeArray.map((attributeName, i) => (
-                          <TableCell
-                            key={i}
-                            className={`t-col-size ${attributeName === "totalHours" || attributeName === "consumedQueryHours" ? "tl-table-cell" : ""}`}
-                            onClick={() => {
-                              if (attributeName === "caseNumber") onRowClick(dataRow);
-                            }}
-                            sx={{
-                              cursor: attributeName === "caseNumber" ? "pointer" : "default",
-                              "&:hover": { backgroundColor: attributeName === "caseNumber" ? "#97c9ff" : "inherit" },
-                            }}
-                          >
-                            {(attributeName === "totalHours" || attributeName === "consumedQueryHours") &&
-                            parseFloat(dataRow[attributeName]) > 0 ? (
-                              <a href={`#${dataRow.caseNumber}`} style={{ marginLeft: 5 }}>
-                                {" "}
-                                {dataRow[attributeName]}
-                              </a>
-                            ) : (
-                              dataRow[attributeName]
-                            )}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-
-          {showReport && (
-            <Box sx={{ marginTop: "50px", textAlign: "center", marginBottom: "20px" }}>
-              <Typography variant="h4" sx={{ fontWeight: "bold" }}>
-                Time Cards
-              </Typography>
-            </Box>
-          )}
-
-          {filteredCases?.map(
-            (caseItem) =>
-              filterBillableAndApproved(caseItem.timeCards).length > 0 && (
-                <div id={caseItem.caseNumber} key={caseItem.caseId}>
-                  <Box className="tl-timecard-table-container">
-                    <Typography variant="h6" className="tl-subheading">
-                      {caseItem.caseNumber + " / " + caseItem.caseId}
-                    </Typography>
-                    <TableContainer component={Paper}>
-                      <Table className="tl-case-table">
-                        <TableHead className="tl-table-header">
-                          <TableRow>
-                            {timecardColNameArray.map((value, index) => (
-                              <TableCell key={index} className={`t-col-size ${value === "Total Time" ? "tl-table-cell" : ""}`}>
-                                {value}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {filterBillableAndApproved(caseItem.timeCards).map((dataRow, index) => (
-                            <TableRow key={index}>
-                              {timecardColAttributeArray.map((attributeName, i) => (
-                                <TableCell key={i} className={`t-col-size ${attributeName === "total" ? "tl-table-cell" : ""}`}>
-                                  {dataRow[attributeName]}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
-                </div>
-              ),
-          )}
-        </Box>
-      </div>
-      </ThemeProvider>
-    </>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+        {label}
+      </Typography>
+      <Box sx={{ minWidth: 0 }}>{children}</Box>
+    </Box>
   );
 }
 
-function ToggleReport({
+function EmptyRow({ colSpan, label }: { colSpan: number; label: string }): JSX.Element {
+  return (
+    <TableRow>
+      <TableCell colSpan={colSpan}>
+        <Typography variant="body2" color="text.secondary">
+          {label}
+        </Typography>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+async function downloadPDF(): Promise<void> {
+  const input = document.getElementById("timelogs-report");
+  if (!input) return;
+  const canvas = await html2canvas(input, { scale: 2, backgroundColor: "#ffffff", logging: false, imageTimeout: 2000 });
+  const imgData = canvas.toDataURL("image/jpeg", 0.92);
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pdfWidth = pdf.internal.pageSize.getWidth();
+  const pdfHeight = pdf.internal.pageSize.getHeight();
+  const imgProps = pdf.getImageProperties(imgData);
+  const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+  let heightLeft = imgHeight;
+  let position = 0;
+  pdf.addImage(imgData, "JPEG", 0, position, pdfWidth, imgHeight);
+  heightLeft -= pdfHeight;
+  while (heightLeft >= 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "JPEG", 0, position, pdfWidth, imgHeight);
+    heightLeft -= pdfHeight;
+  }
+  pdf.save("Timelogs_Report.pdf");
+}
+
+function ReportToggle({
   isCustomerReport,
   onChange,
 }: {
   isCustomerReport: boolean;
   onChange: (isCustomer: boolean) => void;
-}) {
-  const [value, setValue] = useState(isCustomerReport ? 1 : 0);
+}): JSX.Element {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      color="primary"
+      value={isCustomerReport ? "customer" : "internal"}
+      onChange={(_, next: string | null) => {
+        if (next) onChange(next === "customer");
+      }}
+    >
+      <ToggleButton value="internal">Internal</ToggleButton>
+      <ToggleButton value="customer">Customer</ToggleButton>
+    </ToggleButtonGroup>
+  );
+}
 
-  const handleChange = (_event: SyntheticEvent, newValue: number) => {
-    setValue(newValue);
-    onChange(newValue === 1);
-  };
+function ProjectCard({ data }: { data: TimeLogBreakdownDetails }): JSX.Element {
+  return (
+    <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+      <Typography variant="subtitle2">Project</Typography>
+      <Box
+        sx={{
+          display: "grid",
+          gap: 2,
+          alignItems: "start",
+          gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1.2fr) minmax(0, 1fr)" },
+        }}
+      >
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+          }}
+        >
+          <MetaCell label="Project name">
+            <Typography variant="body2">{display(data.projectName)}</Typography>
+          </MetaCell>
+          <MetaCell label="Project key">
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+              {display(data.projectKey)}
+            </Typography>
+          </MetaCell>
+          <MetaCell label="Project type">
+            <Typography variant="body2">{formatProjectType(data.projectType)}</Typography>
+          </MetaCell>
+          <MetaCell label="Total query hours">
+            <Typography variant="body2">{display(data.totalQueryHours)}</Typography>
+          </MetaCell>
+          <MetaCell label="Remaining query hours">
+            <Typography variant="body2">{display(data.remainingQueryHours)}</Typography>
+          </MetaCell>
+        </Box>
+        <PieChart remainingQueryHours={data.remainingQueryHours || "0"} totalQueryHours={data.totalQueryHours || "0"} />
+      </Box>
+    </Card>
+  );
+}
+
+const CASE_ROWS_PER_PAGE = [10, 20, 50];
+
+function CasesCard({
+  cases,
+  linkedCaseNumbers,
+  isCustomerReport,
+  showAll,
+  onOpenCase,
+}: {
+  cases: TimeLogBreakdownCase[];
+  linkedCaseNumbers: Set<string>;
+  isCustomerReport: boolean;
+  showAll: boolean;
+  onOpenCase: (row: TimeLogBreakdownCase) => void;
+}): JSX.Element {
+  const hoursKey = isCustomerReport ? "consumedQueryHours" : "totalHours";
+  const hoursLabel = isCustomerReport ? "Consumed query time" : "Total time";
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(CASE_ROWS_PER_PAGE[0]);
+
+  const pageCount = Math.max(1, Math.ceil(cases.length / rowsPerPage));
+  const safePage = Math.min(page, pageCount - 1);
+  const visibleCases = showAll ? cases : cases.slice(safePage * rowsPerPage, safePage * rowsPerPage + rowsPerPage);
 
   return (
-    <div style={{ border: "1px solid #ff7300", borderRadius: 25, height: "49.5px", width: "fit-content" }}>
-      <Tabs
-        sx={{
-          justifyContent: "flex-start",
-          "& button": { borderRadius: 10, boxShadow: "insert", zIndex: 1 },
-          "& button.Mui-selected": { color: "#fff" },
-        }}
-        value={value}
-        onChange={handleChange}
-        slotProps={{ indicator: { sx: { backgroundColor: "#ff7300", height: "100%", borderRadius: 10 } } }}
-      >
-        <Tab label="Internal Report" />
-        <Tab label="Customer Report" />
-      </Tabs>
-    </div>
+    <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+      <Typography variant="subtitle2">Project cases</Typography>
+      <TableContainer>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Case number</TableCell>
+              <TableCell>Case id</TableCell>
+              <TableCell>Case type</TableCell>
+              <TableCell>Short description</TableCell>
+              <TableCell>State</TableCell>
+              <TableCell>{hoursLabel}</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {visibleCases.length === 0 ? (
+              <EmptyRow colSpan={6} label="No cases for this report." />
+            ) : (
+              visibleCases.map((row) => {
+                const hours = row[hoursKey] as string;
+                return (
+                  <TableRow key={row.caseId || row.caseNumber}>
+                    <TableCell>
+                      <Button variant="text" size="small" sx={{ p: 0, minWidth: 0 }} onClick={() => onOpenCase(row)}>
+                        {display(row.caseNumber)}
+                      </Button>
+                    </TableCell>
+                    <TableCell>{display(row.caseId)}</TableCell>
+                    <TableCell>{display(row.caseType)}</TableCell>
+                    <TableCell>{display(row.shortDescription)}</TableCell>
+                    <TableCell>{row.state ? <Chip size="small" variant="outlined" label={row.state} /> : "—"}</TableCell>
+                    <TableCell>
+                      {parseFloat(hours) > 0 && linkedCaseNumbers.has(row.caseNumber) ? (
+                        <Button variant="text" size="small" sx={{ p: 0, minWidth: 0 }} href={`#${row.caseNumber}`}>
+                          {hours}
+                        </Button>
+                      ) : (
+                        display(hours)
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {!showAll && cases.length > 0 && (
+        <TablePagination
+          component="div"
+          count={cases.length}
+          page={safePage}
+          onPageChange={(_, nextPage) => setPage(nextPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(parseInt(event.target.value, 10));
+            setPage(0);
+          }}
+          rowsPerPageOptions={CASE_ROWS_PER_PAGE}
+          showFirstButton
+          showLastButton
+        />
+      )}
+    </Card>
+  );
+}
+
+function TimeCardsCard({
+  caseItem,
+  cards,
+  isCustomerReport,
+}: {
+  caseItem: TimeLogBreakdownCase;
+  cards: TimeCardDetails[];
+  isCustomerReport: boolean;
+}): JSX.Element {
+  return (
+    <Card id={caseItem.caseNumber} sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
+      <Typography variant="subtitle2">
+        {display(caseItem.caseNumber)}
+        {caseItem.caseId ? ` · ${caseItem.caseId}` : ""}
+      </Typography>
+      <TableContainer>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Logged on</TableCell>
+              <TableCell>Logged by</TableCell>
+              {!isCustomerReport && <TableCell>State</TableCell>}
+              <TableCell>Billable</TableCell>
+              <TableCell>Total time</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {cards.map((card, index) => (
+              <TableRow key={`${card.createdOn}-${card.createdBy}-${index}`}>
+                <TableCell>{display(card.createdOn)}</TableCell>
+                <TableCell>{display(card.createdBy)}</TableCell>
+                {!isCustomerReport && (
+                  <TableCell>{card.state ? <Chip size="small" variant="outlined" label={card.state} /> : "—"}</TableCell>
+                )}
+                <TableCell>{yesNo(card.isBillable)}</TableCell>
+                <TableCell>{display(card.total)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Card>
   );
 }
 
 export default function TimelogsReportPage(): JSX.Element {
   const { projectId: id } = useParams<{ projectId: string }>();
   const projectId = id ? DOMPurify.sanitize(id) : "";
+  const navigate = useNavTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState("");
   const [isCustomerReport, setCustomerReport] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
-  const { data, isLoading, error } = useGetTimelogsBreakdown(projectId);
-  const showReport = Boolean(data);
+  const { data, isLoading, isError, error, refetch } = useGetTimelogsBreakdown(projectId);
 
-  const handleRowClick = (rowData: DataStruct) => {
-    // This report's case rows are still ServiceNow-sourced (see
-    // postgresReportsClient's own doc comment on the backend -- report
-    // case data isn't part of the accounts/projects/cases entity-service
-    // merge), so caseSysId is a bare ServiceNow sysid, not entity-service's
-    // own dashed UUID -- sysidToUuid converts it to what the normal
-    // /cases/:caseId route (which validates a dashed UUID) needs.
-    if (rowData?.caseSysId) {
-      window.open(`/cases/${sysidToUuid(rowData.caseSysId)}`, "_blank");
+  const cases = (isCustomerReport ? data?.cases.filter((c) => c.caseType === "Query") : data?.cases) ?? [];
+  const timeCardCases = cases
+    .map((caseItem) => ({
+      caseItem,
+      cards: (isCustomerReport
+        ? (caseItem.timeCards ?? []).filter((tc) => tc.isBillable === "true" && isApproved(tc.state))
+        : (caseItem.timeCards ?? [])),
+    }))
+    .filter((entry) => entry.cards.length > 0);
+
+  const handleOpenCase = (row: TimeLogBreakdownCase) => {
+    // caseSysId is entity-service's case id. A dashed UUID is already the
+    // shape /cases/:caseId expects; sysidToUuid only rewrites a bare
+    // 32-character id.
+    if (row.caseSysId) {
+      window.open(`/cases/${sysidToUuid(row.caseSysId)}`, "_blank");
     } else {
       setErrorMessage("Case not found.");
     }
   };
 
+  const handleDownload = () => {
+    setDownloadError("");
+    flushSync(() => setPrinting(true));
+    void downloadPDF()
+      .catch(() => setDownloadError("Could not download the time report."))
+      .finally(() => setPrinting(false));
+  };
+
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+      <Button
+        variant="text"
+        size="small"
+        className="csm-print-hide"
+        startIcon={<ArrowLeft size={16} />}
+        onClick={() => navigate(projectId ? `/customers/projects/${projectId}` : "/customers/projects")}
+        sx={{ alignSelf: "flex-start" }}
+      >
+        Back
+      </Button>
+
+      {!data && (
+        <Box>
+          <Typography variant="h5">Time report</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isLoading ? "Building the time report. This can take a moment." : "Time logged against this project."}
+          </Typography>
+        </Box>
+      )}
+
+      {data && (
+        <Box className="csm-print-hide" sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+          <ReportToggle isCustomerReport={isCustomerReport} onChange={setCustomerReport} />
+        </Box>
+      )}
+
       {errorMessage && (
-        <Alert severity="warning" onClose={() => setErrorMessage(null)} sx={{ mb: 2 }}>
+        <Alert severity="warning" className="csm-print-hide" onClose={() => setErrorMessage(null)}>
           {errorMessage}
         </Alert>
       )}
-      {isLoading ? (
-        <>
-          <LinearProgress />
-          <Box className="blur">
-            <MainView data={data} showReport={showReport} isCustomerReport={isCustomerReport} onRowClick={handleRowClick} />
-          </Box>
-        </>
-      ) : error ? (
-        <Typography color="error" sx={{ mt: 2 }}>
-          {error instanceof BackendApiError && error.status === 404
-            ? "Timelogs report not found."
-            : "Something went wrong loading the timelogs report."}
-        </Typography>
-      ) : (
-        <>
-          {showReport && (
-            <>
-              <ToggleReport isCustomerReport={isCustomerReport} onChange={setCustomerReport} />
-              <MainView data={data} showReport={showReport} isCustomerReport={isCustomerReport} onRowClick={handleRowClick} />
-            </>
-          )}
-          {!showReport && (
-            <Box className="blur">
-              <MainView data={data} showReport={showReport} isCustomerReport={isCustomerReport} onRowClick={handleRowClick} />
+      {downloadError && (
+        <Alert severity="error" className="csm-print-hide" onClose={() => setDownloadError("")}>
+          {downloadError}
+        </Alert>
+      )}
+
+      {isLoading && (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <Skeleton variant="rounded" height={220} />
+          <Skeleton variant="rounded" height={280} />
+        </Box>
+      )}
+
+      {isError && <QueryErrorState message="Could not load the time report." error={error} onRetry={() => void refetch()} />}
+
+      {data && (
+        <Box id="timelogs-report" sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+          <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="h5">{isCustomerReport ? "Query hours report" : "Time report"}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {data.projectName?.trim() || "Time logged against this project."}
+              </Typography>
             </Box>
-          )}
-        </>
+            {!printing && (
+              <Button variant="contained" className="csm-print-hide" onClick={handleDownload} sx={{ flexShrink: 0 }}>
+                Download PDF
+              </Button>
+            )}
+          </Box>
+          <ProjectCard data={data} />
+          <CasesCard
+            key={isCustomerReport ? "customer" : "internal"}
+            cases={cases}
+            linkedCaseNumbers={new Set(timeCardCases.map((entry) => entry.caseItem.caseNumber))}
+            isCustomerReport={isCustomerReport}
+            showAll={printing}
+            onOpenCase={handleOpenCase}
+          />
+          {timeCardCases.map(({ caseItem, cards }) => (
+            <TimeCardsCard key={caseItem.caseId || caseItem.caseNumber} caseItem={caseItem} cards={cards} isCustomerReport={isCustomerReport} />
+          ))}
+        </Box>
       )}
     </Box>
   );
