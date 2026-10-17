@@ -107,6 +107,13 @@ type Customer struct {
 	LostReasonCategory      *string       `json:"lostReasonCategory"`
 	DeactivationDate        *string       `json:"deactivationDate"`
 	IsPartner               *bool         `json:"isPartner"`
+
+	// PrimaryPartnerAccountID is the Salesforce Id of the account's primary
+	// partner (Primary_Partner_Name2__c), the ServiceNow
+	// u_primary_partner_account_id that hasPrimaryPartner is read from.
+	// Present is false while Sales Entity does not send the key, and the
+	// Account ingest then keeps the stored value; a null clears it.
+	PrimaryPartnerAccountID OptionalString `json:"primaryPartnerAccountId"`
 }
 
 // CustomerAddress is the billing part of a Customer's address.

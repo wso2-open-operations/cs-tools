@@ -410,6 +410,34 @@ func TestMapSalesEntityCustomer_NumberIsId(t *testing.T) {
 	}
 }
 
+// TestMapSalesEntityCustomer_PrimaryPartner: an absent key keeps the stored
+// primary partner (Sales Entity does not send it yet); a present key is
+// written as sent, so a partner cleared in Salesforce clears here too and
+// hasPrimaryPartner turns false, as it did in ServiceNow.
+func TestMapSalesEntityCustomer_PrimaryPartner(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        salesentity.OptionalString
+		wantKeep  bool
+		wantValue *string
+	}{
+		{"absent keeps the stored value", salesentity.OptionalString{}, true, nil},
+		{"null clears", salesentity.OptionalString{Present: true}, false, nil},
+		{"blank clears", salesentity.OptionalString{Present: true, Value: sampleStr("  ")}, false, nil},
+		{"set is written trimmed", salesentity.OptionalString{Present: true, Value: sampleStr(" 001PP ")}, false, sampleStr("001PP")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mapSalesEntityCustomer(context.Background(), salesentity.Customer{ID: "001xx", Name: sampleStr("Acme"), PrimaryPartnerAccountID: tc.in})
+			if got.KeepExistingPrimaryPartner != tc.wantKeep || derefString(got.PrimaryPartnerSfID) != derefString(tc.wantValue) ||
+				(got.PrimaryPartnerSfID == nil) != (tc.wantValue == nil) {
+				t.Errorf("primary partner = %v keep = %v, want %v / %v",
+					derefString(got.PrimaryPartnerSfID), got.KeepExistingPrimaryPartner, derefString(tc.wantValue), tc.wantKeep)
+			}
+		})
+	}
+}
+
 func asValidation(err error, target **apierror.ValidationError) bool {
 	if ve, ok := err.(*apierror.ValidationError); ok {
 		*target = ve

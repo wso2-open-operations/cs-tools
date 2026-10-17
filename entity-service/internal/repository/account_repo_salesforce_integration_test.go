@@ -252,3 +252,61 @@ func TestAccountSalesforceIntegration(t *testing.T) {
 }
 
 func eqp(p *string, want string) bool { return p != nil && *p == want }
+
+// TestAccountSalesforceIntegration_PrimaryPartner: hasPrimaryPartner follows
+// the primary partner Salesforce sends, as ServiceNow's
+// u_primary_partner_account_id did. A partner link alone does not count, an
+// event without the field keeps the stored partner, and a cleared one clears it.
+func TestAccountSalesforceIntegration_PrimaryPartner(t *testing.T) {
+	r, pool := newAccountSalesforceIntegrationRepo(t)
+	ctx := context.Background()
+	v1 := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
+
+	// A partner account linked to the customer as a non-primary partner.
+	if err := r.UpsertFromSalesforce(ctx, domain.SalesforceAccountUpsert{SfID: sfiNewSfID, Name: "Partnerco", Number: sfiNewSfID},
+		sfiState(sfiNewSfID, domain.SalesforceEventCreated, v1)); err != nil {
+		t.Fatalf("CREATED partner: %v", err)
+	}
+	var partnerID string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM account WHERE sf_id = $1`, sfiNewSfID).Scan(&partnerID); err != nil {
+		t.Fatalf("read partner id: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM account_relationship WHERE from_account_id IN ($1, $2) OR to_account_id IN ($1, $2)`, sfiAccountID, partnerID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO account_relationship (id, created_on, updated_on, created_by, updated_by,
+			from_account_id, to_account_id, relationship_type_id, relationship_label, reverse_relationship_label, is_reverse_relationship)
+		VALUES (gen_random_uuid(), now(), now(), 't', 't', $1, $2, 'sfi', 'Is Partner Of', 'Is Customer Of', false)`,
+		partnerID, sfiAccountID); err != nil {
+		t.Fatalf("seed partner link: %v", err)
+	}
+
+	hasPrimary := func(step string, want bool) {
+		t.Helper()
+		row, err := r.GetAccountByID(WithSystemIdentity(ctx), sfiAccountID)
+		if err != nil {
+			t.Fatalf("%s: GetAccountByID: %v", step, err)
+		}
+		if row.HasPrimaryPartner != want {
+			t.Errorf("%s: hasPrimaryPartner = %v, want %v", step, row.HasPrimaryPartner, want)
+		}
+	}
+	upsert := func(step string, row domain.SalesforceAccountUpsert) {
+		t.Helper()
+		row.SfID, row.Name, row.Number, row.KeepExistingPhone = sfiSfID, "Acme", sfiSfID, true
+		if err := r.UpsertFromSalesforce(ctx, row, sfiState(sfiSfID, domain.SalesforceEventUpdated, v1)); err != nil {
+			t.Fatalf("%s: UPDATED: %v", step, err)
+		}
+	}
+
+	hasPrimary("non-primary partner link only", false)
+
+	upsert("primary partner set", domain.SalesforceAccountUpsert{PrimaryPartnerSfID: sp(sfiNewSfID)})
+	hasPrimary("primary partner set", true)
+
+	upsert("field not sent", domain.SalesforceAccountUpsert{KeepExistingPrimaryPartner: true})
+	hasPrimary("field not sent", true)
+
+	upsert("primary partner cleared", domain.SalesforceAccountUpsert{})
+	hasPrimary("primary partner cleared", false)
+}

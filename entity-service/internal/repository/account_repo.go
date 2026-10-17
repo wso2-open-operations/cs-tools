@@ -66,9 +66,10 @@ type AccountRow struct {
 	SreTeamName                 *string
 	HasAgent                    *bool
 	HasKbReferences             *bool
-	// HasPartner approximates ServiceNow's primary partner: any partner link in
-	// account_relationship (there is no "primary" marker).
-	HasPartner bool
+	// HasPrimaryPartner is whether the account has a primary partner
+	// (account.primary_partner_sf_id, ServiceNow's u_primary_partner_account_id).
+	// Other partner links in account_relationship do not count.
+	HasPrimaryPartner bool
 	CreatedOn  time.Time
 	CreatedBy  string
 	UpdatedOn  time.Time
@@ -151,9 +152,7 @@ const accountSelectColumns = `
 	csm.id, COALESCE(csm.name, NULLIF(TRIM(CONCAT_WS(' ', csm.first_name, csm.last_name)), '')), csm.email,
 	cre.id, cre.name, sre.id, sre.name,
 	a.ai_gen_response_enabled, a.smart_knowledge_base_suggestions_enabled,
-	EXISTS (SELECT 1 FROM account_relationship ar
-	         WHERE (ar.to_account_id = a.id AND NOT ar.is_reverse_relationship AND ar.relationship_label = '` + relationshipLabelPartnerOf + `')
-	            OR (ar.from_account_id = a.id AND ar.is_reverse_relationship AND ar.relationship_label = '` + relationshipLabelCustomerOf + `')),
+	COALESCE(TRIM(a.primary_partner_sf_id), '') <> '',
 	a.created_on, a.created_by, a.updated_on`
 
 // accountLeftJoins is every join accountSelectColumns and the search filters
@@ -182,7 +181,7 @@ func accountRowScanDests(a *AccountRow) []any {
 		&a.RenewalAccountManagerID, &a.RenewalAccountManagerName, &a.RenewalAccountManagerEmail,
 		&a.CustomerSuccessManagerID, &a.CustomerSuccessManagerName, &a.CustomerSuccessManagerEmail,
 		&a.CreTeamID, &a.CreTeamName, &a.SreTeamID, &a.SreTeamName,
-		&a.HasAgent, &a.HasKbReferences, &a.HasPartner,
+		&a.HasAgent, &a.HasKbReferences, &a.HasPrimaryPartner,
 		&a.CreatedOn, &a.CreatedBy, &a.UpdatedOn,
 	}
 }
@@ -335,7 +334,8 @@ func upsertAccountFromSalesforce(ctx context.Context, q querier, row domain.Sale
 		row.AccountManagerID, row.ActivationDate, row.LostDate, row.LostReason,
 		row.CustomerSuccessManagerID, row.SecondaryTechnicalOwnerID, row.RenewalAccountManagerID,
 		row.AccountVertical, row.LostReasonCategory, row.DeactivationDate,
-		row.KeepExistingPhone,
+		row.PrimaryPartnerSfID,
+		row.KeepExistingPhone, row.KeepExistingPrimaryPartner,
 	}
 	_, n, err := updateOneBySfID(ctx, q, updateAccountBySfIDQuery, "account", row.SfID, args...)
 	if err != nil {
@@ -356,7 +356,7 @@ func upsertAccountFromSalesforce(ctx context.Context, q querier, row domain.Sale
 		linked = tag.RowsAffected()
 	}
 	if n == 0 && linked == 0 {
-		if _, err := q.Exec(ctx, insertAccountFromSalesforceQuery, args[:30]...); err != nil {
+		if _, err := q.Exec(ctx, insertAccountFromSalesforceQuery, args[:31]...); err != nil {
 			return fmt.Errorf("upsert account from salesforce: insert: %w", err)
 		}
 	}
@@ -378,7 +378,8 @@ func lockAccountSfID(ctx context.Context, q querier, sfID string) error {
 
 // updateAccountFromSalesforceQuery is completed with a WHERE clause by
 // upsertAccountFromSalesforce; its parameters match
-// insertAccountFromSalesforceQuery plus $31 (keep the existing phone).
+// insertAccountFromSalesforceQuery plus $32 (keep the existing phone) and $33
+// (keep the existing primary partner).
 //
 // $25-$30 are the SE-1 columns (customer success manager, secondary
 // technical owner, renewal manager, account vertical, lost reason category,
@@ -386,6 +387,10 @@ func lockAccountSfID(ctx context.Context, q querier, sfID string) error {
 // COALESCEd with the stored value rather than assigned: a NULL keeps what the
 // ServiceNow sync loaded. Switch them to plain assignment once SE-1 is
 // deployed, so a value cleared in Salesforce clears here too.
+//
+// $31 is the primary partner. It is assigned as sent (a partner removed in
+// Salesforce clears here too, so hasPrimaryPartner turns false), unless $33
+// says Sales Entity did not send the field at all.
 //
 // number keeps its stored value: it is NOT NULL, so the COALESCE always
 // picks account.number (ServiceNow's "ACC" auto-number, or the Salesforce Id
@@ -400,7 +405,7 @@ const updateAccountFromSalesforceQuery = `
 		industry = $5,
 		region = $6,
 		global_pod = $7,
-		phone = CASE WHEN $31 THEN account.phone ELSE $8 END,
+		phone = CASE WHEN $32 THEN account.phone ELSE $8 END,
 		sales_region = $9,
 		sub_region = $10,
 		life_cycle = $11,
@@ -423,6 +428,7 @@ const updateAccountFromSalesforceQuery = `
 		account_vertical = COALESCE($28, account.account_vertical),
 		lost_reason_category = COALESCE($29, account.lost_reason_category),
 		deactivation_date = COALESCE($30, account.deactivation_date),
+		primary_partner_sf_id = CASE WHEN $33 THEN account.primary_partner_sf_id ELSE $31 END,
 		deleted_on = NULL,
 		updated_on = now(),
 		updated_by = $1,
@@ -453,6 +459,7 @@ const insertAccountFromSalesforceQuery = `
 		account_manager_id, activation_date, lost_date, lost_reason,
 		customer_success_manager_id, secondary_technical_owner_id, renewal_account_manager_id,
 		account_vertical, lost_reason_category, deactivation_date,
+		primary_partner_sf_id,
 		sync_time_stamp
 	) VALUES (
 		gen_random_uuid(), now(), now(), $1, $1,
@@ -463,6 +470,7 @@ const insertAccountFromSalesforceQuery = `
 		$21, $22, $23, $24,
 		$25, $26, $27,
 		$28, $29, $30,
+		$31,
 		now()
 	)`
 

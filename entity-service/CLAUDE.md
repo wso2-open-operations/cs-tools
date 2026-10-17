@@ -433,6 +433,14 @@ the list.
   `deactivation_date`. Sales Entity sends these only after its "customer fields"
   change (SE-1 in `docs/customer-onboarding/SALESFORCE_SYNC_PLAN.md`); until then they
   keep the ServiceNow sync's value. Switch them to plain assignment once SE-1 ships.
+- `primary_partner_sf_id` (migration 0235, from `primaryPartnerAccountId`, Salesforce
+  `Primary_Partner_Name2__c`): assigned as sent, so a partner removed in Salesforce clears
+  it; only a payload without the key keeps the stored value (`salesentity.OptionalString`,
+  `KeepExistingPrimaryPartner`). `hasPrimaryPartner` on `GET /accounts/{id}` and the account
+  search is "this column is set", as ServiceNow's `u_primary_partner_account_id` was. Partner
+  links in `account_relationship` no longer count: a customer with only non-primary partners
+  is `false`. Until Sales Entity sends the field every account reads `false`; the ACP closure
+  service is its only reader and must not go to production before then.
 - Never written: `number` on an existing row (a new row gets the Salesforce Id,
   decision D9), `cre_team_id`, `sre_team_id`, `support_tier`, `support_timezone`,
   `suspension_process_state`, the two AI flags, `drive_location`.

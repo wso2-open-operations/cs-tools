@@ -214,7 +214,7 @@ func accountRowToView(row repository.AccountRow) domain.AccountView {
 		CreatedBy:              &createdBy,
 		UpdatedOn:              row.UpdatedOn.Format(time.RFC3339),
 		IsPartner:              accountIsPartner(row.Classification),
-		HasPrimaryPartner:      &row.HasPartner,
+		HasPrimaryPartner:      &row.HasPrimaryPartner,
 		HealthSummary:          accountHealthSummaryFromRow(row),
 	}
 }
@@ -295,6 +295,6 @@ func accountRowToDetail(row repository.AccountRow) domain.AccountDetail {
 		CreatedBy:              &createdBy,
 		UpdatedOn:              row.UpdatedOn.Format(time.RFC3339),
 		IsPartner:              accountIsPartner(row.Classification),
-		HasPrimaryPartner:      &row.HasPartner,
+		HasPrimaryPartner:      &row.HasPrimaryPartner,
 	}
 }

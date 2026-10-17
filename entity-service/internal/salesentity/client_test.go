@@ -120,6 +120,38 @@ func TestGetCustomer_DecodesAccountIngestFields(t *testing.T) {
 	}
 }
 
+// TestGetCustomer_DecodesPrimaryPartner: the ingest must tell an absent key
+// (Sales Entity does not send it yet: keep the stored value) from a null one
+// (the primary partner was cleared in Salesforce).
+func TestGetCustomer_DecodesPrimaryPartner(t *testing.T) {
+	cases := []struct {
+		name        string
+		fields      map[string]any
+		wantPresent bool
+		wantValue   *string
+	}{
+		{"absent", map[string]any{}, false, nil},
+		{"null", map[string]any{"primaryPartnerAccountId": nil}, true, nil},
+		{"set", map[string]any{"primaryPartnerAccountId": "001PP"}, true, strPtr("001PP")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"id": "001xx", "name": "Acme"}
+			for k, v := range tc.fields {
+				body[k] = v
+			}
+			got, err := newTestClient(t, http.StatusOK, []map[string]any{body}).GetCustomer(context.Background(), "001xx")
+			if err != nil {
+				t.Fatalf("GetCustomer: %v", err)
+			}
+			p := got.PrimaryPartnerAccountID
+			if p.Present != tc.wantPresent || deref(p.Value) != deref(tc.wantValue) || (p.Value == nil) != (tc.wantValue == nil) {
+				t.Errorf("PrimaryPartnerAccountID = %+v, want present=%v value=%v", p, tc.wantPresent, deref(tc.wantValue))
+			}
+		})
+	}
+}
+
 func TestGetCustomer_EmptyArrayIs503(t *testing.T) {
 	client := newTestClient(t, http.StatusOK, []any{})
 	_, err := client.GetCustomer(context.Background(), "001xx")

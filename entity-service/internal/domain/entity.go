@@ -643,7 +643,8 @@ type AccountView struct {
 	// customer_account.partner, or account.classification = 'Partner' on Postgres.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set. On
-	// Postgres it approximates this as "has any partner in account_relationship".
+	// Postgres it is account.primary_partner_sf_id (Salesforce Primary_Partner_Name2__c);
+	// other partner links do not count.
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
 	// HealthSummary is set only when the search asked for it
 	// (filters.includeHealthSummary); omitted otherwise.
@@ -705,7 +706,7 @@ type AccountDetail struct {
 	// AccountView.IsPartner.
 	IsPartner *bool `json:"isPartner"`
 	// HasPrimaryPartner is whether this account has a primary partner account set.
-	// Mirrors AccountView.HasPrimaryPartner, including its Postgres approximation.
+	// Mirrors AccountView.HasPrimaryPartner.
 	HasPrimaryPartner *bool `json:"hasPrimaryPartner"`
 }
 
@@ -819,6 +820,13 @@ type SalesforceAccountUpsert struct {
 	AccountVertical           *string
 	LostReasonCategory        *string
 	DeactivationDate          *time.Time
+
+	// PrimaryPartnerSfID is the Salesforce Id of the account's primary
+	// partner; nil when it has none. KeepExistingPrimaryPartner is set when
+	// Sales Entity did not send the field, so the stored value is kept rather
+	// than cleared.
+	PrimaryPartnerSfID         *string
+	KeepExistingPrimaryPartner bool
 }
 
 // Salesforce Project_Contact__c states, as stored in Salesforce State__c and

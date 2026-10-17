@@ -42,23 +42,24 @@ const maxAccountPhoneChars = 64
 // value cannot fail the whole event. name is not listed: it is NOT NULL, and
 // Salesforce caps Account.Name at 255 characters, which is its width here.
 var accountColumnLimits = map[string]int{
-	"industry":             255,
-	"region":               100,
-	"global_pod":           100,
-	"sales_region":         100,
-	"sub_region":           100,
-	"life_cycle":           50,
-	"naics_industry":       100,
-	"sub_industry":         255,
-	"classification":       255,
-	"street":               255,
-	"city":                 100,
-	"state_province":       100,
-	"postal_code":          20,
-	"country":              100,
-	"lost_reason":          255,
-	"account_vertical":     255,
-	"lost_reason_category": 255,
+	"industry":              255,
+	"region":                100,
+	"global_pod":            100,
+	"sales_region":          100,
+	"sub_region":            100,
+	"life_cycle":            50,
+	"naics_industry":        100,
+	"sub_industry":          255,
+	"classification":        255,
+	"street":                255,
+	"city":                  100,
+	"state_province":        100,
+	"postal_code":           20,
+	"country":               100,
+	"lost_reason":           255,
+	"account_vertical":      255,
+	"lost_reason_category":  255,
+	"primary_partner_sf_id": 255,
 }
 
 // SalesEntityCustomerClient fetches a REST sales/sales-entity-service Customer by Salesforce Account Id.
@@ -469,6 +470,9 @@ func mapSalesEntityCustomer(ctx context.Context, cust salesentity.Customer) doma
 		AccountVertical:    bounded("account_vertical", cust.AccountVertical),
 		LostReasonCategory: bounded("lost_reason_category", cust.LostReasonCategory),
 		DeactivationDate:   salesforceDate(ctx, cust.ID, "deactivation_date", cust.DeactivationDate),
+
+		PrimaryPartnerSfID:         bounded("primary_partner_sf_id", cust.PrimaryPartnerAccountID.Value),
+		KeepExistingPrimaryPartner: !cust.PrimaryPartnerAccountID.Present,
 	}
 }
 
