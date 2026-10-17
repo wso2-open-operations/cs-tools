@@ -155,6 +155,92 @@ func RenderOpenCasesReport(data OpenCasesReportData) string {
 	return replacer.Replace(openCasesReportTemplate)
 }
 
+// RotaReminderData is everything a rota reminder says
+// (internal/rotareminder builds it). Every text value is plain text, escaped
+// here.
+type RotaReminderData struct {
+	Greeting string
+	Intro    string
+	// Columns and Rows are the rota table: one row per person and rotation.
+	Columns     []string
+	Rows        [][]string
+	ScheduleURL string
+	// IntendedFor is set only when reminders are redirected away from their
+	// real recipients (a non-production environment): it names who the email
+	// would have gone to.
+	IntendedFor []string
+}
+
+// RenderRotaReminder writes a rota reminder as a plain, formal message: a
+// greeting, one paragraph, a simple table, the request to arrange a swap, and a
+// sign-off. No template, colours or branding. It is HTML only because the email
+// service sends HTML.
+func RenderRotaReminder(data RotaReminderData) string {
+	var b strings.Builder
+	b.WriteString(`<div style="font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px;">` + "\n")
+	if len(data.IntendedFor) > 0 {
+		fmt.Fprintf(&b, "<p><i>[Test copy] Rota reminders are redirected in this environment. This email would have been sent to: %s.</i></p>\n",
+			escapeHTML(strings.Join(data.IntendedFor, ", ")))
+	}
+	fmt.Fprintf(&b, "<p>%s</p>\n<p>%s</p>\n", escapeHTML(data.Greeting), escapeHTML(data.Intro))
+	b.WriteString(`<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size:14px;">` + "\n<tr>")
+	for _, c := range data.Columns {
+		fmt.Fprintf(&b, `<th align="left">%s</th>`, escapeHTML(c))
+	}
+	b.WriteString("</tr>\n")
+	for _, row := range data.Rows {
+		b.WriteString("<tr>")
+		for _, cell := range row {
+			fmt.Fprintf(&b, "<td>%s</td>", orDash(escapeHTML(cell)))
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n")
+	b.WriteString("<p>If you are unable to cover your shift, please arrange a swap with your team lead and have the Team Schedule updated accordingly.")
+	if data.ScheduleURL != "" {
+		b.WriteString(scheduleLink(data.ScheduleURL))
+	}
+	b.WriteString("</p>\n<p>Regards,<br/>CSM Team Schedule</p>\n" +
+		`<p style="color:#666666; font-size:12px;">This is an automated message. Please do not reply to this email.</p>` + "\n</div>\n")
+	return b.String()
+}
+
+// scheduleLink is the sentence pointing at the Team Schedule, with the address
+// written out as well as linked, so it survives a client that strips links.
+func scheduleLink(url string) string {
+	u := escapeHTML(url)
+	return fmt.Sprintf(` The latest roster is available in the Team Schedule: <a href="%s">%s</a>`, u, u)
+}
+
+// RotaReminderFailureData is the alert for a rota reminder run in which some
+// windows' emails failed and the others went out (internal/rotareminder).
+type RotaReminderFailureData struct {
+	Task string
+	// Rows are the failed windows: rotation, day, the people on it, the error.
+	Rows [][]string
+}
+
+// RenderRotaReminderFailure writes that alert, as plainly as the reminders
+// themselves. It says why there is no retry, so that whoever reads it knows
+// the people listed have to be told by hand.
+func RenderRotaReminderFailure(data RotaReminderFailureData) string {
+	var b strings.Builder
+	b.WriteString(`<div style="font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px;">` + "\n")
+	fmt.Fprintf(&b, "<p>Some rota reminders from <b>%s</b> could not be sent. The others went out, so this run is not retried (a retry would email everybody again). Please tell the people below about their shift.</p>\n",
+		escapeHTML(data.Task))
+	b.WriteString(`<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size:14px;">` + "\n")
+	b.WriteString(`<tr><th align="left">Rotation</th><th align="left">Day</th><th align="left">People</th><th align="left">Error</th></tr>` + "\n")
+	for _, row := range data.Rows {
+		b.WriteString("<tr>")
+		for _, cell := range row {
+			fmt.Fprintf(&b, "<td>%s</td>", orDash(escapeHTML(cell)))
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n</div>\n")
+	return b.String()
+}
+
 // renderCaseRows builds one <tr> per case for RenderStaleCasesReport. A case
 // with no account or no assignee (nil AssignedEngineer/AccountDetails on
 // entity-service's side, already flattened to "" by entitycases.Client)

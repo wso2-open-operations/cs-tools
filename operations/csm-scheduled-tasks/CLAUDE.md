@@ -168,6 +168,66 @@ query run) if empty. Shares `internal/entitycases.Client` and the row-rendering 
 (`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
 emails" below.
 
+## Rota reminders
+
+`internal/rotareminder`, registered as **`rota_weekday_reminder`** and **`rota_weekend_notice`**,
+emails the people rostered on a rotation shift in the Team Schedule. **Registered only when
+`ROTA_REMINDERS_ENABLED=true`** (default false): they email real staff from the real rota.
+
+| Task | Default schedule | Announces |
+|---|---|---|
+| `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
+| `rota_weekend_notice` | `30 9 * * 1,5` (15:00 Colombo, Mon and Fri) | the coming weekend's rotations (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`): a heads-up on Monday, a reminder on Friday |
+
+The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
+(`NextWorkingDay`, `ComingWeekend`), counted in `ROTA_REMINDER_TIME_ZONE` (default
+`Asia/Colombo`), so a schedule moved by `SUB_CRON_SCHEDULES` still announces sensible days. The
+schedules assume `TZ=UTC` like every other here.
+
+- **The rota comes from entity-service** (`internal/teamschedule`): `GET /team-schedule/catalogue`
+  for labels, windows and team names, and `POST /team-schedule/assignments/search` with
+  `excludeAbsent: true`, so **people on leave are left out by entity-service**, by the same rule
+  the pager uses. An entity-service that predates `excludeAbsent` answers 400 (unknown field) and
+  the task fails and alerts rather than reminding somebody on leave: deploy entity-service first.
+  The Team Schedule is internal-only, so this client's id must be in entity-service's
+  `M2M_CLIENT_IDS`.
+- **One email per shift window**, sent to the people on that window only. A window is a shift
+  and its on-call variant (`<CODE>_OC`), which share hours: weekday Morning (with its on-call
+  person) and Evening; weekend LK and America (with its on-call person), for each day. A
+  weekday email lists its window's people; a weekend email lists the whole weekend's rota, so
+  everybody sees who else is on. One recipient is greeted by full name, several with "Dear all,".
+- **The task's `SUB_CRON_RECIPIENTS` are not copied** unless
+  `ROTA_REMINDER_COPY_TASK_RECIPIENTS=true`; they still get its failure alerts, as everywhere
+  here. Nobody is ever both a recipient and copied, or copied twice (case-insensitive).
+- **A plain, formal message, not a branded template** (by request): `notify.RenderRotaReminder`
+  writes a greeting, one line about the window (date and hours in IST), a Name | Rotation table
+  (weekend: Name | Day | Rotation), the swap instruction with the Team Schedule link written out,
+  and a sign-off. Rotation names come from config (`CODE=Name`). Names are escaped.
+- **A retry announces what its scheduled run would have.** The engine retries a failed run every
+  tick until the next period, which for `rota_weekend_notice` is days later. So the rota days are
+  counted from the run's period key (`Config.Anchor`, from `schedule.PeriodKey`), not the clock:
+  Thursday's run retried after midnight still announces Friday, not Monday, and Friday's weekend
+  notice retried on Saturday announces this weekend, not the next. "Tomorrow" / "today" in the text
+  are from the clock, as the reader sees them.
+- **A window that has started is not sent** (a late retry); it is logged.
+- **The run fails only when no email went out.** The handler keeps no record of what it sent, so
+  a retry re-sends every window. When some windows went out and some failed, the run succeeds and
+  the handler itself emails the task's alert audience (its `SUB_CRON_RECIPIENTS` and
+  `ALERT_RECIPIENTS`, as the engine would) a "PARTLY FAILED" alert listing each failed window and
+  its people, to be told by hand. When nothing went out, the run fails and is retried as usual,
+  which repeats nothing.
+- **Nobody to email is a success**: an empty rota, or a shift whose people have no address (logged).
+- **`ROTA_REMINDER_REDIRECT_TO`** sends every reminder to a test inbox instead, naming the intended
+  recipients in its first line. Use it in any environment that holds the real rota but must not mail
+  people. `ALERTS_ENABLED=false` silences these like every other email here.
+- Turning the tasks on with `EMAIL_BASE_URL` unset refuses to start.
+- **Not built**: a "your shift changed" email when a lead edits the rota after the reminder went
+  out (it needs entity-service to announce rota changes; see "Future: events"), SRE and SME
+  rotas (set `ROTA_REMINDER_FAMILY` and the shift lists; the date rules assume CRE's weekday and
+  weekend split), and calendar events. An `.ics` attached through the email service shows in
+  Gmail as a downloadable file, not an invitation, so events need the Google Calendar API from
+  a scheduler account instead. Unlike the report tasks, these own no template file.
+
 ## Availability recalculation
 
 Recomputes every committed service offering's uptime and rewrites
@@ -306,6 +366,12 @@ report emails" below for why that's not a generic engine feature.
 | `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
 | `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for a report-style task, its report's actual recipients (see "Alerting" above for which tasks work which way). A task not mentioned gets no per-task recipients |
+| `ROTA_REMINDERS_ENABLED` | No (default `false`) | Registers the two rota reminder tasks — see "Rota reminders" above |
+| `ROTA_REMINDER_REDIRECT_TO` | No | Comma-separated test inbox(es) that receive every rota reminder instead of the people on the shift |
+| `ROTA_REMINDER_SCHEDULE_URL` | No | Link to the CSM portal's Team Schedule page, shown in every reminder |
+| `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
+| `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
+| `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time

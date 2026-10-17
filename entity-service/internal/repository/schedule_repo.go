@@ -471,6 +471,12 @@ func (r *scheduleRepository) SearchAssignments(ctx context.Context, req domain.S
 		args = append(args, req.UserEmail)
 		where += fmt.Sprintf(" AND LOWER(u.email) = LOWER($%d)", len(args))
 	}
+	if req.ExcludeAbsent {
+		// Asked of the rota day rather than an instant: a whole shift is about
+		// to be announced, and the day it is rostered for is the day leave is
+		// granted against.
+		where += " AND " + absenceOn("NOT EXISTS", "a.rota_date")
+	}
 
 	rows, err := r.db.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+" "+where+
 		" ORDER BY a.rota_date, a.starts_at, s.sort_order, u.name", args...)
@@ -526,23 +532,32 @@ func (r *scheduleRepository) OnDutyAt(ctx context.Context, at time.Time, include
 func (r *scheduleRepository) onDutyRows(ctx context.Context, at time.Time, exists string) ([]domain.ScheduleAssignment, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+assignmentColumns+assignmentFrom+`
 		WHERE tstzrange(a.starts_at, a.ends_at, '[)') @> $1::timestamptz
-		  AND `+exists+` (
-		        SELECT 1 FROM team_schedule_absence ab
-		        JOIN team_schedule_absence_kind k ON k.id = ab.kind_id
-		        WHERE ab.user_id = a.user_id
-		          AND daterange(ab.starts_on, ab.ends_on, '[]')
-		              @> ($1::timestamptz AT TIME ZONE s.authoring_time_zone)::date
-		          -- Away from every team but the one the span moved them to,
-		          -- and that team's rota: someone on the Brazil rotation is
-		          -- working the Americas rota, and is on duty for its shifts.
-		          AND NOT `+movedWithinRota+`
-		      )
+		  AND `+absenceOn(exists, "($1::timestamptz AT TIME ZONE s.authoring_time_zone)::date")+`
 		ORDER BY a.tier NULLS LAST, s.sort_order, u.name`, at)
 	if err != nil {
 		return nil, fmt.Errorf("query on-duty assignments: %w", err)
 	}
 	defer rows.Close()
 	return scanAssignments(rows)
+}
+
+// absenceOn is the one rule for "this assignment's person is away on day":
+// exists is "EXISTS" (they are away) or "NOT EXISTS" (they are not). The
+// on-duty lookup, its include-on-leave mode, and a search that leaves absent
+// people out all read it, so they can never disagree about who is working.
+// Both arguments are always constants from this file, never caller input: day
+// is a SQL date expression over the assignment (a) and its shift (s).
+func absenceOn(exists, day string) string {
+	return exists + ` (
+		        SELECT 1 FROM team_schedule_absence ab
+		        JOIN team_schedule_absence_kind k ON k.id = ab.kind_id
+		        WHERE ab.user_id = a.user_id
+		          AND daterange(ab.starts_on, ab.ends_on, '[]') @> ` + day + `
+		          -- Away from every team but the one the span moved them to,
+		          -- and that team's rota: someone on the Brazil rotation is
+		          -- working the Americas rota, and is on duty for its shifts.
+		          AND NOT ` + movedWithinRota + `
+		      )`
 }
 
 // SearchAbsences returns every absence overlapping the window. An absence

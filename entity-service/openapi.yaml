@@ -23055,6 +23055,14 @@ components:
           description: >
             Also return a block that began before `from` and is still running
             into it — the night crew a day view shows at the top.
+        excludeAbsent:
+          type: boolean
+          description: >
+            Leave out an assignment whose person is away (leave, an
+            allocation, excluded from the rota) on its rota day, by the same
+            rule `/team-schedule/on-duty` applies. A span that moves somebody
+            to another team does not count against that team's shifts. Off by
+            default: the rota views draw leave over the rota instead.
     SearchScheduleAbsencesRequest:
       type: object
       required: [from, to]

@@ -1797,6 +1797,90 @@ func TestScheduleIntegration_OnDutyAtExcludesSomebodyOnLeave(t *testing.T) {
 	}
 }
 
+// excludeAbsent asks the on-duty rule of a rota day: a reminder email must not
+// tell somebody on leave that they are working, and the rota views, which
+// leave it off, still see the assignment under the leave.
+func TestScheduleIntegration_SearchAssignmentsCanLeaveOutSomebodyAway(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const tuesday, wednesday = "2026-09-22", "2026-09-23"
+
+	if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, ShiftCode: code,
+		From: schedMonday, To: wednesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey,
+		KindCode: absenceKind(t, pool, "LEAVE"),
+		From:     tuesday, To: tuesday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence: %v", err)
+	}
+
+	days := func(excludeAbsent bool) []string {
+		t.Helper()
+		rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+			From: schedMonday, To: wednesday, TeamKeys: []string{schedTeamKey},
+			ExcludeAbsent: excludeAbsent,
+		})
+		if err != nil {
+			t.Fatalf("SearchAssignments(excludeAbsent=%v): %v", excludeAbsent, err)
+		}
+		var out []string
+		for _, a := range rows {
+			out = append(out, a.RotaDate)
+		}
+		return out
+	}
+
+	if got := days(false); len(got) != 3 {
+		t.Fatalf("without excludeAbsent: %v, want Mon, Tue and Wed", got)
+	}
+	if got := days(true); len(got) != 2 || got[0] != schedMonday || got[1] != wednesday {
+		t.Fatalf("with excludeAbsent: %v, want Mon and Wed (leave on Tue)", got)
+	}
+}
+
+// A span that moves somebody to another team keeps them on that team's
+// shifts, and away from their own, exactly as the on-duty lookup has it.
+func TestScheduleIntegration_SearchAssignmentsExcludeAbsentFollowsAMove(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	kind := moveKind(t, pool)
+	code := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	const tuesday = "2026-09-22"
+
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, HomeTeamKey: schedTeamKey,
+		KindCode: kind, From: schedMonday, To: "2026-09-25",
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("ApplyAbsence: %v", err)
+	}
+	// Seeded after the span, as the on-duty test does: a shift on each team
+	// inside it.
+	for _, a := range []struct{ team, day string }{{schedOtherTeam, schedMonday}, {schedTeamKey, tuesday}} {
+		if _, err := repo.ApplyRange(ctx, domain.ApplyScheduleRangeRequest{
+			UserID: schedMemberID, TeamKey: a.team, ShiftCode: code, From: a.day, To: a.day,
+		}, schedLeadEmail); err != nil {
+			t.Fatalf("seed %s shift: %v", a.team, err)
+		}
+	}
+
+	rows, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
+		From: schedMonday, To: tuesday, TeamKeys: []string{schedTeamKey, schedOtherTeam},
+		ExcludeAbsent: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchAssignments: %v", err)
+	}
+	if len(rows) != 1 || rows[0].TeamKey != schedOtherTeam {
+		t.Fatalf("got %+v, want only the shift on the team the span moved them to", rows)
+	}
+}
+
 func TestScheduleIntegration_SearchAbsencesFindsAnOverlappingSpan(t *testing.T) {
 	repo, pool := newScheduleIntegrationRepo(t)
 	ctx := context.Background()

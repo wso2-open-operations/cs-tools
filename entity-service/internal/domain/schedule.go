@@ -400,6 +400,12 @@ type SearchScheduleAssignmentsRequest struct {
 	// client a lookup -- and saves them all implementing it differently.
 	UserEmail        string `json:"userEmail,omitempty"`
 	IncludeOvernight bool   `json:"includeOvernight,omitempty"`
+	// ExcludeAbsent leaves out an assignment whose person is away on its rota
+	// day: the same rule /team-schedule/on-duty applies, asked of a day rather
+	// than an instant. The rota views leave it off because they draw leave over
+	// the rota; a reminder email sets it, or it tells somebody on leave that
+	// they are working.
+	ExcludeAbsent bool `json:"excludeAbsent,omitempty"`
 }
 
 // SearchScheduleAbsencesRequest finds absences overlapping a date range.
