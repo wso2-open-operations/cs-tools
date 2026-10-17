@@ -31,9 +31,9 @@ import (
 
 // licenseProvisioningWriteDeadline extends the response write deadline for
 // GetDeploymentLicense beyond the server's global WriteTimeout (see
-// cmd/server/main.go) — ProcessLicenseDownload can make up to 5 sequential
-// upstream requests, which can plausibly exceed the global timeout under
-// normal network latency even though no single step is slow.
+// cmd/server/main.go) — ProcessLicenseDownload delegates to the upstream
+// product-consumption microservice, which performs application provisioning,
+// credential generation, and HMAC license signing.
 const licenseProvisioningWriteDeadline = 2 * time.Minute
 
 // productConsumptionClient abstracts the upstream product-consumption
@@ -47,6 +47,7 @@ type productConsumptionClient interface {
 // verify the caller has access to a project before provisioning a license.
 type entityProjectAccessChecker interface {
 	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
+	SearchDeployments(ctx context.Context, req entity.SearchDeploymentsRequest) (entity.SearchDeploymentsResponse, error)
 }
 
 // ProductConsumptionHandler handles HTTP requests for the product-consumption
@@ -123,6 +124,31 @@ func (h *ProductConsumptionHandler) ImportDeploymentUsage(w http.ResponseWriter,
 
 	zipFile, ok := readBinaryBody(w, r, maxZipUploadBytes)
 	if !ok {
+		return
+	}
+
+	// The upload names no project, so the report's own deployment number decides
+	// whose usage it is, and the caller must be able to see that deployment: the
+	// search runs as the caller, so entity-service returns it only to an internal
+	// user or a registered contact of its project. The product-consumption service
+	// then verifies the report's signature against that deployment's key.
+	deploymentNumber, err := usageReportDeploymentNumber(zipFile)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "The uploaded file is not a usage report exported by a WSO2 product.")
+		return
+	}
+	deployments, err := h.entity.SearchDeployments(r.Context(), entity.SearchDeploymentsRequest{
+		Pagination:      entity.Pagination{Limit: 1},
+		Numbers:         []string{deploymentNumber},
+		IncludeInactive: true,
+	})
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchDeployments failed", "userID", user.UserID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to import deployment usage data.")
+		return
+	}
+	if len(deployments.Deployments) == 0 {
+		writeError(w, http.StatusNotFound, "The report's deployment was not found.")
 		return
 	}
 

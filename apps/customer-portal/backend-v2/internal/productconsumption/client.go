@@ -180,35 +180,6 @@ func (c *Client) postJSONTracking(ctx context.Context, path string, reqBody, out
 	return nil
 }
 
-// postText issues a POST with a raw text/plain body — used only for
-// subscribeApplication, whose upstream endpoint expects a bare string
-// payload as raw text/plain, not a JSON-quoted string.
-func (c *Client) postText(ctx context.Context, path, body string, out any) error {
-	respBody, err := c.do(ctx, http.MethodPost, path, "text/plain", []byte(body))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(respBody, out); err != nil {
-		return fmt.Errorf("productconsumption: decode response for POST %s: %w", path, err)
-	}
-	return nil
-}
-
-func (c *Client) patchJSON(ctx context.Context, path string, reqBody, out any) error {
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("productconsumption: encode request for PATCH %s: %w", path, err)
-	}
-	body, err := c.do(ctx, http.MethodPatch, path, "application/json", payload)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("productconsumption: decode response for PATCH %s: %w", path, err)
-	}
-	return nil
-}
-
 func pathEscape(s string) string {
 	return url.PathEscape(s)
 }

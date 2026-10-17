@@ -187,7 +187,10 @@ func TestChangeRequestRouteGating(t *testing.T) {
 	}
 	approve := request{"PATCH approve", http.MethodPatch, "/change-requests/" + crID, `{"isCustomerApproved":true}`}
 	review := request{"PATCH review", http.MethodPatch, "/change-requests/" + crID, `{"isCustomerReviewed":false}`}
-	propose := request{"PATCH propose a new time", http.MethodPatch, "/change-requests/" + crID, `{"plannedStartOn":"2026-10-10 10:00:00"}`}
+	// The handler refuses a proposed time that has passed (by the real clock), so
+	// the proposal is always a month from now rather than a fixed date.
+	proposedStart := time.Now().UTC().AddDate(0, 1, 0).Format("2006-01-02 15:04:05")
+	propose := request{"PATCH propose a new time", http.MethodPatch, "/change-requests/" + crID, `{"plannedStartOn":"` + proposedStart + `"}`}
 	editTitle := request{"PATCH title", http.MethodPatch, "/change-requests/" + crID, `{"title":"x"}`}
 	approveAndMove := request{"PATCH approve plus state", http.MethodPatch, "/change-requests/" + crID, `{"isCustomerApproved":true,"state":"scheduled"}`}
 	decide := request{"POST decision", http.MethodPost, "/change-requests/" + crID + "/approvals/decision", `{"decision":"approved"}`}

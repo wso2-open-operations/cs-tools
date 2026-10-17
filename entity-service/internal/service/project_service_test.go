@@ -54,6 +54,14 @@ func (r *recordingProjectRepo) UpdateProject(context.Context, string, domain.Pro
 	panic("UpdateProject: not exercised by these tests")
 }
 
+func (r *recordingProjectRepo) GetProjectConsumptionStatus(context.Context, string) (domain.ProjectConsumptionStatus, error) {
+	panic("GetProjectConsumptionStatus: not exercised by these tests")
+}
+
+func (r *recordingProjectRepo) UpdateProjectConsumption(context.Context, string, domain.ProjectConsumptionUpdateRequest, string) error {
+	panic("UpdateProjectConsumption: not exercised by these tests")
+}
+
 // TestSearchProjectsExcludeClosureStatesAndProjectKeysPassThrough locks in
 // that ExcludeClosureStates, ExcludeProjectKeys, and ExcludeSubscriptionTypes
 // (individually, and together) are NOT rejected — they all map onto real

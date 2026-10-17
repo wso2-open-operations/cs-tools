@@ -3260,7 +3260,13 @@ paths:
       description: >
         Calls the separate product-consumption service, not entity-service —
         see this backend's CLAUDE.md, "The product-consumption service". The
-        request body is a raw zip file, not JSON.
+        request body is a raw zip file, not JSON: a usage report as a WSO2
+        product exports it (one JSON file). The report's
+        export_metadata.deployment_id must be a deployment the caller can see
+        (404 otherwise); the product-consumption service then verifies the
+        report's signature and refuses a report the product marked invalid
+        (400). The result carries importedCount and skippedCount (daily rows
+        the product marked invalid).
       operationId: postDeploymentUsages
       requestBody:
         required: true
@@ -3290,6 +3296,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: The report's deployment was not found, or is not visible to the caller
           content:
             application/json:
               schema:

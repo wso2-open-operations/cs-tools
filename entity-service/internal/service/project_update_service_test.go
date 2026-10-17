@@ -59,6 +59,14 @@ func (r *stubProjectUpdateRepo) UpdateProject(ctx context.Context, id string, re
 	return domain.ProjectUpdateResult{ID: id, UpdatedBy: updatedBy, UpdatedOn: time.Now()}, nil
 }
 
+func (r *stubProjectUpdateRepo) GetProjectConsumptionStatus(context.Context, string) (domain.ProjectConsumptionStatus, error) {
+	panic("GetProjectConsumptionStatus: not exercised by these tests")
+}
+
+func (r *stubProjectUpdateRepo) UpdateProjectConsumption(context.Context, string, domain.ProjectConsumptionUpdateRequest, string) error {
+	panic("UpdateProjectConsumption: not exercised by these tests")
+}
+
 // stubProjectMirror is a ProjectUpdateService whose UpdateProject records the
 // call and returns either a canned error or a canned response -- used as the
 // dual-write mode's ServiceNow mirror, standing in for the real

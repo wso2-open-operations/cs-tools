@@ -904,6 +904,11 @@ type SearchDeploymentsRequest struct {
 	// with no project context at all. Postgres data source only (see
 	// entity-service's own SearchDeploymentsRequest.IDs doc comment).
 	IDs []string `json:"ids,omitempty"`
+	// Numbers filters by exact deployment number (e.g. "DEP000002442"), the
+	// identifier an offline usage report carries.
+	Numbers []string `json:"numbers,omitempty"`
+	// IncludeInactive also returns deployments that have been deactivated.
+	IncludeInactive bool `json:"includeInactive,omitempty"`
 }
 
 // DeploymentView is a single search result item from POST /deployments/search.

@@ -18,7 +18,6 @@ package productconsumption
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,7 +64,6 @@ func TestLicenceCallsSendBareSysIDs(t *testing.T) {
 	)
 
 	var paths []string
-	var statusBody map[string]any
 
 	// The client authenticates with client credentials, so it needs a token
 	// endpoint before it will make any call at all.
@@ -77,13 +75,6 @@ func TestLicenceCallsSendBareSysIDs(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		if strings.HasSuffix(r.URL.Path, "/consumption/status") {
-			_ = json.NewDecoder(r.Body).Decode(&statusBody)
-			// status 4 == generated secret keys, so the flow goes straight to
-			// the licence call without provisioning anything.
-			_, _ = w.Write([]byte(`{"result":{"status":4,"applicationId":"app-1"}}`))
-			return
-		}
 		_, _ = w.Write([]byte(`{"result":{"success":true,"license":{"subscriptionData":{},"signature":"sig"}}}`))
 	}))
 	defer srv.Close()
@@ -111,8 +102,5 @@ func TestLicenceCallsSendBareSysIDs(t *testing.T) {
 	}
 	if !strings.Contains(joined, bareDeploy) {
 		t.Errorf("no bare deployment sysid in the licence path. paths: %v", paths)
-	}
-	if got, _ := statusBody["deploymentId"].(string); got != bareDeploy {
-		t.Errorf("consumption-status body deploymentId = %q, want the bare sysid %q", got, bareDeploy)
 	}
 }

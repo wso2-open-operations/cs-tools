@@ -1503,6 +1503,30 @@ type ProjectUpdateResult struct {
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 }
 
+// ProjectConsumptionStatus represents the product consumption state and keys for a project.
+type ProjectConsumptionStatus struct {
+	Status             int     `json:"status"`
+	ApplicationID      *string `json:"applicationId,omitempty"`
+	Name               *string `json:"name,omitempty"`
+	Description        *string `json:"description,omitempty"`
+	ConsumerKey        *string `json:"consumerKey,omitempty"`
+	ConsumerSecret     *string `json:"consumerSecret,omitempty"`
+	PrimarySecretKey   *string `json:"primarySecretKey,omitempty"`
+	SecondarySecretKey *string `json:"secondarySecretKey,omitempty"`
+	LicenseSecrets     *string `json:"licenseSecrets,omitempty"`
+}
+
+// ProjectConsumptionUpdateRequest holds the fields updated during the subscription/licensing lifecycle.
+type ProjectConsumptionUpdateRequest struct {
+	Status             int     `json:"status"`
+	ApplicationID      *string `json:"applicationId,omitempty"`
+	ConsumerKey        *string `json:"consumerKey,omitempty"`
+	ConsumerSecret     *string `json:"consumerSecret,omitempty"`
+	PrimarySecretKey   *string `json:"primarySecretKey,omitempty"`
+	SecondarySecretKey *string `json:"secondarySecretKey,omitempty"`
+	LicenseSecrets     *string `json:"licenseSecrets,omitempty"`
+}
+
 // SearchProjectsRequest is the input for a project search operation.
 // SearchQuery is matched case-insensitively against name, key, and subscription_type.
 type SearchProjectsRequest struct {
@@ -2109,6 +2133,9 @@ type SearchDeploymentsRequest struct {
 	ProjectIDs      []string         `json:"projectIds"`
 	DeploymentTypes []DeploymentType `json:"deploymentTypes"`
 	IDs             []string         `json:"ids"`
+	// Numbers matches deployments by their exact deployment number (e.g.
+	// "DEP000002442"), the identifier an offline usage report carries.
+	Numbers []string `json:"numbers,omitempty"`
 	// IncludeInactive additively widens the result to also include deployments
 	// with is_active = FALSE -- omitted/false reproduces today's exact
 	// behavior for every existing caller (the permanent is_active = TRUE

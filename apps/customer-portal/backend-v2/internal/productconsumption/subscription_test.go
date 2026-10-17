@@ -23,10 +23,8 @@ import (
 	"testing"
 )
 
-// newLicenseTestServers starts a token server and a licensing server whose
-// /consumption/status always reports status 5 (generated secret keys), so
-// ProcessLicenseDownload goes straight to the license call with the given
-// response body.
+// newLicenseTestServers starts a token server and a licensing server that
+// answers the license call with the given response body.
 func newLicenseTestServers(t *testing.T, licenseBody string) *Client {
 	t.Helper()
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -36,10 +34,6 @@ func newLicenseTestServers(t *testing.T, licenseBody string) *Client {
 	t.Cleanup(tokenSrv.Close)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path[len(r.URL.Path)-len("/consumption/status"):] == "/consumption/status" {
-			_, _ = w.Write([]byte(`{"result":{"status":5,"applicationId":"app-1"}}`))
-			return
-		}
 		_, _ = w.Write([]byte(licenseBody))
 	}))
 	t.Cleanup(srv.Close)

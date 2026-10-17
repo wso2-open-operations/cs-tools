@@ -477,6 +477,10 @@ type ProjectService interface {
 	// caller-scoped access" for the full rule and why existence is hidden
 	// rather than returning a 403.
 	GetProjectByID(ctx context.Context, id string) (domain.ProjectDetailsView, error)
+	// GetProjectConsumptionStatus returns product consumption state and credentials for the project.
+	GetProjectConsumptionStatus(ctx context.Context, id string) (domain.ProjectConsumptionStatus, error)
+	// UpdateProjectConsumption updates product consumption state, application ID, credentials, and license signing keys.
+	UpdateProjectConsumption(ctx context.Context, id string, req domain.ProjectConsumptionUpdateRequest, updatedBy string) error
 }
 
 // ProjectUpdateService defines the write operations available on a project.

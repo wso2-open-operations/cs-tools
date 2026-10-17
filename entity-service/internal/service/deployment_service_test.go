@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 // assertion (e.g. "Postgres must stay untouched on SN failure").
 type stubDeploymentRepo struct {
 	searchDeployments              func(context.Context, domain.SearchDeploymentsRequest) ([]domain.DeploymentView, int, error)
+	createDeployment               func(context.Context, domain.CreateDeploymentRequest, string) (domain.CreatedDeployment, error)
 	createDeploymentFromServiceNow func(context.Context, domain.CreateDeploymentRequest, string, string, string, time.Time) (domain.CreatedDeployment, error)
 	updateDeploymentFields         func(context.Context, domain.UpdateDeploymentRequest, string) (domain.UpdatedDeployment, error)
 }
@@ -40,6 +42,13 @@ func (r *stubDeploymentRepo) SearchDeployments(ctx context.Context, req domain.S
 		panic("stubDeploymentRepo: SearchDeployments not set")
 	}
 	return r.searchDeployments(ctx, req)
+}
+
+func (r *stubDeploymentRepo) CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest, createdBy string) (domain.CreatedDeployment, error) {
+	if r.createDeployment == nil {
+		panic("stubDeploymentRepo: CreateDeployment not set")
+	}
+	return r.createDeployment(ctx, req, createdBy)
 }
 
 func (r *stubDeploymentRepo) CreateDeploymentFromServiceNow(ctx context.Context, req domain.CreateDeploymentRequest, id, number, createdBy string, createdOn time.Time) (domain.CreatedDeployment, error) {
@@ -157,17 +166,129 @@ func TestDeploymentService_SearchDeployments_IncludeInactivePassesThrough(t *tes
 	}
 }
 
-// A plain Postgres data source (no SN mirror wired at all) must keep
-// rejecting CreateDeployment/UpdateDeployment exactly as before this
-// dual-write path existed -- no regression for DATA_SOURCE=postgres.
-func TestDeploymentService_NotSupportedOnPlainPostgres(t *testing.T) {
+// SearchDeployments passes the numbers filter through trimmed, and refuses a
+// blank or over-long number -- the customer portal backend resolves an offline
+// usage report's deployment number this way, as the uploading user.
+func TestDeploymentService_SearchDeployments_NumbersFilter(t *testing.T) {
+	var gotReq domain.SearchDeploymentsRequest
+	svc := NewDeploymentService(&stubDeploymentRepo{
+		searchDeployments: func(_ context.Context, req domain.SearchDeploymentsRequest) ([]domain.DeploymentView, int, error) {
+			gotReq = req
+			return nil, 0, nil
+		},
+	})
+
+	if _, err := svc.SearchDeployments(context.Background(), domain.SearchDeploymentsRequest{Numbers: []string{" DEP000002442 "}}); err != nil {
+		t.Fatalf("SearchDeployments: unexpected error: %v", err)
+	}
+	if len(gotReq.Numbers) != 1 || gotReq.Numbers[0] != "DEP000002442" {
+		t.Errorf("repository got numbers %q", gotReq.Numbers)
+	}
+	for _, bad := range [][]string{{" "}, {strings.Repeat("9", 51)}} {
+		if _, err := svc.SearchDeployments(context.Background(), domain.SearchDeploymentsRequest{Numbers: bad}); err == nil {
+			t.Errorf("numbers %q: want a validation error", bad)
+		}
+	}
+}
+
+// UpdateDeployment is not supported on the plain Postgres data source (s.snMirror == nil).
+func TestDeploymentService_UpdateDeployment_NotSupportedOnPlainPostgres(t *testing.T) {
 	svc := NewDeploymentService(&stubDeploymentRepo{})
 
-	if _, err := svc.CreateDeployment(context.Background(), validCreateDeploymentRequest()); err == nil {
-		t.Error("CreateDeployment: expected an error on the plain Postgres data source")
-	}
 	if _, err := svc.UpdateDeployment(context.Background(), domain.UpdateDeploymentRequest{ID: testDeploymentUUID}); err == nil {
 		t.Error("UpdateDeployment: expected an error on the plain Postgres data source")
+	}
+}
+
+// CreateDeployment on the plain Postgres data source delegates directly to
+// repo.CreateDeployment with the resolved caller email.
+func TestDeploymentService_CreateDeployment_PlainPostgres(t *testing.T) {
+	var calledRepo bool
+	var gotCreatedBy string
+	var gotReq domain.CreateDeploymentRequest
+
+	repo := &stubDeploymentRepo{
+		createDeployment: func(_ context.Context, req domain.CreateDeploymentRequest, createdBy string) (domain.CreatedDeployment, error) {
+			calledRepo = true
+			gotCreatedBy = createdBy
+			gotReq = req
+			return domain.CreatedDeployment{
+				ID:        "44444444-4444-4444-4444-444444444444",
+				CreatedOn: time.Date(2026, 10, 15, 10, 0, 0, 0, time.UTC),
+				CreatedBy: createdBy,
+			}, nil
+		},
+	}
+	svc := NewDeploymentService(repo)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "alice@example.com"))
+	req := validCreateDeploymentRequest()
+
+	resp, err := svc.CreateDeployment(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateDeployment on plain Postgres: unexpected error: %v", err)
+	}
+
+	if !calledRepo {
+		t.Fatal("expected repo.CreateDeployment to be called")
+	}
+	if gotCreatedBy != "alice@example.com" {
+		t.Errorf("expected createdBy alice@example.com, got %q", gotCreatedBy)
+	}
+	if gotReq.ProjectID != req.ProjectID {
+		t.Errorf("expected ProjectID %q, got %q", req.ProjectID, gotReq.ProjectID)
+	}
+	if resp.Deployment.ID != "44444444-4444-4444-4444-444444444444" {
+		t.Errorf("unexpected deployment ID: %q", resp.Deployment.ID)
+	}
+	if resp.Message != "Deployment created successfully." {
+		t.Errorf("unexpected message: %q", resp.Message)
+	}
+}
+
+func TestDeploymentService_CreateDeployment_PlainPostgres_Validation(t *testing.T) {
+	svc := NewDeploymentService(&stubDeploymentRepo{})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "alice@example.com"))
+
+	// Missing token
+	if _, err := svc.CreateDeployment(context.Background(), validCreateDeploymentRequest()); err == nil {
+		t.Error("expected error when x-user-id-token is missing")
+	}
+
+	// Invalid projectId
+	req := validCreateDeploymentRequest()
+	req.ProjectID = "invalid-uuid"
+	if _, err := svc.CreateDeployment(ctx, req); err == nil {
+		t.Error("expected error for invalid projectId")
+	}
+
+	// Empty name
+	req = validCreateDeploymentRequest()
+	req.Name = ""
+	if _, err := svc.CreateDeployment(ctx, req); err == nil {
+		t.Error("expected error for empty name")
+	}
+
+	// Nil type
+	req = validCreateDeploymentRequest()
+	req.Type = nil
+	if _, err := svc.CreateDeployment(ctx, req); err == nil {
+		t.Error("expected error for nil type")
+	}
+
+	// Invalid type
+	invalidType := domain.DeploymentType("INVALID")
+	req = validCreateDeploymentRequest()
+	req.Type = &invalidType
+	if _, err := svc.CreateDeployment(ctx, req); err == nil {
+		t.Error("expected error for invalid type")
+	}
+
+	// Empty description
+	req = validCreateDeploymentRequest()
+	req.Description = ""
+	if _, err := svc.CreateDeployment(ctx, req); err == nil {
+		t.Error("expected error for empty description")
 	}
 }
 

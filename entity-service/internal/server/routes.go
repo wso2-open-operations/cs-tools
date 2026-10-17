@@ -646,6 +646,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeProjectSvc = pgProjectSvc
 	}
 	projectHandler := handler.NewProjectHandler(activeProjectSvc)
+	projectConsumptionHandler := handler.NewProjectConsumptionHandler(activeProjectSvc)
 
 	projectContactRepo := repository.NewProjectContactRepository(db)
 	var activeProjectContactSvc service.ProjectContactService
@@ -1613,6 +1614,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	instanceHandler := handler.NewInstanceHandler(activeInstanceSvc)
 
+	var instanceIngestionHandler *handler.InstanceIngestionHandler
+	if db != nil {
+		instanceIngestionRepo := repository.NewInstanceIngestionRepository(repository.NewScoped(db))
+		instanceIngestionSvc := service.NewInstanceIngestionService(instanceIngestionRepo)
+		instanceIngestionHandler = handler.NewInstanceIngestionHandler(instanceIngestionSvc)
+	}
+
 	itServiceRepo := repository.NewITServiceRepository(db)
 	var activeITServiceSvc service.ITServiceService
 	if cfg.DataSource == config.DataSourceServiceNow {
@@ -1932,6 +1940,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	mux.HandleFunc("GET /projects/{id}", projectHandler.GetProject)
 	mux.HandleFunc("POST /projects/search", projectHandler.SearchProjects)
+	// Product-consumption provisioning state, internal callers only: the status
+	// carries the project's client secret and HMAC secret keys, and the update
+	// replaces them. The caller is the subscription service (its client id in
+	// M2M_CLIENT_IDS); customers reach provisioning only through it.
+	mux.HandleFunc("GET /projects/{id}/consumption/status", internalOnly(accessSvc, projectConsumptionHandler.GetProjectConsumptionStatus))
+	mux.HandleFunc("POST /projects/{id}/consumption/status", internalOnly(accessSvc, projectConsumptionHandler.GetProjectConsumptionStatus))
+	mux.HandleFunc("PATCH /projects/{id}/consumption", internalOnly(accessSvc, projectConsumptionHandler.UpdateProjectConsumption))
+	mux.HandleFunc("POST /projects/{id}/consumption", internalOnly(accessSvc, projectConsumptionHandler.UpdateProjectConsumption))
 	mux.HandleFunc("POST /projects/{id}/contacts/search", projectMemberOnly(accessSvc, projectContactHandler.SearchProjectContacts))
 	mux.HandleFunc("GET /projects/{id}/contacts/{contactId}", projectMemberOnly(accessSvc, projectContactHandler.GetProjectContact))
 	if projectMembershipHandler != nil {
@@ -2270,6 +2286,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /instances/usages/search", instanceHandler.SearchInstanceUsage)
 	mux.HandleFunc("POST /instances/metrics/stats/search", instanceHandler.SearchInstanceMetricsStats)
 	mux.HandleFunc("POST /instances/usages/stats/search", instanceHandler.SearchInstanceUsageStats)
+	// Telemetry ingestion for product-consumption-tracking, internal callers
+	// only: the writes run as the caller with no project scoping of their own,
+	// and the secret key is the credential telemetry signatures are verified
+	// with. product-consumption-tracking's client id must be in M2M_CLIENT_IDS.
+	if instanceIngestionHandler != nil {
+		mux.HandleFunc("POST /instances/meta", internalOnly(accessSvc, instanceIngestionHandler.UpsertInstanceMeta))
+		mux.HandleFunc("POST /instances/info", internalOnly(accessSvc, instanceIngestionHandler.InsertInstanceInfo))
+		mux.HandleFunc("POST /instances/usage-stats", internalOnly(accessSvc, instanceIngestionHandler.InsertUsageStats))
+		mux.HandleFunc("POST /instances/daily-usages/batch", internalOnly(accessSvc, instanceIngestionHandler.ImportDailyUsagesBatch))
+		mux.HandleFunc("GET /projects/{key}/secret-key", internalOnly(accessSvc, instanceIngestionHandler.GetProjectSecretKey))
+		mux.HandleFunc("GET /deployments/by-number/{number}/consumption-secret", internalOnly(accessSvc, instanceIngestionHandler.GetDeploymentConsumptionSecret))
+	}
 
 	// Token validation always runs -- there is no config flag to disable it.
 	// The JWKS must load right here at startup: a wrong URL panics now instead

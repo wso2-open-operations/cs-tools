@@ -106,3 +106,23 @@ func (s *projectService) GetProjectByID(ctx context.Context, id string) (domain.
 	}
 	return s.repo.GetProjectByID(ctx, id, scope)
 }
+
+// GetProjectConsumptionStatus implements ProjectService.
+func (s *projectService) GetProjectConsumptionStatus(ctx context.Context, id string) (domain.ProjectConsumptionStatus, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ProjectConsumptionStatus{}, err
+	}
+	return s.repo.GetProjectConsumptionStatus(ctx, id)
+}
+
+// UpdateProjectConsumption implements ProjectService.
+func (s *projectService) UpdateProjectConsumption(ctx context.Context, id string, req domain.ProjectConsumptionUpdateRequest, updatedBy string) error {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return err
+	}
+	if updatedBy == "" {
+		updatedBy = "choreo-subscription-service"
+	}
+	return s.repo.UpdateProjectConsumption(ctx, id, req, updatedBy)
+}
+

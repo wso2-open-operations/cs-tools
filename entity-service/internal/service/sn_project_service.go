@@ -1033,3 +1033,20 @@ func (s *snProjectContactService) GetProjectContact(
 	}
 	return domain.ProjectContact{}, &apierror.NotFoundError{Msg: "contact not found on this project"}
 }
+
+// GetProjectConsumptionStatus implements ProjectService.
+func (s *snProjectService) GetProjectConsumptionStatus(ctx context.Context, id string) (domain.ProjectConsumptionStatus, error) {
+	if s.pgFallback != nil {
+		return s.pgFallback.GetProjectConsumptionStatus(ctx, id)
+	}
+	return domain.ProjectConsumptionStatus{}, fmt.Errorf("consumption status not supported without postgres fallback")
+}
+
+// UpdateProjectConsumption implements ProjectService.
+func (s *snProjectService) UpdateProjectConsumption(ctx context.Context, id string, req domain.ProjectConsumptionUpdateRequest, updatedBy string) error {
+	if s.pgFallback != nil {
+		return s.pgFallback.UpdateProjectConsumption(ctx, id, req, updatedBy)
+	}
+	return fmt.Errorf("consumption update not supported without postgres fallback")
+}
+

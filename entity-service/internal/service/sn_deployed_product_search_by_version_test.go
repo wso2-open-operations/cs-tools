@@ -122,6 +122,14 @@ func (f *fakeProjectService) GetProjectByID(context.Context, string) (domain.Pro
 	panic("fakeProjectService: GetProjectByID not implemented")
 }
 
+func (f *fakeProjectService) GetProjectConsumptionStatus(context.Context, string) (domain.ProjectConsumptionStatus, error) {
+	panic("fakeProjectService: GetProjectConsumptionStatus not implemented")
+}
+
+func (f *fakeProjectService) UpdateProjectConsumption(context.Context, string, domain.ProjectConsumptionUpdateRequest, string) error {
+	panic("fakeProjectService: UpdateProjectConsumption not implemented")
+}
+
 // alwaysMoreProjectService always reports HasMore: true and returns a full
 // page of throwaway projects regardless of offset, used only to force
 // fetchEligibleProjectIDs' safety bound to trip.
@@ -137,6 +145,14 @@ func (alwaysMoreProjectService) SearchProjects(_ context.Context, req domain.Sea
 
 func (alwaysMoreProjectService) GetProjectByID(context.Context, string) (domain.ProjectDetailsView, error) {
 	panic("alwaysMoreProjectService: GetProjectByID not implemented")
+}
+
+func (alwaysMoreProjectService) GetProjectConsumptionStatus(context.Context, string) (domain.ProjectConsumptionStatus, error) {
+	panic("alwaysMoreProjectService: GetProjectConsumptionStatus not implemented")
+}
+
+func (alwaysMoreProjectService) UpdateProjectConsumption(context.Context, string, domain.ProjectConsumptionUpdateRequest, string) error {
+	panic("alwaysMoreProjectService: UpdateProjectConsumption not implemented")
 }
 
 var (

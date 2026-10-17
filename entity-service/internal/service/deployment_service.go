@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -69,14 +70,33 @@ type deploymentSNCreator interface {
 	createDeploymentSNFirstDetails(ctx context.Context, req domain.CreateDeploymentRequest) (id, number, createdBy string, createdOn time.Time, err error)
 }
 
-// CreateDeployment implements DeploymentService. Not supported for the plain
-// PostgreSQL data source (s.snMirror == nil); SN-first under
-// DATA_SOURCE=postgres-servicenow-dual-write -- see createDeploymentSNFirst.
+// CreateDeployment implements DeploymentService. If snMirror is configured
+// (DATA_SOURCE=postgres-servicenow-dual-write), delegates to ServiceNow first;
+// on the plain PostgreSQL data source (s.snMirror == nil), generates continuous
+// sequential deployment numbers natively via next_portal_deployment_number().
 func (s *deploymentService) CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest) (domain.CreateDeploymentResponse, error) {
 	if s.snMirror != nil {
 		return s.createDeploymentSNFirst(ctx, req)
 	}
-	return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "CreateDeployment is not supported for the PostgreSQL data source"}
+
+	if err := validateCreateDeploymentRequest(&req); err != nil {
+		return domain.CreateDeploymentResponse{}, err
+	}
+
+	actor, err := s.resolveActorEmail(ctx)
+	if err != nil {
+		return domain.CreateDeploymentResponse{}, err
+	}
+
+	created, err := s.repo.CreateDeployment(ctx, req, actor)
+	if err != nil {
+		return domain.CreateDeploymentResponse{}, err
+	}
+
+	return domain.CreateDeploymentResponse{
+		Message:    "Deployment created successfully.",
+		Deployment: created,
+	}, nil
 }
 
 // createDeploymentSNFirst implements CreateDeployment's
@@ -182,6 +202,30 @@ func (s *deploymentService) UpdateDeployment(ctx context.Context, req domain.Upd
 	}, nil
 }
 
+// validateCreateDeploymentRequest holds the validation rules for
+// CreateDeployment shared across implementations (UUID shape for projectId,
+// non-empty name and description, and known valid deployment type).
+func validateCreateDeploymentRequest(req *domain.CreateDeploymentRequest) error {
+	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
+		return err
+	}
+	if req.Name == "" {
+		return &apierror.ValidationError{Msg: "name is required"}
+	}
+	if req.Type == nil {
+		return &apierror.ValidationError{Msg: "type is required"}
+	}
+	normalized := domain.DeploymentType(strings.ToLower(string(*req.Type)))
+	if _, ok := validDeploymentTypes[normalized]; !ok {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+	}
+	req.Type = &normalized
+	if req.Description == "" {
+		return &apierror.ValidationError{Msg: "description is required"}
+	}
+	return nil
+}
+
 // validateUpdateDeploymentRequest holds the validation rules for
 // UpdateDeployment shared by both implementations -- originally only
 // snDeploymentService.UpdateDeployment enforced these (UUID shape, exactly
@@ -255,6 +299,15 @@ func (s *deploymentService) SearchDeployments(ctx context.Context, req domain.Se
 	}
 	if err := validateUUIDs("ids", req.IDs); err != nil {
 		return domain.SearchDeploymentsResponse{}, err
+	}
+	if len(req.Numbers) > 50 {
+		return domain.SearchDeploymentsResponse{}, &apierror.ValidationError{Msg: "numbers may hold at most 50 entries"}
+	}
+	for i, n := range req.Numbers {
+		req.Numbers[i] = strings.TrimSpace(n)
+		if req.Numbers[i] == "" || len(req.Numbers[i]) > 50 {
+			return domain.SearchDeploymentsResponse{}, &apierror.ValidationError{Msg: "numbers must be deployment numbers of 1 to 50 characters"}
+		}
 	}
 
 	views, total, err := s.repo.SearchDeployments(ctx, req)

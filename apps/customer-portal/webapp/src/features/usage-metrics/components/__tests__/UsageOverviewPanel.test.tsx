@@ -78,6 +78,14 @@ vi.mock("@features/project-details/api/usePostDeploymentInstancesUsagesSearch", 
   }),
 }));
 
+vi.mock("@features/project-details/api/usePostProjectInstancesUsagesStats", () => ({
+  default: () => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 describe("UsageOverviewPanel", () => {
   it("renders environment rows and calls toggle handler", () => {
     const onToggleEnvironment = vi.fn();

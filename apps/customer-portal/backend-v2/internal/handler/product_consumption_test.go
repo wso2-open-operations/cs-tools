@@ -17,6 +17,8 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/productconsumption"
 )
 
@@ -41,6 +44,12 @@ type fakeLicenseProductConsumptionClient struct {
 	calls   int
 	license productconsumption.License
 	err     error
+
+	gotImportEmail string
+	gotImportZip   []byte
+	importCalls    int
+	importRes      productconsumption.ImportUsageResponse
+	importErr      error
 }
 
 func (f *fakeLicenseProductConsumptionClient) ProcessLicenseDownload(_ context.Context, req productconsumption.LicenseDownloadRequest) (productconsumption.License, error) {
@@ -49,8 +58,11 @@ func (f *fakeLicenseProductConsumptionClient) ProcessLicenseDownload(_ context.C
 	return f.license, f.err
 }
 
-func (f *fakeLicenseProductConsumptionClient) ImportDeploymentUsage(context.Context, string, []byte) (productconsumption.ImportUsageResponse, error) {
-	return productconsumption.ImportUsageResponse{}, nil
+func (f *fakeLicenseProductConsumptionClient) ImportDeploymentUsage(_ context.Context, email string, zipFile []byte) (productconsumption.ImportUsageResponse, error) {
+	f.gotImportEmail = email
+	f.gotImportZip = zipFile
+	f.importCalls++
+	return f.importRes, f.importErr
 }
 
 // fakeProjectAccessChecker controls whether GetProject succeeds, standing in
@@ -58,12 +70,57 @@ func (f *fakeLicenseProductConsumptionClient) ImportDeploymentUsage(context.Cont
 type fakeProjectAccessChecker struct {
 	err   error
 	calls int
+
+	// SearchDeployments: the deployments the caller can see, by number.
+	visibleDeployments map[string]bool
+	searchErr          error
+	gotSearch          entity.SearchDeploymentsRequest
+	searchCalls        int
 }
 
 func (f *fakeProjectAccessChecker) GetProject(context.Context, string) (entity.ProjectDetailsView, error) {
 	f.calls++
 	return entity.ProjectDetailsView{}, f.err
 }
+
+func (f *fakeProjectAccessChecker) SearchDeployments(_ context.Context, req entity.SearchDeploymentsRequest) (entity.SearchDeploymentsResponse, error) {
+	f.searchCalls++
+	f.gotSearch = req
+	if f.searchErr != nil {
+		return entity.SearchDeploymentsResponse{}, f.searchErr
+	}
+	var resp entity.SearchDeploymentsResponse
+	for _, n := range req.Numbers {
+		if f.visibleDeployments[n] {
+			resp.Deployments = append(resp.Deployments, entity.DeploymentView{})
+		}
+	}
+	return resp, nil
+}
+
+// usageReportZip builds a ZIP the way WSO2 products export a usage report: one
+// JSON file whose export_metadata names the deployment.
+func usageReportZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		fw, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+const testUsageReport = `{"export_metadata":{"export_version":"1.0","is_valid":true,"deployment_id":"DEP000002442","signature":"sig"},` +
+	`"deployment_meta_information":[],"deployment_information":[],"daily_usage_count":[]}`
 
 func newLicenseMux(product productConsumptionClient, entityClient entityProjectAccessChecker) *http.ServeMux {
 	h := NewProductConsumptionHandler(product, entityClient)
@@ -162,5 +219,189 @@ func TestGetDeploymentLicense_RejectsInvalidUUID(t *testing.T) {
 	}
 	if entityClient.calls != 0 || product.calls != 0 {
 		t.Fatalf("GetProject calls = %d, ProcessLicenseDownload calls = %d, want 0 and 0", entityClient.calls, product.calls)
+	}
+}
+
+func newUsageMux(product productConsumptionClient, entityClient entityProjectAccessChecker) *http.ServeMux {
+	h := NewProductConsumptionHandler(product, entityClient)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /deployment-usages", h.ImportDeploymentUsage)
+	return mux
+}
+
+func authedBinaryRequest(method, url string, body []byte, contentType string) *http.Request {
+	req := httptest.NewRequest(method, url, bytes.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return req.WithContext(middleware.WithUserInfo(req.Context(), &middleware.UserInfo{
+		UserID: "user-1",
+		Email:  "customer@example.com",
+	}))
+}
+
+func TestImportDeploymentUsage_Unauthorized(t *testing.T) {
+	product := &fakeLicenseProductConsumptionClient{}
+	entityClient := &fakeProjectAccessChecker{}
+
+	mux := newUsageMux(product, entityClient)
+	req := httptest.NewRequest(http.MethodPost, "/deployment-usages", bytes.NewReader([]byte("zip-data")))
+	req.Header.Set("Content-Type", "application/zip")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if product.importCalls != 0 {
+		t.Fatalf("importCalls = %d, want 0", product.importCalls)
+	}
+}
+
+func TestImportDeploymentUsage_RejectsNonZipContentType(t *testing.T) {
+	product := &fakeLicenseProductConsumptionClient{}
+	entityClient := &fakeProjectAccessChecker{}
+
+	mux := newUsageMux(product, entityClient)
+	req := authedBinaryRequest(http.MethodPost, "/deployment-usages", []byte("not-a-zip"), "text/plain")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if product.importCalls != 0 {
+		t.Fatalf("importCalls = %d, want 0", product.importCalls)
+	}
+}
+
+func TestImportDeploymentUsage_Success(t *testing.T) {
+	msg := "Usage imported successfully."
+	product := &fakeLicenseProductConsumptionClient{
+		importRes: productconsumption.ImportUsageResponse{
+			Message: &msg,
+			Result:  map[string]any{"imported": true},
+		},
+	}
+	entityClient := &fakeProjectAccessChecker{visibleDeployments: map[string]bool{"DEP000002442": true}}
+
+	testZipBytes := usageReportZip(t, map[string]string{"usage-report.json": testUsageReport})
+	mux := newUsageMux(product, entityClient)
+	req := authedBinaryRequest(http.MethodPost, "/deployment-usages", testZipBytes, "application/zip; charset=binary")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if product.importCalls != 1 {
+		t.Fatalf("importCalls = %d, want 1", product.importCalls)
+	}
+	if got := entityClient.gotSearch; len(got.Numbers) != 1 || got.Numbers[0] != "DEP000002442" || !got.IncludeInactive {
+		t.Errorf("deployment lookup = %+v, want the report's number, inactive included", got)
+	}
+	if product.gotImportEmail != "customer@example.com" {
+		t.Errorf("gotImportEmail = %q, want %q", product.gotImportEmail, "customer@example.com")
+	}
+	if !bytes.Equal(product.gotImportZip, testZipBytes) {
+		t.Errorf("gotImportZip = %q, want %q", product.gotImportZip, testZipBytes)
+	}
+
+	var res struct {
+		Message string         `json:"message"`
+		Result  map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if res.Message != msg {
+		t.Errorf("Message = %q, want %q", res.Message, msg)
+	}
+	if res.Result["imported"] != true {
+		t.Errorf("Result[imported] = %v, want true", res.Result["imported"])
+	}
+}
+
+func TestImportDeploymentUsage_MapsUpstreamError(t *testing.T) {
+	product := &fakeLicenseProductConsumptionClient{
+		importErr: apierror.NewUpstreamError(http.StatusBadGateway, []byte(`{"error":"tracking service unavailable"}`)),
+	}
+	entityClient := &fakeProjectAccessChecker{visibleDeployments: map[string]bool{"DEP000002442": true}}
+
+	mux := newUsageMux(product, entityClient)
+	req := authedBinaryRequest(http.MethodPost, "/deployment-usages", usageReportZip(t, map[string]string{"r.json": testUsageReport}), "application/zip")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+// A report for a deployment the caller cannot see is refused before anything is
+// forwarded: entity-service's search runs as the caller and returns nothing.
+func TestImportDeploymentUsage_RefusesADeploymentTheCallerCannotSee(t *testing.T) {
+	product := &fakeLicenseProductConsumptionClient{}
+	entityClient := &fakeProjectAccessChecker{visibleDeployments: map[string]bool{}}
+
+	mux := newUsageMux(product, entityClient)
+	req := authedBinaryRequest(http.MethodPost, "/deployment-usages", usageReportZip(t, map[string]string{"r.json": testUsageReport}), "application/zip")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if product.importCalls != 0 {
+		t.Fatalf("importCalls = %d, want 0", product.importCalls)
+	}
+}
+
+func TestImportDeploymentUsage_RefusesWhatIsNotAUsageReport(t *testing.T) {
+	cases := map[string][]byte{
+		"not a zip":            []byte("PK\x03\x04sample-zip-content"),
+		"two files":            usageReportZip(t, map[string]string{"a.json": testUsageReport, "b.json": testUsageReport}),
+		"not json":             usageReportZip(t, map[string]string{"report.csv": "a,b"}),
+		"no export_metadata":   usageReportZip(t, map[string]string{"r.json": `{"nodeId":"n","dailyUsages":[]}`}),
+		"no deployment number": usageReportZip(t, map[string]string{"r.json": `{"export_metadata":{"deployment_id":" "}}`}),
+		"malformed json":       usageReportZip(t, map[string]string{"r.json": `{"export_metadata":`}),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			product := &fakeLicenseProductConsumptionClient{}
+			entityClient := &fakeProjectAccessChecker{visibleDeployments: map[string]bool{"DEP000002442": true}}
+			mux := newUsageMux(product, entityClient)
+			req := authedBinaryRequest(http.MethodPost, "/deployment-usages", body, "application/zip")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if entityClient.searchCalls != 0 || product.importCalls != 0 {
+				t.Fatalf("searchCalls = %d, importCalls = %d, want 0 and 0", entityClient.searchCalls, product.importCalls)
+			}
+		})
+	}
+}
+
+func TestImportDeploymentUsage_DeploymentLookupFailureIsNotForwarded(t *testing.T) {
+	product := &fakeLicenseProductConsumptionClient{}
+	entityClient := &fakeProjectAccessChecker{searchErr: apierror.NewUpstreamError(http.StatusInternalServerError, nil)}
+
+	mux := newUsageMux(product, entityClient)
+	req := authedBinaryRequest(http.MethodPost, "/deployment-usages", usageReportZip(t, map[string]string{"r.json": testUsageReport}), "application/zip")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code < 500 {
+		t.Fatalf("status = %d, want a 5xx", rec.Code)
+	}
+	if product.importCalls != 0 {
+		t.Fatalf("importCalls = %d, want 0", product.importCalls)
 	}
 }
