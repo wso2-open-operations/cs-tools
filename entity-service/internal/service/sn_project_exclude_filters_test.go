@@ -328,3 +328,46 @@ func TestSNProjectService_SearchProjects_ExcludeFiltersErrorsRatherThanTruncate(
 		t.Fatalf("expected *apierror.ServiceUnavailableError, got %T: %v", err, err)
 	}
 }
+
+// TestSNProjectService_SearchProjects_FiltersBySfIDs verifies that SfIDs keeps
+// only projects with a matching Salesforce id (exact match; a project with no
+// sfId is dropped) and that it triggers the page-through-and-filter path on
+// its own.
+func TestSNProjectService_SearchProjects_FiltersBySfIDs(t *testing.T) {
+	withSf := func(p map[string]any, sf any) map[string]any { p["sfId"] = sf; return p }
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"projects": []map[string]any{
+				withSf(snTestProject("11111111111111111111111111111111", "A", "A1", "Subscription", "Open"), "SF001"),
+				withSf(snTestProject("22222222222222222222222222222222", "B", "B1", "Subscription", "Open"), "SF002"),
+				withSf(snTestProject("33333333333333333333333333333333", "C", "C1", "Subscription", "Open"), "SF0011"),
+				withSf(snTestProject("44444444444444444444444444444444", "D", "D1", "Subscription", "Open"), nil),
+			},
+			"totalRecords": 4, "offset": 0, "limit": 100,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	resp, err := svc.SearchProjects(contextWithUserIDToken("token"), domain.SearchProjectsRequest{
+		Pagination: domain.Pagination{Limit: 10},
+		SfIDs:      []string{"SF001", "SF002"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Total != 2 || len(resp.Projects) != 2 || resp.Projects[0].Key != "A1" || resp.Projects[1].Key != "B1" {
+		t.Errorf("unexpected result: total=%d projects=%+v", resp.Total, resp.Projects)
+	}
+}
+
+func TestValidateProjectSearchFilters_SfIDs(t *testing.T) {
+	for _, bad := range [][]string{{""}, {"  "}, {" SF001"}, {"SF001 "}} {
+		if err := validateProjectSearchFilters(domain.SearchProjectsRequest{SfIDs: bad}); err == nil {
+			t.Errorf("sfIds %q accepted, want validation error", bad)
+		}
+	}
+	if err := validateProjectSearchFilters(domain.SearchProjectsRequest{SfIDs: []string{"SF001"}}); err != nil {
+		t.Errorf("valid sfIds rejected: %v", err)
+	}
+}

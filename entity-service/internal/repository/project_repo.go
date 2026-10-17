@@ -162,6 +162,14 @@ func buildProjectSearchWhere(req domain.SearchProjectsRequest, scope SearchScope
 		argIdx++
 	}
 
+	// sf_id is nullable (migration 0095 dropped NOT NULL) and a NULL never
+	// matches ANY(), so projects with no Salesforce id are simply not returned.
+	if len(req.SfIDs) > 0 {
+		where += fmt.Sprintf(" AND p.sf_id = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.SfIDs)
+		argIdx++
+	}
+
 	// wso2_closure_state_enum's values ('OPEN', 'READ_ONLY', 'CLOSED',
 	// 'RESTRICTED', 'SUSPENDED', migration 0014) are the same vocabulary as
 	// ExcludeClosureStates' ServiceNow-sourced values ("Open"/"Suspended"/

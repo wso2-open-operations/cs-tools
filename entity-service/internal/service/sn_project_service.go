@@ -248,7 +248,7 @@ func (s *snProjectService) SearchProjects(ctx context.Context, req domain.Search
 
 	token := middleware.UserIDTokenFromContext(ctx)
 
-	if len(req.ExcludeClosureStates) == 0 && len(req.ExcludeSubscriptionTypes) == 0 && len(req.ExcludeProjectKeys) == 0 {
+	if len(req.ExcludeClosureStates) == 0 && len(req.ExcludeSubscriptionTypes) == 0 && len(req.ExcludeProjectKeys) == 0 && len(req.SfIDs) == 0 {
 		views, total, err := s.fetchProjectsPage(ctx, req, accountSysid, token, req.Pagination.Limit, req.Pagination.Offset)
 		if err != nil {
 			return domain.SearchProjectsResponse{}, err
@@ -307,7 +307,8 @@ const snExcludeFilterPageSize = maxLimit
 // fetchAllProjectsFiltered pages through every ServiceNow match for req
 // (ignoring req.Pagination — the caller applies that to the returned slice)
 // and returns the subset that matches none of ExcludeClosureStates,
-// ExcludeSubscriptionTypes, or ExcludeProjectKeys.
+// ExcludeSubscriptionTypes, or ExcludeProjectKeys, and, when req.SfIDs is set,
+// keeps only projects whose Salesforce id is one of them.
 func (s *snProjectService) fetchAllProjectsFiltered(ctx context.Context, req domain.SearchProjectsRequest, accountSysid, token string) ([]domain.ProjectView, error) {
 	excludeClosure := make(map[string]struct{}, len(req.ExcludeClosureStates))
 	for _, v := range req.ExcludeClosureStates {
@@ -320,6 +321,11 @@ func (s *snProjectService) fetchAllProjectsFiltered(ctx context.Context, req dom
 	excludeKey := make(map[string]struct{}, len(req.ExcludeProjectKeys))
 	for _, v := range req.ExcludeProjectKeys {
 		excludeKey[v] = struct{}{}
+	}
+
+	includeSfID := make(map[string]struct{}, len(req.SfIDs))
+	for _, v := range req.SfIDs {
+		includeSfID[v] = struct{}{}
 	}
 
 	var filtered []domain.ProjectView
@@ -340,6 +346,14 @@ func (s *snProjectService) fetchAllProjectsFiltered(ctx context.Context, req dom
 			}
 			if _, excluded := excludeKey[v.Key]; excluded {
 				continue
+			}
+			if len(includeSfID) > 0 {
+				if v.SfID == nil {
+					continue
+				}
+				if _, ok := includeSfID[*v.SfID]; !ok {
+					continue
+				}
 			}
 			filtered = append(filtered, v)
 		}
@@ -834,6 +848,17 @@ func validateProjectSearchFilters(req domain.SearchProjectsRequest) error {
 		}
 		if k != strings.TrimSpace(k) {
 			return &apierror.ValidationError{Msg: "excludeProjectKeys must not contain leading or trailing whitespace: " + strconv.Quote(k)}
+		}
+	}
+	// Same shapes rejected as ExcludeProjectKeys, for the same reason: an
+	// empty or padded id could never equal a real Salesforce id, so it would
+	// silently match nothing instead of failing loudly.
+	for _, id := range req.SfIDs {
+		if strings.TrimSpace(id) == "" {
+			return &apierror.ValidationError{Msg: "sfIds must not contain empty values"}
+		}
+		if id != strings.TrimSpace(id) {
+			return &apierror.ValidationError{Msg: "sfIds must not contain leading or trailing whitespace: " + strconv.Quote(id)}
 		}
 	}
 	return nil

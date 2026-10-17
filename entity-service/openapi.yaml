@@ -16621,6 +16621,17 @@ components:
             Excludes projects whose Key is any of the given values (exact,
             case-sensitive match). Unrelated to closure state or subscription
             type. Supported on both data sources.
+        sfIds:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only projects whose Salesforce id is any of the given values
+            (exact, case-sensitive match; empty or padded values are rejected
+            with 400). Supported on both data sources: SQL filter on
+            Postgres; applied in Go on ServiceNow by paging through every
+            match (503 if that exceeds the page bound), and a project the
+            ServiceNow response carries no sfId for is never returned.
 
     ProjectAccountRef:
       type: object

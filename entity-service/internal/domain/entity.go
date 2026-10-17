@@ -1565,6 +1565,15 @@ type SearchProjectsRequest struct {
 	// Matching is exact and case-sensitive (project keys are opaque
 	// identifiers, not display text).
 	ExcludeProjectKeys []string `json:"excludeProjectKeys,omitempty"`
+	// SfIDs restricts results to projects whose Salesforce id (ProjectView.SfID)
+	// is any of the given values — the include-side counterpart of
+	// ExcludeProjectKeys, for callers that hold Salesforce ids rather than
+	// platform UUIDs. Matching is exact and case-sensitive. The Postgres data
+	// source applies it as a real SQL filter against project.sf_id; the
+	// ServiceNow data source has no upstream filter for it, so it is applied
+	// in Go by paging through every match, with the same page-bound caveat as
+	// ExcludeClosureStates.
+	SfIDs []string `json:"sfIds,omitempty"`
 }
 
 // ProjectSearchAccountRef is the account reference embedded in a project

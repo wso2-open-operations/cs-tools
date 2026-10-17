@@ -68,6 +68,7 @@ func main() {
 	itServiceHandler := handler.NewITServiceHandler(entityClient)
 	alertIncidentMappingHandler := handler.NewAlertIncidentMappingHandler(entityClient)
 	cloudStatusHandler := handler.NewCloudStatusHandler(entityClient)
+	catalogHandler := handler.NewCatalogHandler(entityClient)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +97,10 @@ func main() {
 	mux.HandleFunc("POST /services/search", itServiceHandler.SearchITServices)
 	mux.HandleFunc("POST /alert-incident-mappings", alertIncidentMappingHandler.CreateAlertIncidentMapping)
 	mux.HandleFunc("POST /alert-incident-mappings/lookup", alertIncidentMappingHandler.LookupAlertIncidentMappings)
+	mux.HandleFunc("GET /deployed-products/search", catalogHandler.SearchDeployedProducts)
+	mux.HandleFunc("GET /deployments/search", catalogHandler.SearchDeployments)
+	mux.HandleFunc("GET /products/search", catalogHandler.SearchProducts)
+	mux.HandleFunc("GET /products/{id}/versions/search", catalogHandler.SearchProductVersions)
 	mux.HandleFunc("GET /cloud-status/monitors", cloudStatusHandler.GetMonitors)
 	mux.HandleFunc("GET /cloud-status/incidents", cloudStatusHandler.GetIncidents)
 	mux.HandleFunc("GET /cloud-status/availabilities", cloudStatusHandler.GetAvailabilities)

@@ -255,6 +255,30 @@ func (c *Client) SearchITServices(ctx context.Context, body []byte) ([]byte, err
 	return c.do(ctx, http.MethodPost, "/services/search", body)
 }
 
+// SearchProducts calls POST /products/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchProducts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/products/search", body)
+}
+
+// SearchProductVersions calls POST /products/{id}/versions/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchProductVersions(ctx context.Context, productID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/products/%s/versions/search", url.PathEscape(productID)), body)
+}
+
+// SearchDeployments calls POST /deployments/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchDeployments(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/deployments/search", body)
+}
+
+// SearchDeployedProducts calls POST /deployed-products/search on the entity service.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *Client) SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/deployed-products/search", body)
+}
+
 // GetCloudStatusMonitors calls GET /cloud-status/monitors on the entity
 // service. Response is returned as raw JSON; typed response structs are
 // deferred, as elsewhere here.
