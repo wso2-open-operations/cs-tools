@@ -127,6 +127,7 @@ import UserScanPage from "@features/csm-user-scan/pages/UserScanPage";
 import UsageMetricsPage from "@features/csm-usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/csm-customer-health/pages/CustomerHealthDashboardPage";
 import CustomerHealthDetailPage from "@features/csm-customer-health/pages/CustomerHealthDetailPage";
+import CsReportPage from "@features/csm-reports/pages/CsReportPage";
 
 /**
  * Landing for `/`. Defers to AuthGuard's post-login deep-link restore when a
@@ -684,6 +685,10 @@ export default function App(): JSX.Element {
                   <Route
                     path="customers/projects/:projectId/timelogs-report"
                     element={<TimelogsReportPage />}
+                  />
+                  <Route
+                    path="customers/projects/:projectId/cs-report/:sysId"
+                    element={<CsReportPage />}
                   />
                 </Route>
               </Route>

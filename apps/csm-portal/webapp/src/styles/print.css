@@ -97,4 +97,12 @@
     text-overflow: clip !important;
     white-space: normal !important;
   }
+
+  .engagement-description {
+    display: block !important;
+    -webkit-line-clamp: unset !important;
+    -webkit-box-orient: unset !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
 }

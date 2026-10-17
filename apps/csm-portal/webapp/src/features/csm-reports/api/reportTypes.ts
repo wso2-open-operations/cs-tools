@@ -51,3 +51,81 @@ export interface TimeCardDetails extends DataStruct {
   isBillable: string;
   state: string;
 }
+
+export interface CSReportDetailsResponse extends DataStruct {
+  subscriptionDetails: ReportInfo;
+  casesRecords: CaseDetails[];
+  slaDetails: SlaDetails;
+  projectDeployments: ProjectDeployment[];
+  monthlyCounts: MonthlyCounts[];
+}
+
+export interface ReportInfo extends DataStruct {
+  projectName: string;
+  projectKey: string;
+  projectType: string;
+  accountName: string;
+  startDate: string;
+  endDate: string;
+  supportTier: string;
+  subscription: string;
+  totalQueryHours: string;
+  consumedQueryHours: string;
+}
+
+export interface CaseDetails extends DataStruct {
+  caseSysId: string;
+  caseNumber: string;
+  engagementType: string;
+  caseType: string;
+  casePriority: string;
+  caseState: string;
+  opened: string;
+  description: string;
+  updated: string;
+  deployment: string;
+  productName: string;
+}
+
+export interface SlaDetails extends DataStruct {
+  slaRecords: SlaRecords[];
+  slaPerformanceStats?: SlaPerformanceStats;
+}
+
+export interface SlaRecords extends DataStruct {
+  task: string;
+  slaDefinition: string;
+  businessElapsedPercentage: string;
+}
+
+export interface SlaPerformanceStats extends DataStruct {
+  Workaround: SlaMetric;
+  Resolution: SlaMetric;
+  Response: SlaMetric;
+}
+
+export interface SlaMetric extends DataStruct {
+  fraction: number | string;
+  percentage: string;
+}
+
+export interface ProjectDeployment extends DataStruct {
+  name: string;
+  products: ProductDetails[];
+}
+
+export interface ProductDetails extends DataStruct {
+  name: string;
+  version: string;
+  supportStatus: string;
+  eolDate: string;
+  cores: string;
+  tps: string;
+  updateLevelInfo?: number | null;
+  earliestPossibleSupportEOLDate?: string;
+}
+
+export interface MonthlyCounts extends DataStruct {
+  yearAndMonth: string;
+  counts: { incidentCount: number; queryCount: number };
+}
