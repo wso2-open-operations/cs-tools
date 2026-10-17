@@ -346,6 +346,19 @@ type Dispatcher struct {
 	// one. Released once the whole record succeeds or record.NoMoreRetries
 	// is true — same lifecycle as done; see handleProjectContactInvited.
 	identityExisted map[string]bool
+
+	// now is the clock chataudience.Resolve is given, so a test can pin
+	// the time of day the Americas/weekend audiences depend on. nil means
+	// time.Now; see clock.
+	now func() time.Time
+}
+
+// clock returns d.now(), or time.Now() when no clock is set.
+func (d *Dispatcher) clock() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
 }
 
 // recordState is recordsMu/records' per-baseKey bookkeeping — see
@@ -1164,7 +1177,7 @@ func (d *Dispatcher) checkFrustration(ctx context.Context, record eventbus.Recor
 		// than adding to it.
 		audiences = []string{chataudience.Migration}
 	} else {
-		audiences = chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, time.Now(), d.googleChat.HasAudienceSpace)
+		audiences = chataudience.Resolve(p.Team, p.IsEvaluationAccount, p.ProjectOnboardingStatus, d.clock(), d.googleChat.HasAudienceSpace)
 	}
 	for _, audience := range audiences {
 		if err := d.googleChat.SendFrustrationAlert(ctx, audience, p.CaseNumber, p.WSO2CaseID, p.Product, result.Reason, result.FrustratedLevel, caseLink); err != nil {

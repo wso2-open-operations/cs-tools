@@ -189,8 +189,14 @@ func testDurations() map[string]map[string]time.Duration {
 	}
 }
 
+// weekdayDaytime is a Wednesday at 11:00 IST, outside both the Americas
+// (21:00-06:00 IST) and weekend coverage windows, so chataudience.Resolve
+// adds no audience that depends on when the test happens to run.
+var weekdayDaytime = time.Date(2026, time.October, 14, 5, 30, 0, 0, time.UTC)
+
 func newTestEngine(st *fakeStore, chat *fakeChat, pub *fakePublisher) *Engine {
-	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, durations: testDurations(), slaEmailSendingEnabled: true}
+	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, durations: testDurations(), slaEmailSendingEnabled: true,
+		now: func() time.Time { return weekdayDaytime }}
 }
 
 // --- RegisterClocks ---

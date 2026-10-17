@@ -1093,6 +1093,11 @@ func (m *mockEscalationDetector) callCount() int {
 	return len(m.calls)
 }
 
+// weekdayDaytime is a Wednesday at 11:00 IST, outside both the Americas
+// (21:00-06:00 IST) and weekend coverage windows, so chataudience.Resolve
+// adds no audience that depends on when the test happens to run.
+var weekdayDaytime = time.Date(2026, time.October, 14, 5, 30, 0, 0, time.UTC)
+
 // TestDispatcher_Handle_CommentAdded_FrustrationDetected_SendsChatAlert
 // verifies the full frustration-detection path: a customer-authored comment
 // is sent to the detector, and a ShouldAlert result sends a Chat alert routed
@@ -1107,6 +1112,7 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetected_SendsChatAlert(t *te
 	}}
 	d := NewDispatcher(&mockEmailSender{}, chat, &mockCallSender{}, links, true, false, nil, true, "", nil).
 		WithFrustrationDetection(detector)
+	d.now = func() time.Time { return weekdayDaytime }
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Something broke","caseComment":"this is unacceptable, still no update","commentId":"C-1","recipients":["test-recipient@example.com"],"authorEmail":"customer@acme.com","product":"WSO2 API Manager"}}`)}
 
@@ -1251,6 +1257,7 @@ func TestDispatcher_Handle_CommentAdded_FrustrationDetection_NotRepeatedWhenEmai
 	detector := &mockEscalationDetector{result: escalation.Result{ShouldAlert: true, Reason: "Repeated unanswered follow-ups", FrustratedLevel: 0.91}}
 	d := NewDispatcher(email, chat, &mockCallSender{}, links, true, false, nil, true, "", nil).
 		WithFrustrationDetection(detector)
+	d.now = func() time.Time { return weekdayDaytime }
 
 	record := eventbus.Record{Topic: "case-events", Partition: 1, Offset: 7, Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Something broke","caseComment":"still no update, unacceptable","commentId":"C-1","recipients":["test-recipient@example.com"],"authorEmail":"customer@acme.com","product":"WSO2 API Manager"}}`)}
 

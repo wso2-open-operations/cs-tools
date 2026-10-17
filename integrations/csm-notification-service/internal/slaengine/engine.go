@@ -176,6 +176,18 @@ type Engine struct {
 	// breach email should that reaction be rebuilt. Non-SLA alerts are
 	// unaffected.
 	slaEmailSendingEnabled bool
+	// now is the clock chataudience.Resolve is given, so a test can pin
+	// the time of day the Americas/weekend audiences depend on. nil means
+	// time.Now; see clock.
+	now func() time.Time
+}
+
+// clock returns e.now(), or time.Now() when no clock is set.
+func (e *Engine) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
 }
 
 // NewEngine constructs an Engine. entity is the same *EntityClient the
@@ -649,7 +661,7 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		openedAt = meta.StartedAt.UTC().Format("2006-01-02 15:04:05") + " (UTC)"
 	}
 
-	audiences := chataudience.Resolve(meta.Team, false, "", time.Now(), e.chat.HasAudienceSpace)
+	audiences := chataudience.Resolve(meta.Team, false, "", e.clock(), e.chat.HasAudienceSpace)
 	caseLink := e.links.CSMLink(caseID)
 	for _, audience := range audiences {
 		if err := e.chat.SendSLABreachAlert(ctx, audience, clockType, tierLabel(tier), caseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType, meta.Product, meta.Team, "", meta.Priority, meta.State, openedAt, caseLink); err != nil {
