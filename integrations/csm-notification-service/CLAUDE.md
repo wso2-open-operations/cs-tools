@@ -363,8 +363,8 @@ ticker, with Redis as its only durable state — the same `REDIS_URL`/
   other delivery decision does, and it is **exclusive** — `Channel.Uses`
   reports false for `log` against `both`, so a log ladder wires that notifier
   and nothing else; a live ladder that also emitted "would notify" lines would
-  read like a dry run mid-page. It logs the recipient's **name only**, never
-  an address or a number. **A chat card does not wake anyone**
+  read like a dry run mid-page. It logs the recipient's `recipientId`
+  (`Recipient.LogID`), never a name, address or number. **A chat card does not wake anyone**
   - the initial Chat alert already exists and the ladder exists because it
   was not enough overnight - so `chat` alone is a real reduction in what the
   feature does. Where it earns its place is alongside the calls, giving the
@@ -750,6 +750,27 @@ every 20 s up to 3 min (still in progress at the end is `completed`, anything
 else `no-answer`), and PUTs `completed`/`no-answer`/`busy`/`failed` to
 `/team-schedule/paging-contacts/{userId}/test-result` (three attempts). A
 restart during the wait leaves the status `pending` (accepted for phase 1).
+
+**Call outcomes** (`call_outcome.go`, `ALERTING_CALL_OUTCOME_CHECK`, default
+off): a rung's call is logged `ALERT TRIGGERED ... status=queued`, which only
+says Twilio took it. With the flag on, `Engine.WithCallOutcomeWatcher` gives
+both engines one `CallOutcomeWatcher`, and every call `placeVia` places (a
+`ChannelCall` delivery with a sid) is asked of Twilio the same way a test call
+is -- after 60 s, every 20 s, up to 3 min -- then logged once as
+`escalation: call outcome` with `callSid`, `result`
+(`completed`/`no-answer`/`busy`/`failed`/`canceled`, or `unresolved` with the
+last `twilioStatus`), at info when answered and warn otherwise. Logging only:
+the ladder never reads it. Not a `StatusCallback` on purpose -- that needs a
+public route this service does not have. `completed` means Twilio connected
+the call; a voicemail pickup is `completed` too. A restart during the wait
+loses that line.
+
+**People in logs are ids.** Every paging log line names a person as
+`recipientId` = `Recipient.LogID()`: the CSM user id the Team Schedule gave
+(`Recipient.UserID`, filled from on-duty assignments and team members), else
+`e:` + 12 hex of the SHA-256 of the lower-cased email (heads and leads named in
+configuration have no user id), never a name, email or number. Chat cards and
+the execution summary still name people; they are for people to read.
 
 **Calls switch on when the ABT lead pool is verified.** Before any call is
 placed, `applySafety` asks the resolver for its whole lead pool

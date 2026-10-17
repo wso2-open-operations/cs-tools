@@ -163,25 +163,25 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 			if e164.MatchString(a.Number) {
 				out[i].Phone = a.Number
 				slog.DebugContext(ctx, "incident escalation: calling the recipient's number stored in CSM",
-					"recipient", out[i].Name, "source", a.Source)
+					"recipientId", out[i].LogID(), "source", a.Source)
 				continue
 			}
 			slog.WarnContext(ctx, "incident escalation: recipient's number in CSM is not E.164; not dialling it",
-				"recipient", out[i].Name, "source", a.Source)
+				"recipientId", out[i].LogID(), "source", a.Source)
 		}
 		// CSM has no number for them, or an older entity-service gave only the
 		// paging-only one, which comes after the profile: ask Asgardeo.
 		if p.lookup != nil {
-			out[i].Phone = p.number(ctx, out[i].Email, out[i].Name)
+			out[i].Phone = p.number(ctx, out[i])
 		}
 		if out[i].Phone == "" && a.Source == "" && a.Number != "" {
 			if e164.MatchString(a.Number) {
 				out[i].Phone = a.Number
 				slog.InfoContext(ctx, "incident escalation: no profile number; using the recipient's paging number",
-					"recipient", out[i].Name)
+					"recipientId", out[i].LogID())
 			} else {
 				slog.WarnContext(ctx, "incident escalation: recipient's paging number is not E.164; not dialling it",
-					"recipient", out[i].Name)
+					"recipientId", out[i].LogID())
 			}
 		}
 	}
@@ -289,9 +289,9 @@ func (p *ProfilePhoneResolver) LeadPool(ctx context.Context) ([]Recipient, error
 var errNoLeadPool = errors.New("resolver has no lead pool")
 
 // number is one person's profile number, or "" when there is none to dial.
-// The number itself is never logged.
-func (p *ProfilePhoneResolver) number(ctx context.Context, email, name string) string {
-	key := strings.ToLower(strings.TrimSpace(email))
+// The number itself is never logged, and the person is named by LogID.
+func (p *ProfilePhoneResolver) number(ctx context.Context, r Recipient) string {
+	key := strings.ToLower(strings.TrimSpace(r.Email))
 	now := p.now()
 
 	p.mu.Lock()
@@ -308,14 +308,14 @@ func (p *ProfilePhoneResolver) number(ctx context.Context, email, name string) s
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "incident escalation: could not read a recipient's profile phone number",
-			"recipient", name, "err", err)
+			"recipientId", r.LogID(), "err", err)
 		number, ttl = "", profilePhoneFailTTL
 	case number == "":
 		slog.InfoContext(ctx, "incident escalation: recipient has no mobile number on their CSM Portal profile",
-			"recipient", name)
+			"recipientId", r.LogID())
 	case !e164.MatchString(number):
 		slog.WarnContext(ctx, "incident escalation: recipient's profile phone number is not E.164; not dialling it",
-			"recipient", name)
+			"recipientId", r.LogID())
 		number = ""
 	}
 

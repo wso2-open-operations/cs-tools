@@ -354,7 +354,7 @@ func (r TeamScheduleResolver) onCallTier(ctx context.Context, at time.Time, ownT
 			continue
 		}
 		holders = append(holders, tierHolder{
-			Recipient: Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, ShiftCode: a.ShiftCode},
+			Recipient: Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, UserID: a.Engineer.UserID, ShiftCode: a.ShiftCode},
 			team:      r.keyOf(a.TeamKey),
 			zone:      zone,
 			onLeave:   a.OnLeave,
@@ -456,7 +456,7 @@ func (r TeamScheduleResolver) resolveSME(ctx context.Context, level Level, rc Ro
 			continue
 		}
 		seen[email] = true
-		p := Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, ShiftCode: a.ShiftCode}
+		p := Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, UserID: a.Engineer.UserID, ShiftCode: a.ShiftCode}
 		if a.OnLeave {
 			away = append(away, p)
 			continue

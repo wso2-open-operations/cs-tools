@@ -119,10 +119,9 @@ func (c Channel) Reaches() bool { return c != ChannelLog }
 // logNotifier is ChannelLog's delivery: one line per call, naming the rung and
 // who would have been reached.
 //
-// It logs the recipient's name and never their address or number. The name is
-// already on the chat card that a whole room can see; an address or a number is
-// neither, and a test channel is not a reason to start writing them to a log
-// that ships somewhere else.
+// It logs the recipient's LogID -- never their name, address or number. The
+// name is on the chat card a room can see, but the log ships somewhere else,
+// and a test channel is not a reason to start writing people into it.
 type logNotifier struct{}
 
 func (logNotifier) Channel() Channel { return ChannelLog }
@@ -135,7 +134,7 @@ func (logNotifier) Deliver(ctx context.Context, plan Plan, call PlannedCall) (De
 		"rung", call.Level.String(),
 		"role", rungRole(call.Level, plan.Trigger.Routing),
 		"attempt", call.Ordinal,
-		"name", call.Recipient.Name,
+		"recipientId", call.Recipient.LogID(),
 		"shift", call.Recipient.ShiftCode,
 		"hasNumber", call.Recipient.Phone != "",
 	)

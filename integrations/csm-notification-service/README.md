@@ -429,6 +429,7 @@ Requires Redis. The ladder starts only if escalation is enabled, a resolver can 
 | `PAGING_CONFIG_SOURCE` | `db` | `db` uses ladder settings saved in the entity service (Team Schedule alert settings) over the file's; `off` uses file and env only; `shadow` reads them, logs differences and keeps the file's. Unknown values act as `off`. Read once at start. Needs `CUSTOMER_ENTITY_BASE_URL`. | `off` |
 | `PAGING_CONFIG_WAIT` | `2m` | How long a `db` start retries the entity service (`0` tries once). On failure it uses the last settings stored in Redis, else the file's. | `30s` |
 | `PAGING_PHONE_SCIM_FALLBACK` | on | `false` stops asking the identity-admin service for numbers the entity service lacks. | `false` |
+| `ALERTING_CALL_OUTCOME_CHECK` | off | Log how each placed paging call ended (`escalation: call outcome`, `result=completed\|no-answer\|busy\|failed\|unresolved`), read from Twilio after the ring timeout. Logging only. | `true` |
 
 ### Server
 

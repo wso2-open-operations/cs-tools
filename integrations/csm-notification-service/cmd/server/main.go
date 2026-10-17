@@ -949,6 +949,14 @@ func main() {
 			// its own consumer group and its own store namespace, because a
 			// P0 CRE incident climbs both ladders at the same time and the
 			// two must not mistake each other for a redelivery.
+			// ALERTING_CALL_OUTCOME_CHECK (default false): log how each placed
+			// call ended, asked of Twilio after the ring timeout -- the log
+			// otherwise stops at "queued". Shared by both engines; logging only.
+			var callOutcomes *paging.CallOutcomeWatcher
+			if envBool("ALERTING_CALL_OUTCOME_CHECK", false) {
+				callOutcomes = paging.NewCallOutcomeWatcher(ctx, twilioClient)
+			}
+
 			ladders := []struct {
 				kind    paging.Ladder
 				name    string
@@ -1014,6 +1022,7 @@ func main() {
 						// code -- not configurable (see paging.Config).
 					},
 				)
+				escalationEngine.WithCallOutcomeWatcher(callOutcomes)
 
 				if l.kind == paging.LadderSRE && escalationCfg.SME.Enabled {
 					// The SME page runs on the dispatcher's sre-events
@@ -1066,7 +1075,8 @@ func main() {
 					"ladder", l.name,
 					"channel", string(channel),
 					"ssml", os.Getenv("INCIDENT_ESCALATION_SSML") == "true",
-					"sending", callSendingEnabled)
+					"sending", callSendingEnabled,
+					"callOutcomeCheck", callOutcomes != nil)
 				if l.kind == paging.LadderSRE && escalationCfg.SME.Enabled {
 					slog.Info("case paging: incident.special_ops_alert pages the SME through the SRE engine",
 						"channel", string(escalationCfg.SME.Channel))

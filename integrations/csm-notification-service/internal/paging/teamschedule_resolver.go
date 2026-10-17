@@ -666,7 +666,7 @@ func (r TeamScheduleResolver) withoutAway(ctx context.Context, in []Recipient, a
 	out := in[:0:0]
 	for _, p := range in {
 		if away[strings.ToLower(strings.TrimSpace(p.Email))] {
-			slog.InfoContext(ctx, "escalation: on leave; not calling them (onLeave: skip)", "recipient", p.Name)
+			slog.InfoContext(ctx, "escalation: on leave; not calling them (onLeave: skip)", "recipientId", p.LogID())
 			continue
 		}
 		out = append(out, p)
@@ -722,7 +722,7 @@ func (r TeamScheduleResolver) rotaMembers(ctx context.Context, at time.Time, shi
 		}
 		seen[a.Engineer.UserID] = true
 		out = append(out, Recipient{
-			Email: a.Engineer.Email, Name: a.Engineer.Name, ShiftCode: a.ShiftCode,
+			Email: a.Engineer.Email, Name: a.Engineer.Name, UserID: a.Engineer.UserID, ShiftCode: a.ShiftCode,
 		})
 	}
 	sortRecipients(out)
@@ -752,7 +752,7 @@ func (r TeamScheduleResolver) rotaMembersOnShifts(ctx context.Context, at time.T
 		}
 		seen[a.Engineer.UserID] = true
 		out = append(out, Recipient{
-			Email: a.Engineer.Email, Name: a.Engineer.Name, ShiftCode: a.ShiftCode,
+			Email: a.Engineer.Email, Name: a.Engineer.Name, UserID: a.Engineer.UserID, ShiftCode: a.ShiftCode,
 		})
 	}
 	sortRecipients(out)
@@ -798,7 +798,7 @@ func (r TeamScheduleResolver) rotaPair(ctx context.Context, at time.Time, teamKe
 			continue
 		}
 		seen[a.Engineer.UserID] = true
-		rec := Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, ShiftCode: a.ShiftCode}
+		rec := Recipient{Email: a.Engineer.Email, Name: a.Engineer.Name, UserID: a.Engineer.UserID, ShiftCode: a.ShiftCode}
 		if teamKey != "" && teamKeyFor(a.TeamKey) == teamKey {
 			own = append(own, rec)
 			continue
@@ -980,7 +980,7 @@ func (r TeamScheduleResolver) pickOnePerTeam(members []teamMember) []Recipient {
 	out := make([]Recipient, 0, len(order))
 	for _, key := range order {
 		m := byTeam[key]
-		out = append(out, Recipient{Email: m.Email, Name: m.Name})
+		out = append(out, Recipient{Email: m.Email, Name: m.Name, UserID: m.UserID})
 	}
 	return out
 }
@@ -1135,7 +1135,7 @@ func teamKeyFor(team string) string {
 func recipientsOf(members []teamMember) []Recipient {
 	var out []Recipient
 	for _, m := range members {
-		out = append(out, Recipient{Email: m.Email, Name: m.Name})
+		out = append(out, Recipient{Email: m.Email, Name: m.Name, UserID: m.UserID})
 	}
 	return out
 }

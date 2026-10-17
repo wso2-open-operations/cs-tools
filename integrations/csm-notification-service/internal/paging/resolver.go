@@ -321,6 +321,12 @@ func (rc RoutingContext) Rule() string {
 type Recipient struct {
 	Email string
 	Name  string
+	// UserID is the person's CSM user id, when the Team Schedule gave one
+	// (on-duty assignments and team members do; heads and leads named in
+	// configuration do not). Log lines name a recipient by it -- see LogID --
+	// never by name or email. Optional: a ladder stored before this existed
+	// decodes with it empty.
+	UserID string
 	// Phone is empty when the user profile has no mobile number. The
 	// specification's execution summary logs that case as
 	// [LEVEL_n][ERROR][NO_NUMBER][email] and carries on — a missing number

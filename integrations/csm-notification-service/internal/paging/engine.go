@@ -169,6 +169,9 @@ type Engine struct {
 	store         ladderStore
 	notes         incidentNotes
 	cfg           EngineConfig
+	// outcomes logs how each placed call ended (ALERTING_CALL_OUTCOME_CHECK);
+	// nil, the default, leaves it off. See call_outcome.go.
+	outcomes *CallOutcomeWatcher
 	// clock is time.Now unless a test substitutes one; the staleness check
 	// in start is the only thing that reads it, and it has to be testable
 	// against a trigger that is genuinely old.
@@ -239,6 +242,14 @@ func NewEngine(policies map[string]PriorityPolicy, resolver Resolver, calls *not
 			}
 		}
 	}
+	return e
+}
+
+// WithCallOutcomeWatcher has every call this engine places logged once more,
+// when Twilio says how it ended. Nil leaves it off; nothing about the ladder
+// changes either way.
+func (e *Engine) WithCallOutcomeWatcher(w *CallOutcomeWatcher) *Engine {
+	e.outcomes = w
 	return e
 }
 
@@ -1588,9 +1599,16 @@ func (e *Engine) placeVia(ctx context.Context, plan Plan, call PlannedCall, noti
 		slog.InfoContext(ctx, "escalation: ALERT TRIGGERED",
 			"incidentId", t.IncidentID, "rule", t.Routing.Rule(), "priority", t.Priority,
 			"level", call.Level.String(), "attempt", call.Ordinal,
-			"recipient", call.Recipient.Name, "to", maskPhone(call.Recipient.Phone),
+			"recipientId", call.Recipient.LogID(), "to", maskPhone(call.Recipient.Phone),
 			"channel", string(delivered.Channel), "ref", delivered.Ref,
 			"status", delivered.Status)
+		if delivered.Channel == ChannelCall && delivered.Ref != "" {
+			e.outcomes.watch(watchedCall{
+				incidentID: t.IncidentID, rule: t.Routing.Rule(), priority: t.Priority,
+				level: call.Level.String(), attempt: call.Ordinal,
+				recipientID: call.Recipient.LogID(), callSID: delivered.Ref,
+			})
+		}
 	}
 
 	// Record the call for the evening pairing's fairness rule, whatever the

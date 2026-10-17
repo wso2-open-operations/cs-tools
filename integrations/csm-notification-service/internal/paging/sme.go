@@ -365,7 +365,7 @@ func (e *Engine) startSMELadder(ctx context.Context, t Trigger, p specialOpsPres
 	}
 	first := st.Plan.Calls[0].Recipient
 	slog.InfoContext(ctx, "escalation: SME paged",
-		"incidentId", t.IncidentID, "smeTeam", t.Routing.SMETeam, "recipient", first.Name,
+		"incidentId", t.IncidentID, "smeTeam", t.Routing.SMETeam, "recipientId", first.LogID(),
 		"shift", first.ShiftCode, "channel", string(sme.Channel), "calls", len(st.Plan.Calls))
 	e.writeSMENote(ctx, t, p, &first, "", "")
 	return true, nil
