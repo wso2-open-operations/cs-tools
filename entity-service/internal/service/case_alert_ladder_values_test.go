@@ -91,6 +91,13 @@ func (f *fakeCaseAlertRepo) TeamFamilyByName(_ context.Context, name string) (st
 	return fam, ok, nil
 }
 
+// caseAlertCRENames are CRE teams no route group lists (a leadership team).
+var caseAlertCRENames = map[string]bool{"vega": true, "cre leadership": true}
+
+func (f *fakeCaseAlertRepo) IsCRETeamName(_ context.Context, name string) (bool, error) {
+	return caseAlertCRENames[strings.ToLower(strings.TrimSpace(name))], nil
+}
+
 func (f *fakeCaseAlertRepo) TeamTypeExists(_ context.Context, t string) (bool, error) {
 	return f.types[t], nil
 }

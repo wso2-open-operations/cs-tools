@@ -546,6 +546,10 @@ func main() {
 	var redisClient *redis.Client
 	var slaProducer *eventbus.Producer
 	var escalationConsumers []*eventbus.Consumer
+	// slaDurations is the SLA duration policy fetched below, kept for the
+	// Case Alerts rung email's "response SLA remaining time"; nil when the
+	// fetch failed (the email then uses the published defaults).
+	var slaDurations map[string]map[string]time.Duration
 	redisURL := os.Getenv("REDIS_URL")
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisURL != "" || redisAddr != "" {
@@ -616,6 +620,7 @@ func main() {
 		if err != nil {
 			slog.Error("slaengine: failed to fetch sla duration policy at startup, sla tracking is disabled for this run", "err", err)
 		} else {
+			slaDurations = durations
 			slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, durations, slaEntityClient, slaEmailSendingEnabled)
 			dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
@@ -1020,6 +1025,22 @@ func main() {
 					// consumer, not on this engine's: the engine ignores
 					// incident.special_ops_alert even when it reads that topic.
 					smePager = escalationEngine
+				}
+
+				// The rung email (cre.email): one email per rung, L1 to L4.
+				// It follows the service's email switches, not
+				// CALL_SENDING_ENABLED, so silencing the phones leaves it on
+				// and a debug run redirects it like every other email.
+				if l.kind == paging.LadderCRE && l.cfg.Email.Enabled {
+					escalationEngine.WithRungEmail(emailClient, paging.RungEmailSending{
+						Enabled:         emailSendingEnabled,
+						DebugMode:       emailDebugMode,
+						DebugRecipients: emailDebugRecipients,
+						SLADurations:    slaDurations,
+					})
+					slog.Info("case paging: rung emails are on for the CRE ladder",
+						"teamLists", len(l.cfg.Email.TeamLists), "emailSendingEnabled", emailSendingEnabled,
+						"emailDebugMode", emailDebugMode, "responseSLAFrom", map[bool]string{true: "sla-duration-policy", false: "published defaults"}[slaDurations != nil])
 				}
 
 				escalationCount := envInt("INCIDENT_ESCALATION_CONSUMER_COUNT", 1)

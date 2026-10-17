@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useState, type JSX } from "react";
 import type { ScheduleAssignment, ScheduleShift } from "../types";
 import { dayLabel, isRotationShift, partsInZone, timeOf, zoneDisplayName } from "../utils/rota";
+import { InlineSkeleton } from "./ScheduleSkeleton";
 
 interface NextRotationProps {
   /** The signed-in engineer's own rota, from today forward. */
@@ -103,7 +104,7 @@ export default function NextRotation({
     return (
       <div className="nextrot loading">
         <span className="nrlab">Your next rotation</span>
-        <span className="nrmuted">Looking…</span>
+        <InlineSkeleton label="Looking…" w="14em" />
       </div>
     );
   }

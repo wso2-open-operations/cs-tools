@@ -346,6 +346,12 @@ func TestCaseAlertIntegration_Values(t *testing.T) {
 	if _, ok, _ := repo.TeamFamilyByName(ctx, "no team has this name"); ok {
 		t.Fatal("a name no team has was found")
 	}
+	if cre, err := repo.IsCRETeamName(ctx, "no team has this name"); err != nil || cre {
+		t.Fatalf("IsCRETeamName(no team) = %v, %v", cre, err)
+	}
+	if cre, err := repo.IsCRETeamName(ctx, caseAlertFixtureTeam); err != nil || cre {
+		t.Fatalf("IsCRETeamName(an SRE team) = %v, %v", cre, err)
+	}
 
 	if err := repo.RecordApplied(ctx, "service:csm-notification-service", 9, "db", map[string]any{
 		"running": map[string]any{"ladders": map[string]any{"SRE": map[string]any{"timing.interval": map[string]any{"value": "5m", "source": "saved"}}}},

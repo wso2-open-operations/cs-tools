@@ -619,14 +619,27 @@ func (s *caseAlertSettingsService) SaveRoute(ctx context.Context, req domain.Sav
 	if w.GroupName == "" || len(w.GroupName) > maxCaseAlertGroupName {
 		return domain.CaseAlertGroupRoute{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupName must be 1 to %d characters", maxCaseAlertGroupName)}
 	}
-	// A route matches a case's or incident's assignment group by name, and
-	// those are CSM Portal teams now: a name no team has would never match.
+	// A route matches a case's or incident's assignment group by name. A CRE
+	// case's group is always a CSM Portal team. An SRE incident's may be a
+	// ServiceNow group no CSM Portal team has ("WSO2 IaaS Team"), so the SRE
+	// ladder also takes a name no team has -- but never a CRE team's, since
+	// CRE and SRE never page for each other.
 	groupFamily, ok, err := s.repo.TeamFamilyByName(ctx, w.GroupName)
 	if err != nil {
 		return domain.CaseAlertGroupRoute{}, err
 	}
-	if allowed := routeGroupFamilies[ladder]; !ok || !slices.Contains(allowed, groupFamily) {
+	allowed := routeGroupFamilies[ladder]
+	if ok && !slices.Contains(allowed, groupFamily) || !ok && ladder != familySRE {
 		return domain.CaseAlertGroupRoute{}, &apierror.ValidationError{Msg: fmt.Sprintf("groupName must be the name of a CSM Portal %s team", strings.Join(allowed, " or "))}
+	}
+	if !ok {
+		cre, err := s.repo.IsCRETeamName(ctx, w.GroupName)
+		if err != nil {
+			return domain.CaseAlertGroupRoute{}, err
+		}
+		if cre {
+			return domain.CaseAlertGroupRoute{}, &apierror.ValidationError{Msg: "groupName is a CRE team's; an SRE route cannot take a CRE team's incidents"}
+		}
 	}
 	if (w.TeamKey == "") == (w.RotaCode == "") {
 		return domain.CaseAlertGroupRoute{}, &apierror.ValidationError{Msg: "send exactly one of teamKey or rotaCode"}

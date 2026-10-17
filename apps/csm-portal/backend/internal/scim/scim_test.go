@@ -178,8 +178,8 @@ func TestClient_GetUserByID(t *testing.T) {
 					{"value": "role-id-2", "display": "app-csm-admin", "audienceType": "application"}
 				],
 				"groups": [
-					{"value": "group-id-1", "display": "csm-engineers"},
-					{"value": "group-id-2", "display": "csm-engineers"}
+					{"value": "group-id-1", "display": "DEFAULT/csm-engineers"},
+					{"value": "group-id-2", "display": "DEFAULT/csm-engineers"}
 				]
 			}`))
 		}))
@@ -208,13 +208,16 @@ func TestClient_GetUserByID(t *testing.T) {
 		}
 
 		// Same reasoning for groups: two distinct groups sharing a display
-		// name must both survive, by ID.
+		// name must both survive, by ID. The fixture's "DEFAULT/" prefix is
+		// the real shape Asgardeo returns (confirmed live) -- Name must come
+		// back with it stripped, exactly like a role member's email already
+		// does via emailFromDisplay.
 		wantGroups := []GroupAssignment{
 			{ID: "group-id-1", Name: "csm-engineers"},
 			{ID: "group-id-2", Name: "csm-engineers"},
 		}
 		if !reflect.DeepEqual(assignments.Groups, wantGroups) {
-			t.Errorf("assignments.Groups = %+v, want %+v", assignments.Groups, wantGroups)
+			t.Errorf("assignments.Groups = %+v, want %+v (the \"DEFAULT/\" prefix must be stripped)", assignments.Groups, wantGroups)
 		}
 	})
 

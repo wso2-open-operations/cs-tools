@@ -18,6 +18,7 @@
 
 import { useMemo, useState, type JSX } from "react";
 import type { ScheduleActivity } from "../types";
+import ScheduleSkeleton from "./ScheduleSkeleton";
 
 interface RecentChangesProps {
   activity: ScheduleActivity[];
@@ -166,7 +167,7 @@ export default function RecentChanges({
         </button>
       </div>
       {isLoading ? (
-        <div className="offnone">Loading changes…</div>
+        <ScheduleSkeleton variant="list" label="Loading changes…" rows={3} />
       ) : isError ? (
         <div className="offnone" role="alert">
           Could not load the recent changes. Try again in a moment.

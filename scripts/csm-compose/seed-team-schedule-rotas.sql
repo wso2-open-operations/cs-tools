@@ -37,7 +37,9 @@ FROM (VALUES
     ('cloud-core',     'WSO2 Cloud · Core',           'sme-cloud-core'),
     ('moesif',         'Moesif',                      'sme-moesif')
 ) AS v(key, display, type)
-ON CONFLICT (id) DO NOTHING;
+-- No conflict target: migration 0235 now creates these same teams under
+-- random ids, so a clash comes on the key (team_key_unique), not the id.
+ON CONFLICT DO NOTHING;
 
 -- IaaS's windows, seeded inactive by 0200, are switched on by migration 0231,
 -- as on every other deployment. They used to be switched on here, which is

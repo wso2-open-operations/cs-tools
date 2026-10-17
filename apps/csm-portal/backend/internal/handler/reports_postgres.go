@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/viewer"
@@ -35,6 +36,8 @@ type entityReportsClient interface {
 	GetProject(ctx context.Context, id string) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
 	SearchTimeCards(ctx context.Context, body []byte) ([]byte, error)
+	SearchDeployments(ctx context.Context, body []byte) ([]byte, error)
+	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
 }
 
 type entityTimeCardRef struct {
@@ -49,6 +52,7 @@ type entityTimeCardView struct {
 	HasBillable bool               `json:"hasBillable"`
 	State       *string            `json:"state"`
 	User        *entityTimeCardRef `json:"user"`
+	Case        *entityTimeCardRef `json:"case"`
 }
 
 type entitySearchTimeCardsRequest struct {
@@ -57,7 +61,8 @@ type entitySearchTimeCardsRequest struct {
 }
 
 type entitySearchTimeCardsFilter struct {
-	CaseID string `json:"caseId,omitempty"`
+	CaseID     string   `json:"caseId,omitempty"`
+	ProjectIDs []string `json:"projectIds,omitempty"`
 }
 
 type entitySearchTimeCardsResponse struct {
@@ -66,10 +71,9 @@ type entitySearchTimeCardsResponse struct {
 }
 
 // postgresReportsClient implements reportsClient by calling entity-service
-// (Postgres). The former SLA and CS reports are retired rather than ported:
-// their statistics (SLA percentile breakdowns, monthly case counts,
-// subscription/SLA summaries) only ever existed inside ServiceNow scoped-app
-// scripts, with no equivalent data or business rules on the Postgres side.
+// (Postgres). The CS report is built from the project, its cases, and its
+// deployments. SLA percentile clocks are not stored in Postgres, so that
+// report stays retired.
 type postgresReportsClient struct {
 	entity entityReportsClient
 }
@@ -79,6 +83,27 @@ type postgresReportsClient struct {
 // handler already uses.
 func NewPostgresReportsClient(entity entityReportsClient) *postgresReportsClient {
 	return &postgresReportsClient{entity: entity}
+}
+
+// displayTimeCardState turns entity-service's lowercase time-card state
+// into the label the report shows ("Approved", and the rest).
+func displayTimeCardState(state string) string {
+	switch strings.ToLower(state) {
+	case "approved":
+		return "Approved"
+	case "pending":
+		return "Pending"
+	case "submitted":
+		return "Submitted"
+	case "rejected":
+		return "Rejected"
+	case "processed":
+		return "Processed"
+	case "recalled":
+		return "Recalled"
+	default:
+		return state
+	}
 }
 
 // formatHoursMinutes converts a fractional-hours value to the report's
@@ -203,15 +228,15 @@ func (c *postgresReportsClient) searchAllCases(ctx context.Context, filters enti
 	}
 }
 
-// searchAllTimeCards pages through entity-service's SearchTimeCards for a
-// single case, returning every time card rather than just the first
-// entitySearchPageLimit.
-func (c *postgresReportsClient) searchAllTimeCards(ctx context.Context, caseID string) ([]entityTimeCardView, error) {
+// searchAllProjectTimeCards pages through every time card on the project.
+// One project search replaces a search per case, which made this report
+// take minutes and outlive the request timeout.
+func (c *postgresReportsClient) searchAllProjectTimeCards(ctx context.Context, projectID string) ([]entityTimeCardView, error) {
 	var all []entityTimeCardView
 	for offset := 0; ; offset += entitySearchPageLimit {
 		body, err := json.Marshal(entitySearchTimeCardsRequest{
 			Pagination: entityPagination{Limit: entitySearchPageLimit, Offset: offset},
-			Filters:    entitySearchTimeCardsFilter{CaseID: caseID},
+			Filters:    entitySearchTimeCardsFilter{ProjectIDs: []string{projectID}},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("marshal entity-service time-cards request: %w", err)
@@ -231,11 +256,9 @@ func (c *postgresReportsClient) searchAllTimeCards(ctx context.Context, caseID s
 	}
 }
 
-// GetTimeLogBreakdown implements reportsClient, paging through every
-// case in the project and every time card per case (see
-// searchAllCases/searchAllTimeCards) rather than reading a single
-// entitySearchPageLimit-sized page and truncating the rest, which ServiceNow's
-// own version of this report never did either.
+// GetTimeLogBreakdown implements reportsClient. Cases are paged through
+// searchAllCases. Time cards are one project search, then attached to the
+// case they belong to.
 func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string) (viewer.TimeLogBreakdownDetails, error) {
 	project, err := c.resolveProject(ctx, projectID)
 	if err != nil {
@@ -247,6 +270,20 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 		entityCaseSort{Field: "createdOn", Order: "desc"})
 	if err != nil {
 		return viewer.TimeLogBreakdownDetails{}, err
+	}
+
+	cardsByCase := map[string][]entityTimeCardView{}
+	if len(cases) > 0 {
+		allCards, err := c.searchAllProjectTimeCards(ctx, project.ID)
+		if err != nil {
+			return viewer.TimeLogBreakdownDetails{}, err
+		}
+		for _, tc := range allCards {
+			if tc.Case == nil || tc.Case.ID == "" {
+				continue
+			}
+			cardsByCase[tc.Case.ID] = append(cardsByCase[tc.Case.ID], tc)
+		}
 	}
 
 	result := viewer.TimeLogBreakdownDetails{
@@ -265,14 +302,13 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 			displayState = state
 		}
 
-		timeCards, err := c.searchAllTimeCards(ctx, cv.ID)
-		if err != nil {
-			return viewer.TimeLogBreakdownDetails{}, err
-		}
-
+		timeCards := cardsByCase[cv.ID]
+		_, caseType := reportCaseKind(cv)
 		caseResult := viewer.TimeLogBreakdownCase{
+			CaseSysID:        cv.ID,
 			CaseNumber:       cv.Number,
 			CaseID:           cv.InternalID,
+			CaseType:         caseType,
 			ShortDescription: derefStr(cv.Subject),
 			State:            displayState,
 			TimeCards:        make([]viewer.TimeCardDetails, 0, len(timeCards)),
@@ -282,18 +318,23 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 		for _, tc := range timeCards {
 			totalHours += tc.TotalTime
 			tcState := derefStr(tc.State)
-			if tc.HasBillable && tcState == "approved" {
+			if tc.HasBillable && strings.EqualFold(tcState, "approved") {
 				consumedHours += tc.TotalTime
 			}
 			isBillable := "false"
 			if tc.HasBillable {
 				isBillable = "true"
 			}
+			loggedBy := ""
+			if tc.User != nil {
+				loggedBy = tc.User.Name
+			}
 			caseResult.TimeCards = append(caseResult.TimeCards, viewer.TimeCardDetails{
 				Total:      formatHoursMinutes(tc.TotalTime),
 				CreatedOn:  tc.WorkDate,
+				CreatedBy:  loggedBy,
 				IsBillable: isBillable,
-				State:      tcState,
+				State:      displayTimeCardState(tcState),
 			})
 		}
 		caseResult.TotalHours = formatHoursMinutes(totalHours)

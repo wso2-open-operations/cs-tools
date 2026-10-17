@@ -723,14 +723,17 @@ func main() {
 	// EXCEPT the /usage-metrics/* routes further down, which are registered
 	// directly on the broader PermUsageMetricsViewer instead -- see that
 	// permission's own doc comment for why this one domain's audience is
-	// wider than its siblings' -- and the Customer Health routes (/customer-
+	// wider than its siblings' -- the Customer Health routes (/customer-
 	// health/* plus the GET /products and GET /abt-teams lists its filters
 	// read), which use PermViewCustomerHealth so a cs_engineer or admin
-	// reaches them without also holding Viewer.
+	// reaches them without also holding Viewer, and the project reports
+	// (GET /report-details and GET /generate-timelogs-breakdown-report),
+	// which use PermView.
 	route("GET /accounts/{accountId}/escalations", handler.PermViewerAccess, viewerHandlers.accountEsc.GetAccountEscalations)
 	route("GET /products", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetProducts)
 	route("GET /abt-teams", handler.PermViewCustomerHealth, viewerHandlers.lookups.GetABTTeams)
-	route("GET /generate-timelogs-breakdown-report", handler.PermViewerAccess, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
+	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
+	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
 	route("POST /scan-user", handler.PermViewerAccess, viewerHandlers.userScan.ScanUser)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)

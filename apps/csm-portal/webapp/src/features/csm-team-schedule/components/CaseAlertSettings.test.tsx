@@ -233,6 +233,33 @@ describe("CaseAlertSettings", () => {
     expect(screen.getByText(/^✓ Saved/)).toHaveTextContent("✓ Saved 2 changes.");
   });
 
+  it("redirects an SRE assignment group that is not a CSM Portal team, typed by name", async () => {
+    render(<CaseAlertSettings chain="SRE_SAAS" />);
+    fireEvent.change(screen.getByLabelText("When an incident is assigned to"), {
+      target: { value: "\u0000other" },
+    });
+    fireEvent.change(screen.getByLabelText("send its alerts to"), {
+      target: { value: "team:apollo" },
+    });
+    expect(
+      screen.getByText(
+        "A redirect is saved with this tab's Submit. The alert service uses it after its next restart.",
+      ),
+    ).toBeInTheDocument();
+    // No name typed yet: nothing to add.
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Assignment group name"), {
+      target: { value: "  WSO2 IaaS Team " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText(/^Added to this tab's changes:/)).toHaveTextContent(
+      "Added to this tab's changes: redirect from WSO2 IaaS Team to Apollo. Submit to save them.",
+    );
+    expect(screen.queryByLabelText("Assignment group name")).not.toBeInTheDocument();
+    await submit();
+    expect(saveRoute.mutateAsync).toHaveBeenCalledWith({ ladder: "SRE", groupName: "WSO2 IaaS Team", teamKey: "apollo" });
+  });
+
   it("sends an SME team's incidents to a whole rota, picked from lists", async () => {
     render(<CaseAlertSettings chain="SRE_SAAS" />);
     expect(
@@ -425,6 +452,10 @@ describe("CaseAlertSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Other teams")).not.toBeInTheDocument();
+    // A CRE case's group is always a CSM Portal team: no typed name.
+    expect(
+      screen.queryByRole("option", { name: "Another assignment group…" }),
+    ).not.toBeInTheDocument();
   });
 
 });

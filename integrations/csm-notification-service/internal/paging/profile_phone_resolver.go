@@ -285,6 +285,11 @@ func (p *ProfilePhoneResolver) LeadPool(ctx context.Context) ([]Recipient, error
 	return p.fill(ctx, pool), nil
 }
 
+// Unwrap is the wrapped resolver, for a reader that needs people but not
+// their numbers (the rung email): asking through the wrapper would look up a
+// number for everyone for nothing.
+func (p *ProfilePhoneResolver) Unwrap() Resolver { return p.inner }
+
 // errNoLeadPool: the wrapped resolver cannot name a lead pool.
 var errNoLeadPool = errors.New("resolver has no lead pool")
 

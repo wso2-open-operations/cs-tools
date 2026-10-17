@@ -140,6 +140,81 @@ func TestScimRoleAssignments_UnmarshalJSON(t *testing.T) {
 	}
 }
 
+// TestScimGroupAssignments_UnmarshalJSON mirrors TestScimRoleAssignments_UnmarshalJSON
+// for groups, with one addition every case below exercises: a group's own
+// SCIM "display" comes back prefixed "<domain>/<name>" the same way a role
+// member's email does (confirmed live against a real deployment) -- Name
+// must always come back with that prefix already stripped, never the raw
+// "<domain>/..." value.
+func TestScimGroupAssignments_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		want    []GroupAssignment
+		wantErr bool
+	}{
+		{
+			name: "array of value/display objects (the real shape), domain prefix stripped",
+			json: `[{"value":"11111111-1111-1111-1111-111111111111","display":"DEFAULT/example-group-one"},{"value":"22222222-2222-2222-2222-222222222222","display":"DEFAULT/example-group-two"}]`,
+			want: []GroupAssignment{
+				{ID: "11111111-1111-1111-1111-111111111111", Name: "example-group-one"},
+				{ID: "22222222-2222-2222-2222-222222222222", Name: "example-group-two"},
+			},
+		},
+		{
+			name: "two distinct groups sharing the same display name keep distinct IDs",
+			json: `[{"value":"11111111-1111-1111-1111-111111111111","display":"DEFAULT/example-group"},{"value":"22222222-2222-2222-2222-222222222222","display":"DEFAULT/example-group"}]`,
+			want: []GroupAssignment{
+				{ID: "11111111-1111-1111-1111-111111111111", Name: "example-group"},
+				{ID: "22222222-2222-2222-2222-222222222222", Name: "example-group"},
+			},
+		},
+		{
+			name: "single value/display object, domain prefix stripped",
+			json: `{"value":"22222222-2222-2222-2222-222222222222","display":"DEFAULT/example-group-two"}`,
+			want: []GroupAssignment{{ID: "22222222-2222-2222-2222-222222222222", Name: "example-group-two"}},
+		},
+		{
+			name: "array of strings, domain prefix stripped, no id available",
+			json: `["DEFAULT/example-group-one","DEFAULT/example-group-two"]`,
+			want: []GroupAssignment{{Name: "example-group-one"}, {Name: "example-group-two"}},
+		},
+		{
+			name: "bare string, domain prefix stripped, no id available",
+			json: `"DEFAULT/example-group-two"`,
+			want: []GroupAssignment{{Name: "example-group-two"}},
+		},
+		{
+			name: "a display with no domain prefix at all is kept as-is",
+			json: `{"value":"33333333-3333-3333-3333-333333333333","display":"example-group-no-prefix"}`,
+			want: []GroupAssignment{{ID: "33333333-3333-3333-3333-333333333333", Name: "example-group-no-prefix"}},
+		},
+		{name: "empty string", json: `""`, want: nil},
+		{name: "null", json: `null`, want: nil},
+		{name: "empty array", json: `[]`, want: []GroupAssignment{}},
+		{name: "malformed", json: `42`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got scimGroupAssignments
+			err := json.Unmarshal([]byte(tt.json), &got)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual([]GroupAssignment(got), tt.want) {
+				t.Errorf("got %#v, want %#v", []GroupAssignment(got), tt.want)
+			}
+		})
+	}
+}
+
 // TestSearchUser_ExtractsRolesFromValueObjects proves SearchUser's own
 // end-to-end decoding (scimSearchResponse -> scimUser -> UserInfo) survives
 // the real object-array shape, not just the isolated scimRoles unit above.

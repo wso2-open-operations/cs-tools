@@ -161,6 +161,16 @@ beforeEach(() => {
 });
 
 describe("Team chat routing", () => {
+  it("says in the add dialog that a routing takes effect after the alert service restarts", () => {
+    render(<CaseAlertSettings chain="SRE_SAAS" />);
+    const { dialog } = openAdd();
+    expect(
+      within(dialog).getByText(
+        "Saved with this tab's Submit. The alert service uses it after its next restart.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("lists only the routings saved here, with the hint and last test: the space alone", () => {
     render(<CaseAlertSettings chain="SRE_SAAS" />);
     expect(

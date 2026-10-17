@@ -264,6 +264,7 @@ function SettingsPanel({
         ladderChannel={ladderChannel}
         roomsOnly
         webhooksEnabled={s.webhooksEnabled}
+        appliedNote={whenUsed(s)}
         onError={setError}
         onSaved={onSaved}
       />
@@ -406,6 +407,7 @@ function Redirects({
           rooms={rooms}
           ladderChannel={ladderChannel}
           canEdit={canRoutes}
+          appliedNote={whenUsed(s)}
           onError={onError}
           onSaved={onSaved}
         />
@@ -413,6 +415,9 @@ function Redirects({
     </>
   );
 }
+
+/** whenUsed's usual answer, for a dialog not told the mode. */
+const DEFAULT_APPLIED_NOTE = "The alert service uses it after its next restart.";
 
 /** When the alert service starts using a saved change. */
 function whenUsed(s: Settings): string {
@@ -423,7 +428,7 @@ function whenUsed(s: Settings): string {
     case "off":
       return "The alert service could not use the saved settings at its last start; it uses them after a restart that accepts them.";
     default:
-      return "The alert service uses it after its next restart.";
+      return DEFAULT_APPLIED_NOTE;
   }
 }
 
@@ -468,6 +473,8 @@ interface TeamChatRoutingProps {
   /** Only the chat space is set here: how a team is alerted stays the file's. */
   roomsOnly: boolean;
   webhooksEnabled: boolean;
+  /** When the alert service starts using a saved change (whenUsed). */
+  appliedNote: string;
   onError: (msg: string | null) => void;
   onSaved: (what: string) => void;
 }
@@ -487,6 +494,7 @@ function TeamChatRouting({
   ladderChannel,
   roomsOnly,
   webhooksEnabled,
+  appliedNote,
   onError,
   onSaved,
 }: TeamChatRoutingProps): JSX.Element {
@@ -588,6 +596,7 @@ function TeamChatRouting({
                 showActions={canAdd}
                 roomsOnly={roomsOnly}
                 webhooksEnabled={webhooksEnabled}
+                appliedNote={appliedNote}
                 onError={onError}
                 onSaved={onSaved}
               />
@@ -603,6 +612,7 @@ function TeamChatRouting({
           ladderChannel={ladderChannel}
           roomsOnly={roomsOnly}
           webhooksEnabled={webhooksEnabled}
+          appliedNote={appliedNote}
           returnFocus={addRef}
           onClose={() => setAdding(false)}
           onSaved={onSaved}
@@ -622,6 +632,7 @@ interface ChatRowProps {
   showActions?: boolean;
   roomsOnly: boolean;
   webhooksEnabled: boolean;
+  appliedNote?: string;
   onError: (msg: string | null) => void;
   onSaved: (what: string) => void;
 }
@@ -636,6 +647,7 @@ function ChatRow({
   showActions = canEdit,
   roomsOnly,
   webhooksEnabled,
+  appliedNote,
   onError,
   onSaved,
 }: ChatRowProps): JSX.Element {
@@ -810,6 +822,7 @@ function ChatRow({
               ladderChannel={ladderChannel}
               roomsOnly={roomsOnly}
               webhooksEnabled={webhooksEnabled}
+              appliedNote={appliedNote}
               returnFocus={editRef}
               onClose={() => setEditing(false)}
               onSaved={onSaved}
@@ -836,6 +849,8 @@ interface RoomDialogProps {
   /** Only the space is set: a team's channel is kept as it is. */
   roomsOnly: boolean;
   webhooksEnabled: boolean;
+  /** When the alert service starts using a saved change (whenUsed). */
+  appliedNote?: string;
   returnFocus: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onSaved: (what: string) => void;
@@ -856,6 +871,7 @@ function RoomDialog({
   ladderChannel,
   roomsOnly,
   webhooksEnabled,
+  appliedNote = DEFAULT_APPLIED_NOTE,
   returnFocus,
   onClose,
   onSaved,
@@ -1025,6 +1041,9 @@ function RoomDialog({
             {error}
           </p>
         ) : null}
+        <p className="cas-sub cas-applied">
+          Saved with this tab&apos;s Submit. {appliedNote}
+        </p>
         <div className="cp-modal-actions">
           <button type="button" className="btn sm" onClick={onClose}>
             Cancel
@@ -1057,7 +1076,16 @@ function SetupStep({
 }: SetupStepProps): JSX.Element | null {
   const drafts = useCaseAlertDrafts();
   const [confirm, setConfirm] = useState(false);
-  const values = valuesToCopy(settings, ladder);
+  // Values already in this tab's changes are on their way: once queued (and
+  // after Submit, once saved) they no longer count as the file's.
+  const queued = new Set(
+    drafts.changes.flatMap((c) =>
+      c.kind === "values" && c.input.ladder === ladder ? Object.keys(c.input.values) : [],
+    ),
+  );
+  const values = Object.fromEntries(
+    Object.entries(valuesToCopy(settings, ladder)).filter(([k]) => !queued.has(k)),
+  );
   const count = Object.keys(values).length;
   if (count === 0) return null;
   const word = count === 1 ? "setting" : "settings";
@@ -1201,6 +1229,8 @@ interface RouteTableProps {
   /** The ladder's own channel from the file, when reported. */
   ladderChannel?: string;
   canEdit: boolean;
+  /** When the alert service starts using a saved change (whenUsed). */
+  appliedNote?: string;
   onError: (msg: string | null) => void;
   onSaved: (what: string) => void;
 }
@@ -1217,7 +1247,8 @@ const ROUTE_WORDS: Record<
     help:
       "An incident is alerted to the SRE team it's assigned to in CSM Portal. If it's assigned to a different " +
       "team, such as an SME team, choose which SRE team should get its alerts: that team's chat space gets the " +
-      "card, and its people on call get the calls, as set in Team chat routing above.",
+      "card, and its people on call get the calls, as set in Team chat routing above. An assignment group " +
+      "that isn't a CSM Portal team (such as WSO2 IaaS Team) can be typed in under \"Another assignment group\".",
     when: "When an incident is assigned to",
     empty:
       "No redirects. Each incident is alerted to the SRE team it's assigned to.",
@@ -1235,6 +1266,10 @@ const ROUTE_WORDS: Record<
 
 /** The CSM Portal teams a ladder's routes can be for: a CRE case's team, or
  *  an SRE incident's SRE or SME team. */
+/** The group list's "type a name" entry: an SRE incident's assignment group
+ *  that no CSM Portal team has. Not a name any team can have. */
+const OTHER_GROUP = "\u0000other";
+
 const ROUTE_GROUP_FAMILIES: Record<
   CaseAlertLadder,
   CaseAlertTeamOption["family"][]
@@ -1250,6 +1285,7 @@ function RouteTable({
   rooms,
   ladderChannel,
   canEdit,
+  appliedNote = DEFAULT_APPLIED_NOTE,
   onError,
   onSaved,
 }: RouteTableProps): JSX.Element {
@@ -1257,6 +1293,9 @@ function RouteTable({
   const family = familyOfLadder(ladder);
   const words = ROUTE_WORDS[ladder];
   const [group, setGroup] = useState("");
+  // The typed name when group is OTHER_GROUP (SRE only).
+  const [otherGroup, setOtherGroup] = useState("");
+  const groupName = group === OTHER_GROUP ? otherGroup.trim() : group;
   // "team:<key>" or "rota:<code>": one list, the ladder's teams first.
   const [target, setTarget] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -1307,7 +1346,8 @@ function RouteTable({
     if (at < 0) return;
     const kind = target.slice(0, at);
     const value = target.slice(at + 1);
-    const what = `redirect from ${groupLabel(group)} to ${
+    if (!groupName) return;
+    const what = `redirect from ${groupLabel(groupName)} to ${
       kind === "team" ? teamLabel(value) : `every team on ${rotaLabel(value)}`
     }`;
     drafts.add({
@@ -1316,12 +1356,13 @@ function RouteTable({
       kind: "route",
       input: {
         ladder,
-        groupName: group,
+        groupName,
         ...(kind === "team" ? { teamKey: value } : { rotaCode: value }),
       },
     });
     onSaved(what);
     setGroup("");
+    setOtherGroup("");
     setTarget("");
   };
 
@@ -1426,8 +1467,25 @@ function RouteTable({
                   </optgroup>
                 ) : null;
               })}
+              {ladder === "SRE" ? (
+                <optgroup label="Not a CSM Portal team">
+                  <option value={OTHER_GROUP}>Another assignment group…</option>
+                </optgroup>
+              ) : null}
             </select>
           </label>
+          {group === OTHER_GROUP ? (
+            <label>
+              Assignment group name
+              <input
+                type="text"
+                value={otherGroup}
+                maxLength={255}
+                placeholder="As the incident carries it, e.g. WSO2 IaaS Team"
+                onChange={(e) => setOtherGroup(e.target.value)}
+              />
+            </label>
+          ) : null}
           <label>
             send its alerts to
             <select value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -1455,11 +1513,16 @@ function RouteTable({
           <button
             type="submit"
             className="btn sm"
-            disabled={busy || !group || !target}
+            disabled={busy || !groupName || !target}
           >
             Add
           </button>
         </form>
+      ) : null}
+      {canEdit ? (
+        <p className="cas-sub cas-applied">
+          A redirect is saved with this tab&apos;s Submit. {appliedNote}
+        </p>
       ) : null}
     </>
   );

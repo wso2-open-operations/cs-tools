@@ -228,6 +228,8 @@ describe("CaseAlertLadderSettings", () => {
       "Added to this tab's changes: 3 CRE settings from the file. Submit to save them.",
     );
     expect(saveValues.mutateAsync).not.toHaveBeenCalled();
+    // Queued: the bar goes, rather than offering the same settings again.
+    expect(screen.queryByText(/still come/)).not.toBeInTheDocument();
     await submit();
     expect(saveValues.mutateAsync).toHaveBeenCalledTimes(1);
     expect(saveValues.mutateAsync).toHaveBeenCalledWith({

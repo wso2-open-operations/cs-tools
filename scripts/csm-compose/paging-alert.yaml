@@ -203,6 +203,28 @@ cre:
     cre: {name: "", email: "", phone: ""}
     cs:  {name: "", email: "", phone: ""}
 
+  # One email per rung of a customer case's chain, sent when the rung opens and
+  # stopped by the same acknowledgement as the calls. LEVEL_0 gets no email.
+  #   L1    To the case's ABT team lead, Cc that ABT team's list
+  #   L2    To every ABT team lead, Cc every ABT team list
+  #   L3    To the CRE head, Cc creTeamList
+  #   L4    To the CS head,  Cc csTeamList
+  # At night (21:00-06:00 IST) L1 and L2 also go to the Americas: L1 also To
+  # the Americas team leads, L2 also To the America Team lead, both also Cc
+  # the Americas team list.
+  # Follows EMAIL_SENDING_ENABLED / EMAIL_DEBUG_MODE, not CALL_SENDING_ENABLED.
+  # This file is committed: keep real addresses in the deployed copy, not here.
+  email:
+    enabled: false
+    # Team key (teams.abts, teams.americas) -> the team's mailing list, and the
+    # CRE and CS team lists. Left out here (absent, not empty) so this file and
+    # paging-alert.minimal.yaml load alike; a deployment sets them, e.g.
+    #   teamLists:
+    #     atlas: <atlas team list>
+    #     americas: <americas team list>
+    #   creTeamList: <cre team list>
+    #   csTeamList: <cs team list>
+
   # How the nominated rungs are read.
   alertDuty:
     # The nominations that exist. Each ABT has three, and so does Americas.

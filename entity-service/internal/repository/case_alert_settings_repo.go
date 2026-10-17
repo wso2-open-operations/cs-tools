@@ -94,6 +94,9 @@ type CaseAlertSettingsRepository interface {
 	// TeamFamilyByName is the family (CRE, SRE, SME) of the team with this
 	// name, matched ignoring case; false when no CRE, SRE or SME team has it.
 	TeamFamilyByName(ctx context.Context, name string) (string, bool, error)
+	// IsCRETeamName reports whether any team of a CRE type (leadership teams
+	// included) has this name, matched ignoring case.
+	IsCRETeamName(ctx context.Context, name string) (bool, error)
 	// TeamTypeExists reports whether any team has this type (cre-abt).
 	TeamTypeExists(ctx context.Context, teamType string) (bool, error)
 	// ShiftCodeExists reports whether the Team Schedule has an active shift
@@ -637,6 +640,15 @@ func (r *caseAlertSettingsRepository) TeamFamilyByName(ctx context.Context, name
 		return "", false, fmt.Errorf("team by name: %w", err)
 	}
 	return family, true, nil
+}
+
+func (r *caseAlertSettingsRepository) IsCRETeamName(ctx context.Context, name string) (bool, error) {
+	var ok bool
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM team t
+		WHERE lower(btrim(t.name)) = lower(btrim($1)) AND lower(COALESCE(t.type, '')) LIKE 'cre%')`, name).Scan(&ok); err != nil {
+		return false, fmt.Errorf("cre team by name: %w", err)
+	}
+	return ok, nil
 }
 
 func (r *caseAlertSettingsRepository) TeamTypeExists(ctx context.Context, teamType string) (bool, error) {

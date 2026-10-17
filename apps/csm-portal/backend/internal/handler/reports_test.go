@@ -29,12 +29,19 @@ import (
 type mockReportsClient struct {
 	timelogs     viewer.TimeLogBreakdownDetails
 	timelogsErr  error
+	csReport     viewer.CSReportDetails
+	csErr        error
 	gotProjectID string
 }
 
 func (m *mockReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string) (viewer.TimeLogBreakdownDetails, error) {
 	m.gotProjectID = projectID
 	return m.timelogs, m.timelogsErr
+}
+
+func (m *mockReportsClient) GetProjectReportDetails(ctx context.Context, projectID, from, to string) (viewer.CSReportDetails, error) {
+	m.gotProjectID = projectID
+	return m.csReport, m.csErr
 }
 
 func TestGenerateTimelogsBreakdownReport_Success(t *testing.T) {
@@ -71,6 +78,56 @@ func TestGenerateTimelogsBreakdownReport_RequiresProjectID(t *testing.T) {
 	if mock.gotProjectID != "" {
 		t.Error("client should not have been called without a projectId")
 	}
+}
+
+func TestGenerateTimelogsBreakdownReport_AllowsCsEngineer(t *testing.T) {
+	mock := &mockReportsClient{timelogs: viewer.TimeLogBreakdownDetails{ProjectKey: "ACME"}}
+	h := NewReportsHandler(mock, viewerAccessGuard)
+	req := withCsEngineerUser(httptest.NewRequest(http.MethodGet, "/generate-timelogs-breakdown-report?projectId=ACME", nil))
+	w := httptest.NewRecorder()
+
+	h.GenerateTimelogsBreakdownReport(w, req)
+
+	assertStatus(t, w, http.StatusOK)
+}
+
+func TestGetReportDetails_RequiresRange(t *testing.T) {
+	mock := &mockReportsClient{}
+	h := NewReportsHandler(mock, viewerAccessGuard)
+	req := withUser(httptest.NewRequest(http.MethodGet, "/report-details?projectSysId=ACME", nil))
+	w := httptest.NewRecorder()
+
+	h.GetReportDetails(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
+	if mock.gotProjectID != "" {
+		t.Error("client should not have been called without from and to")
+	}
+}
+
+func TestGetReportDetails_RejectsBadDate(t *testing.T) {
+	mock := &mockReportsClient{}
+	h := NewReportsHandler(mock, viewerAccessGuard)
+	req := withUser(httptest.NewRequest(http.MethodGet, "/report-details?projectSysId=ACME&from=abc&to=2026-01-31", nil))
+	w := httptest.NewRecorder()
+
+	h.GetReportDetails(w, req)
+
+	assertStatus(t, w, http.StatusBadRequest)
+	if mock.gotProjectID != "" {
+		t.Error("client should not have been called for an invalid from")
+	}
+}
+
+func TestGetReportDetails_NotFound(t *testing.T) {
+	mock := &mockReportsClient{csErr: viewer.ErrProjectNotFound}
+	h := NewReportsHandler(mock, viewerAccessGuard)
+	req := withUser(httptest.NewRequest(http.MethodGet, "/report-details?projectSysId=missing&from=2026-01-01&to=2026-01-31", nil))
+	w := httptest.NewRecorder()
+
+	h.GetReportDetails(w, req)
+
+	assertStatus(t, w, http.StatusNotFound)
 }
 
 func TestGenerateTimelogsBreakdownReport_RejectsMissingViewerAccess(t *testing.T) {

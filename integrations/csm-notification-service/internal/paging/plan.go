@@ -149,6 +149,9 @@ type Plan struct {
 	// pool is not verified with phone numbers yet. A call-only ladder held
 	// this way has nothing left to do and ends without a work note.
 	CallsHeld bool `json:",omitempty"`
+	// Emails are the rung emails (rung_email.go), one per rung, scheduled
+	// beside the calls on the same clock. Empty unless cre.email is on.
+	Emails []PlannedEmail `json:",omitempty"`
 	// IncidentCards are the SRE spaces the "Incident Reported" card already went to, so a retried first rung posts only its reply there.
 	IncidentCards []string `json:",omitempty"`
 }
@@ -282,6 +285,21 @@ func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolic
 
 	sort.SliceStable(plan.Calls, func(i, j int) bool { return plan.Calls[i].At.Before(plan.Calls[j].At) })
 	return plan, nil
+}
+
+// lastScheduled is when the plan's last call or rung email is due: the
+// ladder's whole length. Zero for a plan with neither.
+func (p Plan) lastScheduled() time.Time {
+	var last time.Time
+	if n := len(p.Calls); n > 0 {
+		last = p.Calls[n-1].At
+	}
+	for _, m := range p.Emails {
+		if m.At.After(last) {
+			last = m.At
+		}
+	}
+	return last
 }
 
 // orNone renders an empty routing field as "none" rather than a blank gap —

@@ -109,13 +109,22 @@ type LadderState struct {
 	// stopped the ladder, stored alongside Cancelled so a retried cancellation
 	// writes the same summary the first attempt would have.
 	CancelReason string `json:"cancelReason,omitempty"`
+	// EmailSent is parallel to Plan.Emails: true once that rung's email has
+	// been sent, or given up on. Absent on a ladder with no rung emails.
+	EmailSent []bool `json:"emailSent,omitempty"`
 }
 
 // AllSettled reports whether every call in the plan has reached an outcome —
-// dialled, or given up on. It is what decides the ladder has run its course.
+// dialled, or given up on — and every rung email has gone. It is what decides
+// the ladder has run its course.
 func (s LadderState) AllSettled() bool {
 	for i := range s.Placed {
 		if s.owed(i) {
+			return false
+		}
+	}
+	for i := range s.Plan.Emails {
+		if !s.emailDone(i) {
 			return false
 		}
 	}
@@ -146,6 +155,11 @@ func (s *LadderState) setCardPending(i int, owed bool) {
 		s.CardPending = grown
 	}
 	s.CardPending[i] = owed
+}
+
+// emailDone reports whether rung email i has been sent or given up on.
+func (s LadderState) emailDone(i int) bool {
+	return i < len(s.EmailSent) && s.EmailSent[i]
 }
 
 // failure is the recorded permanent-failure reason for call i, or "".

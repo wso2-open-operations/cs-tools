@@ -1032,6 +1032,13 @@ func (r TeamScheduleResolver) LeadPool(ctx context.Context) ([]Recipient, error)
 	return r.teamLeadPool(ctx)
 }
 
+// TeamLead implements TeamLeadResolver: the lead of one team, by name or key,
+// whatever the shift. The rung email's L1 reaches the case's own ABT team lead
+// at night too, when the call's LEVEL_1 is the Americas team leads.
+func (r TeamScheduleResolver) TeamLead(ctx context.Context, team string) ([]Recipient, error) {
+	return r.abtMembers(ctx, team, roleLead)
+}
+
 // leadsOfABT is every lead in this ladder's ABT, resolved by type so a team
 // added to the ABT is reached without a config change.
 func (r TeamScheduleResolver) leadsOfABT(ctx context.Context) ([]Recipient, error) {

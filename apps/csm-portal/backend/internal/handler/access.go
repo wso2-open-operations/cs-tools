@@ -137,9 +137,8 @@ const (
 	// useAccess.ts for the matching frontend halves of this split;
 	// keep all three in sync on which role each one checks.
 	//
-	// Customer Health is the one viewer-audience domain that is NOT on this
-	// permission any more: see PermViewCustomerHealth, which cs_engineer and
-	// admin hold as well as Viewer.
+	// Customer Health is not on this permission: see PermViewCustomerHealth.
+	// The project time and CS reports are not on it either: they use PermView.
 	PermViewerAccess
 	// PermViewCustomerHealth is the Customer Health dashboard: its summary,
 	// account detail, risk and action-item routes (/customer-health/*) and the
@@ -149,14 +148,15 @@ const (
 	// cs_engineer and admin, who work the same accounts and need the same
 	// view -- so unlike PermViewerAccess it does not require the Viewer role:
 	// a cs_engineer or admin reaches it without separately holding Viewer.
-	// Every other route in the viewer-audience block (User Scan, Time report,
-	// the account escalation list, Drive files) stays on PermViewerAccess.
+	// Every other route in the viewer-audience block (User Scan, the account
+	// escalation list, Drive files) stays on PermViewerAccess. The project
+	// time and CS reports use PermView instead.
 	// Keep the webapp's canViewCustomerHealth (portalAccess.ts) in sync with
 	// this set.
 	PermViewCustomerHealth
 	// PermUsageMetricsViewer is the Usage Metrics domain (/usage-metrics/*).
 	// Unlike the ex-"Support Portal Lite" domains still gated by
-	// PermViewerAccess (Viewer only: User Scan, the Time project report),
+	// PermViewerAccess (Viewer only: User Scan),
 	// and unlike Customer Health (PermViewCustomerHealth, which cs_engineer
 	// and admin hold too), Usage Metrics is registered directly
 	// on THIS permission at the route level, not layered on top of

@@ -38,6 +38,20 @@ cre:
   channel: log
   phones:
     source: profile
+
+  # The rung email (one per rung, L1-L4) is a switch and a few addresses, so it
+  # lives in this file, not on the Alert Settings tab. Same block as in
+  # paging-alert.yaml; see there for who each rung reaches.
+  email:
+    enabled: false
+    # Team key (teams.abts, teams.americas) -> the team's mailing list, and the
+    # CRE and CS team lists. Left out here (absent, not empty) so this file and
+    # paging-alert.yaml load alike; a deployment sets them, e.g.
+    #   teamLists:
+    #     atlas: <atlas team list>
+    #     americas: <americas team list>
+    #   creTeamList: <cre team list>
+    #   csTeamList: <cs team list>
   safety:
     maxCallsPerLadder: 12
     callWithoutVerifiedLeads: false

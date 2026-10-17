@@ -140,6 +140,30 @@ type LadderConfig struct {
 	// Phones is where a recipient's phone number comes from when the rung's
 	// resolver does not supply one (the Team Schedule never does).
 	Phones Phones `yaml:"phones"`
+
+	// Email sends one email per rung, L1 to L4, alongside the calls and
+	// cards. CRE only; absent is off.
+	Email RungEmail `yaml:"email"`
+}
+
+// RungEmail is the Case Paging rung email (rung_email.go). LEVEL_0 gets none.
+//
+//	L1    To the case's ABT team lead, Cc the case's ABT team list
+//	L2    To every ABT team lead, Cc every ABT team list
+//	L3    To the CRE head, Cc creTeamList
+//	L4    To the CS head,  Cc csTeamList
+//
+// At night (21:00-06:00 IST) L1 and L2 also go To the Americas team leads
+// (L1) and the America Team lead (L2), and also Cc the Americas team list.
+type RungEmail struct {
+	Enabled bool `yaml:"enabled"`
+	// TeamLists maps a team key to its mailing list: the ABT teams
+	// (teams.abts) and the Americas team (teams.americas). A key that is
+	// neither is refused.
+	TeamLists map[string]string `yaml:"teamLists"`
+	// CRETeamList and CSTeamList are Cc'd on L3 and L4.
+	CRETeamList string `yaml:"creTeamList"`
+	CSTeamList  string `yaml:"csTeamList"`
 }
 
 // Phones selects the source of recipients' phone numbers.
@@ -685,6 +709,9 @@ func (l *LadderConfig) validate(name string) error {
 		if len(l.Rules) > 0 {
 			return fmt.Errorf("sre: rules is a CRE setting; the SRE ladder routes by on-call tier")
 		}
+		if l.Email.Enabled || len(l.Email.TeamLists) > 0 || l.Email.CRETeamList != "" || l.Email.CSTeamList != "" {
+			return fmt.Errorf("sre: email is a CRE setting; the SRE ladder sends no rung email")
+		}
 		if l.Timing.Interval < 0 || l.Timing.InitialWait < 0 {
 			return fmt.Errorf("sre: timing durations must not be negative")
 		}
@@ -743,6 +770,40 @@ func (l *LadderConfig) validate(name string) error {
 		}
 		if len(l.TeamChats) > 0 || l.UnansweredChat || l.SMEHandoffChat || len(l.TeamlessChats) > 0 {
 			return fmt.Errorf("%s: teamChats, teamlessChats, unansweredChat and smeHandoffChat are SRE settings", name)
+		}
+		if err := l.Email.validate(name, l.Teams); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// oneAddress reports whether s is a single email address.
+func oneAddress(s string) bool {
+	a := strings.TrimSpace(s)
+	return a != "" && !strings.ContainsAny(a, " ,;") && strings.Count(a, "@") == 1
+}
+
+// validate checks the rung email's lists. Never echoes an address.
+func (m RungEmail) validate(name string, teams TeamKeys) error {
+	for key, v := range map[string]string{"creTeamList": m.CRETeamList, "csTeamList": m.CSTeamList} {
+		if strings.TrimSpace(v) != "" && !oneAddress(v) {
+			return fmt.Errorf("%s: email.%s is not a single email address", name, key)
+		}
+	}
+	for k, addr := range m.TeamLists {
+		key := teamKeyFor(k)
+		if key == "" {
+			return fmt.Errorf("%s: email.teamLists has an entry with no team key", name)
+		}
+		if !oneAddress(addr) {
+			return fmt.Errorf("%s: email.teamLists.%s is not a single email address", name, k)
+		}
+		// A key naming no team would read as a Cc and send nothing. Only
+		// checked against a list that was written down: with teams.abts empty
+		// the ABTs come from their type, and any key may be one of them.
+		if len(teams.ABTs) > 0 && !contains(teams.ABTs, key) && key != teamKeyFor(teams.Americas) {
+			return fmt.Errorf("%s: email.teamLists names team %q, which is neither in teams.abts nor teams.americas", name, k)
 		}
 	}
 	return nil

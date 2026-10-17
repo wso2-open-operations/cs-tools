@@ -31,6 +31,7 @@ import { mayBeResponder, responderNeedsProfilePhoneMessage } from "../utils/pagi
 import { teamDisplayName } from "../utils/teamDisplayName";
 import PagingReadinessStrip, { type PhoneGapAction } from "./PagingReadinessStrip";
 import PhoneChip, { type PagingPhoneControls } from "./PhoneChip";
+import ScheduleSkeleton from "./ScheduleSkeleton";
 
 /**
  * The Case Paging tab: who the system pages about an incident, tier by tier,
@@ -322,7 +323,7 @@ export default function CasePagingPanel({
       {chain.isError ? (
         <QueryErrorState message="Could not load the alert chain." error={chain.error} />
       ) : chain.isLoading ? (
-        <div className="offnone">Loading the alert chain…</div>
+        <ScheduleSkeleton variant="list" label="Loading the alert chain…" rows={4} />
       ) : chainTeams.length === 0 ? (
         <div className="offnone">No teams on the {family} alert chain.</div>
       ) : (

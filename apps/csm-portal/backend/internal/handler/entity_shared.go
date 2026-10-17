@@ -83,14 +83,17 @@ type entitySearchCaseView struct {
 	InternalID       string               `json:"internalId"`
 	Number           string               `json:"number"`
 	CreatedOn        string               `json:"createdOn"`
+	UpdatedOn        string               `json:"updatedOn"`
 	CreatedBy        *entityUserReference `json:"createdBy"`
 	Subject          *string              `json:"subject"`
 	Description      *string              `json:"description"`
 	State            *string              `json:"state"`
 	Severity         *string              `json:"severity"`
 	Type             string               `json:"type"`
+	IssueType        *string              `json:"issueType"`
 	EngagementType   *string              `json:"engagementType"`
 	Product          *entityRef           `json:"product"`
+	Deployment       *entityRef           `json:"deployment"`
 	Project          *entityRef           `json:"project"`
 	ProjectKey       *string              `json:"projectKey"`
 	AssignedEngineer *entityUserReference `json:"assignedEngineer"`
@@ -133,6 +136,7 @@ type entityProjectAccountRef struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Number string `json:"number"`
+	Tier   string `json:"tier"`
 }
 
 type entityProjectDetailsView struct {
@@ -146,6 +150,7 @@ type entityProjectDetailsView struct {
 	ClosureState        *string                 `json:"closureState"`
 	TotalQueryHours     *float64                `json:"totalQueryHours"`
 	RemainingQueryHours *float64                `json:"remainingQueryHours"`
+	ConsumedQueryHours  *float64                `json:"consumedQueryHours"`
 }
 
 // caseStateToDisplay translates entity-service's domain.CaseState wire

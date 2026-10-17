@@ -769,7 +769,54 @@ without a lead pool (the hand-maintained roster, whose entries carry numbers)
 is not checked. To keep calls off entirely regardless, use `channel: chat` or
 `log`.
 
-**Not built**: the email at each rung (section 10.0), the two
+**Rung email** (`rung_email.go`, `cre.email`, off unless `enabled`): one email
+per rung of a customer case's CRE chain, sent when the rung opens; LEVEL_0 gets
+none. Recipients (agreed 2026-10-13/15): L1 To the case's ABT team lead
+(`TeamLeadResolver`) Cc that team's list, L2 To every ABT team lead (`LeadPool`)
+Cc every ABT team list; at night (USA/USA_WEEKEND) L1 and L2 **add** the
+Americas -- L1 also To the Americas team leads, L2 also To the America Team
+lead (the night calls' own rungs), both also Cc the Americas team list; L3 To
+the CRE head Cc
+`creTeamList`, L4 To the CS head Cc `csTeamList`. Lists are
+`cre.email.teamLists` (team key -> address; the case team through
+`teams.aliases`); a list not configured sends with no Cc. Every rung of a chain
+shares one subject, `[Case Alerts] S0 CS0099001 not acknowledged`, so a case's
+emails group into one Gmail conversation (the email service sets no threading
+headers, and Gmail splits on a changed subject; agreed 2026-10-15); the body's
+first line names the rung (`S0 alert at L1 for Atlas ABT Team Lead`, night
+adding `and Americas Team Leads`), each email lists the rungs already emailed,
+and it signs off "CSM Case Alerts". It
+is not a notifier: a notifier delivers one attempt to one person (an L2 email
+would go once per lead), and a call plan drops people without a number and
+holds every call until the leads are verified. So `schedule` records what each
+rung resolved to (`recordingResolver`, no second lookup), `planEmails` adds
+`Plan.Emails` **before** `applySafety` (held calls do not hold the emails;
+`safety.maxLevel` is honoured), and each email has its own wake entry
+(`<caseId>|email|<n>`) on the same clock, dropped with the calls by an
+acknowledgement, a closed case or a severity change (which starts a new series).
+`LadderState.EmailSent` is parallel to `Plan.Emails`; `AllSettled` waits for
+both. Sending follows `EMAIL_SENDING_ENABLED`/`EMAIL_DEBUG_MODE`, **not**
+`CALL_SENDING_ENABLED`; a transient failure retries each tick for
+`emailGiveUpAfter` (15m), a 4xx is not retried. Logs carry counts, never
+addresses. Not on the work note yet. The template is
+`notifications/templates/case_paging.html` (agreed 2026-10-15): a bar and rung
+callout in the severity's colour, the WSO2 logo, the rung line first, then
+rows for case number, WSO2 case ID, short description, severity, account, team,
+escalation level (coloured L1 blue to L4 red), created, waiting for, already
+notified, next escalation, and a "View case" button; tables and inline styles
+only, ASCII only. It never shows a customer escalation (`case.escalated` is a
+separate flow). Every rung's email opens "Case <n> (<sev>) is still in open
+state and response SLA remaining time is <t>" ("...was breached <t> ago" once
+past it), counted from the chain's start against the `response` clock of the
+SLA duration policy the SLA engine fetches at startup (`RungEmailSending.SLADurations`),
+else WSO2's published defaults (S0 15m, S1 1h, S2 4h, S3 6h, S4 24h, as migration
+0192 seeds them). `cre.email` lives in the file -- both `paging-alert.yaml` and
+`paging-alert.minimal.yaml` -- never on the Alert Settings tab: it is a switch
+and a few addresses, and `MergeCaseAlertSettings` keeps it as the file has it
+(`TestRungEmail_ConfigSurvivesSavedSettings`). Leave its lists out rather than
+empty in the shipped files, so the two load alike.
+
+**Not built**: the two
 erroneous-scenario emails (section 12.0), LEVEL_0 availability filtering
 (section 8.0), a ServiceNow-backed `Resolver`. **No longer relevant**: `abtEligible` was never populated by any publisher, so
 every incident used to route as `UNKNOWN_ABT`. The updated rule table does not

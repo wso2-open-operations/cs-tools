@@ -369,3 +369,10 @@ type LeadPoolResolver interface {
 	Resolver
 	LeadPool(ctx context.Context) ([]Recipient, error)
 }
+
+// TeamLeadResolver is a Resolver that can name one team's lead regardless of
+// shift, for the rung email's L1 (rung_email.go). A resolver that cannot is
+// simply not asked: L1 then reaches whoever the call's LEVEL_1 reaches.
+type TeamLeadResolver interface {
+	TeamLead(ctx context.Context, team string) ([]Recipient, error)
+}

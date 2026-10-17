@@ -283,9 +283,20 @@ func (c *Client) AddRoleMembers(ctx context.Context, roleID string, emails []str
 }
 
 // emailFromDisplay strips a SCIM role member's "<domain>/" prefix (e.g.
-// "DEFAULT/jane@wso2.com" -> "jane@wso2.com"). Falls back to the raw value
-// when it carries no "/", rather than returning an empty string.
+// "DEFAULT/<email>" -> "<email>").
 func emailFromDisplay(display string) string {
+	return stripSCIMDomainPrefix(display)
+}
+
+// stripSCIMDomainPrefix strips a SCIM display value's leading "<domain>/"
+// prefix. Shared by emailFromDisplay (role members) and scimGroupAssignments
+// (group names, in types.go): confirmed live that a group's own SCIM
+// "display" comes back the identical "<domain>/<name>" shape role members'
+// emails do (e.g. "DEFAULT/<group name>", not the bare group name
+// ASGARDEO_ROLE_GROUP_NAMES is configured with) -- without stripping it,
+// every group-name match silently failed. Falls back to the raw value when
+// it carries no "/", rather than returning an empty string.
+func stripSCIMDomainPrefix(display string) string {
 	if idx := strings.Index(display, "/"); idx >= 0 && idx+1 < len(display) {
 		return display[idx+1:]
 	}

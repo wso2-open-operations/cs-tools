@@ -23604,7 +23604,7 @@ components:
       required: [ladder, groupName]
       properties:
         ladder: { type: string, enum: [CRE, SRE] }
-        groupName: { type: string, maxLength: 255 }
+        groupName: { type: string, maxLength: 255, description: "A CSM Portal team's name: a CRE team for CRE, an SRE or SME team for SRE. SRE also takes an assignment group no CSM Portal team has (WSO2 IaaS Team), but never a CRE team's name." }
         teamKey: { type: string }
         rotaCode: { type: string, description: "SRE only. An active SRE rota, e.g. SRE_SAAS." }
         enabled: { type: boolean, default: true }

@@ -192,13 +192,20 @@ func (r *scimRoleAssignments) UnmarshalJSON(b []byte) error {
 // in the same shapes scimRoleAssignments already handles for "roles" (see
 // that type's own doc comment for why every variant is accepted rather than
 // assuming a single one): a bare string, an array of strings, a bare
-// {value,display} object, or an array of {value,display} objects. Display is
-// the group's name as shown in the Asgardeo console -- what
-// ASGARDEO_ROLE_GROUP_NAMES configures per portal role (by deployment
-// choice: a readable name, not the group's opaque id, even though a display
-// name is no more guaranteed unique than a role's is). Value (the group's
-// own unique Asgardeo ID) is still kept on GroupAssignment for completeness,
-// but nothing in this backend currently matches against it.
+// {value,display} object, or an array of {value,display} objects. Value
+// (the group's own unique Asgardeo ID) is still kept on GroupAssignment for
+// completeness, but nothing in this backend currently matches against it.
+//
+// Name is stripped of its leading "<domain>/" prefix via
+// stripSCIMDomainPrefix (scim.go) -- confirmed live against a real
+// deployment that a group's own SCIM display comes back "DEFAULT/<group
+// name>", not the bare group name ASGARDEO_ROLE_GROUP_NAMES is configured
+// with, the identical shape emailFromDisplay already strips for role
+// members' emails. Applied in
+// every decoded shape below (including a bare string/array of strings,
+// since groups can arrive that way too) so GroupAssignment.Name is always
+// already the clean, directly-comparable name -- callers never need to know
+// this prefix exists at all.
 type scimGroupAssignments []GroupAssignment
 
 func (r *scimGroupAssignments) UnmarshalJSON(b []byte) error {
@@ -207,14 +214,14 @@ func (r *scimGroupAssignments) UnmarshalJSON(b []byte) error {
 		if s == "" {
 			*r = nil
 		} else {
-			*r = []GroupAssignment{{Name: s}}
+			*r = []GroupAssignment{{Name: stripSCIMDomainPrefix(s)}}
 		}
 		return nil
 	}
 
 	var oneEntry scimRoleEntry
 	if err := json.Unmarshal(b, &oneEntry); err == nil {
-		*r = []GroupAssignment{{ID: oneEntry.Value, Name: oneEntry.Display}}
+		*r = []GroupAssignment{{ID: oneEntry.Value, Name: stripSCIMDomainPrefix(oneEntry.Display)}}
 		return nil
 	}
 
@@ -222,7 +229,7 @@ func (r *scimGroupAssignments) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &strs); err == nil {
 		values := make([]GroupAssignment, len(strs))
 		for i, s := range strs {
-			values[i] = GroupAssignment{Name: s}
+			values[i] = GroupAssignment{Name: stripSCIMDomainPrefix(s)}
 		}
 		*r = values
 		return nil
@@ -234,7 +241,7 @@ func (r *scimGroupAssignments) UnmarshalJSON(b []byte) error {
 	}
 	values := make([]GroupAssignment, len(entries))
 	for i, e := range entries {
-		values[i] = GroupAssignment{ID: e.Value, Name: e.Display}
+		values[i] = GroupAssignment{ID: e.Value, Name: stripSCIMDomainPrefix(e.Display)}
 	}
 	*r = values
 	return nil
