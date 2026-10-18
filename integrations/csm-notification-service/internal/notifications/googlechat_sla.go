@@ -69,6 +69,26 @@ func slaClockTypeLabel(clockType string) string {
 	return clockType
 }
 
+// slaStateLabels maps the raw case state carried on the SLA clock record to
+// the label shown on the card. An unmapped state falls back to the raw value
+// (see slaStateLabel) rather than dropping the line.
+var slaStateLabels = map[string]string{
+	"OPEN":              "Open",
+	"WORK_IN_PROGRESS":  "Work In Progress",
+	"AWAITING_INFO":     "Awaiting Info",
+	"WAITING_ON_WSO2":   "Waiting on WSO2",
+	"SOLUTION_PROPOSED": "Solution Proposed",
+	"REOPENED":          "Reopened",
+	"CLOSED":            "Closed",
+}
+
+func slaStateLabel(state string) string {
+	if label, ok := slaStateLabels[state]; ok {
+		return label
+	}
+	return state
+}
+
 // maxSLACardTitleLength/truncateSLACardTitle mirror dispatch's own
 // maxChatTitleLength/truncateTitle (dispatch.go) — same reasoning as
 // slaSeverityDisplay above for why this is a small duplicate, not an
@@ -168,7 +188,7 @@ func (c *GoogleChatClient) SendSLABreachAlert(ctx context.Context, audience, clo
 	}
 	lines = append(lines, caseAlertLine(`<b>Priority :</b> <font color="%s">%s</font>`, severityColor, severityLabel))
 	if state != "" {
-		lines = append(lines, caseAlertLine(`<b>State :</b> %s`, state))
+		lines = append(lines, caseAlertLine(`<b>State :</b> %s`, slaStateLabel(state)))
 	}
 	if openedAt != "" {
 		lines = append(lines, caseAlertLine(`<b>Opened At :</b> %s`, openedAt))
