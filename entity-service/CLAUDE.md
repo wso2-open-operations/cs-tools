@@ -7592,9 +7592,12 @@ key, and a `"group"` row with that id and name is added when missing --
 `work_item.assignment_group_id` references `"group"`, so the incident needs
 one. ServiceNow-synced teams already share their group's id; an existing
 row is never touched. A key no team holds is logged and the team refuses
-handoffs (409) until the team exists and the service restarts. Both
-startup copies of the config (NewRouter, and main.go's for the alert) are
-resolved. A product with several teams
+handoffs (409) until the team exists and the service restarts. NewRouter
+resolves its copy of the config at startup; the alert drainer's copy (main.go)
+resolves on demand instead (`WithSpecialOpsAlertTeamGroups`): a group change
+matching no team while a team-only team is unresolved resolves them first,
+and a failed lookup is returned so the change is retried -- a handoff the
+router took always raises its alert. A product with several teams
 (Choreo) requires `escalationTeam`; one with a single team (Asgardeo) takes
 it and records no team, as SN does. `GET /specialist-handoff-teams?serviceId=`
 feeds the dialog, and `IncidentView.CanHandOffToSpecialist` (SN's

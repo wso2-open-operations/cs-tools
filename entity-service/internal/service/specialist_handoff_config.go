@@ -418,6 +418,22 @@ func (c *SpecialistHandoffConfig) ResolveTeamGroups(ctx context.Context, repo re
 	return missing, nil
 }
 
+// hasUnresolvedTeams reports whether a team configured without a groupId
+// still has no group.
+func (c *SpecialistHandoffConfig) hasUnresolvedTeams() bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Products {
+		for _, t := range c.Products[i].Teams {
+			if t.fromTeam && t.GroupID == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ResolveSpecialistHandoffTeamGroups runs cfg.ResolveTeamGroups for a
 // service starting up, logging what it could not resolve instead of failing:
 // the other teams' handoffs, and every other route, still work.

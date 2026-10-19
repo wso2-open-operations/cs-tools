@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -203,5 +205,47 @@ func TestSpecialistHandoffConfig_TeamsForGroup_TeamWithoutGroup(t *testing.T) {
 	p, teams := cfg.teamsForGroup(strings.ToUpper(tgU2Team))
 	if p == nil || p.Name != "U2" || len(teams) != 1 || teams[0].Key != "u2" || teams[0].SMETeam != "u2" {
 		t.Errorf("u2 group: %v %v, want the U2 product's u2 team paging SME team u2", p, teams)
+	}
+}
+
+// The alert drainer's copy of the configuration resolves a team configured
+// without a groupId when a group change first needs it, so a handoff the
+// router's copy took always raises its alert: a failed lookup is returned
+// (the change is retried, not dropped), and once every team is resolved an
+// unrelated group change looks nothing up.
+func TestSpecialOpsAlert_ResolvesTeamWithoutGroupOnDemand(t *testing.T) {
+	ctx := context.Background()
+	pub := &alertPublisher{}
+	repo := &fakeTeamGroups{err: errors.New("db down")}
+	svc := WithSpecialOpsAlertTeamGroups(WithSpecialOpsAlerts(NewIncidentReportService(), pub, tgConfig(t)), repo)
+	toU2 := groupChange(soOtherGroup, tgU2Team, "jane.doe@wso2.com")
+
+	if err := svc.HandleChange(ctx, alertTx(), toU2); err == nil || len(pub.sent) != 0 {
+		t.Fatalf("lookup failing: err %v, sent %d; want an error so the change is retried", err, len(pub.sent))
+	}
+
+	repo.err = nil
+	repo.teams = map[string]repository.SpecialistHandoffTeamGroup{
+		"u2":          {ID: tgU2Team, Name: "U2"},
+		"cloud-agent": {ID: tgCloudAgentTeam, Name: "WSO2 Cloud · Agent platform"},
+		"cloud-core":  {ID: "2d9c3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5", Name: "WSO2 Cloud · Core"},
+	}
+	if err := svc.HandleChange(ctx, alertTx(), toU2); err != nil || len(pub.sent) != 1 {
+		t.Fatalf("lookup working: err %v, sent %d; want one alert", err, len(pub.sent))
+	}
+	var got events.IncidentSpecialOpsAlertPayload
+	if err := json.Unmarshal(pub.sent[0].Payload, &got); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	if got.Product != "U2" || got.TeamKey != "u2" || got.TeamLabel != "U2" || got.SMETeam != "u2" || got.AssignmentGroupID != tgU2Team {
+		t.Errorf("payload %+v, want product U2, team u2 labelled U2 paging SME team u2, group %s", got, tgU2Team)
+	}
+
+	asked := len(repo.asked)
+	if err := svc.HandleChange(ctx, alertTx(), groupChange(tgU2Team, soOtherGroup, "jane.doe@wso2.com")); err != nil || len(pub.sent) != 1 {
+		t.Fatalf("unrelated group: err %v, sent %d; want no alert", err, len(pub.sent))
+	}
+	if len(repo.asked) != asked {
+		t.Errorf("every team resolved, yet an unrelated group change looked them up again")
 	}
 }

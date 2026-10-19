@@ -261,12 +261,12 @@ func main() {
 				}),
 				service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(pool)),
 			)
-			// The same groups the handoff moves incidents to (NewRouter
-			// resolves its own copy of the configuration the same way).
-			resolveCtx, cancelResolve := context.WithTimeout(context.Background(), 15*time.Second)
-			service.ResolveSpecialistHandoffTeamGroups(resolveCtx, repository.NewSpecialistHandoffGroupRepository(pool), handoffTeams)
-			cancelResolve()
 			incidentReportFlows = service.WithSpecialOpsAlerts(incidentReportFlows, specialOpsPublisher, handoffTeams)
+			// Teams configured without a groupId are matched by the group of
+			// their Team Schedule team, resolved when an alert first needs
+			// it and retried until it succeeds -- so a handoff NewRouter's
+			// copy of the configuration took always raises its alert.
+			incidentReportFlows = service.WithSpecialOpsAlertTeamGroups(incidentReportFlows, repository.NewSpecialistHandoffGroupRepository(pool))
 			log.Printf("special ops alerts on: incident.special_ops_alert to topic %q", cfg.SREEventHubTopic)
 		}
 		incidentReportDrainer := service.NewIncidentReportDrainer(
