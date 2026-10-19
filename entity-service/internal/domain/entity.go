@@ -6669,6 +6669,11 @@ type IncidentSpecialistHandoffSummary struct {
 	AssignmentGroup   EntityRef                                `json:"assignmentGroup"`
 	Task              IncidentSpecialistHandoffSummaryTask     `json:"task"`
 	GithubIssueURL    *string                                  `json:"githubIssueUrl"`
+	// GithubIssueExpected is whether the incident's product files a GitHub
+	// issue on a handoff: true only for a product with a repository in
+	// SPECIALIST_HANDOFF_CONFIG. Absent when the summary comes from
+	// ServiceNow.
+	GithubIssueExpected *bool `json:"githubIssueExpected,omitempty"`
 }
 
 // ProblemFieldFilter is a single predicate in a problem search's generic

@@ -25459,6 +25459,13 @@ components:
         githubIssueUrl:
           type: string
           nullable: true
+        githubIssueExpected:
+          type: boolean
+          description: >-
+            Whether a handoff of this incident files an internal GitHub issue at all: true only
+            when its product has a repository in SPECIALIST_HANDOFF_CONFIG (Choreo, Asgardeo);
+            false otherwise (U2, B-Central, WSO2 Cloud, Moesif, or a service in no product).
+            A null githubIssueUrl is a missing issue only when this is true.
 
     HandOffIncidentToSpecialistRequest:
       type: object
@@ -25539,7 +25546,8 @@ components:
               description: >-
                 Why the internal issue could not be created, if creation was requested but
                 failed. The handoff itself still succeeds -- callers must surface this rather
-                than report a clean success when it is non-null.
+                than report a clean success when it is non-null. Null, with a null githubIssue,
+                when the product has no repository: it files no issue by design.
             incident:
               $ref: '#/components/schemas/IncidentView'
 

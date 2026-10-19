@@ -40,7 +40,9 @@ interface SpecialistHandoffBadgeProps {
  *
  * A missing GitHub issue is called out explicitly rather than just omitted:
  * it durably signals the `githubIssueError` case even after the one-time
- * dialog result that reported it is gone.
+ * dialog result that reported it is gone -- but only for a product that
+ * files one (`githubIssueExpected`: Choreo, Asgardeo). Elsewhere (U2,
+ * B-Central, WSO2 Cloud, Moesif) no issue is the expected outcome.
  */
 export default function SpecialistHandoffBadge({
   handoff,
@@ -76,12 +78,14 @@ export default function SpecialistHandoffBadge({
             </a>
           </Typography>
         ) : (
-          <Tooltip title="No internal GitHub issue is linked to this handoff — it may have failed to create, or none was requested.">
-            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, color: "warning.main" }}>
-              <AlertTriangle size={12} />
-              <Typography variant="caption">No GitHub issue</Typography>
-            </Box>
-          </Tooltip>
+          handoff.githubIssueExpected === true && (
+            <Tooltip title="No internal GitHub issue is linked to this handoff — it may have failed to create, or none was requested.">
+              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, color: "warning.main" }}>
+                <AlertTriangle size={12} />
+                <Typography variant="caption">No GitHub issue</Typography>
+              </Box>
+            </Tooltip>
+          )
         )}
       </Box>
     </Box>

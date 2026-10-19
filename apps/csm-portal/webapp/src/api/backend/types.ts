@@ -5265,5 +5265,11 @@ export interface BeSpecialistHandoffSummary {
     stateLabel?: string | null;
   };
   githubIssueUrl: string | null;
+  /**
+   * Whether this incident's product files a GitHub issue on a handoff at all:
+   * `true` only for a product with a repository (Choreo, Asgardeo). A missing
+   * issue is flagged only then.
+   */
+  githubIssueExpected?: boolean;
 }
 

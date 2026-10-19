@@ -496,8 +496,10 @@ func TestHandOffIncidentToSpecialist_ProductWithoutRepoFilesNoIssue(t *testing.T
 	if applied == nil || applied.GroupID != hoMoesifGroup {
 		t.Errorf("applied plan %+v, want Moesif's one team", applied)
 	}
-	if issues.calls != 0 || resp.Handoff.GithubIssueError == nil || *resp.Handoff.GithubIssueError != "No GitHub repository is configured for this product's specialist handoffs" {
-		t.Errorf("calls %d error %v", issues.calls, resp.Handoff.GithubIssueError)
+	// No repository is by design, not a failure: neither an issue nor an
+	// error, so the dialog shows a plain success.
+	if issues.calls != 0 || resp.Handoff.GithubIssue != nil || resp.Handoff.GithubIssueError != nil {
+		t.Errorf("calls %d issue %v error %v, want no call, no issue and no error", issues.calls, resp.Handoff.GithubIssue, resp.Handoff.GithubIssueError)
 	}
 }
 
@@ -565,15 +567,18 @@ func TestIncidentView_SpecialistHandoff(t *testing.T) {
 		cfg      *SpecialistHandoffConfig
 		can      bool
 		keptTeam bool
+		// issue is githubIssueExpected: only a product with a repository
+		// (Choreo here) files one.
+		issue bool
 	}{
-		{"choreo in progress", view("IN_PROGRESS", hoChoreoService, "44444444-4444-4444-8444-444444444444", "choreo-apim-team"), cfg, true, true},
-		{"moesif no group", view("IN_PROGRESS", hoMoesifService, "", ""), cfg, true, false},
-		{"already special ops", view("IN_PROGRESS", hoChoreoService, hoChoreoAPIM, ""), cfg, false, false},
-		{"new", view("NEW", hoChoreoService, "", ""), cfg, false, false},
-		{"other service", view("IN_PROGRESS", "22222222-2222-4222-8222-222222222222", "", ""), cfg, false, false},
-		{"no service", view("IN_PROGRESS", "", "", ""), cfg, false, false},
-		{"unknown team dropped", view("IN_PROGRESS", hoChoreoService, "", "sre-team"), cfg, true, false},
-		{"no config", view("IN_PROGRESS", hoChoreoService, "", "choreo-apim-team"), nil, false, false},
+		{"choreo in progress", view("IN_PROGRESS", hoChoreoService, "44444444-4444-4444-8444-444444444444", "choreo-apim-team"), cfg, true, true, true},
+		{"moesif no group", view("IN_PROGRESS", hoMoesifService, "", ""), cfg, true, false, false},
+		{"already special ops", view("IN_PROGRESS", hoChoreoService, hoChoreoAPIM, ""), cfg, false, false, true},
+		{"new", view("NEW", hoChoreoService, "", ""), cfg, false, false, true},
+		{"other service", view("IN_PROGRESS", "22222222-2222-4222-8222-222222222222", "", ""), cfg, false, false, false},
+		{"no service", view("IN_PROGRESS", "", "", ""), cfg, false, false, false},
+		{"unknown team dropped", view("IN_PROGRESS", hoChoreoService, "", "sre-team"), cfg, true, false, true},
+		{"no config", view("IN_PROGRESS", hoChoreoService, "", "choreo-apim-team"), nil, false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -590,6 +595,9 @@ func TestIncidentView_SpecialistHandoff(t *testing.T) {
 			}
 			if (got.SpecialistHandoff.EscalationTeam != nil) != c.keptTeam {
 				t.Errorf("escalationTeam %v, want kept=%v", got.SpecialistHandoff.EscalationTeam, c.keptTeam)
+			}
+			if e := got.SpecialistHandoff.GithubIssueExpected; e == nil || *e != c.issue {
+				t.Errorf("githubIssueExpected %v, want %v", e, c.issue)
 			}
 		})
 	}

@@ -355,13 +355,13 @@ func handoffTeamLabel(product *SpecialistHandoffProduct, key *domain.IncidentSpe
 // repository, with the token its credential names: titled and bodied by
 // buildHandoffIssueTitle / buildHandoffIssueBody, and labelled as the
 // product's github.labels map the incident. It never fails the handoff: a
-// product with no repository, a credential with no token, or a GitHub error
-// comes back as the error text.
+// credential with no token or a GitHub error comes back as the error text. A
+// product with no repository files no issue by design (only Choreo and
+// Asgardeo have one), so it returns neither an issue nor an error.
 func (s *incidentService) fileHandoffIssue(ctx context.Context, product *SpecialistHandoffProduct, in handoffIssueInput) (*domain.IncidentSpecialistHandoffGithubIssue, *string) {
 	inc := in.Incident
 	if product == nil || product.Github == nil {
-		msg := "No GitHub repository is configured for this product's specialist handoffs"
-		return nil, &msg
+		return nil, nil
 	}
 	owner, repo := product.Github.Owner, product.Github.Repo
 	client := s.handoffIssues[product.Github.credential()]
@@ -430,6 +430,17 @@ func (s *incidentService) incidentView(ctx context.Context, id string) (domain.I
 	v.CanHandOffToSpecialist = &can
 	if sum := v.SpecialistHandoff; sum != nil && sum.EscalationTeam != nil && !s.handoffConfig.knowsTeam(string(*sum.EscalationTeam)) {
 		sum.EscalationTeam = nil
+	}
+	if sum := v.SpecialistHandoff; sum != nil {
+		// Whether a handoff of this incident files a GitHub issue at all:
+		// only a product with a repository does, so the portal flags a
+		// missing issue only there.
+		var product *SpecialistHandoffProduct
+		if v.Service != nil {
+			product = s.handoffConfig.productFor(&v.Service.ID)
+		}
+		expected := product != nil && product.Github != nil
+		sum.GithubIssueExpected = &expected
 	}
 	return v, nil
 }
