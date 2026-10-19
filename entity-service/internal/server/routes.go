@@ -1368,6 +1368,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if handoffErr != nil {
 		log.Fatalf("invalid specialist handoff configuration: %v", handoffErr)
 	}
+	if db != nil {
+		// A team configured without a groupId hands off to its Team Schedule
+		// team's group; read those teams before the configuration is shared.
+		resolveCtx, cancelResolve := context.WithTimeout(context.Background(), 15*time.Second)
+		service.ResolveSpecialistHandoffTeamGroups(resolveCtx, repository.NewSpecialistHandoffGroupRepository(db), handoffConfig)
+		cancelResolve()
+	}
 	activeIncidentSvc = service.WithSpecialistHandoffConfig(activeIncidentSvc, handoffConfig)
 	// The handoff's GitHub issue links back to the incident in the CSM portal.
 	activeIncidentSvc = service.WithHandoffPortalBaseURL(activeIncidentSvc, cfg.CSMPortalBaseURL)

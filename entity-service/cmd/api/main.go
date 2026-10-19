@@ -261,6 +261,11 @@ func main() {
 				}),
 				service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(pool)),
 			)
+			// The same groups the handoff moves incidents to (NewRouter
+			// resolves its own copy of the configuration the same way).
+			resolveCtx, cancelResolve := context.WithTimeout(context.Background(), 15*time.Second)
+			service.ResolveSpecialistHandoffTeamGroups(resolveCtx, repository.NewSpecialistHandoffGroupRepository(pool), handoffTeams)
+			cancelResolve()
 			incidentReportFlows = service.WithSpecialOpsAlerts(incidentReportFlows, specialOpsPublisher, handoffTeams)
 			log.Printf("special ops alerts on: incident.special_ops_alert to topic %q", cfg.SREEventHubTopic)
 		}

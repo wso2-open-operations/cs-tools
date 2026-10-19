@@ -162,6 +162,12 @@ func planSpecialistHandoff(cfg *SpecialistHandoffConfig, req domain.HandOffIncid
 		}
 	}
 
+	if team.GroupID == "" {
+		// Configured without a groupId, and no Team Schedule team had its key
+		// when the service started (ResolveTeamGroups).
+		return fail(specialistHandoffConflict("Special Ops team " + team.Label + " has no assignment group: no Team Schedule team has the key " + team.Key + "."))
+	}
+
 	reason := handoffReasons[req.ReasonCode]
 	blob, err := handoffReasonBlob(req, reason.description)
 	if err != nil {
