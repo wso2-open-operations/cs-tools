@@ -37,8 +37,8 @@ const caseActivityStreamHeartbeat = 15 * time.Second
 
 // StreamHandler handles GET /cases/{id}/activities/stream: a long-lived
 // Server-Sent Events connection that emits a `case_updated` event whenever
-// internal/caseevents.Handler observes a case.comment_added, case.status_changed, case.assigned,
-// case.severity_changed or case.acknowledged record for this case on any backend replica (see internal/stream.BroadcastHub).
+// internal/caseevents.Handler observes a customer-visible case.comment_added or
+// case.status_changed record for this case on any backend replica (see internal/stream.BroadcastHub).
 // It is registered on the dedicated :9092 listener (see cmd/server/main.go)
 // so the health check listener's timeouts can't kill the connection, but it
 // sits behind the same middleware.Auth chain as every other endpoint — there

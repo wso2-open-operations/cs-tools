@@ -101,27 +101,19 @@ func TestHandle_StatusChanged_BroadcastsToHub(t *testing.T) {
 	}
 }
 
-func TestHandle_AssignedSeverityAcknowledged_BroadcastIDOnly(t *testing.T) {
+func TestHandle_AssignedSeverityAcknowledged_NotBroadcast(t *testing.T) {
 	for _, typ := range []string{"case.assigned", "case.severity_changed", "case.acknowledged"} {
 		t.Run(typ, func(t *testing.T) {
 			hub := &mockHub{}
 			h := NewHandler(hub)
 			record := eventbus.Record{
-				Value: []byte(`{"type":"` + typ + `","entityId":"CASE-5","payload":{"timestamp":"2026-08-13T00:00:00Z","assigneeEmail":"jane.doe@example.com","newSeverity":"S1"}}`),
+				Value: []byte(`{"type":"` + typ + `","entityId":"CASE-5","payload":{"timestamp":"2026-08-13T00:00:00Z","newSeverity":"S1"}}`),
 			}
 			if err := h.Handle(t.Context(), record); err != nil {
 				t.Fatalf("Handle() error = %v, want nil", err)
 			}
-			if len(hub.calls) != 1 {
-				t.Fatalf("hub.Publish called %d times, want 1", len(hub.calls))
-			}
-			got := hub.calls[0]
-			want := `{"caseId":"CASE-5","type":"` + typ + `","timestamp":"2026-08-13T00:00:00Z"}`
-			if got.caseID != "CASE-5" || got.payload != want {
-				t.Errorf("Publish = (%q, %q), want (CASE-5, %q)", got.caseID, got.payload, want)
-			}
-			if strings.Contains(got.payload, "jane.doe") || strings.Contains(got.payload, "S1") {
-				t.Errorf("Publish payload %q leaks event payload fields", got.payload)
+			if len(hub.calls) != 0 {
+				t.Fatalf("hub.Publish called %d times, want 0", len(hub.calls))
 			}
 		})
 	}
@@ -194,8 +186,8 @@ func TestHandle_CommentAdded_NotInternalOrAbsentFlagBroadcast(t *testing.T) {
 	}
 }
 
-func TestHandle_OtherTypesIgnoreInternalNoteFlag(t *testing.T) {
-	for _, typ := range []string{"case.status_changed", "case.assigned", "case.severity_changed", "case.acknowledged"} {
+func TestHandle_StatusChangedIgnoresInternalNoteFlag(t *testing.T) {
+	for _, typ := range []string{"case.status_changed"} {
 		t.Run(typ, func(t *testing.T) {
 			hub := &mockHub{}
 			h := NewHandler(hub)

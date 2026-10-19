@@ -1,6 +1,6 @@
 # Customer Portal Activity Stream Service
 
-Go HTTP server (`net/http`, Go 1.26+) serving the case-activity SSE endpoint (`GET /cases/{id}/activities/stream`) on a dedicated listener (default `:9092`). Consumes the `case-events` Azure Event Hub topic in its own per-replica consumer group (`LatestOffset`) and fans `case.comment_added` / `case.status_changed` / `case.assigned` / `case.severity_changed` / `case.acknowledged` events to connected SSE clients via an in-process `BroadcastHub`.
+Go HTTP server (`net/http`, Go 1.26+) serving the case-activity SSE endpoint (`GET /cases/{id}/activities/stream`) on a dedicated listener (default `:9092`). Consumes the `case-events` Azure Event Hub topic in its own per-replica consumer group (`LatestOffset`) and fans `case.comment_added` (customer-visible comments only) / `case.status_changed` events to connected SSE clients via an in-process `BroadcastHub`.
 
 Cloned from `integrations/csm-portal-activity-stream-service`, adapted for `apps/customer-portal`. The underlying "case" concept, ID space, and entity-service contract are identical between the two portals, so almost nothing besides naming needed to change — see that service's own `CLAUDE.md` for the original design rationale, most of which applies here unchanged.
 
@@ -19,7 +19,7 @@ apps/customer-portal/backend-v2 ──┤──▶ entity-service (EventPublishe
 
 Both portals' backends call the same entity-service HTTP endpoints (`POST /comments`, `PATCH /cases/{id}`); the publish happens inside entity-service's `snCaseService.CreateCaseComment`/`UpdateCase`, unconditionally, regardless of which portal's backend made the call. This service, `csm-portal-activity-stream-service`, and `csm-notification-service` all consume the same topic independently, each in its own consumer group.
 
-Only `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` and `case.acknowledged` are broadcast; other types (e.g. `case.created`, `incident.created`) are not. The payload is minimal: `{caseId, type, timestamp}` — no comment text, field values, names or emails.
+Only `case.comment_added` (skipped when the comment is an internal note) and `case.status_changed` are broadcast; other types (e.g. `case.created`, `case.assigned`, `case.severity_changed`, `case.acknowledged`, `incident.created`) are not. The payload is minimal: `{caseId, type, timestamp}` — no comment text, field values, names or emails.
 
 ## Auth
 

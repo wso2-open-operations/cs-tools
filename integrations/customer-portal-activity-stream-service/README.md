@@ -1,6 +1,6 @@
 # Customer Portal Activity Stream Service
 
-Go HTTP server (`net/http`, Go 1.26+) that serves the case-activity SSE endpoint (`GET /cases/{id}/activities/stream`). It consumes the `case-events` Azure Event Hub topic in its own consumer group and fans `case.comment_added` / `case.status_changed` / `case.assigned` / `case.severity_changed` / `case.acknowledged` events to any connected SSE clients via an in-process BroadcastHub.
+Go HTTP server (`net/http`, Go 1.26+) that serves the case-activity SSE endpoint (`GET /cases/{id}/activities/stream`). It consumes the `case-events` Azure Event Hub topic in its own consumer group and fans `case.comment_added` (customer-visible comments only) / `case.status_changed` events to any connected SSE clients via an in-process BroadcastHub.
 
 Cloned from `integrations/csm-portal-activity-stream-service`, adapted for `apps/customer-portal`. See that repo's `CLAUDE.md` for the original design rationale, and this repo's own `CLAUDE.md` for customer-portal-specific notes.
 
@@ -19,7 +19,7 @@ apps/customer-portal/backend-v2 ──┤──▶ entity-service ──▶ Even
 
 Both portals' backends call the same entity-service endpoints; the publish is a side effect of entity-service's own `CreateCaseComment`/`UpdateCase`, unconditional on which portal called it. This service, `csm-portal-activity-stream-service`, and `csm-notification-service` each consume the same topic independently, in their own consumer groups.
 
-Only `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` and `case.acknowledged` are broadcast; other types (e.g. `case.created`, `incident.created`) are not. The payload is minimal: `{caseId, type, timestamp}` — no comment text, field values, names or emails.
+Only `case.comment_added` (skipped when the comment is an internal note) and `case.status_changed` are broadcast; other types (e.g. `case.created`, `case.assigned`, `case.severity_changed`, `case.acknowledged`, `incident.created`) are not. The payload is minimal: `{caseId, type, timestamp}` — no comment text, field values, names or emails.
 
 ## Auth
 
