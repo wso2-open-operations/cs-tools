@@ -61,6 +61,7 @@ describe("ChatHistoryCard", () => {
               startedTime: "2026-01-01T00:00:00Z",
               messages: 3,
               kbArticles: 1,
+              isResumable: true,
             } as never
           }
           onItemAction={onItemAction}
@@ -90,6 +91,7 @@ describe("ChatHistoryCard", () => {
               startedTime: "2026-01-01T00:00:00Z",
               messages: 2,
               kbArticles: 0,
+              isResumable: false,
             } as never
           }
           onCloseChat={onCloseChat}

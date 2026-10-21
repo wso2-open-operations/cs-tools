@@ -34,7 +34,6 @@ import {
   getConversationStatusColor,
   formatDateTime,
 } from "@features/support/utils/support";
-import { isConversationResumable } from "@features/support/utils/conversationsList";
 
 export interface ChatHistoryCardProps {
   item: ChatHistoryItem;
@@ -189,7 +188,7 @@ export default function ChatHistoryCard({
           alignItems="center"
           sx={{ flexShrink: 0 }}
         >
-          {onCloseChat && isConversationResumable(item.status) && (
+          {onCloseChat && item.isResumable && (
             <Button
               component="span"
               size="small"

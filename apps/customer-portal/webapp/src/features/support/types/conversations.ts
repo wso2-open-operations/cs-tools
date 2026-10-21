@@ -33,6 +33,9 @@ export type ChatHistoryItem = {
   kbArticles: number;
   status: string;
   createdBy?: string | null;
+  // Whether the chat can be resumed (and therefore closed). Derived from the
+  // conversation state upstream; missing/unknown state is treated as false.
+  isResumable?: boolean;
 };
 
 // Response type for project chat history list.
