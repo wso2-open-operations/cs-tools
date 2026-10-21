@@ -33,6 +33,58 @@ import { RECORD_ID_PATTERN } from "./ids";
  * than real <label for>, so `getByLabel` does not work here — the MUI Selects
  * are located by the placeholder text their `renderValue` emits, and the
  * inputs by their stable ids. */
+/**
+ * The header account menu (`UserProfile.tsx`).
+ *
+ * Rendered on every page, so it belongs to no one feature.
+ *
+ * ⚠️ The sign-out item reads "Log out", not "Sign out" — the app is not
+ * self-consistent here, since the destination is Asgardeo's SIGN-IN page. Use
+ * the constant rather than either phrase.
+ */
+export const ACCOUNT_MENU = {
+  /** The avatar button that opens the menu. */
+  trigger: "Account",
+  profileItem: "Profile",
+  logoutItem: "Log out",
+  /** The modal the Profile item opens; its dialog is labelled by this heading. */
+  profileModalTitle: "Profile",
+  /** Dismisses the profile modal without saving. ⚠️ The modal shows Full Name,
+   * Email and Mobile Number as DISABLED TEXTBOXES, so their contents are input
+   * values — `getByText` cannot see them. */
+  closeButton: "Close profile",
+} as const;
+
+/**
+ * Guard states shown when a project lacks a feature.
+ *
+ * These are what a DEEP LINK hits: the routes in App.tsx are not individually
+ * permission-guarded — they all sit under ProjectGuard, which only resolves the
+ * project — so each page decides for itself what to render without its feature.
+ * Hiding the side-nav item is therefore not the same as blocking the route, and
+ * these messages are the only thing standing between a typed URL and a feature
+ * the project does not have.
+ *
+ * ⚠️ Verified live 2026-10-08: only SOME routes implement one. See the findings
+ * in specs/cross-cutting/permission-deep-link.spec.ts.
+ */
+export const PERMISSION_GUARDS = {
+  serviceRequests: "Service requests are not available for this project type.",
+  securityReportAnalysis:
+    "Security report analysis is not available for this project type.",
+} as const;
+
+/**
+ * The Asgardeo sign-in page, for specs that assert the app sent a user there.
+ *
+ * Ids rather than roles: the hosted page's fields carry no labels or accessible
+ * names, which is also why LoginPage addresses them this way.
+ */
+export const LOGIN = {
+  usernameInput: "#usernameUserInput",
+  passwordInput: "#password",
+} as const;
+
 export const CREATE_CASE = {
   heading: "Complete Case Details",
   /** Shown under Product Version when the chosen deployment has no products
@@ -193,7 +245,64 @@ export const SETTINGS = {
     /** Column headers of the user list. */
     headers: ["User", "Role", "Status", "Actions"],
     searchPlaceholder: "Search users by name, email, or role...",
+    /**
+     * The four fields the search filters on — and the reason the placeholder's
+     * promise is checkable.
+     *
+     * `SettingsUserManagement` matches the query, lowercased, against the
+     * contact's email, firstName, lastName, and the joined labels of its role
+     * badges. All four are RENDERED in the row, which gives a single invariant
+     * covering every search: a row that survives must display the query
+     * somewhere in its text, whichever field actually matched.
+     *
+     * Client-side over the already-loaded contacts, so searching narrows the
+     * list without issuing a request.
+     */
+    searchFields: ["email", "firstName", "lastName", "role badges"],
+    /** Shown in place of a name the contact does not have (NULL_PLACEHOLDER). */
+    nullPlaceholder: "--",
+    /** Every label `getRoleBadges` can put on a row. A role search matches
+     * against these, so a query has to be one of them to filter by role. */
+    roleLabels: [
+      "Admin",
+      "Lead",
+      "System User",
+      "Portal User",
+      "Security User",
+      "Partner",
+    ],
     addUserButton: "Add User",
+    /**
+     * The two-step Add User modal (`AddUserModal.tsx`).
+     *
+     * Step 1 takes an email and VALIDATES it server-side before step 2 opens —
+     * so a rejected address never reaches the details form, and the modal stays
+     * on step 1 showing the backend's own message.
+     *
+     * Step 2 pre-fills the name when the address already belongs to a known
+     * contact, and leaves it blank otherwise.
+     */
+    addUserModal: {
+      title: "Add New User",
+      emailPlaceholder: "user@company.com",
+      nextButton: "Next",
+      /** While the email is being validated; the control is disabled meanwhile. */
+      validatingButton: "Validating...",
+      firstNamePlaceholder: "Enter first name",
+      lastNamePlaceholder: "Enter last name",
+      backButton: "Back",
+      submitButton: "Send Invitation",
+      /** While the POST is in flight. */
+      sendingButton: "Sending...",
+      cancelButton: "Cancel",
+    },
+    /** The confirmation shown by the per-row Remove control. */
+    removeUserModal: {
+      title: "Remove User",
+      confirmButton: "Yes, Remove",
+      busyButton: "Removing...",
+      cancelButton: "Cancel",
+    },
     editUserButton: "Edit user",
     removeUserButton: "Remove user",
     editModal: {
@@ -626,6 +735,38 @@ export const ENGAGEMENTS = {
   backButton: "Back",
   filtersButton: "Filters",
   clearFiltersButton: (activeCount: number) => `Clear Filters (${activeCount})`,
+  /**
+   * The Engagement Type filter, inside the Filters panel.
+   *
+   * Its options ARE the engagement-type breakdown: `engagementTypeOptions`
+   * builds them from `stats.engagementTypeCount`, keeping only the four display
+   * names below and in this order, and omitting any the project has none of. So
+   * which options appear is project data — a test must read them rather than
+   * assume all four.
+   *
+   * ⚠️ One option can stand for SEVERAL backend ids: types sharing a display
+   * name are grouped and their ids comma-joined into the option's value, which
+   * the request then splits back out into `engagementTypeKeys`.
+   */
+  engagementType: {
+    /** `InputLabel` for the select; also its accessible name, and the
+     * accessible name of the listbox it opens. */
+    label: "Engagement Type",
+    /** Multi-select, so options are checkboxes and the menu stays open. */
+    multiple: true,
+    /**
+     * ⚠️ Do NOT assert the offered entries against a fixed list.
+     *
+     * This repo's `engagementTypeOptions` keeps only four display names
+     * (Consultancy, Onboarding, Migration, Follow Up) and drops anything
+     * unmapped — but the DEPLOYED build does not: staging offers five,
+     * including "New Feature Improvement". Verified live 2026-10-08. The same
+     * source/deployment drift shows up in the Time Tracking date labels.
+     *
+     * So which entries appear is both project data and build-dependent. Tests
+     * read them and act on what is offered.
+     */
+  },
   /** Row number, matched within the card's whole text — engagements are cases
    * underneath, so rows carry a "CS" number. Unanchored, since `hasText` sees the
    * card's concatenated text. */
@@ -650,6 +791,14 @@ export const ENGAGEMENTS = {
 /** Announcements list (`/projects/:projectId/announcements`), reached from the
  * side nav. Announcements are cases underneath, so their rows carry a "CS"
  * number and the detail page reuses the case header. */
+/** The announcement detail page (`/projects/:projectId/announcements/:id`). */
+export const ANNOUNCEMENT_DETAIL = {
+  /** Rendered in place of the header when the id resolves to nothing — a
+   * deleted or unpublished announcement, or one belonging to another project.
+   * See ANNOUNCEMENT_DETAILS_ERROR in announcementsConstants.ts. */
+  notFoundMessage: "Could not load announcement details.",
+} as const;
+
 export const ANNOUNCEMENTS_LIST = {
   navItem: "Announcements",
   pathSegment: "announcements",
@@ -1113,6 +1262,153 @@ export const CREATE_SECURITY_REPORT = {
   },
 } as const;
 
+/** The Documents section inside a deployment card (DeploymentDocumentList),
+ * on Project Details → Deployments.
+ *
+ * It reuses the case-attachment upload modal, but NOT its wording: in
+ * deployment mode the dialog is titled "Add Document" rather than "Upload
+ * Attachment" (UploadAttachmentModal branches on `deploymentId`), so the
+ * CASE_ATTACHMENTS constants do not apply here.
+ *
+ * Documents POST to `/deployments/{id}/attachments` and CAN be deleted, so a
+ * spec that uploads one is able to clean up after itself — unlike cases. */
+export const DEPLOYMENT_DOCUMENTS = {
+  /** Section heading; the count renders beside it as "(N)". */
+  section: "Documents",
+  /** Opens the upload dialog. */
+  uploadButton: "Upload",
+  emptyMessage: "No documents uploaded",
+  uploadModal: {
+    /** "Add Document" in deployment mode — see above. */
+    title: "Add Document",
+    chooseFileButton: "Choose file",
+    /** Reads "Upload"; the "Add" variant only appears when the caller passes
+     * `onSelect` to hold the file locally, which this section does not. */
+    confirmButton: "Upload",
+    /** While the POST is in flight. */
+    busyButton: "Uploading",
+    /** "Document name" here, not the case tab's "Attachment name" —
+     * UploadAttachmentModal branches this label on `deploymentId` exactly as it
+     * does the dialog title. Verified live. */
+    nameField: "Document name",
+    /** Optional, and the only field unique to this mode. */
+    descriptionField: "Description (optional)",
+  },
+  deleteModal: {
+    confirmButton: "Confirm",
+  },
+} as const;
+
+/**
+ * The header search bar (`SearchBar.tsx`) — present on every project-scoped
+ * page, including the dashboard.
+ *
+ * Project-SCOPED despite its global placement: it searches the cases and change
+ * requests of the currently selected project only, so a query has to be run from
+ * inside a project. With no project (the project hub) the dropdown says "Select
+ * a project to search." instead of searching.
+ *
+ * Results are two card types in one list — cases and change requests — and the
+ * destination depends on the record's own type label, not on the search. See
+ * `getCaseSearchResultPath`.
+ */
+/**
+ * The header project switcher (`ProjectSwitcher.tsx`).
+ *
+ * Selecting a project navigates to that project's dashboard, which is what
+ * scopes the header search bar — so anything that searches has to establish the
+ * project through here (or by landing on a project URL) first.
+ *
+ * The trigger is a `Paper` with an `onClick`, carrying no role, test id or
+ * accessible name — it is identified by the project name it displays, which is
+ * why callers pass the name in.
+ */
+export const PROJECT_SWITCHER = {
+  /** Shown by the trigger until the projects query resolves the current one. */
+  unselectedLabel: "Select Project",
+  /** The in-dropdown filter. Rendered ONLY when the account has more than
+   * PROJECT_HUB_MIN_PROJECTS_FOR_SEARCH (5) projects, so callers must treat it
+   * as optional rather than wait for it. */
+  searchPlaceholder: "Search projects...",
+} as const;
+
+export const GLOBAL_SEARCH = {
+  /** ⚠️ On the MUI TextField ROOT, not the `<input>` — descend to the inner
+   * `input` before typing. */
+  inputTestId: "header-search-input",
+  dropdownTestId: "header-search-dropdown",
+  placeholder: "What are you looking for?",
+  /** Query text is debounced before the request is issued
+   * (SEARCH_DEBOUNCE_MS). Anything waiting on results has to outlast this. */
+  debounceMs: 300,
+  /** The dropdown's four mutually exclusive non-result states. Asserted against
+   * rather than merely waited out: an empty dropdown and a failed one look
+   * alike to a locator that only counts cards. */
+  emptyStates: {
+    noResults: "No results found. Try adjusting your search query.",
+    error: "Failed to load search results.",
+    prompt: "Type to search cases and change requests...",
+    noProject: "Select a project to search.",
+  },
+} as const;
+
+/**
+ * Time Tracking tab of the project details page (`ProjectTimeTracking.tsx`).
+ *
+ * Permission-gated on `hasTimeLogs`, so the tab is absent — not disabled — for a
+ * project without it; specs must skip rather than fail when it does not render.
+ *
+ * The date range APPLIES AS IT CHANGES. There is no Search or Apply button: each
+ * picker's onChange resets the page to 1 and refetches, so "search" is the
+ * refetch, and anything asserting on results has to wait for the new response
+ * rather than for a click.
+ */
+export const TIME_TRACKING = {
+  dateFilter: {
+    /** Labels the row. The portal calls the range "Time Range"; it filters on
+     * the case CREATED date downstream. */
+    label: "Time Range:",
+    /** Accessible names of the two pickers AS RENDERED — "From"/"To", not the
+     * "Start date"/"End date" aria-labels in this repo's TimeCardsDateFilter.
+     * The deployed build differs from the source tree here; these are the live
+     * values.
+     *
+     * ⚠️ MUI X v8+ renders these with the accessible field DOM structure — a
+     * group of per-section spinbuttons, NOT a plain `<input>` — so they are
+     * typed into, never `fill()`ed. */
+    startField: "From",
+    endField: "To",
+    /** Rendered only while a range is set, so its ABSENCE is how a cleared
+     * filter is asserted.
+     *
+     * ⚠️ Three buttons answer to the name "Clear": each picker carries a
+     * `clearable` icon button titled "Clear", and only the filter row's own is
+     * a text button. Disambiguated by TEXT CONTENT — the icon buttons have
+     * none. */
+    clearButton: "Clear",
+  },
+  /** "Showing {n} of {total} time cards" — the count of rendered cards and the
+   * unpaginated total. The only place either number is stated. */
+  summaryPattern: /Showing\s+(\d+)\s+of\s+(\d+)\s+time cards/,
+  emptyMessage: "No time logs available.",
+  errorMessage: "Error loading time tracking details. Please try again later.",
+  /** Each card chips its case number. Matched on shape, as the card carries no
+   * test id and no other element holds a bare case number. */
+  caseNumberPattern: /^CS\d+$/,
+  export: {
+    button: "Export",
+    /** Shown while the file is being built; the control is disabled meanwhile. */
+    busyButton: "Exporting...",
+    csvItem: "Export to CSV",
+    pdfItem: "Export to PDF",
+    /** `<project-name-slug>-time-cards-YYYY-MM-DD.<ext>` — see `buildFilename`
+     * in timeCardsCsvExport.ts. The prefix is the project name lowercased with
+     * whitespace runs collapsed to hyphens, so it is not matched literally. */
+    filenamePattern: (extension: string): RegExp =>
+      new RegExp(`-time-cards-\\d{4}-\\d{2}-\\d{2}\\.${extension}$`),
+  },
+} as const;
+
 /** Security Center (`/projects/:projectId/security-center`), whose default tab is
  * the Security Report Analysis list. */
 export const SECURITY_CENTER = {
@@ -1319,6 +1615,20 @@ export const DASHBOARD = {
      * nav item — which SIDE_NAV_VISIBILITY records as on for all three fixture
      * projects. */
     outstandingEngagements: "Outstanding Engagements",
+    /** The four categories the engagements donut always renders, in legend
+     * order (OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA in
+     * features/dashboard/constants/dashboard.ts).
+     *
+     * Rendered from that fixed list rather than from the data, so a category
+     * with no outstanding engagements still appears — with a zero. Asserting
+     * only the ones that happen to be non-empty would pass on a project where
+     * the chart had silently dropped a category. */
+    engagementCategories: [
+      "Consultancy",
+      "Onboarding",
+      "Migration",
+      "Follow Up",
+    ],
     /** Gated on `showOutstandingOpsChart` (`hasSR || hasCR`) — the same access
      * that governs the Operations nav item, so it is present for some projects
      * and withheld for others. Expected visibility per project lives in

@@ -46,18 +46,25 @@ export interface Credentials {
  *   gated on it.
  * - `portal` is an ordinary Portal user. Admin-only controls are simply absent
  *   for it, by design.
+ * - `partner` is a PARTNER account, which is a different axis again: the portal
+ *   routes it to its own pages (PartnerGuard — /partner/projects,
+ *   /partner/cases) and withholds the non-partner ones (NonPartnerGuard). So it
+ *   sees a different app rather than a differently-permissioned one, and a spec
+ *   written for the ordinary routes will not merely lose controls under it — it
+ *   will not reach those routes at all.
  *
  * See the capability table in apps/customer-portal/CLAUDE.md: admin comes from a
  * ServiceNow user role, while Lead/Portal/Security come from project membership
  * — two independent sources, and the usual cause of confusion in this area.
  */
-export type IdentityName = "admin" | "portal";
+export type IdentityName = "admin" | "portal" | "partner";
 
 /** Env-var prefix per identity. `admin` keeps the original unprefixed names so
  * existing setups and CI secrets keep working unchanged. */
 const PREFIXES: Record<IdentityName, string> = {
   admin: "E2E",
   portal: "E2E_PORTAL",
+  partner: "E2E_PARTNER",
 };
 
 /**
@@ -68,11 +75,16 @@ const PREFIXES: Record<IdentityName, string> = {
  * Assistant toggle — which are simply absent for a Portal user and would fail
  * looking like missing UI rather than a permissions boundary.
  *
- * Override with `E2E_LOGIN_IDENTITY=portal` to cover what a non-admin sees.
+ * Override with `E2E_LOGIN_IDENTITY=portal` to cover what a non-admin sees, or
+ * `=partner` for the partner-only routes.
  */
 export function loginIdentity(): IdentityName {
   const raw = process.env.E2E_LOGIN_IDENTITY?.trim().toLowerCase();
-  if (raw === "admin" || raw === "portal") return raw;
+  // Checked against the prefix table rather than a second hand-written list, so
+  // adding an identity cannot leave the two disagreeing.
+  if (raw && Object.prototype.hasOwnProperty.call(PREFIXES, raw)) {
+    return raw as IdentityName;
+  }
   if (raw) {
     throw new Error(
       `E2E_LOGIN_IDENTITY="${raw}" is not a known identity. ` +

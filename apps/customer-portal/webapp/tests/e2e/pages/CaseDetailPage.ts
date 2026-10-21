@@ -21,6 +21,7 @@ import {
   expect,
 } from "../fixtures/test";
 import {
+  ANNOUNCEMENT_DETAIL,
   CASE_COMMENT_INPUT,
   CASE_DETAIL,
   CASE_DETAILS_PANEL,
@@ -124,7 +125,21 @@ export class CaseDetailPage {
     await this.page.goto(
       `/projects/${projectId}/${CASE_DETAIL.announcementPathSegment}/${announcementId}`,
     );
-    await expect(this.caseNumber()).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+
+    // Settles on EITHER outcome — the header, or the page's not-found state —
+    // rather than demanding the header.
+    //
+    // Deliberate: an id that no longer resolves is a stale fixture, and waiting
+    // only for the header reports it as "element not found" on a locator that
+    // had nothing to do with the cause. Letting the caller see the error state
+    // is what lets it say so. The caller still has to assert the error is
+    // absent; this only decides when the page has stopped loading.
+    await expect(
+      this.caseNumber()
+        .or(this.page.getByText(ANNOUNCEMENT_DETAIL.notFoundMessage))
+        .first(),
+      "the announcement page rendered neither a header nor an error",
+    ).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
   }
 
   //

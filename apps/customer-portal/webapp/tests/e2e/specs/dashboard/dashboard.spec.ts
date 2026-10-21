@@ -420,6 +420,74 @@ test.describe("Dashboard", () => {
       });
 
 
+      test("renders the Outstanding Engagements breakdown", async ({ page }) => {
+        test.skip(!project.id, `${projectType} needs a project id.`);
+
+        const dashboard = new DashboardPage(page);
+        await dashboard.openViaSideNav(project.id);
+
+        const heading = DASHBOARD.sections.outstandingEngagements;
+
+        // The card is gated on `permissions.hasEngagements`, the same flag as
+        // the Engagements nav item — so its absence is a permission state, not a
+        // failure, and is skipped rather than asserted away.
+        //
+        // Keyed on the first CATEGORY, not on the heading: "Outstanding
+        // Engagements" also labels a stat in the row above, so a heading check
+        // passes on a project that has no card — the same ambiguity this file
+        // already documents for "Outstanding Support Cases". Waiting for a
+        // category both resolves that and gives the chart time to render, which
+        // a bare visibility read would not.
+        const firstCategory = DASHBOARD.sections.engagementCategories[0];
+        const present = await dashboard
+          .legendEntry(firstCategory)
+          .first()
+          .waitFor({ state: "visible", timeout: 60_000 })
+          .then(() => true)
+          .catch(() => false);
+        test.skip(
+          !present,
+          `${projectType} does not expose the Outstanding Engagements ` +
+            `breakdown (permissions.hasEngagements).`,
+        );
+
+        // All four categories, every time. They are rendered from a fixed list
+        // (OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA) rather than from the
+        // data, so one with no engagements still appears with a zero —
+        // asserting only the non-empty ones would pass on a chart that had
+        // silently dropped a category.
+        //
+        // Soft, so a missing category does not hide the state of the others.
+        for (const category of DASHBOARD.sections.engagementCategories) {
+          await expect
+            .soft(
+              dashboard.legendEntry(category).first(),
+              `the "${category}" category should be listed`,
+            )
+            .toBeVisible({ timeout: 60_000 });
+        }
+
+        // Slices are drawn only for non-zero categories — Recharts gives a
+        // zero-value series no slice at all — so the count is bounded by the
+        // legend rather than equal to it.
+        const slices = await dashboard
+          .chartSlices(heading)
+          .count()
+          .catch(() => 0);
+        expect(
+          slices,
+          "the donut should not draw more slices than it has categories",
+        ).toBeLessThanOrEqual(
+          DASHBOARD.sections.engagementCategories.length,
+        );
+
+        console.log(
+          `Dashboard (${projectType}): Outstanding Engagements lists ` +
+            `${DASHBOARD.sections.engagementCategories.length} categories, ` +
+            `${slices} with engagements`,
+        );
+      });
+
       test("filters the cases table by severity and clears it", async ({
         page,
       }) => {

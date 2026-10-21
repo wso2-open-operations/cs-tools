@@ -40,7 +40,7 @@ import {
   CASE_VIEW_EXPECTATIONS,
   PROJECTS,
 } from "../../config/testData";
-import { CASE_DETAIL } from "../../utils/selectors";
+import { ANNOUNCEMENT_DETAIL, CASE_DETAIL } from "../../utils/selectors";
 
 withSession(test);
 
@@ -68,6 +68,23 @@ test.describe("View Announcement", () => {
 
         const announcement = new CaseDetailPage(page);
         await announcement.openAnnouncement(project.id, announcementId);
+
+        // `openAnnouncement` has already waited for the page to settle on one of
+        // its two outcomes, so this reads a finished state rather than racing a
+        // still-loading one — the distinction matters, since "not rendered yet"
+        // and "not rendered" are the same to a count.
+        //
+        // A FAILURE, not a skip: a fixture naming a record that no longer
+        // exists is exactly the kind of rot that should be fixed rather than
+        // tolerated, and a skip would report green while this page went
+        // unchecked.
+        await expect(
+          page.getByText(ANNOUNCEMENT_DETAIL.notFoundMessage),
+          `Announcement ${announcementId} no longer exists on ${projectType} ` +
+            `— the page renders "${ANNOUNCEMENT_DETAIL.notFoundMessage}". ` +
+            `Repoint ANNOUNCEMENT_VIEWS in tests/e2e/config/testData.ts at a ` +
+            `live announcement from that project's list.`,
+        ).toHaveCount(0);
 
         // Case number — format only; the value differs per project.
         await expect(announcement.caseNumber()).toBeVisible();
