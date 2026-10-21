@@ -29,10 +29,13 @@ shown at all.
 Not every project can raise a service request — the form checks the selected
 project's eligibility and shows an error instead of letting you submit
 against one that isn't eligible. A project's **Create** menu on its detail
-page hides **Create service request** the same way. For a cloud project
-with a private data plane, the deployed-product picker is narrowed to that
-project's eligible product categories automatically — you won't see
-unrelated deployed products in the list.
+page hides **Create service request** the same way. Where a project's type
+only allows service requests on certain product categories (MS or PC for a
+managed cloud subscription, PDP for a cloud project with a private data
+plane), the deployed-product picker lists only products with one of those
+categories. A product with no category isn't listed: set it under the
+project's deployments first. A product carried over from a case is checked
+the same way, and the form says so if it doesn't qualify.
 
 ## Change requests
 

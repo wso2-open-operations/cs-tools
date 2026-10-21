@@ -145,18 +145,27 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // CreateServiceRequestPage, which restricts its deployed-product picker the
   // same way. Fetched independently of deployedProducts and applied both
   // server-side (below, via useDeployedProductOptions' productCategories
-  // param — the entity service narrows the search itself) and client-side
-  // (the memo below) as a defensive backstop. A missing/empty/failed-to-load
-  // srProductCategories must never narrow the list to zero when it would
-  // otherwise show options — fail open, not closed.
+  // param — the entity service narrows the search itself, but keeps
+  // uncategorized products) and client-side (the memo below), which drops
+  // the uncategorized ones. A missing or empty srProductCategories is no
+  // restriction, so every product shows.
   const projectMetadata = useProjectMetadata(projectId || undefined);
   const srProductCategories = projectMetadata.data?.features?.srProductCategories;
+  // Fail closed until that rule is known. entity-service rejects a service
+  // request whose deployed product isn't in the project type's
+  // srProductCategories, and one with no category at all
+  // (validateDeployedProductCategoryForType), so a list shown before -- or
+  // without -- the rule is a list of products the create may refuse with a
+  // 400. `null` (a project the metadata lookup doesn't know) carries no rule,
+  // as on the server.
+  const productRuleFailed = !!projectId && projectMetadata.isError;
+  const productRuleKnown =
+    !projectId || (!projectMetadata.isError && projectMetadata.data !== undefined);
   // `hasServiceRequestReadAccess` gates the SR feature itself (viewer
-  // permission), separately from `hasSr` (project eligibility) above. Fail
-  // open while metadata is still loading/unloaded (`undefined`) — only an
-  // explicit `false` once loaded blocks submission; the same fail-closed
-  // `projectLoadFailed`/`isLoading` guard on `canSubmit` below already
-  // prevents submitting before metadata resolves.
+  // permission), separately from `hasSr` (project eligibility) above. Only an
+  // explicit `false` once loaded shows the ineligibility error; until
+  // metadata resolves, `productRuleKnown` on `canSubmit` below holds
+  // submission.
   const hasNoSrReadAccess =
     projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
 
@@ -166,13 +175,35 @@ export default function CreateServiceRequestPage(): JSX.Element {
     srProductCategories ?? undefined,
   );
   const deployedProductOptions = useMemo(() => {
+    if (!productRuleKnown) return [];
     const options = deployedProducts.data ?? [];
     if (!srProductCategories || srProductCategories.length === 0) return options;
     return options.filter(
       (o) => o.category != null && srProductCategories.includes(o.category),
     );
-  }, [deployedProducts.data, srProductCategories]);
-  const catalogs = useSearchCatalogs(deployedProductId || undefined);
+  }, [deployedProducts.data, srProductCategories, productRuleKnown]);
+  // A product carried in from a case ("Create service request" on the case
+  // page) never went through the picker, so hold it to the same list.
+  const selectedProductIneligible =
+    !!deployedProductId &&
+    productRuleKnown &&
+    deployedProducts.isSuccess &&
+    !deployedProductOptions.some((o) => o.id === deployedProductId);
+  // "MS or PC", for the messages below.
+  const srProductCategoriesLabel = (srProductCategories ?? [])
+    .map((c) => c.toUpperCase())
+    .join(" or ");
+  // The deployment has products, but none in an allowed category.
+  const noEligibleProducts =
+    !!srProductCategories?.length &&
+    productRuleKnown &&
+    deployedProducts.isSuccess &&
+    deployedProductOptions.length === 0 &&
+    (deployedProducts.data?.length ?? 0) > 0;
+  // The product the rest of the form builds on: none while the selected one
+  // is ineligible.
+  const eligibleProductId = selectedProductIneligible ? "" : deployedProductId;
+  const catalogs = useSearchCatalogs(eligibleProductId || undefined);
   const variables = useCatalogItemVariables(
     catalogId || undefined,
     catalogItemId || undefined,
@@ -220,7 +251,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // A deployed product with no catalogs is the common non-ServiceNow case;
   // tell the engineer rather than leaving an empty dropdown.
   const noCatalogs =
-    !!deployedProductId &&
+    !!eligibleProductId &&
     catalogs.isSuccess &&
     (catalogs.data?.length ?? 0) === 0;
 
@@ -257,8 +288,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
   };
 
   const hasOptionsError =
-    deployments.isError || deployedProducts.isError || catalogs.isError;
+    productRuleFailed || deployments.isError || deployedProducts.isError || catalogs.isError;
   const retryOptions = (): void => {
+    if (productRuleFailed) void projectMetadata.refetch();
     if (deployments.isError) void deployments.refetch();
     if (deployedProducts.isError) void deployedProducts.refetch();
     if (catalogs.isError) void catalogs.refetch();
@@ -269,6 +301,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
       !!projectId &&
       !!deploymentId &&
       !!deployedProductId &&
+      // The product must be one the create will accept -- see
+      // productRuleKnown and selectedProductIneligible above.
+      productRuleKnown &&
+      deployedProducts.isSuccess &&
+      !selectedProductIneligible &&
       !!catalogId &&
       !!catalogItemId &&
       // isSuccess, not !isLoading && !isError: a query paused offline is
@@ -291,6 +328,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
       projectId,
       deploymentId,
       deployedProductId,
+      productRuleKnown,
+      deployedProducts.isSuccess,
+      selectedProductIneligible,
       catalogId,
       catalogItemId,
       variables.isSuccess,
@@ -463,7 +503,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             <FormControl fullWidth size="small" required>
               <InputLabel
                 id="sr-product-label"
-                shrink={deployedProductId !== ""}
+                shrink={eligibleProductId !== ""}
                 sx={{ top: "0px !important" }}
               >
                 Deployed product
@@ -471,10 +511,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
               <Select
                 labelId="sr-product-label"
                 label="Deployed product"
-                value={deployedProductId}
+                value={eligibleProductId}
                 onChange={(e) => onDeployedProductChange(String(e.target.value))}
-                disabled={!deploymentId || deployedProducts.isLoading}
-                notched={deployedProductId !== ""}
+                disabled={!deploymentId || deployedProducts.isLoading || !productRuleKnown}
+                notched={eligibleProductId !== ""}
               >
                 {deployedProductOptions.map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
@@ -484,10 +524,26 @@ export default function CreateServiceRequestPage(): JSX.Element {
               </Select>
               {!deploymentId ? (
                 <FormHelperText>Select a deployment first</FormHelperText>
+              ) : productRuleFailed ? (
+                <FormHelperText error>
+                  Failed to load which products this project allows.
+                </FormHelperText>
               ) : deployedProducts.isError ? (
                 <FormHelperText error>Failed to load deployed products.</FormHelperText>
-              ) : deployedProducts.isLoading ? (
+              ) : deployedProducts.isLoading || !productRuleKnown ? (
                 <FormHelperText>Loading products…</FormHelperText>
+              ) : selectedProductIneligible ? (
+                <FormHelperText error>
+                  {srProductCategoriesLabel
+                    ? `The selected product isn't categorized as ${srProductCategoriesLabel}, which this project requires for service requests. Choose another product, or set its category under the project's deployments.`
+                    : "The selected product isn't in this deployment. Choose another product."}
+                </FormHelperText>
+              ) : noEligibleProducts ? (
+                <FormHelperText>
+                  No product in this deployment is categorized as {srProductCategoriesLabel}, which this
+                  project requires for service requests. Set a product's category under the project's
+                  deployments.
+                </FormHelperText>
               ) : deployedProductOptions.length === 0 ? (
                 <FormHelperText>No deployed products found for this deployment.</FormHelperText>
               ) : null}
@@ -508,7 +564,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 label="Catalog"
                 value={catalogId}
                 onChange={(e) => onCatalogChange(String(e.target.value))}
-                disabled={!deployedProductId || catalogs.isLoading || noCatalogs}
+                disabled={!eligibleProductId || catalogs.isLoading || noCatalogs}
                 notched={catalogId !== ""}
               >
                 {(catalogs.data ?? []).map((c) => (
@@ -517,7 +573,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
-              {!deployedProductId ? (
+              {!eligibleProductId ? (
                 <FormHelperText>Select a deployed product first</FormHelperText>
               ) : catalogs.isError ? (
                 <FormHelperText error>Failed to load catalogs.</FormHelperText>
