@@ -1317,6 +1317,99 @@ func (c *CustomerEntityClient) DeleteRunbook(ctx context.Context, id string) ([]
 	return c.do(ctx, http.MethodDelete, "/runbooks/"+url.PathEscape(id), nil)
 }
 
+// The SLA module's admin-config calls (entity-service migrations
+// 0245-0250): field registry, calendars, definitions, notification rules.
+
+// GetSLAWorkItemTypes calls GET /sla/work-item-types.
+func (c *CustomerEntityClient) GetSLAWorkItemTypes(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/work-item-types", nil)
+}
+
+// GetSLAFieldCatalog calls GET /sla/field-catalog, optionally filtered to
+// one work item type.
+func (c *CustomerEntityClient) GetSLAFieldCatalog(ctx context.Context, workItemType string) ([]byte, error) {
+	path := "/sla/field-catalog"
+	if workItemType != "" {
+		path += "?workItemType=" + url.QueryEscape(workItemType)
+	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
+
+// SetSLAFieldEnabled calls PATCH /sla/field-catalog/{id}/enablement.
+func (c *CustomerEntityClient) SetSLAFieldEnabled(ctx context.Context, fieldCatalogEntryID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/sla/field-catalog/"+url.PathEscape(fieldCatalogEntryID)+"/enablement", body)
+}
+
+// ListSLACalendars calls GET /sla/calendars.
+func (c *CustomerEntityClient) ListSLACalendars(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/calendars", nil)
+}
+
+// GetSLACalendar calls GET /sla/calendars/{id}.
+func (c *CustomerEntityClient) GetSLACalendar(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/calendars/"+url.PathEscape(id), nil)
+}
+
+// UpdateSLACalendarWorkingWeek calls PATCH /sla/calendars/{id}.
+func (c *CustomerEntityClient) UpdateSLACalendarWorkingWeek(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/sla/calendars/"+url.PathEscape(id), body)
+}
+
+// AddSLAHoliday calls POST /sla/calendars/{id}/holidays.
+func (c *CustomerEntityClient) AddSLAHoliday(ctx context.Context, calendarID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/sla/calendars/"+url.PathEscape(calendarID)+"/holidays", body)
+}
+
+// DeleteSLAHoliday calls DELETE /sla/calendars/{id}/holidays/{holidayId}.
+func (c *CustomerEntityClient) DeleteSLAHoliday(ctx context.Context, calendarID, holidayID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, "/sla/calendars/"+url.PathEscape(calendarID)+"/holidays/"+url.PathEscape(holidayID), nil)
+}
+
+// SearchSLADefinitions calls POST /sla/definitions/search.
+func (c *CustomerEntityClient) SearchSLADefinitions(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/sla/definitions/search", body)
+}
+
+// GetSLADefinition calls GET /sla/definitions/{id}.
+func (c *CustomerEntityClient) GetSLADefinition(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/definitions/"+url.PathEscape(id), nil)
+}
+
+// CreateSLADefinition calls POST /sla/definitions.
+func (c *CustomerEntityClient) CreateSLADefinition(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/sla/definitions", body)
+}
+
+// UpdateSLADefinition calls PATCH /sla/definitions/{id}.
+func (c *CustomerEntityClient) UpdateSLADefinition(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/sla/definitions/"+url.PathEscape(id), body)
+}
+
+// SetSLADefinitionStatus calls PATCH /sla/definitions/{id}/status.
+func (c *CustomerEntityClient) SetSLADefinitionStatus(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/sla/definitions/"+url.PathEscape(id)+"/status", body)
+}
+
+// ListSLANotificationRules calls GET /sla/notification-rules.
+func (c *CustomerEntityClient) ListSLANotificationRules(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/notification-rules", nil)
+}
+
+// GetSLANotificationRule calls GET /sla/notification-rules/{id}.
+func (c *CustomerEntityClient) GetSLANotificationRule(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/sla/notification-rules/"+url.PathEscape(id), nil)
+}
+
+// CreateSLANotificationRule calls POST /sla/notification-rules.
+func (c *CustomerEntityClient) CreateSLANotificationRule(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/sla/notification-rules", body)
+}
+
+// UpdateSLANotificationRule calls PATCH /sla/notification-rules/{id}.
+func (c *CustomerEntityClient) UpdateSLANotificationRule(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, "/sla/notification-rules/"+url.PathEscape(id), body)
+}
+
 // ImportRunbooks calls POST /runbooks/import.
 func (c *CustomerEntityClient) ImportRunbooks(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/runbooks/import", body)

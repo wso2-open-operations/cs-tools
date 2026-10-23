@@ -422,6 +422,15 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Dashboards",
         href: "/admin/dashboards",
       },
+      // Unlike Dashboard Builder above, this has a real backend permission
+      // (PermAdmin) behind every route — "show the action, let the backend
+      // reject it" is the right default here, so this tab is not frontend-
+      // gated the way admin.dashboards is.
+      {
+        id: "admin.sla",
+        label: "SLA",
+        href: "/admin/sla",
+      },
     ],
   },
   {

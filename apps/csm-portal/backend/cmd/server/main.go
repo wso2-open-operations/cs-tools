@@ -673,6 +673,7 @@ func main() {
 	// the webhook URLs opened is for csm-notification-service only and is not
 	// proxied.
 	caseAlertSettingsHandler := handler.NewCaseAlertSettingsHandler(customerEntityClient)
+	slaHandler := handler.NewSLAHandler(customerEntityClient)
 	route("GET /team-schedule/case-alerts/settings", handler.PermView, caseAlertSettingsHandler.GetCaseAlertSettings)
 	route("PUT /team-schedule/case-alerts/settings/rooms", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertRoom)
 	route("PUT /team-schedule/case-alerts/settings/rooms/{roomId}/webhook", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertWebhook)
@@ -682,6 +683,28 @@ func main() {
 	route("DELETE /team-schedule/case-alerts/settings/routes/{routeId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertRoute)
 	route("PUT /team-schedule/case-alerts/settings/values", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertValues)
 	route("DELETE /team-schedule/case-alerts/settings/values/{valueId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertValue)
+	// Admin > SLA: the admin-configurable SLA module's field registry, calendars,
+	// definitions and notification rules (entity-service migrations 0245-0250).
+	// PermAdmin throughout -- global, admin-only config with no per-project
+	// scoping, same gate as the rota admin grants above; entity-service itself
+	// re-checks the caller holds AUTH_ADMIN_ROLES regardless.
+	route("GET /sla/work-item-types", handler.PermAdmin, slaHandler.GetSLAWorkItemTypes)
+	route("GET /sla/field-catalog", handler.PermAdmin, slaHandler.GetSLAFieldCatalog)
+	route("PATCH /sla/field-catalog/{fieldCatalogEntryId}/enablement", handler.PermAdmin, slaHandler.SetSLAFieldEnabled)
+	route("GET /sla/calendars", handler.PermAdmin, slaHandler.ListSLACalendars)
+	route("GET /sla/calendars/{id}", handler.PermAdmin, slaHandler.GetSLACalendar)
+	route("PATCH /sla/calendars/{id}", handler.PermAdmin, slaHandler.UpdateSLACalendarWorkingWeek)
+	route("POST /sla/calendars/{id}/holidays", handler.PermAdmin, slaHandler.AddSLAHoliday)
+	route("DELETE /sla/calendars/{id}/holidays/{holidayId}", handler.PermAdmin, slaHandler.DeleteSLAHoliday)
+	route("POST /sla/definitions/search", handler.PermAdmin, slaHandler.SearchSLADefinitions)
+	route("GET /sla/definitions/{id}", handler.PermAdmin, slaHandler.GetSLADefinition)
+	route("POST /sla/definitions", handler.PermAdmin, slaHandler.CreateSLADefinition)
+	route("PATCH /sla/definitions/{id}", handler.PermAdmin, slaHandler.UpdateSLADefinition)
+	route("PATCH /sla/definitions/{id}/status", handler.PermAdmin, slaHandler.SetSLADefinitionStatus)
+	route("GET /sla/notification-rules", handler.PermAdmin, slaHandler.ListSLANotificationRules)
+	route("GET /sla/notification-rules/{id}", handler.PermAdmin, slaHandler.GetSLANotificationRule)
+	route("POST /sla/notification-rules", handler.PermAdmin, slaHandler.CreateSLANotificationRule)
+	route("PATCH /sla/notification-rules/{id}", handler.PermAdmin, slaHandler.UpdateSLANotificationRule)
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)
 	route("GET /runbooks", handler.PermViewOperations, runbookHandler.ListRunbooks)
