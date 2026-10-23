@@ -297,6 +297,67 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     });
   });
 
+  it("seeds the deviation from the implementation plan right after the plan, and sends it on create", () => {
+    locationState = {
+      sourceNumber: "CHG0009988",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationPlan: "<p>Implementation text.</p>",
+      implementationDeviation: "<p>Deviation text.</p>",
+      riskImpactAnalysis: "<p>Risk text.</p>",
+    };
+    render(<CreateChangeRequestPage />);
+    const values = screen.getAllByLabelText("editor").map((e) => (e as HTMLTextAreaElement).value);
+    expect(values.indexOf("<p>Deviation text.</p>")).toBe(values.indexOf("<p>Implementation text.</p>") + 1);
+    expect(values.indexOf("<p>Risk text.</p>")).toBe(values.indexOf("<p>Deviation text.</p>") + 1);
+    expect(screen.getByText(/Carried over from the change request this one was cloned from/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({
+      implementationPlan: "<p>Implementation text.</p>",
+      implementationDeviation: "<p>Deviation text.</p>",
+    });
+  });
+
+  it("does not send a deviation that was cleared, and offers none when the source had none", () => {
+    locationState = {
+      sourceNumber: "CHG0009988",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationDeviation: "<p>Deviation text.</p>",
+    };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    const editor = screen
+      .getAllByLabelText("editor")
+      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).not.toHaveProperty("implementationDeviation");
+    unmount();
+    sessionStorage.clear();
+
+    locationState = { sourceNumber: "CHG0009989", subject: "Another change", type: "normal" };
+    render(<CreateChangeRequestPage />);
+    expect(screen.queryByText(/Deviation from the implementation plan/)).not.toBeInTheDocument();
+  });
+
+  it("still offers the deviation after a remount when the user had emptied it (the draft keeps the blank)", () => {
+    locationState = {
+      sourceNumber: "CHG0009990",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationDeviation: "<p>Deviation text.</p>",
+    };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    const editor = screen
+      .getAllByLabelText("editor")
+      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "<p><br></p>" } });
+    unmount();
+    // Same clone again (the draft for it is restored, with the emptied deviation).
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByText(/Carried over from the change request this one was cloned from/)).toBeInTheDocument();
+  });
+
   it("shows a generic banner when the source number is unavailable", () => {
     locationState = { subject: "Upgrade the gateway cluster" };
     render(<CreateChangeRequestPage />);

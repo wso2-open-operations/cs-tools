@@ -810,7 +810,7 @@ describe("EditChangeRequestDialog — Customer Approval / Customer Review checkb
         renderDialog({ state, project: ACME, customerApprovalRequired: true, customerReviewRequired: false });
         expect(approvalBox()).toBeDisabled();
         expect(reviewBox()).toBeDisabled();
-        expect(screen.getByText(/CAB approval has been received/)).toBeInTheDocument();
+        expect(screen.getByText(/This change request has been approved/)).toBeInTheDocument();
         // Nothing can be saved: the box does not promise an edit the form no longer offers.
         expect(reviewBox()).not.toHaveAccessibleDescription(/Once saved this can't be removed/);
       },
@@ -1321,9 +1321,9 @@ describe("EditChangeRequestDialog — read-only once approved, work notes only",
       implementationPlan: "<p>Run the upgrade playbook.</p>",
       category: "devops",
     });
-    expect(screen.getByText(/CAB approval has been received, so this change request's fields are read-only/)).toBeInTheDocument();
+    expect(screen.getByText(/This change request has been approved, so its fields are read-only/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /^subject/i })).toBeDisabled();
-    for (const name of [/^description/i, /^justification/i, /risk and impact analysis/i, /implementation plan/i, /rollback plan/i, /test plan/i]) {
+    for (const name of [/^description/i, /^justification/i, /risk and impact analysis/i, /^implementation plan/i, /rollback plan/i, /test plan/i]) {
       expect(planEditor(name)).toBeDisabled();
     }
     for (const name of ["Type", "Impact", "Priority", "Category"]) {
@@ -1349,15 +1349,15 @@ describe("EditChangeRequestDialog — read-only once approved, work notes only",
 
   it.each(["new", "assess", "authorize", "canceled"])("leaves the fields editable in %s (not approved), with no notice", (state) => {
     renderDialog({ state });
-    expect(screen.queryByText(/CAB approval has been received/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This change request has been approved/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /^subject/i })).toBeEnabled();
-    expect(planEditor(/implementation plan/i)).toBeEnabled();
+    expect(planEditor(/^implementation plan/i)).toBeEnabled();
     expect(saveButton()).toHaveTextContent("Save");
   });
 
   it("sends a work note together with an edit before the approval", () => {
     const { onSave } = renderDialog({ state: "authorize" });
-    fireEvent.change(planEditor(/implementation plan/i), { target: { value: "<p>Step 1.</p>" } });
+    fireEvent.change(planEditor(/^implementation plan/i), { target: { value: "<p>Step 1.</p>" } });
     fireEvent.change(workNote(), { target: { value: "Added the first step." } });
     fireEvent.click(saveButton());
     expect(onSave).toHaveBeenCalledWith({ implementationPlan: "<p>Step 1.</p>", workNote: "Added the first step." });
@@ -1366,6 +1366,93 @@ describe("EditChangeRequestDialog — read-only once approved, work notes only",
   it("does not send a blank work note", () => {
     renderDialog({ state: "scheduled" });
     fireEvent.change(workNote(), { target: { value: "   " } });
+    expect(saveButton()).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The deviation from the implementation plan: offered from the approval on
+// (the plan is read-only by then), final once the change is closed, canceled
+// or rolled back, and before the approval shown only when one is stored (a
+// clone carried it).
+// ---------------------------------------------------------------------------
+
+describe("EditChangeRequestDialog — deviation from the implementation plan", () => {
+  const deviation = (): HTMLElement => planEditor(/^deviation from the implementation plan/i);
+  const workNote = (): HTMLElement => screen.getByRole("textbox", { name: /work note/i });
+  const OPEN_APPROVED = ["customer_approval", "scheduled", "implement", "review", "customer_review"];
+
+  it.each(OPEN_APPROVED)("can be recorded in %s while the plan itself stays read-only", (state) => {
+    const { onSave } = renderDialog({ state, implementationPlan: "<p>Run the upgrade playbook.</p>" });
+    expect(
+      screen.getByText(/fields are read-only\. You can still record a deviation from the implementation plan and add work notes\./),
+    ).toBeInTheDocument();
+    expect(planEditor(/^implementation plan/i)).toBeDisabled();
+    expect(deviation()).toBeEnabled();
+    expect(saveButton()).toHaveTextContent("Add work note");
+    // At the top with the work note (the inputs left), not among the disabled plan fields.
+    const group = screen.getByRole("group", { name: /^deviation from the implementation plan/i });
+    const following = (a: Node, b: Node): boolean => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(following(group, workNote())).toBe(true);
+    expect(following(workNote(), screen.getByRole("textbox", { name: /^subject/i }))).toBe(true);
+
+    fireEvent.change(deviation(), { target: { value: "<p>Restarted the nodes one at a time.</p>" } });
+    expect(saveButton()).toHaveTextContent("Save");
+    fireEvent.change(workNote(), { target: { value: "Recorded the deviation." } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({
+      implementationDeviation: "<p>Restarted the nodes one at a time.</p>",
+      workNote: "Recorded the deviation.",
+    });
+  });
+
+  it("clears a stored deviation with an empty value", () => {
+    const { onSave } = renderDialog({ state: "implement", implementationDeviation: "<p>Used the standby.</p>" });
+    fireEvent.change(deviation(), { target: { value: "" } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ implementationDeviation: "" });
+  });
+
+  it.each([
+    ["closed", "The change request is closed, so its deviation from the implementation plan is final."],
+    ["rollback", "The change request is rolled back, so its deviation from the implementation plan is final."],
+    ["canceled", "The change request is canceled, so its deviation from the implementation plan is final."],
+  ])("is final once the change request is %s: shown read-only with the reason", (state, reason) => {
+    renderDialog({ state, implementationDeviation: "<p>Used the standby.</p>" });
+    expect(deviation()).toBeDisabled();
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    if (state !== "canceled") {
+      expect(screen.getByText(/fields are read-only\. Only work notes can be added\./)).toBeInTheDocument();
+    }
+  });
+
+  it.each(["closed", "rollback", "canceled"])("is not offered in %s when none was recorded", (state) => {
+    renderDialog({ state });
+    expect(screen.queryByRole("group", { name: /deviation from the implementation plan/i })).not.toBeInTheDocument();
+  });
+
+  it.each(["new", "assess", "authorize"])("is not offered before the approval (%s) unless one is stored", (state) => {
+    renderDialog({ state });
+    expect(screen.queryByRole("group", { name: /deviation from the implementation plan/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a stored one before the approval (a clone carried it), editable, under the plan", () => {
+    const { onSave } = renderDialog({ state: "new", implementationDeviation: "<p>From the source change.</p>" });
+    // Right under the implementation plan, before the rollback plan.
+    const plan = screen.getByRole("group", { name: /^implementation plan/i });
+    const dev = screen.getByRole("group", { name: /^deviation from the implementation plan/i });
+    const rollback = screen.getByRole("group", { name: /^rollback plan/i });
+    expect(plan.compareDocumentPosition(dev) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dev.compareDocumentPosition(rollback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deviation()).toBeEnabled();
+    fireEvent.change(deviation(), { target: { value: "<p>Does not apply here.</p>" } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ implementationDeviation: "<p>Does not apply here.</p>" });
+  });
+
+  it("is not sent when only reformatted by the editor", () => {
+    renderDialog({ state: "scheduled", implementationDeviation: "<p>Used the standby.</p>" });
+    // The editor's own re-serialisation on load is not an edit.
     expect(saveButton()).toBeDisabled();
   });
 });

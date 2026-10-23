@@ -314,12 +314,15 @@ func hasProjectID(project *string) bool {
 
 // changeRequestPatchNeedsGate reports whether the request carries anything the
 // creation-phase gate judges: the state, the project, the type, the requester, either
-// box, or any deployment field.
+// box, any deployment field, a field of the approved-content lock, or the deviation
+// from the implementation plan (final once the change is closed, canceled or rolled
+// back: checkDeviationEditable needs the stored state).
 func changeRequestPatchNeedsGate(req domain.PatchChangeRequestRequest) bool {
 	return req.State != nil || req.ProjectID != nil || req.Type != nil || req.RequestedByID != nil ||
 		req.CustomerApprovalRequired != nil || req.CustomerReviewRequired != nil ||
 		req.DeploymentIDs != nil || req.DeploymentProductIDs != nil ||
 		req.DeploymentID != nil || req.DeployedProductID != nil ||
+		req.ImplementationDeviation != nil ||
 		changeRequestPatchTouchesApprovedContent(req)
 }
 

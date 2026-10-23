@@ -32,6 +32,10 @@ import {
   changeRequestScopeLockedReason,
   changeRequestApprovedReadOnlyReason,
   CHANGE_REQUEST_APPROVED_READ_ONLY_REASON,
+  CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON,
+  changeRequestApprovedNotice,
+  implementationDeviationLockedReason,
+  implementationDeviationOffered,
   changeRequestPriorityValue,
   changeRequestImpactValue,
   changeRequestTransitionLabel,
@@ -141,6 +145,17 @@ describe("buildCloneChangeRequestNavState", () => {
     // Read back as impactDescription / rollbackPlan; created as riskImpactAnalysis / backoutPlan.
     expect(state.riskImpactAnalysis).toContain("Brief outage expected.");
     expect(state.backoutPlan).toContain("Revert to the previous image.");
+  });
+
+  it("carries the deviation from the implementation plan, and leaves a blank one out", () => {
+    const withOne = buildCloneChangeRequestNavState({
+      ...FULL_CR,
+      implementationDeviation: "<p>Rolled out to one region first.</p><script>alert(1)</script>",
+    });
+    expect(withOne.implementationDeviation).toContain("Rolled out to one region first.");
+    expect(withOne.implementationDeviation).not.toContain("<script");
+    expect(buildCloneChangeRequestNavState({ ...FULL_CR, implementationDeviation: "<p><br></p>" }).implementationDeviation).toBeUndefined();
+    expect(buildCloneChangeRequestNavState({ ...FULL_CR, implementationDeviation: null }).implementationDeviation).toBeUndefined();
   });
 
   it("leaves a blank plan field out rather than seeding an empty editor", () => {
@@ -1269,6 +1284,52 @@ describe("changeRequestApprovedReadOnlyReason (every field read-only once approv
     expect(changeRequestApprovedReadOnlyReason(undefined)).toBeNull();
     expect(changeRequestApprovedReadOnlyReason("scheduled")).toBe(CHANGE_REQUEST_APPROVED_READ_ONLY_REASON);
     expect(CHANGE_REQUEST_APPROVED_READ_ONLY_REASON).toMatch(/Only work notes can be added/);
+  });
+});
+
+// The entity service's checkDeviationEditable (change_request_deviation.go): the deviation
+// from the implementation plan is not under the approved lock, but is final once the
+// change request is closed, canceled or rolled back. One row per state.
+describe("the deviation from the implementation plan", () => {
+  it.each([
+    [undefined, false, false],
+    ["new", false, false],
+    ["assess", false, false],
+    ["authorize", false, false],
+    ["customer_approval", false, true],
+    ["scheduled", false, true],
+    ["implement", false, true],
+    ["review", false, true],
+    ["customer_review", false, true],
+    ["closed", true, false],
+    ["canceled", true, false],
+    ["rollback", true, false],
+  ] as const)("%s -> final %s, offered when none is stored %s", (state, final, offeredEmpty) => {
+    expect(implementationDeviationLockedReason(state) !== null).toBe(final);
+    expect(implementationDeviationOffered(state, null)).toBe(offeredEmpty);
+    expect(implementationDeviationOffered(state, "<p><br></p>")).toBe(offeredEmpty);
+    // A stored one is always shown, so it can be seen (and, while not final, edited).
+    expect(implementationDeviationOffered(state, "<p>Used the standby.</p>")).toBe(true);
+  });
+
+  it("words the final state the way the backend does", () => {
+    expect(implementationDeviationLockedReason("rollback")).toBe(
+      "The change request is rolled back, so its deviation from the implementation plan is final.",
+    );
+  });
+
+  it("tells an approved change request's editor what is still possible", () => {
+    expect(changeRequestApprovedNotice("assess")).toBeNull();
+    expect(changeRequestApprovedNotice("scheduled")).toBe(CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON);
+    expect(changeRequestApprovedNotice("closed")).toBe(CHANGE_REQUEST_APPROVED_READ_ONLY_REASON);
+    expect(changeRequestApprovedNotice("rollback")).toBe(CHANGE_REQUEST_APPROVED_READ_ONLY_REASON);
+    // Canceled is not approved: its fields are editable, its deviation is final.
+    expect(changeRequestApprovedNotice("canceled")).toBeNull();
+    // A Standard change is approved by Request Approval, with no CAB stage: neither notice names the CAB.
+    for (const notice of [CHANGE_REQUEST_APPROVED_READ_ONLY_REASON, CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON]) {
+      expect(notice).not.toMatch(/CAB/);
+      expect(notice).toMatch(/^This change request has been approved, so its fields are read-only\./);
+    }
   });
 });
 

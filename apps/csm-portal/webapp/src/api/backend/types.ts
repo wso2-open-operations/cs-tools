@@ -2814,6 +2814,12 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Rich-text implementation plan. Also present (write-only) on
    * {@link BeCreateChangeRequestPayload}; this is the read-back. */
   implementationPlan?: string | null;
+  /** Rich-text "Deviation from the implementation plan": what the implementation or
+   * the review actually did differently from `implementationPlan`. Unlike the plan it
+   * stays editable once approved, until the change request is closed, canceled or
+   * rolled back. Internal (the backend never returns it to a customer); absent or
+   * null on the ServiceNow data source. */
+  implementationDeviation?: string | null;
   priority?: { id: number; label: string } | null;
   /** The `category` enum value (`other`, `devops`, ...) as the Postgres data
    * source returns it, or an `{ id, label }` ref as the ServiceNow-backed
@@ -3096,6 +3102,9 @@ export interface BeCreateChangeRequestPayload {
   description?: string;
   justification?: string;
   implementationPlan?: string;
+  /** The deviation from the implementation plan, sent only by a clone of a change
+   * request that has one. */
+  implementationDeviation?: string;
   riskImpactAnalysis?: string;
   backoutPlan?: string;
   testPlan?: string;
@@ -3404,9 +3413,10 @@ export interface BePatchChangeRequestPayload {
    */
   type?: BeChangeRequestType;
   /**
-   * An internal work note, appended to the journal (never blank). The one thing
-   * that can still be added once the change request has been approved: every
-   * field is read-only then (400 `change_request_approved_read_only`).
+   * An internal work note, appended to the journal (never blank). It can still
+   * be added once the change request has been approved, when every other field
+   * is read-only (400 `change_request_approved_read_only`) except
+   * `implementationDeviation`.
    */
   workNote?: string;
   plannedStartOn?: string;
@@ -3457,6 +3467,10 @@ export interface BePatchChangeRequestPayload {
   //     shipped half-right.
   /** Rich-text implementation plan; `""` clears it. */
   implementationPlan?: string;
+  /** Rich-text deviation from the implementation plan; `""` clears it. Accepted
+   * after approval too, until the change request is closed, canceled or rolled back
+   * (then a change is a 400 `change_request_deviation_final`). */
+  implementationDeviation?: string;
   affectedServicesText?: string;
   affectedComponentsText?: string;
   rollbackDurationText?: string;

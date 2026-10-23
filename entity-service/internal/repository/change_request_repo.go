@@ -983,7 +983,8 @@ const changeRequestDetailColumns = `
 	cr.customer_updated_date_confirmation::TEXT,
 	CASE WHEN isfinite(cr.customer_updated_on) THEN cr.customer_updated_on END,
 	CASE WHEN isfinite(cr.work_start_on) THEN cr.work_start_on END, CASE WHEN isfinite(cr.work_end_on) THEN cr.work_end_on END, cr.git_reference,
-	cr.customer_approval_required, cr.customer_review_required`
+	cr.customer_approval_required, cr.customer_review_required,
+	cr.implementation_deviation`
 
 // changeRequestDetailJoins adds the two FK joins changeRequestDetailColumns
 // needs beyond changeRequestFromJoins -- kept separate from (not folded
@@ -1032,7 +1033,12 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 	// caller's read leaves them null, the same line the visibility rule draws.
 	// Best-effort like the case read: a lookup failure is logged and leaves
 	// Tags null rather than failing the detail.
-	if restricted, _ := crViewer(ctx); !restricted {
+	// The deviation from the implementation plan is internal too, on the same
+	// line: a restricted caller never reads it.
+	restricted, _ := crViewer(ctx)
+	if restricted {
+		cr.ImplementationDeviation = nil
+	} else {
 		tags, err := fetchCaseTags(ctx, r.db, id)
 		switch {
 		case err != nil:
@@ -1103,6 +1109,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 		customerUpdatedOn, workStart, workEnd                              *time.Time
 		gitReference                                                       *string
 		customerApprovalRequired, customerReviewRequired                   bool
+		implementationDeviation                                            *string
 	)
 	err := row.Scan(
 		&v.ID, &v.Number, &v.Subject, &v.Description,
@@ -1127,6 +1134,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 		&confirmCustomerUpdatedDate, &customerUpdatedOn,
 		&workStart, &workEnd, &gitReference,
 		&customerApprovalRequired, &customerReviewRequired,
+		&implementationDeviation,
 	)
 	if err != nil {
 		return err
@@ -1201,6 +1209,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 	cr.HasCustomerReviewed = isCustomerReviewed != nil && *isCustomerReviewed
 
 	cr.ImplementationPlan = implementationPlan
+	cr.ImplementationDeviation = implementationDeviation
 	if priority != nil {
 		lower := strings.ToLower(*priority)
 		cr.Priority = &lower
@@ -1426,6 +1435,12 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		// ask who could be asked: past the approval no contact would make an edit
 		// possible, so their words would mislead.
 		if err := checkApprovedContentLock(ctx, tx, id, gates, req, staffTimeResponse); err != nil {
+			return "", err
+		}
+		// The deviation from the implementation plan is not under that lock (it is
+		// written after the approval), but it is final once the change is closed,
+		// canceled or rolled back (change_request_deviation.go).
+		if err := checkDeviationEditable(ctx, tx, id, gates, req.ImplementationDeviation); err != nil {
 			return "", err
 		}
 		// A box turned on after Request Approval needs somebody who can be asked
@@ -1877,6 +1892,14 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		addCR(col+" = $%d", **v)
 	}
 	addNullableText("implementation_plan", req.ImplementationPlan)
+	// The deviation is a plain *string: nil leaves it, a blank value clears it.
+	if req.ImplementationDeviation != nil {
+		if d := normalizeImplementationDeviation(req.ImplementationDeviation); d != nil {
+			addCR("implementation_deviation = $%d", *d)
+		} else {
+			crSets = append(crSets, "implementation_deviation = NULL")
+		}
+	}
 	addNullableText("affected_services", req.AffectedServicesText)
 	addNullableText("affected_component", req.AffectedComponentsText)
 	addNullableText("rollback_duration", req.RollbackDurationText)
@@ -2352,7 +2375,7 @@ const createChangeRequestPortalQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process
+			impact_description, rollback_process, implementation_deviation
 		)
 		SELECT id, 'NEW'::change_request_state_enum, $5::uuid, $6::uuid, $7::change_request_impact_enum, $8::change_request_risk_enum,
 		       $9::change_request_priority_enum, $10::change_request_change_model_enum,
@@ -2360,7 +2383,7 @@ const createChangeRequestPortalQuery = `
 		       $16::text::timestamptz, $17::text::timestamptz, $18::uuid, $19::uuid,
 		       $20, $21, $22, $23, COALESCE($25::boolean, false), COALESCE($26::boolean, false),
 		       $30::change_request_category_enum,
-		       $13, $14
+		       $13, $14, $31
 		FROM inserted_work_item
 		RETURNING id
 	)
@@ -2500,6 +2523,7 @@ func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
+			normalizeImplementationDeviation(req.ImplementationDeviation),
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})
@@ -2573,7 +2597,7 @@ const createChangeRequestFromServiceNowQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process
+			impact_description, rollback_process, implementation_deviation
 		)
 		VALUES (
 			$1, 'NEW'::change_request_state_enum, $7::uuid, $8::uuid, $9::change_request_impact_enum, $10::change_request_risk_enum,
@@ -2582,7 +2606,7 @@ const createChangeRequestFromServiceNowQuery = `
 			$18::text::timestamptz, $19::text::timestamptz, $20::uuid, $21::uuid,
 			$22, $23, $24, $25, COALESCE($27::boolean, false), COALESCE($28::boolean, false),
 			$32::change_request_category_enum,
-			$15, $16
+			$15, $16, $33
 		)
 		RETURNING id
 	)
@@ -2631,6 +2655,7 @@ func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Contex
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
+			normalizeImplementationDeviation(req.ImplementationDeviation),
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})

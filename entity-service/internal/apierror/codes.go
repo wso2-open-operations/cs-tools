@@ -117,4 +117,10 @@ const (
 	// implemented, so its fields are read-only. Work notes can still be added and the
 	// lifecycle still moves. Nothing was written.
 	CodeChangeRequestApprovedReadOnly = "change_request_approved_read_only"
+
+	// CodeChangeRequestDeviationFinal is the 400 for a PATCH /change-requests/{id}
+	// that changes the deviation from the implementation plan of a change request
+	// that is closed, canceled or rolled back: the record is final. Resending the
+	// stored value is accepted. Nothing was written.
+	CodeChangeRequestDeviationFinal = "change_request_deviation_final"
 )

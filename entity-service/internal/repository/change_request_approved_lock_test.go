@@ -72,6 +72,9 @@ func TestChangeRequestPatchTouchesApprovedContent(t *testing.T) {
 		{Comment: s("a comment")},
 		{OnHold: b(true), OnHoldReason: s("waiting")},
 		{RequestApproval: b(true)},
+		// The deviation from the implementation plan is written after the
+		// approval, so it is never part of the approved content.
+		{ImplementationDeviation: s("<p>done differently</p>")},
 	}
 	for i, req := range notContent {
 		if changeRequestPatchTouchesApprovedContent(req) {
@@ -170,9 +173,18 @@ func TestApprovedContentQuery_NumbersEveryBoundValueAfterTheID(t *testing.T) {
 }
 
 func TestApprovedContentLockedMsg(t *testing.T) {
+	// While the change is open the deviation from the implementation plan can still be recorded.
 	got := approvedContentLockedMsg([]string{"description", "implementationPlan"}, crStateScheduled)
-	want := "description, implementationPlan can no longer be changed: the change request has been approved (current state: scheduled), so its fields are read-only; only work notes can be added"
+	want := "description, implementationPlan can no longer be changed: the change request has been approved (current state: scheduled), so its fields are read-only; only work notes and the deviation from the implementation plan can be added"
 	if got != want {
 		t.Errorf("message = %q\nwant      %q", got, want)
+	}
+	// Once it is closed or rolled back, that is final too.
+	for _, state := range []string{crStateClosed, crStateRollback} {
+		got := approvedContentLockedMsg([]string{"description"}, state)
+		want := "description can no longer be changed: the change request has been approved (current state: " + lockStateName(state) + "), so its fields are read-only; only work notes can be added"
+		if got != want {
+			t.Errorf("%s: message = %q\nwant      %q", state, got, want)
+		}
 	}
 }

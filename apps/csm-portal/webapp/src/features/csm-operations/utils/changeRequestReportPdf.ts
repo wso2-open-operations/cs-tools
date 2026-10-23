@@ -133,6 +133,7 @@ export function generateChangeRequestReportPdf(
   writePlanSection(cur, "Justification", cr.justification);
   writePlanSection(cur, "Impact description", cr.impactDescription);
   writePlanSection(cur, "Implementation plan", cr.implementationPlan);
+  writePlanSection(cur, "Deviation from the implementation plan", cr.implementationDeviation);
   writePlanSection(cur, "Test plan", cr.testPlan);
   writePlanSection(cur, "Rollback plan", cr.rollbackPlan);
   writePlanSection(cur, "Communication plan", cr.communicationPlan);

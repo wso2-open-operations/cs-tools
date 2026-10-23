@@ -256,6 +256,18 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const [implementationPlan, setImplementationPlan] = useState(
     draft?.implementationPlan ?? cloneState?.implementationPlan ?? "",
   );
+  // A clone copies the source's deviation from the implementation plan. The
+  // field is shown only when the form opened with one (a clone of a change
+  // request that has a deviation, or a draft of one): a new change request has
+  // no plan to have deviated from yet.
+  const initialImplementationDeviation = draft?.implementationDeviation ?? cloneState?.implementationDeviation ?? "";
+  const [implementationDeviation, setImplementationDeviation] = useState(initialImplementationDeviation);
+  // Decided from either source, not the restored value alone: a draft that kept a
+  // deviation the user had emptied must still show the field (to retype it), and the
+  // clone it came from still has one.
+  const [showImplementationDeviation] = useState(
+    () => !isBlankHtml(draft?.implementationDeviation ?? "") || !isBlankHtml(cloneState?.implementationDeviation ?? ""),
+  );
   const [riskImpactAnalysis, setRiskImpactAnalysis] = useState(
     draft?.riskImpactAnalysis ?? cloneState?.riskImpactAnalysis ?? "",
   );
@@ -423,6 +435,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
       description,
       justification,
       implementationPlan,
+      implementationDeviation,
       riskImpactAnalysis,
       backoutPlan,
       testPlan,
@@ -454,6 +467,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     description,
     justification,
     implementationPlan,
+    implementationDeviation,
     riskImpactAnalysis,
     backoutPlan,
     testPlan,
@@ -516,6 +530,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isBlankHtml(description)) payload.description = description;
     if (!isBlankHtml(justification)) payload.justification = justification;
     if (!isBlankHtml(implementationPlan)) payload.implementationPlan = implementationPlan;
+    if (showImplementationDeviation && !isBlankHtml(implementationDeviation)) {
+      payload.implementationDeviation = implementationDeviation;
+    }
     if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
     if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
     if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
@@ -975,6 +992,16 @@ export default function CreateChangeRequestPage(): JSX.Element {
             "Implementation plan",
             implementationPlan,
             setImplementationPlan,
+          )}
+          {showImplementationDeviation && (
+            <ExpandableRichTextField
+              id="cr-implementation-deviation"
+              label="Deviation from the implementation plan"
+              value={implementationDeviation}
+              onChange={setImplementationDeviation}
+              disabled={isSubmitting}
+              helperText="Internal: never shown to the customer. Carried over from the change request this one was cloned from; clear it if it does not apply to this change."
+            />
           )}
           {renderEditorField(
             "cr-risk-impact-analysis",

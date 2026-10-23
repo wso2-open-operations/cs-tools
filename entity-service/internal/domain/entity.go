@@ -4536,6 +4536,13 @@ type CreateChangeRequestRequest struct {
 	TestPlan            *string                `json:"testPlan,omitempty"`
 	PlannedStartDate    *string                `json:"plannedStartDate,omitempty"`
 	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
+
+	// ImplementationDeviation: see ChangeRequest.ImplementationDeviation. A
+	// create carries it only for a clone of a change request that has one; a
+	// blank value is not stored. PostgreSQL only: the ServiceNow data source
+	// refuses it, and the ServiceNow-first create does not send it to ServiceNow.
+	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
+
 	// Comment is the customer-visible "Additional comments" entry and WorkNote
 	// the internal "Work notes" entry. On the PostgreSQL data source each
 	// becomes a row in comment (type COMMENT / WORK_NOTE) written with the
@@ -5096,6 +5103,18 @@ type PatchChangeRequestRequest struct {
 	CustomerApprovalRequired *bool `json:"customerApprovalRequired,omitempty"`
 	CustomerReviewRequired   *bool `json:"customerReviewRequired,omitempty"`
 
+	// ImplementationDeviation sets the "Deviation from the implementation plan"
+	// (see ChangeRequest.ImplementationDeviation). nil leaves it unchanged; a
+	// blank value clears it (a plain *string, not the pointer-to-pointer below:
+	// encoding/json decodes an explicit null as omitted). It is not one of the
+	// approved lock's fields, so it is accepted in every state but a final one
+	// (closed, canceled, rollback), where a change is a 400
+	// change_request_deviation_final and resending the stored value is accepted.
+	// The state judged is the stored one, so a PATCH that closes the change may
+	// still record the deviation. Staff only (a customer's PATCH may not carry
+	// it); PostgreSQL only, never mirrored to ServiceNow.
+	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
+
 	// The fields below are the change-request field-parity additions. Except
 	// Comment and WorkNote (journal entries, append-only, cannot be cleared),
 	// every one of them uses a pointer-to-pointer to distinguish three states:
@@ -5452,6 +5471,14 @@ type ChangeRequest struct {
 	Priority           *string    `json:"priority"`
 	Category           *string    `json:"category"`
 	RequestedBy        *EntityRef `json:"requestedBy"`
+
+	// ImplementationDeviation is the "Deviation from the implementation plan":
+	// what the implementation or the review actually did differently from
+	// ImplementationPlan (rich text). Unlike the plan, it stays editable once the
+	// change request has been approved, until it is closed, canceled or rolled
+	// back. Internal: null for a restricted (customer) caller, the same line Tags
+	// draws. PostgreSQL data source only (null on the ServiceNow one).
+	ImplementationDeviation *string `json:"implementationDeviation"`
 
 	// Group C1 -- real content the shared API did not surface before.
 	AffectedServicesText   *string `json:"affectedServicesText"`

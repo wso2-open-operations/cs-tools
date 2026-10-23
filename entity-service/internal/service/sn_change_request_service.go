@@ -566,6 +566,10 @@ func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, re
 	return resp, nil
 }
 
+// implementationDeviationNotOnServiceNowMsg refuses the deviation from the
+// implementation plan on the ServiceNow data source, which has no field for it.
+const implementationDeviationNotOnServiceNowMsg = "implementationDeviation is not supported on the ServiceNow data source"
+
 // snCreateChangeRequestPayload is the Choreo POST /change-requests request
 // body. Deliberately has no stateKey field: the org's own Change Management
 // process flow confirms every change request begins at New unconditionally
@@ -809,6 +813,11 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	// sole data source.)
 	if req.ProjectID != nil || len(req.DeploymentIDs) > 0 {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "projectId and deploymentIds are not supported on the ServiceNow data source"}
+	}
+	// ServiceNow has no field for the deviation from the implementation plan
+	// either (the dual-write service strips it before it mirrors).
+	if req.ImplementationDeviation != nil && strings.TrimSpace(*req.ImplementationDeviation) != "" {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
 	}
 	if req.Category != nil {
 		if _, ok := snCRCategoryIDMap[*req.Category]; !ok {
@@ -1092,6 +1101,9 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	}
 	if req.DeploymentIDs != nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "deploymentIds is not supported on the ServiceNow data source"}
+	}
+	if req.ImplementationDeviation != nil {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
 	}
 	// WSO2's answer to a time the customer proposed lives in PostgreSQL (customer_updated_on /
 	// customer_updated_date_confirmation): ServiceNow is the authority on this data source, and

@@ -116,6 +116,7 @@ import {
   windowChangedMessage,
   projectFrozenMessage,
   approvedReadOnlyMessage,
+  deviationFinalMessage,
   APPROVED_STATES,
   requirementCannotBeRemovedMessage,
   requirementGatePassedMessage,
@@ -1302,7 +1303,7 @@ test.describe("change request approval flow — editing the customer checkboxes"
     expect(api.flags().customerReviewRequired).toBe(false);
   });
 
-  test("after the CAB approval every field is read-only, the implementation plan included, and a work note is all the form adds", async ({ page }) => {
+  test("after the CAB approval every field is read-only, the implementation plan included, and a work note is added on its own", async ({ page }) => {
     const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
     const detail = new ChangeRequestDetailPage(page);
     await openDetail(detail);
@@ -1314,7 +1315,7 @@ test.describe("change request approval flow — editing the customer checkboxes"
     await expect(detail.editApprovedNotice()).toBeVisible();
     await expect(detail.editDialog().getByRole("textbox", { name: /^subject/i })).toBeDisabled();
     await expect(
-      detail.editDialog().getByRole("group", { name: /implementation plan/i }).locator("[contenteditable], textarea").first(),
+      detail.editDialog().getByRole("group", { name: /^implementation plan/i }).locator("[contenteditable], textarea").first(),
     ).not.toBeEditable();
     await expect(detail.editDeploymentsField()).toBeDisabled();
     await expect(detail.editCustomerApprovalCheckbox()).toBeDisabled();
@@ -1516,6 +1517,102 @@ const ACME_CONTACTS = FAKE_PROJECT_CONTACTS[ACME.id]!.map((u) => u.name);
 const BETA_CONTACTS = FAKE_PROJECT_CONTACTS[BETA.id]!.map((u) => u.name);
 const productsOf = (deploymentId: string): string[] =>
   FAKE_DEPLOYMENT_PRODUCTS.filter((p) => p.deploymentId === deploymentId).map((p) => p.name);
+
+test.describe("change request lifecycle — the deviation from the implementation plan (mocked backend)", () => {
+  const PLAN = "<p>Upgrade every node together.</p>";
+  const DEVIATION = "<p>Upgraded the nodes one at a time instead.</p>";
+
+  test("once approved the plan is read-only, but the deviation is recorded beside a work note and shown under the plan", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("implement");
+    await page.reload();
+    await expect(detail.currentStep()).toContainText("Implement");
+    await expect(detail.planTab()).toHaveAccessibleName("Plan");
+
+    await detail.openEditDialog();
+    await expect(
+      detail.editDialog().getByText("You can still record a deviation from the implementation plan and add work notes.", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      detail.editDialog().getByRole("group", { name: /^implementation plan/i }).locator(".editor-input"),
+    ).not.toBeEditable();
+    await expect(detail.editDeviationEditor()).toBeEditable();
+    await detail.editDeviationEditor().click();
+    await page.keyboard.type("Upgraded the nodes one at a time instead.");
+    await detail.editWorkNoteField().fill("Recorded the deviation.");
+    await expect(detail.saveButton()).toBeEnabled();
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "PATCH" && r.url().endsWith(`/change-requests/${FAKE_CR_ID}`)),
+      detail.saveEdit(),
+    ]);
+    expect(request.postDataJSON()).toEqual({
+      implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+      workNote: "Recorded the deviation.",
+    });
+    await expect(detail.editDialog()).toHaveCount(0);
+    expect(api.plan().implementationDeviation).toContain("Upgraded the nodes one at a time instead.");
+
+    // The Plan tab is flagged, and the deviation sits right under the implementation plan.
+    await expect(detail.planTab()).toHaveAccessibleName("Plan, has a deviation from the implementation plan");
+    await detail.planTab().click();
+    await expect(detail.deviationSection()).toContainText("Upgraded the nodes one at a time instead.");
+    // The section is the very next block after the Implementation plan section.
+    await expect(
+      page.getByText("Implementation plan", { exact: true }).locator("xpath=..").locator("xpath=following-sibling::*[1]"),
+    ).toHaveAttribute("aria-labelledby", "cr-plan-implementation-deviation-title");
+  });
+
+  test("final once the change request is closed: read-only in the form, and the API refuses a change in the backend's words", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN, implementationDeviation: DEVIATION });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("closed");
+    await page.reload();
+
+    await detail.openEditDialog();
+    await expect(detail.editDeviationEditor()).not.toBeEditable();
+    await expect(
+      detail.editDialog().getByText("The change request is closed, so its deviation from the implementation plan is final."),
+    ).toBeVisible();
+    await expect(detail.addWorkNoteButton()).toBeVisible();
+
+    expect(await patchFromPage(page, { implementationDeviation: "<p>Something else</p>", workNote: "riding along" })).toEqual({
+      status: 400,
+      message: deviationFinalMessage("closed"),
+    });
+    expect(api.plan().implementationDeviation).toBe(DEVIATION);
+    expect(api.journal().filter((e) => e.text === "riding along")).toHaveLength(0);
+    // The stored value resent is accepted.
+    expect((await patchFromPage(page, { implementationDeviation: DEVIATION })).status).toBe(200);
+  });
+
+  test("Clone carries the deviation into the create form, which sends it", async ({ page }) => {
+    const api = await installFakeChangeRequestApi(page, "normal", FAKE_CREATOR, {}, ON_ACME);
+    api.seedPlan({ implementationPlan: PLAN, implementationDeviation: DEVIATION });
+    const detail = new ChangeRequestDetailPage(page);
+    await openDetail(detail);
+    api.setState("review");
+    await page.reload();
+
+    await detail.cloneButton().click();
+    await expect(page.getByRole("heading", { name: "New change request" })).toBeVisible();
+    const deviation = page.getByRole("group", { name: /^Deviation from the implementation plan/ });
+    await expect(deviation).toContainText("Upgraded the nodes one at a time instead.");
+    await expect(page.getByText(/Carried over from the change request this one was cloned from/)).toBeVisible();
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/change-requests")),
+      page.getByRole("button", { name: /create change request/i }).click(),
+    ]);
+    expect(request.postDataJSON()).toMatchObject({
+      implementationPlan: expect.stringContaining("Upgrade every node together."),
+      implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+    });
+  });
+});
 
 test.describe("change request lifecycle — project and deployments (mocked backend)", () => {
   test("Normal change: create with project + deployments, see them on the detail page, edit the scope, approve, and have it locked once implementing", async ({

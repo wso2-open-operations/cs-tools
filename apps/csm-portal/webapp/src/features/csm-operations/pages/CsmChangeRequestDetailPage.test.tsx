@@ -733,6 +733,61 @@ describe("CsmChangeRequestDetailPage — Clone", () => {
   });
 });
 
+describe("CsmChangeRequestDetailPage — deviation from the implementation plan", () => {
+  const WITH_DEVIATION = {
+    ...BASE_CR,
+    state: "implement",
+    implementationPlan: "<p>Upgrade every node together.</p>",
+    implementationDeviation: "<p>Upgraded the nodes one at a time instead.</p>",
+    affectedServicesText: "<p>Gateway</p>",
+  };
+
+  it("flags the Plan tab, and shows the deviation right under the implementation plan", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" });
+    expect(within(tab).getByTestId("cr-plan-tab-deviation-marker")).toBeInTheDocument();
+    fireEvent.click(tab);
+    const section = screen.getByRole("region", { name: "Deviation from the implementation plan" });
+    expect(section).toHaveTextContent("Upgraded the nodes one at a time instead.");
+    const plan = screen.getByText("Implementation plan");
+    const affected = screen.getByText("Affected services");
+    expect(plan.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(affected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the Plan card for a deviation alone", () => {
+    mockQueryResult({ data: { ...BASE_CR, implementationDeviation: "<p>Skipped the dry run.</p>" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /^plan/i }));
+    expect(screen.queryByText("No plan has been recorded for this change request.")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toBeInTheDocument();
+  });
+
+  it("neither flags the tab nor shows a section when there is no deviation", () => {
+    mockQueryResult({ data: { ...WITH_DEVIATION, implementationDeviation: "<p><br></p>" } });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan" });
+    expect(within(tab).queryByTestId("cr-plan-tab-deviation-marker")).not.toBeInTheDocument();
+    fireEvent.click(tab);
+    expect(screen.queryByRole("region", { name: "Deviation from the implementation plan" })).not.toBeInTheDocument();
+  });
+
+  it("is carried by Clone", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /clone/i }));
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/operations/change-requests/new",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+        }),
+      }),
+    );
+  });
+});
+
 describe("CsmChangeRequestDetailPage — Request Approval (New -> Assess)", () => {
   it("shows the Request Approval button when the backend flags 'assess' as a legal next state", () => {
     mockQueryResult({ data: { ...BASE_CR, legalNextStates: ["assess"] } });

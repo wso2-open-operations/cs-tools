@@ -69,10 +69,16 @@ func changeRequestContentApproved(state string) bool {
 }
 
 // approvedContentLockedMsg is the 400 for a PATCH that changes the named fields of
-// an approved change request.
+// an approved change request. It says what is still possible: work notes, and,
+// until the change is closed or rolled back, the deviation from the
+// implementation plan (change_request_deviation.go).
 func approvedContentLockedMsg(fields []string, state string) string {
-	return fmt.Sprintf("%s can no longer be changed: the change request has been approved (current state: %s), so its fields are read-only; only work notes can be added",
-		strings.Join(fields, ", "), lockStateName(state))
+	still := "only work notes and the deviation from the implementation plan can be added"
+	if terminalChangeRequestState(state) {
+		still = "only work notes can be added"
+	}
+	return fmt.Sprintf("%s can no longer be changed: the change request has been approved (current state: %s), so its fields are read-only; %s",
+		strings.Join(fields, ", "), lockStateName(state), still)
 }
 
 // approvedLockField is one field of a PATCH the lock judges: the API name, a SQL

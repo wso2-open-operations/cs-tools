@@ -5009,10 +5009,12 @@ and Request Approval now refuses that, so a test that needs the dead end uses
 the residual edge) or `legacyInCustomerState` (a row written with SQL, as an older build left it);
 the rest moved to a project with contacts, `createAnswerable`).
 
-### An approved change request is read-only (only work notes are added)
+### An approved change request is read-only (only work notes and the deviation are added)
 
 Decision (the user's, 2026-10-21): once CAB approval has been received, every field of the change
-request is read-only, the implementation plan included; only work notes can still be added. Code:
+request is read-only, the implementation plan included; only work notes can still be added, and (the
+user's, 2026-10-22) the deviation from the implementation plan, until the change is closed or rolled back
+(see the next section). Code:
 `change_request_approved_lock.go` (`checkApprovedContentLock`, called in `patchChangeRequestTx` right
 after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`change_request_approved_read_only`).
 
@@ -5029,13 +5031,15 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
   the planned window, assignedTeamId, assignedEngineerId, requestedById, caseId, serviceId,
   serviceOfferingId, isPlanningVisibleToCustomers and the two customer boxes -- is a 400 naming every
   changed field ("description, implementationPlan can no longer be changed: the change request has been
-  approved (current state: scheduled), so its fields are read-only; only work notes can be added"), and
-  nothing is written, not even the rest of the request. The comparison is one SQL statement
+  approved (current state: scheduled), so its fields are read-only; only work notes and the deviation from
+  the implementation plan can be added"; in closed and rollback the tail is "only work notes can be added"),
+  and nothing is written, not even the rest of the request. The comparison is one SQL statement
   (`approvedContentQuery`, `IS DISTINCT FROM` per field, ids and enum labels compared as text), so a
   field resent with its stored value is the accepted no-op it is everywhere in this PATCH. The project
   and the type keep their own (earlier, stricter) freezes; the deployments and deployment products are
   held by `changeRequestLinksLockedStates`, whose window now closes at the same point.
-- **Still accepted:** `workNote` and `comment`, `state` (the lifecycle), `onHold` / `onHoldReason`,
+- **Still accepted:** `workNote` and `comment`, `implementationDeviation` (not one of `approvedLockFields`;
+  final in closed / canceled / rollback, next section), `state` (the lifecycle), `onHold` / `onHoldReason`,
   `requestApproval`, a Re-schedule out of Customer Approval (`{state: "authorize"}` with a new window:
   the window is exempt for a staff time response, anything else it carries is judged), WSO2's answer to
   a time the customer proposed, and the customer's own answer / proposal (external callers return before
@@ -5048,12 +5052,58 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
   Scheduled / Implement / Review.
 - **Not enforced:** the data source that talks to the previous system directly (the PATCH goes there and
   that system decides), and csm-sync-service's own SQL writes. The CSM webapp and microapp disable their
-  Edit forms for these states (the webapp keeps a work-note field); the backend is the authority.
+  Edit forms for these states (the webapp keeps a work-note field and the deviation); the backend is the authority.
 - Tests: `change_request_approved_lock_test.go` (states, fields, query, message),
   `change_request_approved_lock_integration_test.go` (every approved state read-only, resend accepted,
   work notes and on hold accepted, refused PATCH writes nothing; editable before approval, NULL and
   canceled), run as a superuser and as `csm_app`. Existing tests that edited an approved change now
   carry `onHoldReason` / a work note as "the rest of the request" (`holdReasonOf`).
+
+### The deviation from the implementation plan (editable after approval, final once closed)
+
+Decision (the user's, 2026-10-22): what the implementation or the review actually did differently from the
+approved implementation plan is recorded in a field of its own, "Deviation from the implementation plan",
+that stays editable after CAB approval until the change request reaches a final state, and is copied by a
+clone. Code: `change_request_deviation.go`; migration `0245_change_request_implementation_deviation.sql`
+(`change_request.implementation_deviation TEXT`, `ADD COLUMN IF NOT EXISTS`, safe to re-run). Apply it before deploying
+the build, as usual: the detail read and both create inserts name the column, so the build fails every change request
+read and create on a database without it (the older build never names it, so the migration first is safe).
+
+- **ServiceNow has no such field** (checked read-only on wso2.service-now.com, 2026-10-22: nothing on the
+  change request form; `u_delta_changes` is an unused boolean, true on none of about 9,300 records; the
+  standard `close_code` / `close_notes` are closure reasons and not on the form). So it is PostgreSQL-only:
+  the dual-write PATCH mirror and the ServiceNow-first create strip it (a deviation-only PATCH mirrors
+  nothing, so no write-back failure is recorded), and the ServiceNow data source refuses it with a 400
+  (`implementationDeviation is not supported on the ServiceNow data source`; on create only a non-blank one).
+- **API.** `implementationDeviation` on the detail (and the PATCH receipt, the same read), on create, and on
+  PATCH as a plain `*string`: nil leaves it, a blank value clears it to NULL. Not the plan's
+  pointer-to-pointer: `encoding/json` decodes an explicit `null` into an omitted field, so that shape cannot
+  clear over HTTP. Not on search rows.
+- **When it can change.** It is deliberately **not** one of `approvedLockFields`, so the approved-content
+  lock never judges it: it is accepted in every state but a final one. In closed, canceled and rollback a
+  change is a 400 `implementationDeviation can no longer be changed: the change request is <closed |
+  canceled | rolled back>, so its record is final`, errorCode `change_request_deviation_final`, and nothing
+  is written (not even the rest of the request); resending the stored value is the accepted no-op, and a
+  blank value is a change only when one is stored. `changeRequestPatchNeedsGate` includes the field, so a
+  deviation-only PATCH takes the row locks and reads the stored state; `checkDeviationEditable` runs right
+  after `checkApprovedContentLock`. The state judged is the stored one, so the PATCH that closes the change
+  (from Review) may record the deviation with it. Before approval it is editable too (a clone in New may
+  carry one); the webapp offers the field from the approval on, and earlier only when one is stored.
+- **Internal.** A restricted caller (a customer, or staff who also hold a customer record) reads it as null,
+  on the same line as `Tags` (`crViewer`); a customer's PATCH carrying it is refused by `classifyExternalPatch`
+  (403). The customer portal's backend-v2 drops it anyway (its typed detail has no field for it).
+- **Side effect to know.** Like every staff PATCH, recording the deviation stamps `work_item.updated_by`, so
+  while a customer's proposed time waits in Customer Approval it makes that proposal read "nobody is
+  recorded" (see "A customer's proposed time"). No new rule for it.
+- **Not built:** no activity entry (change requests have no activity feed; the outbox trigger records the
+  column change like any other), no bulk edit.
+- Tests: `change_request_deviation_test.go` (normalisation, message, only final states judged),
+  `change_request_deviation_integration_test.go` (editable in every non-final state with the plan still
+  locked once approved, blank clears; refused in closed / canceled / rollback with the code, nothing
+  written, resend accepted; the closing PATCH may record it; both creates carry it; a customer neither reads
+  nor writes it), run as a superuser and as `csm_app`; `change_request_service_deviation_test.go` (alone is a
+  patch, never mirrored, the ServiceNow-first create keeps it for PostgreSQL, the ServiceNow data source
+  refuses it).
 
 ### Customer Group: approving / rejecting Customer Approval and Customer Review
 
@@ -10077,6 +10127,7 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
 | `POST /incidents/{id}/specialist-handoffs` on an incident nobody is assigned to; nothing written | `incident_handoff_needs_assignee` | 409 |
+| A PATCH that changes the deviation from the implementation plan of a change request that is closed, canceled or rolled back (resending the stored value is accepted); nothing written | `change_request_deviation_final` | 400 |
 
 `TestWriteServiceError_CarriesTheMachineReadableCode` (handler) and `TestChangeRequestErrorCodesIntegration_*` (repository, against a real database) pin each code to its refusal. customer-portal `backend-v2` and the CSM portal BFF pass the code through with the status they give it; the customer webapp classifies a refusal by it (`describeChangeRequestActionError`), and a 409 with a code it does not know, or none (an older entity-service), is "something went wrong, refresh", never "already answered".
 

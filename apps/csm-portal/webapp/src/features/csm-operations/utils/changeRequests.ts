@@ -1062,9 +1062,12 @@ const CHANGE_REQUEST_APPROVED_STATES: readonly string[] = [
   "rollback",
 ];
 
-/** Why an approved change request's fields are read-only. */
+/**
+ * Why an approved change request's fields are read-only. Worded without naming
+ * the CAB: a Standard change is approved by Request Approval, with no CAB stage.
+ */
 export const CHANGE_REQUEST_APPROVED_READ_ONLY_REASON =
-  "CAB approval has been received, so this change request's fields are read-only. Only work notes can be added.";
+  "This change request has been approved, so its fields are read-only. Only work notes can be added.";
 
 /**
  * Why every field of the change request is read-only in `state` (it has been
@@ -1074,6 +1077,54 @@ export const CHANGE_REQUEST_APPROVED_READ_ONLY_REASON =
  */
 export function changeRequestApprovedReadOnlyReason(state?: string | null): string | null {
   return state && CHANGE_REQUEST_APPROVED_STATES.includes(state) ? CHANGE_REQUEST_APPROVED_READ_ONLY_REASON : null;
+}
+
+/** The approved notice while the deviation from the implementation plan can still be recorded (no CAB claim either). */
+export const CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON =
+  "This change request has been approved, so its fields are read-only. You can still record a deviation from the implementation plan and add work notes.";
+
+/**
+ * The Edit form's notice for an approved change request: the fields are read-only,
+ * and until the change is closed or rolled back a deviation from the implementation
+ * plan can still be recorded beside the work notes. `null` before the approval.
+ */
+export function changeRequestApprovedNotice(state?: string | null): string | null {
+  if (!changeRequestApprovedReadOnlyReason(state)) return null;
+  return implementationDeviationLockedReason(state)
+    ? CHANGE_REQUEST_APPROVED_READ_ONLY_REASON
+    : CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON;
+}
+
+/**
+ * Why the deviation from the implementation plan can no longer be changed in
+ * `state`, or `null` while it can. Mirrors the entity service's
+ * `checkDeviationEditable` (change_request_deviation.go): the deviation is not
+ * under the approved-content lock (it is written once the plan is fixed), but it
+ * is final once the change request is closed, canceled or rolled back (400
+ * `change_request_deviation_final`).
+ */
+export function implementationDeviationLockedReason(state?: string | null): string | null {
+  switch (state) {
+    case "closed":
+      return "The change request is closed, so its deviation from the implementation plan is final.";
+    case "canceled":
+      return "The change request is canceled, so its deviation from the implementation plan is final.";
+    case "rollback":
+      return "The change request is rolled back, so its deviation from the implementation plan is final.";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether the Edit form shows the deviation field. It is written once the
+ * change request has been approved (the plan is read-only by then), so it is
+ * offered from the approval on; before it, and in a final state, only when one
+ * is stored (a clone carried one, or the record keeps it), so it can be seen.
+ */
+export function implementationDeviationOffered(state: string | null | undefined, stored: string | null | undefined): boolean {
+  if (stored && !isBlankHtml(stored)) return true;
+  return !!changeRequestApprovedReadOnlyReason(state) && !implementationDeviationLockedReason(state);
 }
 
 /**
@@ -1632,7 +1683,8 @@ export function buildChangeRequestSearchFilters(
 // None of the above can be safely carried over without either fabricating
 // data or guessing at an unconfirmed field mapping, so this only clones the
 // fields that are genuinely the same field on both sides: `subject`,
-// `description`, `justification`, `implementationPlan`, the risk and impact
+// `description`, `justification`, `implementationPlan` (and its
+// `implementationDeviation`, when there is one), the risk and impact
 // analysis, the backout plan, `testPlan`, `type`, `impact`, and
 // `assignedEngineer`. Everything else resets to the create form's own
 // defaults, same as a from-scratch change request — see
@@ -1644,6 +1696,9 @@ export interface CloneChangeRequestNavState {
   description?: string;
   justification?: string;
   implementationPlan?: string;
+  /** The source's deviation from the implementation plan, when it has one: a clone
+   * copies it so the change it promotes carries what was learned. */
+  implementationDeviation?: string;
   /** Seeds the create form's "Risk and impact analysis"; read as `impactDescription`. */
   riskImpactAnalysis?: string;
   /** Seeds the create form's "Backout plan"; read as `rollbackPlan`. */
@@ -1698,6 +1753,7 @@ export function buildCloneChangeRequestNavState(
     description: cloneableHtml(cr.description),
     justification: cloneableHtml(cr.justification),
     implementationPlan: cloneableHtml(cr.implementationPlan),
+    implementationDeviation: cloneableHtml(cr.implementationDeviation),
     riskImpactAnalysis: cloneableHtml(cr.impactDescription),
     backoutPlan: cloneableHtml(cr.rollbackPlan),
     testPlan: cloneableHtml(cr.testPlan),
@@ -1720,7 +1776,7 @@ export function buildCloneChangeRequestNavState(
  * wants a preview) and the create page stay in sync.
  */
 export const CLONE_SOURCE_GAP_MESSAGE =
-  "Copied the subject, description, justification, implementation plan, risk and impact analysis, backout plan, test plan, type, impact, assigned engineer, customer project, category, and customer approval/review settings. " +
+  "Copied the subject, description, justification, implementation plan and any deviation from it, risk and impact analysis, backout plan, test plan, type, impact, assigned engineer, customer project, category, and customer approval/review settings. " +
   "Priority, assignment group, " +
   "linked case, and affected product aren't available to copy and need to be re-entered. " +
   "Deployments, deployment products, schedule, and approval fields are intentionally left blank for you to set for the new environment. The Customer Group follows the customer project.";
@@ -1836,6 +1892,8 @@ export interface ChangeRequestDraft {
   description: string;
   justification: string;
   implementationPlan: string;
+  /** Optional: a draft saved before the field existed lacks it. */
+  implementationDeviation?: string;
   riskImpactAnalysis: string;
   backoutPlan: string;
   testPlan: string;

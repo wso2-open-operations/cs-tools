@@ -327,12 +327,43 @@ impact analysis (sent as `impactDescription`), beside the fields it already had.
 
 Once the change request has been approved (`changeRequestApprovedReadOnlyReason`: Customer Approval, Scheduled, Implement,
 Review, Customer Review, Closed, Rollback -- CAB approval received, or a Standard change scheduled; not Canceled) every
-field is disabled under one notice and the form's only input is the internal **Work note**, sent as `workNote` with the
-button "Add work note". This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
+field is disabled under one notice and the form's inputs are the internal **Work note**, sent as `workNote` with the
+button "Add work note", and, until the change is closed or rolled back, the deviation from the implementation plan (next
+section). This mirrors entity-service's approved-content lock (400 `change_request_approved_read_only`),
 which is the authority; the deployments' window (`changeRequestScopeLockedReason`) closes at the same point, and the review
 box can no longer be added after the approval. A work note can ride with any save before the approval too;
 `usePatchChangeRequest` refreshes the comments query when one was sent. The CSM microapp disables its Edit button in the
 same states. e2e: the fake API refuses the same edits in the backend's words (`approvedReadOnlyMessage`, `APPROVED_STATES`).
+
+### The deviation from the implementation plan (editable after approval, final once closed)
+
+What the implementation or the review actually did differently from the approved implementation plan
+(`implementationDeviation`, rich text; entity-service CLAUDE.md, "The deviation from the implementation plan", has the
+backend rules). It is the one field the approved lock leaves open:
+
+- **Edit form** (`EditChangeRequestDialog`): offered from the approval on (`implementationDeviationOffered`): once approved it
+  sits at the top beside the work note, under the notice `CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON`
+  (`changeRequestApprovedNotice`), and the button reads "Save" once it is edited ("Add work note" otherwise). Final once the
+  change is closed, canceled or rolled back (`implementationDeviationLockedReason`, mirroring the backend's 400
+  `change_request_deviation_final`): shown read-only with that reason when one is stored, not shown when none is. Before the
+  approval it is shown (under the implementation plan, editable) only when one is stored, i.e. a clone carried it. Cleared with
+  `""` like the plan fields (`useRichTextPlanField`).
+- **Plan tab** (`CsmChangeRequestDetailPage`): `ImplementationDeviationSection`, right under the Implementation plan section, a
+  named region with a warning-coloured edge and icon (prominent without being an alert). The Plan tab is not the default one, so
+  its label carries a small warning dot and the tab's accessible name becomes "Plan, has a deviation from the implementation plan"
+  (an explicit `aria-label`: Chrome's computed name of the flex label put a space before the comma). The Plan card renders for
+  a deviation alone.
+- **Clone** copies it (`buildCloneChangeRequestNavState`, `CLONE_SOURCE_GAP_MESSAGE`); the create form shows the field only when it
+  opened with one (a clone or a draft of one), under the implementation plan, and sends it only then and only non-blank. The draft
+  keeps it (`ChangeRequestDraft.implementationDeviation`, optional).
+- **PDF export** writes it after the implementation plan. Not in the bulk edit. Not in the CSM microapp (its detail shows no plan
+  at all).
+- Internal: the backend never returns it to a customer, and the customer portal has no field for it.
+- Tests: `EditChangeRequestDialog.test.tsx` ("deviation from the implementation plan"), `CsmChangeRequestDetailPage.test.tsx`
+  (same), `CreateChangeRequestPage.test.tsx` (Clone prefill), `changeRequests.test.ts` (one row per state),
+  `ImplementationDeviationSection.test.tsx`; e2e `change-request-lifecycle.spec.ts` ("the deviation from the implementation plan
+  (mocked backend)"), whose fake API holds the plan and the deviation (`seedPlan`, `plan()`) and refuses a change in a final
+  state in the backend's words (`deviationFinalMessage`).
 
 ### Customers never decide in the CSM portal
 

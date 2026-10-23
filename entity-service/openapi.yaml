@@ -23434,6 +23434,15 @@ components:
             implementationPlan:
               type: string
               nullable: true
+            implementationDeviation:
+              type: string
+              nullable: true
+              description: >-
+                "Deviation from the implementation plan": what the implementation or the
+                review actually did differently from the implementation plan (rich text).
+                Unlike the plan it stays editable once the change request has been approved,
+                until it is closed, canceled or rolled back. Internal: null for a customer
+                caller. PostgreSQL data source only (null on the ServiceNow one).
             priority:
               type: string
               nullable: true
@@ -24130,6 +24139,12 @@ components:
           type: string
         implementationPlan:
           type: string
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan, for a clone of a change request that
+            has one; a blank value is not stored. PostgreSQL only: the ServiceNow data source
+            refuses a non-blank one (400), and the ServiceNow-first create does not send it to ServiceNow.
         riskImpactAnalysis:
           type: string
         backoutPlan:
@@ -24367,9 +24382,13 @@ components:
         that changes any of its fields is a 400 naming them, with errorCode
         change_request_approved_read_only, and nothing is written. A field resent with the
         value it already holds is accepted. Still accepted: state, onHold / onHoldReason,
-        requestApproval, workNote and comment, a Re-schedule (state authorize with a new
-        planned window, out of customer_approval) and WSO2's answer to a time the customer
-        proposed.
+        requestApproval, workNote and comment, implementationDeviation, a Re-schedule (state
+        authorize with a new planned window, out of customer_approval) and WSO2's answer to a
+        time the customer proposed.
+        THE DEVIATION FROM THE IMPLEMENTATION PLAN (implementationDeviation) is final once
+        the change request is closed, canceled or rolled back: a change is then a 400 with
+        errorCode change_request_deviation_final, and nothing is written. The state judged
+        is the stored one, so the PATCH that closes the change may record it.
       properties:
         title:
           type: string
@@ -24568,6 +24587,14 @@ components:
           type: string
           nullable: true
           description: Explicit null clears the field.
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan (rich text). A blank value clears it.
+            Not under the approved-content lock: accepted in every state but closed, canceled
+            and rollback (400 change_request_deviation_final; resending the stored value is
+            accepted). Staff only: a customer's PATCH carrying it is a 403. PostgreSQL data
+            source only (400 on the ServiceNow one); never mirrored to ServiceNow.
         priority:
           type: string
           nullable: true
@@ -28123,7 +28150,9 @@ components:
             `change_request_approved_read_only` (400: a field of a change request that has
             been approved -- CAB approval received, or a Standard change once scheduled --
             would change; its fields are read-only, work notes can still be added; nothing
-            written). The list grows, so this is
+            written), and `change_request_deviation_final` (400: the deviation from the
+            implementation plan of a change request that is closed, canceled or rolled back
+            would change; nothing written). The list grows, so this is
             deliberately not a closed enum: a value not listed here is a newer server's.
           example: change_request_on_hold
 

@@ -425,9 +425,17 @@ export const stateJumpMessage = (target: string, from: string, reviewRequired: b
     WAITING_ON[from] ?? "that is not a step of the change request's lifecycle from here"
   }; the moves open to staff from ${from} are: ${opens}`;
 };
+/** The refusal of a PATCH that changes the deviation from the implementation plan of a change request in a final state
+ * (entity-service `deviationFinalMsg`, errorCode `change_request_deviation_final`). */
+export const deviationFinalMessage = (state: string): string =>
+  `implementationDeviation can no longer be changed: the change request is ${state === "rollback" ? "rolled back" : state}, so its record is final`;
 /** The refusal of a PATCH that changes a field of an approved change request (entity-service `approvedContentLockedMsg`). */
 export const approvedReadOnlyMessage = (fields: string[], state: string): string =>
-  `${fields.join(", ")} can no longer be changed: the change request has been approved (current state: ${state}), so its fields are read-only; only work notes can be added`;
+  `${fields.join(", ")} can no longer be changed: the change request has been approved (current state: ${state}), so its fields are read-only; ${
+    ["closed", "rollback"].includes(state)
+      ? "only work notes can be added"
+      : "only work notes and the deviation from the implementation plan can be added"
+  }`;
 export const projectFrozenMessage = (state: string): string =>
   `projectId can no longer be changed: the Customer Project is fixed once approval has been requested (current state: ${state}). Cancel this change request and clone it to use another project.`;
 export const requirementCannotBeRemovedMessage = (field: string, state: string): string =>
@@ -563,6 +571,10 @@ const REVIEW_FLAG_LOCKED = ["customer_review", "closed", "rollback", "canceled"]
 export interface FakeChangeRequestApi {
   /** Who the app believes is signed in (applied on the next page load). */
   setViewer(user: FakeUser): void;
+  /** Gives the fake CR an implementation plan and / or a deviation from it, as a create or an earlier edit would have. */
+  seedPlan(plan: { implementationPlan?: string | null; implementationDeviation?: string | null }): void;
+  /** The implementation plan and the deviation from it, as the fake backend holds them. */
+  plan(): { implementationPlan: string | null; implementationDeviation: string | null };
   /** The CR's current lifecycle state, as the fake backend holds it. */
   state(): string;
   /** The CR's current checkbox settings, as the fake backend holds them. */
@@ -825,6 +837,11 @@ export async function installFakeChangeRequestApi(
   let confirmation: "agree" | "disagree" | null = null;
   let proposer: FakeUser | null = null;
   let onHold = false;
+  // The implementation plan and the deviation from it (rich text; null when none).
+  let implementationPlan: string | null = null;
+  let implementationDeviation: string | null = null;
+  // Blank is whitespace only, as entity-service's normalizeImplementationDeviation reads it (an empty paragraph is stored).
+  const blankToNull = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
   /** "2030-03-01 09:00:00" (UTC, as the planned window is held and sent) or an RFC 3339 instant, as epoch ms. */
   const instantOf = (value: string | null | undefined): number | null => {
     if (!value) return null;
@@ -1026,6 +1043,8 @@ export async function installFakeChangeRequestApi(
     confirmCustomerUpdatedDate: confirmation,
     ...(customerUpdatedOn ? { customerProposal: proposalView() } : {}),
     onHold,
+    implementationPlan,
+    implementationDeviation,
     project: FAKE_PROJECTS.find((p) => p.id === scope.projectId),
     deployments: FAKE_DEPLOYMENTS.filter((d) => scope.deploymentIds.includes(d.id)).map(({ id, name }) => ({ id, name })),
     deploymentProducts: FAKE_DEPLOYMENT_PRODUCTS.filter((p) => scope.deploymentProductIds.includes(p.id)).map(({ id, name }) => ({ id, name })),
@@ -1167,6 +1186,9 @@ export async function installFakeChangeRequestApi(
         case "customerApprovalRequired":
         case "customerReviewRequired":
           return body[field] !== flags[field];
+        case "implementationPlan":
+          // Compared as sent, like the backend's IS DISTINCT FROM (an empty string is a change from none).
+          return body.implementationPlan !== implementationPlan;
         default:
           return true;
       }
@@ -1580,6 +1602,8 @@ export async function installFakeChangeRequestApi(
       subject = String(body.subject ?? subject);
       if (body.customerApprovalRequired !== undefined) flags.customerApprovalRequired = body.customerApprovalRequired as boolean;
       if (body.customerReviewRequired !== undefined) flags.customerReviewRequired = body.customerReviewRequired as boolean;
+      implementationPlan = blankToNull(body.implementationPlan);
+      implementationDeviation = blankToNull(body.implementationDeviation);
       for (const kind of ["comment", "workNote"] as const) {
         const text = body[kind];
         if (typeof text === "string" && text.trim()) journal.push({ kind, text });
@@ -1719,6 +1743,12 @@ export async function installFakeChangeRequestApi(
         // Once approved, every field is read-only: the rest of the request is not written either.
         const approvedProblem = approvedLockProblem(body);
         if (approvedProblem) return json(route, { message: approvedProblem, errorCode: "change_request_approved_read_only" }, 400);
+        // The deviation from the implementation plan is not under that lock, but it is final once the change is over (a
+        // resend of the stored value is accepted).
+        // Only a string is judged: entity-service decodes an explicit null as omitted.
+        if (typeof body.implementationDeviation === "string" && FINAL_STATES.includes(state) && blankToNull(body.implementationDeviation) !== implementationDeviation) {
+          return json(route, { message: deviationFinalMessage(state), errorCode: "change_request_deviation_final" }, 400);
+        }
         // A refused state change writes nothing either, not even the rest of its own request (a comment, a scope field,
         // a tick box): the backend refuses inside the one transaction.
         const refusal = typeof body.state === "string" ? manualStateRefusal(body.state, body) : null;
@@ -1747,6 +1777,8 @@ export async function installFakeChangeRequestApi(
           const text = body[kind];
           if (typeof text === "string" && text.trim()) journal.push({ kind, text });
         }
+        if (typeof body.implementationPlan === "string") implementationPlan = blankToNull(body.implementationPlan);
+        if (typeof body.implementationDeviation === "string") implementationDeviation = blankToNull(body.implementationDeviation);
         // Checkbox edits: the gate above has refused every one that is not allowed.
         if (typeof body.customerApprovalRequired === "boolean") flags.customerApprovalRequired = body.customerApprovalRequired;
         if (typeof body.customerReviewRequired === "boolean") flags.customerReviewRequired = body.customerReviewRequired;
@@ -1804,6 +1836,11 @@ export async function installFakeChangeRequestApi(
     setViewer: (user) => {
       currentViewer = user;
     },
+    seedPlan: (plan) => {
+      if (plan.implementationPlan !== undefined) implementationPlan = plan.implementationPlan;
+      if (plan.implementationDeviation !== undefined) implementationDeviation = plan.implementationDeviation;
+    },
+    plan: () => ({ implementationPlan, implementationDeviation }),
     state: () => state,
     setState: (next) => {
       state = next;

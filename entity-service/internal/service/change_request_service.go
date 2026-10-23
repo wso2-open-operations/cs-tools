@@ -337,7 +337,7 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		req.IsPlanningVisibleToCustomers == nil &&
 		req.ImplementationPlan == nil && req.Priority == nil && req.Category == nil &&
 		req.RequestedByID == nil && req.AffectedServicesText == nil && req.AffectedComponentsText == nil &&
-		req.RollbackDurationText == nil &&
+		req.RollbackDurationText == nil && req.ImplementationDeviation == nil &&
 		req.OnHold == nil && req.OnHoldReason == nil &&
 		req.CustomerApprovalRequired == nil && req.CustomerReviewRequired == nil &&
 		req.ConfirmCustomerUpdatedDate == nil &&
@@ -395,6 +395,10 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	mirrorReq := req
 	mirrorReq.CustomerApprovalRequired, mirrorReq.CustomerReviewRequired = nil, nil
 	mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil
+	// The deviation from the implementation plan has no field in ServiceNow's
+	// change request API (checked on wso2.service-now.com: nothing on the form or
+	// the table records one), so it stays PostgreSQL-only.
+	mirrorReq.ImplementationDeviation = nil
 	// The conversation about a time the customer proposed (confirmCustomerUpdatedDate,
 	// expectedCustomerUpdatedOn) has no field in the previous system's change request API: it stays
 	// PostgreSQL-only. What of it changes the change request itself is mirrored from what
@@ -630,6 +634,9 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	// the project's registered contacts).
 	mirrorReq := req
 	mirrorReq.ProjectID, mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil, nil
+	// A clone's deviation from the implementation plan is PostgreSQL-only, as on
+	// PATCH: ServiceNow has no field for it. PostgreSQL still gets it (req).
+	mirrorReq.ImplementationDeviation = nil
 	if mirrorReq.PlannedStartDate != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartDate)
 		mirrorReq.PlannedStartDate = &v
