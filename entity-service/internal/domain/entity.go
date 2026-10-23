@@ -933,6 +933,29 @@ type SalesforceMembershipUpsert struct {
 	// in after the upsert; every other group membership of this project
 	// contact is removed.
 	ProjectGroups []string
+
+	// DeferredSalesforceWrite, when set, makes the repository record a
+	// salesforce_write_request row in the transaction that writes these
+	// rows: the Salesforce half did not run (sales-entity-service was
+	// unavailable), the sf_id columns stay NULL, and the request row is what
+	// the asynchronous consumer later carries out. Portal writes only.
+	DeferredSalesforceWrite *DeferredSalesforceWrite
+	// CompletesSalesforceWriteRequestID, when set, is the
+	// salesforce_write_request row this upsert fulfils: it is marked
+	// SUCCEEDED in the same transaction that stamps the Salesforce ids, so
+	// the request and the rows can never disagree about whether the write
+	// happened. Set only by the deferred-write consumer.
+	CompletesSalesforceWriteRequestID string
+	// AdoptProjectContactID, when set, is the project_contact row a deferred
+	// write committed with NULL ids, which this upsert must stamp rather
+	// than match afresh. The deferred row sits under the project's account;
+	// Salesforce may place the contact on another account (a partner's), in
+	// which case the ordinary (account, user) and (project, account_contact)
+	// lookups would miss the row and insert a second membership. With this
+	// set, the row's account_contact is moved to the resolved account and
+	// the row itself is updated in place. Set only by the deferred-write
+	// completion.
+	AdoptProjectContactID string
 }
 
 // SalesforceMembershipUpsertResult reports what the upsert resolved or created.
@@ -958,6 +981,9 @@ type SalesforceMembershipUpsertResult struct {
 	// carries the project ADMIN role (or the contact's Salesforce isCsAdmin
 	// flag is set), which is exactly when AdminRoleName is held.
 	IsAccountAdmin bool
+	// SalesforceWriteRequestID is the id of the salesforce_write_request row
+	// written for DeferredSalesforceWrite, "" when the write was not deferred.
+	SalesforceWriteRequestID string
 }
 
 // SalesforceContactUpsert is the Contact writer's input: one Salesforce
@@ -1049,6 +1075,12 @@ type ProjectMembership struct {
 	// ("Portal user", "Admin", ...), exactly as they were written to
 	// Salesforce — not the derived project_role/project_group values.
 	Roles []string `json:"roles"`
+	// SalesforceSync is "" when the membership is in Salesforce, PENDING
+	// while its Salesforce write is still owed (sales-entity-service was
+	// unavailable at invitation time and the write was deferred), FAILED
+	// when that deferred write gave up. MembershipSfID and ContactSfID are
+	// empty while it is PENDING or FAILED.
+	SalesforceSync string `json:"salesforceSync,omitempty"`
 }
 
 // CreateProjectMembershipRequest is the body of POST /projects/{id}/contacts:
@@ -4935,6 +4967,10 @@ type ProjectContact struct {
 	// happen on genuine customer rows, not only on integration/system accounts.
 	CustomerContactPresent bool `json:"customerContactPresent"`
 	GrantsCaseAccess       bool `json:"grantsCaseAccess"`
+	// SalesforceSync is omitted for a membership that is in Salesforce;
+	// PENDING while a deferred Salesforce write is still owed for it,
+	// FAILED when that write gave up (see domain.SalesforceWriteRequest).
+	SalesforceSync *string `json:"salesforceSync,omitempty"`
 }
 
 // SearchProjectContactsRequest is the input for POST /projects/{id}/contacts/search.

@@ -146,7 +146,7 @@ func upsertContactTx(ctx context.Context, tx querier, in domain.SalesforceContac
 	}
 
 	// 3. account_contact on the contact's current account.
-	res.AccountContactID, res.CreatedAccountContact, err = upsertAccountContact(ctx, tx, in.ContactSfID, in.AccountID, userName, in.IsPrimaryContact, actor)
+	res.AccountContactID, res.CreatedAccountContact, err = upsertAccountContact(ctx, tx, in.ContactSfID, in.AccountID, userName, in.IsPrimaryContact, actor, "")
 	if err != nil {
 		return res, err
 	}
