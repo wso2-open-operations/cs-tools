@@ -91,10 +91,16 @@ interface ChainOption {
   /** Where its people are set, for a chain that takes them from the rota. */
   rota?: { family: RotaFamily; rotaCode?: string };
   disabledReason?: string;
+  /** A chain named after an assignment group (U2-SRE, B-Central-SRE): shown
+   *  only once its team is an SRE team in the catalogue, which entity-service
+   *  migration 0242 makes it. Before that the team is SME and its readiness is
+   *  on the SME chain. */
+  sreTeamKey?: string;
 }
 
-/** The chains under the SRE tab's "Who gets alerts", in order: the three SRE
- *  sub-teams, then SME. PaaS SRE has no rota yet, so it is listed -- it is a
+/** The chains under the SRE tab's "Who gets alerts", in order: the SRE
+ *  sub-teams (SaaS, IaaS, then U2-SRE and B-Central-SRE, named after their
+ *  assignment groups), PaaS, then SME. PaaS SRE has no rota yet, so it is listed -- it is a
  *  chain people expect -- with no chain to show. CRE's "Who gets alerts" is
  *  its own editable chain (CasePagingPanel), where the CRE Team leads and
  *  those above them mark each team's first responders. */
@@ -108,6 +114,18 @@ const SRE_CHAINS: readonly ChainOption[] = [
     code: "SRE_IAAS",
     label: "IaaS SRE",
     rota: { family: "SRE", rotaCode: "SRE_IAAS" },
+  },
+  {
+    code: "SRE_U2",
+    label: "U2-SRE",
+    rota: { family: "SRE", rotaCode: "SME_U2" },
+    sreTeamKey: "u2",
+  },
+  {
+    code: "SRE_B_CENTRAL",
+    label: "B-Central-SRE",
+    rota: { family: "SRE", rotaCode: "SME_B_CENTRAL" },
+    sreTeamKey: "b-central",
   },
   { code: "PAAS", label: "PaaS SRE", disabledReason: "No PaaS rota yet" },
   { code: "SME", label: "SME", rota: { family: "SME" } },
@@ -167,8 +185,12 @@ function AlertTabs({
     code !== "PAAS" && mayManageChain(code, roomLadders);
   // The SRE and SME chains the reader is shown: their own, and every one
   // whose settings they may change.
+  const isSRETeam = (key: string) =>
+    (teams ?? []).some((t) => t.key.toLowerCase() === key && t.family === "SRE");
   const sreChains = SRE_CHAINS.filter(
-    (c) => !visibleChains || visibleChains.includes(c.code) || manages(c.code),
+    (c) =>
+      (!c.sreTeamKey || isSRETeam(c.sreTeamKey)) &&
+      (!visibleChains || visibleChains.includes(c.code) || manages(c.code)),
   );
   // CRE's chain: for every chain's reader (a CSM admin, the heads) and for
   // whoever caseAlertChainsFor gave it to (a CRE Team lead, rota admin,

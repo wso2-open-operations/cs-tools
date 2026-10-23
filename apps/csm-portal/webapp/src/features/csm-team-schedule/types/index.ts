@@ -361,7 +361,10 @@ export type PagingMemberChange =
   | { membershipId: string; role: PagingRole };
 
 /** The paging chains the readiness check answers for. */
-export type PagingChainCode = "CRE" | "SRE_SAAS" | "SRE_IAAS" | "SME";
+/** SRE_U2 / SRE_B_CENTRAL are the chains named after the U2 SRE Group and
+ *  B-Central SRE Group assignment groups (rotas SME_U2 / SME_B_CENTRAL, moved
+ *  to the SRE family by entity-service migration 0242). */
+export type PagingChainCode = "CRE" | "SRE_SAAS" | "SRE_IAAS" | "SRE_U2" | "SRE_B_CENTRAL" | "SME";
 
 /** What it takes to close a readiness gap, which decides the action offered. */
 export type PagingGapFix =

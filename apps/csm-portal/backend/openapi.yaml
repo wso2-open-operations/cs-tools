@@ -15692,7 +15692,7 @@ components:
       properties:
         chain:
           type: string
-          enum: [CRE, SRE_SAAS, SRE_IAAS, SME]
+          enum: [CRE, SRE_SAAS, SRE_IAAS, SRE_U2, SRE_B_CENTRAL, SME]
         label:
           type: string
         ready:

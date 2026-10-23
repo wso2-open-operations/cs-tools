@@ -332,10 +332,11 @@ DROP FUNCTION IF EXISTS team_schedule_assignment_matches_shift(), team_schedule_
 
 ## Rotas: IaaS SRE and the SME rotations (0199–0200)
 
-A **rota** is a named rotation inside a family. SRE runs SaaS (Apollo & Artemis)
-and IaaS. **SME**, a third family added in 0199, runs one rota per product:
+A **rota** is a named rotation inside a family. SRE runs SaaS (Apollo & Artemis),
+IaaS, U2 and B-Central. **SME**, a third family added in 0199, runs one rota per product:
 Asgardeo, Choreo Runtime, Bijira, Devant, WSO2 Cloud · Agent platform,
-WSO2 Cloud · Core and Moesif, plus U2 and B-Central (0217). The source is the "CSM SRE + SME on call" doc.
+WSO2 Cloud · Core and Moesif. U2 and B-Central were added as SME rotas in 0217 and
+moved to SRE in 0242. The source is the "CSM SRE + SME on call" doc.
 PaaS SRE is N/A there, so it has no rota until it has a schedule.
 
 | Rota | Family | Team type | Zones (LK time) | Duty rotates | Escalation |
@@ -349,10 +350,12 @@ PaaS SRE is N/A there, so it has no rota until it has a schedule.
 | `SME_CLOUD_AGENT` | SME | `sme-cloud-agent` | `WCA_D` 06:00–18:00 · `WCA_N` 18:00–06:00 | weekly | 5 min |
 | `SME_CLOUD_CORE` | SME | `sme-cloud-core` | `WCC_D` / `WCC_N`, as Agent platform | weekly | 5 min |
 | `SME_MOESIF` | SME | `sme-moesif` | `MOE_D` 10:00–22:00 · `MOE_N` 22:00–10:00 | weekly | 30 min |
-| `SME_U2` | SME | `sme-u2` | `U2_D` 06:00–18:00 · `U2_N` 18:00–06:00 (0236) | weekly | 5 min |
-| `SME_B_CENTRAL` | SME | `sme-b-central` | `BCN_D` / `BCN_N`, as U2 | weekly | 5 min |
+| `SME_U2` | SRE (0242) | `sre-u2` | `U2_D` 06:00–18:00 · `U2_N` 18:00–06:00 (0236) | weekly | 5 min |
+| `SME_B_CENTRAL` | SRE (0242) | `sre-b-central` | `BCN_D` / `BCN_N`, as U2 | weekly | 5 min |
 
 U2 and B-Central were added by migration 0217, data only, with the windows their rota sheet gives. Unlike the other SME rotations it also inserts their two team rows (keys `u2`, `b-central`), only when no team has that key, so every environment gets them from one script.
+
+Migration 0242 moved both to the **SRE family** (data only): `team.type` becomes `sre-u2` / `sre-b-central`, the two rotas and their four windows become SRE, and the rota codes stay `SME_U2` / `SME_B_CENTRAL` (they are keys, and scripts outside this repository name them). No escalation reaches these teams: they answer the "U2 SRE Group" and "B-Central SRE Group" incidents, so the SRE ladder pages them from their own rota the moment such an incident is created, as it pages IaaS. Their chains are named after the assignment groups, **U2-SRE** and **B-Central-SRE**, on the Case Paging tab, the readiness check and the alert cards. Every turn already rostered stays; the SRE ladder calls only people holding L1, L2 or L3, so each turn needs a tier. Editing the two rotas now needs SRE rota admin rights, not SME. To page them, add `u2` and `b-central` to the SRE ladder's ABT teams on the Alert Settings tab, give each an SRE room, and redirect the two assignment groups to them.
 
 Migration 0236 corrected both to Day 06:00–18:00 and Night 18:00–06:00 (from 0217's 10:00–22:00 / 22:00–10:00), for all time: those were never their hours. It changes the four windows in place (same codes, zones, labels and colours) and resolves every turn on them again, past turns included, in the same transaction -- the one case the used-shift guard (0153) allows a used window's hours to change, as 0154 did. The turns are first parked a minute apart far ahead, because the same engineers hold day and night and the row-by-row no-overlap check would otherwise trip mid-update. A turn whose new hours overlap the same engineer's turn on another rota keeps its old instants and is named in a NOTICE.
 
@@ -394,9 +397,10 @@ them by.
 **Not changed, on purpose:**
 - **`rota.escalation_minutes` is informational.** The escalation ladder
   (csm-notification-service) keeps its own timing.
-- **The notification service only runs the CRE ladder.** Its rota rungs are
-  scoped by team type and key, so the new teams never reach it. An SRE or SME
-  ladder is separate work.
+- **The notification service ran only the CRE ladder when this shipped.** Its
+  CRE rota rungs are scoped by team type and key, so the new teams never reach
+  them. It has since gained the SRE ladder (SaaS, IaaS and, since 0242, U2-SRE
+  and B-Central-SRE, each from its own rota) and the SME page.
 
 ## The SaaS Night cover (0232)
 

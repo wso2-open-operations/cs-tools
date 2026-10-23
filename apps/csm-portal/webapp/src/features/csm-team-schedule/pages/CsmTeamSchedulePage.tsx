@@ -49,7 +49,7 @@ import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
 import WeekTable from "../components/WeekTable";
 import CasePagingTab, { type PagingRotaTarget } from "../components/CasePagingTab";
-import { caseAlertChainsFor, caseAlertChainsReady, caseAlertsOffered } from "../utils/pagingChains";
+import { caseAlertChainsFor, caseAlertChainsReady, caseAlertsOffered, sreChainOfRota } from "../utils/pagingChains";
 import RotaAccessTab from "../components/RotaAccessTab";
 import { canManageRotaAccess, useRotaAccess } from "../api/useRotaAccess";
 import { canViewCaseAlertSettings, useCaseAlertSettings } from "../api/useCaseAlertSettings";
@@ -516,10 +516,11 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   const myRota = myTeam?.rotaCode ?? (editRotas.length === 1 ? editRotas[0] : undefined);
 
   /** The paging chain Case Paging opens on: the reader's own. SME for SME,
-   *  the reader's SRE sub-team's for SRE (SaaS unless their team is on the
-   *  IaaS rota, and for an SRE rota admin, who holds no team), else CRE. */
+   *  the reader's SRE rota's chain for SRE (IaaS, U2-SRE or B-Central-SRE when
+   *  their team is on that rota, else SaaS -- also for an SRE rota admin, who
+   *  holds no team), else CRE. */
   const myPagingChain: PagingChainCode =
-    myFamily === "SME" ? "SME" : myFamily === "SRE" ? (myRota === "SRE_IAAS" ? "SRE_IAAS" : "SRE_SAAS") : "CRE";
+    myFamily === "SME" ? "SME" : myFamily === "SRE" ? (sreChainOfRota(myRota) ?? "SRE_SAAS") : "CRE";
 
   /** The rotas the family on screen runs. Only a family that runs more than
    *  one rota is narrowed by it (SRE with SaaS alone reads exactly as before),

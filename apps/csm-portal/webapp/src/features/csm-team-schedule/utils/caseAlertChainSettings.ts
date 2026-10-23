@@ -39,6 +39,8 @@ export const CHAIN_SETTINGS: Partial<Record<PagingChainCode, ChainSettings>> = {
   CRE: { label: "CRE", ladder: "CRE", routes: true, values: true },
   SRE_SAAS: { label: "SaaS SRE", ladder: "SRE", routes: true, values: true },
   SRE_IAAS: { label: "IaaS SRE", ladder: "SRE", routes: true, values: true },
+  SRE_U2: { label: "U2-SRE", ladder: "SRE", routes: true, values: true },
+  SRE_B_CENTRAL: { label: "B-Central-SRE", ladder: "SRE", routes: true, values: true },
   SME: { label: "SME", ladder: "SME", routes: false, values: true },
 };
 
