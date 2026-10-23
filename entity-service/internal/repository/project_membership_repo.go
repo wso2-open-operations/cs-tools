@@ -352,10 +352,29 @@ func upsertWithinTx(ctx context.Context, tx pgx.Tx, projectID, email string, pla
 	if err != nil {
 		return domain.SalesforceMembershipUpsertResult{}, err
 	}
-	step.ProjectID = &res.ProjectID
-	step.ProjectContactID = &res.ProjectContactID
-	if _, err := upsertOnboardingStep(ctx, tx, step); err != nil {
-		return domain.SalesforceMembershipUpsertResult{}, err
+	// The onboarding ledger is keyed by the Salesforce membership id
+	// (UNIQUE (membership_sf_id, step)); a deferred write has none yet, so
+	// its DATABASE step is recorded by the consumer that stamps the id, not
+	// here -- recording it under "" would make every deferred invitation
+	// share one ledger row.
+	if strings.TrimSpace(step.MembershipSfID) != "" {
+		step.ProjectID = &res.ProjectID
+		step.ProjectContactID = &res.ProjectContactID
+		if _, err := upsertOnboardingStep(ctx, tx, step); err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
+	}
+	if in.DeferredSalesforceWrite != nil {
+		id, err := insertSalesforceWriteRequestTx(ctx, tx, *in.DeferredSalesforceWrite, res.ProjectID, res.ProjectContactID, in.Email)
+		if err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
+		res.SalesforceWriteRequestID = id
+	}
+	if in.CompletesSalesforceWriteRequestID != "" {
+		if err := completeSalesforceWriteRequestTx(ctx, tx, in.CompletesSalesforceWriteRequestID); err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
 	}
 	return res, nil
 }
@@ -621,15 +640,20 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 	}
 
 	// One copy per sf_id: active first, then oldest (an account_contact EXISTS has no index here).
+	// A blank id (a deferred write that has no Salesforce record yet) is not
+	// a key: matching on it would hand every such write the same row.
 	var copies int64
 	var replacedContact bool
-	err = tx.QueryRow(ctx, `
+	contactSfID := strings.TrimSpace(in.ContactSfID)
+	if contactSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT id, user_name, count(*) OVER () FROM "user" WHERE sf_id = $1
-		ORDER BY is_active IS TRUE DESC, created_on, id LIMIT 1`, in.ContactSfID).Scan(&id, &userName, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", "", false, fmt.Errorf("upsert membership: resolve user by sf_id: %w", err)
+		ORDER BY is_active IS TRUE DESC, created_on, id LIMIT 1`, contactSfID).Scan(&id, &userName, &copies)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", "", false, fmt.Errorf("upsert membership: resolve user by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "user", contactSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "user", in.ContactSfID, id, copies)
 	if id == "" {
 		rows, qerr := tx.Query(ctx, `SELECT id, user_name, COALESCE(sf_id, '') FROM "user" WHERE LOWER(email) = $1 LIMIT 2`, email)
 		if qerr != nil {
@@ -653,7 +677,7 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 		case 1:
 			id, userName = matches[0][0], matches[0][1]
 			// The person's earlier Salesforce contact was replaced by a new one.
-			replacedContact = matches[0][2] != "" && matches[0][2] != in.ContactSfID
+			replacedContact = contactSfID != "" && matches[0][2] != "" && matches[0][2] != contactSfID
 		default:
 			return "", "", false, &apierror.ConflictError{Msg: "more than one user matches the contact email; cannot resolve the membership"}
 		}
@@ -666,7 +690,7 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, $3, $4, $5, $2, TRUE, $6, $7)
 			RETURNING id, user_name`,
 			actor, email, nullIfBlank(in.ContactName), nullIfBlank(in.ContactFirstName), nullIfBlank(in.ContactLastName),
-			in.IsCsIntegrationUser, in.ContactSfID).Scan(&id, &userName)
+			in.IsCsIntegrationUser, nullIfBlank(contactSfID)).Scan(&id, &userName)
 		if err != nil {
 			return "", "", false, fmt.Errorf("upsert membership: insert user: %w", err)
 		}
@@ -674,15 +698,16 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 	}
 
 	// Existing row: refresh profile fields and stamp the Salesforce id, but
-	// never touch user_name — it is the join key to account_contact.
+	// never touch user_name — it is the join key to account_contact. A blank
+	// id (deferred write) keeps whatever id the row already has.
 	if _, err = tx.Exec(ctx, `
 		UPDATE "user"
 		SET name = COALESCE($2, name), first_name = COALESCE($3, first_name), last_name = COALESCE($4, last_name),
-		    email = $5, is_system_user = $6, sf_id = $7, updated_on = NOW(), updated_by = $8,
+		    email = $5, is_system_user = $6, sf_id = COALESCE($7, sf_id), updated_on = NOW(), updated_by = $8,
 		    is_active = CASE WHEN $9 THEN TRUE ELSE is_active END
 		WHERE id = $1`,
 		id, nullIfBlank(in.ContactName), nullIfBlank(in.ContactFirstName), nullIfBlank(in.ContactLastName),
-		email, in.IsCsIntegrationUser, in.ContactSfID, actor,
+		email, in.IsCsIntegrationUser, nullIfBlank(contactSfID), actor,
 		// Only a replacement contact reactivates (either writer); the same contact never does.
 		replacedContact && in.State != domain.MembershipStateDeactivated); err != nil {
 		return "", "", false, fmt.Errorf("upsert membership: update user: %w", err)
@@ -858,14 +883,18 @@ func syncDerivedAdminRole(ctx context.Context, tx querier, userID, adminRole str
 // when nil.
 func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountID, userName string, isPrimary *bool, actor string) (id string, created bool, err error) {
 	var copies int64
-	err = tx.QueryRow(ctx, `
+	contactSfID = strings.TrimSpace(contactSfID)
+	// A blank id (deferred write) is not a key -- see upsertMembershipUser.
+	if contactSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT ac.id, count(*) OVER () FROM account_contact ac WHERE ac.sf_id = $1 AND ac.account_id = $2
 		ORDER BY EXISTS (SELECT 1 FROM project_contact pc WHERE pc.account_contact_id = ac.id) DESC, ac.created_on, ac.id
 		LIMIT 1`, contactSfID, accountID).Scan(&id, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, fmt.Errorf("upsert membership: resolve account_contact by sf_id: %w", err)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, fmt.Errorf("upsert membership: resolve account_contact by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "account_contact", contactSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "account_contact", contactSfID, id, copies)
 	if id == "" {
 		err = tx.QueryRow(ctx, `
 			SELECT id FROM account_contact WHERE account_id = $1 AND LOWER(user_name) = LOWER($2)
@@ -879,7 +908,7 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 			INSERT INTO account_contact (id, created_on, updated_on, created_by, updated_by,
 				is_active, user_name, is_primary_contact, account_id, sf_id)
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, TRUE, $2, COALESCE($5::boolean, FALSE), $3, $4)
-			RETURNING id`, actor, userName, accountID, contactSfID, isPrimary).Scan(&id)
+			RETURNING id`, actor, userName, accountID, nullIfBlank(contactSfID), isPrimary).Scan(&id)
 		if err != nil {
 			return "", false, fmt.Errorf("upsert membership: insert account_contact: %w", err)
 		}
@@ -887,10 +916,10 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 	}
 	if _, err = tx.Exec(ctx, `
 		UPDATE account_contact
-		SET is_active = TRUE, sf_id = $2, is_primary_contact = COALESCE($4::boolean, is_primary_contact),
+		SET is_active = TRUE, sf_id = COALESCE($2, sf_id), is_primary_contact = COALESCE($4::boolean, is_primary_contact),
 		    updated_on = NOW(), updated_by = $3
 		WHERE id = $1`,
-		id, contactSfID, actor, isPrimary); err != nil {
+		id, nullIfBlank(contactSfID), actor, isPrimary); err != nil {
 		return "", false, fmt.Errorf("upsert membership: update account_contact: %w", err)
 	}
 	return id, false, nil
@@ -903,14 +932,18 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMembershipUpsert, projectID, accountContactID, actor string) (id string, created bool, previousState string, err error) {
 	var prior *string
 	var copies int64
-	err = tx.QueryRow(ctx, `
+	membershipSfID := strings.TrimSpace(in.MembershipSfID)
+	// A blank id (deferred write) is not a key -- see upsertMembershipUser.
+	if membershipSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT pc.id, pc.state::text, count(*) OVER () FROM project_contact pc WHERE pc.sf_id = $1
 		ORDER BY EXISTS (SELECT 1 FROM project_contact_group g WHERE g.project_contact_id = pc.id) DESC, pc.created_on, pc.id
-		LIMIT 1`, in.MembershipSfID).Scan(&id, &prior, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, "", fmt.Errorf("upsert membership: resolve project_contact by sf_id: %w", err)
+		LIMIT 1`, membershipSfID).Scan(&id, &prior, &copies)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, "", fmt.Errorf("upsert membership: resolve project_contact by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "project_contact", membershipSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "project_contact", in.MembershipSfID, id, copies)
 	if id == "" {
 		err = tx.QueryRow(ctx, `
 			SELECT id, state::text FROM project_contact WHERE project_id = $1 AND account_contact_id = $2
@@ -928,7 +961,7 @@ func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMe
 			INSERT INTO project_contact (id, created_on, updated_on, created_by, updated_by,
 				email, state, account_contact_id, project_id, sf_id)
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, $3::project_contact_state_enum, $4, $5, $6)
-			RETURNING id`, actor, email, in.State, accountContactID, projectID, in.MembershipSfID).Scan(&id)
+			RETURNING id`, actor, email, in.State, accountContactID, projectID, nullIfBlank(membershipSfID)).Scan(&id)
 		if err != nil {
 			return "", false, "", fmt.Errorf("upsert membership: insert project_contact: %w", err)
 		}
@@ -936,10 +969,10 @@ func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMe
 	}
 	if _, err = tx.Exec(ctx, `
 		UPDATE project_contact
-		SET email = $2, state = $3::project_contact_state_enum, account_contact_id = $4, sf_id = $5,
+		SET email = $2, state = $3::project_contact_state_enum, account_contact_id = $4, sf_id = COALESCE($5, sf_id),
 		    updated_on = NOW(), updated_by = $6
 		WHERE id = $1`,
-		id, email, in.State, accountContactID, in.MembershipSfID, actor); err != nil {
+		id, email, in.State, accountContactID, nullIfBlank(membershipSfID), actor); err != nil {
 		return "", false, "", fmt.Errorf("upsert membership: update project_contact: %w", err)
 	}
 	return id, false, previousState, nil

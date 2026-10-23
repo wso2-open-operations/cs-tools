@@ -584,8 +584,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// never registered, so a portal built against them fails loudly with a
 	// 404 rather than writing one system and not the other.
 	var projectMembershipHandler *handler.ProjectMembershipHandler
+	// The deferred Salesforce write ledger (migration 0249). Written by the
+	// membership writes below, read by the contact lists further down for
+	// the "syncing to Salesforce" status; nil without a database.
+	var salesforceWriteRequestRepo repository.SalesforceWriteRequestRepository
+	if db != nil {
+		salesforceWriteRequestRepo = repository.NewSalesforceWriteRequestRepository(db)
+	}
+	// salesforceWritePublisher and stopSalesforceWriteConsumers belong to the
+	// deferred Salesforce write (service.DeferredSalesforceWriter); both nil
+	// unless cfg.HasSalesforceDeferredWrites(). Released by closePublishers.
+	var salesforceWritePublisher service.EventPublisherService
+	var stopSalesforceWriteConsumers func()
 	if db != nil && cfg.HasPortalMembershipWrites() && salesEntityClient != nil {
-		projectMembershipHandler = handler.NewProjectMembershipHandler(service.NewProjectMembershipWriteService(service.MembershipWriteDeps{
+		writeDeps := service.MembershipWriteDeps{
 			Memberships: repository.NewProjectMembershipRepository(repository.NewScoped(db)),
 			Steps:       repository.NewOnboardingStepRepository(db),
 			SalesEntity: salesEntityClient,
@@ -595,7 +607,34 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			Invitations: service.NewInvitationValidator(salesEntityClient, repository.NewAccountPartnerRepository(db)),
 			Admins:      repository.NewAccountAdminRepository(db),
 			UserCache:   userCacheInvalidator,
-		}))
+		}
+		switch {
+		case cfg.HasSalesforceDeferredWrites():
+			// Its own producer on its own topic: the command is consumed by
+			// this service alone and must not share a stream with the
+			// notifications (see Config.SalesforceWriteEventHubTopic).
+			salesforceWritePublisher = service.NewEventPublisherService(
+				eventbus.NewProducer(eventbus.Config{
+					Broker:           cfg.EventHubBroker,
+					ConnectionString: cfg.EventHubConnectionString,
+					Topic:            cfg.SalesforceWriteEventHubTopic,
+				}),
+				eventPublishFailureSvc,
+			)
+			writeDeps.WriteRequests = salesforceWriteRequestRepo
+			writeDeps.SalesforceWritePublisher = salesforceWritePublisher
+		case cfg.SalesforceDeferredWritesEnabled:
+			log.Printf("SALESFORCE_DEFERRED_WRITES_ENABLED is set but Event Hub publishing is not configured and enabled; deferred Salesforce writes stay off")
+		}
+		membershipWriteSvc := service.NewProjectMembershipWriteService(writeDeps)
+		projectMembershipHandler = handler.NewProjectMembershipHandler(membershipWriteSvc)
+		if salesforceWritePublisher != nil {
+			writer, ok := membershipWriteSvc.(service.DeferredSalesforceWriter)
+			if !ok {
+				panic("salesforce: membership write service does not implement DeferredSalesforceWriter")
+			}
+			stopSalesforceWriteConsumers = startSalesforceWriteConsumers(cfg, writer)
+		}
 	}
 
 	// Allocation-app events into customer engagements; off by default (route not registered).
@@ -699,7 +738,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeProjectContactSvc = service.NewServiceNowProjectContactService(serviceNowIntegrationServiceClient)
 	} else {
-		activeProjectContactSvc = service.NewProjectContactService(projectContactRepo, accessSvc)
+		activeProjectContactSvc = service.WithProjectContactSalesforceSync(
+			service.NewProjectContactService(projectContactRepo, accessSvc), salesforceWriteRequestRepo)
 	}
 	projectContactHandler := handler.NewProjectContactHandler(activeProjectContactSvc)
 
@@ -2496,6 +2536,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	closePublishers := func() {
 		stopIngestRetry()
 		ingestRetryWG.Wait()
+		// The deferred-write consumers first: a write in flight finishes
+		// (or is left uncommitted for redelivery) before its publishers go.
+		if stopSalesforceWriteConsumers != nil {
+			stopSalesforceWriteConsumers()
+		}
+		if salesforceWritePublisher != nil {
+			salesforceWritePublisher.Close()
+		}
 		if eventPublisher != nil {
 			eventPublisher.Close()
 		}

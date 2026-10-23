@@ -3675,7 +3675,11 @@ paths:
               $ref: '#/components/schemas/CreateProjectMembershipRequest'
       responses:
         '201':
-          description: The membership that was created.
+          description: >
+            The membership that was created. With SALESFORCE_DEFERRED_WRITES_ENABLED and
+            sales-entity-service unavailable, a first invitation is still created: the body then
+            carries salesforceSync PENDING and empty Salesforce ids, and the write to Salesforce
+            (and the invitation e-mail that follows it) happens asynchronously.
           content:
             application/json:
               schema:
@@ -3714,7 +3718,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          description: Salesforce is unavailable, or the change could not be saved.
+          description: >
+            Salesforce is unavailable (and the invitation could not be deferred: deferral is off,
+            or this is a re-invitation), or the change could not be saved.
           content:
             application/json:
               schema:
@@ -19852,6 +19858,13 @@ components:
             restatement of `customerContactPresent` — a row invited under one address but
             linked to a contact whose own address differs is invisible to both people, and
             that does happen on genuine customer rows.
+        salesforceSync:
+          type: string
+          enum: [PENDING, FAILED]
+          description: >
+            Omitted for a membership that is in Salesforce. PENDING while the invitation's
+            Salesforce write is still owed (it was deferred because sales-entity-service was
+            unavailable); FAILED when that deferred write gave up. See ProjectMembership.salesforceSync.
 
     CreateProjectMembershipRequest:
       type: object

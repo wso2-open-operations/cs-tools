@@ -74,6 +74,12 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED` | no | `false` | Must be `"true"` for the partner-link refresh (`account_relationship` "Is Partner Of" / "Is Customer Of") to run after Account events and partner-contact membership events, and for `POST /salesforce/accounts/{sfId}/refresh-partners` to be registered (see "Salesforce partner relationships" below). Keep it off while csm-sync-service still copies `account_relationship` from ServiceNow |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
+| `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
+| `SALESFORCE_WRITE_EVENT_HUB_TOPIC` | no | `salesforce-writes` | Topic of the deferred-write commands. Its own topic: nothing but this service consumes it. Unset = the default name; the Event Hub must exist or every deferred invitation's publish fails (recorded in `event_publish_failures`, the request stays unpublished) |
+| `SALESFORCE_WRITE_EVENT_HUB_DLQ_TOPIC` | no | `salesforce-writes-dlq` | Dead-letter topic the main consumer republishes to after its attempts; consumed by the long-retry consumer |
+| `SALESFORCE_WRITE_CONSUMER_GROUP` / `SALESFORCE_WRITE_DLQ_CONSUMER_GROUP` | no | `entity-service-salesforce-writes` / `…-dlq` | Consumer groups on the two topics. Must not be shared with any other component |
+| `SALESFORCE_WRITE_RETRY_ATTEMPTS` / `SALESFORCE_WRITE_RETRY_DELAY` | no | `3` / `2s` | Main-topic policy: attempts in total and a fixed pause between them, then dead-letter. Keep short: a retry here blocks the partition for every later invitation |
+| `SALESFORCE_WRITE_DLQ_RETRY_ATTEMPTS` / `SALESFORCE_WRITE_DLQ_RETRY_DELAY` / `SALESFORCE_WRITE_DLQ_RETRY_MAX_DELAY` | no | `10` / `30s` / `15m` | Dead-letter policy: attempts, first pause, doubling up to the cap (defaults ≈ 75 min of in-place cover). After the last attempt the request is marked FAILED and the record dropped |
 | `CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED` | no | `false` | Registers `POST /customer-engagements/allocation-events` (Postgres-authoritative only); see "Allocation events" below |
 | `CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID` | no | — | ServiceNow sys_id written as `engagement_type_id` on firefighting engagements created by allocation events. Unset skips creating them |
 | `REDIS_URL` | no | — | `rediss://:<key>@<host>:<port>` (TLS, Azure Managed Redis); wins over `REDIS_ADDR`. Turns on the user cache (see "User cache (Redis)" below). `Validate` requires a `redis`/`rediss` scheme and a host, and never echoes the URL |
@@ -1849,6 +1855,64 @@ sent. A label Salesforce would reject is a **400 naming it**, not an
 `ignoredRoles` log line: the ingest is right to tolerate an unknown role on a
 record Salesforce already holds (refusing would strip a real membership over a
 vocabulary gap), and wrong to tolerate one a caller is asking us to write.
+
+### Deferred Salesforce writes (`project_membership_deferred_write.go`)
+
+The ordering above makes every invitation fail with 503 while
+sales/sales-entity-service (or Salesforce behind it) is down, and a customer
+admin can do nothing about that. With `SALESFORCE_DEFERRED_WRITES_ENABLED=true`
+a **first invitation** survives the outage; everything else keeps failing fast.
+
+1. `Invite` tries Salesforce synchronously as always. Only when the validator
+   or the write fails with `ServiceUnavailableError` (connection error,
+   timeout, 5xx, an answer with no id) **and** the project has no membership
+   for the address yet does it fall through. A validation refusal, a conflict,
+   or a re-invitation of a DEACTIVATED row (which already has Salesforce ids
+   and would be an UPDATE there) is never deferred.
+2. The rows commit with NULL `sf_id` columns (`"user"`, `account_contact`,
+   `project_contact`; the repository never matches or stamps a blank id, and
+   records **no** DATABASE onboarding step, because the ledger is keyed by
+   the membership id) plus a `salesforce_write_request` row (migration 0249:
+   the admin's request as JSON `intent`, status PENDING) in the same
+   transaction. Then `salesforce.membership_write.requested` is published to
+   `SALESFORCE_WRITE_EVENT_HUB_TOPIC`, keyed by the request id, and
+   `published_on` is stamped. The caller gets **201** with
+   `salesforceSync: "PENDING"` and empty ids.
+3. `startSalesforceWriteConsumers` (`internal/server/salesforce_write_consumer.go`)
+   runs two consumers of this service's own: the main topic with a short fixed
+   policy, then a dead-letter topic with a long exponential one (the
+   `SALESFORCE_WRITE_*RETRY*` vars; `eventbus.RetryPolicy`). Each record calls
+   `ProcessDeferredSalesforceWrite`, which re-reads the request row (settled →
+   acknowledge; this is what makes redelivery safe), re-runs the invitation
+   validator, and replays the intent through **the same `writeSalesforce`**
+   the synchronous path uses — search first, create or adopt — then upserts
+   the rows with the ids, records the DATABASE step and marks the request
+   SUCCEEDED **in one transaction**, and only then publishes
+   `project_contact.invited`. The invitation email and the identity
+   provisioning therefore wait for Salesforce to come back; nothing else
+   publishes that event for a deferred row (the Salesforce echo stays silent
+   because the row is already INVITED).
+4. Still unavailable → `RecordAttempt` and the error is returned, so the
+   consumer retries per its policy. On the dead-letter tier's final call
+   (`Record.NoMoreRetries`) the request is marked **FAILED** instead, so it
+   never sits PENDING with nothing behind it. Refused for good (validation,
+   row gone) → FAILED and acknowledged. A commit failure after Salesforce
+   succeeded is recorded as an orphan like the synchronous path and retried;
+   the search adopts the record.
+5. While a request is PENDING, `UpdateRoles`, `Deactivate` and
+   `ResendInvitation` answer **409** with code `SALESFORCE_SYNC_PENDING`
+   ("still being synced to Salesforce"); a row with no id and no request
+   keeps the generic missing-id refusal. The contact reads
+   (`POST /projects/{id}/contacts/search`, `GET …/{contactId}`) carry
+   `salesforceSync: PENDING | FAILED` from the latest request row, read
+   best-effort through `WithProjectContactSalesforceSync`.
+
+What the event path does **not** cover: a request that outlives both tiers
+(the record is dropped; the row says FAILED), and a publish that failed (the
+row stays PENDING with `published_on` NULL). Both need a re-publish — a sweep
+or a manual retry — which is deliberately not part of this change.
+`membership_registration_service.go` already skips rows with a blank `sf_id`,
+so a person who signs in before the sync lands is registered on a later login.
 
 ### The Sales Entity write client (`internal/salesentity/membership_writes.go`)
 

@@ -514,6 +514,50 @@ type Config struct {
 	// stop that without turning the ingest off. An invalid or negative value
 	// disables it too (with a warning) rather than falling back to 5m.
 	SalesforceIngestRetryInterval time.Duration
+	// SalesforceDeferredWritesEnabled turns on the deferred Salesforce
+	// membership write: when sales/sales-entity-service is unavailable
+	// during a portal invitation, the CSM rows are committed with NULL
+	// sf_id columns, a salesforce_write_request row is recorded, and
+	// salesforce.membership_write.requested is published to
+	// SalesforceWriteEventHubTopic for this service's own consumer to carry
+	// out. From SALESFORCE_DEFERRED_WRITES_ENABLED, exactly "true"; off by
+	// default. Needs HasPortalMembershipWrites and a configured, enabled
+	// Event Hub publisher; without either it stays off (logged at startup).
+	SalesforceDeferredWritesEnabled bool
+	// SalesforceWriteEventHubTopic carries the deferred-write commands
+	// (SALESFORCE_WRITE_EVENT_HUB_TOPIC, default "salesforce-writes"). Its
+	// own topic on purpose: nothing but this service's consumer should read
+	// it, and a backlog here must not delay a case or project event.
+	SalesforceWriteEventHubTopic string
+	// SalesforceWriteEventHubDLQTopic is where a command every main-topic
+	// attempt failed on is republished (SALESFORCE_WRITE_EVENT_HUB_DLQ_TOPIC,
+	// default "salesforce-writes-dlq"), to be retried with the long policy.
+	SalesforceWriteEventHubDLQTopic string
+	// SalesforceWriteConsumerGroup / SalesforceWriteDLQConsumerGroup are the
+	// consumer groups on the two topics (SALESFORCE_WRITE_CONSUMER_GROUP,
+	// default "entity-service-salesforce-writes";
+	// SALESFORCE_WRITE_DLQ_CONSUMER_GROUP, default
+	// "entity-service-salesforce-writes-dlq"). Distinct from every other
+	// service's groups; each group reads its whole topic.
+	SalesforceWriteConsumerGroup    string
+	SalesforceWriteDLQConsumerGroup string
+	// SalesforceWriteRetryAttempts / SalesforceWriteRetryDelay are the main
+	// topic's retry policy (SALESFORCE_WRITE_RETRY_ATTEMPTS, default 3;
+	// SALESFORCE_WRITE_RETRY_DELAY, default 2s, fixed): short, so one
+	// unreachable Salesforce cannot hold the partition for long before the
+	// record moves to the dead-letter tier.
+	SalesforceWriteRetryAttempts int
+	SalesforceWriteRetryDelay    time.Duration
+	// SalesforceWriteDLQRetryAttempts / SalesforceWriteDLQRetryDelay /
+	// SalesforceWriteDLQRetryMaxDelay are the dead-letter tier's policy
+	// (SALESFORCE_WRITE_DLQ_RETRY_ATTEMPTS, default 10;
+	// SALESFORCE_WRITE_DLQ_RETRY_DELAY, default 30s, doubling each attempt;
+	// SALESFORCE_WRITE_DLQ_RETRY_MAX_DELAY, default 15m cap). The defaults
+	// cover roughly an hour of Salesforce unavailability in place. Waiting
+	// is this tier's job; blocking its partition is fine.
+	SalesforceWriteDLQRetryAttempts int
+	SalesforceWriteDLQRetryDelay    time.Duration
+	SalesforceWriteDLQRetryMaxDelay time.Duration
 	// Auth* configure token validation (internal/auth), always on -- there is
 	// no config flag to disable it. AuthIssuer/AuthJWKSURL/
 	// AuthUserTokenAudiences are required (Validate rejects startup without
@@ -855,6 +899,16 @@ func Load() *Config {
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
 		SalesforceIngestRetryInterval:                 envDurationOrOff("SALESFORCE_INGEST_RETRY_INTERVAL", 5*time.Minute),
+		SalesforceDeferredWritesEnabled:               os.Getenv("SALESFORCE_DEFERRED_WRITES_ENABLED") == "true",
+		SalesforceWriteEventHubTopic:                  getEnvOrDefault("SALESFORCE_WRITE_EVENT_HUB_TOPIC", "salesforce-writes"),
+		SalesforceWriteEventHubDLQTopic:               getEnvOrDefault("SALESFORCE_WRITE_EVENT_HUB_DLQ_TOPIC", "salesforce-writes-dlq"),
+		SalesforceWriteConsumerGroup:                  getEnvOrDefault("SALESFORCE_WRITE_CONSUMER_GROUP", "entity-service-salesforce-writes"),
+		SalesforceWriteDLQConsumerGroup:               getEnvOrDefault("SALESFORCE_WRITE_DLQ_CONSUMER_GROUP", "entity-service-salesforce-writes-dlq"),
+		SalesforceWriteRetryAttempts:                  envPositiveInt("SALESFORCE_WRITE_RETRY_ATTEMPTS", 3),
+		SalesforceWriteRetryDelay:                     envDuration("SALESFORCE_WRITE_RETRY_DELAY", 2*time.Second),
+		SalesforceWriteDLQRetryAttempts:               envPositiveInt("SALESFORCE_WRITE_DLQ_RETRY_ATTEMPTS", 10),
+		SalesforceWriteDLQRetryDelay:                  envDuration("SALESFORCE_WRITE_DLQ_RETRY_DELAY", 30*time.Second),
+		SalesforceWriteDLQRetryMaxDelay:               envDuration("SALESFORCE_WRITE_DLQ_RETRY_MAX_DELAY", 15*time.Minute),
 		SalesEntityBaseURL:                            os.Getenv("SALES_ENTITY_BASE_URL"),
 		SalesEntityTokenURL:                           os.Getenv("SALES_ENTITY_TOKEN_URL"),
 		SalesEntityClientID:                           os.Getenv("SALES_ENTITY_CLIENT_ID"),
@@ -1329,6 +1383,18 @@ func (c *Config) HasPortalMembershipWrites() bool {
 		c.SalesEntityConfigured()
 }
 
+// HasSalesforceDeferredWrites reports whether the deferred Salesforce
+// membership write runs: the flag, the portal writes it belongs to, and an
+// enabled Event Hub publisher to carry the command. Without the publisher
+// there is no consumer to hand the write to, so an invitation during a
+// Salesforce outage fails fast as before.
+func (c *Config) HasSalesforceDeferredWrites() bool {
+	return c.SalesforceDeferredWritesEnabled &&
+		c.HasPortalMembershipWrites() &&
+		c.EventHubBroker != "" &&
+		c.EventPublishingEnabled
+}
+
 // HasCustomerEngagementIngest reports whether POST /customer-engagements/allocation-events
 // may be registered: the flag is on and PostgreSQL is authoritative.
 func (c *Config) HasCustomerEngagementIngest() bool {
@@ -1430,6 +1496,21 @@ func (c *Config) hasRepoTokens() bool {
 // envFlagOn is true unless the value is "false" (case-insensitive).
 func envFlagOn(key string) bool {
 	return !strings.EqualFold(strings.TrimSpace(os.Getenv(key)), "false")
+}
+
+// envPositiveInt reads a positive integer, falling back to def when unset,
+// unparseable or not positive -- the same "a typo costs the override, not the
+// start" rule as envDuration.
+func envPositiveInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 // envDuration reads a Go duration string (e.g. "5s", "500ms"), falling back to
