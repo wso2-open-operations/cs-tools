@@ -473,6 +473,40 @@ instead of being cut off mid-request with no chance to react.
 `.env` is auto-loaded from the working directory at startup if present (silently ignored if
 absent), matching `integrations/csm-notification-service`'s own convention.
 
+## Monthly product regression reports
+
+`internal/regressionscan.SendReport`, registered three times -- `"product_regression_report_apim"`,
+`"product_regression_report_iam"` and `"product_regression_report_integration"` -- is the port of
+ServiceNow's three *Monthly Product Regression Report* scheduled reports. Each one was a plain list
+report on cases filtered by the regression tag, "Fix ETA shared on last month", and that business
+unit's product list, mailed as a PDF on the 1st at 09:00 India Standard Time to a fixed address
+list. Here entity-service builds the list (`GET /reports/product-regressions?products=...`, client in
+`internal/regressionreport`; the tag and the month window live there) and this task mails it as an
+inline table grouped by product, with the introduction the ServiceNow mail carried, through its own
+template (`internal/notify/templates/product_regression_report.html`,
+`notify.RenderProductRegressionReport`).
+
+The three reports are one handler constructor over a `regressionscan.Variant` (key, label, product
+list): `regressionscan.DefaultVariants` holds the three product lists ServiceNow filtered on, and
+`PRODUCT_REGRESSION_REPORT_PRODUCTS` (a JSON object of key to names) replaces any of them without a
+code change -- an unknown key or an empty list refuses to start rather than mailing an empty report
+every month. Three registry entries rather than one task sending three mails so that each report
+keeps its own `SUB_CRON_SCHEDULES` and `SUB_CRON_RECIPIENTS` entry by exact task name, the way
+every other task here is configured. Default schedule `30 3 1 * *`: 09:00 IST on the 1st, the hour
+the reports have always arrived, in UTC (same `TZ=UTC` caveat as "Housekeeping" above). The month
+reported is decided by entity-service in Asia/Colombo (the same +05:30), so a retry later in the
+month still reports the same month.
+
+Two behaviours are ServiceNow's, reproduced on purpose: a report whose month has no regression
+cases is **not sent** (the scheduled reports had "Omit if no records" ticked), and the audience is
+**only** the task's own `SUB_CRON_RECIPIENTS` entry, as the address lists were fixed per report
+there. With no `to`, the task skips its query and succeeds, like the stale and open case reports.
+Each `registry.Task` leaves `To`/`Cc` nil, as `migration_case_report` does: the audience is business
+unit mail groups, and a failed period is retried on every tick, so failure alerts go to
+`ALERT_RECIPIENTS` only.
+`PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
+(`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
 ## Per-task report emails
 
 `engine.recordSuccess` still only ever updates the ledger — it never sends anything, and
@@ -481,8 +515,9 @@ succeeded" template was tried and dropped early on: different sub-crons want gen
 report content (a usage report reads nothing like a billing summary), so one shared shape would
 either stay generic to the point of being useless or grow special cases per task.
 
-`stale_cases_report`, `open_cases_report` (see "Stale cases report"/"Open cases report" above) and
-`migration_case_report` are the real instances of the shape that replaced it. The third differs in
+`stale_cases_report`, `open_cases_report` (see "Stale cases report"/"Open cases report" above),
+`migration_case_report` and the three `product_regression_report_*` tasks (see "Monthly product regression
+reports" above) are the real instances of the shape that replaced it. `migration_case_report` differs in
 two ways worth knowing: entity-service builds the whole report (`GET /reports/migration-cases`,
 client in `internal/migrationreport`) and derives part of the audience from the team table, so the
 task merges those mail groups with its own `SUB_CRON_RECIPIENTS` entry (`migrationscan.Audience`)

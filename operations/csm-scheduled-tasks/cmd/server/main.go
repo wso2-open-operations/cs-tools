@@ -51,7 +51,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
@@ -126,6 +130,36 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service migration-scan client", "err", err)
+		os.Exit(1)
+	}
+
+	// The query-hour client. Same deployment and credentials; its own
+	// client because a recompute walks every opportunity in service and
+	// every project linked to each, so it needs minutes rather than the
+	// seconds a read allows.
+	queryHourClient, err := queryhours.NewClient(queryhours.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service query-hour client", "err", err)
+		os.Exit(1)
+	}
+
+	// The product regression reports' own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/product-regressions).
+	regressionReportClient, err := regressionreport.NewClient(regressionreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -397,7 +431,11 @@ func main() {
 
 	const migrationCaseReportTaskName = "migration_case_report"
 	migrationCaseTo, migrationCaseCc := recipientsFor(recipientOverrides, migrationCaseReportTaskName)
+	const queryHoursWeeklyTaskName = "query_hours_weekly_report"
+	const queryHoursNoticeTaskName = "query_hours_usage_notifications"
 	migrationCaseEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, migrationCaseReportTaskName))
+	queryHoursWeeklyEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, queryHoursWeeklyTaskName))
+	queryHoursNoticeEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, queryHoursNoticeTaskName))
 	// The age a migration must reach before the weekly scan lists it. One
 	// value, read once: the source report hard-coded its window in three
 	// places and the CS team asked for six months in place of three.
@@ -420,6 +458,73 @@ func main() {
 			slog.Error("invalid MIGRATION_CASE_REPORT_LINK_BASE_URL", "err", err)
 			os.Exit(1)
 		}
+	}
+
+	// For the query-hour tasks these are ADDITIONS to the derived
+	// audience, not the audience itself -- see the package doc.
+	queryHoursWeeklyTo, queryHoursWeeklyCc := recipientsFor(recipientOverrides, queryHoursWeeklyTaskName)
+	_, queryHoursNoticeCc := recipientsFor(recipientOverrides, queryHoursNoticeTaskName)
+	// A single address that replaces every derived audience, for
+	// testing against real data without mailing real account owners.
+	queryHoursOverride := splitComma(os.Getenv("QUERY_HOURS_RECIPIENT_OVERRIDE"))
+
+	// The monthly product regression reports: one task per business unit
+	// (product_regression_report_apim / _iam / _integration), each mailing
+	// last month's regression cases for its own products. The product lists
+	// are built in (regressionscan.DefaultVariants) and may be replaced per
+	// report with PRODUCT_REGRESSION_REPORT_PRODUCTS, a JSON object of
+	// report key to product names; a key that names no report, or an empty
+	// list, refuses to start rather than mailing an empty report every
+	// month.
+	regressionVariants, err := regressionscan.ApplyProductOverrides(regressionscan.DefaultVariants(), os.Getenv("PRODUCT_REGRESSION_REPORT_PRODUCTS"))
+	if err != nil {
+		slog.Error("invalid PRODUCT_REGRESSION_REPORT_PRODUCTS", "err", err)
+		os.Exit(1)
+	}
+	// An optional case page prefix for the links in the reports
+	// (<prefix>/<case number>). Unset renders the case ids as plain text,
+	// as the source report's PDF did; a non-https value refuses to start,
+	// as every URL here does.
+	regressionCaseLinkBase := strings.TrimRight(os.Getenv("PRODUCT_REGRESSION_REPORT_LINK_BASE_URL"), "/")
+	if regressionCaseLinkBase != "" {
+		if err := httpsec.RequireSecureURL(regressionCaseLinkBase); err != nil {
+			slog.Error("invalid PRODUCT_REGRESSION_REPORT_LINK_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	// Default schedule: 09:00 on the 1st in India Standard Time, the hour
+	// the reports have always arrived, which is 03:30 UTC (these cron
+	// strings are UTC). Each report's schedule and recipients are looked
+	// up by its own task name, like every other task here. To and Cc are
+	// its SUB_CRON_RECIPIENTS entry: the report goes only to them, and
+	// with no "to" the task skips its query and succeeds, as the stale and
+	// open case reports do. A month with no regression cases sends nothing
+	// (the source report omitted itself when empty).
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the migration
+	// scan: the engine mails task.To plus ALERT_RECIPIENTS on every failed
+	// attempt, and a failed period is retried on every tick. The audience
+	// is business unit mail groups; an entity-service outage must not send
+	// them an hourly FAILED notice. Failures go to ALERT_RECIPIENTS alone.
+	// Because To is nil, the EMAIL_BASE_URL check below cannot see these
+	// tasks' own audiences; regressionTasksWithRecipients carries them
+	// there, so a deployment that names readers but no email service still
+	// refuses to start instead of failing silently on the 1st.
+	var regressionTasks []registry.Task
+	var regressionTasksWithRecipients []string
+	for _, v := range regressionVariants {
+		name := regressionscan.TaskName(v)
+		to, cc := recipientsFor(recipientOverrides, name)
+		if len(to) > 0 {
+			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
+		}
+		regressionTasks = append(regressionTasks, registry.Task{
+			Name:     name,
+			Schedule: scheduleFor(scheduleOverrides, name, "30 3 1 * *"),
+			Handler: regressionscan.SendReport(regressionReportClient,
+				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
+				v, to, cc, regressionCaseLinkBase, alertsEnabled),
+		})
 	}
 
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
@@ -541,6 +646,29 @@ func main() {
 				worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
 		},
+		// Query-hour utilisation, ported from ServiceNow's two flows.
+		//
+		// The weekly report's audience is DERIVED from the accounts it
+		// reports on, so To and Cc are left nil here: the failure
+		// alerts go to ALERT_RECIPIENTS, and the report goes to the
+		// owners of whichever accounts are breaching that week.
+		//
+		// The notification task also RECOMPUTES, which is what makes
+		// the crossings detectable at all -- it compares the state it
+		// derives against the one already stored. Scheduled hourly so
+		// a breach is noticed the same day rather than at the weekly.
+		{
+			Name:     queryHoursNoticeTaskName,
+			Schedule: scheduleFor(scheduleOverrides, queryHoursNoticeTaskName, "15 * * * *"),
+			Handler: queryhoursreport.SendUsageNotifications(queryHourClient, queryHoursNoticeEmail,
+				queryHoursNoticeCc, queryHoursOverride, alertsEnabled),
+		},
+		{
+			Name:     queryHoursWeeklyTaskName,
+			Schedule: scheduleFor(scheduleOverrides, queryHoursWeeklyTaskName, "0 4 * * 1"),
+			Handler: queryhoursreport.SendWeeklyReport(queryHourClient, queryHoursWeeklyEmail,
+				queryHoursWeeklyTo, queryHoursWeeklyCc, queryHoursOverride, alertsEnabled),
+		},
 		// The first sub-cron here that does real, per-row, multi-step,
 		// partial-failure-tolerant work rather than a bulk delete or a
 		// read-only report — see internal/announcementpublish's own doc
@@ -562,6 +690,7 @@ func main() {
 		// entity-service's outage notice drainer and csm-notification-service,
 		// which send them seconds after the change rather than on this tick.
 	}
+	tasks = append(tasks, regressionTasks...)
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert
@@ -756,9 +885,12 @@ func main() {
 		slog.Error("ROTA_REMINDERS_ENABLED is true but EMAIL_BASE_URL is not set; refusing to start since no reminder could be sent")
 		os.Exit(1)
 	}
-	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0) {
+	// The product regression reports keep their audience out of task.To (see
+	// their registration above), so it is checked here by name instead.
+	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
-			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients)
+			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
+			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
 		os.Exit(1)
 	}
 

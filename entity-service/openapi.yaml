@@ -10237,6 +10237,174 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/query-hours:
+    get:
+      summary: >-
+        The accounts whose purchased query-support hours are exhausted, or
+        nearly so, with the audience their owners imply. Read-only.
+        Internal callers only.
+      description: >-
+        Two tables. `exceeded` lists the accounts with no allowance left;
+        `closeToExceed` those under ten hours from it. The two are NOT
+        disjoint -- an account is in a table if any of its opportunity
+        groups qualifies, so one with an exhausted group and a nearly
+        exhausted one appears in both. `recipients` are the account
+        managers and technical owners of every account in either table,
+        deduped and restricted to internal addresses.
+
+        Writes nothing: the figures this reads are refreshed by
+        POST /query-hours/recompute, which is a separate call.
+      operationId: getQueryHourWeeklyReport
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryHourReport'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /query-hours/recompute:
+    post:
+      summary: >-
+        Recompute every opportunity's query-hour utilisation, write the
+        figures back, and return the projects that crossed a threshold.
+        Internal callers only.
+      description: >-
+        Safe to run at any time, including twice: the transitions are
+        returned rather than acted on, and only a RISE through a
+        threshold is reported. Whether a crossing becomes an email is the
+        caller's decision.
+
+        Takes no body. `transitions` is always a list, never null.
+      operationId: recomputeQueryHours
+      responses:
+        "200":
+          description: The thresholds crossed by this recompute.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transitions]
+                properties:
+                  transitions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QueryHourTransition'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/product-regressions:
+    get:
+      summary: >-
+        Build one monthly product regression report: the regression-tagged
+        cases on the named products whose fix ETA was shared with the
+        customer during one calendar month, grouped by product. Read-only.
+        Internal callers only.
+      description: >-
+        A case is listed when it is filed against one of `products`
+        (names compared ignoring case and surrounding whitespace), carries
+        the configured regression tag, and its fix ETA was shared at or
+        after the first instant of the month and before the first instant
+        of the next, in the report's timezone (Asia/Colombo). `month`
+        defaults to the month before now and must be a month that has
+        already ended. Groups are in product name order; each group's
+        cases in the order their ETA was shared.
+      operationId: getProductRegressionReport
+      parameters:
+        - name: products
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+          description: The product names the report covers, comma-separated.
+        - name: month
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9]{4}-[0-9]{2}$'
+          description: The calendar month reported, YYYY-MM. Defaults to last month.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductRegressionReport'
+        "400":
+          description: products is missing, or month is not a finished calendar month.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The regression tag is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -26870,6 +27038,251 @@ components:
         sentOn:
           type: string
           format: date-time
+    ProductRegressionReport:
+      type: object
+      description: One monthly product regression report.
+      required: [generatedAt, month, periodStart, periodEnd, tag, products, totalCases, groups]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        month:
+          type: string
+          description: The calendar month reported, YYYY-MM.
+        periodStart:
+          type: string
+          format: date-time
+          description: The first instant of the month, in the report's timezone.
+        periodEnd:
+          type: string
+          format: date-time
+          description: The first instant of the next month; cases are listed when their ETA was shared before it.
+        tag:
+          type: string
+          description: The tag that marks a case as a regression.
+        products:
+          type: array
+          description: The product names asked for, as given.
+          items:
+            type: string
+        totalCases:
+          type: integer
+          description: Cases across every group.
+        groups:
+          type: array
+          description: The cases by product, in product name order.
+          items:
+            $ref: '#/components/schemas/ProductRegressionReportGroup'
+    ProductRegressionReportGroup:
+      type: object
+      description: One product's regression cases.
+      required: [product, cases]
+      properties:
+        product:
+          type: string
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductRegressionReportRow'
+    ProductRegressionReportRow:
+      type: object
+      description: One regression case in the report.
+      required: [id, number, issueKey, subject, product, deployedProduct, etaSharedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        issueKey:
+          type: string
+          description: The case's customer-facing identifier.
+        subject:
+          type: string
+        product:
+          type: string
+          description: The WSO2 product the case is filed against.
+        deployedProduct:
+          type: string
+          description: The customer's deployment the case concerns; blank when none is named.
+        etaSharedOn:
+          type: string
+          format: date-time
+          description: When the fix ETA was shared with the customer.
+    QueryHourReport:
+      type: object
+      description: The weekly query-support consumption report.
+      required: [generatedOn, exceeded, closeToExceed, recipients]
+      properties:
+        generatedOn:
+          type: string
+          format: date-time
+        exceeded:
+          type: array
+          description: Accounts with no query-hour allowance left.
+          items:
+            $ref: '#/components/schemas/QueryHourAccount'
+        closeToExceed:
+          type: array
+          description: >-
+            Accounts under ten hours from exhausting their allowance. An
+            absolute floor of 600 minutes, unrelated to the 75/90/100
+            percent thresholds that drive the notifications.
+          items:
+            $ref: '#/components/schemas/QueryHourAccount'
+        recipients:
+          type: array
+          description: >-
+            Internal addresses of the account managers and technical
+            owners of every account in either table, deduped.
+          items:
+            type: string
+    QueryHourAccount:
+      type: object
+      required: [accountId, accountName, isExceeded, isCloseToExceed, opportunities]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        accountName:
+          type: string
+        salesforceId:
+          type: string
+        accountManagerEmail:
+          type: string
+          description: Omitted when the account records no manager.
+        technicalOwnerEmail:
+          type: string
+          description: Omitted when the account records no technical owner.
+        isExceeded:
+          type: boolean
+        isCloseToExceed:
+          type: boolean
+        opportunities:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryHourOpportunity'
+    QueryHourOpportunity:
+      type: object
+      required:
+        [opportunityId, salesforceId, name, accountId, accountName, totalMinutes,
+         consumedMinutes, remainingMinutes, usagePercent, state, isExceeded,
+         isCloseToExceed, unmatchedLines, projects]
+      properties:
+        opportunityId:
+          type: string
+          format: uuid
+        salesforceId:
+          type: string
+        name:
+          type: string
+        accountId:
+          type: string
+          format: uuid
+        accountName:
+          type: string
+        totalMinutes:
+          type: integer
+          description: The entitlement, from the opportunity's in-service product lines.
+        consumedMinutes:
+          type: integer
+          description: Approved billable time, less onboarding time.
+        remainingMinutes:
+          type: integer
+          description: Goes negative once the allowance is overdrawn, which is how "exceeded" is decided.
+        usagePercent:
+          type: number
+          format: double
+        state:
+          type: string
+          nullable: true
+          enum: [NOTIFIED_75, NOTIFIED_90, CLOSURE_NOTICE_100]
+          description: The highest threshold reached, or null below 75 percent.
+        isExceeded:
+          type: boolean
+        isCloseToExceed:
+          type: boolean
+        unmatchedLines:
+          type: integer
+          description: >-
+            Active product lines whose name matches none of the known
+            entitlement packs -- a renamed SKU, most likely. They
+            contribute zero hours; this makes that visible.
+        serviceStart:
+          type: string
+          format: date-time
+          description: Earliest start across the opportunity's active lines.
+        serviceEnd:
+          type: string
+          format: date-time
+          description: Latest end across the opportunity's active lines.
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryHourProject'
+    QueryHourProject:
+      type: object
+      required: [projectId, projectKey, projectName, consumedMinutes, nonBillableMinutes, onboardingMinutes]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        projectKey:
+          type: string
+        projectName:
+          type: string
+        salesforceId:
+          type: string
+        consumedMinutes:
+          type: integer
+          description: Approved BILLABLE time only.
+        nonBillableMinutes:
+          type: integer
+          description: Carried for the report; not part of the sum.
+        onboardingMinutes:
+          type: integer
+          description: >-
+            Onboarding time absorbed by the project's onboarding grant
+            rather than its query hours. Zero once onboarding completes,
+            and for a renewal.
+    QueryHourTransition:
+      type: object
+      description: One project's rise through a utilisation threshold.
+      required: [projectId, projectKey, projectName, accountId, accountName, from, to, totalText, consumedText, remainingText]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        projectKey:
+          type: string
+        projectName:
+          type: string
+        accountId:
+          type: string
+          format: uuid
+        accountName:
+          type: string
+        from:
+          type: string
+          nullable: true
+          enum: [NOTIFIED_75, NOTIFIED_90, CLOSURE_NOTICE_100]
+          description: The state before this recompute; null when no threshold had been reached.
+        to:
+          type: string
+          enum: [NOTIFIED_75, NOTIFIED_90, CLOSURE_NOTICE_100]
+        totalText:
+          type: string
+          description: The entitlement as "Xh Ym".
+        consumedText:
+          type: string
+        remainingText:
+          type: string
+        accountManagerEmail:
+          type: string
+        accountManagerName:
+          type: string
+        technicalOwnerEmail:
+          type: string
     MigrationCaseReport:
       type: object
       description: The weekly migration case scan.

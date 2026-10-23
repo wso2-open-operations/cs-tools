@@ -1332,3 +1332,35 @@ func TestConfig_UsageReadRoute(t *testing.T) {
 		}
 	}
 }
+
+// TestConfig_Validate_QueryHourInternalEmailDomain covers the one thing a
+// reader of this setting is likely to get wrong. The service matches it with
+// strings.HasSuffix, so "wso2.com" without the leading "@" also accepts
+// someone@notwso2.com -- the report names accounts, their owners and what
+// each has spent, so that is a disclosure, not a cosmetic slip. Empty stays
+// valid: NewQueryHourService falls back to "@wso2.com".
+func TestConfig_Validate_QueryHourInternalEmailDomain(t *testing.T) {
+	tests := []struct {
+		name    string
+		domain  string
+		wantErr bool
+	}{
+		{name: "unset is valid, the service defaults", domain: "", wantErr: false},
+		{name: "with the @ is valid", domain: "@wso2.com", wantErr: false},
+		{name: "without the @ is rejected", domain: "wso2.com", wantErr: true},
+		{name: "a bare suffix is rejected", domain: ".com", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.QueryHourInternalEmailDomain = tt.domain
+			err := c.Validate()
+			if tt.wantErr && err == nil {
+				t.Fatalf("QueryHourInternalEmailDomain=%q: expected an error, got none", tt.domain)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("QueryHourInternalEmailDomain=%q: unexpected error: %v", tt.domain, err)
+			}
+		})
+	}
+}

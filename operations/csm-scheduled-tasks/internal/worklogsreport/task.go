@@ -179,11 +179,21 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 		// never appears, or one who left and still receives it, shows
 		// up here instead of in somebody's inbox.
 		if missing, extra := worklogreport.Drift(report.Recipients, audience); len(missing) > 0 || len(extra) > 0 {
+			// COUNTS, NEVER THE ADDRESSES. Application logs are far
+			// more widely readable than a report's audience, and this
+			// line was printing every derived address into them --
+			// sixteen real ones on the first run. notify's redirect
+			// log takes the same care for the same reason.
+			//
+			// Who the addresses are is still answerable: the derived
+			// audience comes back on the report itself, from
+			// GET /reports/worklogs, where reaching it is a deliberate
+			// act by someone entitled to.
 			slog.Info("worklog report audience drifts from the team registry",
 				"cadence", cadence,
 				"source", source,
-				"derivedButNotConfigured", strings.Join(missing, ","),
-				"configuredButNotDerived", strings.Join(extra, ","))
+				"derivedButNotConfigured", len(missing),
+				"configuredButNotDerived", len(extra))
 		}
 
 		return email.SendEmail(ctx, audience.To, audience.Cc,

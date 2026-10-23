@@ -1,0 +1,136 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="supported-color-schemes" content="light dark" />
+    <title>Monthly Product Regression Report</title>
+
+    <style type="text/css">
+        @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap");
+
+        body {
+            font-family: 'Roboto', Helvetica, Arial, sans-serif;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        table td { border-collapse: collapse; }
+        img { border: 0; outline: none; text-decoration: none; }
+
+        .wso2_orange { color: #ff7300 !important; }
+        .footerContent a { color: #465868; }
+        .footerContent a:hover { color: #ff7300 !important; }
+
+        @media only screen and (max-width: 650px) {
+            .bodyContent { padding: 0 20px 30px !important; }
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body, .bgtest { background-color: #202124 !important; color: #e2e2e2 !important; }
+            .Bodyconetntdark { background-color: #282f34 !important; }
+            p, li, td { color: #e2e2e2 !important; }
+            .wso2_orange { color: #ff957d !important; }
+            .footerContent { color: #a2a3a4 !important; }
+            .footerContent a { color: #bbbdc1 !important; }
+            .reportTable th { background-color: #33383d !important; color: #e2e2e2 !important; }
+            .reportTable td { border-color: #454b52 !important; }
+        }
+    </style>
+</head>
+
+<body class="bgtest" style="margin:0; padding:0; background-color:#f8f9fa;">
+
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f8f9fa;">
+        <tr>
+            <td align="center" valign="top">
+
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px;">
+                    <tr>
+                        <td align="center" bgcolor="#ff7101" style="padding:30px 0;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px;">
+                                <tr>
+                                    <td align="left" style="padding:0 30px;">
+                                        <img src="<!-- [LOGO_SRC] -->" alt="WSO2 Logo" width="120" style="display:block;" />
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td align="left" style="padding:16px 30px 0; color:#ffffff; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase;">
+                                        Monthly Product Regression Report - <!-- [UNIT] -->
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+                <br/>
+
+                <!-- Main Content -->
+                <table bgcolor="#ffffff" border="0" cellpadding="0" cellspacing="0" class="Bodyconetntdark" width="100%" style="max-width:800px; margin:auto; box-shadow:0 2px 12px rgba(0,0,0,0.1);">
+                    <tr>
+                        <td class="bodyContent" style="padding:40px 50px; color:#465868; font-size:16px; line-height:24px; text-align:left;">
+
+                            <p style="margin:0 0 10px;">Hi Team,</p>
+                            <p style="margin:0 0 10px;">
+                                Please find below the Monthly Regression Issues Report for your review. This report
+                                summarizes the regressions identified in <!-- [UNIT] --> products during the past month
+                                (<!-- [MONTH] -->).
+                            </p>
+                            <p style="margin:0 0 10px;">
+                                We kindly request you to review the report and perform RCA for all regression cases.
+                                The related Git issue for each support case can be obtained from the UMT.
+                            </p>
+                            <p style="margin:0 0 4px;">Action items for the BU:</p>
+                            <ul style="margin:0 0 10px; padding-left:24px;">
+                                <li>Aim to reduce regression issues in the monthly report to zero.</li>
+                                <li>Perform an RCA for each regression issue and complete a postmortem.</li>
+                            </ul>
+                            <p style="margin:0 0 10px;">
+                                Thank you for your continued support in improving product stability and customer experience.
+                            </p>
+
+                            <p style="margin:30px 0 10px; font-size:16px; font-weight:700;">Regression Cases <span style="font-weight:400; color:#8a8f98;">(<!-- [TOTAL] -->)</span></p>
+                            <table class="reportTable" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:12px; border-collapse:collapse;">
+                                <thead>
+                                    <tr>
+                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">WSO2 Case Id</th>
+                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Short Description</th>
+                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Product</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- [ROWS] -->
+                                </tbody>
+                            </table>
+
+                            <p style="margin:30px 0 0;">Best Regards,<br/>CS Team</p>
+
+                            <p style="margin:40px 0 0; font-size:13px; color:#8a8f98;">
+                                This is an automated report. Please do not reply to this email.
+                            </p>
+
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Footer -->
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px; background-color:#e8eaed; padding:30px 0;">
+                    <tr>
+                        <td align="center" style="padding:0 50px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="left" class="footerContent" style="color:#465868; font-size:12px; line-height:16px;">
+                                        &copy; <!-- [YEAR] --> WSO2 LLC. All Rights Reserved.
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

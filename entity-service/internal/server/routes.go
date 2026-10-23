@@ -236,7 +236,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	)
 	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
 	var worklogReportHandler *handler.WorklogReportHandler
+	var queryHourHandler *handler.QueryHourHandler
 	if db != nil {
+		// Query-hour utilisation. No table of its own: the entitlement
+		// comes from the Salesforce mirror, the consumption from time
+		// cards, and the result is written back to columns that already
+		// exist -- sf_opportunity.query_hour_state and project's three
+		// duration fields.
+		queryHourHandler = handler.NewQueryHourHandler(
+			service.NewQueryHourService(
+				repository.NewQueryHourRepository(repository.NewScoped(db)),
+				cfg.QueryHourInternalEmailDomain))
 		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
 		// Which teams the CS Worklogs reports cover is deployment
 		// configuration, not a constant: the default is the CRE
@@ -333,6 +343,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var runbookHandler *handler.RunbookHandler
+	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
 
@@ -1481,6 +1492,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
+		// Monthly product regression reports: one business unit's regression
+		// cases whose fix ETA was shared last month, for the scheduled task
+		// that mails one report per unit.
+		productRegressionReportHandler = handler.NewProductRegressionReportHandler(
+			service.NewProductRegressionReportService(
+				repository.NewProductRegressionReportRepository(repository.NewScoped(db)),
+				service.ProductRegressionReportConfig{Tag: cfg.ProductRegressionReportTag}))
 		caseAlertSettingsHandler = handler.NewCaseAlertSettingsHandler(
 			service.NewCaseAlertSettingsService(repository.NewCaseAlertSettingsRepository(db), repository.NewPagingChainRepository(db), accessSvc,
 				service.CaseAlertSettingsConfig{
@@ -1862,6 +1880,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// token must never reach it.
 		mux.HandleFunc("GET /reports/worklogs", internalOnly(accessSvc, worklogReportHandler.GetWorklogReport))
 	}
+	if queryHourHandler != nil {
+		// internalOnly: the report names accounts, their owners and
+		// what each has spent. A customer token must never reach it.
+		mux.HandleFunc("GET /reports/query-hours", internalOnly(accessSvc, queryHourHandler.GetWeeklyReport))
+		mux.HandleFunc("POST /query-hours/recompute", internalOnly(accessSvc, queryHourHandler.RecomputeQueryHours))
+	}
 	if scheduledTaskRunHandler != nil {
 		mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
 		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
@@ -1903,6 +1927,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the scan names accounts, their owners and who is
 		// assigned to each migration; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/migration-cases", internalOnly(accessSvc, migrationCaseReportHandler.GetMigrationCaseReport))
+	}
+	if productRegressionReportHandler != nil {
+		// internalOnly: the report names customers' cases and deployments; a
+		// customer token must never reach it.
+		mux.HandleFunc("GET /reports/product-regressions", internalOnly(accessSvc, productRegressionReportHandler.GetProductRegressionReport))
 	}
 	if runbookHandler != nil {
 		// Runbooks (Operations > Runbooks): internal callers only.
