@@ -374,6 +374,25 @@ ticker, with Redis as its only durable state — the same `REDIS_URL`/
   start loaded, kept in Redis under `incident:escalation:case-alerts:last-loaded`
   without webhook URLs (so rooms come from the file), and only then to the
   file. A fallback start does not report.
+  **A newer save restarts the process** (`cmd/server/case_alert_watch.go`).
+  Saved settings still apply only at start-up (the engines are built from them,
+  a ladder that is off has no consumer, the SME page is wired once), so instead
+  of swapping them live, a db start that read them from entity-service
+  (`loadCaseAlertSettings` returns `caseAlertLoaded{revision, watch}`) reads the
+  saved revision every minute and, once a newer one has stayed unchanged for 2
+  minutes, the process has been up at least 10 minutes, and a random wait of
+  under a minute has passed, calls the signal context's `stop`: the normal
+  shutdown runs, `main` returns, and the platform starts the container again,
+  which loads the new revision and reports it, so the tab's "Saved. Changes apply
+  the next time the alert service restarts" turns into "In use" by itself.
+  Ladders in flight live in Redis and carry on; a redelivered record is
+  harmless. Never watched: shadow and off, a start from the last-loaded snapshot
+  or the file (an entity-service that keeps failing must not become a restart
+  loop), no `CUSTOMER_ENTITY_BASE_URL`. A read that fails changes nothing. It
+  relies on the platform restarting a container that exits (Kubernetes'
+  `restartPolicy: Always`); a deployment that does not would stay down. No
+  environment variable: `PAGING_CONFIG_SOURCE=shadow` or `off` is the way to run
+  without it (and without the saved settings).
 - **`notifier.go` - which channel a rung reaches people on.** The ladder's
   timing, routing and cancellation are channel-agnostic; only the last hop
   differs. `INCIDENT_ESCALATION_CHANNEL` picks `call` (the specification's

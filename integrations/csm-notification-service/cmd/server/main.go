@@ -879,7 +879,13 @@ func main() {
 			// every ladder, over the file's (unset PAGING_CONFIG_SOURCE is db);
 			// off asks nobody.
 			if mode := caseAlertSettingsMode(os.Getenv("PAGING_CONFIG_SOURCE")); mode != caseAlertSourceOff {
-				escalationCfg = applyCaseAlertSettings(ctx, mode, escalationCfg, caseAlertSettingsEntity(), os.Setenv, caseAlertStartFor(redisClient))
+				settingsEntity := caseAlertSettingsEntity()
+				var loaded caseAlertLoaded
+				escalationCfg, loaded = loadCaseAlertSettings(ctx, mode, escalationCfg, settingsEntity, os.Setenv, caseAlertStartFor(redisClient))
+				// Saved settings apply at start-up only, so a newer save
+				// restarts this process through the normal shutdown below
+				// (see caseAlertWatch); the platform starts it again.
+				watchCaseAlertSettings(ctx, loaded, settingsEntity, time.Now(), stop)
 			}
 		}
 		creCfg, creRunning := escalationCfg.For(paging.LadderKeyCRE)

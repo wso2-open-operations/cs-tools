@@ -122,12 +122,29 @@ func caseAlertWait(raw string) time.Duration {
 // as it is -- never the defaults, which turn paging off. setenv puts a saved
 // room's URL where the engine reads webhooks from (db mode only).
 func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config, entity caseAlertSettingsReader, setenv func(string, string) error, start caseAlertStart) paging.Config {
+	cfg, _ = loadCaseAlertSettings(ctx, mode, cfg, entity, setenv, start)
+	return cfg
+}
+
+// caseAlertLoaded is which saved revision a start read from entity-service.
+// watch is true only for a db start that really read it: a start from the
+// last-loaded snapshot or the file never restarts itself (see
+// caseAlertWatch), so an entity-service that keeps failing cannot turn into
+// a restart loop.
+type caseAlertLoaded struct {
+	revision int64
+	watch    bool
+}
+
+// loadCaseAlertSettings is applyCaseAlertSettings, also saying which saved
+// revision this process runs with.
+func loadCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config, entity caseAlertSettingsReader, setenv func(string, string) error, start caseAlertStart) (paging.Config, caseAlertLoaded) {
 	if mode == caseAlertSourceOff {
-		return cfg
+		return cfg, caseAlertLoaded{}
 	}
 	if entity == nil {
 		slog.Warn("PAGING_CONFIG_SOURCE needs CUSTOMER_ENTITY_BASE_URL; the file and env vars are used", "mode", mode)
-		return cfg
+		return cfg, caseAlertLoaded{}
 	}
 	wait := time.Duration(0)
 	if mode == caseAlertSourceDB {
@@ -145,9 +162,12 @@ func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config,
 		}
 		if !fromSnapshot {
 			slog.Warn("could not read the Case Alerts settings; the file and env vars are used", "mode", mode, "err", err)
-			return cfg
+			return cfg, caseAlertLoaded{}
 		}
 	}
+	// Watched whatever the merge makes of them: a save that fixes a refused
+	// value moves the revision too, and should be picked up.
+	loaded := caseAlertLoaded{revision: saved.Revision, watch: mode == caseAlertSourceDB && !fromSnapshot}
 
 	merged, env, changes, mergeErr := paging.MergeCaseAlertSettings(cfg, saved)
 	summary := map[string]any{"rooms": len(saved.Rooms), "routes": len(saved.Routes), "values": len(saved.Values), "changes": changes}
@@ -170,7 +190,7 @@ func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config,
 		slog.Error("the saved Case Alerts settings would not pass the file's checks; the file and env vars are used",
 			"mode", mode, "revision", saved.Revision, "err", mergeErr)
 		report(caseAlertSourceOff, cfg, nil)
-		return cfg
+		return cfg, loaded
 	}
 
 	if mode == caseAlertSourceShadow {
@@ -180,7 +200,7 @@ func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config,
 		slog.Info("case alerts shadow: compared the saved settings with the file; the file's are used",
 			"revision", saved.Revision, "differences", len(changes))
 		report(caseAlertSourceShadow, cfg, nil)
-		return cfg
+		return cfg, loaded
 	}
 
 	names := make([]string, 0, len(env))
@@ -188,7 +208,7 @@ func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config,
 		if err := setenv(name, url); err != nil {
 			slog.Error("could not put a saved Case Alerts room in the environment; the file and env vars are used", "variable", name)
 			report(caseAlertSourceOff, cfg, nil)
-			return cfg
+			return cfg, loaded
 		}
 		names = append(names, name)
 	}
@@ -202,7 +222,7 @@ func applyCaseAlertSettings(ctx context.Context, mode string, cfg paging.Config,
 	if !fromSnapshot && start.snapshots != nil {
 		saveCaseAlertSnapshot(ctx, start.snapshots, saved)
 	}
-	return merged
+	return merged, loaded
 }
 
 // readCaseAlertSettings reads the saved settings, trying again for up to wait
