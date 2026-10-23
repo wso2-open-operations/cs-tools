@@ -38,11 +38,11 @@ import (
 // (domain.SalesforceIngestEntityContact) inside its own transaction.
 type SalesforceContactRepository interface {
 	// Upsert writes one contact in one transaction: "user" (by sf_id, then by
-	// unique email), the global roles, account_contact on in.AccountID (by
+	// email; of several rows sharing one, the active one with a sf_id, else
+	// the oldest), the global roles, account_contact on in.AccountID (by
 	// sf_id, then user_name) with is_primary_contact, the deactivation of
 	// the contact's account_contact rows on accounts it has moved away from,
-	// the derived admin role, and the ledger row. ConflictError when the
-	// email matches more than one user.
+	// the derived admin role, and the ledger row.
 	Upsert(ctx context.Context, in domain.SalesforceContactUpsert, state domain.UpsertSalesforceIngestStateRequest) (domain.SalesforceContactUpsertResult, error)
 	// DeactivateBySfID soft-deletes a contact Salesforce has deleted:
 	// account_contact.is_active and "user".is_active go FALSE by sf_id, and

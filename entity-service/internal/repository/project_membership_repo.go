@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -42,8 +44,7 @@ import (
 // transaction so it can never disagree with the rows.
 type ProjectMembershipRepository interface {
 	// Upsert writes one membership. NotFoundError when the project or account
-	// is unknown, ConflictError when the contact email matches more than one
-	// user, ServiceUnavailableError when a role or project_group row the
+	// is unknown, ServiceUnavailableError when a role or project_group row the
 	// mapping relies on is missing (the ServiceNow sync seeds them).
 	Upsert(ctx context.Context, in domain.SalesforceMembershipUpsert, step domain.UpsertOnboardingStepRequest) (domain.SalesforceMembershipUpsertResult, error)
 	// UpsertWithin is Upsert with the transaction held open across a
@@ -574,7 +575,7 @@ func upsertMembershipTx(ctx context.Context, tx pgx.Tx, in domain.SalesforceMemb
 		}
 	}
 
-	// 3. user — by sf_id, then by email (must be unique), else insert.
+	// 3. user — by sf_id, then by email (the best of any duplicates), else insert.
 	var userName string
 	res.UserID, userName, res.CreatedUser, err = upsertMembershipUser(ctx, tx, in, actor)
 	if err != nil {
@@ -614,6 +615,40 @@ func upsertMembershipTx(ctx context.Context, tx pgx.Tx, in domain.SalesforceMemb
 	return res, nil
 }
 
+// emailUserMatch is one "user" row that shares a contact's email.
+type emailUserMatch struct {
+	id, userName, sfID string
+	active             bool
+	createdOn          time.Time
+}
+
+// pickUserByEmail chooses the row a membership resolves to when several share
+// an email: the active row, then one that carries a sf_id, then the oldest,
+// then the lowest id, so the same rows always give the same answer. matches
+// must not be empty.
+func pickUserByEmail(matches []emailUserMatch) emailUserMatch {
+	best := matches[0]
+	for _, m := range matches[1:] {
+		switch {
+		case m.active != best.active:
+			if m.active {
+				best = m
+			}
+		case (m.sfID != "") != (best.sfID != ""):
+			if m.sfID != "" {
+				best = m
+			}
+		case !m.createdOn.Equal(best.createdOn):
+			if m.createdOn.Before(best.createdOn) {
+				best = m
+			}
+		case m.id < best.id:
+			best = m
+		}
+	}
+	return best
+}
+
 func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceMembershipUpsert, actor string) (id, userName string, created bool, err error) {
 	email := strings.ToLower(strings.TrimSpace(in.ContactEmail))
 	if email == "" {
@@ -631,31 +666,49 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 	}
 	warnDuplicateSfID(ctx, "user", in.ContactSfID, id, copies)
 	if id == "" {
-		rows, qerr := tx.Query(ctx, `SELECT id, user_name, COALESCE(sf_id, '') FROM "user" WHERE LOWER(email) = $1 LIMIT 2`, email)
+		// Serialise on the email so two memberships for the same person
+		// (different contact ids) cannot both miss the lookup below and each
+		// insert a row. The sf_id lock the callers take cannot cover this.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, "user-email|"+email); err != nil {
+			return "", "", false, fmt.Errorf("upsert membership: lock user email: %w", err)
+		}
+		rows, qerr := tx.Query(ctx, `
+			SELECT id, user_name, COALESCE(sf_id, ''), is_active IS TRUE, created_on
+			FROM "user" WHERE LOWER(email) = $1`, email)
 		if qerr != nil {
 			return "", "", false, fmt.Errorf("upsert membership: resolve user by email: %w", qerr)
 		}
-		var matches [][3]string
+		var matches []emailUserMatch
 		for rows.Next() {
-			var mid, mname, msf string
-			if serr := rows.Scan(&mid, &mname, &msf); serr != nil {
+			var m emailUserMatch
+			if serr := rows.Scan(&m.id, &m.userName, &m.sfID, &m.active, &m.createdOn); serr != nil {
 				rows.Close()
 				return "", "", false, fmt.Errorf("upsert membership: scan user: %w", serr)
 			}
-			matches = append(matches, [3]string{mid, mname, msf})
+			matches = append(matches, m)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return "", "", false, fmt.Errorf("upsert membership: iterate users: %w", err)
 		}
-		switch len(matches) {
-		case 0:
-		case 1:
-			id, userName = matches[0][0], matches[0][1]
+		if len(matches) > 0 {
+			chosen := pickUserByEmail(matches)
+			if len(matches) > 1 {
+				// One person can hold several rows (one made at onboarding, one by
+				// a contact sync); the later sf_id stamp below makes this one the
+				// row every later event for the contact resolves to.
+				ignored := make([]string, 0, len(matches)-1)
+				for _, m := range matches {
+					if m.id != chosen.id {
+						ignored = append(ignored, m.id)
+					}
+				}
+				slog.WarnContext(ctx, "upsert membership: more than one user shares the contact email; using one",
+					"rows", len(matches), "chosenId", chosen.id, "ignoredIds", ignored)
+			}
+			id, userName = chosen.id, chosen.userName
 			// The person's earlier Salesforce contact was replaced by a new one.
-			replacedContact = matches[0][2] != "" && matches[0][2] != in.ContactSfID
-		default:
-			return "", "", false, &apierror.ConflictError{Msg: "more than one user matches the contact email; cannot resolve the membership"}
+			replacedContact = chosen.sfID != "" && chosen.sfID != in.ContactSfID
 		}
 	}
 
