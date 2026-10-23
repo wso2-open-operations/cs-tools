@@ -136,11 +136,26 @@ type WorklogReportRepository interface {
 	// Leave returns the day-blanking absences overlapping [from, to].
 	Leave(ctx context.Context, from, to time.Time) ([]WorklogLeaveRow, error)
 	// RosteredUserIDs returns the users with a rota assignment on any date
-	// in [from, to]. It is what makes a person appear in a report having
-	// logged nothing: the delivered daily mail for Sunday 2026-10-18 lists
-	// six people, two of them with no time, no leave and no rejected
-	// entries -- the weekend crew.
+	// in [from, to], whatever the shift. This is the WEEKLY report's
+	// membership rule and it is deliberately rota-driven: ServiceNow's
+	// WeeklyTimeReportUtil.getTeamInfo builds its roster from the shift
+	// API's rows for the range, not from group membership, which is why
+	// the delivered weekly mail lists people who logged nothing all week.
 	RosteredUserIDs(ctx context.Context, from, to time.Time) ([]string, error)
+	// WeekendCrewUserIDs is RosteredUserIDs narrowed to shifts whose
+	// team_schedule_shift.day_scope is WEEKEND. The daily report needs
+	// the narrower set, and only on a Saturday or Sunday: ServiceNow's
+	// __internal_excludeNonWeekendMembers matches cmn_schedule_span rows
+	// of type ops_weekend / ops_weekend_night, not any span at all. The
+	// distinction is load-bearing -- SRE_TZ3 is a WEEKDAY shift that
+	// nonetheless carries weekend assignments, so "has a rota row" would
+	// keep people ServiceNow drops.
+	//
+	// ANY counts as well. ServiceNow had no equivalent -- a span was
+	// weekend-typed or it was not -- but this schema uses ANY for the
+	// round-the-clock SME and IaaS rotas, and somebody assigned to one
+	// on a Saturday is on weekend duty by any reading.
+	WeekendCrewUserIDs(ctx context.Context, from, to time.Time) ([]string, error)
 	// TeamContacts returns, per team in scope, its group address and the
 	// email of every member holding role 'lead'. It is a separate read
 	// from Roster because Roster collapses to one row per person, which
@@ -339,8 +354,28 @@ SELECT DISTINCT a.user_id::text
  WHERE a.rota_date >= $1
    AND a.rota_date <= $2`
 
+// The weekend variant. day_scope lives on the shift, not the assignment,
+// so this has to join -- and the join is the point: filtering on the
+// DATE being a weekend would keep a weekday shift that happens to run on
+// a Saturday, which is exactly what ServiceNow's span-type match excludes.
+const worklogWeekendCrewQuery = `
+SELECT DISTINCT a.user_id::text
+  FROM team_schedule_assignment a
+  JOIN team_schedule_shift s ON s.id = a.shift_id
+ WHERE a.rota_date >= $1
+   AND a.rota_date <= $2
+   AND s.day_scope IN ('WEEKEND', 'ANY')`
+
 func (r *worklogReportRepo) RosteredUserIDs(ctx context.Context, from, to time.Time) ([]string, error) {
-	rows, err := r.db.Query(ctx, worklogRosteredQuery, from, to)
+	return r.rotaUserIDs(ctx, worklogRosteredQuery, from, to)
+}
+
+func (r *worklogReportRepo) WeekendCrewUserIDs(ctx context.Context, from, to time.Time) ([]string, error) {
+	return r.rotaUserIDs(ctx, worklogWeekendCrewQuery, from, to)
+}
+
+func (r *worklogReportRepo) rotaUserIDs(ctx context.Context, query string, from, to time.Time) ([]string, error) {
+	rows, err := r.db.Query(ctx, query, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("query worklog rostered users: %w", err)
 	}

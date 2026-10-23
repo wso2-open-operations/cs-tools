@@ -324,9 +324,13 @@ func seedWorklogDailyFixture(ctx context.Context, t *testing.T, pool *pgxpool.Po
 	      VALUES ('00000000-0000-0000-0000-0000000000ad', NOW(), NOW(),
 	              'headof@example.com', 'CS Head', 'headof@example.com')`)
 
-	exec(`INSERT INTO team_schedule_shift (id, code, short_code, label, colour_token, family, start_minute, end_minute)
-	      VALUES ('00000000-0000-0000-0000-0000000000ff', 'WKND', 'WK', 'Weekend', 'WK', 'CRE', 540, 1080)
-	      ON CONFLICT DO NOTHING`)
+	// day_scope is WEEKEND, not the column's WEEKDAY default. It is what
+	// makes these six count as the weekend crew: a daily report for a
+	// Saturday or Sunday takes its membership from WEEKEND/ANY-scoped
+	// assignments alone, mirroring ServiceNow's ops_weekend span match.
+	exec(`INSERT INTO team_schedule_shift (id, code, short_code, label, colour_token, family, start_minute, end_minute, day_scope)
+	      VALUES ('00000000-0000-0000-0000-0000000000ff', 'WKND', 'WK', 'Weekend', 'WK', 'CRE', 540, 1080, 'WEEKEND')
+	      ON CONFLICT (id) DO UPDATE SET day_scope = EXCLUDED.day_scope`)
 
 	seenTeam := map[string]bool{}
 	for i, u := range worklogDailyFixture {
@@ -979,5 +983,151 @@ func TestWorklogExcludedTeamsDisappearEntirely(t *testing.T) {
 	}
 	if len(after.Recipients.To) >= len(before.Recipients.To) {
 		t.Errorf("derived To = %d, want fewer than %d", len(after.Recipients.To), len(before.Recipients.To))
+	}
+}
+
+// A WEEKDAY daily report is not rota-gated at all. This is the one rule
+// the two cadences do not share, and getting it wrong is invisible --
+// the report still renders, just short.
+//
+// ServiceNow's DailyTimeReportUtil_V2.__internal_getTeamInfo starts from
+// every member of the operational groups and narrows to the shift crew
+// only inside an isWeekend branch, so a Wednesday report lists the whole
+// roster and most of it shows zeros. An earlier version of this port
+// applied the rota filter on every day of the week, which silently
+// dropped whoever the rota did not cover: on staging for Wednesday
+// 2026-10-21, 64 of team cre-abt's 98 members.
+//
+// The fixture rosters its six people for Sunday 2026-10-18 only, so
+// nobody has a rota row on the Wednesday three days earlier. Under the
+// old rule that report was empty; under ServiceNow's it is everyone.
+func TestWorklogWeekdayDailyIgnoresTheRota(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	seedWorklogDailyFixture(ctx, t, pool)
+	ctx = repository.WithSystemIdentity(ctx)
+	svc := service.NewWorklogReportService(
+		repository.NewWorklogReportRepository(repository.NewScoped(pool)), nil, nil)
+
+	// 2026-10-14 is a Wednesday. No fixture rota row falls on it.
+	wednesday := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	weekday, err := svc.BuildReport(ctx, domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: wednesday, To: wednesday})
+	if err != nil {
+		t.Fatalf("weekday daily: %v", err)
+	}
+
+	// Sunday, the same fixture, where the rota does apply.
+	sunday := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	weekend, err := svc.BuildReport(ctx, domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: sunday, To: sunday})
+	if err != nil {
+		t.Fatalf("weekend daily: %v", err)
+	}
+
+	if weekday.Totals.Members == 0 {
+		t.Fatal("the weekday daily report is empty; it must list the roster " +
+			"regardless of the rota")
+	}
+	if weekday.Totals.Members < weekend.Totals.Members {
+		t.Errorf("weekday members = %d, weekend members = %d: the weekday report "+
+			"must not be narrower than the weekend crew",
+			weekday.Totals.Members, weekend.Totals.Members)
+	}
+
+	// Nobody logged time on the Wednesday, so every member of it is
+	// there on roster membership alone -- precisely the people the old
+	// rule dropped.
+	if weekday.Totals.Issues != 0 {
+		t.Errorf("TotalIssues = %d, want 0 (the fixture logs no time that day)",
+			weekday.Totals.Issues)
+	}
+
+	// The head of function stays out: dropping the rota gate must not
+	// quietly readmit a role the roster query excludes.
+	for _, team := range weekday.Teams {
+		for _, dev := range team.Developers {
+			if dev.Email == "headof@example.com" {
+				t.Error("headof@example.com holds cs_head and must appear in no team section")
+			}
+		}
+	}
+}
+
+// On a weekend, being on the rota is not enough -- the SHIFT has to be a
+// weekend one. ServiceNow matched cmn_schedule_span rows of type
+// ops_weekend / ops_weekend_night, never any span at all, and the
+// distinction is live in this schema: on staging, SRE_TZ3 is a WEEKDAY
+// shift that still carried 28 weekend assignments over September and
+// October. Gating on "has a rota row" would put all of them in the
+// Sunday mail.
+func TestWorklogWeekendDailyTakesWeekendShiftsOnly(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	seedWorklogDailyFixture(ctx, t, pool)
+	ctx = repository.WithSystemIdentity(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+
+	// A seventh person, on the roster of a fixture team, rostered that
+	// Sunday on a WEEKDAY-scoped shift. They logged nothing and took no
+	// leave, so the rota row is the only thing that could list them.
+	exec(`INSERT INTO team_schedule_shift (id, code, short_code, label, colour_token, family, start_minute, end_minute, day_scope)
+	      VALUES ('00000000-0000-0000-0000-0000000000fe', 'WKDY', 'WD', 'Weekday', 'WD', 'SRE', 540, 1080, 'WEEKDAY')
+	      ON CONFLICT (id) DO UPDATE SET day_scope = EXCLUDED.day_scope`)
+	exec(`INSERT INTO "user" (id, created_on, updated_on, user_name, name, email)
+	      VALUES ('00000000-0000-0000-0000-0000000000fd', NOW(), NOW(),
+	              'weekdayshift@example.com', 'Weekday Shift', 'weekdayshift@example.com')`)
+	exec(`INSERT INTO team_member (id, created_on, updated_on, team_id, user_id, role)
+	      VALUES (gen_random_uuid(), NOW(), NOW(),
+	              (SELECT id FROM team WHERE key = 'americas'),
+	              '00000000-0000-0000-0000-0000000000fd', 'engineer')`)
+	exec(`INSERT INTO team_schedule_assignment (user_id, team_key, shift_id, rota_date, starts_at, ends_at)
+	      VALUES ('00000000-0000-0000-0000-0000000000fd', 'americas',
+	              '00000000-0000-0000-0000-0000000000fe', DATE '2026-10-18',
+	              TIMESTAMPTZ '2026-10-18 09:00+05:30', TIMESTAMPTZ '2026-10-18 18:00+05:30')`)
+
+	svc := service.NewWorklogReportService(
+		repository.NewWorklogReportRepository(repository.NewScoped(pool)), nil, nil)
+	sunday := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	report, err := svc.BuildReport(ctx, domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: sunday, To: sunday})
+	if err != nil {
+		t.Fatalf("weekend daily: %v", err)
+	}
+
+	for _, team := range report.Teams {
+		for _, dev := range team.Developers {
+			if dev.Email == "weekdayshift@example.com" {
+				t.Error("a WEEKDAY-scoped shift is not weekend duty; " +
+					"weekdayshift@example.com must not appear in a Sunday report")
+			}
+		}
+	}
+	if report.Totals.Members != 6 {
+		t.Errorf("Members = %d, want 6 (the weekend crew, unchanged by the extra rota row)",
+			report.Totals.Members)
 	}
 }

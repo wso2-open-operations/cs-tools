@@ -199,9 +199,39 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	if err != nil {
 		return domain.WorklogReport{}, err
 	}
-	rostered, err := s.repo.RosteredUserIDs(ctx, from, to)
-	if err != nil {
-		return domain.WorklogReport{}, err
+	// WHICH ROTA READ, AND WHETHER ONE HAPPENS AT ALL, IS THE WHOLE
+	// DIFFERENCE BETWEEN THE TWO CADENCES.
+	//
+	// The weekly is rota-driven: WeeklyTimeReportUtil.getTeamInfo builds
+	// its roster from the shift API's rows for the range, so a person
+	// with no shift that week is in no section.
+	//
+	// The daily is NOT, except on a weekend.
+	// DailyTimeReportUtil_V2.__internal_getTeamInfo starts from every
+	// member of the operational groups and narrows by shift only inside
+	//
+	//     if (this.teamScheduleUtils.isWeekend(new GlideDateTime(date)))
+	//         this.__internal_excludeNonWeekendMembers(teamMembers, date);
+	//
+	// so a Wednesday report lists the whole roster -- most of it with
+	// zeros -- and a Sunday report lists the weekend crew. Reading the
+	// rota on a weekday and gating on it, as this did, silently dropped
+	// everyone the rota happened not to cover: on staging for Wed
+	// 2026-10-21 that was 64 of team cre-abt's 98 members.
+	daily := req.Cadence == domain.WorklogReportCadenceDaily
+	weekendDaily := daily && isWeekend(from)
+	// A weekday daily reads no rota at all, so it issues no query here.
+	rotaGated := !daily || weekendDaily
+
+	var rostered []string
+	if rotaGated {
+		read := s.repo.RosteredUserIDs
+		if weekendDaily {
+			read = s.repo.WeekendCrewUserIDs
+		}
+		if rostered, err = read(ctx, from, to); err != nil {
+			return domain.WorklogReport{}, err
+		}
 	}
 	// Every team, not just the ones in the report's scope: the leadership
 	// team contributes recipients while appearing in no team section.
@@ -322,7 +352,6 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	}
 
 	weekdays := weekdaysBetween(from, to)
-	daily := req.Cadence == domain.WorklogReportCadenceDaily
 
 	teams := map[string]*domain.WorklogTeamReport{}
 	// Hours are accumulated as whole minutes and converted once, never by
@@ -369,7 +398,14 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		if daily && u.excluded {
 			continue
 		}
-		if !isRostered[u.roster.UserID] && u.approvedMin == 0 && u.pendingMin == 0 &&
+		// A weekday daily applies no rota gate at all -- the roster IS
+		// the membership, which is why rotaGated is false for it and
+		// this whole branch is skipped. For the weekly, and for a
+		// weekend daily, a person still appears if they logged time or
+		// were away even without a rota row: the union degrades safely
+		// where no rota rows exist for a range, rather than returning
+		// an empty report.
+		if rotaGated && !isRostered[u.roster.UserID] && u.approvedMin == 0 && u.pendingMin == 0 &&
 			len(u.approvedKeys) == 0 && len(u.pendingKeys) == 0 &&
 			u.disapproved == 0 && u.leaveCode == "" {
 			continue
