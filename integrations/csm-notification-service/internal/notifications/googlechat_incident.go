@@ -224,7 +224,10 @@ type SMEIncidentEscalatedAlert struct {
 	EscalatedBy   string
 	EscalatedFrom string
 	// OnCall is the SME the first rung pages.
-	OnCall       string
+	OnCall string
+	// OnCallRung and OnCallAt are the tier and IST time of that first rung when it is not L1, so the card says when anyone is called.
+	OnCallRung   string
+	OnCallAt     string
 	EscalatedAt  string
 	IncidentLink string
 }
@@ -262,9 +265,16 @@ func buildSMEIncidentEscalatedCard(a SMEIncidentEscalatedAlert) chatCardMessage 
 		}
 		summary = append(summary, chatCardWidget{DecoratedText: &chatDecoratedText{TopLabel: "Escalated by", Text: text, WrapText: true}})
 	}
-	onCall := caseAlertLine("<b>%s</b>", a.OnCall)
-	if strings.TrimSpace(a.OnCall) == "" {
-		onCall = `<font color="#B3261E">Nobody rostered</font>`
+	onCall := `<font color="#B3261E">Nobody rostered</font>`
+	if name := strings.TrimSpace(a.OnCall); name != "" {
+		onCall = caseAlertLine("<b>%s</b>", name)
+		if rung := strings.TrimSpace(a.OnCallRung); rung != "" {
+			// L1 is empty: name who is called first and when, so the room does not read it as nobody being paged.
+			onCall = caseAlertLine(`<font color="#B3261E">Nobody rostered before %s</font><br>`, rung) + caseAlertLine("<b>%s</b> (%s)", name, rung)
+			if at := strings.TrimSpace(a.OnCallAt); at != "" {
+				onCall += caseAlertLine(", called at %s", at)
+			}
+		}
 	}
 	summary = append(summary, chatCardWidget{DecoratedText: &chatDecoratedText{TopLabel: "SME on call", Text: onCall, WrapText: true}})
 	if a.IncidentLink != "" {

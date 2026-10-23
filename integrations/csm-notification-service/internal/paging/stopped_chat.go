@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
@@ -38,8 +39,8 @@ func (e *Engine) postStopped(ctx context.Context, st LadderState, reason cancelR
 	case reason == cancelEscalatedToSME:
 		// The hand-off posts its own message (smeHandoffChat).
 		return
-	case !e.cfg.CallSendingEnabled || st.PlacedCount() == 0:
-		// No rung card went out, so the room never saw this chain.
+	case !e.cfg.CallSendingEnabled || (st.PlacedCount() == 0 && len(st.Plan.IncidentCards) == 0):
+		// No rung card or incident card went out, so the room never saw this chain.
 		return
 	}
 	rooms := e.cardRooms(st.Plan)
@@ -63,6 +64,10 @@ func (e *Engine) postStopped(ctx context.Context, st LadderState, reason cancelR
 	for _, r := range rooms {
 		room := r.roomFor()
 		if !r.chat.HasAudienceSpace(room) {
+			continue
+		}
+		if st.PlacedCount() == 0 && !slices.Contains(st.Plan.IncidentCards, room) {
+			// Before any rung, only a room the incident card reached saw this chain.
 			continue
 		}
 		msg.Audience, msg.Reply = room, r.reply || e.threadReplies(t)

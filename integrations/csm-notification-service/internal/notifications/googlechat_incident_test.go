@@ -233,3 +233,18 @@ func TestBuildSMEIncidentEscalatedCard_NobodyOnCall(t *testing.T) {
 		t.Errorf("title = %q", got)
 	}
 }
+
+// With L1 empty the card names the first rostered tier and when it is called, never plain "Nobody rostered".
+func TestBuildSMEIncidentEscalatedCard_FirstRostered(t *testing.T) {
+	msg := buildSMEIncidentEscalatedCard(SMEIncidentEscalatedAlert{IncidentID: "inc-1", Number: "INC1",
+		OnCall: "Nimal Fernando", OnCallRung: "L2", OnCallAt: "2026-10-23 14:10 IST"})
+	got := msg.CardsV2[0].Card.Sections[0].Widgets[1].DecoratedText
+	if got == nil {
+		t.Fatal("no on call widget")
+	}
+	for _, want := range []string{"Nobody rostered before L2", "<b>Nimal Fernando</b> (L2)", "called at 2026-10-23 14:10 IST"} {
+		if !strings.Contains(got.Text, want) {
+			t.Errorf("on call = %q; want it to contain %q", got.Text, want)
+		}
+	}
+}

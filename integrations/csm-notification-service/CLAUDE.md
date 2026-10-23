@@ -565,7 +565,9 @@ when a severity or priority change replaces the chain -- "Severity changed to
 X: paging restarts". It lists who was paged and how many calls were
 cancelled. Posted only from the first stop (a retried stop finds `Cancelled`
 set) and only once a rung has gone out with sending on, so a room never hears
-about a chain it did not see. A hand-off to the SMEs posts nothing here; its
+about a chain it did not see; before any rung, a room the incident card
+reached (`IncidentCards`, e.g. an SME ladder whose L1 was empty) counts as
+having seen it. A hand-off to the SMEs posts nothing here; its
 own message says it. The SRE setting covers the SME ladders. Best effort.
 
 **Stops on** (an SRE incident): `incident.assigned` (an engineer set as the
@@ -632,7 +634,16 @@ file's `sme.enabled`:
   uncomments it and checks each team gets its own space). Unset, every team's
   cards go to `sme.chat`, as before. Set, a listed team's cards go to its own space and
   a team not listed uses `sme.chat`, never no card (a room saved on the Alert
-  Settings tab counts as listed). `Engine.smeNotifiersFor` picks by `Routing.SMETeam`. At the start a work note says who
+  Settings tab counts as listed). `Engine.smeNotifiersFor` picks by `Routing.SMETeam`.
+- **The "Incident Escalated" card is the escalation's, not L1's** (since
+  2026-10-23): `postSMEIncidentCard` posts it to the SME team's spaces when the
+  alert is handled, with chat in `sme.channel` and sending on, whoever is on
+  call. Nobody rostered on any tier: the card still goes out ("Nobody
+  rostered") and no ladder starts. L1 empty: the card goes out at once rather
+  than with L2, and names the first rostered tier and when it is called
+  ("Nobody rostered before L2", then the L2 and the time). The rooms it reached are saved on the ladder (`IncidentCards`)
+  before any rung is scheduled, so the first rung posts only its reply; a room
+  the card missed gets it from the first rung, as before. At the start a work note says who
   L1 is, or why nobody can be paged (`NO_RECIPIENTS`, `NO_NUMBER`,
   `NUMBER_NOT_ALLOWED`, `NO_CHANNEL`); a rung with nobody is logged ("SME rung
   cannot be called") and skipped; the usual execution summary is written when

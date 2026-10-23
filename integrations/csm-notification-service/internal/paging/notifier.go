@@ -403,6 +403,17 @@ func incidentCard(t Trigger, link string) notifications.IncidentCreatedAlert {
 // smeIncidentCard is the "Incident Escalated" card the SME space's rung replies sit under.
 func smeIncidentCard(plan Plan, link string) notifications.SMEIncidentEscalatedAlert {
 	t := plan.Trigger
+	onCall, onCallRung, onCallAt := "", "", ""
+	if len(plan.Calls) > 0 {
+		first := plan.Calls[0]
+		if onCall = first.Recipient.Name; onCall == "" {
+			onCall = first.Level.RoleIn(LadderSME)
+		}
+		if first.Level != Level0 {
+			// L1 is empty: the card names the first tier that is rostered and when it is called.
+			onCallRung, onCallAt = first.Level.LabelIn(LadderSME), istStamp(first.At)
+		}
+	}
 	return notifications.SMEIncidentEscalatedAlert{
 		IncidentID:       t.IncidentID,
 		Number:           t.Number,
@@ -413,7 +424,9 @@ func smeIncidentCard(plan Plan, link string) notifications.SMEIncidentEscalatedA
 		State:            t.State,
 		EscalatedBy:      t.EscalatedBy,
 		EscalatedFrom:    t.EscalatedFrom,
-		OnCall:           onCallName(plan),
+		OnCall:           onCall,
+		OnCallRung:       onCallRung,
+		OnCallAt:         onCallAt,
 		EscalatedAt:      istStamp(t.At),
 		IncidentLink:     link,
 	}

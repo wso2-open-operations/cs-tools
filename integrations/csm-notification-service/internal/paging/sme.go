@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 )
@@ -352,6 +354,8 @@ func (e *Engine) startSMELadder(ctx context.Context, t Trigger, p specialOpsPres
 		}
 		slog.WarnContext(ctx, "escalation: nobody on the SME team's rota can be paged; no SME page",
 			"incidentId", t.IncidentID, "smeTeam", t.Routing.SMETeam, "reason", reason)
+		// The on call is optional: the SME space still hears of the escalation, its card saying nobody is rostered.
+		e.postSMEIncidentCard(ctx, plan)
 		e.writeSMENote(ctx, t, p, nil, reason, detail)
 		return false, nil
 	}
@@ -368,6 +372,9 @@ func (e *Engine) startSMELadder(ctx context.Context, t Trigger, p specialOpsPres
 		if st, _, err = e.store.Get(ctx, key); err != nil {
 			return false, fmt.Errorf("escalation: load the SME ladder for %s: %w", t.IncidentID, err)
 		}
+	} else if rooms := e.postSMEIncidentCard(ctx, st.Plan); len(rooms) > 0 {
+		// Recorded before any rung is scheduled, so L1 posts only its reply; a room the card missed gets it from the first rung.
+		e.recordIncidentCards(ctx, key, st.Plan.Trigger, rooms)
 	}
 	if _, err := e.seedPendingWakes(ctx, key, st); err != nil {
 		return false, fmt.Errorf("escalation: schedule the SME ladder for %s: %w", t.IncidentID, err)
@@ -378,6 +385,42 @@ func (e *Engine) startSMELadder(ctx context.Context, t Trigger, p specialOpsPres
 		"shift", first.ShiftCode, "channel", string(sme.Channel), "calls", len(st.Plan.Calls))
 	e.writeSMENote(ctx, t, p, &first, "", "")
 	return true, nil
+}
+
+// postSMEIncidentCard posts the "Incident Escalated" card to the SME team's spaces when the escalation is handled, whoever is on call, and returns the rooms it reached. Best effort: a failure is logged.
+func (e *Engine) postSMEIncidentCard(ctx context.Context, plan Plan) []string {
+	t := plan.Trigger
+	if !e.cfg.CallSendingEnabled || !e.cfg.SME.Channel.Uses(ChannelChat) {
+		return nil
+	}
+	var rooms []string
+	for _, n := range e.cardRooms(plan) {
+		room := n.roomFor()
+		if n.reply || slices.Contains(rooms, room) {
+			continue
+		}
+		if !n.chat.HasAudienceSpace(room) {
+			slog.WarnContext(ctx, "escalation: no Google Chat space for the SME incident card", "incidentId", t.IncidentID, "audience", room)
+			continue
+		}
+		link := ""
+		if n.links != nil {
+			link = n.links.IncidentLink(t.IncidentID)
+		}
+		if err := n.chat.SendSMEIncidentEscalatedAlert(ctx, room, smeIncidentCard(plan, link)); err != nil {
+			// The status only: a Chat error response can echo the card's content.
+			status := 0
+			var upstream *apierror.Error
+			if errors.As(err, &upstream) {
+				status = upstream.StatusCode
+			}
+			slog.ErrorContext(ctx, "escalation: the SME incident card was not posted", "incidentId", t.IncidentID, "audience", room, "statusCode", status)
+			continue
+		}
+		slog.InfoContext(ctx, "escalation: SME incident card posted", "incidentId", t.IncidentID, "audience", room, "smeTeam", t.Routing.SMETeam)
+		rooms = append(rooms, room)
+	}
+	return rooms
 }
 
 // applySMESafety drops the calls sme.safety.allowedNumbers does not allow,
