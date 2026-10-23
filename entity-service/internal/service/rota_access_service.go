@@ -32,14 +32,19 @@ import (
 // team each).
 //
 // Who may do what:
-//   - a CSM admin grants and removes rota admin, and any team's marker;
+//   - a CSM admin or a portal admin grants and removes rota admin, and any
+//     team's marker;
 //   - a rota admin grants and removes markers for the teams of their own
-//     family, and nothing else;
+//     family;
+//   - a team's lead (lead or Americas team lead) grants and removes that
+//     team's markers;
 //   - everybody else sees an empty tab and may change nothing.
 //
 // A CSM admin is a CSM Portal admin: a caller whose token's "roles" claim holds
 // one of AUTH_ADMIN_ROLES -- the same variable, with the same value, that
-// csm-portal-backend reads to decide who its admins are.
+// csm-portal-backend reads to decide who its admins are. A portal admin holds
+// the global admin role in the database (and is internal); the two are
+// treated alike here.
 type RotaAccessService interface {
 	Get(ctx context.Context) (domain.RotaAccess, error)
 	GrantRotaAdmin(ctx context.Context, family, userID string) error
@@ -74,8 +79,9 @@ var rotaFamilies = []string{familyCRE, familySRE, familySME}
 // caller is who is asking and what they may change.
 type rotaAccessCaller struct {
 	email          string
-	csmAdmin       bool
+	csmAdmin       bool // a CSM admin or a portal admin
 	markerFamilies []string
+	markerTeams    []string // teams the caller leads
 }
 
 // whoIsAsking resolves the caller's rights. Internal first, so somebody
@@ -88,8 +94,15 @@ func (s *rotaAccessService) whoIsAsking(ctx context.Context) (rotaAccessCaller, 
 	if id.UserEmail == "" {
 		return rotaAccessCaller{}, &apierror.ForbiddenError{Msg: "rota access needs a user token, not a service credential"}
 	}
-	c := rotaAccessCaller{email: id.UserEmail}
+	c := rotaAccessCaller{email: id.UserEmail, markerTeams: []string{}}
 	c.csmAdmin = holdsAnyRole(id.Roles, s.adminRoles)
+	if !c.csmAdmin {
+		portalAdmin, err := s.repo.IsPortalAdmin(ctx, id.UserEmail)
+		if err != nil {
+			return rotaAccessCaller{}, err
+		}
+		c.csmAdmin = portalAdmin
+	}
 	if c.csmAdmin {
 		c.markerFamilies = rotaFamilies
 		return c, nil
@@ -99,6 +112,11 @@ func (s *rotaAccessService) whoIsAsking(ctx context.Context) (rotaAccessCaller, 
 		return rotaAccessCaller{}, err
 	}
 	c.markerFamilies = families
+	led, err := s.schedule.LeadTeamsFor(ctx, id.UserEmail)
+	if err != nil {
+		return rotaAccessCaller{}, err
+	}
+	c.markerTeams = led
 	return c, nil
 }
 
@@ -128,20 +146,23 @@ func (s *rotaAccessService) Get(ctx context.Context) (domain.RotaAccess, error) 
 		return domain.RotaAccess{}, err
 	}
 	out := domain.RotaAccess{
-		CanManage:  domain.RotaAccessRights{RotaAdmins: c.csmAdmin, MarkerFamilies: c.markerFamilies},
+		CanManage:  domain.RotaAccessRights{RotaAdmins: c.csmAdmin, MarkerFamilies: c.markerFamilies, MarkerTeams: c.markerTeams},
 		RotaAdmins: []domain.RotaAdminGrant{},
 		Markers:    []domain.RotaMarkerGrant{},
 	}
 	if out.CanManage.MarkerFamilies == nil {
 		out.CanManage.MarkerFamilies = []string{}
 	}
-	if !c.csmAdmin && len(c.markerFamilies) == 0 {
+	if out.CanManage.MarkerTeams == nil {
+		out.CanManage.MarkerTeams = []string{}
+	}
+	if !c.csmAdmin && len(c.markerFamilies) == 0 && len(c.markerTeams) == 0 {
 		return out, nil
 	}
 	if out.RotaAdmins, err = s.repo.ListRotaAdmins(ctx); err != nil {
 		return domain.RotaAccess{}, err
 	}
-	if out.Markers, err = s.repo.ListRotaMarkers(ctx, c.markerFamilies); err != nil {
+	if out.Markers, err = s.repo.ListRotaMarkers(ctx, c.markerFamilies, c.markerTeams); err != nil {
 		return domain.RotaAccess{}, err
 	}
 	return out, nil
@@ -208,8 +229,9 @@ func (s *rotaAccessService) RevokeRotaAdmin(ctx context.Context, family, userID 
 	return err
 }
 
-// requireMarkerManager is the gate for one team's markers: a CSM admin, or a
-// rota admin for that team's family. It returns the caller.
+// requireMarkerManager is the gate for one team's markers: a CSM or portal
+// admin, a rota admin for that team's family, or the team's lead. It returns
+// the caller.
 func (s *rotaAccessService) requireMarkerManager(ctx context.Context, teamKey string) (rotaAccessCaller, error) {
 	c, err := s.whoIsAsking(ctx)
 	if err != nil {
@@ -222,9 +244,9 @@ func (s *rotaAccessService) requireMarkerManager(ctx context.Context, teamKey st
 	if !ok {
 		return c, &apierror.NotFoundError{Msg: fmt.Sprintf("%s is not a team on the schedule", teamKey)}
 	}
-	if !c.csmAdmin && !containsFold(c.markerFamilies, family) {
+	if !c.csmAdmin && !containsFold(c.markerFamilies, family) && !containsFold(c.markerTeams, teamKey) {
 		return c, &apierror.ForbiddenError{
-			Msg: fmt.Sprintf("a rota manager for %s is granted by a CSM admin or the %s rota admin", teamKey, family),
+			Msg: fmt.Sprintf("a rota manager for %s is granted by a CSM admin, the %s rota admin or the team's lead", teamKey, family),
 		}
 	}
 	return c, nil

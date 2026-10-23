@@ -16,10 +16,10 @@
  * under the License.
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import WeekTable from "./WeekTable";
+import WeekTable, { type WeekEditControls } from "./WeekTable";
 import {
   ANNUAL_LEAVE,
   EVENING,
@@ -161,5 +161,80 @@ describe("WeekTable: no tier on a zone's escalation window", () => {
       [...container.querySelectorAll("tbody tr")].find((tr) => tr.querySelector("th.lab small")?.textContent === label);
     expect(rowOf("TZ3 regular hours")).toHaveTextContent("Isuri");
     expect(container.textContent).not.toContain("tier not set");
+  });
+});
+
+describe("WeekTable: a rota admin editing the week", () => {
+  const PEOPLE = [
+    { userId: "u-jane", name: "Jane Doe", teamKey: "alpha" },
+    { userId: "u-john", name: "John Roe", teamKey: "bravo" },
+  ];
+
+  function editControls(over: Partial<WeekEditControls> = {}): WeekEditControls {
+    return { people: PEOPLE, onAdd: vi.fn(), onRemove: vi.fn(), busy: false, ...over };
+  }
+
+  const WEEK = [
+    assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: REGULAR.code, teamKey: "alpha" }),
+    assignment({ name: "Jane Doe", userId: "u-jane", rotaDate: "2026-09-21", shiftCode: EVENING.code, teamKey: "alpha" }),
+  ];
+
+  it("offers nothing to change while not editing", () => {
+    renderWeek({ assignments: WEEK });
+    expect(screen.queryByRole("combobox", { name: /Add someone/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Take .* off/ })).not.toBeInTheDocument();
+  });
+
+  it("adds someone to a rotation on a day, offering only people not already on it", () => {
+    const edit = editControls();
+    renderWeek({ assignments: WEEK, edit });
+    const monday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Mon 21" });
+    // Jane is already on Monday's evening turn: only John is offered.
+    expect(within(monday).queryByRole("option", { name: /Jane Doe/ })).not.toBeInTheDocument();
+    fireEvent.change(monday, { target: { value: "u-john" } });
+    expect(edit.onAdd).toHaveBeenCalledWith(
+      { shiftCode: EVENING.code, tier: undefined, label: "Evening 6-9pm" },
+      "2026-09-21",
+      PEOPLE[1],
+    );
+    // Tuesday is empty, so both are offered there.
+    const tuesday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" });
+    expect(within(tuesday).getAllByRole("option")).toHaveLength(3);
+  });
+
+  it("takes someone off the turn they hold in that cell", () => {
+    const edit = editControls();
+    renderWeek({ assignments: WEEK, edit });
+    fireEvent.click(screen.getByRole("button", { name: "Take Jane Doe off Evening 6-9pm on Mon 21" }));
+    expect(edit.onRemove).toHaveBeenCalledWith(expect.objectContaining({ shiftCode: EVENING.code, rotaDate: "2026-09-21" }));
+  });
+
+  it("leaves regular hours and a weekday rotation's weekend alone", () => {
+    renderWeek({ assignments: WEEK, edit: editControls() });
+    expect(screen.queryByRole("combobox", { name: /Regular hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Take Asela off/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Evening 6-9pm on (Sat|Sun)/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("combobox", { name: /Add someone to Evening 6-9pm/ })).toHaveLength(5);
+  });
+
+  it("holds the controls while a change is saving", () => {
+    renderWeek({ assignments: WEEK, edit: editControls({ busy: true }) });
+    expect(screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Take Jane Doe off Evening 6-9pm on Mon 21" })).toBeDisabled();
+  });
+
+  it("adds to an SRE tier row with that tier, on the tier's own window", () => {
+    const edit = editControls();
+    renderWeek({
+      shifts: shiftMap(TZ1_L1),
+      ...scopeControls(),
+      family: "SRE",
+      assignments: [assignment({ name: "Kasun", rotaDate: "2026-09-21", shiftCode: TZ1_L1.code, zoneCode: "TZ1", tier: "L1" })],
+      edit,
+    });
+    const tue = screen.getByRole("combobox", { name: /Add someone to .* on Tue 22/ });
+    fireEvent.change(tue, { target: { value: "u-jane" } });
+    // The window carries its own tier, so none is sent with it.
+    expect(edit.onAdd).toHaveBeenCalledWith(expect.objectContaining({ shiftCode: TZ1_L1.code, tier: undefined }), "2026-09-22", PEOPLE[0]);
   });
 });

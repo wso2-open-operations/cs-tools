@@ -12501,8 +12501,8 @@ paths:
       operationId: getTeamScheduleRotaAccess
       description: >
         The Rota access tab. The entity service's payload, forwarded unchanged: `canManage`
-        (`rotaAdmins` for a CSM admin, `markerFamilies` for the families whose rota managers the caller
-        may change), `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
+        (`rotaAdmins` for a CSM or portal admin, `markerFamilies` for the families whose rota managers the
+        caller may change, `markerTeams` for the teams they lead), `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
         lists, which is how the page decides not to show the tab.
       responses:
         "200":
@@ -12536,7 +12536,7 @@ paths:
       summary: Make somebody a family's rota admin.
       operationId: putTeamScheduleRotaAdmin
       description: >
-        CSM admin only (PermAdmin here, and checked again by the entity service). The person must be
+        CSM or portal admin only (PermWrite here; the entity service decides who is an admin). The person must be
         active internal staff. Audited by the entity service.
       parameters:
         - name: family
@@ -12588,7 +12588,7 @@ paths:
       summary: Take a family's rota admin role away.
       operationId: deleteTeamScheduleRotaAdmin
       description: >
-        CSM admin only (PermAdmin here, and checked again by the entity service).
+        CSM or portal admin only (PermWrite here; the entity service decides who is an admin).
       parameters:
         - name: family
           in: path

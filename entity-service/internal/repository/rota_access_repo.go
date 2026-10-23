@@ -35,9 +35,13 @@ import (
 type RotaAccessRepository interface {
 	// ListRotaAdmins is every holder of a rota admin role.
 	ListRotaAdmins(ctx context.Context) ([]domain.RotaAdminGrant, error)
-	// ListRotaMarkers is every rota marker grant in the given families, or in
-	// every family when families is empty.
-	ListRotaMarkers(ctx context.Context, families []string) ([]domain.RotaMarkerGrant, error)
+	// ListRotaMarkers is every rota marker grant of a team in one of the given
+	// families or one of the given teams (keys matched ignoring case). Both
+	// empty is no grants.
+	ListRotaMarkers(ctx context.Context, families, teamKeys []string) ([]domain.RotaMarkerGrant, error)
+	// IsPortalAdmin is whether the user holds the global admin role and is
+	// internal staff.
+	IsPortalAdmin(ctx context.Context, userEmail string) (bool, error)
 
 	// GrantRotaAdmin gives the user the named rota admin role, reporting
 	// whether it was new. RevokeRotaAdmin removes it, reporting whether
@@ -93,7 +97,7 @@ func (r *rotaAccessRepository) ListRotaAdmins(ctx context.Context) ([]domain.Rot
 }
 
 // ListRotaMarkers implements RotaAccessRepository.
-func (r *rotaAccessRepository) ListRotaMarkers(ctx context.Context, families []string) ([]domain.RotaMarkerGrant, error) {
+func (r *rotaAccessRepository) ListRotaMarkers(ctx context.Context, families, teamKeys []string) ([]domain.RotaMarkerGrant, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT m.team_key, `+teamFamilyExpr+`, u.id::text, COALESCE(u.name, ''), COALESCE(u.email, ''),
 		       m.created_by, m.created_on,
@@ -102,8 +106,9 @@ func (r *rotaAccessRepository) ListRotaMarkers(ctx context.Context, families []s
 		  FROM team_schedule_rota_marker m
 		  JOIN team t   ON t.key = m.team_key
 		  JOIN "user" u ON u.id = m.user_id
-		 WHERE cardinality($1::text[]) = 0 OR `+teamFamilyExpr+` = ANY($1::text[])
-		 ORDER BY m.team_key, lower(COALESCE(u.name, '')), u.id`, families)
+		 WHERE `+teamFamilyExpr+` = ANY($1::text[])
+		    OR lower(m.team_key) IN (SELECT lower(k) FROM unnest($2::text[]) k)
+		 ORDER BY m.team_key, lower(COALESCE(u.name, '')), u.id`, families, teamKeys)
 	if err != nil {
 		return nil, fmt.Errorf("list rota markers: %w", err)
 	}
@@ -117,6 +122,25 @@ func (r *rotaAccessRepository) ListRotaMarkers(ctx context.Context, families []s
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// IsPortalAdmin implements RotaAccessRepository. Only an internal holder
+// counts, as for the rota admin roles (RotaAdminTeamsFor).
+func (r *rotaAccessRepository) IsPortalAdmin(ctx context.Context, userEmail string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM "user" u
+		    JOIN user_role ur ON ur.user_id = u.id
+		    JOIN role ro      ON ro.id = ur.role_id
+		   WHERE lower(u.email) = lower($1)
+		     AND u.user_type = 'INTERNAL'::user_type_enum
+		     AND ro.name = 'admin')`, userEmail).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("portal admin: %w", err)
+	}
+	return ok, nil
 }
 
 // inTx runs fn in a transaction that names the actor for the audit trail.

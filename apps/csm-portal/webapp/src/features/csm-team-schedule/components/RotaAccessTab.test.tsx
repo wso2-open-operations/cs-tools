@@ -130,6 +130,33 @@ describe("RotaAccessTab", () => {
     expect(screen.queryByRole("rowheader", { name: "Lyra" })).not.toBeInTheDocument();
   });
 
+  it("shows a team's lead only the teams they lead, and lets them name a Rota Manager", () => {
+    access.data = {
+      canManage: { rotaAdmins: false, markerFamilies: [], markerTeams: ["APOLLO"] },
+      rotaAdmins: [],
+      markers: [{ teamKey: "apollo", family: "SRE", userId: ANA, name: "Ana", email: "ana@example.test", ...granted }],
+    };
+    render(<RotaAccessTab teams={TEAMS} />);
+    expect(screen.queryByRole("heading", { name: "Rota admins" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Group" })).not.toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "Apollo" })).toBeInTheDocument();
+    expect(screen.queryByRole("rowheader", { name: "Lyra" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Add Rota Manager for Apollo" }), { target: { value: BEN } });
+    expect(lastChange()).toEqual({ kind: "marker", teamKey: "apollo", userId: BEN, grant: true });
+    expect(screen.queryByText("reminder settings card")).not.toBeInTheDocument();
+  });
+
+  it("adds the groups of the teams a rota admin also leads", () => {
+    access.data = {
+      canManage: { rotaAdmins: false, markerFamilies: ["CRE"], markerTeams: ["apollo"] },
+      rotaAdmins: [],
+      markers: [],
+    };
+    render(<RotaAccessTab teams={TEAMS} />);
+    const tabs = within(screen.getByRole("tablist", { name: "Group" })).getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["CRE", "SRE"]);
+  });
+
   it("shows the CRE rota reminder settings to a CSM admin", () => {
     render(<RotaAccessTab teams={TEAMS} />);
     expect(screen.getByText("reminder settings card")).toBeInTheDocument();

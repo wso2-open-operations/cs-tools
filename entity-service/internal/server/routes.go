@@ -1118,7 +1118,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
 		)
 		scheduleHandler = handler.NewScheduleHandler(
-			service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc),
+			service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles),
 		)
 		rotaGenerateHandler = handler.NewRotaGenerateHandler(
 			service.NewRotaGenerateService(repository.NewScheduleRepository(db), repository.NewRotaGenerateRepository(db), accessSvc),

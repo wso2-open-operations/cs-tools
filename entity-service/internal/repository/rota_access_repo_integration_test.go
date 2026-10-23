@@ -77,7 +77,7 @@ func TestScheduleIntegration_RotaMarkerCountsWhileOnTheTeam(t *testing.T) {
 	if teams, _ := schedule.RotaMarkerTeamsFor(ctx, schedMemberEmail); len(teams) != 0 {
 		t.Fatalf("a marker who left the team still marks %v", teams)
 	}
-	markers, err := access.ListRotaMarkers(ctx, []string{"CRE"})
+	markers, err := access.ListRotaMarkers(ctx, []string{"CRE"}, nil)
 	if err != nil {
 		t.Fatalf("ListRotaMarkers: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestScheduleIntegration_RotaMarkerCountsWhileOnTheTeam(t *testing.T) {
 	if !found {
 		t.Fatal("the grant was not listed")
 	}
-	if sre, _ := access.ListRotaMarkers(ctx, []string{"SRE"}); slices.ContainsFunc(sre, func(m domain.RotaMarkerGrant) bool { return m.UserID == schedMemberID }) {
+	if sre, _ := access.ListRotaMarkers(ctx, []string{"SRE"}, nil); slices.ContainsFunc(sre, func(m domain.RotaMarkerGrant) bool { return m.UserID == schedMemberID }) {
 		t.Fatal("a CRE team's marker was listed under SRE")
 	}
 

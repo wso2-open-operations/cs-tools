@@ -1318,7 +1318,11 @@ func (r *scheduleRepository) LeadTeamsFor(ctx context.Context, userEmail string)
 // The service refuses a non-internal caller before it asks this at all; this
 // holds the same line here so the answer can never be used without it.
 //
-// The CRE head and the CS head count as CRE rota admins (see headsCRE).
+// The CRE head and the CS head count as CRE rota admins (see headsCRE). A
+// portal admin -- the global admin role, on an internal holder -- counts for
+// every rostered team of every family: whoever administers the portal can
+// correct any rota. A CSM admin (the admin role on the sign-in token, which
+// is not stored here) is the service's to add.
 func (r *scheduleRepository) RotaAdminTeamsFor(ctx context.Context, userEmail string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT t.key
@@ -1338,6 +1342,15 @@ func (r *scheduleRepository) RotaAdminTeamsFor(ctx context.Context, userEmail st
 		 WHERE lower(u.email) = lower($1)
 		   AND u.user_type = 'INTERNAL'::user_type_enum
 		   AND `+headsCRE+`
+		UNION
+		SELECT t.key
+		  FROM "user" u
+		  JOIN user_role ur ON ur.user_id = u.id
+		  JOIN role ro      ON ro.id = ur.role_id
+		  JOIN team t       ON `+rosteredTeamWhere+`
+		 WHERE lower(u.email) = lower($1)
+		   AND u.user_type = 'INTERNAL'::user_type_enum
+		   AND ro.name = 'admin'
 		 ORDER BY 1`, userEmail)
 	if err != nil {
 		return nil, fmt.Errorf("query rota admin teams: %w", err)

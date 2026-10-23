@@ -645,14 +645,15 @@ func main() {
 	route("POST /team-schedule/rotas/{code}/generate", handler.PermWrite, rotaGenerateHandler.GenerateRotaMonth)
 	route("GET /team-schedule/rotas/{code}/night-crew", handler.PermView, rotaGenerateHandler.GetRotaNightCrew)
 	// Rota access tab: rota admins (one family each) and each team's rota
-	// marker. Granting rota admin is for the portal's admins, so PermAdmin
-	// keeps the control away from anyone else; a team's marker can also be
-	// named by that family's rota admin, who is no portal admin, so those
-	// routes are PermWrite and entity-service decides.
+	// marker. Granting rota admin is for the portal's admins -- a CSM admin by
+	// sign-in role, or a portal admin by the global admin role in the
+	// database, whom this guard cannot see -- so it is PermWrite and
+	// entity-service decides. A team's marker is named by an admin, the
+	// family's rota admin or the team's lead, likewise decided there.
 	rotaAccessHandler := handler.NewRotaAccessHandler(customerEntityClient)
 	route("GET /team-schedule/rota-access", handler.PermView, rotaAccessHandler.GetRotaAccess)
-	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermAdmin, rotaAccessHandler.PutRotaAdmin)
-	route("DELETE /team-schedule/rota-access/admins/{family}/{userId}", handler.PermAdmin, rotaAccessHandler.DeleteRotaAdmin)
+	route("PUT /team-schedule/rota-access/admins/{family}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaAdmin)
+	route("DELETE /team-schedule/rota-access/admins/{family}/{userId}", handler.PermWrite, rotaAccessHandler.DeleteRotaAdmin)
 	route("PUT /team-schedule/rota-access/markers/{teamKey}/{userId}", handler.PermWrite, rotaAccessHandler.PutRotaMarker)
 	route("DELETE /team-schedule/rota-access/markers/{teamKey}/{userId}", handler.PermWrite, rotaAccessHandler.DeleteRotaMarker)
 	// Rota Reminders card on the Rota access tab: a family's rota reminder
