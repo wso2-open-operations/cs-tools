@@ -15800,6 +15800,7 @@ components:
         mode: {type: string, enum: [replace, merge]}
         dryRun: {type: boolean}
         cleared: {type: integer, description: Assignments a replace removed first.}
+        leaveWrittenOver: {type: integer, description: Earlier time away a replace removed, shortened or split under the file's assignments.}
         applied: {type: integer, description: Assignment days written.}
         skipped: {type: integer, description: Assignment days the window is not worked on.}
         skippedDays:

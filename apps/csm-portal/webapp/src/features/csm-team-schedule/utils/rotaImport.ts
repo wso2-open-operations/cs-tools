@@ -17,8 +17,9 @@
  */
 
 import type { RotaImportFile } from "../api/useImportRota";
+import type { ScheduleCatalogue, ScheduleTier } from "../types";
 
-/** The standard structure, offered as a template to start from. */
+/** The standard structure, offered as a template when the catalogue has not loaded. */
 export const ROTA_IMPORT_TEMPLATE = {
   schemaVersion: 1,
   family: "SRE",
@@ -36,6 +37,101 @@ export const ROTA_IMPORT_TEMPLATE = {
     { email: "user2@example.com", teamKey: "apollo", kindCode: "ANNUAL_LEAVE", from: "2026-11-16", to: "2026-11-20" },
   ],
 };
+
+const TIERS: ScheduleTier[] = ["L1", "L2", "L3"];
+
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * A template for one rota built from the catalogue: every window of the rota's zones (each tier where the window leaves it open)
+ * and every kind of time away offered on its family, so it lists every code the roster can hold, in merge mode.
+ * The emails are placeholders to replace with team members'. Assignments go on the rota's own teams, never a team a move sends people to,
+ * and no two take one tier of a zone on the same day, so once the emails are real the entries do not refuse one another.
+ */
+export function buildRotaImportTemplate(rotaCode: string, catalogue: ScheduleCatalogue | undefined, today = new Date()): object {
+  const rota = catalogue?.rotas?.find((r) => r.code === rotaCode);
+  if (!catalogue || !rota) return ROTA_IMPORT_TEMPLATE;
+  const rotaTeams = catalogue.teams.filter((t) => t.rotaCode === rotaCode).map((t) => t.key);
+  const zones = new Set(catalogue.zones.filter((z) => z.rotaCode === rotaCode).map((z) => z.code));
+  const kinds = catalogue.absenceKinds
+    .filter((k) => !k.retired && (!k.family || k.family === rota.family))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const moveTargets = new Set(kinds.map((k) => k.movesToTeamKey).filter((k): k is string => Boolean(k)));
+  const homeTeams = rotaTeams.filter((t) => !moveTargets.has(t));
+  const teams = homeTeams.length > 0 ? homeTeams : rotaTeams;
+  if (teams.length === 0) return ROTA_IMPORT_TEMPLATE;
+
+  const first = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0));
+  const days: Date[] = [];
+  for (let d = new Date(first); d <= last; d = new Date(d.getTime() + 86_400_000)) days.push(d);
+  const isWeekend = (d: Date): boolean => d.getUTCDay() === 0 || d.getUTCDay() === 6;
+  const fits = (scope: "WEEKDAY" | "WEEKEND" | "ANY", d: Date): boolean =>
+    scope === "ANY" || (scope === "WEEKEND") === isWeekend(d);
+
+  // Days already taken per tier slot (zone and tier), so two entries never hold one slot on one day.
+  const taken = new Map<string, Set<string>>();
+  let cursor = 0;
+  const dayFor = (scope: "WEEKDAY" | "WEEKEND" | "ANY", slot?: string): string => {
+    const used = slot ? (taken.get(slot) ?? new Set<string>()) : new Set<string>();
+    for (let i = 0; i < days.length; i++) {
+      const d = days[(cursor + i) % days.length];
+      const iso = isoDay(d);
+      if (fits(scope, d) && !used.has(iso)) {
+        cursor = (cursor + i + 1) % days.length;
+        if (slot) taken.set(slot, used.add(iso));
+        return iso;
+      }
+    }
+    return isoDay(first);
+  };
+
+  const shifts = catalogue.shifts
+    .filter((s) => s.family === rota.family && s.zoneCode !== undefined && zones.has(s.zoneCode))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const assignments: object[] = [];
+  for (const s of shifts) {
+    const tiers = s.isEscalation && !s.tier ? TIERS : [s.tier];
+    for (const tier of tiers) {
+      const slot = s.isEscalation && tier ? `${s.zoneCode}:${tier}` : undefined;
+      const day = dayFor(s.dayScope, slot);
+      const n = assignments.length + 1;
+      assignments.push({
+        email: `person${n}@example.com`,
+        teamKey: teams[(n - 1) % teams.length],
+        shiftCode: s.code,
+        ...(tier && !s.tier ? { tier } : {}),
+        from: day,
+        to: day,
+        ...(n === 1 ? { note: "optional" } : {}),
+      });
+    }
+  }
+
+  const absences = kinds.map((k, i) => {
+    const day = dayFor("ANY");
+    return {
+      email: `away${i + 1}@example.com`,
+      teamKey: teams[0],
+      kindCode: k.code,
+      ...(k.bucket === "ALLOCATION" ? { allocatedTo: "Example Customer" } : {}),
+      from: day,
+      to: day,
+    };
+  });
+
+  return {
+    schemaVersion: 1,
+    family: rota.family,
+    rotaCode,
+    period: { from: isoDay(first), to: isoDay(last) },
+    mode: "merge",
+    assignments,
+    absences,
+  };
+}
 
 export type ParsedRotaImport = { file: RotaImportFile; error?: undefined } | { file?: undefined; error: string };
 

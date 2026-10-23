@@ -29,7 +29,8 @@ import {
 } from "@wso2/oxygen-ui";
 import { useRef, useState, type ChangeEvent, type JSX } from "react";
 import { useImportRota, type ImportRotaResult } from "../api/useImportRota";
-import { parseRotaImportFile, ROTA_IMPORT_TEMPLATE, type ParsedRotaImport } from "../utils/rotaImport";
+import { buildRotaImportTemplate, parseRotaImportFile, type ParsedRotaImport } from "../utils/rotaImport";
+import type { ScheduleCatalogue } from "../types";
 
 /** The largest file read; the server takes at most 1 MiB. */
 const MAX_FILE_BYTES = 1 << 20;
@@ -46,13 +47,14 @@ function readText(file: File): Promise<string> {
   });
 }
 
-function downloadTemplate(): void {
+function downloadTemplate(rotaCode: string, catalogue: ScheduleCatalogue | undefined): void {
   if (typeof URL.createObjectURL !== "function") return;
-  const blob = new Blob([JSON.stringify(ROTA_IMPORT_TEMPLATE, null, 2)], { type: "application/json" });
+  const template = buildRotaImportTemplate(rotaCode, catalogue);
+  const blob = new Blob([JSON.stringify(template, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "rota-import-template.json";
+  a.download = `${rotaCode.toLowerCase()}-import-template.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -70,7 +72,8 @@ function absenceNote(r: ImportRotaResult): string {
 
 function summary(r: ImportRotaResult): string {
   const replaced = r.cleared > 0 ? `, ${plural(r.cleared, "earlier assignment")} replaced` : "";
-  return `${plural(r.applied, "day")} on the rota from ${r.from} to ${r.to}${replaced}, ${absenceNote(r)}.`;
+  const leave = (r.leaveWrittenOver ?? 0) > 0 ? `, ${plural(r.leaveWrittenOver ?? 0, "earlier leave span")} cut` : "";
+  return `${plural(r.applied, "day")} on the rota from ${r.from} to ${r.to}${replaced}${leave}, ${absenceNote(r)}.`;
 }
 
 export interface ImportRotaDialogProps {
@@ -78,10 +81,12 @@ export interface ImportRotaDialogProps {
   onClose: () => void;
   /** The rota the roster shows; the file must be for it. */
   rotaCode: string;
+  /** What the template is built from; without it a fixed example is offered. */
+  catalogue?: ScheduleCatalogue;
 }
 
 /** Imports a whole rota for a period from one JSON file: choose it, preview what it would do, then write it, all or nothing. */
-export default function ImportRotaDialog({ open, onClose, rotaCode }: ImportRotaDialogProps): JSX.Element {
+export default function ImportRotaDialog({ open, onClose, rotaCode, catalogue }: ImportRotaDialogProps): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedRotaImport | null>(null);
@@ -153,7 +158,7 @@ export default function ImportRotaDialog({ open, onClose, rotaCode }: ImportRota
         </Typography>
         <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 2 }}>
           Not sure of the format?{" "}
-          <Link component="button" type="button" variant="caption" onClick={downloadTemplate}>
+          <Link component="button" type="button" variant="caption" onClick={() => downloadTemplate(rotaCode, catalogue)}>
             Download a template
           </Link>
           .
@@ -196,11 +201,13 @@ export default function ImportRotaDialog({ open, onClose, rotaCode }: ImportRota
             {file.mode === "replace" ? (
               <Alert severity="warning" sx={{ mt: 1 }}>
                 Replace removes every assignment of the rota&rsquo;s teams from {file.period.from} to {file.period.to}{" "}
-                before writing the file. Time away, and the shifts a move such as the Night cover gives, are kept.
+                before writing the file, and the time away of each person in the file on the days they are put on the
+                rota. A move such as the Night cover, and the shifts it gives, are kept. Preview shows how many.
               </Alert>
             ) : (
               <Alert severity="info" sx={{ mt: 1 }}>
-                Merge keeps what is on the roster and writes the file&rsquo;s entries over it.
+                Merge keeps what is on the roster and writes the file&rsquo;s entries over it; a clash with a row it
+                does not replace is refused.
               </Alert>
             )}
           </Box>

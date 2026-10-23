@@ -225,3 +225,105 @@ func TestScheduleIntegration_ImportRotaMergeKeepsWhatIsThere(t *testing.T) {
 		t.Errorf("%d merged rows, want 5", n)
 	}
 }
+
+func TestScheduleIntegration_ImportRotaReplaceCutsTheLeaveUnderAnAssignment(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	shift := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	// Leave from the Monday to the next Monday: the week's weekdays go, the weekend and the next Monday stay.
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: "ANNUAL_LEAVE", From: schedMonday, To: importNextMon,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed leave: %v", err)
+	}
+	// Leave filed on a team outside the rota is left alone.
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedOtherID, TeamKey: schedOtherTeam, KindCode: "ANNUAL_LEAVE", From: schedMonday, To: schedMonday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed leave on the other team: %v", err)
+	}
+
+	w := importWeek(shift)
+	w.Absences = nil
+	w.Assignments = append(w.Assignments, domain.ApplyScheduleRangeRequest{
+		UserID: schedOtherID, TeamKey: schedTeamKey, ShiftCode: shift, From: schedMonday, To: schedMonday,
+	})
+	res, err := repo.ImportRota(ctx, w, schedLeadEmail)
+	if err != nil {
+		t.Fatalf("replace over leave: %v", err)
+	}
+	if res.LeaveWrittenOver != 1 {
+		t.Errorf("leave written over %d, want the member's leave cut back to the weekend", res.LeaveWrittenOver)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_absence
+		 WHERE user_id = $1::uuid AND starts_on = $2::date AND ends_on = $3::date`,
+		schedMemberID, "2026-09-26", importNextMon); n != 1 {
+		t.Errorf("the member's leave was not cut to the weekend and the next Monday (%d)", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_absence WHERE user_id = $1::uuid`, schedOtherID); n != 1 {
+		t.Errorf("leave on a team outside the rota was touched (%d left)", n)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_absence_activity
+		 WHERE user_id = $1::uuid AND action = 'TRIMMED' AND note = $2`, schedMemberID, rotaImportReplaceNote); n != 1 {
+		t.Errorf("%d TRIMMED activity rows for the cut leave, want 1", n)
+	}
+}
+
+func TestScheduleIntegration_ImportRotaReplaceNeverCutsAMove(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	shift := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	kind := moveKind(t, pool)
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, HomeTeamKey: schedTeamKey, KindCode: kind, From: schedMonday, To: importSunday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed the move: %v", err)
+	}
+
+	w := importWeek(shift)
+	w.Absences = nil
+	w.TeamKeys = []string{schedTeamKey, schedOtherTeam}
+	w.Assignments = []domain.ApplyScheduleRangeRequest{
+		{UserID: schedMemberID, TeamKey: schedOtherTeam, ShiftCode: shift, From: schedMonday, To: schedMonday},
+	}
+	res, err := repo.ImportRota(ctx, w, schedLeadEmail)
+	if err != nil {
+		t.Fatalf("replace inside a move: %v", err)
+	}
+	if res.LeaveWrittenOver != 0 {
+		t.Errorf("leave written over %d, want the move kept", res.LeaveWrittenOver)
+	}
+	if n := countRows(t, pool, `
+		SELECT count(*) FROM team_schedule_absence a JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+		 WHERE a.user_id = $1::uuid AND k.code = $2 AND a.starts_on = $3::date AND a.ends_on = $4::date`,
+		schedMemberID, kind, schedMonday, importSunday); n != 1 {
+		t.Errorf("a replace cut a move (%d left whole)", n)
+	}
+}
+
+func TestScheduleIntegration_ImportRotaMergeKeepsTheLeave(t *testing.T) {
+	repo, pool := newScheduleIntegrationRepo(t)
+	ctx := context.Background()
+	shift := shiftWithScope(t, pool, "CRE", "WEEKDAY")
+	if _, err := repo.ApplyAbsence(ctx, domain.ApplyScheduleAbsenceRequest{
+		UserID: schedMemberID, TeamKey: schedTeamKey, KindCode: "ANNUAL_LEAVE", From: schedMonday, To: schedMonday,
+	}, schedLeadEmail); err != nil {
+		t.Fatalf("seed leave: %v", err)
+	}
+
+	w := importWeek(shift)
+	w.Replace = false
+	w.Absences = nil
+	res, err := repo.ImportRota(ctx, w, schedLeadEmail)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if res.LeaveWrittenOver != 0 {
+		t.Errorf("a merge wrote over %d leave spans", res.LeaveWrittenOver)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_absence WHERE user_id = $1::uuid`, schedMemberID); n != 1 {
+		t.Errorf("a merge removed leave (%d left)", n)
+	}
+}

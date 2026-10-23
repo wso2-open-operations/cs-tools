@@ -49,6 +49,8 @@ export interface ImportRotaResult {
   absencesCreated: number;
   absencesRemoved: number;
   absencesTrimmed: number;
+  /** Earlier time away a replace cut under the file's assignments; absent from an older server. */
+  leaveWrittenOver?: number;
 }
 
 /** Previews (dryRun) or writes a whole rota for a period from one import file; who may is the server's decision. */

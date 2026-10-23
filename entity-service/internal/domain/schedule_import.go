@@ -21,9 +21,9 @@ const RotaImportSchemaVersion = 1
 
 // The two ways an import lands on the rota already there.
 const (
-	// RotaImportReplace clears every assignment of the rota's teams in the period first.
+	// RotaImportReplace clears every assignment of the rota's teams in the period first, and the person's time away on the days an entry is worked.
 	RotaImportReplace = "replace"
-	// RotaImportMerge writes the file's rows over what is there and keeps the rest.
+	// RotaImportMerge writes the file's rows over what is there and keeps the rest; a clash the picker would refuse is refused.
 	RotaImportMerge = "merge"
 )
 
@@ -84,6 +84,8 @@ type ImportRotaResponse struct {
 	AbsencesCreated int `json:"absencesCreated"`
 	AbsencesRemoved int `json:"absencesRemoved"`
 	AbsencesTrimmed int `json:"absencesTrimmed"`
+	// LeaveWrittenOver is the earlier time away a replace removed, shortened or split under the file's assignments; a move is never one.
+	LeaveWrittenOver int `json:"leaveWrittenOver"`
 }
 
 // ImportRotaSkippedDays is the days one assignment's window was not worked on.

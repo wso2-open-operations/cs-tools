@@ -597,7 +597,12 @@ lands whole or not at all.
 In the CSM portal, the roster of an SRE rota offers **Import rota** (next to
 Generate month) to anyone who may edit one of its teams: choose the file, Preview
 (a dry run), then Import. The dialog checks the file is for the rota on screen and
-offers the template below as a download.
+offers a template as a download, built from the catalogue for that rota: next month
+in `merge`, every window of the rota's zones (each tier separately where the window
+leaves it open) on the rota's own teams (never a team a move sends people to), no two
+entries on one tier of a zone on a day, and every kind of time away offered on its
+family. The emails are placeholders to replace with team members'. It lists exactly
+the codes the database it came from accepts, custom tags included.
 
 The standard structure, schema version 1:
 
@@ -630,7 +635,7 @@ The standard structure, schema version 1:
 | `schemaVersion` | `1` |
 | `family`, `rotaCode` | `SRE` and a rota of that family (`SRE_SAAS`, `SRE_IAAS`); `rotaCode` must equal the path's `{code}` |
 | `period` | `YYYY-MM-DD`, both ends inclusive, at most a year |
-| `mode` | `replace`: first remove every assignment of the rota's teams dated inside the period, except the shifts a move derives (`source` MOVE, e.g. the SaaS Night cover); absences, and so their moves, are left alone. `merge`: keep them; each entry replaces only what the picker would |
+| `mode` | `replace`: first remove every assignment of the rota's teams dated inside the period, except the shifts a move derives (`source` MOVE, e.g. the SaaS Night cover), and cut the time away of each person in the file on the days their entries are worked (`leaveWrittenOver`); a move is never cut. `merge`: keep them; each entry replaces only what the picker would |
 | `email` | resolved against the team schedule's members (case-insensitive); unknown, or shared by two users, is refused |
 | `teamKey` | a team on that rota (`apollo`, `artemis`, `saas-night-cover`; `iaas`) |
 | `shiftCode` | a window of one of the rota's zones; `SRE_WE_TZ2` is retired and refused |
@@ -671,6 +676,30 @@ them, activity and audit recorded), so a later "Generate month" treats them as s
 hand. Each assignment a replace clears leaves a `DELETED` activity row, noted
 "Cleared by a rota import (replace)", as a delete on the roster does.
 
+**Time away under a replace.** After clearing the period, a replace takes the days
+an assignment's window is worked out of that person's earlier time away filed on the
+rota's teams (removed, shortened or split as the picker would, one call per run of
+consecutive worked days), so a person the file puts on the rota is not also on leave.
+A move (the Night cover) is never cut; it is where they work, not time off. The file's
+own absences go in after every assignment, so none of them is cut, and they do not
+take turns off the days they cover (as marking leave on the roster does not). Each cut
+leaves a `TRIMMED` or `DELETED` absence activity row with the same note. A merge cuts
+nothing.
+
+**Codes the roster legend shows** (SaaS; the catalogue of the database decides, so
+download the template from the environment you import into):
+
+| Legend | In the file |
+|---|---|
+| L1 | `SRE_TZ1_L1` / `SRE_TZ2_L1` (no tier), or `SRE_TZ1` / `SRE_TZ2` / `SRE_TZ3` with `"tier": "L1"` |
+| L2, L3 | `SRE_TZ1` / `SRE_TZ2` / `SRE_TZ3` with `"tier": "L2"` / `"L3"` |
+| TZ1 Weekend TZ1 | `SRE_WE_TZ1` with a tier (the weekend TZ1+2 crew) |
+| TZ3 escalation | `SRE_TZ3` with a tier |
+| SUP regular hours | `SRE_TZ1_REGULAR`, `SRE_TZ2_REGULAR`, `SRE_TZ3_REGULAR` (no tier) |
+| AL, HD-AM, HD-PM, LL, SAB | `ANNUAL_LEAVE`, `HALF_DAY_LEAVE_MORNING`, `HALF_DAY_LEAVE_EVENING`, `LIEU_LEAVE`, `SABBATICAL_LEAVE` |
+| RnD, ENG, NC | `RND`, `ENG`, `SRE_NIGHT_COVER` |
+| CUS-ON, CUS-OFF, Mig | `CUSTOMER_ONSITE`, `CUSTOMER_OFFSITE`, `MIGRATION` where a database has them active on SRE; the migrations retire the first two and offer the third on CRE only, and a tag added in the portal takes a code made from its label, so read them off that environment's template |
+
 ## 5. Known gaps
 
 - **Why 0152–0156.** 0141–0150 are claimed by the open RLS work in #2094, and
@@ -687,6 +716,7 @@ hand. Each assignment a replace clears leaves a `DELETED` activity row, noted
 
 ## Change log
 
+- **Rota import: replace cuts leave, template from the catalogue (no migration).** A `replace` also cuts the time away of each person in the file on the days their entries are worked (never a move); the response counts it as `leaveWrittenOver`. `merge` is unchanged. The downloadable template is built from the catalogue for the rota on screen. `cutAbsencesTx` is the absence-cutting core `ApplyAbsence` and the import share.
 - **Rota import (no migration).** `POST /team-schedule/rotas/{code}/import` writes a whole SRE rota for a period from one JSON file (schema version 1, people by email), all or nothing, `?dryRun=true` to preview; see "Rota import (SRE)". `ApplyRange` / `ApplyAbsence` were split into a transaction-taking core and a begin/commit wrapper so the import reuses their rules unchanged.
 - **0238 Case Alerts: SME ladder values.** `paging_ladder_value` takes ladder
   `SME`. Additive and re-runnable; no row changes.

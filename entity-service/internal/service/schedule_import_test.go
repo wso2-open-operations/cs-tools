@@ -160,7 +160,7 @@ func TestImportRota_HandsTheResolvedFileToTheRepository(t *testing.T) {
 		t.Errorf("absences[1] lost who the allocation is for: %+v", abs[1])
 	}
 
-	if res.Applied != 3 || res.AbsencesCreated != 2 || res.Mode != "replace" || res.DryRun || res.SkippedDays == nil {
+	if res.Applied != 3 || res.AbsencesCreated != 2 || res.Mode != "replace" || res.DryRun || res.SkippedDays == nil || res.LeaveWrittenOver != 3 {
 		t.Errorf("response %+v", res)
 	}
 }

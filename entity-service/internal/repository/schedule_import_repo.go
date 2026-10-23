@@ -18,13 +18,17 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// rotaImportReplaceNote is the note on the activity row of an assignment a replace cleared.
+// rotaImportReplaceNote is the note on the activity row of an assignment, or time away, a replace cleared.
 const rotaImportReplaceNote = "Cleared by a rota import (replace)"
 
 // RotaImportWrite is a rota import file, resolved and authorised, ready to write.
@@ -43,9 +47,11 @@ type RotaImportWrite struct {
 
 // RotaImportResult is what each entry did, in the file's order.
 type RotaImportResult struct {
-	Cleared     int
-	Assignments []domain.ApplyScheduleRangeResponse
-	Absences    []domain.ApplyScheduleAbsenceResponse
+	Cleared int
+	// LeaveWrittenOver is the earlier time away a replace removed, shortened or split under the file's assignments.
+	LeaveWrittenOver int
+	Assignments      []domain.ApplyScheduleRangeResponse
+	Absences         []domain.ApplyScheduleAbsenceResponse
 }
 
 // ImportRota implements ScheduleRepository: the whole file in one transaction, all or nothing.
@@ -89,7 +95,15 @@ func (r *scheduleRepository) ImportRota(ctx context.Context, w RotaImportWrite, 
 		out.Cleared = int(tag.RowsAffected())
 	}
 
+	scopes := map[string]string{}
 	for i, req := range w.Assignments {
+		if w.Replace {
+			n, err := cutLeaveUnderAssignment(ctx, tx, req, w.TeamKeys, scopes, actorEmail)
+			if err != nil {
+				return RotaImportResult{}, apierror.Prefixed(fmt.Sprintf("assignments[%d]", i), err)
+			}
+			out.LeaveWrittenOver += n
+		}
 		res, err := applyRangeTx(ctx, tx, req, actorEmail)
 		if err != nil {
 			return RotaImportResult{}, apierror.Prefixed(fmt.Sprintf("assignments[%d]", i), err)
@@ -112,3 +126,54 @@ func (r *scheduleRepository) ImportRota(ctx context.Context, w RotaImportWrite, 
 	}
 	return out, nil
 }
+
+// cutLeaveUnderAssignment takes the days an entry's window is worked out of the person's time away filed on the rota's teams, a run of consecutive days at a time.
+// A move (the Night cover) is never cut: it is where they work, not time off. The file's own absences go in after every assignment, so none of them is cut.
+func cutLeaveUnderAssignment(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleRangeRequest,
+	teams []string, scopes map[string]string, actorEmail string) (int, error) {
+	from, ferr := time.Parse(time.DateOnly, req.From)
+	to, terr := time.Parse(time.DateOnly, req.To)
+	if ferr != nil || terr != nil || req.ShiftCode == "" {
+		// applyRangeTx refuses it in its own words.
+		return 0, nil
+	}
+	scope, ok := scopes[req.ShiftCode]
+	if !ok {
+		err := tx.QueryRow(ctx, `SELECT day_scope::text FROM team_schedule_shift WHERE code = $1`, req.ShiftCode).Scan(&scope)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("read the window's day scope: %w", err)
+		}
+		scopes[req.ShiftCode] = scope
+	}
+
+	cut := 0
+	var runFrom *time.Time
+	flush := func(end time.Time) error {
+		if runFrom == nil {
+			return nil
+		}
+		removed, trimmed, err := cutAbsencesTx(ctx, tx, req.UserID, req.TeamKey, *runFrom, end, actorEmail, ptrTo(rotaImportReplaceNote), teams)
+		cut, runFrom = cut+removed+trimmed, nil
+		return err
+	}
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		weekend := d.Weekday() == time.Saturday || d.Weekday() == time.Sunday
+		if (scope == "WEEKDAY" && weekend) || (scope == "WEEKEND" && !weekend) {
+			if err := flush(d.AddDate(0, 0, -1)); err != nil {
+				return cut, err
+			}
+			continue
+		}
+		if runFrom == nil {
+			day := d
+			runFrom = &day
+		}
+	}
+	return cut, flush(to)
+}
+
+// ptrTo is a pointer to v.
+func ptrTo(v string) *string { return &v }

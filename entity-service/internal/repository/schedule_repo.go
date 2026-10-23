@@ -1812,9 +1812,6 @@ func applyAbsenceTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleAbse
 	if to.Sub(from) > 366*24*time.Hour {
 		return out, &apierror.ValidationError{Msg: "a range longer than a year is almost certainly a mistake"}
 	}
-	dayBefore := from.AddDate(0, 0, -1).Format(iso)
-	dayAfter := to.AddDate(0, 0, 1).Format(iso)
-
 	var kindID, bucket string
 	var movesTo *string
 	if req.KindCode != "" {
@@ -1847,120 +1844,11 @@ func applyAbsenceTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleAbse
 		allocatedTo = nil
 	}
 
-	// Everything of this engineer's that the span touches. An open-ended
-	// absence (ends_on null) runs forever, so it overlaps anything at or after
-	// its start -- which daterange's own unbounded upper end already means.
-	rows, err := tx.Query(ctx, `
-		SELECT a.id::text, k.code, a.starts_on, a.ends_on
-		  FROM team_schedule_absence a
-		  JOIN team_schedule_absence_kind k ON k.id = a.kind_id
-		 WHERE a.user_id = $1::uuid
-		   AND daterange(a.starts_on, a.ends_on, '[]') && daterange($2::date, $3::date, '[]')`,
-		req.UserID, from.Format(iso), to.Format(iso))
+	removed, trimmed, err := cutAbsencesTx(ctx, tx, req.UserID, req.TeamKey, from, to, actorEmail, req.Note, nil)
 	if err != nil {
-		return out, fmt.Errorf("read overlapping absences: %w", err)
+		return out, err
 	}
-	var hits []overlappingAbsence
-	for rows.Next() {
-		var h overlappingAbsence
-		if err := rows.Scan(&h.id, &h.kindCode, &h.startsOn, &h.endsOn); err != nil {
-			rows.Close()
-			return out, fmt.Errorf("scan overlapping absence: %w", err)
-		}
-		hits = append(hits, h)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return out, fmt.Errorf("read overlapping absences: %w", err)
-	}
-
-	for _, h := range hits {
-		startsBefore := h.startsOn.Before(from)
-		endsAfter := h.endsOn == nil || h.endsOn.After(to)
-
-		switch {
-		case startsBefore && endsAfter:
-			// The span is a hole in the middle. Shorten this one to the part
-			// before it and add a second row for the part after, so the two
-			// stretches that still stand are both kept.
-			if _, err := tx.Exec(ctx,
-				`UPDATE team_schedule_absence SET ends_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
-				h.id, dayBefore, actorEmail); err != nil {
-				return out, fmt.Errorf("trim absence: %w", err)
-			}
-			var tailEnds *string
-			if h.endsOn != nil {
-				e := h.endsOn.Format(iso)
-				tailEnds = &e
-			}
-			var tailID string
-			if err := tx.QueryRow(ctx, `
-				INSERT INTO team_schedule_absence
-				  (id, created_on, updated_on, created_by, updated_by, user_id, team_key,
-				   kind_id, starts_on, ends_on, note, allocated_to, home_team_key)
-				SELECT gen_random_uuid(), now(), now(), $1, $1, a.user_id, a.team_key,
-				       a.kind_id, $2::date, $3::date, a.note, a.allocated_to, a.home_team_key
-				  FROM team_schedule_absence a WHERE a.id = $4::uuid
-				RETURNING id::text`,
-				actorEmail, dayAfter, tailEnds, h.id).Scan(&tailID); err != nil {
-				return out, fmt.Errorf("split absence: %w", err)
-			}
-			if err := recordAbsenceActivity(ctx, tx, h.id, req.UserID, req.TeamKey, h.kindCode,
-				h.startsOn.Format(iso), &dayBefore, "TRIMMED", actorEmail, nil, nil, nil, req.Note); err != nil {
-				return out, err
-			}
-			if err := recordAbsenceActivity(ctx, tx, tailID, req.UserID, req.TeamKey, h.kindCode,
-				dayAfter, tailEnds, "CREATED", actorEmail, nil, nil, nil, req.Note); err != nil {
-				return out, err
-			}
-			out.Trimmed++
-
-		case startsBefore:
-			if _, err := tx.Exec(ctx,
-				`UPDATE team_schedule_absence SET ends_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
-				h.id, dayBefore, actorEmail); err != nil {
-				return out, fmt.Errorf("trim absence: %w", err)
-			}
-			if err := recordAbsenceActivity(ctx, tx, h.id, req.UserID, req.TeamKey, h.kindCode,
-				h.startsOn.Format(iso), &dayBefore, "TRIMMED", actorEmail, nil, nil, nil, req.Note); err != nil {
-				return out, err
-			}
-			out.Trimmed++
-
-		case endsAfter:
-			if _, err := tx.Exec(ctx,
-				`UPDATE team_schedule_absence SET starts_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
-				h.id, dayAfter, actorEmail); err != nil {
-				return out, fmt.Errorf("trim absence: %w", err)
-			}
-			var ends *string
-			if h.endsOn != nil {
-				e := h.endsOn.Format(iso)
-				ends = &e
-			}
-			if err := recordAbsenceActivity(ctx, tx, h.id, req.UserID, req.TeamKey, h.kindCode,
-				dayAfter, ends, "TRIMMED", actorEmail, nil, nil, nil, req.Note); err != nil {
-				return out, err
-			}
-			out.Trimmed++
-
-		default:
-			// Entirely inside the span, so there is nothing of it left to keep.
-			var ends *string
-			if h.endsOn != nil {
-				e := h.endsOn.Format(iso)
-				ends = &e
-			}
-			if err := recordAbsenceActivity(ctx, tx, h.id, req.UserID, req.TeamKey, h.kindCode,
-				h.startsOn.Format(iso), ends, "DELETED", actorEmail, nil, nil, nil, req.Note); err != nil {
-				return out, err
-			}
-			if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_absence WHERE id = $1::uuid`, h.id); err != nil {
-				return out, fmt.Errorf("remove absence: %w", err)
-			}
-			out.Removed++
-		}
-	}
+	out.Removed, out.Trimmed = removed, trimmed
 
 	if req.KindCode != "" {
 		var id string
@@ -1985,6 +1873,143 @@ func applyAbsenceTx(ctx context.Context, tx pgx.Tx, req domain.ApplyScheduleAbse
 		return out, err
 	}
 	return out, nil
+}
+
+// cutAbsencesTx takes the days from..to out of every absence of the person that overlaps them: one inside is removed, one over an end is shortened, one over both is split.
+// With writeOver set (a rota import's replace), only absences filed on those teams are cut, and never a move.
+func cutAbsencesTx(ctx context.Context, tx pgx.Tx, userID, teamKey string, from, to time.Time,
+	actorEmail string, note *string, writeOver []string) (removed, trimmed int, err error) {
+	const iso = "2006-01-02"
+	dayBefore := from.AddDate(0, 0, -1).Format(iso)
+	dayAfter := to.AddDate(0, 0, 1).Format(iso)
+
+	// Everything of this engineer's that the span touches. An open-ended
+	// absence (ends_on null) runs forever, so it overlaps anything at or after
+	// its start -- which daterange's own unbounded upper end already means.
+	rows, err := tx.Query(ctx, `
+		SELECT a.id::text, k.code, a.starts_on, a.ends_on
+		  FROM team_schedule_absence a
+		  JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+		 WHERE a.user_id = $1::uuid
+		   AND daterange(a.starts_on, a.ends_on, '[]') && daterange($2::date, $3::date, '[]')
+		   AND (NOT $4::bool OR (
+		         COALESCE(k.moves_to_team_key, '') = ''
+		     AND (lower(a.team_key) = ANY($5::text[]) OR lower(a.home_team_key) = ANY($5::text[]))))`,
+		userID, from.Format(iso), to.Format(iso), writeOver != nil, lowerKeys(writeOver))
+	if err != nil {
+		return removed, trimmed, fmt.Errorf("read overlapping absences: %w", err)
+	}
+	var hits []overlappingAbsence
+	for rows.Next() {
+		var h overlappingAbsence
+		if err := rows.Scan(&h.id, &h.kindCode, &h.startsOn, &h.endsOn); err != nil {
+			rows.Close()
+			return removed, trimmed, fmt.Errorf("scan overlapping absence: %w", err)
+		}
+		hits = append(hits, h)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return removed, trimmed, fmt.Errorf("read overlapping absences: %w", err)
+	}
+
+	for _, h := range hits {
+		startsBefore := h.startsOn.Before(from)
+		endsAfter := h.endsOn == nil || h.endsOn.After(to)
+
+		switch {
+		case startsBefore && endsAfter:
+			// The span is a hole in the middle. Shorten this one to the part
+			// before it and add a second row for the part after, so the two
+			// stretches that still stand are both kept.
+			if _, err := tx.Exec(ctx,
+				`UPDATE team_schedule_absence SET ends_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
+				h.id, dayBefore, actorEmail); err != nil {
+				return removed, trimmed, fmt.Errorf("trim absence: %w", err)
+			}
+			var tailEnds *string
+			if h.endsOn != nil {
+				e := h.endsOn.Format(iso)
+				tailEnds = &e
+			}
+			var tailID string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO team_schedule_absence
+				  (id, created_on, updated_on, created_by, updated_by, user_id, team_key,
+				   kind_id, starts_on, ends_on, note, allocated_to, home_team_key)
+				SELECT gen_random_uuid(), now(), now(), $1, $1, a.user_id, a.team_key,
+				       a.kind_id, $2::date, $3::date, a.note, a.allocated_to, a.home_team_key
+				  FROM team_schedule_absence a WHERE a.id = $4::uuid
+				RETURNING id::text`,
+				actorEmail, dayAfter, tailEnds, h.id).Scan(&tailID); err != nil {
+				return removed, trimmed, fmt.Errorf("split absence: %w", err)
+			}
+			if err := recordAbsenceActivity(ctx, tx, h.id, userID, teamKey, h.kindCode,
+				h.startsOn.Format(iso), &dayBefore, "TRIMMED", actorEmail, nil, nil, nil, note); err != nil {
+				return removed, trimmed, err
+			}
+			if err := recordAbsenceActivity(ctx, tx, tailID, userID, teamKey, h.kindCode,
+				dayAfter, tailEnds, "CREATED", actorEmail, nil, nil, nil, note); err != nil {
+				return removed, trimmed, err
+			}
+			trimmed++
+
+		case startsBefore:
+			if _, err := tx.Exec(ctx,
+				`UPDATE team_schedule_absence SET ends_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
+				h.id, dayBefore, actorEmail); err != nil {
+				return removed, trimmed, fmt.Errorf("trim absence: %w", err)
+			}
+			if err := recordAbsenceActivity(ctx, tx, h.id, userID, teamKey, h.kindCode,
+				h.startsOn.Format(iso), &dayBefore, "TRIMMED", actorEmail, nil, nil, nil, note); err != nil {
+				return removed, trimmed, err
+			}
+			trimmed++
+
+		case endsAfter:
+			if _, err := tx.Exec(ctx,
+				`UPDATE team_schedule_absence SET starts_on = $2::date, updated_on = now(), updated_by = $3 WHERE id = $1::uuid`,
+				h.id, dayAfter, actorEmail); err != nil {
+				return removed, trimmed, fmt.Errorf("trim absence: %w", err)
+			}
+			var ends *string
+			if h.endsOn != nil {
+				e := h.endsOn.Format(iso)
+				ends = &e
+			}
+			if err := recordAbsenceActivity(ctx, tx, h.id, userID, teamKey, h.kindCode,
+				dayAfter, ends, "TRIMMED", actorEmail, nil, nil, nil, note); err != nil {
+				return removed, trimmed, err
+			}
+			trimmed++
+
+		default:
+			// Entirely inside the span, so there is nothing of it left to keep.
+			var ends *string
+			if h.endsOn != nil {
+				e := h.endsOn.Format(iso)
+				ends = &e
+			}
+			if err := recordAbsenceActivity(ctx, tx, h.id, userID, teamKey, h.kindCode,
+				h.startsOn.Format(iso), ends, "DELETED", actorEmail, nil, nil, nil, note); err != nil {
+				return removed, trimmed, err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM team_schedule_absence WHERE id = $1::uuid`, h.id); err != nil {
+				return removed, trimmed, fmt.Errorf("remove absence: %w", err)
+			}
+			removed++
+		}
+	}
+	return removed, trimmed, nil
+}
+
+// lowerKeys is the team keys lower-cased, never nil.
+func lowerKeys(keys []string) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = strings.ToLower(k)
+	}
+	return out
 }
 
 // AbsenceByID implements ScheduleRepository.

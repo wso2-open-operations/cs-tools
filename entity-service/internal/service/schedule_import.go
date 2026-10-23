@@ -90,13 +90,14 @@ func (s *scheduleService) ImportRota(ctx context.Context, rotaCode string, req d
 	}
 
 	out = domain.ImportRotaResponse{
-		RotaCode:    plan.write.RotaCode,
-		From:        plan.write.From,
-		To:          plan.write.To,
-		Mode:        plan.mode,
-		DryRun:      dryRun,
-		Cleared:     res.Cleared,
-		SkippedDays: []domain.ImportRotaSkippedDays{},
+		RotaCode:         plan.write.RotaCode,
+		From:             plan.write.From,
+		To:               plan.write.To,
+		Mode:             plan.mode,
+		DryRun:           dryRun,
+		Cleared:          res.Cleared,
+		LeaveWrittenOver: res.LeaveWrittenOver,
+		SkippedDays:      []domain.ImportRotaSkippedDays{},
 	}
 	for i, r := range res.Assignments {
 		out.Applied += r.Applied

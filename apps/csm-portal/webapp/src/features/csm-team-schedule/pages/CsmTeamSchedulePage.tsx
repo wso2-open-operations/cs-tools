@@ -1809,7 +1809,12 @@ export default function CsmTeamSchedulePage(): JSX.Element {
         }}
       />
       {canImportRota && scopeRota ? (
-        <ImportRotaDialog open={importOpen} onClose={() => setImportOpen(false)} rotaCode={scopeRota} />
+        <ImportRotaDialog
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          rotaCode={scopeRota}
+          catalogue={catalogue.data}
+        />
       ) : null}
       {canGenerateRota ? (
         <GenerateRotaDialog

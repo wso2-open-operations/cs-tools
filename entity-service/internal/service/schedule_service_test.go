@@ -131,6 +131,9 @@ func (f *fakeScheduleRepo) ApplyAbsence(_ context.Context, req domain.ApplySched
 func (f *fakeScheduleRepo) ImportRota(_ context.Context, w repository.RotaImportWrite, actor string) (repository.RotaImportResult, error) {
 	f.called, f.gotActorEml, f.gotImport = true, actor, &w
 	res := repository.RotaImportResult{}
+	if w.Replace {
+		res.LeaveWrittenOver = len(w.Assignments)
+	}
 	for range w.Assignments {
 		res.Assignments = append(res.Assignments, domain.ApplyScheduleRangeResponse{Applied: 1, SkippedDates: []string{}})
 	}
