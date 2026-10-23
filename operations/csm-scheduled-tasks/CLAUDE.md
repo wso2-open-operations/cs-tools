@@ -374,6 +374,40 @@ Timeout is five minutes, not the sixty seconds the neighbouring sweeps use.
 Volume is the normal case here, and cutting a healthy run off partway leaves
 some subjects updated and the rest stale.
 
+## Case auto-closure
+
+`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `0 8 * * *`, TZ=UTC
+caveat as above), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
+**Off unless `AUTOCLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
+accident. entity-service must also have `AUTOCLOSURE_SYSTEM_USER_EMAIL` set (else it does not register the
+two routes this calls) and this component's client id in its `M2M_CLIENT_IDS`.
+
+This task is a **trigger only**. Everything that decides anything (eligibility, whether a ticket is still due,
+the comment text, how it is closed, the daily limit) is in entity-service; see its CLAUDE.md, "Case
+auto-closure". Each run works through four stages in order -- `release_hold`, `close`, `second_reminder`,
+`first_reminder` -- asking `POST /autoclosure/candidates` for what is due and `POST
+/autoclosure/cases/{id}/advance` for each ticket. A ticket moves at most one stage per run.
+
+- A failure on one ticket never stops the others; a failed listing does not stop the other stages.
+- The run **returns an error if anything failed**, so the engine alerts and retries on the next tick. That is
+  safe: tickets already advanced are no longer due, and entity-service takes what today has already done off the
+  daily limit, so the limit holds across retries.
+- The alert lists at most 10 failures and counts the rest.
+- **Paging.** A listing returns at most one page, so each stage asks again until nothing new comes back (at most 20 passes, 500 new tickets each; the request limit grows with the tickets already attempted, so ones that stay due -- skipped or failed -- cannot hide the ones behind them). A ticket is attempted once per run. With a non-zero daily limit that limit bounds a day's work; with `AUTOCLOSURE_DAILY_LIMIT=0` (no cap) only the 20-pass page cap per stage and the schedule do, so a large backlog is then worked through at that pace.
+- The summary log line carries evaluated / reminded / closed / holdsReleased / wouldAdvance / skipped / failed.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `AUTOCLOSURE_ENABLED` | `false` | Register the task |
+| `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
+| `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
+| `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
+| `AUTOCLOSURE_STATES` | both | Comma list of `awaiting_info`, `solution_proposed`. Run `solution_proposed` alone first, add `awaiting_info` after watching it; an unknown value refuses to start |
+| `AUTOCLOSURE_TEMPLATES` | built-in | JSON `{"<state>.<kind>": "text"}` overriding comment wording; kinds `first_reminder`, `second_reminder`, `closure`; a malformed value refuses to start (it would otherwise silently post the built-in wording) |
+
+First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
+days. Set a hold on tickets that customers asked to keep open **before** enabling.
+
 ## Usage rollups
 
 Two sub-crons that rebuild the usage summary tables: **`usage_rollup_daily`** (default `30 0 * * *`)

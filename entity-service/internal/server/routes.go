@@ -1343,6 +1343,32 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// same *caseService the case handler already holds, so this reaches it.
 	activeCaseSvc = service.WithServiceRequestCatalog(activeCaseSvc, activeCatalogSvc)
 
+	// Case auto-closure (reminders and automatic closure of Awaiting Info /
+	// Solution Proposed tickets). Off until AUTOCLOSURE_SYSTEM_USER_EMAIL names
+	// the system user it acts as, and Postgres-only: the workflow's position
+	// lives on the case-like tables. Driven by operations/csm-scheduled-tasks.
+	var autoclosureHandler *handler.AutoclosureHandler
+	// Plain Postgres only. In postgres-servicenow-dual-write mode activeCaseSvc
+	// mirrors every case update to ServiceNow, so an automatic close would be
+	// written there too (and ServiceNow's own flow may still be closing the same
+	// tickets); in servicenow mode there is no Postgres position to work from.
+	// Refused with a log line rather than silently, until the dual-write cutover
+	// behaviour is defined.
+	if cfg.AutoclosureSystemUserEmail != "" && cfg.DataSource != config.DataSourcePostgres {
+		slog.Warn("AUTOCLOSURE_SYSTEM_USER_EMAIL is set but case auto-closure is only available with DATA_SOURCE=postgres; it is not enabled",
+			"dataSource", string(cfg.DataSource))
+	}
+	if db != nil && cfg.AutoclosureSystemUserEmail != "" && cfg.DataSource == config.DataSourcePostgres {
+		autoclosureSvc := service.NewAutoclosureService(
+			repository.NewAutoclosureRepository(repository.NewScoped(db)),
+			activeCaseSvc, accessSvc, cfg.AutoclosureSystemUserEmail)
+		// A case closed for inactivity is queued for the customer's own
+		// verification (the Pending Verification feature) where the project
+		// has that turned on.
+		service.WithPendingVerificationQueue(autoclosureSvc, repository.NewPendingVerificationRepository(repository.NewScoped(db)))
+		autoclosureHandler = handler.NewAutoclosureHandler(autoclosureSvc)
+	}
+
 	// Case feedback (CSAT submissions): the ServiceNow data source reads it
 	// from the backing system; both Postgres data sources read
 	// work_item_feedback (migration 0102). Dual write deliberately does NOT
@@ -1882,6 +1908,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// what each has spent. A customer token must never reach it.
 		mux.HandleFunc("GET /reports/query-hours", internalOnly(accessSvc, queryHourHandler.GetWeeklyReport))
 		mux.HandleFunc("POST /query-hours/recompute", internalOnly(accessSvc, queryHourHandler.RecomputeQueryHours))
+	}
+	if autoclosureHandler != nil {
+		mux.HandleFunc("POST /autoclosure/candidates", internalOnly(accessSvc, autoclosureHandler.FindCandidates))
+		mux.HandleFunc("POST /autoclosure/cases/{id}/advance", internalOnly(accessSvc, autoclosureHandler.Advance))
 	}
 	if scheduledTaskRunHandler != nil {
 		mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)

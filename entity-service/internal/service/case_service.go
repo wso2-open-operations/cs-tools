@@ -1920,7 +1920,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		if before.State == nil {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "unable to verify the case's current state; try again"}
 		}
-		if *before.State != *req.State && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
+		// The auto-closure workflow (see withAutoclosureActor) closes a ticket
+		// that has sat in Awaiting Info after its reminders; no staff table
+		// lists that move, so it is the one transition allowed past the table.
+		_, byAutoclosure := autoclosureActorFromContext(ctx)
+		autoclosureClose := byAutoclosure && *req.State == domain.CaseStateClosed &&
+			(*before.State == domain.CaseStateAwaitingInfo || *before.State == domain.CaseStateSolutionProposed)
+		if *before.State != *req.State && !autoclosureClose && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{
 				Msg:  fmt.Sprintf("state cannot move from %q to %q", string(*before.State), string(*req.State)),
 				Code: "case_invalid_state_transition",
@@ -2079,6 +2085,12 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		actorEmail = actor.Email
 		if actor.ID != "" {
 			actorID = &actor.ID
+		}
+	} else if systemEmail, ok := autoclosureActorFromContext(ctx); ok {
+		// The auto-closure workflow has no user token; it acts as the system user.
+		actorEmail = systemEmail
+		if u, uErr := s.userRepo.GetUserByEmail(ctx, systemEmail); uErr == nil && u.ID != "" {
+			actorID = &u.ID
 		}
 	}
 

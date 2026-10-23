@@ -3588,6 +3588,145 @@ has neither column, so a hold on one is a 400, never a silent no-op.
   it receives: the case's sysid, only `autocloseHoldUntil` as a date, the caller's
   token forwarded.
 
+## Case auto-closure (reminders and automatic closure)
+
+Tickets that sit in **Awaiting Info** or **Solution Proposed** with no activity are reminded twice and
+then closed. This is native to this service (Postgres only): nothing in it reads or writes ServiceNow,
+and it replaces ServiceNow's "Auto Close Resolved Cases" flow rather than mirroring it. It is **off**
+until `AUTOCLOSURE_SYSTEM_USER_EMAIL` is set (the two routes are not registered without it) **and `DATA_SOURCE=postgres`**: under dual-write the close would be mirrored to ServiceNow, which runs its own auto-closure, so the routes are left unregistered there too (a warning is logged when the email is set but the data source is not plain Postgres). It is driven
+by `operations/csm-scheduled-tasks`'s `case_autoclosure` task (see that component's CLAUDE.md).
+
+| Env var | Meaning |
+|---|---|
+| `AUTOCLOSURE_SYSTEM_USER_EMAIL` | The system user the reminder and closure comments are written as and `closed_by` is stamped with. Should be a `"user"` row of type `SYSTEM`. Empty = feature off |
+
+**Who is eligible** (one SQL predicate, `autoclosureBaseCTE` + `autoclosureNoOpenChild` in
+`autoclosure_repo.go`, used by both the listing and the per-ticket re-check): a `"case"` (Query and
+Incident are both a `"case"`) or a `security_report_analysis` in `AWAITING_INFO` / `SOLUTION_PROPOSED`,
+with `autoclose_enabled` (migration 0249, default true), **no parent** (a child never has a workflow of
+its own), and **no open child** (case-like children not closed; change-request children not
+closed/canceled/rolled back). Who created the ticket does not matter, only its state. Engagements,
+service requests and announcements take no part.
+
+**The workflow position** is the existing `autoclosure_step` / `autoclosure_state_on` columns
+(migrations 0023/0024; the sync used to fill them, so existing `FIRST_COMMENT` / `SECOND_COMMENT` /
+`ON_HOLD` values simply continue). Stages, each one ticket and one step per run:
+
+| Stage | Due when | Does |
+|---|---|---|
+| `release_hold` | step `ON_HOLD` and the held day is over | step `DEFAULT`, clock = now. Nothing posted |
+| `first_reminder` | step none/`DEFAULT`, interval elapsed since the reference time | comment, step `FIRST_COMMENT`, clock = now |
+| `second_reminder` | step `FIRST_COMMENT`, interval since the clock | comment, step `SECOND_COMMENT`, clock = now |
+| `close` | step `SECOND_COMMENT`, interval since the clock | close, then closure comment |
+
+The interval is **7 calendar days** for each stage (`intervalDays`; the support desk runs 24/7/365, so
+business days are deliberately not modelled).
+
+**First-reminder reference time.** Solution Proposed: the later of `resolved_on` and the activity entry
+for entering the state. Awaiting Info: the later of the last **customer-visible comment by an INTERNAL user**
+(never a work note, never the system user's own reminders, never a customer) and entering the state. A
+ticket whose step is `DEFAULT` also waits the interval from the reset, so a ticket coming back from a hold
+or from the customer gets a fresh clock rather than an instant reminder. Fallback: `work_item.updated_on`.
+
+**Hold** keeps the existing contract (`PATCH autocloseHoldUntil`, "Auto-closure hold" above): step `ON_HOLD`
+with the last protected UTC day in `autoclosure_state_on`. A hold suspends **everything** (no reminders,
+no closure): `ON_HOLD` matches no stage. It ends when that day is over (`state_on + 1 day <= now`); the
+ticket then restarts at `DEFAULT` with a fresh clock, so a ticket that was overdue during the hold is
+**not** reminded the moment the hold ends.
+
+**Reset trigger** (`autoclosure_reset`, migration 0249, `BEFORE UPDATE OF state` on `"case"` and
+`security_report_analysis`): on **any** change of state, a parent ticket restarts the workflow (step `DEFAULT`,
+clock = now) when the new state is `WAITING_ON_WSO2` or `REOPENED`, or is `AWAITING_INFO` / `SOLUTION_PROPOSED`
+(entering a waiting state from anywhere, Work in Progress included, is a new request to the customer and must not
+inherit an old clock). **One exception: a ticket on hold keeps its hold when it enters Awaiting Info or Solution
+Proposed** (the customer asked for it not to be closed; swapping between the two waiting states does not cancel
+that); Waiting on WSO2 and Reopened, which a customer reply causes, still end a hold. A trigger so every writer
+(portal, API, sync) restarts the workflow identically. A customer reply moves a waiting ticket to Waiting on WSO2
+through the existing customer-reply rule, which fires it.
+
+**Routes** (internal callers only, `internalOnly`): `POST /autoclosure/candidates` lists what is due, oldest
+reference time first, optionally capped by `dailyLimit`; `POST /autoclosure/cases/{id}/advance` performs one
+stage on one ticket.
+
+**`Advance` is idempotent and race-safe**: it re-runs the listing predicate for that one ticket (a stale
+list is harmless), then **claims** the step with a compare-and-set on `(step, state_on, state)`
+(`ClaimStep`); a run that loses the claim posts nothing. Only then does it act. If the action fails the
+claim is restored (`RestoreStep`) so the next run retries, rather than leaving a ticket marked reminded that
+never was. Every outcome writes a `case_autoclosure_event` audit row.
+
+**Closing.** The close goes through the ordinary `caseService.UpdateCase`, as the system user, so events,
+SLA effects, the activity entry and `closed_by_user_id`/`closed_on` are exactly those of a manual close.
+Awaiting Info tickets get resolution code `ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS_THROUGH_AUTO_CLOSURE` (which
+keeps them out of the KB process); Solution Proposed tickets keep the resolution they were proposed with and
+never get that code. `close_notes` is the closure comment. The closure comment is written **after** the
+close (a comment first and a refused close would leave "this case is closed" on a case that is not); a
+failure of just the comment is logged and does not undo the close. A refused close (for example an open
+child appeared since the listing) is rolled back and retried next run.
+
+**Pending Verification.** A case the workflow closes is queued for the customer's own verification (the
+Pending Verification feature: `pending_verification`, reason `AUTO_CLOSED`, `previous_status` = the state it was
+closed from), so a case closed for inactivity does not silently disappear from their view. `queueForVerification`
+runs after the close and never fails it. It follows the rules `pendingVerificationService.CreatePendingVerification`
+enforces, but writes through `PendingVerificationRepository` as the system user, because that service needs an
+end-user token for "added by" and the workflow has none (this closes the "no machine-to-machine path" gap noted
+for that feature):
+- **Cases only**: a security report analysis is closed but never queued.
+- The project must have `verification_enabled` on; otherwise nothing is queued, quietly.
+- One unverified entry per case: an existing entry (`ConflictError`) counts as done.
+- Wired in `routes.go` with `WithPendingVerificationQueue`; without it (no feature) the close is unchanged.
+- The audit row's `detail` says "queued for customer verification" (or why not, when something failed).
+- **"Added by" is the system user's display name** (the `user.name`, e.g. "Support Team (auto-closure)"), not its email: the customer portal prints the stored value as it is. It falls back to the email if the name cannot be read.
+- **A short `note`** explains the close on the customer's card ("Automatically closed: no response to our request for information after two reminders." / "...to the proposed solution after two reminders.").
+
+**The one transition exemption.** No staff table lists Awaiting Info -> Closed (staff go through Waiting on
+WSO2). `UpdateCase` allows it only when the context carries `withAutoclosureActor` (`autoclosure_context.go`),
+which is unexported and set only by the workflow, and only for a close out of those two waiting states; it also
+attributes the close to the system user. No HTTP request can ask for it.
+
+**Daily limit.** `dailyLimit` is per UTC day across `first_reminder`, `second_reminder` and `close` (hold
+releases send nothing and are exempt). What the audit table says today's `ADVANCED` events already are is
+subtracted, so the three stages share one budget and a run the engine retries the same day cannot exceed it.
+Oldest-first ordering means a backlog never starves the longest-waiting ticket. The limit is applied when
+listing **and again in `Advance`, right before the claim** (`AutoclosureAdvanceRequest.DailyLimit`), so two
+overlapping runs cannot both spend the same remaining budget. Residual: a ticket already in flight in each
+concurrent run when the budget runs out can still complete, so the overshoot is at most one ticket per concurrent run.
+
+**Dry run.** `AutoclosureAdvanceRequest.DryRun` runs the whole decision (still due? within the limit?), records a
+`DRY_RUN` audit row and answers outcome `dry_run`; it posts nothing, claims nothing, closes nothing and queues
+nothing. `DRY_RUN` rows are not counted by the daily limit. The scheduled task sets it from `AUTOCLOSURE_DRY_RUN`
+and forces it for a `TRYOUT_TASK` of this task.
+
+**A ticket that keeps failing is left out for a while.** A ticket with 3 `FAILED` events for the same stage in the
+last 7 days (`autoclosureMaxFailures`, `autoclosureFailureWindowDays`) is dropped from the listing and the
+per-ticket re-check, so one permanently bad ticket (a refused close, for example) does not raise the same alert on
+every run. Only refusals that will repeat (validation, conflict such as an open child, forbidden, not found) are recorded as `FAILED`; a cancelled request, timeout or outage is recorded as `FAILED_TRANSIENT`, which the cap ignores, so a short outage cannot hide healthy tickets for a week. The listing logs how many it left out (`CountQuarantined`). The rows age out of the window by themselves.
+
+**Failure and crash handling.** A step is claimed before the action. If the action fails, or the request is
+cancelled or times out, the claim is restored and the audit row written on a **detached context with its own 15 s
+bound** (`cleanupContext`), so a client that gave up cannot leave the ticket marked reminded with no comment. The one
+window this cannot close is a hard process kill between the claim and the comment: the ticket is then marked
+reminded without having been. It is rare, visible in the audit table (no `ADVANCED` row for the new step), and a
+sweep that re-opens such tickets is the follow-up if it is ever seen.
+
+**Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
+`first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
+scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+
+**Decisions worth knowing.**
+- A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
+  for the next stage until a full interval has passed.
+- Child tickets are never reminded or closed by the workflow, even one carrying a stale step.
+- A non-closed child blocks every stage, re-checked on every advance and again by `UpdateCase` itself.
+- `autoclose_enabled` has no UI yet; set it in SQL to exclude a ticket.
+- Migration 0249 is idempotent (re-runnable). Upstream numbering moves fast: re-check it is still the next free number against the target branch before merging.
+
+Run the two database test packages one at a time (`go test -p 1 ./internal/repository/ ./internal/service/ -run Autoclosure`): the daily-limit audit count is database-wide and the service tests write audit rows too.
+
+Tests: `autoclosure_repo_integration_test.go` (repository: selection matrix, claim exclusivity, reset trigger,
+audit count; `CASE_STATS_TEST_DSN`), `autoclosure_integration_test.go` (service end to end over the real case
+service, lifecycle through to the closed row; `ENTITY_TEST_DATABASE_URL`; run as `csm_app` so row-level
+security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.go` (units).
+
 ## Change requests
 
 Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.

@@ -2052,6 +2052,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /autoclosure/candidates:
+    post:
+      summary: >-
+        List the tickets (Awaiting Info / Solution Proposed, case and security
+        report analysis, no open child, not on hold, auto-closure enabled) that
+        are due for one stage of the auto-closure workflow, oldest reference
+        time first. Internal callers only. Registered only when
+        AUTOCLOSURE_SYSTEM_USER_EMAIL is set. Backs operations/csm-scheduled-tasks.
+      operationId: findAutoclosureCandidates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoclosureCandidatesRequest'
+      responses:
+        "200":
+          description: The tickets due for the stage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoclosureCandidatesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /autoclosure/cases/{id}/advance:
+    post:
+      summary: >-
+        Perform one auto-closure stage on one ticket if it is still due:
+        post the reminder (or closure) comment as the system user, move the
+        workflow step and time, and for the closure stage close the ticket.
+        Idempotent: a ticket that is no longer due, or that another run handled
+        first, answers outcome "skipped" and nothing is written. Internal
+        callers only.
+      operationId: advanceAutoclosure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoclosureAdvanceRequest'
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoclosureAdvanceResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /scheduled-tasks/attempts:
     post:
       summary: >-
@@ -34311,6 +34399,120 @@ components:
           format: date-time
           nullable: true
 
+    AutoclosureStage:
+      type: string
+      enum: [release_hold, first_reminder, second_reminder, close]
+    AutoclosureCandidatesRequest:
+      type: object
+      required: [stage]
+      additionalProperties: false
+      properties:
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        intervalDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Calendar days a ticket must have waited (default 7). Ignored for release_hold.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          description: Most tickets returned, oldest reference time first (default 500).
+        dailyLimit:
+          type: integer
+          minimum: 0
+          description: >-
+            Caps reminders and closures per UTC day across the three stages;
+            what was already advanced today is subtracted, so a retried run
+            cannot exceed it. Hold releases are not counted. 0 = no cap.
+        states:
+          type: array
+          items:
+            type: string
+            enum: [awaiting_info, solution_proposed]
+          description: Narrows the eligible states; empty means both.
+    AutoclosureCandidate:
+      type: object
+      required: [id, number, state, referenceTime]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        state:
+          type: string
+          enum: [awaiting_info, solution_proposed]
+        step:
+          type: string
+          description: Workflow position now; absent when none was ever set.
+        referenceTime:
+          type: string
+          format: date-time
+    AutoclosureCandidatesResponse:
+      type: object
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutoclosureCandidate'
+    AutoclosureAdvanceRequest:
+      type: object
+      required: [stage]
+      additionalProperties: false
+      properties:
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        intervalDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        states:
+          type: array
+          items:
+            type: string
+            enum: [awaiting_info, solution_proposed]
+        templates:
+          type: object
+          additionalProperties:
+            type: string
+          description: >-
+            Comment text overrides keyed "<state>.<kind>" (awaiting_info or
+            solution_proposed, then first_reminder, second_reminder or closure).
+        dailyLimit:
+          type: integer
+          minimum: 0
+          description: >-
+            The per-UTC-day budget of reminders and closures, checked again
+            right before the ticket is claimed (hold releases are exempt). 0 or
+            absent means no cap. Up to one in-flight ticket per concurrent run
+            can still pass it.
+        dryRun:
+          type: boolean
+          description: >-
+            Decide (still due? within the limit?) and record a DRY_RUN audit
+            row, but post nothing, claim nothing and close nothing. The answer
+            is outcome "dry_run" when the ticket would have been advanced.
+    AutoclosureAdvanceResponse:
+      type: object
+      required: [caseId, stage, outcome]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        stage:
+          $ref: '#/components/schemas/AutoclosureStage'
+        outcome:
+          type: string
+          enum: [advanced, skipped, dry_run]
+        reason:
+          type: string
+        fromStep:
+          type: string
+        toStep:
+          type: string
     ClaimScheduledTaskRunRequest:
       type: object
       required: [taskName, periodKey]
