@@ -116,6 +116,10 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 		}
 	}
 
+	if _, err := repository.ParseOnboardingDates(req); err != nil {
+		return domain.ProjectUpdateResponse{}, err
+	}
+
 	updatedBy, err := s.resolveUpdatedBy(ctx)
 	if err != nil {
 		return domain.ProjectUpdateResponse{}, err
@@ -133,7 +137,16 @@ func (s *pgProjectUpdateService) UpdateProject(ctx context.Context, id string, r
 	// first/async shape as caseService.UpdateCase's own mirror (see that
 	// method's own doc comment).
 	if s.snWriteback != nil && s.snMirror != nil && hasSNMirrorableProjectFields(req) {
+		// Strip the Postgres-only onboarding fields: the mirror rejects them
+		// outright, which would otherwise drop the mirrorable fields of a
+		// mixed request (e.g. hasAgent together with an onboarding date).
 		mirrorReq := req
+		mirrorReq.OnboardingStatus = nil
+		mirrorReq.OnboardingOwner = nil
+		mirrorReq.OnboardingStartDate = nil
+		mirrorReq.OnboardingGoLivePlanDate = nil
+		mirrorReq.OnboardingGoLiveDate = nil
+		mirrorReq.OnboardingExpiryDate = nil
 		s.snWriteback.Dispatch(ctx, "project", id, "update", mirrorReq, func(writeCtx context.Context) error {
 			_, err := s.snMirror.UpdateProject(writeCtx, id, mirrorReq)
 			return err
@@ -180,13 +193,19 @@ func (s *pgProjectUpdateService) resolveUpdatedBy(ctx context.Context) (string, 
 // hasStoredProjectFields reports whether req sets a field Postgres stores.
 func hasStoredProjectFields(req domain.ProjectUpdateRequest) bool {
 	return hasSNMirrorableProjectFields(req) || req.ClosureState != nil || req.VerificationEnabled != nil ||
-		req.OnboardingStatus != nil || req.OnboardingOwner != nil
+		req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req)
+}
+
+// hasOnboardingDates reports whether req sets any of the four onboarding dates.
+func hasOnboardingDates(req domain.ProjectUpdateRequest) bool {
+	return req.OnboardingStartDate != nil || req.OnboardingGoLivePlanDate != nil ||
+		req.OnboardingGoLiveDate != nil || req.OnboardingExpiryDate != nil
 }
 
 // hasSNMirrorableProjectFields reports whether req sets a field the
 // ServiceNow dual-write mirror (snProjectUpdateService) knows how to carry.
-// ClosureState, VerificationEnabled, OnboardingStatus and OnboardingOwner are
-// deliberately excluded: they are direct, Postgres-only fields with no
+// ClosureState, VerificationEnabled, OnboardingStatus, OnboardingOwner and the
+// onboarding dates are deliberately excluded: they are direct, Postgres-only fields with no
 // ServiceNow equivalent (see
 // domain.ProjectUpdateRequest.ClosureState's own doc comment), so a request
 // that sets only one of them has nothing to mirror -- dispatching one would

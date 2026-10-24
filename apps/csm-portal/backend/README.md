@@ -429,7 +429,7 @@ unset one (except the three marked optional).
 | `AUTH_SECURITY_TEAM_ROLES` | Yes | Read-only `view`, `view_operations`, `security_center`; never any state-changing permission |
 | `AUTH_WORKNOTE_CREATOR_ROLES` | No (optional) | Posting a `work_note` comment on a case only; none of `write`'s other actions |
 | `AUTH_COMMENT_UPDATER_ROLES` | No (optional) | Reaching comment edit/delete, and editing or deleting **any** comment (a plain `cs_engineer` only succeeds on their own); also `security_center` |
-| `AUTH_ONBOARDING_LEAD_ROLES` | No (optional) | Setting a project's onboarding status and owner (`PATCH /projects/{id}`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can |
+| `AUTH_ONBOARDING_LEAD_ROLES` | No (optional) | Setting a project's onboarding status, owner and dates (`PATCH /projects/{id}`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can |
 | `AUTH_SALES_SOLUTIONS_ROLES` | No (optional) | Only `view_shared_entity` (the shared case, account, project and team-member reads); also reported by `GET /users/me` so the webapp can pick a navigation |
 
 Example: `AUTH_ESCALATOR_ROLES=example-escalators-role,example-leads-role`.
@@ -451,7 +451,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `security_center` | `/products/vulnerabilities` routes. Security-report cases are gated inside the case handler |
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
-| `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus` or `onboardingOwner`; checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
+| `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
 | `use_plg`, `manage_playbooks` | The `/plg/*` routes: `cs_engineer` and `admin` use them; authoring playbook templates is `admin` only |
 
 A caller with none of the required roles gets `403`. Some actions need more than the role: posting a

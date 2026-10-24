@@ -677,6 +677,24 @@ func TestUpdateProject(t *testing.T) {
 			{"cs_engineer alone is denied onboardingStatus", []string{"test-cs-engineer"}, `{"onboardingStatus":"Completed"}`, http.StatusForbidden},
 			{"cs_engineer alone is denied onboardingOwner", []string{"test-cs-engineer"}, `{"onboardingOwner":"00000000-0000-0000-0000-000000000000"}`, http.StatusForbidden},
 			{"cs_engineer is denied a differently-cased onboarding key", []string{"test-cs-engineer"}, `{"ONBOARDINGOWNER":null}`, http.StatusForbidden},
+			{"onboarding_lead may set onboardingStartDate", []string{"test-onboarding-lead"}, `{"onboardingStartDate":"2026-01-05"}`, http.StatusOK},
+			{"onboarding_lead may set onboardingGoLivePlanDate", []string{"test-onboarding-lead"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
+			{"onboarding_lead may set onboardingGoLiveDate", []string{"test-onboarding-lead"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
+			{"onboarding_lead may set onboardingExpiryDate", []string{"test-onboarding-lead"}, `{"onboardingExpiryDate":"2026-12-31"}`, http.StatusOK},
+			{"admin may set onboardingStartDate", []string{"test-admin"}, `{"onboardingStartDate":"2026-01-05"}`, http.StatusOK},
+			{"admin may set onboardingGoLivePlanDate", []string{"test-admin"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusOK},
+			{"admin may set onboardingGoLiveDate", []string{"test-admin"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusOK},
+			{"admin may set onboardingExpiryDate", []string{"test-admin"}, `{"onboardingExpiryDate":"2026-12-31"}`, http.StatusOK},
+			{"cs_engineer alone is denied onboardingStartDate", []string{"test-cs-engineer"}, `{"onboardingStartDate":"2026-01-05"}`, http.StatusForbidden},
+			{"cs_engineer alone is denied onboardingGoLivePlanDate", []string{"test-cs-engineer"}, `{"onboardingGoLivePlanDate":"2026-03-01"}`, http.StatusForbidden},
+			{"cs_engineer alone is denied onboardingGoLiveDate", []string{"test-cs-engineer"}, `{"onboardingGoLiveDate":"2026-03-15"}`, http.StatusForbidden},
+			{"cs_engineer alone is denied onboardingExpiryDate", []string{"test-cs-engineer"}, `{"onboardingExpiryDate":"2026-12-31"}`, http.StatusForbidden},
+			{"cs_engineer is denied a differently-cased date key", []string{"test-cs-engineer"}, `{"ONBOARDINGSTARTDATE":"2026-01-05"}`, http.StatusForbidden},
+			{"onboarding_lead may set a differently-cased date key", []string{"test-onboarding-lead"}, `{"ONBOARDINGSTARTDATE":"2026-01-05"}`, http.StatusOK},
+			{"onboarding_lead alone is denied a date mixed with hasAgent", []string{"test-onboarding-lead"}, `{"onboardingGoLiveDate":"2026-03-15","hasAgent":true}`, http.StatusForbidden},
+			{"onboarding_lead may mix a date with onboardingStatus", []string{"test-onboarding-lead"}, `{"onboardingStatus":"In-Progress","onboardingExpiryDate":"2026-12-31"}`, http.StatusOK},
+			{"cs_engineer alone is denied a date mixed with hasAgent", []string{"test-cs-engineer"}, `{"onboardingGoLiveDate":"2026-03-15","hasAgent":true}`, http.StatusForbidden},
+			{"cs_engineer plus onboarding_lead may mix a date with hasAgent", []string{"test-cs-engineer", "test-onboarding-lead"}, `{"onboardingGoLiveDate":"2026-03-15","hasAgent":true}`, http.StatusOK},
 			{"cs_engineer keeps other fields", []string{"test-cs-engineer"}, `{"hasAgent":true}`, http.StatusOK},
 			{"admin keeps other fields", []string{"test-admin"}, `{"hasAgent":true}`, http.StatusOK},
 			{"onboarding_lead alone is denied other fields", []string{"test-onboarding-lead"}, `{"hasAgent":true}`, http.StatusForbidden},
@@ -747,6 +765,10 @@ func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
 	onb, other := projectUpdateTargets([]byte(`{"onboardingſtatus":"In-Progress"}`))
 	if !onb || other {
 		t.Errorf("long-s onboardingStatus: onboarding=%v other=%v, want true/false", onb, other)
+	}
+	onb, other = projectUpdateTargets([]byte(`{"ONBOARDINGSTARTDATE":"2026-01-05"}`))
+	if !onb || other {
+		t.Errorf("upper-case onboardingStartDate: onboarding=%v other=%v, want true/false", onb, other)
 	}
 	var req struct {
 		ClosureState string `json:"closureState"`

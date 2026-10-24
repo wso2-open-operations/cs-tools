@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -506,6 +507,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        `+accountIsPartnerColumn+`,
 		        p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date,
+		        p.onboarding_start_date,
 		        EXTRACT(EPOCH FROM p.total_query_duration) / 3600,
 		        EXTRACT(EPOCH FROM p.remaining_query_duration) / 3600,
 		        -- ASSUMPTION, not confirmed against a live payload: project.consumed_duration
@@ -554,6 +556,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		&v.ComplianceViolationClosureState, &v.ComplianceViolationDate, &v.SuspensionProcessState,
 		&v.OnboardingStatus, &v.Account.IsPartner,
 		&v.GoLivePlanDate, &v.GoLiveDate, &v.OnboardingExpiryDate,
+		&v.OnboardingStartDate,
 		&v.TotalQueryHours, &v.RemainingQueryHours,
 		&v.ConsumedQueryHours,
 		&v.TotalOnboardingHours, &v.ConsumedOnboardingHours, &v.RemainingOnboardingHours,
@@ -631,6 +634,9 @@ func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.P
 			return domain.ProjectUpdateResult{}, err
 		}
 	}
+	if _, err := ParseOnboardingDates(req); err != nil {
+		return domain.ProjectUpdateResult{}, err
+	}
 	// WithSystemIdentity: this writes only project and account, neither
 	// RLS-protected, and carries no caller-visible rows. The service already
 	// authorized the caller (resolveUpdatedBy); this only gives Scoped the
@@ -642,6 +648,14 @@ func (r *projectRepo) UpdateProject(ctx context.Context, id string, req domain.P
 	})
 }
 
+// firstDate returns a if set, else b.
+func firstDate(a, b *time.Time) *time.Time {
+	if a != nil {
+		return a
+	}
+	return b
+}
+
 // updateProjectTx is UpdateProject's body, run inside tx.
 func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.ProjectUpdateRequest, updatedBy string) (domain.ProjectUpdateResult, error) {
 	// Lock the row first (mirrors CaseRepository.UpdateCase's own
@@ -650,7 +664,9 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 	// nonexistent id is caught as NotFoundError before either UPDATE below
 	// runs.
 	var accountID *string
-	err := tx.QueryRow(ctx, `SELECT account_id FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID)
+	var stored OnboardingDates
+	err := tx.QueryRow(ctx, `SELECT account_id, onboarding_start_date, onboarding_go_live_plan_date, onboarding_go_live_date, onboarding_expiry_date
+		FROM project WHERE id = $1 FOR UPDATE`, id).Scan(&accountID, &stored.Start, &stored.GoLivePlan, &stored.GoLive, &stored.Expiry)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProjectUpdateResult{}, &apierror.NotFoundError{Msg: "project not found"}
 	}
@@ -697,6 +713,23 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		onboardingOwner = req.OnboardingOwner
 	}
 
+	// Order rules: when the request moves the start date, every merged date
+	// (supplied value, else stored) must stay on or after it. Otherwise only
+	// the dates the request supplies are checked, against the stored start, so
+	// stored data that already violates the order never blocks an unrelated edit.
+	dates, _ := ParseOnboardingDates(req) // validated by UpdateProject
+	if dates.Start != nil {
+		merged := OnboardingDates{
+			Start: dates.Start, GoLivePlan: firstDate(dates.GoLivePlan, stored.GoLivePlan),
+			GoLive: firstDate(dates.GoLive, stored.GoLive), Expiry: firstDate(dates.Expiry, stored.Expiry),
+		}
+		if err := merged.checkOrder(merged.Start); err != nil {
+			return domain.ProjectUpdateResult{}, err
+		}
+	} else if err := dates.checkOrder(stored.Start); err != nil {
+		return domain.ProjectUpdateResult{}, err
+	}
+
 	// project.updated_on/updated_by is bumped on every successful call, even one
 	// that only touches the linked account below.
 	var res domain.ProjectUpdateResult
@@ -709,6 +742,10 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		    suspension_process_state = COALESCE($7::jsonb, suspension_process_state),
 		    onboarding_status = COALESCE($8::text::onboarding_status_enum, onboarding_status),
 		    onboarding_owner_id = COALESCE($9::uuid, onboarding_owner_id),
+		    onboarding_start_date = COALESCE($10::date, onboarding_start_date),
+		    onboarding_go_live_plan_date = COALESCE($11::date, onboarding_go_live_plan_date),
+		    onboarding_go_live_date = COALESCE($12::date, onboarding_go_live_date),
+		    onboarding_expiry_date = COALESCE($13::date, onboarding_expiry_date),
 		    updated_on = NOW(),
 		    updated_by = $5
 		WHERE id = $1
@@ -716,6 +753,7 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 		id, closureEnumLabel(req.EndDateClosureState), closureEnumLabel(req.InvoiceDueDateClosureState),
 		closureEnumLabel(req.ComplianceViolationClosureState), updatedBy, req.VerificationEnabled, suspensionStateArg(req.SuspensionProcessState),
 		onboardingStatus, onboardingOwner,
+		dates.Start, dates.GoLivePlan, dates.GoLive, dates.Expiry,
 	).Scan(&res.ID, &res.UpdatedOn, &res.UpdatedBy, &res.VerificationEnabled)
 	if err != nil {
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
@@ -758,9 +796,11 @@ func updateProjectTx(ctx context.Context, tx pgx.Tx, id string, req domain.Proje
 	var ownerID, ownerName, ownerEmail *string
 	err = tx.QueryRow(ctx, `
 		SELECT INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
-		       onb.id::TEXT, COALESCE(onb.name, NULLIF(TRIM(CONCAT_WS(' ', onb.first_name, onb.last_name)), '')), onb.email
+		       onb.id::TEXT, COALESCE(onb.name, NULLIF(TRIM(CONCAT_WS(' ', onb.first_name, onb.last_name)), '')), onb.email,
+		       p.onboarding_start_date, p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date
 		FROM project p LEFT JOIN "user" onb ON onb.id = p.onboarding_owner_id
-		WHERE p.id = $1`, id).Scan(&res.OnboardingStatus, &ownerID, &ownerName, &ownerEmail)
+		WHERE p.id = $1`, id).Scan(&res.OnboardingStatus, &ownerID, &ownerName, &ownerEmail,
+		&res.OnboardingStartDate, &res.GoLivePlanDate, &res.GoLiveDate, &res.OnboardingExpiryDate)
 	if err != nil {
 		return domain.ProjectUpdateResult{}, fmt.Errorf("update project: read onboarding: %w", err)
 	}

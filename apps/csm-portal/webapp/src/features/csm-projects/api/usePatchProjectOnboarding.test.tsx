@@ -70,6 +70,28 @@ describe("usePatchProjectOnboarding", () => {
     });
   });
 
+  it("sends the four onboarding dates as YYYY-MM-DD under their request names", async () => {
+    patchMock.mockResolvedValue(RESPONSE);
+    const { result } = renderHook(() => usePatchProjectOnboarding("proj-1"), { wrapper });
+
+    act(() => {
+      result.current.mutate({
+        onboardingStartDate: "2026-03-01",
+        onboardingGoLivePlanDate: "2026-04-01",
+        onboardingGoLiveDate: "2026-05-01",
+        onboardingExpiryDate: "2026-12-31",
+      });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(patchMock).toHaveBeenCalledWith("/projects/proj-1", {
+      onboardingStartDate: "2026-03-01",
+      onboardingGoLivePlanDate: "2026-04-01",
+      onboardingGoLiveDate: "2026-05-01",
+      onboardingExpiryDate: "2026-12-31",
+    });
+  });
+
   it("invalidates the project detail query and the projects list cache on success", async () => {
     patchMock.mockResolvedValue(RESPONSE);
     const { result } = renderHook(() => usePatchProjectOnboarding("proj-1"), { wrapper });

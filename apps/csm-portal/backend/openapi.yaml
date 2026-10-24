@@ -17,7 +17,7 @@ info:
     | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
     | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
-    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus` or `onboardingOwner`; any other field in that body still needs `write` | onboarding-lead, admin |
+    | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
     | `admin` | `POST /users` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
@@ -2731,15 +2731,16 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Update a project's closure sub-state fields, KB/agent toggles, or onboarding status and owner.
+      summary: Update a project's closure sub-state fields, KB/agent toggles, or onboarding status, owner and dates.
       description: >
         Request body is forwarded to the integration service as-is and the
         response is returned verbatim. At least one field must be provided;
         the integration service validates this and rejects an empty update.
         Reachable by cs_engineer, onboarding_lead and admin; which fields a
         caller may set is then decided per field. onboardingStatus and
-        onboardingOwner need onboarding_lead or admin (a cs_engineer alone gets
-        403); every other field needs cs_engineer or admin (an onboarding_lead
+        onboardingOwner and the four onboarding dates (onboardingStartDate,
+        onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
+        need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
         alone gets 403); closureState needs admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
@@ -19645,6 +19646,38 @@ components:
                 The WSO2 staff member assigned to lead this project's onboarding. Null
                 when no owner is assigned (most projects, since it is only set for
                 onboarding-enabled projects).
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC).
+            totalOnboardingHours:
+              type: number
+              nullable: true
+              description: Total onboarding hours allotted to the project.
+            consumedOnboardingHours:
+              type: number
+              nullable: true
+              description: Onboarding hours consumed so far (reported as a non-negative value).
+            remainingOnboardingHours:
+              type: number
+              nullable: true
+              description: Onboarding hours remaining.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC).
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC).
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC).
 
     ProjectAccountRef:
       type: object
@@ -19677,8 +19710,8 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
-        onboardingStatus and onboardingOwner require the onboarding_lead or
-        admin role; every other field requires the ordinary write permission
+        onboardingStatus, onboardingOwner and the four onboarding dates
+        require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
       properties:
         onboardingStatus:
@@ -19697,6 +19730,38 @@ components:
             active internal user (otherwise 400); clearing the owner is not
             supported. Requires onboarding_lead or admin -- a 403 for a
             cs_engineer alone.
+        onboardingStartDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding start date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingGoLivePlanDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding planned go-live date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingGoLiveDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding actual go-live date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
+        onboardingExpiryDate:
+          type: string
+          format: date
+          description: >
+            Sets the project's onboarding expiry date (YYYY-MM-DD). Requires
+            onboarding_lead or admin -- a 403 for a cs_engineer alone. Only
+            applicable to projects sourced from the database; cannot be
+            cleared; an invalid date, or dates out of order, is a 400.
         hasAgent:
           type: boolean
         hasKbReferences:
@@ -19770,6 +19835,26 @@ components:
                 - $ref: '#/components/schemas/PersonRef'
               nullable: true
               description: Present on Postgres data sources only.
+            onboardingStartDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding start date (midnight UTC). Present on Postgres data sources only.
+            goLivePlanDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding planned go-live date (midnight UTC). Present on Postgres data sources only.
+            goLiveDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding actual go-live date (midnight UTC). Present on Postgres data sources only.
+            onboardingExpiryDate:
+              type: string
+              format: date-time
+              nullable: true
+              description: The project's onboarding expiry date (midnight UTC). Present on Postgres data sources only.
 
     DeploymentCreatePayload:
       type: object

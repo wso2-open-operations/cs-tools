@@ -1463,7 +1463,10 @@ type ProjectEngagementFields struct {
 	GoLiveDate               *time.Time `json:"goLiveDate"`
 	GoLivePlanDate           *time.Time `json:"goLivePlanDate"`
 	OnboardingExpiryDate     *time.Time `json:"onboardingExpiryDate"`
-	OnboardingStatus         *string    `json:"onboardingStatus"`
+	// OnboardingStartDate is populated on Postgres data sources only (nil
+	// elsewhere).
+	OnboardingStartDate *time.Time `json:"onboardingStartDate"`
+	OnboardingStatus    *string    `json:"onboardingStatus"`
 }
 
 type ProjectDetailsView struct {
@@ -1543,6 +1546,16 @@ type ProjectUpdateRequest struct {
 	// Must be an active internal user. Clearing the owner is not supported:
 	// null and omitted both leave it unchanged.
 	OnboardingOwner *string `json:"onboardingOwner,omitempty"`
+	// OnboardingStartDate, OnboardingGoLivePlanDate, OnboardingGoLiveDate and
+	// OnboardingExpiryDate set the project's onboarding dates, as "YYYY-MM-DD"
+	// (Postgres data sources only; rejected on the ServiceNow data source). A
+	// malformed date is a 400, as is a go-live plan, go-live or expiry date
+	// earlier than the (supplied or stored) start date. Clearing a date is not
+	// supported: null and omitted both leave it unchanged.
+	OnboardingStartDate      *string `json:"onboardingStartDate,omitempty"`
+	OnboardingGoLivePlanDate *string `json:"onboardingGoLivePlanDate,omitempty"`
+	OnboardingGoLiveDate     *string `json:"onboardingGoLiveDate,omitempty"`
+	OnboardingExpiryDate     *string `json:"onboardingExpiryDate,omitempty"`
 }
 
 // ProjectUpdateResponse is the result of a project update operation
@@ -1564,10 +1577,16 @@ type ProjectUpdateResult struct {
 	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 	VerificationEnabled             *bool           `json:"verificationEnabled,omitempty"`
-	// OnboardingStatus and OnboardingOwner are populated on Postgres data
-	// sources only.
+	// OnboardingStatus, OnboardingOwner and the onboarding dates are populated
+	// on Postgres data sources only.
 	OnboardingStatus *string    `json:"onboardingStatus,omitempty"`
 	OnboardingOwner  *PersonRef `json:"onboardingOwner,omitempty"`
+	// The onboarding dates are named as the project read names them
+	// (goLiveDate, goLivePlanDate, onboardingExpiryDate).
+	OnboardingStartDate  *time.Time `json:"onboardingStartDate,omitempty"`
+	GoLivePlanDate       *time.Time `json:"goLivePlanDate,omitempty"`
+	GoLiveDate           *time.Time `json:"goLiveDate,omitempty"`
+	OnboardingExpiryDate *time.Time `json:"onboardingExpiryDate,omitempty"`
 }
 
 // ProjectConsumptionStatus represents the product consumption state and keys for a project.

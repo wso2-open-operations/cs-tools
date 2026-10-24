@@ -16,8 +16,10 @@
 
 import {
   Alert,
+  AdapterDateFns,
   Box,
   Button,
+  DatePickers,
   Dialog,
   DialogActions,
   DialogContent,
@@ -29,6 +31,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
+import { formatDateOnly, parseDateOnly, utcDateOnlyValue } from "@utils/dateTime";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import {
   PROJECT_ONBOARDING_STATUSES,
@@ -39,6 +42,8 @@ import {
   useSearchInternalUsers,
   type InternalUserOption,
 } from "@features/csm-projects/api/useSearchInternalUsers";
+
+const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 
 const ONBOARDING_STATUS_LABELS: Record<ProjectOnboardingStatusValue, string> = {
   "Not-Started": "Not Started",
@@ -59,11 +64,37 @@ function matchCurrentStatus(current?: string | null): ProjectOnboardingStatusVal
   return PROJECT_ONBOARDING_STATUSES.find((s) => norm(s) === target) ?? "";
 }
 
+/** Current onboarding dates as the read API returns them (midnight-UTC
+ *  timestamps, or null). Read names differ from the PATCH names for plan and
+ *  go-live; the dialog maps between them. */
+export interface ProjectOnboardingDates {
+  onboardingStartDate?: string | null;
+  goLivePlanDate?: string | null;
+  goLiveDate?: string | null;
+  onboardingExpiryDate?: string | null;
+}
+
+type DateField = "start" | "plan" | "goLive" | "expiry";
+
+const DATE_FIELDS: ReadonlyArray<{
+  key: DateField;
+  label: string;
+  read: keyof ProjectOnboardingDates;
+  write: keyof ProjectOnboardingPatch;
+}> = [
+  { key: "start", label: "Onboarding start date", read: "onboardingStartDate", write: "onboardingStartDate" },
+  { key: "plan", label: "Go-live plan date", read: "goLivePlanDate", write: "onboardingGoLivePlanDate" },
+  { key: "goLive", label: "Go-live date", read: "goLiveDate", write: "onboardingGoLiveDate" },
+  { key: "expiry", label: "Onboarding expiry date", read: "onboardingExpiryDate", write: "onboardingExpiryDate" },
+];
+
 interface EditProjectOnboardingDialogProps {
   /** The project's current `onboardingStatus`, if any. */
   currentStatus?: string | null;
   /** The project's current onboarding owner, if any. */
   currentOwner?: { id: string; name: string } | null;
+  /** The project's current onboarding dates (read-API shape). */
+  currentDates?: ProjectOnboardingDates;
   /** True while the PATCH is in flight; disables the pickers/actions. */
   isSaving: boolean;
   /** User-facing message for the most recent failed save, if any. */
@@ -74,8 +105,13 @@ interface EditProjectOnboardingDialogProps {
 }
 
 /**
- * Edit a project's onboarding status and onboarding owner independently --
- * either may be changed on its own. The owner picker lists internal, active
+ * Edit a project's onboarding status, owner and four onboarding dates
+ * independently -- any may be changed on its own, and only changed fields are
+ * submitted. Dates are calendar days (`YYYY-MM-DD`, seeded from the UTC day of
+ * the stored value, never the viewer's local day) and cannot be cleared: the
+ * backend has no way to unset one, so an emptied date is treated as unchanged.
+ * Plan/go-live/expiry earlier than the start date are blocked client-side; the
+ * backend stays authoritative. The owner picker lists internal, active
  * users only (see `useSearchInternalUsers`). There is no way to clear the
  * owner back to "none": the backend does not support it, so an emptied owner
  * is never submitted. Mirrors `EditProjectClosureStateDialog`/
@@ -85,22 +121,75 @@ interface EditProjectOnboardingDialogProps {
 export default function EditProjectOnboardingDialog({
   currentStatus,
   currentOwner,
+  currentDates,
   isSaving,
   saveError,
   onClose,
   onSave,
 }: EditProjectOnboardingDialogProps): JSX.Element {
-  const initialStatus = matchCurrentStatus(currentStatus);
-  const initialOwnerId = currentOwner?.id ?? "";
+  // Baseline captured once per open session (the caller mounts this dialog
+  // only while open). The live project query can refresh underneath an open
+  // dialog; comparing against refreshed props would desync "changed" from the
+  // editable state and could send a stale value.
+  const [baseline] = useState(() => ({
+    status: matchCurrentStatus(currentStatus),
+    ownerId: currentOwner?.id ?? "",
+    dates: {
+      start: utcDateOnlyValue(currentDates?.onboardingStartDate) ?? "",
+      plan: utcDateOnlyValue(currentDates?.goLivePlanDate) ?? "",
+      goLive: utcDateOnlyValue(currentDates?.goLiveDate) ?? "",
+      expiry: utcDateOnlyValue(currentDates?.onboardingExpiryDate) ?? "",
+    } as Record<DateField, string>,
+  }));
+  const {
+    status: initialStatus,
+    ownerId: initialOwnerId,
+    dates: initialDates,
+  } = baseline;
   const [status, setStatus] = useState<ProjectOnboardingStatusValue | "">(initialStatus);
   const [ownerId, setOwnerId] = useState(initialOwnerId);
+  const [dates, setDates] = useState<Record<DateField, string>>(initialDates);
+
+  // A date counts as changed only when non-empty and different from the stored
+  // value; an emptied picker means "keep", since a date can't be cleared.
+  const isDateChanged = (k: DateField): boolean =>
+    dates[k] !== "" && dates[k] !== initialDates[k];
 
   const patch = useMemo<ProjectOnboardingPatch>(() => {
     const next: ProjectOnboardingPatch = {};
     if (status && status !== initialStatus) next.onboardingStatus = status;
     if (ownerId && ownerId !== initialOwnerId) next.onboardingOwner = ownerId;
+    for (const f of DATE_FIELDS) {
+      if (dates[f.key] !== "" && dates[f.key] !== initialDates[f.key]) {
+        (next as Record<string, string>)[f.write] = dates[f.key];
+      }
+    }
     return next;
-  }, [status, initialStatus, ownerId, initialOwnerId]);
+  }, [status, initialStatus, ownerId, initialOwnerId, dates, initialDates]);
+
+  // The start date the backend will compare against: the one being sent, else
+  // the stored one. A later date is checked when it, or the start date, is
+  // being changed, against its effective value (the edit, else the stored
+  // one), so moving the start past an untouched stored date is caught here
+  // rather than rejected by the backend. Unrelated edits are never blocked by
+  // stored data that already violates the order. ISO dates compare correctly
+  // as strings.
+  const effectiveStart = dates.start || initialDates.start;
+  const startChanged = isDateChanged("start");
+  const dateErrors: Partial<Record<DateField, string>> = {};
+  if (effectiveStart) {
+    for (const k of ["plan", "goLive", "expiry"] as const) {
+      const changed = isDateChanged(k);
+      if (!changed && !startChanged) continue;
+      const effective = changed ? dates[k] : initialDates[k];
+      if (effective && effective < effectiveStart) {
+        dateErrors[k] = changed
+          ? "Can't be earlier than the onboarding start date."
+          : `The stored date (${effective}) is earlier than the new onboarding start date.`;
+      }
+    }
+  }
+  const hasDateError = Object.keys(dateErrors).length > 0;
 
   const hasChanges = Object.keys(patch).length > 0;
 
@@ -149,9 +238,38 @@ export default function EditProjectOnboardingDialog({
             hideClearButton
           />
 
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            {DATE_FIELDS.map((f) => (
+              <DatePicker
+                key={f.key}
+                label={f.label}
+                value={parseDateOnly(dates[f.key])}
+                onChange={(next) =>
+                  setDates((d) => ({
+                    ...d,
+                    [f.key]:
+                      next instanceof Date && !Number.isNaN(next.getTime())
+                        ? formatDateOnly(next)
+                        : "",
+                  }))
+                }
+                disabled={isSaving}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    size: "small",
+                    error: !!dateErrors[f.key],
+                    helperText: dateErrors[f.key],
+                  },
+                }}
+              />
+            ))}
+          </LocalizationProvider>
+
           <Typography variant="caption" color="text.secondary">
-            Only internal users can be the owner. Clearing the owner back to
-            "no owner" isn't supported, so an emptied field won't be saved.
+            Only internal users can be the owner. The owner and the dates can't
+            be cleared once set, so an emptied field is left unchanged and won't
+            be saved.
           </Typography>
         </Box>
       </DialogContent>
@@ -162,7 +280,7 @@ export default function EditProjectOnboardingDialog({
         <Button
           variant="contained"
           onClick={() => onSave(patch)}
-          disabled={isSaving || !hasChanges}
+          disabled={isSaving || !hasChanges || hasDateError}
         >
           {isSaving ? "Saving…" : "Save"}
         </Button>

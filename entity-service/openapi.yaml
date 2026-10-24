@@ -19446,6 +19446,11 @@ components:
           format: date-time
           nullable: true
           description: Date the onboarding entitlement expires.
+        onboardingStartDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Onboarding start date (midnight UTC). Postgres data sources only; null elsewhere.
         onboardingStatus:
           type: string
           nullable: true
@@ -19724,6 +19729,42 @@ components:
             data sources only; a 400 on any other data source). Must be an
             active internal user; an unknown, inactive or external user is a
             400. Clearing the owner is not supported.
+        onboardingStartDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the project's onboarding start date, as YYYY-MM-DD (Postgres
+            data sources only; a 400 on any other data source). A malformed
+            date is a 400. Clearing a date is not supported: null and omitted
+            both leave it unchanged.
+        onboardingGoLivePlanDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the planned onboarding go-live date, as YYYY-MM-DD (Postgres
+            data sources only). Read back as goLivePlanDate. A malformed date,
+            or one earlier than the start date (supplied or stored), is a 400.
+            Clearing is not supported.
+        onboardingGoLiveDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the actual onboarding go-live date, as YYYY-MM-DD (Postgres
+            data sources only). Read back as goLiveDate. A malformed date, or
+            one earlier than the start date (supplied or stored), is a 400.
+            Clearing is not supported.
+        onboardingExpiryDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Sets the date the onboarding entitlement expires, as YYYY-MM-DD
+            (Postgres data sources only). A malformed date, or one earlier
+            than the start date (supplied or stored), is a 400. Clearing is
+            not supported.
 
     ProjectUpdateResponse:
       type: object
@@ -19772,6 +19813,26 @@ components:
             - $ref: '#/components/schemas/PersonRef'
           nullable: true
           description: Present on Postgres data sources only.
+        onboardingStartDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
+        goLivePlanDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
+        goLiveDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
+        onboardingExpiryDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present on Postgres data sources only (midnight UTC).
 
     SearchProjectContactsRequest:
       type: object

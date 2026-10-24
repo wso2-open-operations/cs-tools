@@ -110,15 +110,22 @@ func hasProjectUpdateKey(keys []string, name string) bool {
 	return slices.ContainsFunc(keys, func(k string) bool { return strings.EqualFold(k, name) })
 }
 
-// projectUpdateTargets reports whether a PATCH /projects/{id} body sets the
-// onboarding fields (onboardingStatus / onboardingOwner) and whether it sets
+// projectOnboardingKeys are the PATCH /projects/{id} request keys gated by
+// PermManageOnboarding: status, owner and the four onboarding dates.
+var projectOnboardingKeys = []string{
+	"onboardingStatus", "onboardingOwner",
+	"onboardingStartDate", "onboardingGoLivePlanDate", "onboardingGoLiveDate", "onboardingExpiryDate",
+}
+
+// projectUpdateTargets reports whether a PATCH /projects/{id} body sets any
+// onboarding field (see projectOnboardingKeys) and whether it sets
 // any other field. Same presence-only, case-insensitive matching as
 // projectUpdateTargetsClosureState. An empty object targets neither, so it
 // falls through to the PermWrite check and entity-service's own "at least one
 // field" validation.
 func projectUpdateTargets(body []byte) (onboarding, other bool) {
 	for _, key := range projectUpdateKeys(body) {
-		if strings.EqualFold(key, "onboardingStatus") || strings.EqualFold(key, "onboardingOwner") {
+		if hasProjectUpdateKey(projectOnboardingKeys, key) {
 			onboarding = true
 		} else {
 			other = true

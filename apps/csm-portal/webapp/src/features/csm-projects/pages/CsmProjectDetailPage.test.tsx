@@ -553,3 +553,68 @@ describe("CsmProjectDetailPage — onboarding edit", () => {
     );
   });
 });
+
+describe("CsmProjectDetailPage — Onboarding tab", () => {
+  beforeEach(() => {
+    mockCanEditProjectOnboarding = false;
+    mockPatchOnboardingMutate.mockReset();
+    mockPatchOnboardingIsError = false;
+    mockUseGetProject.mockReturnValue({
+      data: {
+        ...PROJECT,
+        onboardingStatus: "In-Progress",
+        onboardingOwner: { id: "owner-1", name: "John Roe", email: "john.roe@example.com" },
+        onboardingStartDate: "2026-03-01T00:00:00Z",
+        goLivePlanDate: "2026-04-15T00:00:00Z",
+        goLiveDate: null,
+        onboardingExpiryDate: "2026-12-31T00:00:00Z",
+      },
+      isLoading: false,
+      isError: false,
+    });
+  });
+
+  it("lists the Onboarding tab right after Overview, for everyone", () => {
+    renderPage();
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names.slice(0, 2)).toEqual(["Overview", "Onboarding"]);
+  });
+
+  it("selects the tab from ?tab=onboarding and renders its fields read-only", () => {
+    renderPage("/customers/projects/proj-1?tab=onboarding");
+    expect(screen.queryByText("Project key")).not.toBeInTheDocument();
+    expect(screen.getByText("Onboarding start date")).toBeInTheDocument();
+    expect(screen.getByText("Mar 1, 2026")).toBeInTheDocument();
+    expect(screen.getByText("Apr 15, 2026")).toBeInTheDocument();
+    expect(screen.getByText("John Roe")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("clicking the tab updates ?tab=onboarding", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "Onboarding" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/customers/projects/proj-1?tab=onboarding",
+    );
+  });
+
+  it("falls back to Overview for an unknown ?tab= value", () => {
+    renderPage("/customers/projects/proj-1?tab=nonsense");
+    expect(screen.getByText("Project key")).toBeInTheDocument();
+  });
+
+  it("opens the same onboarding dialog from the tab's Edit button for an editor", () => {
+    mockCanEditProjectOnboarding = true;
+    renderPage("/customers/projects/proj-1?tab=onboarding");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByText("Edit onboarding", { selector: "h2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Go-live date" })).toBeInTheDocument();
+  });
+
+  it("opens the same dialog, with the dates, from the overview pencil", () => {
+    mockCanEditProjectOnboarding = true;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Edit onboarding" }));
+    expect(screen.getByRole("group", { name: "Onboarding expiry date" })).toBeInTheDocument();
+  });
+});

@@ -131,6 +131,24 @@ export interface ProjectDetails {
   /** See {@link ProjectOnboardingOwnerRef}. Only meaningful when
    *  {@link onboardingStatus} indicates onboarding is enabled. */
   onboardingOwner?: ProjectOnboardingOwnerRef | null;
+  /** Onboarding calendar dates. Each is a date with no time of day, returned
+   *  as an RFC 3339 timestamp at midnight UTC (or `null`/absent when not set).
+   *  Render and edit the UTC calendar day, never the viewer's local day -- see
+   *  `utcDateOnlyValue`/`formatUtcDateForDisplay` in `@utils/dateTime`. */
+  onboardingStartDate?: string | null;
+  /** Planned go-live date; see {@link onboardingStartDate} for the format. */
+  goLivePlanDate?: string | null;
+  /** Actual go-live date; see {@link onboardingStartDate} for the format. */
+  goLiveDate?: string | null;
+  /** Onboarding expiry date; see {@link onboardingStartDate} for the format. */
+  onboardingExpiryDate?: string | null;
+  /** Onboarding hours entitlement, in hours. `null`/absent when not tracked. */
+  totalOnboardingHours?: number | null;
+  /** Onboarding hours consumed, in hours. `null`/absent when not tracked. */
+  consumedOnboardingHours?: number | null;
+  /** Onboarding hours remaining, in hours. `null`/absent when not tracked;
+   *  `0` means none remaining. */
+  remainingOnboardingHours?: number | null;
 }
 
 export interface SearchProjectsRequest {

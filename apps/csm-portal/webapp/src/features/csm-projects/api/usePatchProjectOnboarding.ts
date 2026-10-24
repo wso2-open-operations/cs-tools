@@ -36,14 +36,22 @@ export const PROJECT_ONBOARDING_STATUSES = [
 export type ProjectOnboardingStatusValue = (typeof PROJECT_ONBOARDING_STATUSES)[number];
 
 /**
- * `PATCH /projects/{id}` onboarding fields. Both are optional, but at least
- * one must be sent. `onboardingOwner` is the id of an active internal user;
- * the backend has no way to clear the owner, so a caller must never send
- * `null`/an empty value expecting that.
+ * `PATCH /projects/{id}` onboarding fields. All are optional, but at least
+ * one must be sent. `onboardingOwner` is the id of an active internal user.
+ * The backend has no way to clear the owner or any of the dates (omitted or
+ * `null` means unchanged), so a caller must never send `null`/an empty value
+ * expecting that. The four date fields are calendar dates as `YYYY-MM-DD`;
+ * the backend rejects a plan/go-live/expiry date earlier than the start date.
+ * Note the read side names two of them differently (`goLivePlanDate`,
+ * `goLiveDate`, see `ProjectDetails`).
  */
 export interface ProjectOnboardingPatch {
   onboardingStatus?: ProjectOnboardingStatusValue;
   onboardingOwner?: string;
+  onboardingStartDate?: string;
+  onboardingGoLivePlanDate?: string;
+  onboardingGoLiveDate?: string;
+  onboardingExpiryDate?: string;
 }
 
 interface ProjectOnboardingPatchResponse {
@@ -52,11 +60,15 @@ interface ProjectOnboardingPatchResponse {
     id: string;
     onboardingStatus?: string | null;
     onboardingOwner?: { id: string; name: string; email: string | null } | null;
+    onboardingStartDate?: string | null;
+    goLivePlanDate?: string | null;
+    goLiveDate?: string | null;
+    onboardingExpiryDate?: string | null;
   };
 }
 
 /**
- * Set a project's onboarding status and/or onboarding owner via
+ * Set a project's onboarding status, owner and/or dates via
  * `PATCH /projects/{id}` — `onboarding_lead` or `admin` only (see
  * `usePortalAccess().canEditProjectOnboarding`, this app's mirror of the
  * backend's own check). The backend is the real gate: a caller without the

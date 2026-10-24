@@ -29,7 +29,7 @@ The Projects tab lists every project across all accounts, searchable by project 
 key, or subscription type. A project is tied to a subscription, and its row shows its closure
 state and start/end dates.
 
-Opening a project takes you to its detail page, with four tabs:
+Opening a project takes you to its detail page, with these tabs:
 
 - **Overview**: project key, closure state, subscription type, a link back to the owning
   account, Salesforce ID, and the created/updated/start/end dates. An **Onboarding Owner**
@@ -37,6 +37,10 @@ Opening a project takes you to its detail page, with four tabs:
   consultant assigned to the project. It's absent for projects with no onboarding engagement.
   Only users with the onboarding lead role (and admins) can edit the onboarding status and
   owner, using the pencil next to the status; the owner must be an internal user.
+- **Onboarding**: the onboarding status and owner plus four dates (onboarding start, go-live
+  plan, go-live, and onboarding expiry). Everyone can read it; only onboarding leads and admins
+  see **Edit**. Dates are calendar days, can't be cleared once set, and the plan, go-live and
+  expiry dates can't be earlier than the start date.
 - **Deployments**: see below.
 - **Project contacts**: see below.
 - **Work items**: cases, service requests, and other work items filed against this project.

@@ -720,8 +720,8 @@ func NewServiceNowProjectUpdateService(client *integrationservice.Client) Projec
 func (s *snProjectUpdateService) UpdateProject(ctx context.Context, id string, req domain.ProjectUpdateRequest) (domain.ProjectUpdateResponse, error) {
 	// Postgres-only fields: reject rather than silently drop, before any
 	// upstream call.
-	if req.OnboardingStatus != nil || req.OnboardingOwner != nil {
-		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "onboardingStatus and onboardingOwner can only be updated on the Postgres data source"}
+	if req.OnboardingStatus != nil || req.OnboardingOwner != nil || hasOnboardingDates(req) {
+		return domain.ProjectUpdateResponse{}, &apierror.ValidationError{Msg: "onboardingStatus, onboardingOwner and the onboarding dates can only be updated on the Postgres data source"}
 	}
 	if req.HasAgent == nil && req.HasKbReferences == nil && req.EndDateClosureState == nil &&
 		req.InvoiceDueDateClosureState == nil && req.ComplianceViolationClosureState == nil &&
