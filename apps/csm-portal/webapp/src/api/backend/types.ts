@@ -4324,6 +4324,15 @@ export interface BeChoiceListItem {
 /** Response of `GET /products/vulnerabilities/meta`. */
 export interface BeVulnerabilityMetaResponse {
   severities: BeChoiceListItem[];
+  /** Distinct products with their distinct versions; names and versions are
+   *  the exact stored strings, sorted, so they match the search's exact
+   *  `productName` / `productVersion` filters. `versions` may be empty. */
+  products?: BeVulnerabilityMetaProduct[];
+}
+
+export interface BeVulnerabilityMetaProduct {
+  name: string;
+  versions: string[];
 }
 
 export type BeTimeCardState =

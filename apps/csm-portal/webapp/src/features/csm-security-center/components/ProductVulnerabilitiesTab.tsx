@@ -58,6 +58,8 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
   const location = useLocation();
   const [searchInput, setSearchInput] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<BeVulnerabilityPriority | "">("");
+  const [productFilter, setProductFilter] = useState("");
+  const [versionFilter, setVersionFilter] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
@@ -67,10 +69,12 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
       filters: {
         ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
         ...(priorityFilter !== "" && { priority: priorityFilter }),
+        ...(productFilter !== "" && { productName: productFilter }),
+        ...(productFilter !== "" && versionFilter !== "" && { productVersion: versionFilter }),
       },
       pagination: { offset: page * rowsPerPage, limit: rowsPerPage },
     }),
-    [debouncedSearch, priorityFilter, page, rowsPerPage],
+    [debouncedSearch, priorityFilter, productFilter, versionFilter, page, rowsPerPage],
   );
 
   const { data, isLoading, isError, error, isFetching, refetch, dataUpdatedAt } =
@@ -82,6 +86,19 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
   const { data: vulnerabilityMeta } = useGetVulnerabilityMeta();
   const priorityOptions = vulnerabilityMetaToPriorityOptions(vulnerabilityMeta?.severities);
 
+  // Product/version options come from the same meta response (no extra
+  // request). While meta is loading or failed, both lists are empty and the
+  // controls are disabled, but the table above still renders and pages.
+  const productOptions = useMemo(
+    () => vulnerabilityMeta?.products ?? [],
+    [vulnerabilityMeta?.products],
+  );
+  const versionOptions = useMemo(
+    () => productOptions.find((p) => p.name === productFilter)?.versions ?? [],
+    [productOptions, productFilter],
+  );
+  const hasNoVersions = productFilter !== "" && versionOptions.length === 0;
+
   const vulnerabilities = data?.productVulnerabilities ?? [];
   const total = data?.total ?? 0;
 
@@ -92,6 +109,17 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
 
   const handlePriorityChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setPriorityFilter(e.target.value as BeVulnerabilityPriority | "");
+    setPage(0);
+  };
+
+  const handleProductChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setProductFilter(e.target.value);
+    setVersionFilter("");
+    setPage(0);
+  };
+
+  const handleVersionChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setVersionFilter(e.target.value);
     setPage(0);
   };
 
@@ -148,6 +176,57 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
           {priorityOptions.map(({ priority, label }) => (
             <MenuItem key={priority} value={priority}>
               {label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          select
+          value={productFilter}
+          onChange={handleProductChange}
+          size="small"
+          label="Product"
+          disabled={productOptions.length === 0}
+          sx={{ minWidth: 180 }}
+          slotProps={{
+            htmlInput: { "aria-label": "Filter by product" },
+            // Same label workaround as the Priority field above.
+            inputLabel: {
+              shrink: productFilter !== "",
+              sx: { top: "0px !important" },
+            },
+            select: { notched: productFilter !== "" },
+          }}
+        >
+          <MenuItem value="">All products</MenuItem>
+          {productOptions.map(({ name }) => (
+            <MenuItem key={name} value={name}>
+              {name}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          select
+          value={versionFilter}
+          onChange={handleVersionChange}
+          size="small"
+          label="Version"
+          disabled={productFilter === "" || versionOptions.length === 0}
+          helperText={hasNoVersions ? "No versions available" : undefined}
+          sx={{ minWidth: 160 }}
+          slotProps={{
+            htmlInput: { "aria-label": "Filter by product version" },
+            // Same label workaround as the Priority field above.
+            inputLabel: {
+              shrink: versionFilter !== "",
+              sx: { top: "0px !important" },
+            },
+            select: { notched: versionFilter !== "" },
+          }}
+        >
+          <MenuItem value="">All versions</MenuItem>
+          {versionOptions.map((version) => (
+            <MenuItem key={version} value={version}>
+              {version}
             </MenuItem>
           ))}
         </TextField>

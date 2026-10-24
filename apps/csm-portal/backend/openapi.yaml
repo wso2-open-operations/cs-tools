@@ -6781,7 +6781,7 @@ paths:
 
   /products/vulnerabilities/meta:
     get:
-      summary: Get reference metadata for product vulnerabilities (severity choice list).
+      summary: Get reference metadata for product vulnerabilities (severity choice list and the product / version options).
       operationId: getVulnerabilityMeta
       security:
         - bearerAuth: []
@@ -21808,6 +21808,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChoiceListItem'
+        products:
+          type: array
+          description: >-
+            Distinct product names found on vulnerability records, each with the distinct
+            product versions recorded for it. The values are the exact stored strings, so
+            each one can be passed back as the productName / productVersion search filter.
+          items:
+            $ref: '#/components/schemas/VulnerabilityProductOption'
+
+    VulnerabilityProductOption:
+      type: object
+      required: [name, versions]
+      properties:
+        name:
+          type: string
+          description: Distinct product name.
+        versions:
+          type: array
+          description: Distinct versions found for this product, sorted ascending (may be empty).
+          items:
+            type: string
 
     SearchProductVulnerabilitiesResponse:
       type: object
