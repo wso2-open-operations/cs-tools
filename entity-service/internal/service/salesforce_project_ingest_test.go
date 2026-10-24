@@ -65,6 +65,9 @@ type fakeProjectRepo struct {
 	deleteState []domain.UpsertSalesforceIngestStateRequest
 	deleteFound bool
 	lookups     []string
+	// byKey are keys already in the table (a row without the sf_id).
+	byKey       map[string]string
+	existsCalls int
 }
 
 func (f *fakeProjectRepo) UpsertFromSalesforce(_ context.Context, row domain.SalesforceProjectUpsert, state domain.UpsertSalesforceIngestStateRequest) (domain.SalesforceProjectUpsertResult, error) {
@@ -76,14 +79,33 @@ func (f *fakeProjectRepo) UpsertFromSalesforce(_ context.Context, row domain.Sal
 	if id, ok := f.bySfID[row.SfID]; ok {
 		return domain.SalesforceProjectUpsertResult{ProjectID: id}, nil
 	}
+	if id, ok := f.byKey[row.Key]; ok {
+		return domain.SalesforceProjectUpsertResult{ProjectID: id, LinkedByKey: true}, nil
+	}
 	if !row.AllowInsert {
 		return domain.SalesforceProjectUpsertResult{}, &apierror.NotFoundError{Msg: fmt.Sprintf("project not found for sfId %q / key %q", row.SfID, row.Key)}
+	}
+	if row.RequireInsertID && row.InsertID == nil {
+		return domain.SalesforceProjectUpsertResult{}, &apierror.NotFoundError{Msg: fmt.Sprintf("project not found for sfId %q / key %q (the backing system has no id for it yet)", row.SfID, row.Key)}
 	}
 	if f.bySfID == nil {
 		f.bySfID = map[string]string{}
 	}
-	f.bySfID[row.SfID] = testProjectRowID
-	return domain.SalesforceProjectUpsertResult{ProjectID: testProjectRowID, Created: true}, nil
+	id := testProjectRowID
+	if row.InsertID != nil {
+		id = *row.InsertID
+	}
+	f.bySfID[row.SfID] = id
+	return domain.SalesforceProjectUpsertResult{ProjectID: id, Created: true}, nil
+}
+
+func (f *fakeProjectRepo) ProjectExists(_ context.Context, sfID, key string) (bool, error) {
+	f.existsCalls++
+	if _, ok := f.bySfID[sfID]; ok {
+		return true, nil
+	}
+	_, ok := f.byKey[key]
+	return ok, nil
 }
 
 func (f *fakeProjectRepo) SoftDeleteBySfID(_ context.Context, sfID string, state domain.UpsertSalesforceIngestStateRequest) (bool, error) {

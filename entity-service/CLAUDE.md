@@ -847,7 +847,49 @@ ignored). Code: `internal/service/salesforce_project_ingest.go` (`WithProjectIng
 - **Update-only by default:** with `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` off a
   project CSM does not have is `NotFoundError` "project not found for sfId ..." plus a FAILED
   ledger row, which the delayed-retry job re-runs. On, it is inserted with
-  `gen_random_uuid()` and `is_active = TRUE`.
+  `is_active = TRUE` and an id chosen as in the next bullet.
+- **Insert id (datasource switch):** the row id is `gen_random_uuid()` in plain
+  `DATA_SOURCE=postgres` (no lookup, nothing else changes). Under
+  `DATA_SOURCE=postgres-servicenow-dual-write`, where the backing system keeps its own copy
+  of every project (fed by another subscriber), a project that has to be INSERTED takes the
+  id that system already uses, so ids converge and a later backing-system-first write that
+  addresses the project by id lands on a real record. The datasource is the only switch (no
+  env var). Mechanics:
+  - `ProjectIngest.IDResolver` (`service.ProjectIDResolver`, nil unless dual-write; `routes.go`
+    builds it and panics if dual-write has no integration client, since a nil resolver would
+    silently insert random ids). The adapter is `internal/service/sn_project_id_resolver.go`
+    (`POST /projects/search` with `filters.searchQuery = key`, id = `sysidToUUID(sys_id)`);
+    the ingest sees only the generic interface.
+  - **Pre-check, no transaction open:** before the upsert, `ProjectExists(sf_id, key)` (the
+    same two arms the write resolves by). Only when neither row exists is the resolver
+    called, so updates, replays and duplicates make no call. The id goes in
+    `SalesforceProjectUpsert.InsertID`; the write still takes the `"project-sf:"+sfId`
+    advisory lock and re-resolves, so two concurrent events for one project cannot make two
+    rows: the loser finds the winner's row and updates it (its `InsertID` is ignored).
+  - **Miss:** the backing system has no such key (or the lookup identity cannot see it):
+    `NotFoundError` "project not found in the backing system for key ... yet", FAILED ledger
+    row, so `IsMissingParentError` matches and the retry worker re-runs it (12 attempts, 5m
+    ticks by default). `RequireInsertID` makes the write refuse an insert without an id too:
+    in this mode a random id is never used. A lookup error (backing system down, malformed
+    id, ambiguity) is not a "project not found" and is not retried by the worker; it is
+    redelivered by the bus and visible as FAILED.
+  - **Exact key match:** the endpoint's `searchQuery` is a substring match on name and key,
+    so results are filtered in Go to `TrimSpace(key) ==` the Salesforce key,
+    case-sensitive (as `project.key = $2` is). A key that differs only in case is a miss
+    (logged), not a match. Up to 10 pages of 50 are scanned; more candidates is an error.
+    Two distinct ids for one key is a `ConflictError`: nothing is guessed or written.
+  - **Derived-id collision:** if a row already holds the derived id but matched neither the
+    sf_id nor the key, it is never overwritten: the write returns a `ConflictError` naming
+    both keys, inserts nothing and writes no ledger row in that transaction (the service
+    records FAILED). Not retried by the worker; it needs a person.
+  - **Lookup identity:** the ingest has no end-user token, so the call carries only the
+    service bearer and the integration service uses its own service identity, which must see
+    every project (the endpoint restricts a non-privileged caller to its own projects, so an
+    under-privileged identity looks like a permanent miss). The endpoint also only returns
+    projects with a key, a Salesforce id and a type recorded, so a project the backing system
+    has not fully populated yet is a miss until it is.
+  - **Cutover:** switching `DATA_SOURCE` away from dual-write (to plain `postgres`) removes
+    the resolver: new projects then get random ids and no backing-system call is made.
 - **Empty `Project_Key__c` (decision D5):** refused: FAILED ledger row with the reason,
   event acknowledged (no retry can fix it).
 - **DELETED:** `is_active = FALSE` on every row with the (18-character) `sf_id` plus a DELETED

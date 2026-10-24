@@ -40,6 +40,10 @@ type SalesforceProjectRepository interface {
 	// (is_active = FALSE) and records state. found is false when no project
 	// carries it; the ledger row is written regardless.
 	SoftDeleteBySfID(ctx context.Context, sfID string, state domain.UpsertSalesforceIngestStateRequest) (bool, error)
+	// ProjectExists reports whether a project row carries sfID or key, the
+	// two arms writeSalesforceProject resolves by. A read-only pre-check, so
+	// an id for a new project can be fetched outside any transaction.
+	ProjectExists(ctx context.Context, sfID, key string) (bool, error)
 	// LookupProjectIDBySfID returns the project row resolveProjectBySfIDQuery
 	// picks for sfID, or nil when there is none.
 	LookupProjectIDBySfID(ctx context.Context, sfID string) (*string, error)
@@ -110,21 +114,29 @@ const updateSalesforceProjectQuery = `
 
 // insertSalesforceProjectQuery creates a project Salesforce knows and CSM
 // does not; only allowed once csm-sync-service no longer writes project
-// (CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED). The row id is random:
-// no ServiceNow sys_id exists for it. is_active starts TRUE, the only value
-// a live Salesforce project can have; number stays NULL (ServiceNow's record
-// number has no Salesforce source).
+// (CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED). $12 is the id the
+// backing system already uses for the project (row.InsertID); NULL, as in
+// plain postgres mode, gets a random one. is_active starts TRUE, the only
+// value a live Salesforce project can have; number stays NULL (ServiceNow's
+// record number has no Salesforce source).
 const insertSalesforceProjectQuery = `
 	INSERT INTO project (
 		id, created_on, updated_on, created_by, updated_by,
 		sf_id, key, name, account_id, start_date, end_date, description,
 		project_type_id, compliance_violation_date, onboarding_go_live_date, is_active
 	) VALUES (
-		gen_random_uuid(), now(), now(), $1, $1,
+		COALESCE($12::uuid, gen_random_uuid()), now(), now(), $1, $1,
 		$2, $3, $4, $5::uuid, $6, $7, $8,
 		$9::uuid, $10, $11, TRUE
 	)
 	RETURNING id::text`
+
+// projectByIDQuery finds the row already holding an id an insert wants, which
+// by then matched neither the sf_id nor the key being written.
+const projectByIDQuery = `SELECT key, sf_id FROM project WHERE id = $1::uuid`
+
+// projectExistsQuery is resolveSalesforceProjectQuery's WHERE, as a boolean.
+const projectExistsQuery = `SELECT EXISTS (SELECT 1 FROM project WHERE sf_id = $1 OR key = $2)`
 
 // reactivateSalesforceProjectQuery clears the DELETED marker. It is a
 // separate statement so the main UPDATE never names is_active, which
@@ -176,7 +188,29 @@ func writeSalesforceProject(ctx context.Context, q querier, row domain.Salesforc
 		if !row.AllowInsert {
 			return res, &apierror.NotFoundError{Msg: fmt.Sprintf("project not found for sfId %q / key %q (inserts are off while ServiceNow writes project)", row.SfID, row.Key)}
 		}
-		if err := q.QueryRow(ctx, insertSalesforceProjectQuery, args...).Scan(&res.ProjectID); err != nil {
+		if row.RequireInsertID && row.InsertID == nil {
+			// Never a random id when the backing system owns ids: the row
+			// would be unreachable from it. The prefix is what the retry job matches.
+			return res, &apierror.NotFoundError{Msg: fmt.Sprintf("project not found for sfId %q / key %q (the backing system has no id for it yet)", row.SfID, row.Key)}
+		}
+		if row.InsertID != nil {
+			// A row already holding the derived id matched neither the sf_id
+			// nor the key (or the resolve above would have found it). Do not
+			// overwrite it and do not retry: it needs a person.
+			var heldKey string
+			var heldSfID *string
+			switch err := q.QueryRow(ctx, projectByIDQuery, *row.InsertID).Scan(&heldKey, &heldSfID); {
+			case err == nil:
+				heldSf := ""
+				if heldSfID != nil {
+					heldSf = *heldSfID
+				}
+				return res, &apierror.ConflictError{Msg: fmt.Sprintf("project id %s, derived from the backing system for key %q, is already used by the project with key %q and sfId %q; not overwriting it", *row.InsertID, row.Key, heldKey, heldSf)}
+			case !errors.Is(err, pgx.ErrNoRows):
+				return res, fmt.Errorf("upsert project from salesforce: check derived id: %w", err)
+			}
+		}
+		if err := q.QueryRow(ctx, insertSalesforceProjectQuery, append(args, row.InsertID)...).Scan(&res.ProjectID); err != nil {
 			return res, fmt.Errorf("upsert project from salesforce: insert: %w", err)
 		}
 		res.Created, res.LinkedByKey = true, false
@@ -233,6 +267,14 @@ func softDeleteSalesforceProject(ctx context.Context, q querier, sfID string, st
 		return false, fmt.Errorf("soft-delete project by sf_id: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+func (r *salesforceProjectRepo) ProjectExists(ctx context.Context, sfID, key string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRow(WithSystemIdentity(ctx), projectExistsQuery, sfID, key).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check project exists: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *salesforceProjectRepo) LookupProjectIDBySfID(ctx context.Context, sfID string) (*string, error) {

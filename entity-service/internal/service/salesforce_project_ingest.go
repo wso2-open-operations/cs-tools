@@ -43,6 +43,15 @@ type ProjectLookup interface {
 	LookupProjectIDBySfID(ctx context.Context, sfID string) (*string, error)
 }
 
+// ProjectIDResolver returns the id a backing system (one that keeps its own
+// copy of every project, as in dual-write mode) already uses for the project
+// with this key, so a project the ingest has to insert is created under that
+// id instead of a random one. found is false when the backing system does not
+// have the project yet; an error means the answer is unknown or ambiguous.
+type ProjectIDResolver interface {
+	ResolveProjectID(ctx context.Context, key string) (id string, found bool, err error)
+}
+
 // ProjectIngest bundles the dependencies of the Project__c branch of
 // POST /salesforce/events. It is optional: a service without it acknowledges
 // Project__c envelopes and does nothing, which is how
@@ -59,6 +68,12 @@ type ProjectIngest struct {
 	// (SALESFORCE_SYNC_PLAN.md §6). Turned on at cutover, when csm-sync-service
 	// stops.
 	InsertEnabled bool
+	// IDResolver, when set, supplies the id of every project the ingest
+	// inserts. nil (plain postgres mode) keeps the random id and makes no
+	// call. Set, a project the backing system does not have yet is NOT
+	// inserted: it fails with the "project not found" prefix the retry job
+	// matches, and a random id is never used instead.
+	IDResolver ProjectIDResolver
 }
 
 func (p *ProjectIngest) enabled() bool {
@@ -310,6 +325,13 @@ func (s *salesforceEventService) upsertProject(ctx context.Context, sfID, eventT
 		}
 	}
 
+	if row.AllowInsert && s.project.IDResolver != nil {
+		if err := s.resolveInsertID(ctx, &row); err != nil {
+			s.recordProjectFailed(ctx, state, err)
+			return err
+		}
+	}
+
 	res, err := s.project.Projects.UpsertFromSalesforce(ctx, row, state)
 	if err != nil {
 		s.recordProjectFailed(ctx, state, err)
@@ -319,6 +341,32 @@ func (s *salesforceEventService) upsertProject(ctx context.Context, sfID, eventT
 		"projectSfId", sfID, "key", row.Key, "projectId", res.ProjectID, "created", res.Created,
 		"linkedByKey", res.LinkedByKey, "reactivated", res.Reactivated)
 	s.requeueChildrenOf(ctx, repository.MissingParent{Kind: repository.MissingParentProject, SfID: sfID, Key: row.Key})
+	return nil
+}
+
+// resolveInsertID fills row.InsertID with the id the backing system uses for
+// the project, but only when the project would be inserted: a row that
+// already carries the sf_id or key is updated and costs no call. The check and
+// the call run outside any transaction; the write re-resolves the row under
+// the sf_id lock, so a concurrent event that inserts first turns this one into
+// an update and the id is ignored. RequireInsertID makes the write refuse a
+// random id even if this id is somehow missing.
+func (s *salesforceEventService) resolveInsertID(ctx context.Context, row *domain.SalesforceProjectUpsert) error {
+	row.RequireInsertID = true
+	exists, err := s.project.Projects.ProjectExists(ctx, row.SfID, row.Key)
+	if err != nil || exists {
+		return err
+	}
+	id, found, err := s.project.IDResolver.ResolveProjectID(ctx, row.Key)
+	if err != nil {
+		return err
+	}
+	if !found {
+		// The prefix is what the delayed-retry job matches, so the ingest
+		// re-runs until the backing system has the project.
+		return &apierror.NotFoundError{Msg: fmt.Sprintf("project not found in the backing system for key %q yet (sfId %q)", row.Key, row.SfID)}
+	}
+	row.InsertID = &id
 	return nil
 }
 

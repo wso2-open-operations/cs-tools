@@ -47,6 +47,14 @@ type SalesforceProjectUpsert struct {
 	// does not. Off while csm-sync-service still writes project (plan §6):
 	// a missing row is then a NotFoundError.
 	AllowInsert bool
+	// InsertID is the id a newly inserted project gets: the id the backing
+	// system already uses for it, so the two never diverge. nil lets the
+	// database generate one. Ignored when a row is found (update path).
+	InsertID *string
+	// RequireInsertID makes a missing InsertID fatal for an insert: a project
+	// CSM does not have is then a NotFoundError rather than a row with a
+	// random id. Set whenever a backing-system id resolver is configured.
+	RequireInsertID bool
 }
 
 // SalesforceProjectUpsertResult reports how the project row was resolved.

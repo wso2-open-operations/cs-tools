@@ -106,9 +106,21 @@ func (q *projectQuerier) QueryRow(_ context.Context, sql string, args ...any) pg
 			return scanRow{vals: []any{byKey.id, true}}
 		}
 		return scanRow{err: pgx.ErrNoRows}
+	case projectByIDQuery:
+		for _, r := range q.rows {
+			if r.id == args[0].(string) {
+				sf := r.sfID
+				return scanRow{vals: []any{r.key, &sf}}
+			}
+		}
+		return scanRow{err: pgx.ErrNoRows}
 	case insertSalesforceProjectQuery:
 		v := true
-		r := &projectRow{id: fmt.Sprintf("proj-%d", len(q.rows)+1), sfID: args[1].(string), key: args[2].(string), isActive: &v}
+		id := fmt.Sprintf("proj-%d", len(q.rows)+1)
+		if given := args[11].(*string); given != nil {
+			id = *given
+		}
+		r := &projectRow{id: id, sfID: args[1].(string), key: args[2].(string), isActive: &v}
 		q.rows = append(q.rows, r)
 		return scanRow{vals: []any{r.id}}
 	}
@@ -228,7 +240,105 @@ func TestWriteSalesforceProject_InsertWhenAllowed(t *testing.T) {
 		t.Errorf("result = %+v rows = %d ledger = %d", res, len(q.rows), len(q.ledger))
 	}
 	if !strings.Contains(insertSalesforceProjectQuery, "gen_random_uuid()") {
-		t.Error("insert does not generate the id")
+		t.Error("insert has no generated-id fallback")
+	}
+}
+
+func (q *projectQuerier) insertCount() int {
+	n := 0
+	for _, st := range q.statements {
+		if st == insertSalesforceProjectQuery {
+			n++
+		}
+	}
+	return n
+}
+
+func (q *projectQuerier) ran(sql string) bool {
+	for _, st := range q.statements {
+		if st == sql {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWriteSalesforceProject_InsertsWithGivenID: InsertID becomes the row id;
+// without one the statement is handed NULL so the database generates it.
+func TestWriteSalesforceProject_InsertsWithGivenID(t *testing.T) {
+	given := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	q := &projectQuerier{}
+	row := projectUpsert(true)
+	row.InsertID, row.RequireInsertID = &given, true
+	res, err := writeSalesforceProject(context.Background(), q, row, projectState("CREATED"))
+	if err != nil || !res.Created || res.ProjectID != given || len(q.rows) != 1 || q.rows[0].id != given {
+		t.Fatalf("res = %+v err = %v rows = %+v", res, err, q.rows)
+	}
+
+	q = &projectQuerier{}
+	if _, err := writeSalesforceProject(context.Background(), q, projectUpsert(true), projectState("CREATED")); err != nil {
+		t.Fatalf("plain insert: %v", err)
+	}
+	if q.ran(projectByIDQuery) {
+		t.Error("plain insert checked for a derived id")
+	}
+	if !strings.Contains(insertSalesforceProjectQuery, "COALESCE($12::uuid, gen_random_uuid())") {
+		t.Error("insert does not fall back to a generated id when none is given")
+	}
+}
+
+// TestWriteSalesforceProject_RequiredIDNeverRandom: with RequireInsertID and no
+// id, a missing project is the retryable NotFoundError and nothing is written.
+func TestWriteSalesforceProject_RequiredIDNeverRandom(t *testing.T) {
+	q := &projectQuerier{}
+	row := projectUpsert(true)
+	row.RequireInsertID = true
+	_, err := writeSalesforceProject(context.Background(), q, row, projectState("CREATED"))
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) || !IsMissingParentError(nf.Msg) {
+		t.Fatalf("err = %v, want a missing-parent NotFoundError", err)
+	}
+	if q.insertCount() != 0 || len(q.rows) != 0 || len(q.ledger) != 0 {
+		t.Errorf("inserts = %d rows = %d ledger = %d, want nothing written", q.insertCount(), len(q.rows), len(q.ledger))
+	}
+}
+
+// TestWriteSalesforceProject_DerivedIDCollision: the id belongs to a project
+// with another key and sf_id. It is not overwritten, nothing is inserted, and
+// the error is not one the retry job matches.
+func TestWriteSalesforceProject_DerivedIDCollision(t *testing.T) {
+	given := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	q := &projectQuerier{rows: []*projectRow{{id: given, sfID: "a0dOTHER", key: "OTHERKEY"}}}
+	row := projectUpsert(true)
+	row.InsertID, row.RequireInsertID = &given, true
+	_, err := writeSalesforceProject(context.Background(), q, row, projectState("CREATED"))
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) || IsMissingParentError(ce.Msg) {
+		t.Fatalf("err = %v, want a ConflictError that is not a missing-parent error", err)
+	}
+	if q.insertCount() != 0 || len(q.rows) != 1 || q.rows[0].key != "OTHERKEY" || q.rows[0].sfID != "a0dOTHER" || len(q.ledger) != 0 {
+		t.Errorf("rows = %+v inserts = %d ledger = %d, want the held row untouched and nothing written", q.rows[0], q.insertCount(), len(q.ledger))
+	}
+}
+
+// TestWriteSalesforceProject_ExistingRowIgnoresInsertID: a concurrent event
+// inserted first, so this one updates; the derived id is neither checked nor used.
+func TestWriteSalesforceProject_ExistingRowIgnoresInsertID(t *testing.T) {
+	given := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	for name, existing := range map[string]*projectRow{
+		"by sf_id": {id: "proj-a", sfID: "a0dSF", key: "CSMSYNCTEST"},
+		"by key":   {id: "proj-b", sfID: "", key: "CSMSYNCTEST"},
+	} {
+		q := &projectQuerier{rows: []*projectRow{existing}}
+		row := projectUpsert(true)
+		row.InsertID, row.RequireInsertID = &given, true
+		res, err := writeSalesforceProject(context.Background(), q, row, projectState("UPDATED"))
+		if err != nil || res.Created || res.ProjectID != existing.id {
+			t.Fatalf("%s: res = %+v err = %v", name, res, err)
+		}
+		if q.insertCount() != 0 || q.ran(projectByIDQuery) {
+			t.Errorf("%s: inserted or checked the derived id on an update", name)
+		}
 	}
 }
 

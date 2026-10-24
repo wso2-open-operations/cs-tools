@@ -371,6 +371,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewCustomerHealthService(repository.NewCustomerHealthRepository(db), userRepo))
 	}
 
+	// Constructed before the Salesforce ingest below, which needs it for the
+	// dual-write project-id lookup.
+	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
+	// active services stay Postgres-backed (see the case wiring below), but
+	// its best-effort ServiceNow mirror writes still need this client. Also
+	// constructed when SLADataSource is servicenow, independent of
+	// DataSource: a plain DataSourcePostgres deployment that points SLA
+	// reads at ServiceNow still needs this client for the task-SLA and
+	// case-search-SLA-filter wiring below. Also constructed when
+	// AttachmentDataSource is servicenow, for the same reason: the
+	// snAttachmentDelegate wiring below needs it too. config.Validate
+	// requires the same four credentials in every one of these cases.
+	var serviceNowIntegrationServiceClient *integrationservice.Client
+	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.AttachmentDataSource == config.AttachmentDataSourceServiceNow {
+		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
+			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
+			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
+			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
+			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
+		}, cfg.UpstreamClientTimeout)
+	}
+
 	var salesforceEventHandler *handler.SalesforceEventHandler
 	// salesforcePartnerHandler is set when the partner refresh is on.
 	var salesforcePartnerHandler *handler.SalesforcePartnerHandler
@@ -434,10 +456,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			if !cfg.CSMMigrationSalesforceProjectIngestEnabled {
 				return svc
 			}
+			// Under dual-write the backing system keeps its own copy of every
+			// project, so a project the ingest inserts takes the id that
+			// system already uses. The datasource is the only switch; plain
+			// postgres leaves the resolver nil (random id, no call). A nil
+			// client here would silently insert random ids, so it is fatal.
+			var projectIDResolver service.ProjectIDResolver
+			if cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite {
+				if serviceNowIntegrationServiceClient == nil {
+					panic("salesforce: dual-write project ingest needs the ServiceNow integration client")
+				}
+				projectIDResolver = service.NewServiceNowProjectIDResolver(serviceNowIntegrationServiceClient)
+			}
 			return service.WithProjectIngest(svc, service.ProjectIngest{
 				Projects:      projectIngestRepo,
 				SalesEntity:   salesEntityClient,
 				InsertEnabled: cfg.CSMMigrationSalesforceProjectInsertEnabled,
+				IDResolver:    projectIDResolver,
 			})
 		}
 		// The Opportunity branch (sf_opportunity + derived line items) and
@@ -610,26 +645,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				repository.NewCustomerEngagementAllocationRepository(repository.NewScoped(db)),
 				cfg.CustomerEngagementFirefightingTypeID),
 			cfg.M2MClientIDs)
-	}
-
-	// Also constructed for DataSourcePostgresServiceNowDualWrite: that mode's
-	// active services stay Postgres-backed (see the case wiring below), but
-	// its best-effort ServiceNow mirror writes still need this client. Also
-	// constructed when SLADataSource is servicenow, independent of
-	// DataSource: a plain DataSourcePostgres deployment that points SLA
-	// reads at ServiceNow still needs this client for the task-SLA and
-	// case-search-SLA-filter wiring below. Also constructed when
-	// AttachmentDataSource is servicenow, for the same reason: the
-	// snAttachmentDelegate wiring below needs it too. config.Validate
-	// requires the same four credentials in every one of these cases.
-	var serviceNowIntegrationServiceClient *integrationservice.Client
-	if cfg.DataSource == config.DataSourceServiceNow || cfg.DataSource == config.DataSourcePostgresServiceNowDualWrite || cfg.SLADataSource == config.SLADataSourceServiceNow || cfg.AttachmentDataSource == config.AttachmentDataSourceServiceNow {
-		serviceNowIntegrationServiceClient = integrationservice.New(cfg.ServiceNowIntegrationServiceBaseURL, integrationservice.ClientCredentialsConfig{
-			TokenURL:     cfg.ServiceNowIntegrationServiceTokenURL,
-			ClientID:     cfg.ServiceNowIntegrationServiceClientID,
-			ClientSecret: cfg.ServiceNowIntegrationServiceClientSecret,
-			Scopes:       cfg.ServiceNowIntegrationServiceScopes,
-		}, cfg.UpstreamClientTimeout)
 	}
 
 	// Under dual-write, a new SR raised from a GitHub issue is created in
