@@ -21,12 +21,18 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
 )
+
+// vulnerabilityCveIDMaxLength is the longest cveId filter accepted, matching
+// entity-service's own limit.
+const vulnerabilityCveIDMaxLength = 100
 
 // entityProductVulnerabilityClient abstracts the entity-service product
 // vulnerability operations used by ProductVulnerabilityHandler.
@@ -63,6 +69,13 @@ func (h *ProductVulnerabilityHandler) SearchProductVulnerabilities(w http.Respon
 
 	var req dto.SearchProductVulnerabilitiesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	// Same cap as entity-service's cveId column; rejecting here spares the
+	// round trip and keeps the 400 in this API's own wording.
+	if req.Filters != nil && utf8.RuneCountInString(strings.TrimSpace(req.Filters.CveID)) > vulnerabilityCveIDMaxLength {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}

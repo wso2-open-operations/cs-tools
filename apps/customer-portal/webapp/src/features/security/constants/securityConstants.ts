@@ -107,20 +107,11 @@ export const PRODUCT_VULNERABILITIES_MAX_PAGE_SIZE = 50;
 
 export const PRODUCT_VULNERABILITIES_NO_VERSIONS_LABEL = "No versions available";
 
-export const PRODUCT_VULNERABILITIES_ALL_FETCH_LIMIT = 5000;
+/** Most pages the details page loads for one CVE (a CVE normally has far fewer rows than one page). */
+export const PRODUCT_VULNERABILITIES_AFFECTED_MAX_PAGES = 10;
 
-/**
- * Search request used only by the vulnerability details page's affected-products
- * lookup, which still reads the list in one request (so it sees at most the
- * first ALL_FETCH_LIMIT records). The Component Analysis table does not use it.
- */
-export const PRODUCT_VULNERABILITIES_FETCH_ALL_REQUEST = {
-  filters: {},
-  pagination: { offset: 0, limit: PRODUCT_VULNERABILITIES_ALL_FETCH_LIMIT },
-};
-
-/** How long the details page trusts its cached affected-products result before refetching. */
-export const PRODUCT_VULNERABILITIES_AFFECTED_STALE_TIME_MS = 5 * 60 * 1000;
+/** How long a CVE's cached affected-products result counts as fresh. */
+export const PRODUCT_VULNERABILITIES_AFFECTED_FRESH_MS = 5 * 60 * 1000;
 
 export const SECURITY_REPORT_ANALYSIS_PAGE_SIZE = 10;
 
@@ -210,6 +201,11 @@ export const VULNERABILITY_AFFECTED_PRODUCTS_EMPTY_MESSAGE =
 
 export const VULNERABILITY_AFFECTED_PRODUCTS_LOAD_ERROR_MESSAGE =
   "Could not load the affected products.";
+
+export const getVulnerabilityAffectedProductsTruncatedMessage = (
+  loaded: number,
+  total: number,
+): string => `Showing the first ${loaded} of ${total} affected records.`;
 
 export const VULNERABILITY_AFFECTED_PRODUCTS_CURRENT_LABEL = "Viewing";
 

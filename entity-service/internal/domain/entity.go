@@ -5669,6 +5669,10 @@ type SearchProductVulnerabilitiesFilters struct {
 	Priority       *VulnerabilityPriority `json:"priority,omitempty"`
 	ProductName    string                 `json:"productName,omitempty"`
 	ProductVersion string                 `json:"productVersion,omitempty"`
+	// CveID matches one CVE exactly (case- and surrounding-whitespace-insensitive,
+	// no wildcards), unlike SearchQuery's substring match. A blank value means
+	// "not provided".
+	CveID string `json:"cveId,omitempty"`
 }
 
 // SearchProductVulnerabilitiesRequest is the input for POST /products/vulnerabilities/search.

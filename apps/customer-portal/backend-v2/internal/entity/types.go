@@ -1700,6 +1700,9 @@ type SearchProductVulnerabilitiesFilters struct {
 	Priority       *string `json:"priority,omitempty"`
 	ProductName    string  `json:"productName,omitempty"`
 	ProductVersion string  `json:"productVersion,omitempty"`
+	// CveID is an exact (case-insensitive, whitespace-trimmed) CVE match,
+	// ANDed with the other filters. Blank means not provided.
+	CveID string `json:"cveId,omitempty"`
 }
 
 // SearchProductVulnerabilitiesRequest is the input for POST /products/vulnerabilities/search.

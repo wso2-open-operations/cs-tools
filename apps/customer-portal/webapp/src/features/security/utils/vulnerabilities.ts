@@ -95,11 +95,11 @@ const isSameVulnerability = (
  * The backend stores one row per product, product version and component, so a
  * single CVE appears as many rows. `current` is always part of the result and
  * replaces any copy of itself in `all`, because it was fetched directly while
- * the list can be hours old. Each id appears once. Rows are ordered by product,
+ * the list may be a few minutes old. Each id appears once. Rows are ordered by product,
  * product version, component, component version, update level and finally id,
  * so the order never depends on how the backend returned them.
  *
- * @param all - Candidate records (typically the full product vulnerability list).
+ * @param all - Candidate records (the records the server returned for the CVE).
  * @param current - The vulnerability the details page is showing.
  * @returns The affected product records, including `current`.
  */

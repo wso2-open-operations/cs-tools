@@ -7746,6 +7746,17 @@ components:
               type: string
             productVersion:
               type: string
+            cveId:
+              type: string
+              maxLength: 100
+              description: >-
+                Exact CVE identifier match (not a substring match, no
+                wildcards). Case-insensitive and ignores surrounding
+                whitespace. A blank value is treated as not provided.
+                Combined with any other filter using AND. Not supported by
+                every backing data source: where it is not supported the
+                request is rejected with a validation error instead of being
+                silently ignored.
         pagination:
           $ref: '#/components/schemas/Pagination'
 
