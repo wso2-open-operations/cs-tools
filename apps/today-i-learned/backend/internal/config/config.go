@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entry"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/novera"
@@ -52,8 +51,6 @@ type Config struct {
 	// text a learning may have.
 	WhatMaxLength int
 
-	// Entity is nil when customer suggestions are off.
-	Entity *entity.Config
 	// Novera is nil when new entries aren't announced.
 	Novera *novera.Config
 }
@@ -87,15 +84,6 @@ func Load(getenv func(string) string) (Config, []string, error) {
 		WhatMaxLength:  r.intInRange("ENTRY_TEXT_MAX_LENGTH", entry.DefaultWhatMaxLength, 1, entry.MaxWhatMaxLength),
 	}
 
-	if r.anySet("ENTITY_SERVICE_BASE_URL", "ENTITY_SERVICE_TOKEN_URL", "ENTITY_SERVICE_CLIENT_ID", "ENTITY_SERVICE_CLIENT_SECRET") {
-		cfg.Entity = &entity.Config{
-			BaseURL:      r.url("ENTITY_SERVICE_BASE_URL", true),
-			TokenURL:     r.url("ENTITY_SERVICE_TOKEN_URL", true),
-			ClientID:     r.required("ENTITY_SERVICE_CLIENT_ID"),
-			ClientSecret: r.required("ENTITY_SERVICE_CLIENT_SECRET"),
-			Scopes:       r.list("ENTITY_SERVICE_SCOPES"),
-		}
-	}
 	if r.anySet("NOVERA_NOTIFY_URL", "NOVERA_TOKEN_URL", "NOVERA_CLIENT_ID", "NOVERA_CLIENT_SECRET") {
 		cfg.Novera = &novera.Config{
 			NotifyURL:    r.url("NOVERA_NOTIFY_URL", true),
@@ -115,9 +103,6 @@ func Load(getenv func(string) string) (Config, []string, error) {
 	}
 	if len(cfg.Auth.ModeratorGroups) == 0 {
 		warnings = append(warnings, "AUTH_MODERATOR_GROUPS is not set: only authors can edit or delete their entries")
-	}
-	if cfg.Entity == nil {
-		warnings = append(warnings, "ENTITY_SERVICE_* is not set: the form gets no customer suggestions")
 	}
 	if cfg.Novera == nil {
 		warnings = append(warnings, "NOVERA_* is not set: new entries are not announced in Google Chat")

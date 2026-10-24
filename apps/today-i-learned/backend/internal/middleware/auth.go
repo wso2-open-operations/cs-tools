@@ -175,6 +175,11 @@ func verify(token string, cfg AuthConfig, keyFunc jwt.Keyfunc) (*User, error) {
 	if c.Email == "" {
 		return nil, errors.New("token has no email claim")
 	}
+	// Every log line for the request names the caller by "sub", so a token
+	// without one would leave the audit log unattributed.
+	if c.Subject == "" {
+		return nil, errors.New("token has no subject claim")
+	}
 
 	clientIDs := append([]string(nil), c.Audience...)
 	if c.ClientID != "" {

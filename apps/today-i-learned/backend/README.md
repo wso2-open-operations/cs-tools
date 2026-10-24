@@ -60,7 +60,6 @@ them all.
 | `ONE_WSO2_BASE_URL` | no | The webapp's address, for the "Read more" link in Google Chat and the TIL logo it serves at `/til-logo.png` (shown only over https). |
 | `CORS_ALLOWED_ORIGINS` | no | Browser origins allowed to call the API. |
 | `PORT`, `REST_READ_TIMEOUT`, `REST_WRITE_TIMEOUT` | no | Defaults 9090, 15s, 45s. |
-| `ENTITY_SERVICE_*` | no | Customer-name suggestions from entity-service: the base URL, token URL, client id and secret together, or none. `ENTITY_SERVICE_SCOPES` is optional. |
 | `NOVERA_*` | no | Announcing new entries in Google Chat through Novera's `POST /internal/notifications`: all four or none. |
 
 ## API
@@ -73,9 +72,8 @@ written to be shown to people as they are.
 | GET | `/health` | Liveness. No token needed. |
 | GET | `/user-info` | `{email, displayName, canModerate}` |
 | GET | `/settings` | `{whatMaxLength, notificationsEnabled}`: the rules the webapp's form shows, and whether entries are announced. |
-| GET | `/customers/search?q=` | `[{id, name}]`; empty when suggestions are off. |
 | GET | `/submissions` | `{items, total, limit, offset}`, newest first. Query: `q` (search), `createdFrom` (inclusive) / `createdBefore` (exclusive) as RFC 3339 times, `author` (the author's name: every word starts a word in it), `source` (Customer, Partner, Internal or Other), `mine=true`, `limit` (1–100, default 10), `offset`. |
-| POST | `/submissions` | `{title, who, where, what, whereDetail?}`. Webapp only. Announced in Google Chat. |
+| POST | `/submissions` | `{title, where, what, whereDetail?}`. Webapp only. Announced in Google Chat. A `who` field is accepted and ignored. |
 | GET | `/submissions/{id}` | One entry. |
 | PUT | `/submissions/{id}` | `{title, where, what, whereDetail?}`. Webapp only; the author or a moderator. |
 | DELETE | `/submissions/{id}` | The author or a moderator. |
@@ -85,13 +83,20 @@ written to be shown to people as they are.
 
 - **Identity.** Each token's signature, issuer and expiry are checked against
   the published keys. `submittedByEmail` always comes from the token, never
-  the request, so no entry is anonymous and no one can post as someone else.
+  the request, and so does a new entry's byline, so no entry is anonymous and
+  no one can post as someone else.
 - **Webapp only.** Sharing and editing need a token issued to the webapp
   (`ONE_WSO2_WEBAPP_CLIENT_ID`). An employee's token from another
   application can read and delete, but not post.
 - **Authors and moderators.** Only an entry's author (by verified email) or
   a moderator can edit or delete it. An edit never changes the byline, and a
   save that changes nothing doesn't mark the entry as edited.
+- **Audit log.** Every share, edit, delete and resend logs one line: `entry
+  created`, `entry updated`, `entry deleted` or `entry sent to Google Chat`,
+  with the entry's `entryID` and the caller's `userID` (their token's `sub`).
+  An edit or delete also logs `byAuthor`, which is false when a moderator
+  changed someone else's entry. Nothing else about the entry is logged. A
+  delete can't be undone, so its line is the only record of it.
 - **Sanitising.** The learning is HTML from a rich-text editor. It is
   sanitised on every write to the editor's own formatting (paragraphs, line
   breaks, bold, italic, underline, lists, links), whatever the client sent.

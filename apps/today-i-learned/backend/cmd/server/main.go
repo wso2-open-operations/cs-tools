@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/config"
-	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/novera"
@@ -41,7 +40,7 @@ import (
 const maxBodyBytes = 256 << 10
 
 func main() {
-	middleware.ConfigureLogger()
+	middleware.ConfigureLogger(os.Stderr)
 	if err := run(); err != nil {
 		slog.Error("til-backend stopped", "err", err)
 		os.Exit(1)
@@ -75,9 +74,6 @@ func run() error {
 	}
 
 	hc := handler.Config{Store: db, WebappClientID: cfg.WebappClientID, WebappBaseURL: cfg.WebappBaseURL, WhatMaxLength: cfg.WhatMaxLength}
-	if cfg.Entity != nil {
-		hc.Customers = entity.New(*cfg.Entity)
-	}
 	if cfg.Novera != nil {
 		hc.Notifier = novera.New(*cfg.Novera)
 	}
@@ -126,7 +122,6 @@ func routes(h *handler.Handler) *http.ServeMux {
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /user-info", h.UserInfo)
 	mux.HandleFunc("GET /settings", h.Settings)
-	mux.HandleFunc("GET /customers/search", h.SearchCustomers)
 	mux.HandleFunc("GET /submissions", h.ListEntries)
 	mux.HandleFunc("POST /submissions", h.CreateEntry)
 	mux.HandleFunc("GET /submissions/{id}", h.GetEntry)

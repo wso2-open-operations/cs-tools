@@ -106,7 +106,7 @@ Backend for "Today I Learned" — a company-wide feed of learnings from customer
 
 | Component | Description |
 |-----------|-------------|
-| `backend` | Go service (`til-backend`) providing the entry, search, moderation, and customer-suggestion APIs |
+| `backend` | Go service (`til-backend`) providing the entry, search, and moderation APIs |
 
 See the [Today I Learned README](./apps/today-i-learned/README.md) for full setup and usage documentation.
 

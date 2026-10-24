@@ -25,9 +25,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"os"
 )
 
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -111,9 +111,9 @@ func newCorrelationID() string {
 
 // ConfigureLogger makes slog's default logger add the request's correlation
 // id and the signed-in user's subject to every line logged with a request
-// context. Call it once at startup.
-func ConfigureLogger() {
-	slog.SetDefault(slog.New(contextHandler{inner: slog.NewTextHandler(os.Stderr, nil)}))
+// context, writing to w. Call it once at startup.
+func ConfigureLogger(w io.Writer) {
+	slog.SetDefault(slog.New(contextHandler{inner: slog.NewTextHandler(w, nil)}))
 }
 
 type contextHandler struct {

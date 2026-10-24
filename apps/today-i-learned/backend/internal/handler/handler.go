@@ -28,7 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entry"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/store"
@@ -48,7 +47,6 @@ const (
 	msgBadRequest   = "The request isn't valid."
 	msgTooLarge     = "The request is too large."
 	msgInternal     = "Something went wrong. Please try again."
-	msgNoCustomers  = "Customer suggestions aren't available right now."
 )
 
 // Store is where entries are kept.
@@ -62,11 +60,6 @@ type Store interface {
 	ReleaseNotification(ctx context.Context, id string, at time.Time) error
 }
 
-// CustomerSearcher suggests customer names.
-type CustomerSearcher interface {
-	SearchCustomers(ctx context.Context, query string) ([]entity.Customer, error)
-}
-
 // Notifier announces an entry in Google Chat. It returns an error when the
 // announcement wasn't accepted.
 type Notifier interface {
@@ -76,9 +69,6 @@ type Notifier interface {
 // Config wires a Handler.
 type Config struct {
 	Store Store
-	// Customers is nil when customer suggestions aren't configured; the form
-	// then gets none and takes the name as typed.
-	Customers CustomerSearcher
 	// Notifier is nil when new entries aren't announced.
 	Notifier Notifier
 	// WebappClientID is the One WSO2 webapp's client id. Only a token issued
@@ -136,24 +126,6 @@ func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
 		// when there's something to send them to.
 		"notificationsEnabled": h.cfg.Notifier != nil,
 	})
-}
-
-// SearchCustomers suggests customer names for the form's "Customer name".
-func (h *Handler) SearchCustomers(w http.ResponseWriter, r *http.Request) {
-	if _, ok := currentUser(w, r); !ok {
-		return
-	}
-	if h.cfg.Customers == nil {
-		writeJSON(w, http.StatusOK, []entity.Customer{})
-		return
-	}
-	customers, err := h.cfg.Customers.SearchCustomers(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")))
-	if err != nil {
-		slog.ErrorContext(r.Context(), "customer search failed", "err", err)
-		writeError(w, http.StatusBadGateway, msgNoCustomers)
-		return
-	}
-	writeJSON(w, http.StatusOK, customers)
 }
 
 func currentUser(w http.ResponseWriter, r *http.Request) (*middleware.User, bool) {
