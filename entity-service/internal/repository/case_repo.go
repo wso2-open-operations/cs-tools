@@ -3134,6 +3134,7 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		) su ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
+		  ` + listedStoredAttachmentSQL + `
 		  AND NOT EXISTS (SELECT 1 FROM case_attachment dup WHERE dup.id = wa.id)`
 	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
 	const dataQuery = `
@@ -3202,6 +3203,14 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 	return attachments, total, nil
 }
 
+// listedStoredAttachmentSQL keeps an attachment out of a list when it should not
+// be shown: one the uploader deleted (status DELETED), one whose upload failed,
+// and an upload still in flight (status PENDING on a row the portal itself
+// created, which is told apart from a migrated row waiting for its file by its
+// legacy state column, always NULL for a row this service wrote).
+const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+
 // SearchWorkItemAttachments implements CaseRepository.
 //
 // Reads work_item_attachment, joined to work_item so that (a) the row's work
@@ -3237,7 +3246,8 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 	const where = `
 		WHERE wa.work_item_id = $1
 		  AND wi.type = ANY($2::text[]::work_item_type_enum[])
-		  AND wa.state IS DISTINCT FROM 'PENDING'`
+		  AND wa.state IS DISTINCT FROM 'PENDING'
+		  ` + listedStoredAttachmentSQL
 	const countQuery = `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
 	// created_by is a free-form string on this table; it is matched to a user
 	// by email (same convention as comment.created_by). The match is a
@@ -5173,6 +5183,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 
 	const syncedAttachmentFilter = `
 			  AND wa.state IS DISTINCT FROM 'PENDING'
+			  ` + listedStoredAttachmentSQL + `
 			  AND NOT EXISTS (SELECT 1 FROM case_attachment ca WHERE ca.id = wa.id)`
 
 	countQuery := `
