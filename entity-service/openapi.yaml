@@ -212,185 +212,180 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /customer-engagements/allocations/search:
+  /attachments/download:
     post:
-      summary: Search customer engagement allocations.
-      description: >
-        Read-only, internal staff only. One page of allocations with their
-        engagement, account and engineer, filtered, sorted (default: newest
-        `startDate` first) and counted. `limit` defaults to 20, at most 50.
-        Registered only when a database pool is configured.
-      operationId: searchEngagementAllocations
+      summary: >-
+        Get metadata, and a short-lived download link for each stored file, for
+        attachments of one kind (work item, comment image or deployment). The
+        link is an SFTPGo share on exactly that one file: the browser fetches the
+        file straight from SFTPGo, and no SFTPGo credential ever reaches it. An
+        id the caller may not see is left out of the response, the same as one
+        that does not exist. Not registered (404) unless SFTPGO_URL,
+        SFTPGO_USER and SFTPGO_PASSWORD are set. The response is never cacheable.
+      operationId: resolveAttachmentLinks
+      security:
+        - clientAssertion: []
+          userIdToken: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SearchEngagementAllocationsRequest'
+              $ref: '#/components/schemas/AttachmentLinksRequest'
       responses:
         "200":
-          description: One page of allocations.
+          description: One entry per visible attachment, in the order asked.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SearchEngagementAllocationsResponse'
+                $ref: '#/components/schemas/AttachmentLinksResponse'
         "400":
-          description: Bad request (unknown field, malformed id, date or state, limit above 50).
+          description: Unknown kind, no ids, more than 100 ids, or an id that is not a UUID.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: No valid user token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: The caller is not internal staff.
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /customer-engagements/allocations/{id}:
-    get:
-      summary: One customer engagement allocation.
-      description: Read-only, internal staff only.
-      operationId: getEngagementAllocation
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200":
-          description: The allocation.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EngagementAllocationView'
-        "400":
-          description: The id is not a UUID.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: No valid user token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: The caller is not internal staff.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No such allocation.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /customer-engagements/allocations/{id}/updates:
-    get:
-      summary: The status updates written against an allocation, newest first.
-      description: Read-only, internal staff only. `limit` defaults to 20, at most 50.
-      operationId: listEngagementAllocationUpdates
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: limit
-          in: query
-          schema: { type: integer }
-        - name: offset
-          in: query
-          schema: { type: integer }
-      responses:
-        "200":
-          description: One page of updates.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListEngagementAllocationUpdatesResponse'
-        "400":
-          description: Bad id, limit or offset.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: No valid user token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: The caller is not internal staff.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No such allocation.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+  /attachments/upload:
     post:
-      summary: Post a status update on an allocation, as the engineer allocated.
-      description: >
-        Only the engineer the allocation is for may post: the caller's email
-        (from the user token) is resolved to the platform user record and that
-        id must equal the allocation's engineer. The server sets the author,
-        and stores the update as PUBLISHED, INTERNAL, INDIVIDUAL, WEEKLY, with
-        the Monday (UTC) of the current week as `cycleStartDate`. No
-        notification is sent. `subject` is required, at most 512 characters;
-        `content` is required, at most 8000.
-      operationId: createEngagementAllocationUpdate
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
+      summary: >-
+        Start an upload. Checks the caller may add a file to the parent (a
+        REGISTERED member of its project, or internal), that the work item is not
+        closed (refused for every caller), and the size and type. Records a
+        PENDING attachment and returns a one-use link: the browser POSTs a
+        multipart form with the file in the field named by fieldName to uploadUrl
+        before expiresAt, then calls confirm. A comment image (kind comment) may
+        only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
+        before its comment exists. Not registered (404) without the SFTPGo
+        settings. The response is never cacheable.
+      operationId: initiateAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateEngagementAllocationUpdateRequest'
+              $ref: '#/components/schemas/InitiateAttachmentUploadRequest'
       responses:
         "201":
-          description: The stored update.
+          description: The upload was started.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EngagementAllocationUpdate'
+                $ref: '#/components/schemas/InitiateAttachmentUploadResponse'
         "400":
-          description: Missing or too long subject or content, or a bad id.
+          description: 'Invalid request: kind, parentId, name, contentType, or sizeBytes over the limit.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: No valid user token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "403":
-          description: The caller is not the engineer allocated, or not internal staff.
+          description: x-user-id-token is missing.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: No such allocation.
+          description: The parent does not exist or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, so new attachments cannot be added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/upload/{id}/confirm:
+    post:
+      summary: >-
+        Finish an upload. Checks the file that arrived (exactly one file, its
+        size against the size declared and the limit, and for a comment image
+        its real type by its bytes), re-checks that the work item is still open,
+        moves the file to its final path and marks the attachment COMPLETE. Only
+        the person who started the upload can confirm it. A rejected upload is
+        thrown away and cannot be confirmed again. Repeating a confirm that
+        already succeeded answers the same. A 503 leaves the upload in place, so
+        confirm can be retried.
+      operationId: confirmAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The attachmentId returned by the upload start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmAttachmentUploadRequest'
+      responses:
+        "200":
+          description: The stored attachment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmAttachmentUploadResponse'
+        "400":
+          description: 'The upload was rejected: no file or more than one, wrong size, over the limit, or not an image.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such attachment, or it is not the caller's upload."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, the upload was already rejected, or it was confirmed concurrently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; confirm can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:
@@ -39579,228 +39574,157 @@ components:
           type: string
           description: Why it could not be landed. Required and must not be empty.
 
-    SkillLevel:
+    StoredAttachmentKind:
+      type: string
+      enum: [work_item, comment, deployment]
+      description: >-
+        Which attachment table: work_item (work_item_attachment), comment (the
+        images embedded in a comment, comment_attachment) or deployment
+        (deployment_attachment).
+
+    AttachmentLinksRequest:
       type: object
-      required: [id, name]
+      required: [kind, ids]
+      additionalProperties: false
       properties:
-        id: {type: string, format: uuid}
-        name: {type: string}
-        value: {type: integer, nullable: true, description: "Orders the levels of a scale (for example 20, 50, 100)."}
-        description: {type: string, nullable: true}
-        color: {type: string, nullable: true}
-    SkillLevelType:
-      type: object
-      required: [id, name, levels]
-      properties:
-        id: {type: string, format: uuid}
-        name: {type: string}
-        description: {type: string, nullable: true}
-        levels:
+        kind:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        ids:
           type: array
-          items: {$ref: '#/components/schemas/SkillLevel'}
-    SkillLevelTypesResponse:
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+
+    AttachmentLink:
       type: object
-      required: [levelTypes]
+      required: [id, number, name, available]
       properties:
-        levelTypes:
-          type: array
-          items: {$ref: '#/components/schemas/SkillLevelType'}
-    SkillCategory:
-      type: object
-      required: [id, name, isLowestCategory]
-      properties:
-        id: {type: string, format: uuid}
-        name: {type: string}
-        code: {type: string, nullable: true}
-        categoryPath: {type: string, nullable: true}
-        isLowestCategory: {type: boolean}
-        parentId: {type: string, format: uuid, nullable: true}
-    SkillCategoriesResponse:
-      type: object
-      required: [categories]
-      properties:
-        categories:
-          type: array
-          items: {$ref: '#/components/schemas/SkillCategory'}
-    SkillCategoryRef:
-      type: object
-      required: [id, name]
-      properties:
-        id: {type: string, format: uuid}
-        name: {type: string}
-        categoryPath: {type: string, nullable: true}
-    Skill:
-      type: object
-      required: [id, name, active, categories, createdOn, updatedOn]
-      properties:
-        id: {type: string, format: uuid}
-        name: {type: string}
-        description: {type: string, nullable: true}
-        keywords: {type: string, nullable: true}
-        active: {type: boolean}
-        levelTypeId: {type: string, format: uuid, nullable: true}
-        categories:
-          type: array
-          items: {$ref: '#/components/schemas/SkillCategoryRef'}
-        createdOn: {type: string, format: date-time}
-        updatedOn: {type: string, format: date-time}
-    SearchSkillsRequest:
-      type: object
-      properties:
-        searchQuery: {type: string, description: "Matches the name or keywords, ignoring case."}
-        categoryIds:
-          type: array
-          items: {type: string, format: uuid}
-          description: Skills filed under any of these categories or their descendants.
-        levelTypeId: {type: string, format: uuid}
-        includeInactive: {type: boolean, description: "Include deactivated skills. Default false."}
-        pagination: {$ref: '#/components/schemas/SkillPagination'}
-    SkillPagination:
-      type: object
-      properties:
-        limit: {type: integer, description: "Page size. Defaults to the endpoint's default; above its maximum is a 400."}
-        offset: {type: integer, description: "Zero-based offset."}
-    SearchSkillsResponse:
-      type: object
-      required: [skills, total, limit, offset]
-      properties:
-        skills:
-          type: array
-          items: {$ref: '#/components/schemas/Skill'}
-        total: {type: integer}
-        limit: {type: integer}
-        offset: {type: integer}
-    CreateSkillRequest:
-      type: object
-      required: [name, levelTypeId]
-      properties:
-        name: {type: string, maxLength: 255}
-        description: {type: string, nullable: true, maxLength: 4000}
-        keywords: {type: string, nullable: true, maxLength: 500}
-        levelTypeId: {type: string, format: uuid}
-        categoryIds:
-          type: array
-          items: {type: string, format: uuid}
-        active: {type: boolean, description: "Defaults to true."}
-    UpdateSkillRequest:
-      type: object
-      description: Fields left out are unchanged. At least one is required.
-      properties:
-        name: {type: string, maxLength: 255}
-        description: {type: string, maxLength: 4000, description: "An empty string clears it."}
-        keywords: {type: string, maxLength: 500, description: "An empty string clears it."}
-        active: {type: boolean}
-        levelTypeId: {type: string, format: uuid, description: "Refused (409) while anybody holds a level of the skill."}
-        categoryIds:
-          type: array
-          items: {type: string, format: uuid}
-          description: Replaces the category links as a whole; an empty list removes them all.
-    UserSkill:
-      type: object
-      required: [skillId, skillName, skillActive, categories, inherited, updatedOn]
-      properties:
-        skillId: {type: string, format: uuid}
-        skillName: {type: string}
-        skillActive: {type: boolean}
-        categories:
-          type: array
-          items: {$ref: '#/components/schemas/SkillCategoryRef'}
-        levelTypeId: {type: string, format: uuid, nullable: true}
-        level:
-          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: The attachment's number (WIA…, CA…, DA…).
+        name:
+          type: string
+        contentType:
+          type: string
           nullable: true
-        inherited: {type: boolean, description: "True when the row comes from a group; the person cannot change it."}
-        inheritedFromGroupId: {type: string, format: uuid, nullable: true}
-        updatedOn: {type: string, format: date-time}
-    MySkillsResponse:
-      type: object
-      required: [userId, skills]
-      properties:
-        userId: {type: string, format: uuid, description: "The caller's own user id."}
-        skills:
-          type: array
-          items: {$ref: '#/components/schemas/UserSkill'}
-    AddMySkillRequest:
-      type: object
-      required: [skillId, levelId]
-      properties:
-        skillId: {type: string, format: uuid}
-        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
-    SetMySkillLevelRequest:
-      type: object
-      required: [levelId]
-      properties:
-        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
-    SkillHistoryEntry:
-      type: object
-      required: [id, skillId, skillName, changedOn]
-      properties:
-        id: {type: string, format: uuid}
-        skillId: {type: string, format: uuid}
-        skillName: {type: string}
-        levelFrom:
-          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+        sizeBytes:
+          type: integer
+          format: int64
           nullable: true
-          description: Null the first time the skill was set.
-        levelTo:
-          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+        available:
+          type: boolean
+          description: True when url can be used to fetch the file.
+        reason:
+          type: string
+          enum: [NOT_STORED, FAILED, STORAGE_UNAVAILABLE]
+          description: >-
+            Why there is no link. NOT_STORED: the file is not in SFTPGo (an
+            upload never confirmed). FAILED: the upload was rejected.
+            STORAGE_UNAVAILABLE: SFTPGo could not be reached just now, so trying
+            again can work.
+        url:
+          type: string
+          format: uri
+          description: >-
+            Where the browser fetches the file. Valid until expiresAt, and
+            usable a limited number of times, so request a new one rather than
+            keeping it.
+        expiresAt:
+          type: string
+          format: date-time
+
+    AttachmentLinksResponse:
+      type: object
+      required: [links]
+      properties:
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentLink'
+
+    InitiateAttachmentUploadRequest:
+      type: object
+      required: [kind, parentId, name, sizeBytes]
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            The work item (kinds work_item and comment) or the deployment (kind
+            deployment) the file belongs to.
+        name:
+          type: string
+          maxLength: 255
+        contentType:
+          type: string
+          description: >-
+            Required for kind comment, where it must be image/png, image/jpeg,
+            image/gif or image/webp. Defaults to application/octet-stream
+            otherwise.
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            The file's size. Checked against ATTACHMENT_MAX_BYTES (kind comment:
+            INLINE_IMAGE_MAX_BYTES), and the uploaded file must match it.
+
+    InitiateAttachmentUploadResponse:
+      type: object
+      required: [attachmentId, number, uploadUrl, fieldName, expiresAt, maxBytes]
+      properties:
+        attachmentId:
+          type: string
+          format: uuid
+        number:
+          type: string
+        uploadUrl:
+          type: string
+          format: uri
+          description: POST a multipart form here, once, before expiresAt.
+        fieldName:
+          type: string
+          description: The multipart field the file goes in (filenames).
+        expiresAt:
+          type: string
+          format: date-time
+        maxBytes:
+          type: integer
+          format: int64
+
+    ConfirmAttachmentUploadRequest:
+      type: object
+      required: [kind]
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+
+    ConfirmAttachmentUploadResponse:
+      type: object
+      required: [id, number, name, sizeBytes, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
           nullable: true
-          description: Null when the skill was removed.
-        changedBy: {type: string, nullable: true, description: "Who made the change."}
-        changedOn: {type: string, format: date-time}
-    SkillHistoryResponse:
-      type: object
-      required: [history, total, limit, offset]
-      properties:
-        history:
-          type: array
-          items: {$ref: '#/components/schemas/SkillHistoryEntry'}
-        total: {type: integer}
-        limit: {type: integer}
-        offset: {type: integer}
-    SearchUserSkillsRequest:
-      type: object
-      properties:
-        searchQuery: {type: string, description: "Matches the person's name or email, ignoring case."}
-        userIds:
-          type: array
-          items: {type: string, format: uuid}
-        skillIds:
-          type: array
-          items: {type: string, format: uuid}
-        levelIds:
-          type: array
-          items: {type: string, format: uuid}
-        minLevelValue: {type: integer, nullable: true, description: "Rows whose level value is at least this."}
-        teamKeys:
-          type: array
-          items: {type: string}
-          description: People on any of these teams (registry keys).
-        pagination: {$ref: '#/components/schemas/SkillPagination'}
-    UserSkillRow:
-      type: object
-      required: [userId, teamKeys, skillId, skillName, inherited, updatedOn]
-      properties:
-        userId: {type: string, format: uuid}
-        userName: {type: string, nullable: true}
-        userEmail: {type: string, nullable: true}
-        teamKeys:
-          type: array
-          items: {type: string}
-        skillId: {type: string, format: uuid}
-        skillName: {type: string}
-        level:
-          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
-          nullable: true
-        inherited: {type: boolean}
-        updatedOn: {type: string, format: date-time}
-    SearchUserSkillsResponse:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: {$ref: '#/components/schemas/UserSkillRow'}
-        total: {type: integer}
-        limit: {type: integer}
-        offset: {type: integer}
+        sizeBytes:
+          type: integer
+          format: int64
+        status:
+          type: string
+          example: COMPLETE

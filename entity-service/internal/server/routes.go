@@ -30,6 +30,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -726,6 +727,25 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var onboardingStepHandler *handler.OnboardingStepHandler
 	if db != nil {
 		onboardingStepHandler = handler.NewOnboardingStepHandler(service.NewOnboardingStepService(repository.NewOnboardingStepRepository(db), accessSvc))
+	}
+
+	// Links to the attachment files held in SFTPGo (work item, comment-image and
+	// deployment attachments). Needs a pool, because the metadata and the access
+	// rules (row-level security) live in Postgres, and the SFTPGo settings: with
+	// either missing the routes are not registered and 404, so nothing here can
+	// reach SFTPGo half configured.
+	var storedAttachmentHandler *handler.StoredAttachmentHandler
+	if db != nil && cfg.HasSFTPGo() {
+		storedAttachmentHandler = handler.NewStoredAttachmentHandler(service.NewStoredAttachmentService(
+			repository.NewStoredAttachmentRepository(repository.NewScoped(db)),
+			filestore.NewClient(cfg.SFTPGoURL, cfg.SFTPGoPublicURL, cfg.SFTPGoUser, cfg.SFTPGoPassword),
+			service.StoredAttachmentLimits{
+				MaxBytes:       cfg.AttachmentMaxBytes,
+				InlineMaxBytes: cfg.InlineImageMaxBytes,
+				ReadLinkTTL:    cfg.AttachmentReadLinkTTL,
+				UploadLinkTTL:  cfg.AttachmentUploadLinkTTL,
+			},
+		))
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND
@@ -2120,6 +2140,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PUT /onboarding-steps/{membershipSfId}/{step}", onboardingStepHandler.UpsertOnboardingStep)
 		mux.HandleFunc("GET /onboarding-steps/{membershipSfId}", onboardingStepHandler.GetOnboardingSteps)
 		mux.HandleFunc("POST /onboarding-steps/search", onboardingStepHandler.SearchOnboardingSteps)
+	}
+	if storedAttachmentHandler != nil {
+		mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
+		mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
+		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and
