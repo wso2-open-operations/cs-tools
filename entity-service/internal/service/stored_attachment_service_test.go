@@ -17,8 +17,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -625,5 +628,62 @@ func TestConfirmUpload_UnknownAttachmentIsNotFound(t *testing.T) {
 	var nerr *apierror.NotFoundError
 	if !errors.As(err, &nerr) {
 		t.Fatalf("err = %v, want NotFoundError", err)
+	}
+}
+
+// captureAudit runs fn with the default logger writing JSON lines, and returns
+// the lines that carry the audit marker.
+func captureAudit(t *testing.T, fn func()) []map[string]any {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+	fn()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) == nil && m["audit"] == true {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func TestAudit_EveryLinkNamesWhoGotItAndWhichShare(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.pdf"
+	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Name: "a.pdf", Status: "COMPLETE", StorageKey: &key}
+	svc := newStoredSvc(repo, store)
+
+	lines := captureAudit(t, func() {
+		if _, err := svc.ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.InitiateUpload(saCtx(t, saEmail), initReq()); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(lines) != 2 {
+		t.Fatalf("audit lines = %d, want one per link (a download and an upload): %v", len(lines), lines)
+	}
+	for i, want := range []string{"download", "upload"} {
+		l := lines[i]
+		if l["action"] != want || l["actor"] != saEmail || l["attachmentId"] != saAttID || l["shareId"] == "" || l["shareId"] == nil || l["kind"] != "work_item" {
+			t.Errorf("line %d = %v", i, l)
+		}
+	}
+}
+
+func TestAudit_NoLineWhenNoLinkWasCreated(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	store.shareErr = errors.New("sftpgo down")
+	key := "k/a.pdf"
+	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Status: "COMPLETE", StorageKey: &key}
+	lines := captureAudit(t, func() {
+		_, _ = newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}})
+	})
+	if len(lines) != 0 {
+		t.Errorf("a link that was not created must not be logged as created: %v", lines)
 	}
 }

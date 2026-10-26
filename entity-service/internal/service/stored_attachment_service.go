@@ -134,6 +134,30 @@ func storageUnavailable(ctx context.Context, what string, err error) error {
 	return &apierror.ServiceUnavailableError{Msg: "file storage is unavailable, please try again"}
 }
 
+// auditActorEmail is the caller's email for the audit log, or "" when it cannot be
+// read. It never fails a request: the access decision does not depend on it.
+func auditActorEmail(ctx context.Context) string {
+	token := middleware.UserIDTokenFromContext(ctx)
+	if token == "" {
+		return ""
+	}
+	email, err := emailFromJWT(token)
+	if err != nil {
+		return ""
+	}
+	return email
+}
+
+// auditLink records who was given a link to which attachment. SFTPGo only sees
+// the one service user for every transfer, so this line (with the share id,
+// which SFTPGo's own log also carries) is how a download or an upload is tied
+// to a person. The access log's correlation id and callerId sit beside it.
+func auditLink(ctx context.Context, action, actor string, kind domain.StoredAttachmentKind, attachmentID, shareID string, expires time.Time) {
+	slog.InfoContext(ctx, "attachment link created",
+		"audit", true, "action", action, "actor", actor, "kind", string(kind),
+		"attachmentId", attachmentID, "shareId", shareID, "expiresAt", expires)
+}
+
 // ResolveLinks implements StoredAttachmentService.
 func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error) {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
@@ -159,13 +183,14 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 		byID[strings.ToLower(row.ID)] = row
 	}
 
+	actor := auditActorEmail(ctx)
 	links := make(map[string]domain.AttachmentLink, len(rows))
 	var g errgroup.Group
 	g.SetLimit(attachmentLinkConcurrency)
 	results := make(chan domain.AttachmentLink, len(rows))
 	for _, row := range rows {
 		g.Go(func() error {
-			results <- s.linkFor(ctx, row)
+			results <- s.linkFor(ctx, actor, req.Kind, row)
 			return nil
 		})
 	}
@@ -193,7 +218,7 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 
 // linkFor builds one attachment's entry, creating its download share when the
 // file is stored. A storage failure makes only that entry unavailable.
-func (s *storedAttachmentService) linkFor(ctx context.Context, row domain.StoredAttachmentRow) domain.AttachmentLink {
+func (s *storedAttachmentService) linkFor(ctx context.Context, actor string, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow) domain.AttachmentLink {
 	l := domain.AttachmentLink{
 		ID: row.ID, Number: row.Number, Name: row.Name,
 		ContentType: row.ContentType, SizeBytes: row.SizeBytes,
@@ -216,6 +241,7 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, row domain.Stored
 		l.Reason = domain.AttachmentUnavailableStorage
 		return l
 	}
+	auditLink(ctx, "download", actor, kind, row.ID, shareID, expires)
 	l.Available = true
 	l.URL = s.store.DownloadURL(shareID)
 	l.ExpiresAt = &expires
@@ -287,6 +313,7 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		s.failQuietly(ctx, req.Kind, row.ID, "upload link could not be created")
 		return domain.InitiateAttachmentUploadResponse{}, storageUnavailable(ctx, "open upload share", err)
 	}
+	auditLink(ctx, "upload", email, req.Kind, row.ID, shareID, expires)
 	return domain.InitiateAttachmentUploadResponse{
 		AttachmentID: row.ID,
 		Number:       row.Number,
