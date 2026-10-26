@@ -289,3 +289,90 @@ func TestStoredAttachment_FailedRowCannotBeCompleted(t *testing.T) {
 		t.Error("a FAILED upload was completed")
 	}
 }
+
+// MarkDeleted soft-deletes a COMPLETE attachment (once), records who and when,
+// and the lists then skip it, along with a failed upload and an upload still in
+// flight, while a migrated row that is merely waiting for its file stays listed.
+func TestStoredAttachment_MarkDeletedAndTheLists(t *testing.T) {
+	pool, repo := storedAttachmentFixture(t)
+	ctx := saSystemCtx()
+	scoped := repository.NewScoped(pool)
+	cases := repository.NewCaseRepository(scoped)
+
+	const (
+		failedID   = "5a000000-0000-0000-0000-0000000000f1"
+		inFlightID = "5a000000-0000-0000-0000-0000000000f2"
+		legacyID   = "5a000000-0000-0000-0000-0000000000f3"
+	)
+	insert := func(id, status, state string) {
+		t.Helper()
+		if _, err := scoped.Exec(ctx, `
+			INSERT INTO work_item_attachment (id, created_on, updated_on, created_by, updated_by, name, work_item_id, size_bytes, status, state)
+			VALUES ($1, now(), now(), 'sa-seed', 'sa-seed', 'seed.bin', $2, 5, $3::attachment_status_enum, NULLIF($4, '')::work_item_attachment_state_enum)`,
+			id, saWIOpen, status, state); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	insert(failedID, "FAILED", "")
+	insert(inFlightID, "PENDING", "")        // an upload the portal started: no legacy state
+	insert(legacyID, "PENDING", "AVAILABLE") // a migrated row waiting for its file
+
+	row, err := repo.InsertPending(saCustomerCtx(), domain.StoredAttachmentWorkItem, domain.StoredAttachmentInsert{
+		ParentID: saWIOpen, Name: "a.pdf", ContentType: "application/pdf", SizeBytes: 10, CreatedBy: saCustomer,
+	})
+	if err != nil {
+		t.Fatalf("InsertPending: %v", err)
+	}
+
+	listed := func() map[string]bool {
+		t.Helper()
+		got, _, err := cases.SearchCaseAttachments(ctx, saWIOpen, domain.Pagination{Limit: 50})
+		if err != nil {
+			t.Fatalf("SearchCaseAttachments: %v", err)
+		}
+		out := map[string]bool{}
+		for _, a := range got {
+			out[a.ID] = true
+		}
+		return out
+	}
+
+	// Only a COMPLETE attachment can be deleted.
+	if ok, err := repo.MarkDeleted(ctx, domain.StoredAttachmentWorkItem, row.ID, saCustomer); err != nil || ok {
+		t.Fatalf("MarkDeleted on a PENDING row = %v, %v; want false, nil", ok, err)
+	}
+	if l := listed(); l[row.ID] || l[failedID] || l[inFlightID] || !l[legacyID] {
+		t.Errorf("before completion: listed = %v, want only the migrated row", l)
+	}
+
+	if ok, err := repo.MarkComplete(ctx, domain.StoredAttachmentWorkItem, row.ID, "csm/x/wia_a.pdf", 10); err != nil || !ok {
+		t.Fatalf("MarkComplete = %v, %v", ok, err)
+	}
+	if l := listed(); !l[row.ID] || !l[legacyID] || l[failedID] || l[inFlightID] {
+		t.Errorf("after completion: listed = %v", l)
+	}
+
+	if ok, err := repo.MarkDeleted(ctx, domain.StoredAttachmentWorkItem, row.ID, saCustomer); err != nil || !ok {
+		t.Fatalf("MarkDeleted = %v, %v; want true", ok, err)
+	}
+	if ok, err := repo.MarkDeleted(ctx, domain.StoredAttachmentWorkItem, row.ID, saCustomer); err != nil || ok {
+		t.Errorf("a second MarkDeleted = %v, %v; want false (already deleted)", ok, err)
+	}
+
+	var status, by string
+	var on *time.Time
+	if err := scoped.QueryRow(ctx, `SELECT status::text, COALESCE(deleted_by, ''), deleted_on FROM work_item_attachment WHERE id = $1`, row.ID).Scan(&status, &by, &on); err != nil {
+		t.Fatal(err)
+	}
+	if status != "DELETED" || by != saCustomer || on == nil {
+		t.Errorf("row = %s / %q / %v, want DELETED by the caller with a time", status, by, on)
+	}
+	if l := listed(); l[row.ID] || !l[legacyID] {
+		t.Errorf("after delete: listed = %v, want the deleted row gone and the migrated row kept", l)
+	}
+
+	// The caller cannot reach it any other way either: UPDATE is internal-only.
+	if ok, err := repo.MarkDeleted(saCustomerCtx(), domain.StoredAttachmentWorkItem, legacyID, saCustomer); err == nil && ok {
+		t.Error("an external caller marked an attachment deleted directly")
+	}
+}

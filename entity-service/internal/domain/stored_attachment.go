@@ -40,6 +40,9 @@ const (
 	// AttachmentUnavailableStorage: the file store could not be reached, so no
 	// link could be made right now. Trying again later can succeed.
 	AttachmentUnavailableStorage = "STORAGE_UNAVAILABLE"
+	// AttachmentUnavailableDeleted: the attachment was deleted by the person who
+	// uploaded it; its file is gone.
+	AttachmentUnavailableDeleted = "DELETED"
 )
 
 // AttachmentLinksRequest is the body of POST /attachments/download.
@@ -114,6 +117,14 @@ type ConfirmAttachmentUploadResponse struct {
 	Status      string  `json:"status"`
 }
 
+// DeleteStoredAttachmentRequest is the body of POST /attachments/delete.
+type DeleteStoredAttachmentRequest struct {
+	// Kind is work_item or deployment; an inline comment image is not deleted
+	// on its own.
+	Kind StoredAttachmentKind `json:"kind"`
+	ID   string               `json:"id"`
+}
+
 // StoredAttachmentParent is what an attachment hangs from, as the caller is
 // allowed to see it: a work item or a deployment. It carries what the file's
 // path is built from and whether new files may still be added.
@@ -135,7 +146,7 @@ type StoredAttachmentRow struct {
 	Name        string
 	ContentType *string
 	SizeBytes   *int64
-	// Status is PENDING, COMPLETE, FAILED or SOURCE_MISSING.
+	// Status is PENDING, COMPLETE, FAILED, SOURCE_MISSING or DELETED.
 	Status     string
 	StorageKey *string
 	CreatedBy  string

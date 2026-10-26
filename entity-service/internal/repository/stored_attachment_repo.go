@@ -55,6 +55,10 @@ type StoredAttachmentRepository interface {
 	MarkComplete(ctx context.Context, kind domain.StoredAttachmentKind, id, storageKey string, sizeBytes int64) (bool, error)
 	// MarkFailed records why a PENDING attachment's upload was rejected.
 	MarkFailed(ctx context.Context, kind domain.StoredAttachmentKind, id, detail string) error
+	// MarkDeleted soft-deletes a COMPLETE attachment: status DELETED, with who
+	// and when. It reports false when the row is no longer COMPLETE (already
+	// deleted by another request). Meant for repository.WithSystemIdentity.
+	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
 }
 
 type storedAttachmentRepo struct {
@@ -233,4 +237,20 @@ func (r *storedAttachmentRepo) MarkFailed(ctx context.Context, kind domain.Store
 		return fmt.Errorf("mark attachment failed: %w", err)
 	}
 	return nil
+}
+
+// MarkDeleted implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error) {
+	t, err := storedAttachmentTableFor(kind)
+	if err != nil {
+		return false, err
+	}
+	ct, err := r.db.Exec(ctx, `
+		UPDATE `+t.table+`
+		SET status = 'DELETED', deleted_on = now(), deleted_by = $2, updated_on = now(), updated_by = $2
+		WHERE id = $1 AND status = 'COMPLETE'`, id, deletedBy)
+	if err != nil {
+		return false, fmt.Errorf("mark attachment deleted: %w", err)
+	}
+	return ct.RowsAffected() == 1, nil
 }

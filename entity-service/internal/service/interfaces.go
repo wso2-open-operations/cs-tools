@@ -1679,4 +1679,9 @@ type StoredAttachmentService interface {
 	// marks the attachment COMPLETE. Only the person who started the upload can
 	// confirm it. Repeating a confirm that already succeeded answers the same.
 	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
+	// DeleteAttachment soft-deletes an attachment: its file is removed from
+	// SFTPGo and the row is marked DELETED. Only the person who uploaded it may
+	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
+	// ConflictError). Repeating a delete that already succeeded answers the same.
+	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
 }

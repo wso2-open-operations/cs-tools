@@ -30,7 +30,13 @@ import (
 type fakeStoredAttachmentSvc struct {
 	links   domain.AttachmentLinksRequest
 	confirm domain.ConfirmAttachmentUploadRequest
+	deleted domain.DeleteStoredAttachmentRequest
 	err     error
+}
+
+func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
+	f.deleted = req
+	return f.err
 }
 
 func (f *fakeStoredAttachmentSvc) ResolveLinks(_ context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error) {
@@ -54,6 +60,7 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 	mux.HandleFunc("POST /attachments/download", h.ResolveLinks)
 	mux.HandleFunc("POST /attachments/upload", h.InitiateUpload)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
+	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
 	return rec
@@ -112,6 +119,34 @@ func TestStoredAttachmentHandler_MapsServiceErrorsToStatuses(t *testing.T) {
 		"storage":     {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
 	} {
 		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/upload/00000000-0000-0000-0000-000000000001/confirm", `{"kind":"work_item"}`)
+		if rec.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestStoredAttachmentHandler_DeleteReturns204WithNoBody(t *testing.T) {
+	svc := &fakeStoredAttachmentSvc{}
+	rec := serveStored(t, svc, http.MethodPost, "/attachments/delete", `{"kind":"work_item","id":"abc"}`)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("status = %d body = %q, want 204 and no body", rec.Code, rec.Body.String())
+	}
+	if svc.deleted.Kind != domain.StoredAttachmentWorkItem || svc.deleted.ID != "abc" {
+		t.Errorf("request = %+v", svc.deleted)
+	}
+}
+
+func TestStoredAttachmentHandler_DeleteMapsErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"not the uploader": {&apierror.ForbiddenError{Msg: "x"}, http.StatusForbidden},
+		"closed item":      {&apierror.ConflictError{Msg: "closed"}, http.StatusConflict},
+		"not found":        {&apierror.NotFoundError{Msg: "x"}, http.StatusNotFound},
+		"storage":          {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
+	} {
+		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/delete", `{"kind":"deployment","id":"a"}`)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}

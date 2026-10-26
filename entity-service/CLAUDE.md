@@ -1901,6 +1901,19 @@ beside migrated ones), and marks the row `COMPLETE` as the system. A rejected up
 the row `FAILED`; a storage error leaves the row `PENDING` and the file staged so confirm can be
 retried.
 
+**Delete (`POST /attachments/delete`, body `{kind, id}` -> 204).** A soft delete: the file is
+removed from SFTPGo first (`DELETE /api/v2/user/files`, a file already gone is fine), then the row
+is marked `DELETED` with `deleted_on`/`deleted_by` (migration 0249; the file-first order means a
+failure in between leaves a `COMPLETE` row whose file is gone, and repeating the call finishes it).
+For now **only the person who uploaded it may delete** (`created_by` = the caller's email, case
+ignored; anyone else who can see it gets 403; the "internal admin" rule is still to be decided), and
+**never once the work item is closed** (409). The decision is made in the service, not by RLS:
+UPDATE on these tables is internal-only, so the mark runs under `WithSystemIdentity` like confirm.
+An image embedded in a comment is not deleted on its own (400). A repeated delete answers 204. A
+`DELETED` attachment has no download link (reason `DELETED`), and the case attachment lists and
+the activity feed skip it (`listedStoredAttachmentSQL`, which also hides `FAILED` rows and uploads
+still in flight). Each delete writes an `attachment deleted` audit line like the link lines.
+
 **Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
 under the attachment tables' RLS (migration 100026): an external caller needs to be a
 `REGISTERED` member of the parent's project, a parent with no project is internal-only, and an

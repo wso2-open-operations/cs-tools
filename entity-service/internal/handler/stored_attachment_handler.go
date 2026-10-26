@@ -78,6 +78,20 @@ func (h *StoredAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.R
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
+// DeleteAttachment handles POST /attachments/delete.
+func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	var req domain.DeleteStoredAttachmentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	if err := h.svc.DeleteAttachment(r.Context(), req); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // writeStoredAttachmentJSON writes a response that carries short-lived links, so
 // it must never be cached by a browser or an intermediary.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body any) {

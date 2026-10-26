@@ -63,6 +63,9 @@ type fakeStoredRepo struct {
 	inserted  []domain.StoredAttachmentInsert
 	insertErr error
 
+	deleted     map[string]string // id -> deleted_by
+	deleteCtx   []bool            // whether each MarkDeleted ran as the system
+	deleteOK    bool
 	completed   map[string]string // id -> storage key
 	completeCtx []bool            // whether each MarkComplete ran as the system
 	completeOK  bool
@@ -74,8 +77,10 @@ func newFakeStoredRepo() *fakeStoredRepo {
 		parent:     domain.StoredAttachmentParent{ID: saParentID, Number: "CS0001", ProjectNumber: "PRJ-9"},
 		rows:       map[string]domain.StoredAttachmentRow{},
 		completed:  map[string]string{},
+		deleted:    map[string]string{},
 		failed:     map[string]string{},
 		completeOK: true,
+		deleteOK:   true,
 	}
 }
 
@@ -118,6 +123,16 @@ func (f *fakeStoredRepo) MarkComplete(ctx context.Context, _ domain.StoredAttach
 	return true, nil
 }
 
+func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachmentKind, id, by string) (bool, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.deleteCtx = append(f.deleteCtx, ok && scope.Unrestricted)
+	if !f.deleteOK {
+		return false, nil
+	}
+	f.deleted[id] = by
+	return true, nil
+}
+
 func (f *fakeStoredRepo) MarkFailed(_ context.Context, _ domain.StoredAttachmentKind, id, detail string) error {
 	f.failed[id] = detail
 	return nil
@@ -135,6 +150,8 @@ type fakeStore struct {
 	renames  [][2]string
 	renameEr error
 	removed  []string
+	files    []string // files removed
+	fileErr  error
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{listing: map[string][]filestore.Entry{}} }
@@ -165,6 +182,13 @@ func (f *fakeStore) Rename(_ context.Context, from, to string) error {
 		return f.renameEr
 	}
 	f.renames = append(f.renames, [2]string{from, to})
+	return nil
+}
+func (f *fakeStore) RemoveFile(_ context.Context, path string) error {
+	if f.fileErr != nil {
+		return f.fileErr
+	}
+	f.files = append(f.files, path)
 	return nil
 }
 func (f *fakeStore) RemoveDir(_ context.Context, dir string) error {
@@ -748,5 +772,177 @@ func TestAudit_CarriesTheCorrelationId(t *testing.T) {
 	})
 	if len(lines) != 1 || lines[0]["correlationId"] != "corr-123" {
 		t.Fatalf("lines = %v", lines)
+	}
+}
+
+// ---- delete ----
+
+const saKey = "csm/projects/prj_9/workitems/cs0001/attachments/wia0000042_report.pdf"
+
+// storedRow prepares a COMPLETE attachment uploaded by saEmail.
+func storedRow(repo *fakeStoredRepo) {
+	size := int64(500)
+	key := saKey
+	repo.rows[saAttID] = domain.StoredAttachmentRow{
+		ID: saAttID, Number: "WIA0000042", Name: "report.pdf", SizeBytes: &size,
+		Status: "COMPLETE", StorageKey: &key, CreatedBy: saEmail, ParentID: saParentID,
+	}
+}
+
+func deleteReq() domain.DeleteStoredAttachmentRequest {
+	return domain.DeleteStoredAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID}
+}
+
+func TestDeleteAttachment_TheUploaderRemovesTheFileThenMarksTheRow(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	if err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("DeleteAttachment: %v", err)
+	}
+	if len(store.files) != 1 || store.files[0] != saKey {
+		t.Errorf("files removed = %v, want the stored file", store.files)
+	}
+	if repo.deleted[saAttID] != saEmail {
+		t.Errorf("deleted_by = %q, want the caller", repo.deleted[saAttID])
+	}
+	if len(repo.deleteCtx) != 1 || !repo.deleteCtx[0] {
+		t.Error("MarkDeleted must run as the system: UPDATE is internal-only on these tables")
+	}
+}
+
+func TestDeleteAttachment_SomeoneElseCannotDeleteIt(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, "someone.else@example.com"), deleteReq())
+	var ferr *apierror.ForbiddenError
+	if !errors.As(err, &ferr) {
+		t.Fatalf("err = %v, want ForbiddenError", err)
+	}
+	if len(store.files) != 0 || len(repo.deleted) != 0 {
+		t.Error("someone else's attachment was deleted")
+	}
+}
+
+func TestDeleteAttachment_TheEmailMatchIgnoresCase(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	if err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, "EXT@Example.com"), deleteReq()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeleteAttachment_NotAllowedOnceTheWorkItemIsClosed(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	repo.parent.Closed = true
+	err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	var cerr *apierror.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %v, want ConflictError", err)
+	}
+	if len(store.files) != 0 || len(repo.deleted) != 0 {
+		t.Error("an attachment of a closed work item was deleted")
+	}
+}
+
+func TestDeleteAttachment_AHiddenOrUnknownAttachmentIsNotFound(t *testing.T) {
+	err := newStoredSvc(newFakeStoredRepo(), newFakeStore()).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	var nerr *apierror.NotFoundError
+	if !errors.As(err, &nerr) {
+		t.Fatalf("err = %v, want NotFoundError", err)
+	}
+}
+
+func TestDeleteAttachment_RepeatingASuccessfulDeleteChangesNothing(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	row := repo.rows[saAttID]
+	row.Status = "DELETED"
+	repo.rows[saAttID] = row
+	if err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("err = %v, want success", err)
+	}
+	if len(store.files) != 0 || len(repo.deleteCtx) != 0 {
+		t.Error("a repeated delete touched something")
+	}
+}
+
+func TestDeleteAttachment_OnlyAStoredAttachmentCanBeDeleted(t *testing.T) {
+	for _, status := range []string{"PENDING", "FAILED", "SOURCE_MISSING"} {
+		repo, store := newFakeStoredRepo(), newFakeStore()
+		storedRow(repo)
+		row := repo.rows[saAttID]
+		row.Status = status
+		repo.rows[saAttID] = row
+		err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+		var cerr *apierror.ConflictError
+		if !errors.As(err, &cerr) {
+			t.Errorf("%s: err = %v, want ConflictError", status, err)
+		}
+	}
+}
+
+func TestDeleteAttachment_AFileAlreadyGoneStillCompletesTheDelete(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	store.fileErr = filestore.ErrNotFound
+	if err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq()); err != nil {
+		t.Fatalf("err = %v, want success (a retry after the file was removed)", err)
+	}
+	if repo.deleted[saAttID] == "" {
+		t.Error("the row was not marked deleted")
+	}
+}
+
+func TestDeleteAttachment_AStorageFailureLeavesTheRowCompleteSoItCanBeRetried(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	store.fileErr = errors.New("sftpgo down")
+	err := newStoredSvc(repo, store).DeleteAttachment(saCtx(t, saEmail), deleteReq())
+	var serr *apierror.ServiceUnavailableError
+	if !errors.As(err, &serr) {
+		t.Fatalf("err = %v, want ServiceUnavailableError", err)
+	}
+	if strings.Contains(err.Error(), "sftpgo down") {
+		t.Errorf("the storage error leaked to the caller: %v", err)
+	}
+	if len(repo.deleted) != 0 {
+		t.Error("the row was marked deleted although the file is still there")
+	}
+}
+
+func TestDeleteAttachment_Validation(t *testing.T) {
+	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
+	for name, req := range map[string]domain.DeleteStoredAttachmentRequest{
+		"unknown kind":     {Kind: "case", ID: saAttID},
+		"comment image":    {Kind: domain.StoredAttachmentComment, ID: saAttID},
+		"id is not a uuid": {Kind: domain.StoredAttachmentWorkItem, ID: "nope"},
+	} {
+		err := svc.DeleteAttachment(saCtx(t, saEmail), req)
+		var verr *apierror.ValidationError
+		if !errors.As(err, &verr) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+	}
+	if err := svc.DeleteAttachment(context.Background(), deleteReq()); err == nil {
+		t.Error("a delete without the caller's token was accepted")
+	}
+}
+
+func TestResolveLinks_ADeletedAttachmentHasNoLink(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	storedRow(repo)
+	row := repo.rows[saAttID]
+	row.Status = "DELETED"
+	repo.rows[saAttID] = row
+	resp, err := newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := resp.Links[0]; l.Available || l.URL != "" || l.Reason != domain.AttachmentUnavailableDeleted {
+		t.Errorf("link = %+v, want unavailable with reason DELETED", l)
+	}
+	if len(store.shares) != 0 {
+		t.Error("a share was created for a deleted attachment")
 	}
 }

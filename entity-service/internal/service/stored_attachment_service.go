@@ -70,6 +70,7 @@ type fileStore interface {
 	MkdirAll(ctx context.Context, dir string) error
 	ListDir(ctx context.Context, dir string) ([]filestore.Entry, error)
 	Rename(ctx context.Context, from, to string) error
+	RemoveFile(ctx context.Context, path string) error
 	RemoveDir(ctx context.Context, dir string) error
 	ReadHead(ctx context.Context, path string, n int) ([]byte, error)
 	DownloadURL(shareID string) string
@@ -244,6 +245,9 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 		ContentType: row.ContentType, SizeBytes: row.SizeBytes,
 	}
 	switch {
+	case row.Status == "DELETED":
+		l.Reason = domain.AttachmentUnavailableDeleted
+		return l
 	case row.Status == "FAILED":
 		l.Reason = domain.AttachmentUnavailableFailed
 		return l
@@ -460,6 +464,83 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 	return confirmResponse(row, file.Size), nil
 }
 
+// DeleteAttachment implements StoredAttachmentService.
+//
+// Who may delete is decided here, not by row-level security: UPDATE on these
+// tables is internal-only, so the soft delete runs as the system after the checks
+// below. For now only the person who uploaded an attachment may delete it, and
+// never once the work item is closed. The file is removed from SFTPGo first and
+// the row marked afterwards, so a failure in between leaves a COMPLETE row whose
+// file is gone, and repeating the call finishes the job.
+func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
+	if err := validateStoredAttachmentKind(req.Kind); err != nil {
+		return err
+	}
+	if req.Kind == domain.StoredAttachmentComment {
+		return &apierror.ValidationError{Msg: "an image in a comment cannot be deleted on its own"}
+	}
+	if !validate.IsUUID(req.ID) {
+		return &apierror.ValidationError{Msg: "id must be a valid UUID"}
+	}
+	email, err := s.resolveActorEmail(ctx)
+	if err != nil {
+		return err
+	}
+
+	// As the caller: an attachment they cannot see is not found.
+	rows, err := s.repo.GetByIDs(ctx, req.Kind, []string{req.ID})
+	if err != nil {
+		return err
+	}
+	if len(rows) != 1 {
+		return &apierror.NotFoundError{Msg: "attachment not found"}
+	}
+	row := rows[0]
+	if !strings.EqualFold(row.CreatedBy, email) {
+		return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+	}
+
+	switch row.Status {
+	case "DELETED":
+		// A delete that is repeated (a retry after a timeout) answers the same.
+		return nil
+	case "COMPLETE":
+	default:
+		return &apierror.ConflictError{Msg: "this attachment is not stored, so it cannot be deleted"}
+	}
+
+	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
+	if err != nil {
+		return err
+	}
+	if parent.Closed {
+		return &apierror.ConflictError{Msg: closedParentDeleteMessage}
+	}
+
+	if row.StorageKey != nil && *row.StorageKey != "" {
+		if err := s.store.RemoveFile(ctx, strings.TrimLeft(*row.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
+			return storageUnavailable(ctx, "delete attachment file", err)
+		}
+	}
+	ok, err := s.repo.MarkDeleted(repository.WithSystemIdentity(ctx), req.Kind, row.ID, email)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// Another request deleted it first: the outcome the caller wanted.
+		return nil
+	}
+	path := ""
+	if row.StorageKey != nil {
+		path = *row.StorageKey
+	}
+	slog.InfoContext(ctx, "attachment deleted",
+		"audit", true, "action", "delete", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
+		"attachmentId", row.ID, "path", path)
+	return nil
+}
+
 // formatByteLimit renders a size limit for a message: "100 MB", or "512 KB"
 // for a limit under one megabyte.
 func formatByteLimit(n int64) string {
@@ -471,6 +552,9 @@ func formatByteLimit(n int64) string {
 
 // closedParentMessage is shown when a file is added to a closed work item.
 const closedParentMessage = "This case is closed, so new attachments can't be added."
+
+// closedParentDeleteMessage is shown when a file is deleted from a closed work item.
+const closedParentDeleteMessage = "This case is closed, so attachments can't be deleted."
 
 func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int64 {
 	if kind == domain.StoredAttachmentComment {

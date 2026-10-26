@@ -391,6 +391,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/delete:
+    post:
+      summary: >-
+        Delete an attachment (soft delete). Removes the file from SFTPGo and marks
+        the attachment DELETED; the row stays, with who deleted it and when, and no
+        list or download link includes it afterwards. Only the person who uploaded
+        the attachment can delete it, and not once its work item is closed.
+        Repeating a delete that already succeeded answers the same. A 503 leaves the
+        attachment as it was, so the delete can be retried. An image embedded in a
+        comment cannot be deleted on its own.
+      operationId: deleteStoredAttachment
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteStoredAttachmentRequest'
+      responses:
+        "204":
+          description: The attachment is deleted.
+        "400":
+          description: Unknown kind, a comment image, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller can see the attachment but did not upload it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such attachment, or the caller may not see it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The work item is closed, or the attachment is not stored (still uploading, or its upload failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; the delete can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /onboarding-steps/search:
     post:
       summary: >-
@@ -39621,12 +39687,12 @@ components:
           description: True when url can be used to fetch the file.
         reason:
           type: string
-          enum: [NOT_STORED, FAILED, STORAGE_UNAVAILABLE]
+          enum: [NOT_STORED, FAILED, DELETED, STORAGE_UNAVAILABLE]
           description: >-
             Why there is no link. NOT_STORED: the file is not in SFTPGo (an
-            upload never confirmed). FAILED: the upload was rejected.
-            STORAGE_UNAVAILABLE: SFTPGo could not be reached just now, so trying
-            again can work.
+            upload never confirmed). FAILED: the upload was rejected. DELETED:
+            the person who uploaded it deleted it. STORAGE_UNAVAILABLE: SFTPGo
+            could not be reached just now, so trying again can work.
         url:
           type: string
           format: uri
@@ -39699,6 +39765,20 @@ components:
         maxBytes:
           type: integer
           format: int64
+
+    DeleteStoredAttachmentRequest:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [work_item, deployment]
+          description: An image embedded in a comment (kind comment) is not deleted on its own.
+        id:
+          type: string
+          format: uuid
+          description: The attachment's id.
 
     ConfirmAttachmentUploadRequest:
       type: object

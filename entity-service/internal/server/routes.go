@@ -2145,6 +2145,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
 		mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
+		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and

@@ -192,6 +192,18 @@ func (c *Client) Rename(ctx context.Context, from, to string) error {
 	return nil
 }
 
+// RemoveFile deletes one file. A file that is already gone returns
+// ErrNotFound, which a caller deleting an attachment can ignore.
+func (c *Client) RemoveFile(ctx context.Context, path string) error {
+	q := url.Values{"path": {abs(path)}}
+	resp, err := c.exec(ctx, http.MethodDelete, "/api/v2/user/files", q, nil, nil)
+	if err != nil {
+		return err
+	}
+	drainClose(resp.Body)
+	return nil
+}
+
 // RemoveDir deletes a folder and everything in it. A folder that is already
 // gone returns ErrNotFound, which callers cleaning up can ignore.
 func (c *Client) RemoveDir(ctx context.Context, dir string) error {

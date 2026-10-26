@@ -165,6 +165,29 @@ func TestMkdirAllRenameRemoveDir_SendTheDocumentedCalls(t *testing.T) {
 	}
 }
 
+func TestRemoveFile_SendsTheDocumentedCallAndTreatsAMissingFileAsNotFound(t *testing.T) {
+	f := newFake(t)
+	var got string
+	f.handlers["DELETE /api/v2/user/files"] = func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery
+		if r.URL.Query().Get("path") == "/csm/gone.pdf" {
+			http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	c := f.client()
+	if err := c.RemoveFile(context.Background(), "csm/p/wia1_a.pdf"); err != nil {
+		t.Fatalf("RemoveFile: %v", err)
+	}
+	if want := "DELETE /api/v2/user/files?path=%2Fcsm%2Fp%2Fwia1_a.pdf"; got != want {
+		t.Errorf("call = %q, want %q", got, want)
+	}
+	if err := c.RemoveFile(context.Background(), "csm/gone.pdf"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestListDir_ParsesEntriesAndTellsFoldersApart(t *testing.T) {
 	f := newFake(t)
 	f.handlers["GET /api/v2/user/dirs"] = func(w http.ResponseWriter, r *http.Request) {
