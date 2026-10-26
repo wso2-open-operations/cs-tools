@@ -1877,8 +1877,10 @@ Responses carry `Cache-Control: no-store`.
 
 **Who made each link is logged here, not in SFTPGo.** SFTPGo sees only the one service user for
 every browser transfer, so each share created writes an `attachment link created` line
-(`audit=true`, `action` download|upload, `actor` = the caller's email, `kind`, `attachmentId`,
-`path`, `shareRef`, `expiresAt`) through `auditLink`. SFTPGo's transfer log carries the same file
+(`audit=true`, `action` download|upload, `callerId`, `correlationId`, `kind`, `attachmentId`,
+`path`, `shareRef`, `expiresAt`) through `auditLink`. `callerId` is what the access log shows for the
+same request (the user's UUID, else a machine caller's client id, else `-`) and `correlationId` finds
+that request's other lines; **the email is not logged** (personal data). SFTPGo's transfer log carries the same file
 path (for an upload, the staging folder named after the attachment id), so a transfer is matched
 to a person on path and time. **The share id is never logged in full**: it is the link's secret
 (`.../api/v2/shares/<id>`), so anyone reading it from a log could use the link until it expires;

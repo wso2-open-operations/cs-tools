@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -656,11 +658,14 @@ func TestAudit_EveryLinkNamesWhoGotItAndWhichShare(t *testing.T) {
 	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Name: "a.pdf", Status: "COMPLETE", StorageKey: &key}
 	svc := newStoredSvc(repo, store)
 
+	ctx := func() context.Context {
+		return auth.WithIdentity(saCtx(t, saEmail), auth.Identity{Validated: true, UserEmail: saEmail, UserID: "user-uuid-1"})
+	}
 	lines := captureAudit(t, func() {
-		if _, err := svc.ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}); err != nil {
+		if _, err := svc.ResolveLinks(ctx(), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.InitiateUpload(saCtx(t, saEmail), initReq()); err != nil {
+		if _, err := svc.InitiateUpload(ctx(), initReq()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -669,8 +674,14 @@ func TestAudit_EveryLinkNamesWhoGotItAndWhichShare(t *testing.T) {
 	}
 	for i, want := range []string{"download", "upload"} {
 		l := lines[i]
-		if l["action"] != want || l["actor"] != saEmail || l["attachmentId"] != saAttID || l["kind"] != "work_item" {
+		if l["action"] != want || l["callerId"] != "user-uuid-1" || l["attachmentId"] != saAttID || l["kind"] != "work_item" {
 			t.Errorf("line %d = %v", i, l)
+		}
+		if _, has := l["actor"]; has {
+			t.Errorf("line %d still carries an actor field: %v", i, l)
+		}
+		if strings.Contains(fmt.Sprint(l), saEmail) {
+			t.Errorf("line %d carries the caller's email: %v", i, l)
 		}
 	}
 	// What SFTPGo's own log carries, so a transfer can be matched to the line.
@@ -686,7 +697,7 @@ func TestAudit_NeverLogsTheWholeShareId(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(prev)
 
-	auditLink(context.Background(), "download", saEmail, domain.StoredAttachmentWorkItem, saAttID, "csm/x/f.pdf", "s3cr3tShareId0123456789ab", saNow)
+	auditLink(context.Background(), "download", domain.StoredAttachmentWorkItem, saAttID, "csm/x/f.pdf", "s3cr3tShareId0123456789ab", saNow)
 	out := buf.String()
 	if strings.Contains(out, "s3cr3tShareId0123456789ab") || strings.Contains(out, "0123456789ab") {
 		t.Fatalf("the share id leaked into the log: %s", out)
@@ -709,5 +720,33 @@ func TestAudit_NoLineWhenNoLinkWasCreated(t *testing.T) {
 	})
 	if len(lines) != 0 {
 		t.Errorf("a link that was not created must not be logged as created: %v", lines)
+	}
+}
+
+func TestAudit_CallerIdFallsBackToTheClientIdThenDash(t *testing.T) {
+	user := auth.WithIdentity(context.Background(), auth.Identity{UserID: "u1", ClientID: "c1"})
+	machine := auth.WithIdentity(context.Background(), auth.Identity{ClientID: "c1"})
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want string
+	}{"user": {user, "u1"}, "machine": {machine, "c1"}, "nobody": {context.Background(), "-"}} {
+		if got := auditCaller(tc.ctx); got != tc.want {
+			t.Errorf("%s: callerId = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestAudit_CarriesTheCorrelationId(t *testing.T) {
+	var ctx context.Context
+	h := middleware.CorrelationID(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { ctx = r.Context() }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-CSM-Correlation-ID", "corr-123")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	lines := captureAudit(t, func() {
+		auditLink(ctx, "download", domain.StoredAttachmentWorkItem, saAttID, "csm/x/f.pdf", "abcdefghijklmnop", saNow)
+	})
+	if len(lines) != 1 || lines[0]["correlationId"] != "corr-123" {
+		t.Fatalf("lines = %v", lines)
 	}
 }
