@@ -27,15 +27,15 @@
 #   1. Every 4-digit NNNN_*.sql file (the convention), ascending.
 #   2. Every 6-digit 1NNNNN_*.sql file numbered 100000+ (the RLS track) -
 #      written to the RLS file, not the schema file.
-#   3. The legacy 6-digit 0NNNNN_*.up.sql stragglers (000020-000105) that
+#   3. The legacy 6-digit 0NNNNN_*.up.sql stragglers (000086-000105) that
 #      predate this whole scheme and still depend on tables the 4-digit
 #      files create. *.down.sql files are rollbacks and never run here.
-# A plain `migrations/*.sql` glob sorts every 6-digit file in the 000020-
+# A plain `migrations/*.sql` glob sorts every 6-digit file in the 000086-
 # 000105 range *before* 0001 (leading zeros) and would fail outright applied
 # against a from-scratch database - this script used to do exactly that,
 # silently, before this fix (it only ever LOOKED sorted because the 100000+
 # RLS files happen to sort after everything 4-digit by coincidence of
-# starting with "1"; the 000020-000105 legacy files got no such luck).
+# starting with "1"; the 000086-000105 legacy files got no such luck).
 #
 # Default output paths include a UTC timestamp (e.g.
 # dist/schema_bootstrap_20260924_153000.sql,
@@ -245,7 +245,7 @@ for f in $files; do
 		# of the two running together indistinguishably.
 		if ((!legacy_marker_written)); then
 			{
-				echo "-- ===== legacy 6-digit stragglers below (000020-000105; predate the"
+				echo "-- ===== legacy 6-digit stragglers below (000086-000105; predate the"
 				echo "-- NNNN_*.sql convention; see entity-service/CLAUDE.md's \"Database"
 				echo "-- migrations\" section) ====="
 				echo
