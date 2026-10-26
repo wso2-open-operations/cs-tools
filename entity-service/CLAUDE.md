@@ -65,6 +65,11 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
+| `SFTPGO_URL` | no* | — | SFTPGo base URL this service reaches it at (see "Attachment files in SFTPGo"). *All three of `SFTPGO_URL`/`SFTPGO_USER`/`SFTPGO_PASSWORD` or none: `Validate` rejects a partial set, and with none the attachment routes are not registered |
+| `SFTPGO_USER` / `SFTPGO_PASSWORD` | no* | — | The SFTPGo service user. Held only here; never sent to a browser, never echoed in an error |
+| `SFTPGO_PUBLIC_URL` | no | `SFTPGO_URL` | Address a **browser** reaches SFTPGo at, used in the links returned to it. Differs from `SFTPGO_URL` once SFTPGo is behind a public proxy |
+| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
+| `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `5m` / `15m` | How long a download / upload link stays valid |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1849,6 +1854,57 @@ response: the case/comment/incident already exists in ServiceNow by that
 point, so a notification-side hiccup must not be reported to the caller as a
 failed
 create.
+
+## Attachment files in SFTPGo
+
+Work item, comment-image and deployment attachment files live in SFTPGo
+(`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
+the older flow and is not touched). Three routes, registered only when `db != nil` and
+`Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
+`POST /attachments/upload/{id}/confirm`. Code: `internal/filestore` (SFTPGo client and the path
+layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
+`handler.StoredAttachmentHandler`.
+
+**A browser never gets an SFTPGo token.** The service user's token can read and write everything
+under `csm/`, so what a browser receives is an SFTPGo *share*: a **download** link is a read share
+on exactly one file (`GET /api/v2/shares/{id}?compress=false`; without `compress=false` SFTPGo
+sends a ZIP), a read link serves up to 10 requests (a browser can fetch one image in several) and
+expires in `ATTACHMENT_READ_LINK_TTL`; an **upload** link is a write share on a folder created for
+that one upload (`csm/staging/<attachment id>/`) with `max_tokens` 1, so it accepts exactly one
+request. SFTPGo stores the multipart file under its base name, so a client cannot escape the
+folder, and it overwrites a file of the same name, which is why the folder is per upload.
+Responses carry `Cache-Control: no-store`.
+
+**Upload flow.** `POST /attachments/upload` checks the parent as the caller (a hidden parent is
+404), refuses a **closed work item for every caller, internal ones included** (409), checks size
+and type, inserts a `PENDING` row (`created_by` = the caller's email), creates the staging folder
+and the one-use share. The browser POSTs the file to `uploadUrl`. `.../confirm` (only the
+uploader) lists the staging folder (exactly one file), checks its size against what was declared
+and the limit, re-checks the work item is still open, and for a comment image reads the leading
+bytes and requires a real PNG/JPEG/GIF/WebP (SVG is refused: it can carry script). It then creates
+the final folder, renames the file to `filestore.Key` (the migrator's layout, so new files sit
+beside migrated ones), and marks the row `COMPLETE` as the system. A rejected upload is deleted and
+the row `FAILED`; a storage error leaves the row `PENDING` and the file staged so confirm can be
+retried.
+
+**Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
+under the attachment tables' RLS (migration 100026): an external caller needs to be a
+`REGISTERED` member of the parent's project, a parent with no project is internal-only, and an
+attachment of a `WORK_NOTE` comment stays internal because `comment_attachment`'s policy goes
+through `comment`'s. An external INSERT must be `PENDING` with no `storage_key`. UPDATE and DELETE
+are internal-only, which is why `ConfirmUpload` runs `MarkComplete`/`MarkFailed` under
+`repository.WithSystemIdentity` after its own checks. There is deliberately no `AccessService`
+in this service. The three tables have no row-level id default except `work_item_attachment`
+(migration 0179), so `InsertPending` generates the id.
+
+**Inline comment images** are uploaded against the work item before the comment exists
+(`comment_attachment.comment_id` is nullable and `work_item_id` is filled, migration 0150);
+linking them to the comment when it is saved, and the cleanup of unlinked images, are not built yet.
+
+Verification: unit tests use a fake SFTPGo (`httptest`) and in-memory fakes; the repository
+integration test needs `STORED_ATTACHMENT_TEST_DSN` (a role that does not bypass RLS, all
+migrations applied). Two SFTPGo calls were not confirmed against a live server: the folder listing
+JSON shape and the ranged read (`ListDir`, `ReadHead`).
 
 ## Portal-driven membership writes
 
