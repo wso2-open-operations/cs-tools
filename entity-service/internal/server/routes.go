@@ -343,6 +343,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var teamMemberHandler *handler.TeamMemberHandler
 	var pagingChainHandler *handler.PagingChainHandler
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
+	var slaFieldRegistryHandler *handler.SLAFieldRegistryHandler
+	var slaCalendarHandler *handler.SLACalendarHandler
+	var slaDefinitionHandler *handler.SLADefinitionHandler
+	var slaNotificationRuleHandler *handler.SLANotificationRuleHandler
 	var runbookHandler *handler.RunbookHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
@@ -1497,6 +1501,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 					Environment:      cfg.CaseAlertsEnvironment,
 				}),
 		)
+		// The SLA module's admin-config surface (migrations 0245-0250) --
+		// field registry, calendars, definitions, notification rules. No
+		// RLS on any of these tables (global admin config, no per-project
+		// scoping), same posture as case alert settings/rota access just
+		// above: every service gates on RequireInternalCaller plus
+		// AUTH_ADMIN_ROLES itself, so a plain *pgxpool.Pool is correct here,
+		// not repository.Scoped.
+		slaFieldRegistryHandler = handler.NewSLAFieldRegistryHandler(
+			service.NewSLAFieldRegistryService(repository.NewSLAFieldRegistryRepository(db), accessSvc, cfg.AuthAdminRoles))
+		slaCalendarHandler = handler.NewSLACalendarHandler(
+			service.NewSLACalendarService(repository.NewSLACalendarRepository(db), accessSvc, cfg.AuthAdminRoles))
+		slaDefinitionHandler = handler.NewSLADefinitionHandler(
+			service.NewSLADefinitionService(repository.NewSLADefinitionRepository(db), accessSvc, cfg.AuthAdminRoles))
+		slaNotificationRuleHandler = handler.NewSLANotificationRuleHandler(
+			service.NewSLANotificationRuleService(repository.NewSLANotificationRuleRepository(db), accessSvc, cfg.AuthAdminRoles))
 	}
 	// One GitHub client per credential the products name, independent of the
 	// change-request sync. A credential with no token is logged, not fatal:
@@ -1955,6 +1974,31 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /team-schedule/case-alerts/settings/values/{valueId}", caseAlertSettingsHandler.DeleteValue)
 		mux.HandleFunc("GET /team-schedule/case-alerts/settings/runtime", caseAlertSettingsHandler.GetRuntime)
 		mux.HandleFunc("PUT /team-schedule/case-alerts/settings/applied", caseAlertSettingsHandler.RecordApplied)
+	}
+	if slaFieldRegistryHandler != nil {
+		mux.HandleFunc("GET /sla/work-item-types", slaFieldRegistryHandler.ListWorkItemTypes)
+		mux.HandleFunc("GET /sla/field-catalog", slaFieldRegistryHandler.ListFieldCatalog)
+		mux.HandleFunc("PATCH /sla/field-catalog/{fieldCatalogEntryId}/enablement", slaFieldRegistryHandler.SetFieldEnabled)
+	}
+	if slaCalendarHandler != nil {
+		mux.HandleFunc("GET /sla/calendars", slaCalendarHandler.List)
+		mux.HandleFunc("GET /sla/calendars/{id}", slaCalendarHandler.Get)
+		mux.HandleFunc("PATCH /sla/calendars/{id}", slaCalendarHandler.UpdateWorkingWeek)
+		mux.HandleFunc("POST /sla/calendars/{id}/holidays", slaCalendarHandler.AddHoliday)
+		mux.HandleFunc("DELETE /sla/calendars/{id}/holidays/{holidayId}", slaCalendarHandler.DeleteHoliday)
+	}
+	if slaDefinitionHandler != nil {
+		mux.HandleFunc("POST /sla/definitions/search", slaDefinitionHandler.Search)
+		mux.HandleFunc("GET /sla/definitions/{id}", slaDefinitionHandler.Get)
+		mux.HandleFunc("POST /sla/definitions", slaDefinitionHandler.Create)
+		mux.HandleFunc("PATCH /sla/definitions/{id}", slaDefinitionHandler.Update)
+		mux.HandleFunc("PATCH /sla/definitions/{id}/status", slaDefinitionHandler.SetStatus)
+	}
+	if slaNotificationRuleHandler != nil {
+		mux.HandleFunc("GET /sla/notification-rules", slaNotificationRuleHandler.List)
+		mux.HandleFunc("GET /sla/notification-rules/{id}", slaNotificationRuleHandler.Get)
+		mux.HandleFunc("POST /sla/notification-rules", slaNotificationRuleHandler.Create)
+		mux.HandleFunc("PATCH /sla/notification-rules/{id}", slaNotificationRuleHandler.Update)
 	}
 	if scheduleHandler != nil {
 

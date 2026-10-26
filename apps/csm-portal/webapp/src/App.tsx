@@ -92,6 +92,12 @@ import DashboardBuilderRouteGuard from "@features/csm-admin/dashboards/pages/Das
 import CsmDashboardBuilderListPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderListPage";
 import CsmDashboardBuilderEditorPage from "@features/csm-admin/dashboards/pages/CsmDashboardBuilderEditorPage";
 import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/CsmDashboardSharedConfigPage";
+import CsmSlaLayout from "@features/csm-admin/sla/pages/CsmSlaLayout";
+import CsmSlaDefinitionListPage from "@features/csm-admin/sla/pages/CsmSlaDefinitionListPage";
+import CsmSlaDefinitionEditorPage from "@features/csm-admin/sla/pages/CsmSlaDefinitionEditorPage";
+import CsmSlaCalendarsPage from "@features/csm-admin/sla/pages/CsmSlaCalendarsPage";
+import CsmSlaFieldRegistryPage from "@features/csm-admin/sla/pages/CsmSlaFieldRegistryPage";
+import CsmSlaNotificationRulesPage from "@features/csm-admin/sla/pages/CsmSlaNotificationRulesPage";
 import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
 import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
 import CsmAccountDetailPage from "@features/csm-accounts/pages/CsmAccountDetailPage";
@@ -387,6 +393,18 @@ export default function App(): JSX.Element {
                       <Route path="shared" element={<CsmDashboardSharedConfigPage />} />
                       <Route path="new" element={<CsmDashboardBuilderEditorPage />} />
                       <Route path=":draftId" element={<CsmDashboardBuilderEditorPage />} />
+                    </Route>
+                    {/* SLA module admin config (migrations 0245-0250) —
+                        PermAdmin-gated server-side; "new" before ":id" for
+                        the same reason as "shared" above. */}
+                    <Route path="sla" element={<CsmSlaLayout />}>
+                      <Route index element={<Navigate to="definitions" replace />} />
+                      <Route path="definitions" element={<CsmSlaDefinitionListPage />} />
+                      <Route path="definitions/new" element={<CsmSlaDefinitionEditorPage />} />
+                      <Route path="definitions/:id" element={<CsmSlaDefinitionEditorPage />} />
+                      <Route path="calendars" element={<CsmSlaCalendarsPage />} />
+                      <Route path="fields" element={<CsmSlaFieldRegistryPage />} />
+                      <Route path="notification-rules" element={<CsmSlaNotificationRulesPage />} />
                     </Route>
                   </Route>
 
