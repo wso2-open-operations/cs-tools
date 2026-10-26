@@ -149,13 +149,29 @@ func auditActorEmail(ctx context.Context) string {
 }
 
 // auditLink records who was given a link to which attachment. SFTPGo only sees
-// the one service user for every transfer, so this line (with the share id,
-// which SFTPGo's own log also carries) is how a download or an upload is tied
-// to a person. The access log's correlation id and callerId sit beside it.
-func auditLink(ctx context.Context, action, actor string, kind domain.StoredAttachmentKind, attachmentID, shareID string, expires time.Time) {
+// the one service user for every transfer, so this line is how a download or an
+// upload is tied to a person: SFTPGo's transfer log carries the file path (for an
+// upload, the staging folder named after the attachment id), which this line
+// carries too, so the two match on path and time.
+//
+// The share id is NOT logged in full. It is the link's secret (the link is
+// .../api/v2/shares/<id>), so anyone who could read it from a log could use the
+// link until it expires. Only a short prefix is kept, enough to recognise one in
+// a proxy log without being able to use it.
+func auditLink(ctx context.Context, action, actor string, kind domain.StoredAttachmentKind, attachmentID, path, shareID string, expires time.Time) {
 	slog.InfoContext(ctx, "attachment link created",
 		"audit", true, "action", action, "actor", actor, "kind", string(kind),
-		"attachmentId", attachmentID, "shareId", shareID, "expiresAt", expires)
+		"attachmentId", attachmentID, "path", path, "shareRef", shareRef(shareID),
+		"expiresAt", expires)
+}
+
+// shareRef is the first few characters of a share id, never the whole of it.
+func shareRef(id string) string {
+	n := len(id) / 4
+	if n > 6 {
+		n = 6
+	}
+	return id[:n] + "..."
 }
 
 // ResolveLinks implements StoredAttachmentService.
@@ -241,7 +257,7 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, actor string, kin
 		l.Reason = domain.AttachmentUnavailableStorage
 		return l
 	}
-	auditLink(ctx, "download", actor, kind, row.ID, shareID, expires)
+	auditLink(ctx, "download", actor, kind, row.ID, *row.StorageKey, shareID, expires)
 	l.Available = true
 	l.URL = s.store.DownloadURL(shareID)
 	l.ExpiresAt = &expires
@@ -313,7 +329,7 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		s.failQuietly(ctx, req.Kind, row.ID, "upload link could not be created")
 		return domain.InitiateAttachmentUploadResponse{}, storageUnavailable(ctx, "open upload share", err)
 	}
-	auditLink(ctx, "upload", email, req.Kind, row.ID, shareID, expires)
+	auditLink(ctx, "upload", email, req.Kind, row.ID, staging, shareID, expires)
 	return domain.InitiateAttachmentUploadResponse{
 		AttachmentID: row.ID,
 		Number:       row.Number,

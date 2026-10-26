@@ -1878,10 +1878,14 @@ Responses carry `Cache-Control: no-store`.
 **Who made each link is logged here, not in SFTPGo.** SFTPGo sees only the one service user for
 every browser transfer, so each share created writes an `attachment link created` line
 (`audit=true`, `action` download|upload, `actor` = the caller's email, `kind`, `attachmentId`,
-`shareId`, `expiresAt`) through `auditLink`. The share id is what ties a transfer in SFTPGo's log to
-a person; the access log's correlation id and `callerId` sit beside it. Nothing is logged for a link
-that was not created. It is a log line, not a table: add an audit table if retention beyond the log
-platform's is needed.
+`path`, `shareRef`, `expiresAt`) through `auditLink`. SFTPGo's transfer log carries the same file
+path (for an upload, the staging folder named after the attachment id), so a transfer is matched
+to a person on path and time. **The share id is never logged in full**: it is the link's secret
+(`.../api/v2/shares/<id>`), so anyone reading it from a log could use the link until it expires;
+`shareRef` is a short prefix, for recognising a link in a proxy log only. Nothing is logged for a
+link that was not created. It is a log line, not a table: add an audit table if retention beyond the
+log platform's is needed. The proxy's access log holds full share ids in its URLs, so access to it
+should be as restricted as the logs of any system holding live links.
 
 **Upload flow.** `POST /attachments/upload` checks the parent as the caller (a hidden parent is
 404), refuses a **closed work item for every caller, internal ones included** (409), checks size

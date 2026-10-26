@@ -669,9 +669,33 @@ func TestAudit_EveryLinkNamesWhoGotItAndWhichShare(t *testing.T) {
 	}
 	for i, want := range []string{"download", "upload"} {
 		l := lines[i]
-		if l["action"] != want || l["actor"] != saEmail || l["attachmentId"] != saAttID || l["shareId"] == "" || l["shareId"] == nil || l["kind"] != "work_item" {
+		if l["action"] != want || l["actor"] != saEmail || l["attachmentId"] != saAttID || l["kind"] != "work_item" {
 			t.Errorf("line %d = %v", i, l)
 		}
+	}
+	// What SFTPGo's own log carries, so a transfer can be matched to the line.
+	if lines[0]["path"] != key || lines[1]["path"] != filestore.StagingDir(saAttID) {
+		t.Errorf("paths = %v / %v, want the stored file and the staging folder", lines[0]["path"], lines[1]["path"])
+	}
+}
+
+// The share id is the link's secret, so it must never reach the log in full.
+func TestAudit_NeverLogsTheWholeShareId(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	auditLink(context.Background(), "download", saEmail, domain.StoredAttachmentWorkItem, saAttID, "csm/x/f.pdf", "s3cr3tShareId0123456789ab", saNow)
+	out := buf.String()
+	if strings.Contains(out, "s3cr3tShareId0123456789ab") || strings.Contains(out, "0123456789ab") {
+		t.Fatalf("the share id leaked into the log: %s", out)
+	}
+	if !strings.Contains(out, `"shareRef":"s3cr3t..."`) {
+		t.Errorf("want a short prefix to recognise the link by: %s", out)
+	}
+	if shareRef("") != "..." || shareRef("ab") != "..." {
+		t.Errorf("a short or empty id must not be echoed: %q %q", shareRef(""), shareRef("ab"))
 	}
 }
 
