@@ -1653,3 +1653,30 @@ type OutageCommunicationService interface {
 	// Log returns one outage's communication history, newest first.
 	Log(ctx context.Context, number string) ([]domain.OutageCommunicationLogEntry, error)
 }
+
+// StoredAttachmentService issues the links a browser uses to download and
+// upload attachment files held in SFTPGo (work item, comment-image and
+// deployment attachments). It never returns SFTPGo credentials: a download link
+// is an SFTPGo share on exactly one file, and an upload link is a share on a
+// folder created for that one upload that accepts one request.
+//
+// Access is the caller's own: row-level security on the attachment tables
+// decides which rows they can see and whether they can add one, so a caller
+// outside the parent's project gets "not found". Adding a file to a closed work
+// item is refused for every caller, internal ones included.
+type StoredAttachmentService interface {
+	// ResolveLinks returns metadata, and a download link for each file that is
+	// stored, for the attachments of one kind the caller can see. An id the
+	// caller cannot see is left out of the response.
+	ResolveLinks(ctx context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error)
+	// InitiateUpload starts an upload: it checks the caller may add a file to
+	// the parent (a ConflictError when the work item is closed), checks the size
+	// and type, records a PENDING attachment, and returns the one-use link the
+	// browser sends the file to.
+	InitiateUpload(ctx context.Context, req domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error)
+	// ConfirmUpload finishes an upload: it checks the file that arrived (size,
+	// and for a comment image the real type), moves it to its final path, and
+	// marks the attachment COMPLETE. Only the person who started the upload can
+	// confirm it. Repeating a confirm that already succeeded answers the same.
+	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
+}
