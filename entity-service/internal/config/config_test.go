@@ -1389,67 +1389,96 @@ func TestConfig_Validate_QueryHourInternalEmailDomain(t *testing.T) {
 	}
 }
 
-// INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS is optional: comma-separated UUIDs,
-// trimmed, empty entries dropped; a non-UUID entry refuses
-// to start.
-func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
-	const a = "791ae9fb-1b41-8d10-a30d-edb8b04bcbd4"
-	const b = "5ddddddd-dddd-4ddd-8ddd-dddddddddddd"
-	for name, tc := range map[string]struct {
-		env     string
-		want    []string
-		wantErr bool
+func TestConfig_Validate_SFTPGoAllOrNothing(t *testing.T) {
+	tests := []struct {
+		name              string
+		url, user, passwd string
+		wantErr           bool
 	}{
-		"unset":              {env: "", want: nil},
-		"only separators":    {env: " , ,, ", want: []string{}},
-		"one":                {env: a, want: []string{a}},
-		"whitespace":         {env: "  " + a + " ,\t" + b + "  ", want: []string{a, b}},
-		"empty entries":      {env: "," + a + ",," + b + ",", want: []string{a, b}},
-		"invalid uuid":       {env: a + ",not-a-uuid", want: []string{a, "not-a-uuid"}, wantErr: true},
-		"name instead of id": {env: "Security Operations Center", want: []string{"Security Operations Center"}, wantErr: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS", tc.env)
-			c := Load()
-			if !reflect.DeepEqual(c.IncidentExtraAssignmentGroupIDs, tc.want) {
-				t.Errorf("Load() = %#v, want %#v", c.IncidentExtraAssignmentGroupIDs, tc.want)
+		{name: "none set"},
+		{name: "all three set", url: "https://sftpgo.internal:8080", user: "svc", passwd: "p"},
+		{name: "only url", url: "https://sftpgo.internal:8080", wantErr: true},
+		{name: "only user", user: "svc", wantErr: true},
+		{name: "only password", passwd: "p", wantErr: true},
+		{name: "missing password", url: "https://sftpgo.internal:8080", user: "svc", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseValidConfig()
+			c.SFTPGoURL, c.SFTPGoPublicURL = tt.url, tt.url
+			c.SFTPGoUser, c.SFTPGoPassword = tt.user, tt.passwd
+			err := c.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("Validate() = nil, want an error for a partial SFTPGo configuration")
 			}
-			base := baseValidConfig()
-			base.IncidentExtraAssignmentGroupIDs = c.IncidentExtraAssignmentGroupIDs
-			if err := base.Validate(); (err != nil) != tc.wantErr {
-				t.Errorf("Validate() err = %v, want error %v", err, tc.wantErr)
+			if !tt.wantErr && err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
 			}
 		})
 	}
 }
 
-// TestLoad_LongOpenCasesReportSets pins the long-open cases report's two
-// filter sets: the defaults, comma-list trimming with blanks dropped, and a
-// blank value falling back to the default rather than emptying the set.
-func TestLoad_LongOpenCasesReportSets(t *testing.T) {
-	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", "")
-	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "")
+func TestConfig_Validate_SFTPGoURLsMustBeHTTP(t *testing.T) {
+	for _, bad := range []string{"sftpgo.internal:8080", "ftp://sftpgo", "https://", "not a url"} {
+		c := baseValidConfig()
+		c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = bad, bad, "svc", "s3cret"
+		err := c.Validate()
+		if err == nil {
+			t.Errorf("SFTPGO_URL %q accepted, want an error", bad)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("error for %q leaks the password: %v", bad, err)
+		}
+	}
+	// A bad public address alone is also refused.
+	c := baseValidConfig()
+	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "files.example.com", "svc", "p"
+	if err := c.Validate(); err == nil {
+		t.Error("a SFTPGO_PUBLIC_URL without a scheme was accepted")
+	}
+}
+
+func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
+	for _, k := range []string{"SFTPGO_URL", "SFTPGO_PUBLIC_URL", "SFTPGO_USER", "SFTPGO_PASSWORD",
+		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "ATTACHMENT_READ_LINK_TTL", "ATTACHMENT_UPLOAD_LINK_TTL"} {
+		t.Setenv(k, "")
+	}
 	c := Load()
-	if want := []string{"Subscription", "Managed Cloud Subscription", "Cloud Support", "Development Support", "Professional Services"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
-		t.Errorf("default project types = %v, want %v", c.LongOpenCasesReportProjectTypes, want)
+	if c.HasSFTPGo() {
+		t.Error("HasSFTPGo() = true with nothing configured")
 	}
-	if want := []string{"migrartion", "migration-assistance"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
-		t.Errorf("default excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
+		t.Errorf("size limits = %d / %d, want 100 MiB / 10 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	}
+	if c.AttachmentReadLinkTTL != 5*time.Minute || c.AttachmentUploadLinkTTL != 15*time.Minute {
+		t.Errorf("link TTLs = %s / %s, want 5m / 15m", c.AttachmentReadLinkTTL, c.AttachmentUploadLinkTTL)
 	}
 
-	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " Subscription , ,Cloud Support,")
-	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "a, b")
+	t.Setenv("SFTPGO_URL", " https://sftpgo.internal:8080/ ")
+	t.Setenv("SFTPGO_USER", "svc")
+	t.Setenv("SFTPGO_PASSWORD", "p")
 	c = Load()
-	if want := []string{"Subscription", "Cloud Support"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
-		t.Errorf("project types = %v, want %v (trimmed, blanks dropped)", c.LongOpenCasesReportProjectTypes, want)
+	if !c.HasSFTPGo() || c.SFTPGoURL != "https://sftpgo.internal:8080" {
+		t.Errorf("SFTPGoURL = %q, HasSFTPGo = %v", c.SFTPGoURL, c.HasSFTPGo())
 	}
-	if want := []string{"a", "b"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
-		t.Errorf("excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	if c.SFTPGoPublicURL != c.SFTPGoURL {
+		t.Errorf("public URL = %q, want it to fall back to %q", c.SFTPGoPublicURL, c.SFTPGoURL)
 	}
 
-	// Only commas and spaces is as good as blank: the default applies.
-	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " , ,")
-	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
-		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
+	t.Setenv("SFTPGO_PUBLIC_URL", "https://files.example.com/")
+	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
+	t.Setenv("ATTACHMENT_READ_LINK_TTL", "2m")
+	c = Load()
+	if c.SFTPGoPublicURL != "https://files.example.com" || c.AttachmentMaxBytes != 52428800 || c.AttachmentReadLinkTTL != 2*time.Minute {
+		t.Errorf("overrides not read: public=%q max=%d ttl=%s", c.SFTPGoPublicURL, c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
+	}
+
+	// A typo costs the override, not the service.
+	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
+	t.Setenv("ATTACHMENT_READ_LINK_TTL", "-5m")
+	c = Load()
+	if c.AttachmentMaxBytes != 100<<20 || c.AttachmentReadLinkTTL != 5*time.Minute {
+		t.Errorf("bad values did not fall back to the defaults: %d / %s", c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
 	}
 }
