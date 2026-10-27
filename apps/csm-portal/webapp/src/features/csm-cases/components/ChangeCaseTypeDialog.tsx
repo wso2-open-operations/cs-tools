@@ -48,6 +48,7 @@ import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalog
 import CatalogVariableFields from "@features/csm-operations/components/CatalogVariableFields";
 import {
   encodeVariableValue,
+  getDateTimeWindowError,
   getFirstEmptyRequiredField,
   getUserEditableVariables,
   isAttachmentField,
@@ -220,6 +221,10 @@ export default function ChangeCaseTypeDialog({
     () => getFirstEmptyRequiredField(allVariables, answers),
     [allVariables, answers],
   );
+  const dateTimeWindowError = useMemo(
+    () => (firstEmptyRequired ? null : getDateTimeWindowError(allVariables, answers)),
+    [allVariables, answers, firstEmptyRequired],
+  );
   const noCatalogs =
     !!deployedProductId && catalogs.isSuccess && (catalogs.data?.length ?? 0) === 0;
 
@@ -234,7 +239,8 @@ export default function ChangeCaseTypeDialog({
             // isSuccess, not !isLoading && !isError: a query paused offline is
             // neither, and would otherwise pass with no questions loaded.
             variables.isSuccess &&
-            firstEmptyRequired === null
+            firstEmptyRequired === null &&
+            dateTimeWindowError === null
           : true;
 
   // fieldsStepValid already carries each target's own requirements (catalog +
@@ -683,11 +689,15 @@ export default function ChangeCaseTypeDialog({
                     />
                   ))}
 
-                {catalogItemId && firstEmptyRequired && !variables.isLoading && (
-                  <Typography variant="caption" color="text.secondary">
-                    Required field: {firstEmptyRequired}
-                  </Typography>
-                )}
+                {catalogItemId &&
+                  !variables.isLoading &&
+                  (firstEmptyRequired || dateTimeWindowError) && (
+                    <Typography variant="caption" color="text.secondary">
+                      {firstEmptyRequired
+                        ? `Required field: ${firstEmptyRequired}`
+                        : dateTimeWindowError}
+                    </Typography>
+                  )}
               </>
             )}
           </DialogContent>

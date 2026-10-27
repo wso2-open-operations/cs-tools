@@ -16,10 +16,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  getDateTimeWindowError,
   getFirstEmptyRequiredField,
   getFirstFieldExceedingMaxLength,
   getFirstFieldFailingValidation,
   getUserEditableVariables,
+  isEndDateTimeField,
+  isStartDateTimeField,
   isVariableRequired,
 } from "@features/csm-operations/utils/catalogVariables";
 import type { BeCatalogItemVariable } from "@api/backend/types";
@@ -151,5 +154,110 @@ describe("getFirstFieldFailingValidation", () => {
     ];
     expect(() => getFirstFieldFailingValidation(vars, { v1: "anything" })).not.toThrow();
     expect(getFirstFieldFailingValidation(vars, { v1: "anything" })).toBeNull();
+  });
+});
+
+describe("isStartDateTimeField / isEndDateTimeField", () => {
+  it("matches a field named exactly Start Date or Start Time", () => {
+    expect(isStartDateTimeField(textVariable({ questionText: "Start Date" }))).toBe(true);
+    expect(isStartDateTimeField(textVariable({ questionText: "Start Time" }))).toBe(true);
+    expect(isStartDateTimeField(textVariable({ questionText: "* Start Date" }))).toBe(true);
+  });
+
+  it("matches a field named exactly End Date or End Time", () => {
+    expect(isEndDateTimeField(textVariable({ questionText: "End Date" }))).toBe(true);
+    expect(isEndDateTimeField(textVariable({ questionText: "End Time" }))).toBe(true);
+  });
+
+  it("does not match a broader date/time field that isn't exactly Start/End", () => {
+    expect(isStartDateTimeField(textVariable({ questionText: "Scheduled Date" }))).toBe(false);
+    expect(isEndDateTimeField(textVariable({ questionText: "Planned End" }))).toBe(false);
+  });
+
+  it("recognizes a Required: label with no leading bullet/asterisk marker", () => {
+    expect(isStartDateTimeField(textVariable({ questionText: "Required: Start Date" }))).toBe(
+      true,
+    );
+    expect(isEndDateTimeField(textVariable({ questionText: "Required: End Date" }))).toBe(true);
+  });
+});
+
+describe("getDateTimeWindowError", () => {
+  function startField(): BeCatalogItemVariable {
+    return textVariable({ id: "start", questionText: "Start Date", order: 1 });
+  }
+  function endField(): BeCatalogItemVariable {
+    return textVariable({ id: "end", questionText: "End Date", order: 2 });
+  }
+
+  it("reports an error when the end time is before the start time", () => {
+    const vars = [startField(), endField()];
+    const result = getDateTimeWindowError(vars, {
+      start: "2026-01-02T10:00",
+      end: "2026-01-01T10:00",
+    });
+    expect(result).toBe("Start time must be before end time.");
+  });
+
+  it("reports an error when the end time equals the start time", () => {
+    const vars = [startField(), endField()];
+    const result = getDateTimeWindowError(vars, {
+      start: "2026-01-01T10:00",
+      end: "2026-01-01T10:00",
+    });
+    expect(result).toBe("Start time must be before end time.");
+  });
+
+  it("passes when the end time is after the start time", () => {
+    const vars = [startField(), endField()];
+    expect(
+      getDateTimeWindowError(vars, { start: "2026-01-01T10:00", end: "2026-01-01T11:00" }),
+    ).toBeNull();
+  });
+
+  it("does not fire while either field is still empty", () => {
+    const vars = [startField(), endField()];
+    expect(getDateTimeWindowError(vars, { start: "", end: "2026-01-01T11:00" })).toBeNull();
+    expect(getDateTimeWindowError(vars, { start: "2026-01-01T10:00", end: "" })).toBeNull();
+  });
+
+  it("is a no-op when the catalog item has no Start/End Date pair at all", () => {
+    const vars = [textVariable({ id: "v1", questionText: "Subject" })];
+    expect(getDateTimeWindowError(vars, { v1: "anything" })).toBeNull();
+  });
+
+  it("validates a second Start/End pair even when the first pair is valid", () => {
+    const vars = [
+      textVariable({ id: "startDate", questionText: "Start Date", order: 1 }),
+      textVariable({ id: "endDate", questionText: "End Date", order: 2 }),
+      textVariable({ id: "startTime", questionText: "Start Time", order: 3 }),
+      textVariable({ id: "endTime", questionText: "End Time", order: 4 }),
+    ];
+    // The Date pair is a valid window; the Time pair is not — neither should
+    // be able to hide the other.
+    const result = getDateTimeWindowError(vars, {
+      startDate: "2026-01-01T10:00",
+      endDate: "2026-01-02T10:00",
+      startTime: "2026-01-01T15:00",
+      endTime: "2026-01-01T10:00",
+    });
+    expect(result).toBe("Start time must be before end time.");
+  });
+
+  it("pairs Start Date with End Date and Start Time with End Time independently, not crossed", () => {
+    const vars = [
+      textVariable({ id: "startDate", questionText: "Start Date", order: 1 }),
+      textVariable({ id: "endDate", questionText: "End Date", order: 2 }),
+      textVariable({ id: "startTime", questionText: "Start Time", order: 3 }),
+      textVariable({ id: "endTime", questionText: "End Time", order: 4 }),
+    ];
+    // Both pairs are individually valid windows.
+    const result = getDateTimeWindowError(vars, {
+      startDate: "2026-01-01T00:00",
+      endDate: "2026-01-02T00:00",
+      startTime: "2026-01-01T09:00",
+      endTime: "2026-01-01T17:00",
+    });
+    expect(result).toBeNull();
   });
 });

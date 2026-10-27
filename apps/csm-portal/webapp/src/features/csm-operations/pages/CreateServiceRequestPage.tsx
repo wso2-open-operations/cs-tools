@@ -56,6 +56,7 @@ import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import {
   encodeVariableValue,
+  getDateTimeWindowError,
   getFirstEmptyRequiredField,
   getFirstFieldExceedingMaxLength,
   getFirstFieldFailingValidation,
@@ -215,6 +216,19 @@ export default function CreateServiceRequestPage(): JSX.Element {
         : getFirstFieldFailingValidation(allVariables, answers),
     [allVariables, answers, firstEmptyRequired, firstExceedingMaxLength],
   );
+  const dateTimeWindowError = useMemo(
+    () =>
+      firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation
+        ? null
+        : getDateTimeWindowError(allVariables, answers),
+    [
+      allVariables,
+      answers,
+      firstEmptyRequired,
+      firstExceedingMaxLength,
+      firstFailingValidation,
+    ],
+  );
 
 
   // A deployed product with no catalogs is the common non-ServiceNow case;
@@ -281,6 +295,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired === null &&
       firstExceedingMaxLength === null &&
       firstFailingValidation === null &&
+      dateTimeWindowError === null &&
       !isIneligibleForSr &&
       !hasNoSrReadAccess &&
       // Fail closed while a selected project's eligibility is still loading
@@ -297,6 +312,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired,
       firstExceedingMaxLength,
       firstFailingValidation,
+      dateTimeWindowError,
       isIneligibleForSr,
       hasNoSrReadAccess,
       selectedProject.isLoading,
@@ -622,7 +638,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
             mt: 2.5,
           }}
         >
-          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation) && (
+          {!variables.isLoading &&
+            (firstEmptyRequired ||
+              firstExceedingMaxLength ||
+              firstFailingValidation ||
+              dateTimeWindowError) && (
             <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
               {firstEmptyRequired
                 ? `Required field: ${firstEmptyRequired}`
@@ -630,7 +650,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   ? `${firstExceedingMaxLength.label} exceeds ${firstExceedingMaxLength.maxLength} characters`
                   : firstFailingValidation
                     ? `${firstFailingValidation.label}: ${firstFailingValidation.message}`
-                    : null}
+                    : dateTimeWindowError}
             </Typography>
           )}
           <Button variant="outlined" onClick={() => navigate(backTarget)}>

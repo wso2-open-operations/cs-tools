@@ -36,6 +36,8 @@ import {
   isDateTimeField,
   isStartDateTimeField,
   isEndDateTimeField,
+  matchingEndDateTimeField,
+  matchingStartDateTimeField,
 } from "@features/operations/utils/serviceRequestValidation";
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
@@ -549,8 +551,16 @@ export default function VariableFormFields({
       let dateHelperText: string = `Timezone: ${effectiveTimeZone}`;
 
       if (isStart || isEnd) {
-        const startField = sortedVariables.find(isStartDateTimeField);
-        const endField = sortedVariables.find(isEndDateTimeField);
+        // Paired by kind (date with date, time with time) — a catalog item
+        // with more than one Start/End pair (e.g. Start Date/End Date
+        // alongside Start Time/End Time) must compare THIS field against
+        // its own counterpart, not whichever Start/End field comes first.
+        const startField = isStart
+          ? variable
+          : matchingStartDateTimeField(sortedVariables, variable);
+        const endField = isStart
+          ? matchingEndDateTimeField(sortedVariables, variable)
+          : variable;
         const startVal = startField ? (values[startField.id] ?? "") : "";
         const endVal = endField ? (values[endField.id] ?? "") : "";
         if (startVal && endVal && startVal >= endVal) {

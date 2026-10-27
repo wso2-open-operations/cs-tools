@@ -48,6 +48,7 @@ import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
+  getDateTimeWindowError,
   getFirstEmptyRequiredField,
   isContextField,
   isDescriptionField,
@@ -545,6 +546,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
       variables,
       variableValues,
     );
+    // Only checked once every other required/length field is fine, same
+    // ordering as the rest of this chain — a field that's still empty should
+    // report "fill this in" first, not an impossible-window message that
+    // depends on it.
+    const dateTimeWindowError = firstEmpty
+      ? null
+      : getDateTimeWindowError(variables, contextValues, variableValues);
 
     const validationError = getCreateServiceRequestValidationError({
       projectId,
@@ -559,6 +567,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
       return;
     }
     if (titleLengthError) {
+      return;
+    }
+    if (dateTimeWindowError) {
+      showError(dateTimeWindowError);
       return;
     }
     if (!projectId || !deploymentMatch) {

@@ -33,8 +33,12 @@ import {
   isChoiceField,
   isDateTimeField,
   isDescriptionField,
+  isEndDateTimeField,
   isMultiLineField,
+  isStartDateTimeField,
   isVariableRequired,
+  matchingEndDateTimeField,
+  matchingStartDateTimeField,
   usableChoices,
   variableLabel,
 } from "@features/csm-operations/utils/catalogVariables";
@@ -205,6 +209,32 @@ export default function CatalogVariableFields({
           }
 
           if (isDateTimeField(v)) {
+            // A "Start Date"/"Start Time" field next to an "End Date"/"End
+            // Time" one is cross-checked against each other here, the same
+            // way a regex-validated field checks itself above — an end at or
+            // before its start is shown inline rather than only caught once
+            // the page-level getDateTimeWindowError blocks submission.
+            const isStart = isStartDateTimeField(v);
+            const isEnd = isEndDateTimeField(v);
+            let dateTimeError: string | undefined;
+            if (isStart || isEnd) {
+              // Paired by kind (date with date, time with time) via
+              // matchingEndDateTimeField/matchingStartDateTimeField — a
+              // catalog item with more than one Start/End pair (e.g. Start
+              // Date/End Date alongside Start Time/End Time) must compare
+              // THIS field against its own counterpart, not whichever
+              // Start/End field happens to come first.
+              const startField = isStart ? v : matchingStartDateTimeField(variables, v);
+              const endField = isStart ? matchingEndDateTimeField(variables, v) : v;
+              const startVal = startField ? (values[startField.id] ?? "") : "";
+              const endVal = endField ? (values[endField.id] ?? "") : "";
+              if (startVal && endVal && startVal >= endVal) {
+                dateTimeError = isStart
+                  ? "Start time must be before end time."
+                  : "End time must be after start time.";
+              }
+            }
+
             return (
               <Grid key={v.id} size={{ xs: 12, sm: 6 }}>
                 <DateTimePicker
@@ -220,7 +250,13 @@ export default function CatalogVariableFields({
                   }
                   disabled={readOnly}
                   slotProps={{
-                    textField: { size: "small", fullWidth: true, required },
+                    textField: {
+                      size: "small",
+                      fullWidth: true,
+                      required,
+                      error: !!dateTimeError,
+                      helperText: dateTimeError,
+                    },
                     field: { clearable: true },
                   }}
                 />

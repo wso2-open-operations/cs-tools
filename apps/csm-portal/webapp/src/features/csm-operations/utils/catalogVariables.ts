@@ -204,6 +204,67 @@ export function variableLabel(variable: BeCatalogItemVariable): string {
   return (variable.questionText ?? "").replace(/^\s*\*?\s*/, "").trim() || variable.id;
 }
 
+/** Strips the same leading `*`/bullet ServiceNow prefix as {@link variableLabel},
+ *  plus an optional "Required:" prefix some catalog items also carry, so a
+ *  question text like "* Required: Start Date" still matches exactly
+ *  "start date" below. The marker group is `*` (zero-or-more), not
+ *  `+` (one-or-more): a label with no leading `*`/bullet at all, e.g. a bare
+ *  "Required: Start Date", must still reach the "Required:" strip — `+`
+ *  would require a marker character to be present before even attempting
+ *  that strip, silently leaving "Required:" on and making the field fail to
+ *  match "start date" below. */
+function normalizeDateTimeFieldLabel(questionText: string): string {
+  return (questionText ?? "").trim().replace(/^[\s*•]*\s*(?:required\s*:?\s*)?/i, "").trim();
+}
+
+/** The "Start Date"/"Start Time" field a start/end window comparison checks
+ *  against (not just any field matching the broader `isDateTimeField`
+ *  patterns — only one named exactly this). */
+export function isStartDateTimeField(variable: BeCatalogItemVariable): boolean {
+  return /^start\s*(date|time)$/i.test(
+    normalizeDateTimeFieldLabel(variable.questionText ?? ""),
+  );
+}
+
+/** The "End Date"/"End Time" field a start/end window comparison checks
+ *  against. */
+export function isEndDateTimeField(variable: BeCatalogItemVariable): boolean {
+  return /^end\s*(date|time)$/i.test(
+    normalizeDateTimeFieldLabel(variable.questionText ?? ""),
+  );
+}
+
+/** "date" or "time" — a Start/End field's own kind, read off its label after
+ *  stripping the "Start "/"End " prefix itself. Used to pair a catalog's
+ *  "Start Date" with its "End Date" and, separately, "Start Time" with
+ *  "End Time", rather than crossing the two or only ever looking at
+ *  whichever Start/End field happens to be first. */
+function dateTimeWindowKind(variable: BeCatalogItemVariable, prefix: "start" | "end"): string {
+  return normalizeDateTimeFieldLabel(variable.questionText ?? "")
+    .replace(new RegExp(`^${prefix}\\s*`, "i"), "")
+    .toLowerCase();
+}
+
+/** The "End <kind>" field pairing with a given "Start <kind>" field (date
+ *  pairs with date, time with time) among `variables`, or undefined if this
+ *  catalog item has no matching end field. */
+export function matchingEndDateTimeField(
+  variables: BeCatalogItemVariable[],
+  startField: BeCatalogItemVariable,
+): BeCatalogItemVariable | undefined {
+  const kind = dateTimeWindowKind(startField, "start");
+  return variables.find((v) => isEndDateTimeField(v) && dateTimeWindowKind(v, "end") === kind);
+}
+
+/** The "Start <kind>" field pairing with a given "End <kind>" field. */
+export function matchingStartDateTimeField(
+  variables: BeCatalogItemVariable[],
+  endField: BeCatalogItemVariable,
+): BeCatalogItemVariable | undefined {
+  const kind = dateTimeWindowKind(endField, "end");
+  return variables.find((v) => isStartDateTimeField(v) && dateTimeWindowKind(v, "start") === kind);
+}
+
 /**
  * User-editable variables — excludes context and hidden fields, sorted by the
  * backend's display order. This is the set the form renders and validates.
@@ -307,6 +368,37 @@ export function getFirstFieldFailingValidation(
       continue;
     }
     if (!matches) return { label: variableLabel(v), message: v.validation.message };
+  }
+  return null;
+}
+
+/**
+ * Error when a catalog item has both a "Start Date"/"Start Time" field and an
+ * "End Date"/"End Time" field and the current values put the end at or before
+ * the start — an impossible window (e.g. a log-retrieval request) that
+ * shouldn't be submittable. Only fires once both fields have a value; an
+ * empty one is left to {@link getFirstEmptyRequiredField} instead of also
+ * reporting a window error on nothing. Values are the "YYYY-MM-DDTHH:MM"
+ * strings the datetime-local picker stores (`formatDateTimeLocal`), which
+ * compare correctly with a plain string `>=` since every field is fixed-width.
+ */
+export function getDateTimeWindowError(
+  variables: BeCatalogItemVariable[],
+  values: Record<string, string>,
+): string | null {
+  const editable = getUserEditableVariables(variables);
+  // Every Start field is checked against its own matching End field, not
+  // just the first Start/End pair found — a catalog item can carry more
+  // than one pair (e.g. Start Date/End Date alongside Start Time/End Time),
+  // and an invalid second pair must not be hidden behind a valid first one.
+  for (const startField of editable.filter(isStartDateTimeField)) {
+    const endField = matchingEndDateTimeField(editable, startField);
+    if (!endField) continue;
+    const startVal = values[startField.id] ?? "";
+    const endVal = values[endField.id] ?? "";
+    if (startVal && endVal && startVal >= endVal) {
+      return "Start time must be before end time.";
+    }
   }
   return null;
 }
