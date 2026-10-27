@@ -603,7 +603,12 @@ func (s *storedAttachmentService) receivedFile(ctx context.Context, staging stri
 func (s *storedAttachmentService) completeMoved(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, key, staging string) (domain.ConfirmAttachmentUploadResponse, bool, error) {
 	entries, err := s.store.ListDir(ctx, path.Dir(key))
 	if err != nil {
-		return domain.ConfirmAttachmentUploadResponse{}, false, nil
+		if errors.Is(err, filestore.ErrNotFound) {
+			return domain.ConfirmAttachmentUploadResponse{}, false, nil
+		}
+		// Not knowing is not the same as absent: a transient failure must not
+		// reject an upload that may have arrived. The row stays PENDING for a retry.
+		return domain.ConfirmAttachmentUploadResponse{}, true, storageUnavailable(ctx, "list final folder", err)
 	}
 	for _, e := range entries {
 		if e.IsDir() || e.Name != path.Base(key) {

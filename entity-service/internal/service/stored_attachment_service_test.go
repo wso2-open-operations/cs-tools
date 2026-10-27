@@ -491,6 +491,17 @@ func TestConfirmUpload_RetryAfterTheMoveFinishesTheRowInsteadOfRejecting(t *test
 	}
 }
 
+func TestConfirmUpload_ATransientListingFailureAfterAMoveDoesNotRejectTheRow(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	stagedUpload(repo, store, 500, domain.StoredAttachmentWorkItem)
+	store.listing[filestore.StagingDir(saAttID)] = nil
+	store.listErr = errors.New("sftpgo down")
+	_, err := newStoredSvc(repo, store).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	if err == nil || repo.rows[saAttID].Status != "PENDING" {
+		t.Errorf("err = %v status = %s, want an error and the row still PENDING", err, repo.rows[saAttID].Status)
+	}
+}
+
 func TestConfirmUpload_DeploymentAndInlineKeysHaveTheirOwnShape(t *testing.T) {
 	// deployment
 	repo, store := newFakeStoredRepo(), newFakeStore()
