@@ -374,3 +374,35 @@ func TestCommentRowToDomain_AuthorAndContentTable(t *testing.T) {
 		})
 	}
 }
+
+type recordingLinker struct {
+	calls []struct{ comment, workItem, author, content string }
+}
+
+func (r *recordingLinker) LinkFromContent(_ context.Context, commentID, workItemID, author, content string) {
+	r.calls = append(r.calls, struct{ comment, workItem, author, content string }{commentID, workItemID, author, content})
+}
+
+func TestCommentService_CreateComment_LinksTheImagesItShows(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	html := `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+	repo := &stubCommentRepo{
+		createComment: func(context.Context, string, domain.ReferenceType, string, string, string) (repository.CommentRow, error) {
+			return repository.CommentRow{ID: "comment-1", WorkItemID: testUUID}, nil
+		},
+	}
+	linker := &recordingLinker{}
+	svc := WithCommentInlineImageLinker(NewCommentService(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}), linker)
+
+	if _, err := svc.CreateComment(ctx, domain.CreateCommentRequest{ReferenceID: testUUID, ReferenceType: domain.ReferenceTypeCase, Type: domain.CommentTypeComment, Content: html}); err != nil {
+		t.Fatalf("CreateComment: %v", err)
+	}
+	if len(linker.calls) != 1 || linker.calls[0].comment != "comment-1" || linker.calls[0].workItem != testUUID ||
+		linker.calls[0].author != "jane.doe@example.com" || linker.calls[0].content != html {
+		t.Errorf("linker calls = %+v, want one call for the saved comment, its work item and its author", linker.calls)
+	}
+}

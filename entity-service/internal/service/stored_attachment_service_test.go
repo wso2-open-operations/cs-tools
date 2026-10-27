@@ -64,20 +64,18 @@ type fakeStoredRepo struct {
 	inserted  []domain.StoredAttachmentInsert
 	insertErr error
 
-	deleted         map[string]string // id -> deleted_by
-	deleteCtx       []bool            // whether each MarkDeleted ran as the system
-	deleteOK        bool
-	completed       map[string]string // id -> storage key
-	completeCtx     []bool            // whether each MarkComplete ran as the system
-	completeOK      bool
-	failed          map[string]string // id -> detail
-	abandoned       []domain.AbandonedUpload
-	abandonedAt     time.Time // the cutoff ListAbandoned was asked for
-	abandonedSys    bool
-	commentWorkItem string
-	commentErr      error
-	linkWant        []string // ids LinkInlineImages will report as linked
-	linkCall        struct {
+	deleted      map[string]string // id -> deleted_by
+	deleteCtx    []bool            // whether each MarkDeleted ran as the system
+	deleteOK     bool
+	completed    map[string]string // id -> storage key
+	completeCtx  []bool            // whether each MarkComplete ran as the system
+	completeOK   bool
+	failed       map[string]string // id -> detail
+	abandoned    []domain.AbandonedUpload
+	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
+	abandonedSys bool
+	linkWant     []string // ids LinkInlineImages will report as linked
+	linkCall     struct {
 		comment, workItem, email string
 		ids                      []string
 		sys                      bool
@@ -151,10 +149,6 @@ func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time,
 	f.abandonedSys = ok && scope.Unrestricted
 	f.abandonedAt = olderThan
 	return f.abandoned, nil
-}
-
-func (f *fakeStoredRepo) CommentWorkItemID(_ context.Context, _ string) (string, error) {
-	return f.commentWorkItem, f.commentErr
 }
 
 func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error) {
@@ -457,43 +451,44 @@ func TestLimiterKey_UsersOfOneClientDoNotShareAnAllowance(t *testing.T) {
 	}
 }
 
-func TestLinkInlineImages(t *testing.T) {
+func TestInlineImageIDs(t *testing.T) {
+	a, b := "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	html := `<p>hi</p><img src="https://portal.example.com/api/attachments/inline/` + a + `/content"><img src="/attachments/inline/` + strings.ToUpper(b) + `/content">` +
+		`<img src="/attachments/inline/` + a + `/content"><img src="https://other.example.com/x.png"><a href="/attachments/` + a + `/content">not an inline ref</a>`
+	got := inlineImageIDs(html)
+	if len(got) != 2 || got[0] != a || got[1] != b {
+		t.Errorf("ids = %v, want [%s %s] (deduped, lower-cased, inline refs only)", got, a, b)
+	}
+	if len(inlineImageIDs("no images here")) != 0 {
+		t.Error("a comment with no images must reference none")
+	}
+	var many strings.Builder
+	for i := 0; i < 30; i++ {
+		many.WriteString(fmt.Sprintf(`<img src="/attachments/inline/%08d-1111-4111-8111-111111111111/content">`, i))
+	}
+	if n := len(inlineImageIDs(many.String())); n != maxAttachmentLinkIDs {
+		t.Errorf("got %d ids, want the cap of %d", n, maxAttachmentLinkIDs)
+	}
+}
+
+func TestLinkFromContent(t *testing.T) {
 	const commentID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	repo := newFakeStoredRepo()
-	repo.commentWorkItem = saParentID
 	repo.linkWant = []string{saAttID}
 	svc := newStoredSvc(repo, newFakeStore())
-	ctx := saCtx(t, saEmail)
+	html := `<img src="/attachments/inline/` + saAttID + `/content">`
 
-	resp, err := svc.LinkInlineImages(ctx, domain.LinkInlineImagesRequest{CommentID: commentID, IDs: []string{saAttID, "9d9d9d9d-9d9d-49d9-89d9-9d9d9d9d9d9d"}})
-	if err != nil || len(resp.Linked) != 1 || resp.Linked[0] != saAttID {
-		t.Fatalf("resp = %+v, err = %v", resp, err)
-	}
+	svc.LinkFromContent(context.Background(), commentID, saParentID, saEmail, html)
 	c := repo.linkCall
-	if c.comment != commentID || c.workItem != saParentID || c.email != saEmail || !c.sys {
-		t.Errorf("repo call = %+v: must be the caller's email, the comment's own work item, and run as the system", c)
+	if c.comment != commentID || c.workItem != saParentID || c.email != saEmail || !c.sys || len(c.ids) != 1 || c.ids[0] != saAttID {
+		t.Errorf("repo call = %+v: want the comment's own work item, the author's email, the image ids, as the system", c)
 	}
 
-	repo.linkWant = nil
-	resp, err = svc.LinkInlineImages(ctx, domain.LinkInlineImagesRequest{CommentID: commentID, IDs: []string{saAttID}})
-	if err != nil || resp.Linked == nil || len(resp.Linked) != 0 {
-		t.Errorf("nothing linked: resp = %+v, err = %v (want an empty list, not null)", resp, err)
-	}
-
-	var verr *apierror.ValidationError
-	for name, req := range map[string]domain.LinkInlineImagesRequest{
-		"bad comment id": {CommentID: "nope", IDs: []string{saAttID}},
-		"no ids":         {CommentID: commentID},
-		"bad image id":   {CommentID: commentID, IDs: []string{"nope"}},
-	} {
-		if _, err := svc.LinkInlineImages(ctx, req); !errors.As(err, &verr) {
-			t.Errorf("%s: err = %v, want ValidationError", name, err)
-		}
-	}
-	var nf *apierror.NotFoundError
-	repo.commentErr = &apierror.NotFoundError{Msg: "comment not found"}
-	if _, err := svc.LinkInlineImages(ctx, domain.LinkInlineImagesRequest{CommentID: commentID, IDs: []string{saAttID}}); !errors.As(err, &nf) {
-		t.Errorf("a comment the caller cannot see: err = %v, want NotFoundError", err)
+	repo.linkCall.comment = ""
+	svc.LinkFromContent(context.Background(), commentID, saParentID, saEmail, "<p>no images</p>")
+	svc.LinkFromContent(context.Background(), commentID, saParentID, "", html)
+	if repo.linkCall.comment != "" {
+		t.Error("nothing should be linked for a comment with no images or no author")
 	}
 }
 

@@ -32,7 +32,6 @@ type fakeStoredAttachmentSvc struct {
 	links   domain.AttachmentLinksRequest
 	confirm domain.ConfirmAttachmentUploadRequest
 	deleted domain.DeleteStoredAttachmentRequest
-	linked  domain.LinkInlineImagesRequest
 	err     error
 }
 
@@ -41,11 +40,6 @@ func (f *fakeStoredAttachmentSvc) OpenInlineImage(_ context.Context, id string) 
 		return domain.StoredAttachmentContent{}, f.err
 	}
 	return domain.StoredAttachmentContent{Body: io.NopCloser(strings.NewReader("IMG")), ContentType: "image/png", Size: 3}, nil
-}
-
-func (f *fakeStoredAttachmentSvc) LinkInlineImages(_ context.Context, req domain.LinkInlineImagesRequest) (domain.LinkInlineImagesResponse, error) {
-	f.linked = req
-	return domain.LinkInlineImagesResponse{Linked: req.IDs}, f.err
 }
 
 func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
@@ -76,7 +70,6 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
 	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImageContent)
-	mux.HandleFunc("POST /attachments/inline/link", h.LinkInlineImages)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
 	return rec
@@ -236,24 +229,5 @@ func TestStoredAttachmentHandler_CleanupUploads(t *testing.T) {
 	h.CleanupUploads(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup", nil))
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
-	}
-}
-
-func TestStoredAttachmentHandler_LinkInlineImages(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/inline/link", `{"commentId":"c1","ids":["a","b"]}`)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"linked":["a","b"]`) || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if svc.linked.CommentID != "c1" || len(svc.linked.IDs) != 2 {
-		t.Errorf("request = %+v", svc.linked)
-	}
-	rec = serveStored(t, svc, http.MethodPost, "/attachments/inline/link", `{"commentId":"c1","ids":["a"],"extra":1}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("an unknown field gave %d, want 400", rec.Code)
-	}
-	rec = serveStored(t, &fakeStoredAttachmentSvc{err: &apierror.NotFoundError{Msg: "x"}}, http.MethodPost, "/attachments/inline/link", `{"commentId":"c1","ids":["a"]}`)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("not found gave %d", rec.Code)
 	}
 }

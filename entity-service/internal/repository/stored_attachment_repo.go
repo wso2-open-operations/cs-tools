@@ -64,10 +64,6 @@ type StoredAttachmentRepository interface {
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
 	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
-	// CommentWorkItemID returns the work item a comment belongs to, as the caller
-	// may see it. A comment that does not exist, or that the caller may not see,
-	// is a *apierror.NotFoundError.
-	CommentWorkItemID(ctx context.Context, commentID string) (string, error)
 	// LinkInlineImages attaches to a comment the images in ids that are stored,
 	// unlinked, on that work item and uploaded by email, and returns the ids it
 	// linked (repeating the call for an already linked image returns it again).
@@ -310,18 +306,6 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 		}
 	}
 	return out, nil
-}
-
-// CommentWorkItemID implements StoredAttachmentRepository.
-func (r *storedAttachmentRepo) CommentWorkItemID(ctx context.Context, commentID string) (string, error) {
-	var id string
-	if err := r.db.QueryRow(ctx, `SELECT work_item_id::TEXT FROM comment WHERE id = $1`, commentID).Scan(&id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", &apierror.NotFoundError{Msg: "comment not found"}
-		}
-		return "", callerError(fmt.Errorf("get comment work item: %w", err))
-	}
-	return id, nil
 }
 
 // LinkInlineImages implements StoredAttachmentRepository.

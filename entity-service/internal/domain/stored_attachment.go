@@ -213,17 +213,3 @@ type UploadCleanupResult struct {
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
 }
-
-// LinkInlineImagesRequest is the body of POST /attachments/inline/link.
-type LinkInlineImagesRequest struct {
-	CommentID string `json:"commentId"`
-	// IDs are the comment images (attachment ids) the saved comment shows, at most 20.
-	IDs []string `json:"ids"`
-}
-
-// LinkInlineImagesResponse names the images that are now linked to the comment.
-// An id that is not listed was not linked (not the caller's, not a stored image
-// of the comment's work item, or already linked to another comment).
-type LinkInlineImagesResponse struct {
-	Linked []string `json:"linked"`
-}

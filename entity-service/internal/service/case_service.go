@@ -126,6 +126,9 @@ type caseService struct {
 	// nil before use anyway, same posture as every other optional
 	// dependency on this struct.
 	volumeTrendCache CaseVolumeTrendCache
+
+	// imageLinker attaches the comment images a new comment shows (nil: none).
+	imageLinker InlineImageLinker
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -195,24 +198,12 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 	return svc
 }
 
-// WithSLAEngine attaches the CSM-native SLA clock engine to an
-// already-constructed CaseService built via the plain NewCaseService (which
-// has no slaEngine parameter at all -- unlike NewCaseServiceWithSNWriteback,
-// which already takes one). Without this, s.slaEngine is always nil on this
-// path, so CreateCase never registers a case's SLA clocks and UpdateCase
-// never revises them on a severity change -- a real, reported gap: a case
-// created under plain DATA_SOURCE=postgres (no ServiceNow mirror at all) got
-// no SLA tracking whatsoever, from creation onward, regardless of its
-// severity. Same post-construction wiring shape as WithCSEngineerRole, for
-// the same reason -- optional, nil-safe to omit (every slaEngine call site in
-// this file already tolerates s.slaEngine == nil), and every existing
-// NewCaseService call site (60+, every test, every other DataSource branch
-// in routes.go) keeps working completely unchanged. slaEngine may itself be
-// nil (config.CSMSLAEngineEnabled == false, or no database configured at
-// all) -- that's the normal "engine turned off" case, not an error.
-func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
-	if cs, ok := svc.(*caseService); ok {
-		cs.slaEngine = slaEngine
+// WithInlineImageLinker attaches the linker that, when a comment is saved,
+// attaches the comment images it shows to it. Same post-construction wiring shape
+// as WithCSEngineerRole; a no-op if svc is not a *caseService or l is nil.
+func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
+	if cs, ok := svc.(*caseService); ok && l != nil {
+		cs.imageLinker = l
 	}
 	return svc
 }
@@ -1441,6 +1432,10 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	}
 
 	s.subscribeCommenterToWatchList(ctx, req.CaseID, actorEmail)
+
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, c.ID, req.CaseID, actorEmail, req.Content)
+	}
 
 	// Computed once, used by both the SLA-engine hook and the published
 	// event's own IsSupportEngineerResponse flag below -- see

@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -559,43 +560,53 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
 
-// LinkInlineImages implements StoredAttachmentService.
+// inlineImageRef finds the comment images a comment's HTML shows: its <img src>
+// ends in .../attachments/inline/<attachment id>/content.
+var inlineImageRef = regexp.MustCompile(`attachments/inline/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/content`)
+
+// inlineImageIDs returns the distinct attachment ids a comment's content refers
+// to, at most maxAttachmentLinkIDs.
+func inlineImageIDs(content string) []string {
+	var ids []string
+	seen := map[string]bool{}
+	for _, m := range inlineImageRef.FindAllStringSubmatch(content, -1) {
+		id := strings.ToLower(m[1])
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		if len(ids) == maxAttachmentLinkIDs {
+			break
+		}
+	}
+	return ids
+}
+
+// LinkFromContent implements InlineImageLinker.
 //
 // A pasted image is uploaded before its comment exists, so it starts unlinked
-// (comment_id NULL, visible only to its uploader). Once the comment is saved the
-// webapp lists the images it shows here and they are attached to it. Only the
-// uploader's own stored images on the comment's own work item are linked, so a
-// caller cannot attach someone else's image, or one from another case.
-func (s *storedAttachmentService) LinkInlineImages(ctx context.Context, req domain.LinkInlineImagesRequest) (domain.LinkInlineImagesResponse, error) {
-	if !validate.IsUUID(req.CommentID) {
-		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: "commentId must be a valid UUID"}
+// (comment_id NULL, visible only to its uploader). When the comment is saved
+// this finds the images its HTML shows and attaches them to it, so everyone who
+// may read the comment can see them. Only the author's own stored images on the
+// comment's own work item are linked, so a comment cannot claim someone else's
+// image or one from another case. It is best effort: a failure is logged and the
+// comment is not affected (the image then stays visible to its uploader only, and
+// is removed by the upload cleanup after 24 hours).
+func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string) {
+	ids := inlineImageIDs(content)
+	if len(ids) == 0 || authorEmail == "" {
+		return
 	}
-	if len(req.IDs) == 0 {
-		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: "ids is required"}
-	}
-	if len(req.IDs) > maxAttachmentLinkIDs {
-		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("ids cannot exceed %d entries", maxAttachmentLinkIDs)}
-	}
-	if err := validateUUIDs("ids", req.IDs); err != nil {
-		return domain.LinkInlineImagesResponse{}, err
-	}
-	email, err := s.resolveActorEmail(ctx)
+	linked, err := s.repo.LinkInlineImages(repository.WithSystemIdentity(ctx), commentID, workItemID, authorEmail, ids)
 	if err != nil {
-		return domain.LinkInlineImagesResponse{}, err
+		slog.ErrorContext(ctx, "could not link comment images", "commentId", commentID, "error", err)
+		return
 	}
-	// As the caller: a comment they cannot see is not found.
-	workItemID, err := s.repo.CommentWorkItemID(ctx, req.CommentID)
-	if err != nil {
-		return domain.LinkInlineImagesResponse{}, err
-	}
-	linked, err := s.repo.LinkInlineImages(repository.WithSystemIdentity(ctx), req.CommentID, workItemID, email, req.IDs)
-	if err != nil {
-		return domain.LinkInlineImagesResponse{}, err
-	}
-	if linked == nil {
-		linked = []string{}
-	}
-	return domain.LinkInlineImagesResponse{Linked: linked}, nil
+	slog.InfoContext(ctx, "comment images linked",
+		"audit", true, "action", "link", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"commentId", commentID, "referenced", len(ids), "linked", len(linked))
 }
 
 // DeleteAttachment implements StoredAttachmentService.
