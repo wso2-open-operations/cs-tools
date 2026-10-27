@@ -2150,6 +2150,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
+		mux.HandleFunc("POST /attachments/inline/link", storedAttachmentHandler.LinkInlineImages)
 		mux.HandleFunc("POST /attachments/shares/cleanup", storedAttachmentHandler.CleanupShares)
 		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
 	}

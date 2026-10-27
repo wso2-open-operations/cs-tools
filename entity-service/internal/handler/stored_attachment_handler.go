@@ -162,6 +162,20 @@ func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *h
 	_, _ = io.Copy(w, c.Body)
 }
 
+// LinkInlineImages handles POST /attachments/inline/link.
+func (h *StoredAttachmentHandler) LinkInlineImages(w http.ResponseWriter, r *http.Request) {
+	var req domain.LinkInlineImagesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.LinkInlineImages(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
 // writeStoredAttachmentJSON writes a response that carries short-lived links, so
 // it must never be cached by a browser or an intermediary.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body any) {

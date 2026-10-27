@@ -409,6 +409,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/inline/link:
+    post:
+      summary: >-
+        Attach comment images to the comment that now shows them. A pasted image is
+        uploaded before its comment exists, so it starts unlinked and visible only to
+        whoever uploaded it; once the comment is saved, send the comment id and the
+        images it shows. Only images the caller uploaded, that are stored, and that
+        belong to the comment's own work item are linked. Images never linked within
+        24 hours are removed by POST /attachments/uploads/cleanup. Not registered
+        (404) unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
+      operationId: linkInlineImages
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [commentId, ids]
+              additionalProperties: false
+              properties:
+                commentId: {type: string, format: uuid}
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The images now linked. An id that is missing was not linked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked]
+                properties:
+                  linked:
+                    type: array
+                    items: {type: string, format: uuid}
+        "400":
+          description: A bad id, no ids, or more than 20.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The comment does not exist or is not visible to the caller, or SFTPGo is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/inline/{id}/content:
     get:
       summary: >-
@@ -516,11 +570,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [found, cleaned, failed]
+                required: [found, cleaned, failed, imagesRemoved, imagesFailed]
                 properties:
                   found: {type: integer}
                   cleaned: {type: integer}
                   failed: {type: integer}
+                  imagesRemoved:
+                    type: integer
+                    description: Comment images stored but never linked to a comment within 24 hours, removed.
+                  imagesFailed: {type: integer}
         "403":
           description: The caller is not an internal service.
           content:

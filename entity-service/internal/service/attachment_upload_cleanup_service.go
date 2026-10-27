@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -39,9 +40,14 @@ const (
 	uploadCleanupMaxPerRun = 200
 )
 
+// unlinkedImageAge is how long a stored comment image may stay unlinked before it
+// is removed: the time to write a comment, with room to spare.
+const unlinkedImageAge = 24 * time.Hour
+
 // uploadStore is the part of the SFTPGo client the upload cleanup uses.
 type uploadStore interface {
 	RemoveDir(ctx context.Context, dir string) error
+	RemoveFile(ctx context.Context, path string) error
 }
 
 type attachmentUploadCleanupService struct {
@@ -85,9 +91,30 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		}
 		res.Cleaned++
 	}
+	// Comment images that were uploaded and stored but never linked to a comment.
+	unlinked, err := s.repo.ListUnlinkedImages(sys, s.now().Add(-unlinkedImageAge), uploadCleanupMaxPerRun)
+	if err != nil {
+		return res, err
+	}
+	for _, img := range unlinked {
+		if img.StorageKey != nil && *img.StorageKey != "" {
+			if err := s.store.RemoveFile(ctx, strings.TrimLeft(*img.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
+				res.ImagesFailed++
+				slog.WarnContext(ctx, "could not remove an unlinked comment image", "attachmentId", img.ID, "error", err)
+				continue
+			}
+		}
+		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentComment, img.ID, "inline-image-cleanup"); err != nil {
+			res.ImagesFailed++
+			slog.WarnContext(ctx, "could not mark an unlinked comment image deleted", "attachmentId", img.ID, "error", err)
+			continue
+		}
+		res.ImagesRemoved++
+	}
 	slog.InfoContext(ctx, "attachment upload cleanup",
 		"audit", true, "action", "upload-cleanup", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx),
-		"found", res.Found, "cleaned", res.Cleaned, "failed", res.Failed)
+		"found", res.Found, "cleaned", res.Cleaned, "failed", res.Failed,
+		"imagesRemoved", res.ImagesRemoved, "imagesFailed", res.ImagesFailed)
 	return res, nil
 }

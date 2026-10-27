@@ -559,6 +559,45 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
 
+// LinkInlineImages implements StoredAttachmentService.
+//
+// A pasted image is uploaded before its comment exists, so it starts unlinked
+// (comment_id NULL, visible only to its uploader). Once the comment is saved the
+// webapp lists the images it shows here and they are attached to it. Only the
+// uploader's own stored images on the comment's own work item are linked, so a
+// caller cannot attach someone else's image, or one from another case.
+func (s *storedAttachmentService) LinkInlineImages(ctx context.Context, req domain.LinkInlineImagesRequest) (domain.LinkInlineImagesResponse, error) {
+	if !validate.IsUUID(req.CommentID) {
+		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: "commentId must be a valid UUID"}
+	}
+	if len(req.IDs) == 0 {
+		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: "ids is required"}
+	}
+	if len(req.IDs) > maxAttachmentLinkIDs {
+		return domain.LinkInlineImagesResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("ids cannot exceed %d entries", maxAttachmentLinkIDs)}
+	}
+	if err := validateUUIDs("ids", req.IDs); err != nil {
+		return domain.LinkInlineImagesResponse{}, err
+	}
+	email, err := s.resolveActorEmail(ctx)
+	if err != nil {
+		return domain.LinkInlineImagesResponse{}, err
+	}
+	// As the caller: a comment they cannot see is not found.
+	workItemID, err := s.repo.CommentWorkItemID(ctx, req.CommentID)
+	if err != nil {
+		return domain.LinkInlineImagesResponse{}, err
+	}
+	linked, err := s.repo.LinkInlineImages(repository.WithSystemIdentity(ctx), req.CommentID, workItemID, email, req.IDs)
+	if err != nil {
+		return domain.LinkInlineImagesResponse{}, err
+	}
+	if linked == nil {
+		linked = []string{}
+	}
+	return domain.LinkInlineImagesResponse{Linked: linked}, nil
+}
+
 // DeleteAttachment implements StoredAttachmentService.
 //
 // Who may delete is decided here, not by row-level security: UPDATE on these

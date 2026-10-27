@@ -1688,6 +1688,11 @@ type StoredAttachmentService interface {
 	// it, so the browser never talks to SFTPGo. An image the caller cannot see,
 	// that is not stored, or that was deleted is a NotFoundError.
 	OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error)
+	// LinkInlineImages attaches comment images to the comment that now shows
+	// them. Only images the caller uploaded, that are stored, and that belong to
+	// the comment's own work item are linked; the response lists those that were.
+	// A comment the caller cannot see is a NotFoundError.
+	LinkInlineImages(ctx context.Context, req domain.LinkInlineImagesRequest) (domain.LinkInlineImagesResponse, error)
 }
 
 // AttachmentShareCleanupService removes the spent and expired SFTPGo shares that

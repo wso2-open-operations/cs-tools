@@ -1860,9 +1860,9 @@ create.
 
 Work item, comment-image and deployment attachment files live in SFTPGo
 (`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
-the older flow and is not touched). Seven routes, registered only when `db != nil` and
+the older flow and is not touched). Eight routes, registered only when `db != nil` and
 `Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
-`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`, `POST /attachments/shares/cleanup`, `POST /attachments/uploads/cleanup`. Code: `internal/filestore` (SFTPGo client and the path
+`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`, `POST /attachments/shares/cleanup`, `POST /attachments/uploads/cleanup`, `POST /attachments/inline/link`. Code: `internal/filestore` (SFTPGo client and the path
 layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
 `handler.StoredAttachmentHandler`.
 
@@ -1959,9 +1959,13 @@ are internal-only, which is why `ConfirmUpload` runs `MarkComplete`/`MarkFailed`
 in this service. The three tables have no row-level id default except `work_item_attachment`
 (migration 0179), so `InsertPending` generates the id.
 
-**Inline comment images** are uploaded against the work item before the comment exists
-(`comment_attachment.comment_id` is nullable and `work_item_id` is filled, migration 0150);
-linking them to the comment when it is saved, and the cleanup of unlinked images, are not built yet.
+**Inline comment images** are uploaded against the work item before the comment exists, so a new image is a
+`comment_attachment` row with `comment_id` NULL and `work_item_id` set (migration 0150), visible only to its
+uploader. Once the comment is saved the webapp calls `POST /attachments/inline/link` with the comment id and
+the images it shows; each is linked (`comment_id` set) only if the caller uploaded it, it is stored, and it
+belongs to the comment's own work item, and the response lists those that were. An image still unlinked after
+24 hours is removed (file deleted, row `DELETED`) by `POST /attachments/uploads/cleanup`, so a client must
+link right after saving the comment. Preview is `GET /attachments/inline/{id}/content`.
 
 Verification: unit tests use a fake SFTPGo (`httptest`) and in-memory fakes; the repository
 integration test needs `STORED_ATTACHMENT_TEST_DSN` (a role that does not bypass RLS, all

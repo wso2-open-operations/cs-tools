@@ -29,7 +29,16 @@ import (
 
 type fakeUploadStore struct {
 	removed []string
+	files   []string
 	errFor  map[string]error
+}
+
+func (f *fakeUploadStore) RemoveFile(_ context.Context, p string) error {
+	if err := f.errFor[p]; err != nil {
+		return err
+	}
+	f.files = append(f.files, p)
+	return nil
 }
 
 func (f *fakeUploadStore) RemoveDir(_ context.Context, dir string) error {
@@ -45,7 +54,7 @@ func TestCleanupUploads_RemovesTheFolderAndMarksTheRowFailed(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.abandoned = []domain.AbandonedUpload{
 		{Kind: domain.StoredAttachmentWorkItem, ID: "11111111-1111-4111-8111-111111111111"},
-		{Kind: domain.StoredAttachmentComment, ID: "22222222-2222-4222-8222-222222222222"},   // folder already gone
+		{Kind: domain.StoredAttachmentComment, ID: "22222222-2222-4222-8222-222222222222"},    // folder already gone
 		{Kind: domain.StoredAttachmentDeployment, ID: "33333333-3333-4333-8333-333333333333"}, // folder cannot be removed
 	}
 	store := &fakeUploadStore{errFor: map[string]error{
@@ -81,5 +90,34 @@ func TestCleanupUploads_InternalCallersOnly(t *testing.T) {
 	svc := NewAttachmentUploadCleanupService(newFakeStoredRepo(), &fakeUploadStore{}, stubAccess{})
 	if _, err := svc.CleanupUploads(context.Background()); !errors.As(err, &forbidden) {
 		t.Errorf("a restricted caller: err = %v, want ForbiddenError", err)
+	}
+}
+
+func TestCleanupUploads_RemovesImagesThatWereNeverLinked(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	repo := newFakeStoredRepo()
+	k1, k2, k3 := "csm/p/w/inline_attachments/ca1_a.png", "csm/p/w/inline_attachments/ca2_b.png", "csm/p/w/inline_attachments/ca3_c.png"
+	repo.unlinked = []domain.StoredAttachmentRow{
+		{ID: "a1111111-1111-4111-8111-111111111111", StorageKey: &k1},
+		{ID: "b2222222-2222-4222-8222-222222222222", StorageKey: &k2}, // file already gone
+		{ID: "c3333333-3333-4333-8333-333333333333", StorageKey: &k3}, // cannot be removed
+	}
+	repo.deleteOK = true
+	store := &fakeUploadStore{errFor: map[string]error{k2: filestore.ErrNotFound, k3: errors.New("boom")}}
+	svc := NewAttachmentUploadCleanupService(repo, store, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
+	svc.now = func() time.Time { return now }
+
+	res, err := svc.CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if res.ImagesRemoved != 2 || res.ImagesFailed != 1 {
+		t.Errorf("result = %+v, want 2 images removed, 1 failed", res)
+	}
+	if repo.deleted["a1111111-1111-4111-8111-111111111111"] == "" || repo.deleted["b2222222-2222-4222-8222-222222222222"] == "" {
+		t.Errorf("rows not marked deleted: %v", repo.deleted)
+	}
+	if _, ok := repo.deleted["c3333333-3333-4333-8333-333333333333"]; ok {
+		t.Error("an image whose file could not be removed must stay, to be tried again")
 	}
 }

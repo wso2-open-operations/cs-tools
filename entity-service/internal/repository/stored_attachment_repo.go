@@ -64,6 +64,18 @@ type StoredAttachmentRepository interface {
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
 	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
+	// CommentWorkItemID returns the work item a comment belongs to, as the caller
+	// may see it. A comment that does not exist, or that the caller may not see,
+	// is a *apierror.NotFoundError.
+	CommentWorkItemID(ctx context.Context, commentID string) (string, error)
+	// LinkInlineImages attaches to a comment the images in ids that are stored,
+	// unlinked, on that work item and uploaded by email, and returns the ids it
+	// linked (repeating the call for an already linked image returns it again).
+	// Meant for repository.WithSystemIdentity: UPDATE is internal-only.
+	LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error)
+	// ListUnlinkedImages returns up to limit stored comment images, created before
+	// olderThan, that no comment was ever linked to. Meant for WithSystemIdentity.
+	ListUnlinkedImages(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error)
 }
 
 // callerError turns "the request carried no caller identity" into a 401: a
@@ -296,6 +308,74 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate abandoned uploads: %w", err)
 		}
+	}
+	return out, nil
+}
+
+// CommentWorkItemID implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) CommentWorkItemID(ctx context.Context, commentID string) (string, error) {
+	var id string
+	if err := r.db.QueryRow(ctx, `SELECT work_item_id::TEXT FROM comment WHERE id = $1`, commentID).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", &apierror.NotFoundError{Msg: "comment not found"}
+		}
+		return "", callerError(fmt.Errorf("get comment work item: %w", err))
+	}
+	return id, nil
+}
+
+// LinkInlineImages implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		UPDATE comment_attachment
+		SET comment_id = $1, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND work_item_id = $2
+		  AND status = 'COMPLETE'
+		  AND lower(created_by) = lower($3)
+		  AND (comment_id IS NULL OR comment_id = $1)
+		RETURNING id::TEXT`, commentID, workItemID, email, ids)
+	if err != nil {
+		return nil, fmt.Errorf("link inline images: %w", err)
+	}
+	defer rows.Close()
+	var linked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked image: %w", err)
+		}
+		linked = append(linked, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate linked images: %w", err)
+	}
+	return linked, nil
+}
+
+// ListUnlinkedImages implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentComment)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM comment_attachment
+		WHERE comment_id IS NULL AND status = 'COMPLETE' AND created_on < $1
+		ORDER BY created_on LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unlinked images: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan unlinked image: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unlinked images: %w", err)
 	}
 	return out, nil
 }
