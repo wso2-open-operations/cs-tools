@@ -439,6 +439,7 @@ paths:
             image/jpeg: {schema: {type: string, format: binary}}
             image/gif: {schema: {type: string, format: binary}}
             image/webp: {schema: {type: string, format: binary}}
+            application/octet-stream: {schema: {type: string, format: binary}}
         "400":
           description: The id is not a UUID.
           content:
