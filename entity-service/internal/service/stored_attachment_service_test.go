@@ -405,6 +405,24 @@ func TestOpenInlineImage(t *testing.T) {
 	}
 }
 
+func TestLimiterKey_UsersOfOneClientDoNotShareAnAllowance(t *testing.T) {
+	ctxFor := func(userID, clientID, email string) context.Context {
+		ctx := saCtx(t, email)
+		return auth.WithIdentity(ctx, auth.Identity{UserID: userID, ClientID: clientID})
+	}
+	a := limiterKey(ctxFor("", "portal-backend", "a@example.com"))
+	b := limiterKey(ctxFor("", "portal-backend", "b@example.com"))
+	if a == b || a == "portal-backend" {
+		t.Errorf("keys %q / %q: two users of one client must not share a key", a, b)
+	}
+	if got := limiterKey(ctxFor("user-1", "portal-backend", "a@example.com")); got != "user-1" {
+		t.Errorf("with a user id the key = %q, want the user id", got)
+	}
+	if got := limiterKey(auth.WithIdentity(context.Background(), auth.Identity{ClientID: "m2m"})); got != "m2m" {
+		t.Errorf("a machine caller's key = %q, want its client id", got)
+	}
+}
+
 func TestResolveLinks_RejectsBadRequests(t *testing.T) {
 	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
 	many := make([]string, maxAttachmentLinkIDs+1)

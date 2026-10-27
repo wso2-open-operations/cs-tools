@@ -129,9 +129,28 @@ func (s *storedAttachmentService) resolveActorEmail(ctx context.Context) (string
 	return email, nil
 }
 
+// limiterKey is who a share is charged to: the user's UUID, else the email in
+// the user's own (already verified) x-user-id-token, else the client id. The
+// client id is shared by every user of one portal backend, so it is only the key
+// for a caller with no user at all (a machine caller); the email keeps one user
+// without a userid claim from using up everyone else's allowance. It is a map
+// key only and is never logged (auditCaller stays the audit identifier).
+func limiterKey(ctx context.Context) string {
+	id := auth.IdentityFromContext(ctx)
+	if id.UserID != "" {
+		return id.UserID
+	}
+	if token := middleware.UserIDTokenFromContext(ctx); token != "" {
+		if email, err := emailFromJWT(token); err == nil && email != "" {
+			return "email:" + strings.ToLower(email)
+		}
+	}
+	return auditCaller(ctx)
+}
+
 // reserveShares charges n new shares to the caller, or refuses with a 429.
 func (s *storedAttachmentService) reserveShares(ctx context.Context, n int) error {
-	if n == 0 || s.shares.allow(auditCaller(ctx), n) {
+	if n == 0 || s.shares.allow(limiterKey(ctx), n) {
 		return nil
 	}
 	return &apierror.TooManyRequestsError{Msg: "too many attachment links requested; try again in a minute"}
