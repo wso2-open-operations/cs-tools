@@ -68,7 +68,7 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 
 func TestStoredAttachmentHandler_LinksAreNeverCached(t *testing.T) {
 	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/download", `{"kind":"work_item","ids":["a"]}`)
+	rec := serveStored(t, svc, http.MethodPost, "/attachments/download", `{"type":"work_item","ids":["a"]}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -82,7 +82,7 @@ func TestStoredAttachmentHandler_LinksAreNeverCached(t *testing.T) {
 
 func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodPost, "/attachments/upload",
-		`{"kind":"work_item","parentId":"p","name":"a.pdf","contentType":"application/pdf","sizeBytes":5}`)
+		`{"type":"work_item","parentId":"p","name":"a.pdf","contentType":"application/pdf","sizeBytes":5}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
@@ -93,7 +93,7 @@ func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 
 func TestStoredAttachmentHandler_ConfirmTakesTheIdFromThePath(t *testing.T) {
 	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"kind":"deployment"}`)
+	rec := serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -101,7 +101,7 @@ func TestStoredAttachmentHandler_ConfirmTakesTheIdFromThePath(t *testing.T) {
 		t.Errorf("confirm request = %+v", svc.confirm)
 	}
 	// An id in the body is not a field: the path is the only source.
-	rec = serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"kind":"deployment","id":"other"}`)
+	rec = serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment","id":"other"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("an id in the body gave %d, want 400 (unknown field)", rec.Code)
 	}
@@ -118,7 +118,7 @@ func TestStoredAttachmentHandler_MapsServiceErrorsToStatuses(t *testing.T) {
 		"no token":    {&apierror.UnauthorizedError{Msg: "x"}, http.StatusUnauthorized},
 		"storage":     {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
 	} {
-		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/upload/00000000-0000-0000-0000-000000000001/confirm", `{"kind":"work_item"}`)
+		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/upload/00000000-0000-0000-0000-000000000001/confirm", `{"type":"work_item"}`)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}
@@ -127,7 +127,7 @@ func TestStoredAttachmentHandler_MapsServiceErrorsToStatuses(t *testing.T) {
 
 func TestStoredAttachmentHandler_DeleteReturns204WithNoBody(t *testing.T) {
 	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/delete", `{"kind":"work_item","id":"abc"}`)
+	rec := serveStored(t, svc, http.MethodPost, "/attachments/delete", `{"type":"work_item","id":"abc"}`)
 	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
 		t.Fatalf("status = %d body = %q, want 204 and no body", rec.Code, rec.Body.String())
 	}
@@ -146,7 +146,7 @@ func TestStoredAttachmentHandler_DeleteMapsErrors(t *testing.T) {
 		"not found":        {&apierror.NotFoundError{Msg: "x"}, http.StatusNotFound},
 		"storage":          {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
 	} {
-		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/delete", `{"kind":"deployment","id":"a"}`)
+		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/delete", `{"type":"deployment","id":"a"}`)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}

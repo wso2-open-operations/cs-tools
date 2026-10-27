@@ -47,7 +47,7 @@ const (
 
 // AttachmentLinksRequest is the body of POST /attachments/download.
 type AttachmentLinksRequest struct {
-	Kind StoredAttachmentKind `json:"kind"`
+	Kind StoredAttachmentKind `json:"type"`
 	// IDs are attachment ids of that kind, at most 100.
 	IDs []string `json:"ids"`
 }
@@ -77,7 +77,7 @@ type AttachmentLinksResponse struct {
 
 // InitiateAttachmentUploadRequest is the body of POST /attachments/upload.
 type InitiateAttachmentUploadRequest struct {
-	Kind StoredAttachmentKind `json:"kind"`
+	Kind StoredAttachmentKind `json:"type"`
 	// ParentID is the work item the file belongs to (kinds work_item and
 	// comment: a comment image is uploaded against the work item before its
 	// comment exists) or the deployment (kind deployment).
@@ -102,7 +102,7 @@ type InitiateAttachmentUploadResponse struct {
 // ConfirmAttachmentUploadRequest is the body of
 // POST /attachments/upload/{id}/confirm. ID comes from the path.
 type ConfirmAttachmentUploadRequest struct {
-	Kind StoredAttachmentKind `json:"kind"`
+	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"-"`
 }
 
@@ -121,7 +121,7 @@ type ConfirmAttachmentUploadResponse struct {
 type DeleteStoredAttachmentRequest struct {
 	// Kind is work_item or deployment; an inline comment image is not deleted
 	// on its own.
-	Kind StoredAttachmentKind `json:"kind"`
+	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"id"`
 }
 

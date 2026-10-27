@@ -216,7 +216,7 @@ paths:
     post:
       summary: >-
         Get metadata, and a short-lived download link for each stored file, for
-        attachments of one kind (work item, comment image or deployment). The
+        attachments of one type (work item, comment image or deployment). The
         link is an SFTPGo share on exactly that one file: the browser fetches the
         file straight from SFTPGo, and no SFTPGo credential ever reaches it. An
         id the caller may not see is left out of the response, the same as one
@@ -240,7 +240,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AttachmentLinksResponse'
         "400":
-          description: Unknown kind, no ids, more than 100 ids, or an id that is not a UUID.
+          description: Unknown type, no ids, more than 100 ids, or an id that is not a UUID.
           content:
             application/json:
               schema:
@@ -266,7 +266,7 @@ paths:
         closed (refused for every caller), and the size and type. Records a
         PENDING attachment and returns a one-use link: the browser POSTs a
         multipart form with the file in the field named by fieldName to uploadUrl
-        before expiresAt, then calls confirm. A comment image (kind comment) may
+        before expiresAt, then calls confirm. A comment image (type comment) may
         only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
         before its comment exists. Not registered (404) without the SFTPGo
         settings. The response is never cacheable.
@@ -288,7 +288,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/InitiateAttachmentUploadResponse'
         "400":
-          description: 'Invalid request: kind, parentId, name, contentType, or sizeBytes over the limit.'
+          description: 'Invalid request: type, parentId, name, contentType, or sizeBytes over the limit.'
           content:
             application/json:
               schema:
@@ -421,7 +421,7 @@ paths:
         "204":
           description: The attachment is deleted.
         "400":
-          description: Unknown kind, a comment image, or an id that is not a UUID.
+          description: Unknown type, a comment image, or an id that is not a UUID.
           content:
             application/json:
               schema:
@@ -39656,10 +39656,10 @@ components:
 
     AttachmentLinksRequest:
       type: object
-      required: [kind, ids]
+      required: [type, ids]
       additionalProperties: false
       properties:
-        kind:
+        type:
           $ref: '#/components/schemas/StoredAttachmentKind'
         ids:
           type: array
@@ -39721,16 +39721,16 @@ components:
 
     InitiateAttachmentUploadRequest:
       type: object
-      required: [kind, parentId, name, sizeBytes]
+      required: [type, parentId, name, sizeBytes]
       additionalProperties: false
       properties:
-        kind:
+        type:
           $ref: '#/components/schemas/StoredAttachmentKind'
         parentId:
           type: string
           format: uuid
           description: >-
-            The work item (kinds work_item and comment) or the deployment (kind
+            The work item (types work_item and comment) or the deployment (type
             deployment) the file belongs to.
         name:
           type: string
@@ -39738,7 +39738,7 @@ components:
         contentType:
           type: string
           description: >-
-            Required for kind comment, where it must be image/png, image/jpeg,
+            Required for type comment, where it must be image/png, image/jpeg,
             image/gif or image/webp. Defaults to application/octet-stream
             otherwise.
         sizeBytes:
@@ -39746,7 +39746,7 @@ components:
           format: int64
           minimum: 1
           description: >-
-            The file's size. Checked against ATTACHMENT_MAX_BYTES (kind comment:
+            The file's size. Checked against ATTACHMENT_MAX_BYTES (type comment:
             INLINE_IMAGE_MAX_BYTES), and the uploaded file must match it.
 
     InitiateAttachmentUploadResponse:
@@ -39774,13 +39774,13 @@ components:
 
     DeleteStoredAttachmentRequest:
       type: object
-      required: [kind, id]
+      required: [type, id]
       additionalProperties: false
       properties:
-        kind:
+        type:
           type: string
           enum: [work_item, deployment]
-          description: An image embedded in a comment (kind comment) is not deleted on its own.
+          description: An image embedded in a comment (type comment) is not deleted on its own.
         id:
           type: string
           format: uuid
@@ -39788,10 +39788,10 @@ components:
 
     ConfirmAttachmentUploadRequest:
       type: object
-      required: [kind]
+      required: [type]
       additionalProperties: false
       properties:
-        kind:
+        type:
           $ref: '#/components/schemas/StoredAttachmentKind'
 
     ConfirmAttachmentUploadResponse:
