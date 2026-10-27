@@ -42,6 +42,10 @@ import (
 // ErrNotFound is returned when SFTPGo answers 404: a missing file or folder.
 var ErrNotFound = errors.New("filestore: not found")
 
+// ErrExists is returned when SFTPGo answers 409: the destination already exists.
+// A live SFTPGo answers this when a folder to create is already there.
+var ErrExists = errors.New("filestore: already exists")
+
 // tokenMaxAge is how long a service token is reused. SFTPGo's default token
 // lifetime is 20 minutes, so this stays well inside it.
 const tokenMaxAge = 10 * time.Minute
@@ -171,6 +175,10 @@ func (c *Client) CreateShare(ctx context.Context, spec ShareSpec) (string, error
 func (c *Client) MkdirAll(ctx context.Context, dir string) error {
 	q := url.Values{"path": {abs(dir)}, "mkdir_parents": {"true"}}
 	resp, err := c.exec(ctx, http.MethodPost, "/api/v2/user/dirs", q, nil, nil)
+	if errors.Is(err, ErrExists) {
+		// SFTPGo answers 409 for a folder that is already there, which is what we want.
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -340,6 +348,9 @@ func statusError(req *http.Request, resp *http.Response) error {
 	}
 	_ = json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&body)
 	detail := strings.TrimSpace(body.Error + " " + body.Message)
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: %s %s: %s", ErrExists, req.Method, req.URL.Path, detail)
+	}
 	return fmt.Errorf("filestore: %s %s: status %d: %s", req.Method, req.URL.Path, resp.StatusCode, detail)
 }
 

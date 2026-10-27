@@ -301,3 +301,13 @@ func TestClient_RefusesARedirectToAnotherOrigin(t *testing.T) {
 		t.Error("ListDir followed a redirect to another origin without an error")
 	}
 }
+
+func TestMkdirAll_AFolderThatAlreadyExistsIsNotAnError(t *testing.T) {
+	f := newFake(t)
+	f.handlers["POST /api/v2/user/dirs"] = func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"the destination already exists Unable to create directory \"/csm/a\""}`, http.StatusConflict)
+	}
+	if err := f.client().MkdirAll(context.Background(), "csm/a"); err != nil {
+		t.Errorf("MkdirAll on an existing folder = %v, want nil", err)
+	}
+}
