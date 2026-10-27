@@ -48,9 +48,18 @@ const (
 // AttachmentLinksRequest is the body of POST /attachments/download.
 type AttachmentLinksRequest struct {
 	Kind StoredAttachmentKind `json:"type"`
-	// IDs are attachment ids of that kind, at most 100.
+	// IDs are attachment ids of that kind, at most 20.
 	IDs []string `json:"ids"`
+	// Purpose is "download" (the default; a link that serves one request) or
+	// "preview" (an inline image; a link that serves two).
+	Purpose string `json:"purpose,omitempty"`
 }
+
+// The purposes of a download link.
+const (
+	AttachmentPurposeDownload = "download"
+	AttachmentPurposePreview  = "preview"
+)
 
 // AttachmentLink is one attachment's metadata and, when its file can be
 // fetched, a short-lived link to it. An id the caller may not see is simply

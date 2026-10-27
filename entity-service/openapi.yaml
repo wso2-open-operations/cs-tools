@@ -39680,6 +39680,15 @@ components:
           items:
             type: string
             format: uuid
+        purpose:
+          type: string
+          enum: [download, preview]
+          default: download
+          description: >-
+            How the link will be used. A download link serves one request and a
+            preview link (an inline image) two, then SFTPGo refuses it; either
+            expires after ATTACHMENT_READ_LINK_TTL (1 minute). Ask again when a
+            link has gone.
 
     AttachmentLink:
       type: object

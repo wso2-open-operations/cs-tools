@@ -48,11 +48,13 @@ const (
 	maxSharesPerCallerPerMinute = 60
 	// maxAttachmentNameLen is the width of the name column (VARCHAR(255)).
 	maxAttachmentNameLen = 255
-	// readLinkMaxUses is how many requests a download link serves. More than
-	// one on purpose: a browser can fetch one image or PDF preview in several
-	// requests (a retry, a range request), and a link with a single use would
-	// break it. The short expiry is what bounds a leaked link.
-	readLinkMaxUses = 10
+	// downloadLinkMaxUses and previewLinkMaxUses are how many requests a link
+	// serves before SFTPGo refuses it. A link is a bearer credential, so it is
+	// spent on the first open: a download is one request; a preview gets one
+	// spare for a browser that fetches an image twice. The webapp asks again if
+	// a link has gone.
+	downloadLinkMaxUses = 1
+	previewLinkMaxUses  = 2
 	// sniffBytes is how much of an upload is read to check its real type.
 	sniffBytes = 512
 )
@@ -206,6 +208,14 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 	if err := validateUUIDs("ids", req.IDs); err != nil {
 		return domain.AttachmentLinksResponse{}, err
 	}
+	uses := downloadLinkMaxUses
+	switch req.Purpose {
+	case "", domain.AttachmentPurposeDownload:
+	case domain.AttachmentPurposePreview:
+		uses = previewLinkMaxUses
+	default:
+		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: "purpose must be download or preview"}
+	}
 
 	// Only rows the caller may see come back; the rest are treated as absent.
 	rows, err := s.repo.GetByIDs(ctx, req.Kind, req.IDs)
@@ -226,7 +236,7 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 	results := make(chan domain.AttachmentLink, len(rows))
 	for _, row := range rows {
 		g.Go(func() error {
-			results <- s.linkFor(ctx, req.Kind, row)
+			results <- s.linkFor(ctx, req.Kind, row, uses)
 			return nil
 		})
 	}
@@ -254,7 +264,7 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 
 // linkFor builds one attachment's entry, creating its download share when the
 // file is stored. A storage failure makes only that entry unavailable.
-func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow) domain.AttachmentLink {
+func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, uses int) domain.AttachmentLink {
 	l := domain.AttachmentLink{
 		ID: row.ID, Number: row.Number, Name: row.Name,
 		ContentType: row.ContentType, SizeBytes: row.SizeBytes,
@@ -273,7 +283,7 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 	expires := s.now().Add(s.limits.ReadLinkTTL)
 	shareID, err := s.store.CreateShare(ctx, filestore.ShareSpec{
 		Name: "dl", Scope: filestore.ShareRead, Path: *row.StorageKey,
-		MaxUses: readLinkMaxUses, ExpiresAt: expires,
+		MaxUses: uses, ExpiresAt: expires,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "attachment storage call failed", "operation", "create read share", "attachmentId", row.ID, "error", err)

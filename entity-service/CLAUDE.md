@@ -69,7 +69,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SFTPGO_USER` / `SFTPGO_PASSWORD` | no* | — | The SFTPGo service user. Held only here; never sent to a browser, never echoed in an error |
 | `SFTPGO_PUBLIC_URL` | no | `SFTPGO_URL` | Address a **browser** reaches SFTPGo at, used in the links returned to it. Differs from `SFTPGO_URL` once SFTPGo is behind a public proxy |
 | `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
-| `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `5m` / `15m` | How long a download / upload link stays valid |
+| `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `1m` / `15m` | How long a download / upload link stays valid |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1868,8 +1868,9 @@ layout), `service.StoredAttachmentService`, `repository.StoredAttachmentReposito
 **A browser never gets an SFTPGo token.** The service user's token can read and write everything
 under `csm/`, so what a browser receives is an SFTPGo *share*: a **download** link is a read share
 on exactly one file (`GET /api/v2/shares/{id}?compress=false`; without `compress=false` SFTPGo
-sends a ZIP), a read link serves up to 10 requests (a browser can fetch one image in several) and
-expires in `ATTACHMENT_READ_LINK_TTL`; an **upload** link is a write share on a folder created for
+sends a ZIP), a read link is nearly single-use, so a copied or logged URL is dead once the real browser has opened
+it: a `download` link serves 1 request, a `preview` link (inline image, `purpose` on the request) 2, and
+either expires in `ATTACHMENT_READ_LINK_TTL` (default 1m). The webapp asks again when a link has gone; an **upload** link is a write share on a folder created for
 that one upload (`csm/staging/<attachment id>/`) with `max_tokens` 1, so it accepts exactly one
 request. SFTPGo stores the multipart file under its base name, so a client cannot escape the
 folder, and it overwrites a file of the same name, which is why the folder is per upload.

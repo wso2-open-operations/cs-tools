@@ -867,7 +867,7 @@ type Config struct {
 	AttachmentMaxBytes  int64
 	InlineImageMaxBytes int64
 	// AttachmentReadLinkTTL and AttachmentUploadLinkTTL are how long a download
-	// link (ATTACHMENT_READ_LINK_TTL, default 5m) and an upload link
+	// link (ATTACHMENT_READ_LINK_TTL, default 1m) and an upload link
 	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
 	AttachmentReadLinkTTL   time.Duration
 	AttachmentUploadLinkTTL time.Duration
@@ -1121,7 +1121,7 @@ func Load() *Config {
 	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
 	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
-	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", 5*time.Minute)
+	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
 	cfg.applySREEventHubTopic()
 	return cfg

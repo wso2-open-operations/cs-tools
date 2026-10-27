@@ -232,8 +232,25 @@ func TestResolveLinks_StoredFileGetsAOneFileShare(t *testing.T) {
 		t.Fatalf("shares created = %d, want 1", len(store.shares))
 	}
 	sh := store.shares[0]
-	if sh.Scope != filestore.ShareRead || sh.Path != key || sh.MaxUses != readLinkMaxUses || !sh.ExpiresAt.Equal(saNow.Add(5*time.Minute)) {
+	if sh.Scope != filestore.ShareRead || sh.Path != key || sh.MaxUses != downloadLinkMaxUses || !sh.ExpiresAt.Equal(saNow.Add(5*time.Minute)) {
 		t.Errorf("share = %+v: want a read share on exactly the stored file, 5 minute expiry", sh)
+	}
+}
+
+func TestResolveLinks_PurposeSetsHowManyTimesALinkWorks(t *testing.T) {
+	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.pdf"
+	for purpose, want := range map[string]int{"": 1, "download": 1, "preview": 2} {
+		repo, store := newFakeStoredRepo(), newFakeStore()
+		repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA1", Name: "a.pdf", Status: "COMPLETE", StorageKey: &key}
+		_, err := newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}, Purpose: purpose})
+		if err != nil || len(store.shares) != 1 || store.shares[0].MaxUses != want {
+			t.Errorf("purpose %q: err=%v shares=%+v, want one share with %d use(s)", purpose, err, store.shares, want)
+		}
+	}
+	_, err := newStoredSvc(newFakeStoredRepo(), newFakeStore()).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}, Purpose: "stream"})
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) {
+		t.Errorf("unknown purpose: err = %v, want a validation error", err)
 	}
 }
 

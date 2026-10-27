@@ -1451,8 +1451,8 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
 		t.Errorf("size limits = %d / %d, want 100 MiB / 10 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
-	if c.AttachmentReadLinkTTL != 5*time.Minute || c.AttachmentUploadLinkTTL != 15*time.Minute {
-		t.Errorf("link TTLs = %s / %s, want 5m / 15m", c.AttachmentReadLinkTTL, c.AttachmentUploadLinkTTL)
+	if c.AttachmentReadLinkTTL != time.Minute || c.AttachmentUploadLinkTTL != 15*time.Minute {
+		t.Errorf("link TTLs = %s / %s, want 1m / 15m", c.AttachmentReadLinkTTL, c.AttachmentUploadLinkTTL)
 	}
 
 	t.Setenv("SFTPGO_URL", " https://sftpgo.internal:8080/ ")
@@ -1478,7 +1478,7 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
 	t.Setenv("ATTACHMENT_READ_LINK_TTL", "-5m")
 	c = Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.AttachmentReadLinkTTL != 5*time.Minute {
+	if c.AttachmentMaxBytes != 100<<20 || c.AttachmentReadLinkTTL != time.Minute {
 		t.Errorf("bad values did not fall back to the defaults: %d / %s", c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
 	}
 }
