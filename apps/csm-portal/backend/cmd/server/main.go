@@ -484,6 +484,17 @@ func main() {
 		route("POST /attachments/{id}/share", handler.PermDownloadAttachment, attachmentStorageHandler.CreateAttachmentShare)
 		route("POST /cases/{caseId}/attachments/{attachmentId}/confirm", handler.PermWrite, attachmentStorageHandler.ConfirmUpload)
 	}
+	// Stored attachments (files in SFTPGo), forwarded to the entity service, which
+	// owns every access decision. A comment's inline image is streamed through this
+	// backend (it serves attachment bytes, so PermDownloadAttachment, like the
+	// content route above); download links are PermDownloadAttachment for the same
+	// reason; upload, confirm and delete are PermWrite.
+	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
+	route("POST /attachments/download", handler.PermDownloadAttachment, storedAttachmentHandler.ResolveLinks)
+	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
+	route("POST /attachments/upload/{id}/confirm", handler.PermWrite, storedAttachmentHandler.ConfirmUpload)
+	route("POST /attachments/delete", handler.PermWrite, storedAttachmentHandler.DeleteAttachment)
+	route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, storedAttachmentHandler.InlineImageContent)
 	route("GET /attachments/{id}", handler.PermView, caseHandler.GetAttachment)
 	route("PATCH /attachments/{id}", handler.PermWrite, caseHandler.UpdateAttachment)
 	route("POST /cases/{id}/call-requests", handler.PermWrite, caseHandler.CreateCallRequest)

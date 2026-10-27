@@ -452,6 +452,40 @@ caller holding `PermWrite` (the onboarding fields, including the four dates, are
 `PermManageOnboarding`). A nil `access` (no guard wired) fails closed, same as every other
 in-handler permission check in this codebase.
 
+## Stored attachments in SFTPGo (`internal/handler/stored_attachments.go`)
+
+Five routes forward to entity-service's stored-attachment API (files held in SFTPGo; the request field is
+`type`: `work_item`, `comment` or `deployment`). They are **additive**: the older flows above
+(`/attachments/search`, `GET /attachments/{id}/content`, `internal/sftpgo`, the `.iix` inline-image
+processor) are untouched. Entity-service owns every access decision (its own row-level security, REGISTERED
+membership, closed work items, only-the-uploader-may-delete), so this handler adds no case lookups.
+
+| Route | Permission | Behaviour |
+|---|---|---|
+| `POST /attachments/download` | `PermDownloadAttachment` | JSON pass-through: metadata plus a short-lived SFTPGo link (one request, two for `purpose: "preview"`, about a minute). Never cacheable |
+| `POST /attachments/upload` | `PermWrite` | 201 pass-through: a one-use upload link the browser POSTs the file to (multipart field `filenames`) |
+| `POST /attachments/upload/{id}/confirm` | `PermWrite` | pass-through; `{id}` must be a UUID |
+| `POST /attachments/delete` | `PermWrite` | 204; entity-service lets only the uploader delete |
+| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | **streams** a comment's inline image (`io.Copy`, nothing buffered) |
+
+**Permission choice.** A link or an inline image is the attachment's bytes, so both are
+`PermDownloadAttachment`, like `GET /attachments/{id}/content` and `POST /attachments/{id}/share`; `PermView`
+alone is what let a `viewer` read a pasted screenshot (see "Redacting raw base64 inline images"). Upload,
+confirm and delete change state, so `PermWrite`.
+
+**The inline image is never sent as anything but an image.** The response `Content-Type` is the upstream value
+only when it is `image/png`, `image/jpeg`, `image/gif` or `image/webp` (parameters stripped), else
+`application/octet-stream`; `Content-Length` only when entity-service sent one; always
+`X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+`Content-Disposition: inline` and `Cache-Control: private, max-age=300`. The webapp uses the route as an
+`<img src>`, so the session authenticates it and no forwardable link exists.
+
+**Errors.** `mapStoredAttachmentError` (not the generic mapper): 400, 403, 409 and 429 carry entity-service's
+own message because it is written for the person ("This case is closed...", "Only the person who uploaded an
+attachment can delete it", "too many attachment links requested"), read only from its JSON envelope (never a raw
+body); 404, 401 as usual; 502/503/504 -> 503; anything else a fixed fallback. Tests:
+`stored_attachments_test.go` (handler), `stored_attachments_test.go` (entity client).
+
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
 A pasted screenshot in a comment or case/incident/change-request description is normally extracted
