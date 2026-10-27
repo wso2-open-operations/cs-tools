@@ -859,6 +859,10 @@ type Config struct {
 	SFTPGoPublicURL string
 	SFTPGoUser      string
 	SFTPGoPassword  string
+	// SFTPGoAllowInsecureHTTP (SFTPGO_ALLOW_INSECURE_HTTP=true) permits http URLs
+	// for SFTPGo. Local development only: the service password and token travel
+	// in clear text over http, and an http public URL puts share ids on the wire.
+	SFTPGoAllowInsecureHTTP bool
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
 	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
 	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
@@ -1119,6 +1123,7 @@ func Load() *Config {
 	}
 	cfg.SFTPGoUser = strings.TrimSpace(os.Getenv("SFTPGO_USER"))
 	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
+	cfg.SFTPGoAllowInsecureHTTP = os.Getenv("SFTPGO_ALLOW_INSECURE_HTTP") == "true"
 	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
@@ -1467,7 +1472,10 @@ func (c *Config) Validate() error {
 		} {
 			parsed, err := url.Parse(u.val)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-				return fmt.Errorf("%s must be an http or https URL", u.name)
+				return fmt.Errorf("%s must be an https URL", u.name)
+			}
+			if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
+				return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
 			}
 		}
 	}

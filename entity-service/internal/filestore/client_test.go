@@ -287,3 +287,17 @@ func TestPersistent401_DoesNotLoop(t *testing.T) {
 		t.Errorf("endpoint hit %d times, want 2 (original + one retry)", n)
 	}
 }
+
+func TestClient_RefusesARedirectToAnotherOrigin(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the redirect was followed to %s carrying Authorization=%q", r.URL, r.Header.Get("Authorization"))
+	}))
+	defer other.Close()
+	f := newFake(t)
+	f.handlers["GET /api/v2/user/dirs"] = func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/steal", http.StatusFound)
+	}
+	if _, err := f.client().ListDir(context.Background(), "csm/x"); err == nil {
+		t.Error("ListDir followed a redirect to another origin without an error")
+	}
+}

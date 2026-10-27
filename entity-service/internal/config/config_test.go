@@ -1418,6 +1418,22 @@ func TestConfig_Validate_SFTPGoAllOrNothing(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_SFTPGoRequiresHTTPSUnlessOptedOut(t *testing.T) {
+	c := baseValidConfig()
+	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "http://localhost:8080", "http://localhost:8080", "svc", "p"
+	if err := c.Validate(); err == nil {
+		t.Error("an http SFTPGO_URL was accepted without SFTPGO_ALLOW_INSECURE_HTTP")
+	}
+	c.SFTPGoURL = "https://sftpgo.internal"
+	if err := c.Validate(); err == nil {
+		t.Error("an http SFTPGO_PUBLIC_URL was accepted without SFTPGO_ALLOW_INSECURE_HTTP")
+	}
+	c.SFTPGoURL, c.SFTPGoAllowInsecureHTTP = "http://localhost:8080", true
+	if err := c.Validate(); err != nil {
+		t.Errorf("http with the local-development opt-out: %v", err)
+	}
+}
+
 func TestConfig_Validate_SFTPGoURLsMustBeHTTP(t *testing.T) {
 	for _, bad := range []string{"sftpgo.internal:8080", "ftp://sftpgo", "https://", "not a url"} {
 		c := baseValidConfig()

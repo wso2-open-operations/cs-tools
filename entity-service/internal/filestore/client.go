@@ -107,8 +107,23 @@ func NewClient(baseURL, publicURL, user, password string) *Client {
 		publicURL: publicURL,
 		user:      user,
 		password:  password,
-		http:      &http.Client{Transport: t, Timeout: 60 * time.Second},
+		http:      &http.Client{Transport: t, Timeout: 60 * time.Second, CheckRedirect: sameOriginRedirect},
 	}
+}
+
+// sameOriginRedirect refuses a redirect to another origin or from https down to
+// http. The default policy keeps the Authorization header on a same-host
+// redirect, so following one elsewhere could hand the service token to a place
+// it was never meant to go. SFTPGo's API does not redirect.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	first := via[0].URL
+	if req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return errors.New("refusing a redirect to another origin")
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // DownloadURL is the address a browser fetches a read share's file from.
