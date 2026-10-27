@@ -2310,11 +2310,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
     (a: CaseAttachment): boolean => {
       if (!isEntityAttachmentsEnabled()) return true;
       if (data?.state === "closed") return false;
-      const mine = currentUser?.email?.trim().toLowerCase();
+      const mine = (currentUser?.email || currentUserEmail)?.trim().toLowerCase();
       const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
       return !!mine && mine === uploader;
     },
-    [currentUser?.email, data?.state],
+    [currentUser?.email, currentUserEmail, data?.state],
   );
 
   const onConfirmDeleteAttachment = useCallback(() => {
