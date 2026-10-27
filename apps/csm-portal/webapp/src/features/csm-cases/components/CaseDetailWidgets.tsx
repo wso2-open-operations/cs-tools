@@ -1028,6 +1028,7 @@ export function AttachmentsWidget({
   onDownloadAll,
   onDownload,
   onDelete,
+  canDeleteAttachment,
   deletingId,
   preview,
   onRefresh,
@@ -1056,6 +1057,11 @@ export function AttachmentsWidget({
   onDownload?: (attachment: CaseAttachment) => void;
   /** Delete an attachment. Omit to hide the per-row delete affordance. */
   onDelete?: (attachment: CaseAttachment) => void;
+  /**
+   * Per-row gate for the delete affordance, on top of `onDelete` being set (for
+   * example "only the uploader"). Omit to show it on every row, as before.
+   */
+  canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1291,7 +1297,7 @@ export function AttachmentsWidget({
                     </Button>
                   </Box>
                 </Tooltip>
-                {onDelete && (
+                {onDelete && (canDeleteAttachment?.(a) ?? true) && (
                   <IconButton
                     size="small"
                     color="error"

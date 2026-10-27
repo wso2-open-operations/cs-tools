@@ -118,6 +118,13 @@ declare global {
        * `onboardingStatusConfig.ts`.
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
+      /**
+       * Entity-service stored attachments (SFTPGo share links for upload and
+       * download, a streamed route for comment images). Only `true` (or the
+       * string `"true"`) turns it on; off is the default and changes nothing.
+       * See `entityAttachmentsConfig.ts`.
+       */
+      CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean | string;
     };
   }
 }

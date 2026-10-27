@@ -53,6 +53,7 @@ import { useLocation } from "react-router";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   usePatchCsmCase,
@@ -2302,6 +2303,20 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
+  // Entity-service stored attachments: only the person who uploaded a file may
+  // delete it, and not once the case is closed. (Off = every row, as before; the
+  // backend still enforces the rule, this only hides a button that would fail.)
+  const canDeleteAttachmentRow = useCallback(
+    (a: CaseAttachment): boolean => {
+      if (!isEntityAttachmentsEnabled()) return true;
+      if (data?.state === "closed") return false;
+      const mine = currentUser?.email?.trim().toLowerCase();
+      const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
+      return !!mine && mine === uploader;
+    },
+    [currentUser?.email, data?.state],
+  );
+
   const onConfirmDeleteAttachment = useCallback(() => {
     if (!caseId || !pendingDelete) return;
     const target = pendingDelete;
@@ -3245,6 +3260,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onDownloadAll={canDownloadAttachment ? onDownloadAllAttachments : undefined}
             onDownload={canDownloadAttachment ? onDownloadAttachment : undefined}
             onDelete={canWrite ? setPendingDelete : undefined}
+            canDeleteAttachment={canDeleteAttachmentRow}
             deletingId={deleteAttachment.isPending ? pendingDelete?.id : null}
             preview={
               canDownloadAttachment

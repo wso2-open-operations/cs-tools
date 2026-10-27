@@ -46,6 +46,16 @@ import {
 } from "@features/csm-cases/utils/attachmentPreview";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
+import { BackendApiError } from "@api/backend/client";
+import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
+import {
+  deleteEntityAttachment,
+  downloadEntityAttachment,
+  entityAttachmentErrorMessage,
+  WORK_ITEM_ATTACHMENT_TYPE,
+  fetchEntityAttachmentBlob,
+  uploadEntityAttachment,
+} from "@features/csm-cases/api/entityAttachments";
 
 /** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const ATTACHMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
@@ -189,6 +199,29 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
     PostCsmCaseAttachmentInput
   >({
     mutationFn: async (input): Promise<CaseAttachment | null> => {
+      // Entity-service stored attachments (flag off = this block never runs).
+      // Its own size limit comes back from the upload call, so the legacy 10 MB
+      // check below does not apply.
+      if (isEntityAttachmentsEnabled()) {
+        setUploadProgress(0);
+        try {
+          await uploadEntityAttachment(api, {
+            type: WORK_ITEM_ATTACHMENT_TYPE,
+            parentId: input.caseId,
+            file: input.file,
+            name: input.name,
+            onProgress: setUploadProgress,
+          });
+        } catch (err) {
+          throw new Error(
+            entityAttachmentErrorMessage(err, "Could not upload the attachment."),
+            { cause: err },
+          );
+        } finally {
+          setUploadProgress(null);
+        }
+        return null;
+      }
       if (input.file.size > MAX_ATTACHMENT_SIZE_BYTES) {
         throw new Error(
           `"${input.file.name}" is too large. The maximum attachment size is ${
@@ -318,6 +351,19 @@ export function useGetCsmCaseAttachmentContent(): (
   );
 }
 
+/**
+ * Re-labels a fetched blob with the attachment's own metadata type, but only
+ * when that type is on the safe allowlist (see {@link isSafeAttachmentContentType}
+ * and the note on {@link useGetCsmCaseAttachmentContent}); anything else stays as
+ * served.
+ */
+function labelBlob(blob: Blob, attachment: CaseAttachment): Blob {
+  if (!isSafeAttachmentContentType(attachment.contentType)) return blob;
+  return blob.type === attachment.contentType
+    ? blob
+    : blob.slice(0, blob.size, attachment.contentType);
+}
+
 /** Opens a URL for download in a new tab, rather than navigating the SPA away
  * from itself. Used for the SFTPGo share URL below, which is a plain public
  * link (not fetched as a `Blob` through this app's own auth) — a normal link
@@ -353,6 +399,16 @@ export function useDownloadCsmCaseAttachment(): (
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
+      // Entity-service stored attachment: fetch the one-use link's bytes now and
+      // save them under the attachment's own name. A file entity-service does
+      // not hold (an older attachment) falls through to the existing paths.
+      if (isEntityAttachmentsEnabled()) {
+        const done = await downloadEntityAttachment(api, {
+          type: WORK_ITEM_ATTACHMENT_TYPE,
+          id: attachment.id,
+        });
+        if (done) return;
+      }
       if (sftpgoEnabled) {
         const { shareUrl } = await api.post<
           Record<string, never>,
@@ -394,6 +450,18 @@ export function useGetCsmCaseAttachmentPreviewSource(): (
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<AttachmentPreviewSource> => {
+      // Entity-service stored attachment: one-use link, fetched now into a blob
+      // (revoked by the dialog). A file it does not hold falls through.
+      if (isEntityAttachmentsEnabled()) {
+        const got = await fetchEntityAttachmentBlob(api, {
+          type: WORK_ITEM_ATTACHMENT_TYPE,
+          id: attachment.id,
+          purpose: "preview",
+        });
+        if (got) {
+          return { url: URL.createObjectURL(labelBlob(got.blob, attachment)), revoke: true };
+        }
+      }
       if (sftpgoEnabled) {
         const { shareUrl } = await api.post<
           Record<string, never>,
@@ -431,6 +499,21 @@ export function useDeleteCsmCaseAttachment(): UseMutationResult<
 
   return useMutation<void, Error, DeleteCsmCaseAttachmentInput>({
     mutationFn: async (input): Promise<void> => {
+      // Entity-service stored attachment: only the uploader may delete, and not
+      // once the case is closed (it answers 403 / 409 with the message to show).
+      // An attachment it does not know (404) is an older one: use the old call.
+      if (isEntityAttachmentsEnabled()) {
+        try {
+          await deleteEntityAttachment(api, { type: WORK_ITEM_ATTACHMENT_TYPE, id: input.attachmentId });
+          return;
+        } catch (err) {
+          if (!(err instanceof BackendApiError && err.status === 404)) {
+            throw new Error(entityAttachmentErrorMessage(err, "Could not delete the attachment."), {
+              cause: err,
+            });
+          }
+        }
+      }
       await api.del<BeDeleteAttachmentResponse>(
         `/attachments/${encodeURIComponent(input.attachmentId)}`,
       );

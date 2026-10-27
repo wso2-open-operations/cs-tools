@@ -16,7 +16,9 @@
 
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { useBackendApi } from "@api/backend/client";
+import { BackendApiError, useBackendApi } from "@api/backend/client";
+import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
+import { fetchEntityInlineImage } from "@features/csm-cases/api/entityAttachments";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import type { BeAttachmentShareResponse } from "@api/backend/types";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -106,6 +108,7 @@ export function useResolvedInlineImageHtml(html: string): {
   const { canDownloadAttachment } = usePortalAccess();
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const attachmentIds = useMemo(() => extractIixAttachmentIds(html), [html]);
+  const entityEnabled = isEntityAttachmentsEnabled();
 
   const queries = useQueries({
     queries: attachmentIds.map((id) => ({
@@ -114,12 +117,28 @@ export function useResolvedInlineImageHtml(html: string): {
         "inline-preview",
         id,
         sftpgoEnabled,
+        entityEnabled,
       ],
       queryFn: async (): Promise<string | null> => {
         // The extracted id is a bare 32-char sysid; the endpoint requires the
         // canonical UUID shape (hyphens re-inserted), same as every other
         // attachment id sent to this backend.
         const attachmentId = encodeURIComponent(sysidToUuid(id));
+
+        // Entity-service comment image (flag off = never runs): streamed by the
+        // backend after its own access check, so no share link is involved. An
+        // id it does not hold (an older image) is a 404 and falls through to
+        // the paths below.
+        if (entityEnabled) {
+          try {
+            const entityBlob = await fetchEntityInlineImage(api, sysidToUuid(id));
+            if (toSafeMimeType(entityBlob.type)) return blobToDataUrl(entityBlob);
+          } catch (err) {
+            if (!(err instanceof BackendApiError && (err.status === 404 || err.status === 400))) {
+              throw err;
+            }
+          }
+        }
 
         if (sftpgoEnabled) {
           // A share is a real SFTPGo object with its own lifecycle — only

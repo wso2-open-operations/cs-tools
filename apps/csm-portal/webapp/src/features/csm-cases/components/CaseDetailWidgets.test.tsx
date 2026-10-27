@@ -1084,3 +1084,33 @@ describe("RequestDetailsWidget", () => {
     expect(screen.getByText("No request details captured.")).toBeInTheDocument();
   });
 });
+
+describe("AttachmentsWidget — per-row delete gate", () => {
+  const mine: CaseAttachment = {
+    id: "att-mine",
+    filename: "mine.txt",
+    size: 1,
+    contentType: "text/plain",
+    uploadedBy: "Me",
+    uploadedAt: "2026-01-01T00:00:00Z",
+  };
+  const theirs: CaseAttachment = { ...mine, id: "att-theirs", filename: "theirs.txt", uploadedBy: "Them" };
+
+  it("shows Delete on every row when no gate is given (unchanged behaviour)", () => {
+    renderWithRouter(<AttachmentsWidgetHarness attachments={[mine, theirs]} onDelete={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete theirs.txt" })).toBeInTheDocument();
+  });
+
+  it("hides Delete on the rows the gate refuses", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[mine, theirs]}
+        onDelete={vi.fn()}
+        canDeleteAttachment={(a) => a.id === "att-mine"}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete theirs.txt" })).not.toBeInTheDocument();
+  });
+});
