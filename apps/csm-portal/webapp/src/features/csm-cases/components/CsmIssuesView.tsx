@@ -61,7 +61,12 @@ import {
 } from "@features/csm-cases/utils/caseSearchPayload";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
-import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
+import {
+  CASE_TYPE_LABEL,
+  caseTypeHasSeverity,
+  visibleCaseTypes,
+} from "@features/csm-cases/utils/caseType";
+import { ISSUE_TYPE_LABEL } from "@features/csm-cases/utils/caseIssueType";
 import {
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
@@ -74,6 +79,10 @@ import {
 } from "@features/csm-cases/utils/casesSort";
 import { stateLabel } from "@features/csm-dashboard/utils/abtDashboard";
 import { WORK_STATE_LABEL } from "@features/csm-cases/utils/caseWorkState";
+import {
+  escalationLevelLabel,
+  isEscalationLevelUnset,
+} from "@features/csm-cases/utils/escalationLevel";
 import RefreshButton from "@components/RefreshButton";
 import type { BeCaseSearchPayload, BeCaseSearchResponse } from "@api/backend/types";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
@@ -260,6 +269,53 @@ interface CsmIssuesViewProps {
  * each just supplies `lockedFilters` (and hides the now-fixed control) so the
  * one component covers every "list issues of kind X" surface.
  */
+/** Same display options `caseToCsvRow`'s fixed "Updated" column already used
+ * — hoisted so `csvValueForOptionalColumn`'s "createdAt" case can share it
+ * without threading it through as a parameter. */
+const CSV_DATE_FORMAT: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+
+/**
+ * Plain-text counterpart to `CasesList`'s `renderOptionalCell` — same switch,
+ * same per-column conventions (blank/"—" rules), but a CSV cell instead of a
+ * chip/JSX element. Kept as one switch over `CaseOptionalColumnId` so a new
+ * optional column added to `CASE_OPTIONAL_COLUMNS` fails this file's
+ * exhaustiveness check (TS2366 on the switch) until a CSV rendering is
+ * picked for it too, rather than silently exporting nothing for it.
+ */
+function csvValueForOptionalColumn(id: CaseOptionalColumnId, c: CsmCaseRow): string {
+  switch (id) {
+    case "product":
+      return c.product || "";
+    case "type":
+      return c.caseType ? CASE_TYPE_LABEL[c.caseType] : "—";
+    case "issueType":
+      return c.issueType ? ISSUE_TYPE_LABEL[c.issueType] : "—";
+    case "severity":
+      return caseTypeHasSeverity(c.caseType) ? c.severity : "—";
+    case "assignee":
+      return c.assignee || "";
+    case "createdBy":
+      return c.createdBy || "—";
+    case "customer":
+      return c.customer || "";
+    case "createdAt":
+      return formatBackendTimestampForDisplay(c.createdAt, CSV_DATE_FORMAT) ?? "";
+    case "escalationLevel":
+      // Same "blank unless escalated" convention as the list column/chip
+      // (see escalationLevel.ts) rather than printing "Not escalated" on
+      // every unescalated row.
+      return isEscalationLevelUnset(c.escalationLevel)
+        ? ""
+        : escalationLevelLabel(c.escalationLevel ?? "0", true);
+  }
+}
+
 export default function CsmIssuesView({
   title,
   actions,
@@ -636,41 +692,41 @@ export default function CsmIssuesView({
     [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
-  // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
-  // || hideSeverityColumn}`) so the export's column set can never drift from
-  // what's actually rendered.
-  const showExportSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Export CSV's optional columns are driven by the SAME `columnPrefs` the
+  // on-screen table/`ColumnCustomizerButton` use -- "what you see is what you
+  // export" -- rather than a second, independently-maintained column list
+  // that can silently drift from what the user actually has visible (as the
+  // old hardcoded Product/Severity export columns had already started to:
+  // Product was always exported even when hidden on screen, and Severity's
+  // inclusion was a one-off boolean rather than a real user choice). Toggling
+  // a column via "Customise columns" changes the next export immediately,
+  // with no separate export-only picker to keep in sync.
   const caseToCsvRow = useCallback(
     (c: CsmCaseRow): string[] => {
       const caseId =
         c.wso2CaseId && c.caseNumber
           ? `${c.wso2CaseId}/${c.caseNumber}`
           : c.wso2CaseId || c.caseNumber || "";
-      const updated = formatBackendTimestampForDisplay(c.updatedAt, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const updated = formatBackendTimestampForDisplay(c.updatedAt, CSV_DATE_FORMAT);
       const stateText =
         stateLabel(c.state) +
         (c.state === "work_in_progress" && c.workState
           ? ` (${WORK_STATE_LABEL[c.workState]})`
           : "");
-      const row = [caseId, c.subject, c.projectName, c.product];
-      if (showExportSeverityColumn) row.push(c.severity);
+      const row = [caseId, c.subject, c.projectName];
+      columnPrefs.visibleColumns.forEach((col) => {
+        row.push(csvValueForOptionalColumn(col.id as CaseOptionalColumnId, c));
+      });
       row.push(stateText, updated ?? "");
       return row;
     },
-    [showExportSeverityColumn],
+    [columnPrefs.visibleColumns],
   );
   const exportHeader = [
     "Case ID",
     "Subject",
     "Project",
-    "Product",
-    ...(showExportSeverityColumn ? ["Severity"] : []),
+    ...columnPrefs.visibleColumns.map((col) => col.label),
     "State",
     "Updated",
   ];
