@@ -90,6 +90,13 @@ export interface CustomerPortalWindowConfig {
    * config predating this key never turns the stream on.
    */
   CUSTOMER_PORTAL_STREAM_ENABLED?: boolean;
+  /**
+   * Uses entity-service's stored-attachment routes (files in SFTPGo) for
+   * downloading, uploading and deleting case and deployment attachments, and for
+   * showing comment images. Defaults to false, so a config predating this key
+   * keeps the existing flow.
+   */
+  CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean;
 }
 
 declare global {

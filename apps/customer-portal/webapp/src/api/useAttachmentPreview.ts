@@ -16,6 +16,8 @@
 
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import { fetchInlineImageBlob } from "@api/storedAttachments";
 
 function getBackendBaseUrl(): string {
   const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -44,6 +46,18 @@ async function fetchAttachmentDataUrl(
   attachmentId: string,
   caseId?: string | null,
 ): Promise<string | null> {
+  // Entity-service streams a comment's image (and checks the caller's access) when
+  // it holds it. A 404 means this id is not one of its stored images, so fall
+  // through to the existing flow below, which still serves older attachments.
+  if (isEntityAttachmentsEnabled()) {
+    const inline = await fetchInlineImageBlob(authFetch, attachmentId);
+    if (inline.status === "ok") {
+      const mimeType = toSafeMimeType(inline.blob.type);
+      if (!mimeType.startsWith("image/")) return null;
+      return blobToDataUrl(inline.blob);
+    }
+    if (inline.status === "error") return null;
+  }
   const baseUrl = getBackendBaseUrl();
   // Resolved against window.location.href so a relative
   // CUSTOMER_PORTAL_BACKEND_BASE_URL still works: the base is ignored when
@@ -69,6 +83,10 @@ async function fetchAttachmentDataUrl(
   const mimeType = toSafeMimeType(rawType);
   if (!mimeType.startsWith("image/")) return null;
 
+  return blobToDataUrl(blob);
+}
+
+function blobToDataUrl(blob: Blob): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => {

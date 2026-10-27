@@ -31,6 +31,13 @@ import { useCallback, useRef, useState, type JSX } from "react";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { usePostDeploymentAttachment } from "@features/project-details/api/usePostDeploymentAttachment";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
+import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
+import {
+  STORED_ATTACHMENT_MAX_BYTES,
+  UploadConfirmPendingError,
+  type StoredUploadStep,
+} from "@api/storedAttachments";
 import UploadAttachmentDropZone from "@case-details-attachments/UploadAttachmentDropZone";
 import SelectedFileDisplay from "@case-details-attachments/SelectedFileDisplay";
 
@@ -77,11 +84,27 @@ export default function UploadAttachmentModal({
 }: UploadAttachmentModalProps): JSX.Element {
   const postAttachments = usePostAttachments();
   const postDeploymentAttachment = usePostDeploymentAttachment();
+  const { upload: storedUpload, confirm: storedConfirm } =
+    useStoredAttachmentUpload();
+  // With entity-service attachments on, the file goes straight to SFTPGo in three
+  // steps; off, it is sent as base64 through the portal backend as before.
+  const useStored = isEntityAttachmentsEnabled();
+  const [uploadStep, setUploadStep] = useState<StoredUploadStep | null>(null);
+  const [storedError, setStoredError] = useState<string | null>(null);
+  // Set when the file arrived but the final confirm failed: retry only that step.
+  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
   const showDescription = isDeploymentMode;
-  const isPending = isDeploymentMode
-    ? postDeploymentAttachment.isPending
-    : postAttachments.isPending;
+  const maxBytes = useStored
+    ? STORED_ATTACHMENT_MAX_BYTES
+    : MAX_ATTACHMENT_SIZE_BYTES;
+  const maxLabel = `${Math.round(maxBytes / (1024 * 1024))} MB`;
+  const isPending =
+    storedUpload.isPending ||
+    storedConfirm.isPending ||
+    (isDeploymentMode
+      ? postDeploymentAttachment.isPending
+      : postAttachments.isPending);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
@@ -91,7 +114,7 @@ export default function UploadAttachmentModal({
   const [fileSizeErrorVisible, setFileSizeErrorVisible] = useState(false);
   const [readErrorVisible, setReadErrorVisible] = useState(false);
 
-  const fileTooLarge = file ? file.size > MAX_ATTACHMENT_SIZE_BYTES : false;
+  const fileTooLarge = file ? file.size > maxBytes : false;
   const displayName = name.trim() || (file ? getBaseFileName(file.name) : "");
   const canUpload =
     !!file &&
@@ -105,6 +128,9 @@ export default function UploadAttachmentModal({
     setDescription("");
     setFileSizeErrorVisible(false);
     setReadErrorVisible(false);
+    setUploadStep(null);
+    setStoredError(null);
+    setPendingConfirm(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -115,7 +141,7 @@ export default function UploadAttachmentModal({
   const setFileWithValidation = useCallback(
     (selected: File | null) => {
       setFile(selected);
-      if (selected && selected.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      if (selected && selected.size > maxBytes) {
         setFileSizeErrorVisible(true);
       } else {
         setFileSizeErrorVisible(false);
@@ -124,7 +150,7 @@ export default function UploadAttachmentModal({
         setName(getBaseFileName(selected.name));
       }
     },
-    [name],
+    [name, maxBytes],
   );
 
   const handleDrop = useCallback(
@@ -176,6 +202,34 @@ export default function UploadAttachmentModal({
 
     if (!caseId && !deploymentId) return;
 
+    if (useStored) {
+      setStoredError(null);
+      storedUpload.mutate(
+        {
+          type: isDeploymentMode ? "deployment" : "work_item",
+          parentId: (isDeploymentMode ? deploymentId : caseId)!,
+          file,
+          body: { name: attachmentName },
+          ...(isDeploymentMode ? { deploymentId } : { caseId }),
+          onStep: setUploadStep,
+        },
+        {
+          onSuccess: () => {
+            handleClose();
+            onSuccess?.();
+          },
+          onError: (error) => {
+            setUploadStep(null);
+            if (error instanceof UploadConfirmPendingError) {
+              setPendingConfirm(error.attachmentId);
+            }
+            setStoredError(error.message);
+          },
+        },
+      );
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = typeof reader.result === "string" ? reader.result : "";
@@ -224,9 +278,39 @@ export default function UploadAttachmentModal({
     isDeploymentMode,
     postAttachments,
     postDeploymentAttachment,
+    storedUpload,
+    useStored,
     handleClose,
     onSuccess,
     onSelect,
+  ]);
+
+  // Retries only the final step; the file is already in place.
+  const handleRetryConfirm = useCallback(() => {
+    if (!pendingConfirm) return;
+    setStoredError(null);
+    storedConfirm.mutate(
+      {
+        type: isDeploymentMode ? "deployment" : "work_item",
+        attachmentId: pendingConfirm,
+        ...(isDeploymentMode ? { deploymentId } : { caseId }),
+      },
+      {
+        onSuccess: () => {
+          handleClose();
+          onSuccess?.();
+        },
+        onError: (error) => setStoredError(error.message),
+      },
+    );
+  }, [
+    pendingConfirm,
+    isDeploymentMode,
+    deploymentId,
+    caseId,
+    storedConfirm,
+    handleClose,
+    onSuccess,
   ]);
 
   return (
@@ -258,7 +342,16 @@ export default function UploadAttachmentModal({
             onClose={() => setFileSizeErrorVisible(false)}
             sx={{ mb: 2 }}
           >
-            File size exceeds 10 MB limit.
+            File size exceeds {maxLabel} limit.
+          </Alert>
+        )}
+        {storedError && (
+          <Alert
+            severity="error"
+            onClose={() => setStoredError(null)}
+            sx={{ mb: 2 }}
+          >
+            {storedError}
           </Alert>
         )}
         {readErrorVisible && (
@@ -324,7 +417,20 @@ export default function UploadAttachmentModal({
             startIcon={<CircularProgress color="inherit" size={16} />}
             disabled
           >
-            Uploading
+            {uploadStep === "preparing"
+              ? "Preparing"
+              : uploadStep === "finishing" || storedConfirm.isPending
+                ? "Finishing"
+                : "Uploading"}
+          </Button>
+        ) : pendingConfirm ? (
+          <Button
+            type="button"
+            variant="contained"
+            color="primary"
+            onClick={handleRetryConfirm}
+          >
+            Retry
           </Button>
         ) : (
           <Button

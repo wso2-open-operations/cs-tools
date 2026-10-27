@@ -28,6 +28,12 @@ import type { CaseAttachment } from "@features/support/types/cases";
 import type { PostAttachmentsVariables } from "@features/support/types/supportApi";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
+import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import {
+  useStoredAttachmentDelete,
+  useStoredAttachmentDownload,
+} from "@api/useStoredAttachments";
+import { isNotFoundError } from "@utils/ApiError";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
@@ -61,6 +67,9 @@ export default function CaseDetailsAttachmentsPanel({
   const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
   const { downloadAttachment, isDownloading, downloadingId } =
     useGetAttachmentContent();
+  const entityAttachments = isEntityAttachmentsEnabled();
+  const storedDownload = useStoredAttachmentDownload();
+  const storedDelete = useStoredAttachmentDelete();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [minTimeElapsed, setMinTimeElapsed] = useState(false);
   const minTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -149,6 +158,19 @@ export default function CaseDetailsAttachmentsPanel({
 
   const handleDownload = async (att: CaseAttachment) => {
     try {
+      if (entityAttachments) {
+        try {
+          await storedDownload.downloadStoredAttachment({
+            type: "work_item",
+            id: att.id,
+            name: att.name,
+          });
+          return;
+        } catch (storedError) {
+          // Not held by entity-service (older attachment): use the existing download.
+          if (!isNotFoundError(storedError)) throw storedError;
+        }
+      }
       await downloadAttachment({
         id: att.id,
         name: att.name,
@@ -168,11 +190,31 @@ export default function CaseDetailsAttachmentsPanel({
 
   const handleConfirmDelete = () => {
     if (!attachmentToDelete?.id) return;
-    deleteAttachment.mutate(
-      { attachmentId: attachmentToDelete.id, caseId },
+    const attachmentId = attachmentToDelete.id;
+    const deleteOlder = () =>
+      deleteAttachment.mutate(
+        { attachmentId, caseId },
+        {
+          onSuccess: () => setAttachmentToDelete(null),
+          onError: (error) => {
+            showError(error.message);
+          },
+        },
+      );
+    if (!entityAttachments) {
+      deleteOlder();
+      return;
+    }
+    storedDelete.mutate(
+      { type: "work_item", attachmentId, caseId },
       {
         onSuccess: () => setAttachmentToDelete(null),
         onError: (error) => {
+          // Not held by entity-service (older attachment): use the existing delete.
+          if (isNotFoundError(error)) {
+            deleteOlder();
+            return;
+          }
           showError(error.message);
         },
       },
@@ -279,12 +321,21 @@ export default function CaseDetailsAttachmentsPanel({
                     key={att.id}
                     attachment={att}
                     onDownload={handleDownload}
-                    onDelete={handleDeleteClick}
+                    // With entity-service attachments on, a closed case offers no delete at all.
+                    onDelete={
+                      entityAttachments && isCaseClosed
+                        ? undefined
+                        : handleDeleteClick
+                    }
                     deleteDisabled={deleteDisabled}
                     deleteTooltip={deleteTooltip}
                     onEdit={isCaseClosed || !isOwner ? undefined : handleEditClick}
                     hideDescription
-                    isDownloadLoading={isDownloading && downloadingId === att.id}
+                    isDownloadLoading={
+                      (isDownloading && downloadingId === att.id) ||
+                      (storedDownload.isDownloading &&
+                        storedDownload.downloadingId === att.id)
+                    }
                   />
                 );
               })
@@ -312,7 +363,10 @@ export default function CaseDetailsAttachmentsPanel({
         attachmentName={attachmentToDelete?.name ?? null}
         onClose={() => setAttachmentToDelete(null)}
         onConfirm={handleConfirmDelete}
-        isDeleting={!!attachmentToDelete && deleteAttachment.isPending}
+        isDeleting={
+          !!attachmentToDelete &&
+          (deleteAttachment.isPending || storedDelete.isPending)
+        }
       />
 
       <EditCaseAttachmentModal
