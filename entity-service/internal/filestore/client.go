@@ -258,6 +258,17 @@ func (c *Client) ReadHead(ctx context.Context, path string, n int) ([]byte, erro
 	return head, nil
 }
 
+// Open starts reading a file and returns its body and size (-1 when unknown).
+// The caller closes the body. A missing file returns ErrNotFound.
+func (c *Client) Open(ctx context.Context, path string) (io.ReadCloser, int64, error) {
+	q := url.Values{"path": {abs(path)}}
+	resp, err := c.exec(ctx, http.MethodGet, "/api/v2/user/files", q, nil, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	return resp.Body, resp.ContentLength, nil
+}
+
 // exec sends one request with the service token and maps the result: 2xx
 // returns the response (the caller closes its body), 404 is ErrNotFound, and a
 // 401 refreshes the token and tries once more, since the cached token may have

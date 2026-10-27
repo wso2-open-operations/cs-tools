@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
@@ -78,6 +79,7 @@ type fileStore interface {
 	RemoveFile(ctx context.Context, path string) error
 	RemoveDir(ctx context.Context, dir string) error
 	ReadHead(ctx context.Context, path string, n int) ([]byte, error)
+	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
 	DownloadURL(shareID string) string
 	UploadURL(shareID string) string
 }
@@ -498,6 +500,44 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 
 	row.Status = "COMPLETE"
 	return confirmResponse(row, file.Size), nil
+}
+
+// OpenInlineImage implements StoredAttachmentService. It is how a comment's
+// image is shown: entity-service reads it from SFTPGo and streams it, so access is
+// checked on every request and no link that could be forwarded ever exists.
+func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
+	if !validate.IsUUID(id) {
+		return domain.StoredAttachmentContent{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
+	}
+	// Only a row the caller may see comes back; anything else is not found.
+	rows, err := s.repo.GetByIDs(ctx, domain.StoredAttachmentComment, []string{id})
+	if err != nil {
+		return domain.StoredAttachmentContent{}, err
+	}
+	notFound := &apierror.NotFoundError{Msg: "attachment not found"}
+	if len(rows) != 1 {
+		return domain.StoredAttachmentContent{}, notFound
+	}
+	row := rows[0]
+	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
+		return domain.StoredAttachmentContent{}, notFound
+	}
+	body, size, err := s.store.Open(ctx, *row.StorageKey)
+	if err != nil {
+		if errors.Is(err, filestore.ErrNotFound) {
+			return domain.StoredAttachmentContent{}, notFound
+		}
+		return domain.StoredAttachmentContent{}, storageUnavailable(ctx, "open inline image", err)
+	}
+	slog.InfoContext(ctx, "attachment content served",
+		"audit", true, "action", "view", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(domain.StoredAttachmentComment),
+		"attachmentId", row.ID, "path", *row.StorageKey)
+	contentType := "application/octet-stream"
+	if row.ContentType != nil && inlineImageTypes[strings.ToLower(*row.ContentType)] {
+		contentType = strings.ToLower(*row.ContentType)
+	}
+	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
 
 // DeleteAttachment implements StoredAttachmentService.

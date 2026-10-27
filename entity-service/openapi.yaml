@@ -409,6 +409,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/inline/{id}/content:
+    get:
+      summary: >-
+        Stream a comment's inline image. Entity-service reads the file from
+        SFTPGo and sends it, so the browser never talks to SFTPGo and no link
+        exists that could be forwarded; access is checked on every request. An
+        image the caller cannot see, that is not stored or that was deleted is
+        404. Not registered (404) unless SFTPGO_URL, SFTPGO_USER and
+        SFTPGO_PASSWORD are set.
+      operationId: getInlineImageContent
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >-
+            The image. Private to the caller (Cache-Control private, max-age=300),
+            with nosniff and a sandboxing Content-Security-Policy.
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/gif: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, deleted, or SFTPGo is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: File storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/delete:
     post:
       summary: >-

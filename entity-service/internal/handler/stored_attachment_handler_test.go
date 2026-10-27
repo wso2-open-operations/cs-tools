@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,13 @@ type fakeStoredAttachmentSvc struct {
 	confirm domain.ConfirmAttachmentUploadRequest
 	deleted domain.DeleteStoredAttachmentRequest
 	err     error
+}
+
+func (f *fakeStoredAttachmentSvc) OpenInlineImage(_ context.Context, id string) (domain.StoredAttachmentContent, error) {
+	if f.err != nil {
+		return domain.StoredAttachmentContent{}, f.err
+	}
+	return domain.StoredAttachmentContent{Body: io.NopCloser(strings.NewReader("IMG")), ContentType: "image/png", Size: 3}, nil
 }
 
 func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
@@ -61,6 +69,7 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 	mux.HandleFunc("POST /attachments/upload", h.InitiateUpload)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
+	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImageContent)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
 	return rec
@@ -150,5 +159,27 @@ func TestStoredAttachmentHandler_DeleteMapsErrors(t *testing.T) {
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}
+	}
+}
+
+func TestStoredAttachmentHandler_InlineImageIsStreamedWithSafeHeaders(t *testing.T) {
+	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodGet, "/attachments/inline/abc/content", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "IMG" {
+		t.Fatalf("status = %d body = %q", rec.Code, rec.Body.String())
+	}
+	for k, want := range map[string]string{
+		"Content-Type": "image/png", "Content-Length": "3", "X-Content-Type-Options": "nosniff",
+		"Cache-Control": "private, max-age=300", "Content-Disposition": "inline",
+	} {
+		if got := rec.Header().Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Errorf("Content-Security-Policy = %q", rec.Header().Get("Content-Security-Policy"))
+	}
+	rec = serveStored(t, &fakeStoredAttachmentSvc{err: &apierror.NotFoundError{Msg: "x"}}, http.MethodGet, "/attachments/inline/abc/content", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("not found gave %d", rec.Code)
 	}
 }

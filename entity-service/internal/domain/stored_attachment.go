@@ -16,7 +16,10 @@
 
 package domain
 
-import "time"
+import (
+	"io"
+	"time"
+)
 
 // StoredAttachmentKind says which attachment table a request is about. These
 // are the three whose files live in SFTPGo: work_item_attachment,
@@ -170,4 +173,14 @@ type StoredAttachmentInsert struct {
 	ContentType string
 	SizeBytes   int64
 	CreatedBy   string
+}
+
+// StoredAttachmentContent is an attachment's file being streamed to the caller.
+// The caller closes Body.
+type StoredAttachmentContent struct {
+	Body io.ReadCloser
+	// ContentType is the stored type when it is an image type, else
+	// application/octet-stream. Size is -1 when unknown.
+	ContentType string
+	Size        int64
 }

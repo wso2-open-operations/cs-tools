@@ -18,7 +18,9 @@ package handler
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
@@ -90,6 +92,32 @@ func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *htt
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// InlineImageContent handles GET /attachments/inline/{id}/content: it streams a
+// comment's inline image after the service has checked the caller may see it.
+func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *http.Request) {
+	c, err := h.svc.OpenInlineImage(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	defer c.Body.Close()
+	hd := w.Header()
+	hd.Set("Content-Type", c.ContentType)
+	if c.Size >= 0 {
+		hd.Set("Content-Length", strconv.FormatInt(c.Size, 10))
+	}
+	// Shown in the page, never run: the type is one of the four image types, and
+	// nosniff plus a sandboxing policy stop anything else being treated as a page.
+	hd.Set("X-Content-Type-Options", "nosniff")
+	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	hd.Set("Content-Disposition", "inline")
+	// The image is private to this caller; a short browser cache keeps an activity
+	// feed from fetching it again on every render.
+	hd.Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, c.Body)
 }
 
 // writeStoredAttachmentJSON writes a response that carries short-lived links, so

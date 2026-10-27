@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -152,6 +153,8 @@ type fakeStore struct {
 	removed  []string
 	files    []string // files removed
 	fileErr  error
+	openErr  error
+	opened   []string
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{listing: map[string][]filestore.Entry{}} }
@@ -194,6 +197,13 @@ func (f *fakeStore) RemoveFile(_ context.Context, path string) error {
 func (f *fakeStore) RemoveDir(_ context.Context, dir string) error {
 	f.removed = append(f.removed, dir)
 	return nil
+}
+func (f *fakeStore) Open(_ context.Context, p string) (io.ReadCloser, int64, error) {
+	if f.openErr != nil {
+		return nil, 0, f.openErr
+	}
+	f.opened = append(f.opened, p)
+	return io.NopCloser(strings.NewReader("IMG")), 3, nil
 }
 func (f *fakeStore) ReadHead(_ context.Context, _ string, _ int) ([]byte, error) { return f.head, nil }
 func (f *fakeStore) DownloadURL(id string) string                                { return "https://files.test/dl/" + id }
@@ -333,6 +343,65 @@ func TestResolveLinks_ACallerWhoKeepsAskingForLinksIsRefused(t *testing.T) {
 	svc.shares.now = func() time.Time { return saNow.Add(2 * time.Minute) }
 	if _, err := svc.ResolveLinks(ctx, req); err != nil {
 		t.Errorf("after the window: %v", err)
+	}
+}
+
+func TestOpenInlineImage(t *testing.T) {
+	key := "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+	png := "image/png"
+	svc := func(status string, ct *string, k *string, store *fakeStore) *storedAttachmentService {
+		repo := newFakeStoredRepo()
+		repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "CIA1", Name: "pic.png", Status: status, ContentType: ct, StorageKey: k}
+		return newStoredSvc(repo, store)
+	}
+	ctx := saCtx(t, saEmail)
+
+	store := newFakeStore()
+	c, err := svc("COMPLETE", &png, &key, store).OpenInlineImage(ctx, saAttID)
+	if err != nil {
+		t.Fatalf("OpenInlineImage: %v", err)
+	}
+	b, _ := io.ReadAll(c.Body)
+	if string(b) != "IMG" || c.ContentType != "image/png" || c.Size != 3 || len(store.opened) != 1 || store.opened[0] != key {
+		t.Errorf("content = %q %+v opened=%v", b, c, store.opened)
+	}
+
+	// An unusual stored type is never echoed back as the response type.
+	html := "text/html"
+	c, err = svc("COMPLETE", &html, &key, newFakeStore()).OpenInlineImage(ctx, saAttID)
+	if err != nil || c.ContentType != "application/octet-stream" {
+		t.Errorf("odd type: err=%v type=%q", err, c.ContentType)
+	}
+
+	var nf *apierror.NotFoundError
+	for name, s := range map[string]*storedAttachmentService{
+		"deleted":  svc("DELETED", &png, &key, newFakeStore()),
+		"pending":  svc("PENDING", &png, nil, newFakeStore()),
+		"no store": svc("COMPLETE", &png, nil, newFakeStore()),
+	} {
+		if _, err := s.OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
+			t.Errorf("%s: err = %v, want NotFoundError", name, err)
+		}
+	}
+	// A row the caller cannot see is absent from the query, so not found.
+	if _, err := newStoredSvc(newFakeStoredRepo(), newFakeStore()).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
+		t.Errorf("hidden: err = %v, want NotFoundError", err)
+	}
+	// The file is gone from storage: not found. Storage down: 503.
+	missing := newFakeStore()
+	missing.openErr = filestore.ErrNotFound
+	if _, err := svc("COMPLETE", &png, &key, missing).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
+		t.Errorf("file gone: err = %v, want NotFoundError", err)
+	}
+	down := newFakeStore()
+	down.openErr = errors.New("sftpgo down")
+	var su *apierror.ServiceUnavailableError
+	if _, err := svc("COMPLETE", &png, &key, down).OpenInlineImage(ctx, saAttID); !errors.As(err, &su) {
+		t.Errorf("storage down: err = %v, want ServiceUnavailableError", err)
+	}
+	var verr *apierror.ValidationError
+	if _, err := svc("COMPLETE", &png, &key, newFakeStore()).OpenInlineImage(ctx, "nope"); !errors.As(err, &verr) {
+		t.Errorf("bad id: err = %v, want ValidationError", err)
 	}
 }
 

@@ -1684,4 +1684,8 @@ type StoredAttachmentService interface {
 	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
 	// ConflictError). Repeating a delete that already succeeded answers the same.
 	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
+	// OpenInlineImage streams a comment's inline image to a caller who may see
+	// it, so the browser never talks to SFTPGo. An image the caller cannot see,
+	// that is not stored, or that was deleted is a NotFoundError.
+	OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error)
 }

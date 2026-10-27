@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -309,5 +310,29 @@ func TestMkdirAll_AFolderThatAlreadyExistsIsNotAnError(t *testing.T) {
 	}
 	if err := f.client().MkdirAll(context.Background(), "csm/a"); err != nil {
 		t.Errorf("MkdirAll on an existing folder = %v, want nil", err)
+	}
+}
+
+func TestOpen_StreamsTheFileAndMapsAMissingOne(t *testing.T) {
+	f := newFake(t)
+	f.handlers["GET /api/v2/user/files"] = func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("path") != "/csm/a/pic.png" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("IMG"))
+	}
+	c := f.client()
+	body, size, err := c.Open(context.Background(), "csm/a/pic.png")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer body.Close()
+	b, _ := io.ReadAll(body)
+	if string(b) != "IMG" || size != 3 {
+		t.Errorf("got %q size %d", b, size)
+	}
+	if _, _, err := c.Open(context.Background(), "csm/a/none.png"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing file err = %v, want ErrNotFound", err)
 	}
 }

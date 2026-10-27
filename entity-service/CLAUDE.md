@@ -1860,9 +1860,9 @@ create.
 
 Work item, comment-image and deployment attachment files live in SFTPGo
 (`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
-the older flow and is not touched). Four routes, registered only when `db != nil` and
+the older flow and is not touched). Five routes, registered only when `db != nil` and
 `Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
-`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`. Code: `internal/filestore` (SFTPGo client and the path
+`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`. Code: `internal/filestore` (SFTPGo client and the path
 layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
 `handler.StoredAttachmentHandler`.
 
@@ -1876,6 +1876,15 @@ that one upload (`csm/staging/<attachment id>/`) with `max_tokens` 1, so it acce
 request. SFTPGo stores the multipart file under its base name, so a client cannot escape the
 folder, and it overwrites a file of the same name, which is why the folder is per upload.
 Responses carry `Cache-Control: no-store`.
+
+**Comment images are streamed, not linked.** `GET /attachments/inline/{id}/content` reads the image from
+SFTPGo (`filestore.Open`) and streams it to the caller, so a browser showing a comment never talks to SFTPGo
+and no URL exists that could be forwarded to someone without access; the caller's own row-level security
+decides on every request, and an image they cannot see, that is not stored or was deleted is 404. The
+response type is the stored image type (anything else is sent as `application/octet-stream`), with
+`nosniff`, a sandboxing `Content-Security-Policy` and `Cache-Control: private, max-age=300`. Each request
+writes an `attachment content served` audit line (callerId, correlationId, attachmentId, path). The portal
+backends pass it through (browser -> backend -> entity-service); only upload and download use share links.
 
 **Saved file names are the webapp's job.** SFTPGo names a download after the stored file, which carries the
 attachment number (`wia0000042_report.pdf`), and a share link has no option to change that. So the webapp
