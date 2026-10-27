@@ -80,6 +80,9 @@ func TestCleanupUploads_RemovesTheFolderAndMarksTheRowFailed(t *testing.T) {
 	if _, ok := repo.failed["33333333-3333-4333-8333-333333333333"]; ok {
 		t.Error("a row whose folder could not be removed must stay PENDING to be tried again")
 	}
+	if len(repo.deferred) != 1 || repo.deferred[0] != "33333333-3333-4333-8333-333333333333" {
+		t.Errorf("deferred = %v, want only the row whose folder could not be removed", repo.deferred)
+	}
 	if want := now.Add(-abandonedUploadAge); !repo.abandonedAt.Equal(want) || !repo.abandonedSys {
 		t.Errorf("listed with cutoff %v (system=%v), want %v as the system", repo.abandonedAt, repo.abandonedSys, want)
 	}
@@ -119,5 +122,8 @@ func TestCleanupUploads_RemovesImagesThatWereNeverLinked(t *testing.T) {
 	}
 	if _, ok := repo.deleted["c3333333-3333-4333-8333-333333333333"]; ok {
 		t.Error("an image whose file could not be removed must stay, to be tried again")
+	}
+	if len(repo.deferred) != 1 || repo.deferred[0] != "c3333333-3333-4333-8333-333333333333" {
+		t.Errorf("deferred = %v, want the failing image moved to the back of the queue", repo.deferred)
 	}
 }

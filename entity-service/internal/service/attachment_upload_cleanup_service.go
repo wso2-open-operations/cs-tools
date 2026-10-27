@@ -82,11 +82,13 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		if err := s.store.RemoveDir(ctx, filestore.StagingDir(u.ID)); err != nil && !errors.Is(err, filestore.ErrNotFound) {
 			res.Failed++
 			slog.WarnContext(ctx, "could not remove an abandoned upload folder", "attachmentId", u.ID, "error", err)
+			s.deferRetry(ctx, sys, u.Kind, u.ID)
 			continue
 		}
 		if err := s.repo.MarkFailed(sys, u.Kind, u.ID, "upload abandoned: never confirmed"); err != nil {
 			res.Failed++
 			slog.WarnContext(ctx, "could not mark an abandoned upload failed", "attachmentId", u.ID, "error", err)
+			s.deferRetry(ctx, sys, u.Kind, u.ID)
 			continue
 		}
 		res.Cleaned++
@@ -101,12 +103,14 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 			if err := s.store.RemoveFile(ctx, strings.TrimLeft(*img.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
 				res.ImagesFailed++
 				slog.WarnContext(ctx, "could not remove an unlinked comment image", "attachmentId", img.ID, "error", err)
+				s.deferRetry(ctx, sys, domain.StoredAttachmentComment, img.ID)
 				continue
 			}
 		}
 		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentComment, img.ID, "inline-image-cleanup"); err != nil {
 			res.ImagesFailed++
 			slog.WarnContext(ctx, "could not mark an unlinked comment image deleted", "attachmentId", img.ID, "error", err)
+			s.deferRetry(ctx, sys, domain.StoredAttachmentComment, img.ID)
 			continue
 		}
 		res.ImagesRemoved++
@@ -117,4 +121,13 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		"found", res.Found, "cleaned", res.Cleaned, "failed", res.Failed,
 		"imagesRemoved", res.ImagesRemoved, "imagesFailed", res.ImagesFailed)
 	return res, nil
+}
+
+// deferRetry sends a row that could not be cleaned to the back of the queue
+// (best effort), so a handful of rows that keep failing cannot take every run's
+// limited batch and keep the rows behind them from ever being reached.
+func (s *attachmentUploadCleanupService) deferRetry(ctx context.Context, sys context.Context, kind domain.StoredAttachmentKind, id string) {
+	if err := s.repo.RecordCleanupAttempt(sys, kind, id); err != nil {
+		slog.WarnContext(ctx, "could not defer a failed cleanup", "attachmentId", id, "error", err)
+	}
 }

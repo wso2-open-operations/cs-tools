@@ -72,6 +72,10 @@ type StoredAttachmentRepository interface {
 	// ListUnlinkedImages returns up to limit stored comment images, created before
 	// olderThan, that no comment was ever linked to. Meant for WithSystemIdentity.
 	ListUnlinkedImages(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error)
+	// RecordCleanupAttempt moves a row to the back of the cleanup queue (updated_on =
+	// now) after a cleanup of it failed, so rows that keep failing cannot fill every
+	// run's limited batch and starve the ones behind them. Meant for WithSystemIdentity.
+	RecordCleanupAttempt(ctx context.Context, kind domain.StoredAttachmentKind, id string) error
 }
 
 // callerError turns "the request carried no caller identity" into a 401: a
@@ -288,7 +292,7 @@ func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time
 		if err != nil {
 			return nil, err
 		}
-		rows, err := r.db.Query(ctx, `SELECT id::text FROM `+t.table+` WHERE status = 'PENDING' AND created_on < $1 ORDER BY created_on LIMIT $2`, olderThan, limit-len(out))
+		rows, err := r.db.Query(ctx, `SELECT id::text FROM `+t.table+` WHERE status = 'PENDING' AND created_on < $1 ORDER BY updated_on, created_on LIMIT $2`, olderThan, limit-len(out))
 		if err != nil {
 			return nil, fmt.Errorf("list abandoned uploads: %w", err)
 		}
@@ -345,7 +349,7 @@ func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM comment_attachment
 		WHERE comment_id IS NULL AND status = 'COMPLETE' AND created_on < $1
-		ORDER BY created_on LIMIT $2`, olderThan, limit)
+		ORDER BY updated_on, created_on LIMIT $2`, olderThan, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list unlinked images: %w", err)
 	}
@@ -362,4 +366,16 @@ func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan
 		return nil, fmt.Errorf("iterate unlinked images: %w", err)
 	}
 	return out, nil
+}
+
+// RecordCleanupAttempt implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) RecordCleanupAttempt(ctx context.Context, kind domain.StoredAttachmentKind, id string) error {
+	t, err := storedAttachmentTableFor(kind)
+	if err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(ctx, `UPDATE `+t.table+` SET updated_on = now() WHERE id = $1 AND status IN ('PENDING', 'COMPLETE')`, id); err != nil {
+		return fmt.Errorf("record cleanup attempt: %w", err)
+	}
+	return nil
 }

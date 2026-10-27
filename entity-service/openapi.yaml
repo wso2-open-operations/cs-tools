@@ -490,6 +490,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: SFTPGo is not configured, so the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: SFTPGo is unavailable; try again.
           content:
@@ -528,6 +534,12 @@ paths:
                   imagesFailed: {type: integer}
         "403":
           description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: SFTPGo is not configured, so the route is not registered.
           content:
             application/json:
               schema:

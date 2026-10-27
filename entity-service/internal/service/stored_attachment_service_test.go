@@ -81,6 +81,7 @@ type fakeStoredRepo struct {
 		sys                      bool
 	}
 	unlinked []domain.StoredAttachmentRow
+	deferred []string // rows sent to the back of the cleanup queue
 }
 
 func newFakeStoredRepo() *fakeStoredRepo {
@@ -160,6 +161,11 @@ func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workIt
 
 func (f *fakeStoredRepo) ListUnlinkedImages(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
 	return f.unlinked, nil
+}
+
+func (f *fakeStoredRepo) RecordCleanupAttempt(_ context.Context, _ domain.StoredAttachmentKind, id string) error {
+	f.deferred = append(f.deferred, id)
+	return nil
 }
 
 func (f *fakeStoredRepo) MarkFailed(_ context.Context, _ domain.StoredAttachmentKind, id, detail string) error {
