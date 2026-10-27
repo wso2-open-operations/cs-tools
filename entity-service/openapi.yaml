@@ -458,6 +458,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/shares/cleanup:
+    post:
+      summary: >-
+        Remove the spent and expired SFTPGo shares that download and upload links
+        leave behind. Deletes only the shares entity-service created (named dl
+        and up) that expired more than 5 minutes ago or whose uses are all spent,
+        at most 500 per run (run it again for a larger backlog). Internal callers
+        only. Meant to be called on a schedule. Not registered (404) unless
+        SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
+      operationId: cleanupAttachmentShares
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scanned, deleted, failed]
+                properties:
+                  scanned: {type: integer}
+                  deleted: {type: integer}
+                  failed: {type: integer}
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: SFTPGo is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/delete:
     post:
       summary: >-

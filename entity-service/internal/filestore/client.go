@@ -34,6 +34,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -168,6 +169,45 @@ func (c *Client) CreateShare(ctx context.Context, spec ShareSpec) (string, error
 		return "", errors.New("filestore: share created but SFTPGo returned no id")
 	}
 	return id, nil
+}
+
+// Share is one share as SFTPGo lists it. ExpiresAt is milliseconds since the
+// epoch, 0 meaning it never expires.
+type Share struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Scope      int    `json:"scope"`
+	ExpiresAt  int64  `json:"expires_at"`
+	MaxTokens  int    `json:"max_tokens"`
+	UsedTokens int    `json:"used_tokens"`
+}
+
+// ListShares returns up to limit of the service user's shares starting at offset.
+//
+// Not yet confirmed against a live server: it is read as the JSON array
+// GET /api/v2/user/shares documents.
+func (c *Client) ListShares(ctx context.Context, limit, offset int) ([]Share, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "order": {"ASC"}}
+	resp, err := c.exec(ctx, http.MethodGet, "/api/v2/user/shares", q, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer drainClose(resp.Body)
+	var shares []Share
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&shares); err != nil {
+		return nil, fmt.Errorf("filestore: decode shares: %w", err)
+	}
+	return shares, nil
+}
+
+// DeleteShare removes one share. A share that is already gone returns ErrNotFound.
+func (c *Client) DeleteShare(ctx context.Context, id string) error {
+	resp, err := c.exec(ctx, http.MethodDelete, "/api/v2/user/shares/"+url.PathEscape(id), nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	drainClose(resp.Body)
+	return nil
 }
 
 // MkdirAll creates dir and any missing parents. Creating a folder that exists

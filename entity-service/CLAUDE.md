@@ -1860,9 +1860,9 @@ create.
 
 Work item, comment-image and deployment attachment files live in SFTPGo
 (`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
-the older flow and is not touched). Five routes, registered only when `db != nil` and
+the older flow and is not touched). Six routes, registered only when `db != nil` and
 `Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
-`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`. Code: `internal/filestore` (SFTPGo client and the path
+`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`, `POST /attachments/shares/cleanup`. Code: `internal/filestore` (SFTPGo client and the path
 layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
 `handler.StoredAttachmentHandler`.
 
@@ -1885,6 +1885,14 @@ response type is the stored image type (anything else is sent as `application/oc
 `nosniff`, a sandboxing `Content-Security-Policy` and `Cache-Control: private, max-age=300`. Each request
 writes an `attachment content served` audit line (callerId, correlationId, attachmentId, path). The portal
 backends pass it through (browser -> backend -> entity-service); only upload and download use share links.
+
+**Share cleanup.** Each link is a stored record in SFTPGo, and one that expired or was used up is not
+necessarily removed by SFTPGo itself (not confirmed either way). `POST /attachments/shares/cleanup`
+(internal callers only, meant for a scheduled trigger such as a Choreo cron) lists the service user's
+shares and deletes the ones entity-service made (named `dl` and `up`) that expired more than 5 minutes ago
+or whose `used_tokens` reached `max_tokens`, at most 500 per run, and answers `{scanned, deleted, failed}`.
+A share that cannot be deleted is counted as failed and tried again on the next run. The list and delete
+calls (`GET /api/v2/user/shares`, `DELETE /api/v2/user/shares/{id}`) have not been run against a live SFTPGo.
 
 **Saved file names are the webapp's job.** SFTPGo names a download after the stored file, which carries the
 attachment number (`wia0000042_report.pdf`), and a share link has no option to change that. So the webapp

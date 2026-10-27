@@ -336,3 +336,26 @@ func TestOpen_StreamsTheFileAndMapsAMissingOne(t *testing.T) {
 		t.Errorf("missing file err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestListAndDeleteShares(t *testing.T) {
+	f := newFake(t)
+	f.handlers["GET /api/v2/user/shares"] = func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "100" || r.URL.Query().Get("offset") != "200" {
+			t.Errorf("query = %s", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`[{"id":"a","name":"dl","scope":1,"expires_at":1700000000000,"max_tokens":1,"used_tokens":1}]`))
+	}
+	var deleted string
+	f.handlers["DELETE /api/v2/user/shares/a"] = func(w http.ResponseWriter, r *http.Request) { deleted = "a" }
+	c := f.client()
+	shares, err := c.ListShares(context.Background(), 100, 200)
+	if err != nil || len(shares) != 1 || shares[0].ID != "a" || shares[0].UsedTokens != 1 || shares[0].ExpiresAt != 1700000000000 {
+		t.Fatalf("ListShares = %+v, %v", shares, err)
+	}
+	if err := c.DeleteShare(context.Background(), "a"); err != nil || deleted != "a" {
+		t.Errorf("DeleteShare: %v (deleted %q)", err, deleted)
+	}
+	if err := c.DeleteShare(context.Background(), "zzz"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a missing share err = %v, want ErrNotFound", err)
+	}
+}

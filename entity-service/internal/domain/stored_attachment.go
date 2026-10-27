@@ -184,3 +184,12 @@ type StoredAttachmentContent struct {
 	ContentType string
 	Size        int64
 }
+
+// ShareCleanupResult is what one share cleanup run did.
+type ShareCleanupResult struct {
+	// Scanned is how many shares were read, Deleted how many of ours were
+	// removed (a share already gone counts), Failed how many could not be.
+	Scanned int `json:"scanned"`
+	Deleted int `json:"deleted"`
+	Failed  int `json:"failed"`
+}

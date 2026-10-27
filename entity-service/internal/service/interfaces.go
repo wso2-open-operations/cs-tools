@@ -1689,3 +1689,12 @@ type StoredAttachmentService interface {
 	// that is not stored, or that was deleted is a NotFoundError.
 	OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error)
 }
+
+// AttachmentShareCleanupService removes the spent and expired SFTPGo shares that
+// download and upload links leave behind.
+type AttachmentShareCleanupService interface {
+	// CleanupShares deletes entity-service's own shares that expired (past a short
+	// grace) or whose uses are spent, at most a bounded number per run. Internal
+	// callers only (a ForbiddenError otherwise).
+	CleanupShares(ctx context.Context) (domain.ShareCleanupResult, error)
+}

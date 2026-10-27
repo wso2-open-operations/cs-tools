@@ -29,12 +29,33 @@ import (
 // StoredAttachmentHandler handles HTTP requests for the links a browser uses to
 // download and upload attachment files held in SFTPGo.
 type StoredAttachmentHandler struct {
-	svc service.StoredAttachmentService
+	svc     service.StoredAttachmentService
+	cleanup service.AttachmentShareCleanupService
 }
 
 // NewStoredAttachmentHandler constructs a StoredAttachmentHandler.
 func NewStoredAttachmentHandler(svc service.StoredAttachmentService) *StoredAttachmentHandler {
 	return &StoredAttachmentHandler{svc: svc}
+}
+
+// WithShareCleanup attaches the share cleanup, which backs POST /attachments/shares/cleanup.
+func (h *StoredAttachmentHandler) WithShareCleanup(c service.AttachmentShareCleanupService) *StoredAttachmentHandler {
+	h.cleanup = c
+	return h
+}
+
+// CleanupShares handles POST /attachments/shares/cleanup.
+func (h *StoredAttachmentHandler) CleanupShares(w http.ResponseWriter, r *http.Request) {
+	if h.cleanup == nil {
+		http.NotFound(w, r)
+		return
+	}
+	res, err := h.cleanup.CleanupShares(r.Context())
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
 // ResolveLinks handles POST /attachments/download.

@@ -183,3 +183,27 @@ func TestStoredAttachmentHandler_InlineImageIsStreamedWithSafeHeaders(t *testing
 		t.Errorf("not found gave %d", rec.Code)
 	}
 }
+
+type fakeCleanup struct {
+	res domain.ShareCleanupResult
+	err error
+}
+
+func (f fakeCleanup) CleanupShares(context.Context) (domain.ShareCleanupResult, error) {
+	return f.res, f.err
+}
+
+func TestStoredAttachmentHandler_CleanupShares(t *testing.T) {
+	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithShareCleanup(fakeCleanup{res: domain.ShareCleanupResult{Scanned: 5, Deleted: 2}})
+	rec := httptest.NewRecorder()
+	h.CleanupShares(rec, httptest.NewRequest(http.MethodPost, "/attachments/shares/cleanup", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deleted":2`) {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	h = NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithShareCleanup(fakeCleanup{err: &apierror.ForbiddenError{Msg: "x"}})
+	rec = httptest.NewRecorder()
+	h.CleanupShares(rec, httptest.NewRequest(http.MethodPost, "/attachments/shares/cleanup", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
+	}
+}
