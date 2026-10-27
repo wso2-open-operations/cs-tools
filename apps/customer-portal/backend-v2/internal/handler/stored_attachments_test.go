@@ -115,7 +115,7 @@ func TestStoredAttachments_RelayBodiesAndStatuses(t *testing.T) {
 	}
 
 	rec, calls = serveStored(t, f, true, http.MethodPost, "/attachments/delete", `{"type":"work_item","id":"x"}`)
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || calls[0].action != middleware.ActionDelete {
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || calls[0].action != middleware.ActionCreate {
 		t.Errorf("delete: %d %q %v", rec.Code, rec.Body.String(), calls)
 	}
 }

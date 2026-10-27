@@ -174,8 +174,12 @@ func (h *StoredAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.R
 }
 
 // DeleteAttachment handles POST /attachments/delete.
+//
+// Gated on the create action, not delete: the module's delete action is admin
+// only, but the rule here is "only the person who uploaded it", which
+// entity-service enforces, and anyone who may upload may delete their own file.
 func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
-	body, ok := h.relay(w, r, middleware.ActionDelete)
+	body, ok := h.relay(w, r, middleware.ActionCreate)
 	if !ok {
 		return
 	}

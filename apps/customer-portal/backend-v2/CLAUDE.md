@@ -1034,7 +1034,7 @@ both sets on one mux, since Go's mux panics at startup on an ambiguous pair).
 | `POST /attachments/download` `{type, ids, purpose?}` | links for up to 20 ids | read |
 | `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | 201, one-use upload link | create |
 | `POST /attachments/upload/{id}/confirm` `{type}` | 200 | create |
-| `POST /attachments/delete` `{type, id}` | 204 | delete |
+| `POST /attachments/delete` `{type, id}` | 204 | create (the module's delete is admin only; entity-service enforces uploader-only) |
 | `GET /attachments/inline/{id}/content` | the image, streamed | cases read |
 
 - **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no
