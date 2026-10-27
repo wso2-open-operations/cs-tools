@@ -40,9 +40,12 @@ import (
 
 const (
 	// maxAttachmentLinkIDs bounds one POST /attachments/download call.
-	maxAttachmentLinkIDs = 100
+	maxAttachmentLinkIDs = 20
 	// attachmentLinkConcurrency bounds how many shares one call creates at once.
 	attachmentLinkConcurrency = 8
+	// maxSharesPerCallerPerMinute is how many shares (download or upload links)
+	// one caller may have created per minute; beyond it the call is a 429.
+	maxSharesPerCallerPerMinute = 60
 	// maxAttachmentNameLen is the width of the name column (VARCHAR(255)).
 	maxAttachmentNameLen = 255
 	// readLinkMaxUses is how many requests a download link serves. More than
@@ -93,6 +96,7 @@ type storedAttachmentService struct {
 	store  fileStore
 	limits StoredAttachmentLimits
 	now    func() time.Time
+	shares *shareLimiter
 }
 
 // NewStoredAttachmentService constructs a StoredAttachmentService.
@@ -103,7 +107,7 @@ type storedAttachmentService struct {
 // needs to be a REGISTERED member of the parent's project, an internal one is
 // unrestricted, and a parent with no project is internal-only.
 func NewStoredAttachmentService(repo repository.StoredAttachmentRepository, store fileStore, limits StoredAttachmentLimits) StoredAttachmentService {
-	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now}
+	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute)}
 }
 
 // resolveActorEmail resolves the caller's email from x-user-id-token. It is
@@ -119,6 +123,14 @@ func (s *storedAttachmentService) resolveActorEmail(ctx context.Context) (string
 		return "", &apierror.ValidationError{Msg: "x-user-id-token: " + err.Error()}
 	}
 	return email, nil
+}
+
+// reserveShares charges n new shares to the caller, or refuses with a 429.
+func (s *storedAttachmentService) reserveShares(ctx context.Context, n int) error {
+	if n == 0 || s.shares.allow(auditCaller(ctx), n) {
+		return nil
+	}
+	return &apierror.TooManyRequestsError{Msg: "too many attachment links requested; try again in a minute"}
 }
 
 func validateStoredAttachmentKind(kind domain.StoredAttachmentKind) error {
@@ -205,6 +217,9 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 		byID[strings.ToLower(row.ID)] = row
 	}
 
+	if err := s.reserveShares(ctx, len(rows)); err != nil {
+		return domain.AttachmentLinksResponse{}, err
+	}
 	links := make(map[string]domain.AttachmentLink, len(rows))
 	var g errgroup.Group
 	g.SetLimit(attachmentLinkConcurrency)
@@ -319,6 +334,10 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ConflictError{Msg: closedParentMessage}
 	}
 
+	// Charged before the row is written, so a refused call leaves nothing behind.
+	if err := s.reserveShares(ctx, 1); err != nil {
+		return domain.InitiateAttachmentUploadResponse{}, err
+	}
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
 		ParentID: req.ParentID, Name: req.Name, ContentType: req.ContentType,
 		SizeBytes: req.SizeBytes, CreatedBy: email,

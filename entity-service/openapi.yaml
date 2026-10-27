@@ -240,7 +240,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/AttachmentLinksResponse'
         "400":
-          description: Unknown type, no ids, more than 100 ids, or an id that is not a UUID.
+          description: Unknown type, no ids, more than 20 ids, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller asked for too many links in a minute (60 shares per caller per minute); retry shortly.
           content:
             application/json:
               schema:
@@ -313,6 +319,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: File storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller asked for too many links in a minute (60 shares per caller per minute); retry shortly.
           content:
             application/json:
               schema:
@@ -39664,7 +39676,7 @@ components:
         ids:
           type: array
           minItems: 1
-          maxItems: 100
+          maxItems: 20
           items:
             type: string
             format: uuid

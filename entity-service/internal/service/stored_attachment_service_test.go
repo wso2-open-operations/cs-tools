@@ -296,6 +296,29 @@ func TestResolveLinks_HiddenIdsAreLeftOutAndOrderIsKept(t *testing.T) {
 	}
 }
 
+func TestResolveLinks_ACallerWhoKeepsAskingForLinksIsRefused(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA1", Name: "a.pdf", Status: "COMPLETE", ParentID: saParentID, CreatedBy: saEmail}
+	svc := newStoredSvc(repo, store)
+	svc.shares.now = func() time.Time { return saNow }
+	ctx := saCtx(t, saEmail)
+	req := domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}
+	for i := 0; i < maxSharesPerCallerPerMinute; i++ {
+		if _, err := svc.ResolveLinks(ctx, req); err != nil {
+			t.Fatalf("call %d refused early: %v", i, err)
+		}
+	}
+	_, err := svc.ResolveLinks(ctx, req)
+	var tooMany *apierror.TooManyRequestsError
+	if !errors.As(err, &tooMany) {
+		t.Fatalf("err = %v, want TooManyRequestsError", err)
+	}
+	svc.shares.now = func() time.Time { return saNow.Add(2 * time.Minute) }
+	if _, err := svc.ResolveLinks(ctx, req); err != nil {
+		t.Errorf("after the window: %v", err)
+	}
+}
+
 func TestResolveLinks_RejectsBadRequests(t *testing.T) {
 	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
 	many := make([]string, maxAttachmentLinkIDs+1)
