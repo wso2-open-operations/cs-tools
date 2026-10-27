@@ -220,6 +220,11 @@ func (c *Client) MkdirAll(ctx context.Context, dir string) error {
 		return nil
 	}
 	if err != nil {
+		// Some SFTPGo versions answer 500 "Unable to create directory" for a folder
+		// that already exists. So before failing, look: a folder that lists is there.
+		if _, lerr := c.ListDir(ctx, dir); lerr == nil {
+			return nil
+		}
 		return err
 	}
 	drainClose(resp.Body)

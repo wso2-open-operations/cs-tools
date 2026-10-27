@@ -61,6 +61,15 @@ type StoredAttachmentRepository interface {
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
 }
 
+// callerError turns "the request carried no caller identity" into a 401: a
+// request with no verified token is the caller's to fix, not a server fault.
+func callerError(err error) error {
+	if errors.Is(err, ErrNoCallerIdentity) {
+		return &apierror.UnauthorizedError{Msg: "a verified user token (x-user-id-token) is required"}
+	}
+	return err
+}
+
 type storedAttachmentRepo struct {
 	db *Scoped
 }
@@ -127,7 +136,7 @@ func (r *storedAttachmentRepo) GetParent(ctx context.Context, kind domain.Stored
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.StoredAttachmentParent{}, &apierror.NotFoundError{Msg: "parent record not found"}
 		}
-		return domain.StoredAttachmentParent{}, fmt.Errorf("get attachment parent: %w", err)
+		return domain.StoredAttachmentParent{}, callerError(fmt.Errorf("get attachment parent: %w", err))
 	}
 	return p, nil
 }
@@ -172,7 +181,7 @@ func (r *storedAttachmentRepo) InsertPending(ctx context.Context, kind domain.St
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return domain.StoredAttachmentRow{}, &apierror.NotFoundError{Msg: "parent record not found"}
 		}
-		return domain.StoredAttachmentRow{}, fmt.Errorf("insert pending attachment: %w", err)
+		return domain.StoredAttachmentRow{}, callerError(fmt.Errorf("insert pending attachment: %w", err))
 	}
 	return a, nil
 }
@@ -188,7 +197,7 @@ func (r *storedAttachmentRepo) GetByIDs(ctx context.Context, kind domain.StoredA
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM `+t.table+` WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
-		return nil, fmt.Errorf("get attachments: %w", err)
+		return nil, callerError(fmt.Errorf("get attachments: %w", err))
 	}
 	defer rows.Close()
 	var out []domain.StoredAttachmentRow

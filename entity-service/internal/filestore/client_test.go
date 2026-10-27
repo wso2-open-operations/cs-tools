@@ -359,3 +359,20 @@ func TestListAndDeleteShares(t *testing.T) {
 		t.Errorf("a missing share err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestMkdirAll_AFolderThatAlreadyExistsIsNotAnErrorEvenOnA500(t *testing.T) {
+	f := newFake(t)
+	f.handlers["POST /api/v2/user/dirs"] = func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"failure Unable to create directory"}`, http.StatusInternalServerError)
+	}
+	f.handlers["GET /api/v2/user/dirs"] = func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) }
+	if err := f.client().MkdirAll(context.Background(), "csm/a"); err != nil {
+		t.Errorf("MkdirAll on an existing folder = %v, want nil", err)
+	}
+	// A real failure still fails: the folder cannot be listed either.
+	g := newFake(t)
+	g.handlers["POST /api/v2/user/dirs"] = f.handlers["POST /api/v2/user/dirs"]
+	if err := g.client().MkdirAll(context.Background(), "csm/a"); err == nil {
+		t.Error("MkdirAll succeeded although the folder neither exists nor could be created")
+	}
+}
