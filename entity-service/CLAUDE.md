@@ -1860,9 +1860,9 @@ create.
 
 Work item, comment-image and deployment attachment files live in SFTPGo
 (`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
-the older flow and is not touched). Six routes, registered only when `db != nil` and
+the older flow and is not touched). Seven routes, registered only when `db != nil` and
 `Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
-`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`, `POST /attachments/shares/cleanup`. Code: `internal/filestore` (SFTPGo client and the path
+`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`, `GET /attachments/inline/{id}/content`, `POST /attachments/shares/cleanup`, `POST /attachments/uploads/cleanup`. Code: `internal/filestore` (SFTPGo client and the path
 layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
 `handler.StoredAttachmentHandler`.
 
@@ -1893,6 +1893,13 @@ shares and deletes the ones entity-service made (named `dl` and `up`) that expir
 or whose `used_tokens` reached `max_tokens`, at most 500 per run, and answers `{scanned, deleted, failed}`.
 A share that cannot be deleted is counted as failed and tried again on the next run. The list and delete
 calls (`GET /api/v2/user/shares`, `DELETE /api/v2/user/shares/{id}`) have not been run against a live SFTPGo.
+
+**Abandoned uploads.** An upload that is started and never confirmed leaves a `PENDING` row and a folder under
+`csm/staging/<attachment id>`. `POST /attachments/uploads/cleanup` (internal callers only, for a scheduled trigger)
+finds the rows still `PENDING` after 24 hours (a confirm that failed on a storage error leaves its file staged on
+purpose, so this is long next to the 15 minute link), removes each staging folder and marks the row `FAILED`, at
+most 200 per run, and answers `{found, cleaned, failed}`. A folder that cannot be removed leaves the row `PENDING`
+for the next run. Run it together with `/attachments/shares/cleanup`.
 
 **Saved file names are the webapp's job.** SFTPGo names a download after the stored file, which carries the
 attachment number (`wia0000042_report.pdf`), and a share link has no option to change that. So the webapp

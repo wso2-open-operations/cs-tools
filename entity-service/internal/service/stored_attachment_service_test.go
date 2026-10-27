@@ -64,13 +64,16 @@ type fakeStoredRepo struct {
 	inserted  []domain.StoredAttachmentInsert
 	insertErr error
 
-	deleted     map[string]string // id -> deleted_by
-	deleteCtx   []bool            // whether each MarkDeleted ran as the system
-	deleteOK    bool
-	completed   map[string]string // id -> storage key
-	completeCtx []bool            // whether each MarkComplete ran as the system
-	completeOK  bool
-	failed      map[string]string // id -> detail
+	deleted      map[string]string // id -> deleted_by
+	deleteCtx    []bool            // whether each MarkDeleted ran as the system
+	deleteOK     bool
+	completed    map[string]string // id -> storage key
+	completeCtx  []bool            // whether each MarkComplete ran as the system
+	completeOK   bool
+	failed       map[string]string // id -> detail
+	abandoned    []domain.AbandonedUpload
+	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
+	abandonedSys bool
 }
 
 func newFakeStoredRepo() *fakeStoredRepo {
@@ -132,6 +135,13 @@ func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachm
 	}
 	f.deleted[id] = by
 	return true, nil
+}
+
+func (f *fakeStoredRepo) ListAbandoned(ctx context.Context, olderThan time.Time, _ int) ([]domain.AbandonedUpload, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.abandonedSys = ok && scope.Unrestricted
+	f.abandonedAt = olderThan
+	return f.abandoned, nil
 }
 
 func (f *fakeStoredRepo) MarkFailed(_ context.Context, _ domain.StoredAttachmentKind, id, detail string) error {

@@ -1698,3 +1698,12 @@ type AttachmentShareCleanupService interface {
 	// callers only (a ForbiddenError otherwise).
 	CleanupShares(ctx context.Context) (domain.ShareCleanupResult, error)
 }
+
+// AttachmentUploadCleanupService clears out uploads that were started and never
+// confirmed.
+type AttachmentUploadCleanupService interface {
+	// CleanupUploads removes the staging folder of each upload still PENDING after
+	// a day and marks its row FAILED, at most a bounded number per run. Internal
+	// callers only (a ForbiddenError otherwise).
+	CleanupUploads(ctx context.Context) (domain.UploadCleanupResult, error)
+}

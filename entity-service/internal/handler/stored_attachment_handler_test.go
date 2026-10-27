@@ -207,3 +207,27 @@ func TestStoredAttachmentHandler_CleanupShares(t *testing.T) {
 		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
 	}
 }
+
+type fakeUploadCleanup struct {
+	res domain.UploadCleanupResult
+	err error
+}
+
+func (f fakeUploadCleanup) CleanupUploads(context.Context) (domain.UploadCleanupResult, error) {
+	return f.res, f.err
+}
+
+func TestStoredAttachmentHandler_CleanupUploads(t *testing.T) {
+	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithUploadCleanup(fakeUploadCleanup{res: domain.UploadCleanupResult{Found: 3, Cleaned: 2, Failed: 1}})
+	rec := httptest.NewRecorder()
+	h.CleanupUploads(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cleaned":2`) {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	h = NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithUploadCleanup(fakeUploadCleanup{err: &apierror.ForbiddenError{Msg: "x"}})
+	rec = httptest.NewRecorder()
+	h.CleanupUploads(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
+	}
+}

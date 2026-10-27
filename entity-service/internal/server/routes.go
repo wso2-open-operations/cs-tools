@@ -737,8 +737,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var storedAttachmentHandler *handler.StoredAttachmentHandler
 	if db != nil && cfg.HasSFTPGo() {
 		sftpgoClient := filestore.NewClient(cfg.SFTPGoURL, cfg.SFTPGoPublicURL, cfg.SFTPGoUser, cfg.SFTPGoPassword)
+		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(service.NewStoredAttachmentService(
-			repository.NewStoredAttachmentRepository(repository.NewScoped(db)),
+			storedAttachmentRepo,
 			sftpgoClient,
 			service.StoredAttachmentLimits{
 				MaxBytes:       cfg.AttachmentMaxBytes,
@@ -746,7 +747,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				ReadLinkTTL:    cfg.AttachmentReadLinkTTL,
 				UploadLinkTTL:  cfg.AttachmentUploadLinkTTL,
 			},
-		)).WithShareCleanup(service.NewAttachmentShareCleanupService(sftpgoClient, accessSvc))
+		)).WithShareCleanup(service.NewAttachmentShareCleanupService(sftpgoClient, accessSvc)).
+			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, sftpgoClient, accessSvc))
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND
@@ -2149,6 +2151,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
 		mux.HandleFunc("POST /attachments/shares/cleanup", storedAttachmentHandler.CleanupShares)
+		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and

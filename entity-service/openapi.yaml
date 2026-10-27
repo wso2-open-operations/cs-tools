@@ -496,6 +496,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/uploads/cleanup:
+    post:
+      summary: >-
+        Clear out uploads that were started and never confirmed. For each upload
+        still PENDING after 24 hours it removes the staging folder in SFTPGo and
+        marks the row FAILED (lists hide it and a later confirm refuses it), at
+        most 200 per run. A folder that cannot be removed leaves the row PENDING for
+        the next run. Internal callers only. Meant to be called on a schedule. Not
+        registered (404) unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
+      operationId: cleanupAttachmentUploads
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [found, cleaned, failed]
+                properties:
+                  found: {type: integer}
+                  cleaned: {type: integer}
+                  failed: {type: integer}
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/delete:
     post:
       summary: >-

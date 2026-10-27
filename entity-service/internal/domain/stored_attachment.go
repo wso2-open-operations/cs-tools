@@ -193,3 +193,19 @@ type ShareCleanupResult struct {
 	Deleted int `json:"deleted"`
 	Failed  int `json:"failed"`
 }
+
+// AbandonedUpload is an upload that was started and never confirmed.
+type AbandonedUpload struct {
+	Kind StoredAttachmentKind
+	ID   string
+}
+
+// UploadCleanupResult is what one upload cleanup run did.
+type UploadCleanupResult struct {
+	// Found is how many abandoned uploads were read, Cleaned how many had their
+	// staging folder removed and their row marked FAILED, Failed how many could
+	// not be (tried again next run).
+	Found   int `json:"found"`
+	Cleaned int `json:"cleaned"`
+	Failed  int `json:"failed"`
+}

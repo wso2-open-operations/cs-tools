@@ -31,6 +31,7 @@ import (
 type StoredAttachmentHandler struct {
 	svc     service.StoredAttachmentService
 	cleanup service.AttachmentShareCleanupService
+	uploads service.AttachmentUploadCleanupService
 }
 
 // NewStoredAttachmentHandler constructs a StoredAttachmentHandler.
@@ -42,6 +43,26 @@ func NewStoredAttachmentHandler(svc service.StoredAttachmentService) *StoredAtta
 func (h *StoredAttachmentHandler) WithShareCleanup(c service.AttachmentShareCleanupService) *StoredAttachmentHandler {
 	h.cleanup = c
 	return h
+}
+
+// WithUploadCleanup attaches the abandoned-upload cleanup, which backs POST /attachments/uploads/cleanup.
+func (h *StoredAttachmentHandler) WithUploadCleanup(c service.AttachmentUploadCleanupService) *StoredAttachmentHandler {
+	h.uploads = c
+	return h
+}
+
+// CleanupUploads handles POST /attachments/uploads/cleanup.
+func (h *StoredAttachmentHandler) CleanupUploads(w http.ResponseWriter, r *http.Request) {
+	if h.uploads == nil {
+		http.NotFound(w, r)
+		return
+	}
+	res, err := h.uploads.CleanupUploads(r.Context())
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
 // CleanupShares handles POST /attachments/shares/cleanup.

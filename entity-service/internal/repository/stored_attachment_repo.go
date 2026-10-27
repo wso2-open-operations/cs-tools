@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -59,6 +60,10 @@ type StoredAttachmentRepository interface {
 	// and when. It reports false when the row is no longer COMPLETE (already
 	// deleted by another request). Meant for repository.WithSystemIdentity.
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
+	// ListAbandoned returns up to limit uploads, across the three tables, that
+	// are still PENDING and were created before olderThan. Meant for
+	// repository.WithSystemIdentity.
+	ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error)
 }
 
 // callerError turns "the request carried no caller identity" into a 401: a
@@ -262,4 +267,35 @@ func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.Stor
 		return false, fmt.Errorf("mark attachment deleted: %w", err)
 	}
 	return ct.RowsAffected() == 1, nil
+}
+
+// ListAbandoned implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListAbandoned(ctx context.Context, olderThan time.Time, limit int) ([]domain.AbandonedUpload, error) {
+	var out []domain.AbandonedUpload
+	for _, kind := range []domain.StoredAttachmentKind{domain.StoredAttachmentWorkItem, domain.StoredAttachmentComment, domain.StoredAttachmentDeployment} {
+		if len(out) >= limit {
+			break
+		}
+		t, err := storedAttachmentTableFor(kind)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := r.db.Query(ctx, `SELECT id::text FROM `+t.table+` WHERE status = 'PENDING' AND created_on < $1 ORDER BY created_on LIMIT $2`, olderThan, limit-len(out))
+		if err != nil {
+			return nil, fmt.Errorf("list abandoned uploads: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan abandoned upload: %w", err)
+			}
+			out = append(out, domain.AbandonedUpload{Kind: kind, ID: id})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate abandoned uploads: %w", err)
+		}
+	}
+	return out, nil
 }
