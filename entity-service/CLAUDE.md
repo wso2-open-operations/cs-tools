@@ -1877,6 +1877,13 @@ request. SFTPGo stores the multipart file under its base name, so a client canno
 folder, and it overwrites a file of the same name, which is why the folder is per upload.
 Responses carry `Cache-Control: no-store`.
 
+**Saved file names are the webapp's job.** SFTPGo names a download after the stored file, which carries the
+attachment number (`wia0000042_report.pdf`), and a share link has no option to change that. So the webapp
+does not navigate to a download link: it `fetch`es the link and saves the bytes under the attachment's own
+`name` from the response (an `<a download>` is ignored on another origin). That needs CORS on SFTPGo's public
+`GET /api/v2/shares/*` (the upload route needs it already) and holds the whole file in the browser, which is
+fine at `ATTACHMENT_MAX_BYTES` (100 MiB). Entity-service keeps the migrator's key layout unchanged.
+
 **Who made each link is logged here, not in SFTPGo.** SFTPGo sees only the one service user for
 every browser transfer, so each share created writes an `attachment link created` line
 (`audit=true`, `action` download|upload, `callerId`, `correlationId`, `kind`, `attachmentId`,
