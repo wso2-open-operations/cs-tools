@@ -246,6 +246,10 @@ func main() {
 	registryHandler := handler.NewRegistryHandler(entityClient, registryClient, adminRole)
 	contactHandler := handler.NewContactHandler(entityClient, userManagementClient, entityClient, csmMigrationPortalContacts)
 	roleResolver := middleware.NewCachedRoleResolver(entityClient, 5*time.Minute).WithInternalWriteGroups(internalWriteGroups)
+	storedAttachmentHandler := handler.NewStoredAttachmentHandler(entityClient,
+		func(w http.ResponseWriter, r *http.Request, m middleware.Module, a middleware.Action) bool {
+			return middleware.CheckPermission(w, r, roleResolver, m, a)
+		})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -336,6 +340,14 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/usages/search", instanceHandler.SearchDeployedProductInstanceUsage)
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/metrics/search", instanceHandler.SearchDeployedProductInstanceMetricsStats)
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
+
+	// SFTPGo-backed attachments (entity-service owns the access checks). The module
+	// permission depends on the attachment type, so the handler applies it.
+	mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
+	mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
+	mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
+	mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
+	mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.GetInlineImage)
 
 	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
 	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)

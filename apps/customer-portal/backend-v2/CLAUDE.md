@@ -1021,6 +1021,39 @@ struct actually carries it), and a stray extra check on `PATCH` would just be de
    declare `403` since `mapUpstreamError` can return it.
 9. **gosec** — run `gosec -fmt=text ./...` (must report 0 issues) before opening a PR.
 
+## Stored attachments (SFTPGo-backed, relayed to entity-service)
+
+Five routes relay entity-service's SFTPGo-backed attachment API for work item, comment-image and
+deployment attachments (`internal/handler/stored_attachments.go`, `internal/entity/stored_attachments.go`).
+They sit beside the older case-attachment routes (`GET /attachments/{id}/content`, `DELETE /attachments/{id}`,
+...), which are unchanged; the paths do not overlap (`cmd/server/stored_attachment_routes_test.go` registers
+both sets on one mux, since Go's mux panics at startup on an ambiguous pair).
+
+| Route | Relays | Module / action |
+|---|---|---|
+| `POST /attachments/download` `{type, ids, purpose?}` | links for up to 20 ids | read |
+| `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | 201, one-use upload link | create |
+| `POST /attachments/upload/{id}/confirm` `{type}` | 200 | create |
+| `POST /attachments/delete` `{type, id}` | 204 | delete |
+| `GET /attachments/inline/{id}/content` | the image, streamed | cases read |
+
+- **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no
+  `authorizeAttachmentAccess`-style lookups. The only check here is the portal's module permission, which depends
+  on the body's `type` (cases for `work_item`/`comment`, deployments for `deployment`), so it is made in the
+  handler through `middleware.CheckPermission` (the body-aware twin of `RequirePermission`) instead of at
+  registration. An unknown `type` is a 400 before anything is called.
+- **Bodies are relayed as raw JSON** and entity-service validates them; the field is `type`, not `kind`.
+- **Errors keep their status** (400/401/403/404/409/503 through `mapUpstreamError`); 429, which entity-service
+  returns when a caller asks for too many links, is passed through by `mapStoredAttachmentError`.
+- **Inline images are streamed, never buffered** (`entity.Client.StreamInlineImage` returns the body unread, the
+  handler `io.Copy`s it; `doBinary` is not used because it buffers). The response type is one of the four image
+  types or `application/octet-stream`, with `nosniff`, a sandboxing `Content-Security-Policy`,
+  `Content-Disposition: inline` and `Cache-Control: private, max-age=300`. The webapp uses the route as the
+  `<img src>`: the session authenticates it and entity-service checks access on every load.
+- **Links are for immediate use**: a download link serves one request and lasts about a minute (`purpose`
+  `preview` allows two). Ask for a link when the user opens or downloads one file, never for a whole list. The
+  browser sends an uploaded file straight to `uploadUrl` (multipart field `filenames`), then calls confirm.
+
 ## Handler conventions
 
 - **Auth**: always check `middleware.UserInfoFromContext(r.Context()) == nil` first → 401.
