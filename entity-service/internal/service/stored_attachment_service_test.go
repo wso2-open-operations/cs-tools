@@ -474,6 +474,23 @@ func TestConfirmUpload_MovesTheFileToItsFinalKeyAndCompletesTheRow(t *testing.T)
 	}
 }
 
+func TestConfirmUpload_RetryAfterTheMoveFinishesTheRowInsteadOfRejecting(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	stagedUpload(repo, store, 500, domain.StoredAttachmentWorkItem)
+	// An earlier confirm moved the file but failed before marking the row.
+	store.listing[filestore.StagingDir(saAttID)] = nil
+	finalDir := "csm/projects/prj_9/workitems/cs0001/attachments"
+	store.listing[finalDir] = []filestore.Entry{{Name: "wia0000042_report.pdf", Size: 500}}
+
+	resp, err := newStoredSvc(repo, store).ConfirmUpload(saCtx(t, saEmail), domain.ConfirmAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
+	if err != nil {
+		t.Fatalf("ConfirmUpload: %v", err)
+	}
+	if resp.Status != "COMPLETE" || resp.SizeBytes != 500 || repo.completed[saAttID] != finalDir+"/wia0000042_report.pdf" {
+		t.Errorf("response = %+v completed = %v", resp, repo.completed)
+	}
+}
+
 func TestConfirmUpload_DeploymentAndInlineKeysHaveTheirOwnShape(t *testing.T) {
 	// deployment
 	repo, store := newFakeStoredRepo(), newFakeStore()

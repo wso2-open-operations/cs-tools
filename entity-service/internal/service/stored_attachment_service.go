@@ -400,10 +400,25 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 		return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, closedParentMessage, &apierror.ConflictError{Msg: closedParentMessage})
 	}
 
+	key := filestore.Key(filestore.KeyParts{
+		ProjectNumber:    parent.ProjectNumber,
+		WorkItemNumber:   workItemNumberFor(req.Kind, parent),
+		DeploymentNumber: deploymentNumberFor(req.Kind, parent),
+		Inline:           req.Kind == domain.StoredAttachmentComment,
+		AttachmentNumber: row.Number,
+		Name:             row.Name,
+	})
+
 	file, err := s.receivedFile(ctx, staging)
 	if err != nil {
 		var verr *apierror.ValidationError
 		if errors.As(err, &verr) {
+			// A confirm that moved the file but failed to mark the row leaves staging
+			// empty and the file at its final key: finish that job instead of
+			// rejecting an upload that did arrive.
+			if resp, done, ferr := s.completeMoved(ctx, req.Kind, row, key, staging); done {
+				return resp, ferr
+			}
 			return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, verr.Msg, verr)
 		}
 		return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "list upload folder", err)
@@ -432,14 +447,6 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 		}
 	}
 
-	key := filestore.Key(filestore.KeyParts{
-		ProjectNumber:    parent.ProjectNumber,
-		WorkItemNumber:   workItemNumberFor(req.Kind, parent),
-		DeploymentNumber: deploymentNumberFor(req.Kind, parent),
-		Inline:           req.Kind == domain.StoredAttachmentComment,
-		AttachmentNumber: row.Number,
-		Name:             row.Name,
-	})
 	// The folder must exist before the file can be moved into it. A failure from
 	// here on leaves the row PENDING and the file staged, so confirm can be retried.
 	if err := s.store.MkdirAll(ctx, path.Dir(key)); err != nil {
@@ -588,6 +595,32 @@ func (s *storedAttachmentService) receivedFile(ctx context.Context, staging stri
 		return files[0], nil
 	}
 	return filestore.Entry{}, &apierror.ValidationError{Msg: "more than one file was uploaded"}
+}
+
+// completeMoved finishes a confirm whose file was already moved to its final key
+// (the earlier attempt failed between the move and marking the row). done is
+// false when no file is there, so the caller rejects as before.
+func (s *storedAttachmentService) completeMoved(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, key, staging string) (domain.ConfirmAttachmentUploadResponse, bool, error) {
+	entries, err := s.store.ListDir(ctx, path.Dir(key))
+	if err != nil {
+		return domain.ConfirmAttachmentUploadResponse{}, false, nil
+	}
+	for _, e := range entries {
+		if e.IsDir() || e.Name != path.Base(key) {
+			continue
+		}
+		ok, err := s.repo.MarkComplete(repository.WithSystemIdentity(ctx), kind, row.ID, key, e.Size)
+		if err != nil {
+			return domain.ConfirmAttachmentUploadResponse{}, true, err
+		}
+		if !ok {
+			return domain.ConfirmAttachmentUploadResponse{}, true, &apierror.ConflictError{Msg: "this upload was already confirmed"}
+		}
+		s.removeStaging(ctx, staging)
+		row.Status = "COMPLETE"
+		return confirmResponse(row, e.Size), true, nil
+	}
+	return domain.ConfirmAttachmentUploadResponse{}, false, nil
 }
 
 // reject throws an upload away: the staged file is removed and the row is

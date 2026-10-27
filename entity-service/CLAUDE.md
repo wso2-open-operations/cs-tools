@@ -1859,9 +1859,9 @@ create.
 
 Work item, comment-image and deployment attachment files live in SFTPGo
 (`work_item_attachment`, `comment_attachment`, `deployment_attachment`; `case_attachment` is
-the older flow and is not touched). Three routes, registered only when `db != nil` and
+the older flow and is not touched). Four routes, registered only when `db != nil` and
 `Config.HasSFTPGo()` (otherwise 404): `POST /attachments/download`, `POST /attachments/upload`,
-`POST /attachments/upload/{id}/confirm`. Code: `internal/filestore` (SFTPGo client and the path
+`POST /attachments/upload/{id}/confirm`, `POST /attachments/delete`. Code: `internal/filestore` (SFTPGo client and the path
 layout), `service.StoredAttachmentService`, `repository.StoredAttachmentRepository`,
 `handler.StoredAttachmentHandler`.
 
