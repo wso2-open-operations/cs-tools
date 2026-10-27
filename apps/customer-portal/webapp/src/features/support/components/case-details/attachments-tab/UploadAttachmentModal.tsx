@@ -94,7 +94,9 @@ export default function UploadAttachmentModal({
   // Set when the file arrived but the final confirm failed: retry only that step.
   const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
-  const showDescription = isDeploymentMode;
+  // The stored (entity-service) upload has no description to send, so the field is
+  // not offered there.
+  const showDescription = isDeploymentMode && !useStored;
   const maxBytes = useStored
     ? STORED_ATTACHMENT_MAX_BYTES
     : MAX_ATTACHMENT_SIZE_BYTES;
