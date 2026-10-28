@@ -25,9 +25,14 @@ import { useSearchIncidents } from "@features/csm-operations/api/useSearchIncide
 import type { BeIncident } from "@api/backend/types";
 
 // The bulk actions' requests, and whether the signed-in user may write.
-const { apiMock, access } = vi.hoisted(() => ({
+const { apiMock, access, currentUser } = vi.hoisted(() => ({
   apiMock: { post: vi.fn(), get: vi.fn(), patch: vi.fn() },
   access: { canWrite: false },
+  // The signed-in user as `useCurrentUser` reports it; "Assigned to me" tests
+  // replace it with a profile still loading or settled without an id.
+  currentUser: {
+    value: { user: { id: "user-1" } as { id?: string } | undefined, isLoading: false },
+  },
 }));
 
 // The backend client reads runtime config at module load, which isn't present
@@ -79,9 +84,9 @@ vi.mock("@features/csm-operations/api/useSearchIncidents", () => ({
   useSearchIncidents: vi.fn(),
 }));
 
-// Only the column picker's storage key derives from the signed-in user.
+// The column picker's storage key and "Assigned to me" derive from the signed-in user.
 vi.mock("@context/current-user/CurrentUserContext", () => ({
-  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+  useCurrentUser: () => ({ ...currentUser.value, isError: false, error: null }),
 }));
 vi.mock("@hooks/useIdTokenClaims", () => ({
   useIdTokenClaims: () => ({ email: "user@example.test" }),
@@ -145,6 +150,7 @@ beforeEach(() => {
   apiMock.patch.mockReset();
   apiMock.get.mockReset();
   access.canWrite = false;
+  currentUser.value = { user: { id: "user-1" }, isLoading: false };
   window.localStorage?.clear();
 });
 
@@ -165,6 +171,56 @@ describe("IncidentsTab — list states", () => {
     mockResult({ data: { incidents: [], total: 0, limit: 20, offset: 0 } });
     render(<IncidentsTab />);
     expect(screen.getByText(/no incidents found/i)).toBeInTheDocument();
+  });
+});
+
+describe("IncidentsTab — Assigned to me", () => {
+  function renderAssignedToMe(): void {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/?incMine=1"]}>
+          <IncidentsTab />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("searches for the viewer's incidents once their id is known", () => {
+    mockResult({ data: { incidents: [INCIDENT], total: 1, limit: 20, offset: 0 } });
+    renderAssignedToMe();
+    const [payload, options] = mockedUseSearch.mock.calls.at(-1)!;
+    expect(options).toEqual({ enabled: true });
+    expect(payload.filters?.filters).toContainEqual({
+      field: "assignedUserId",
+      op: "in",
+      values: ["user-1"],
+    });
+  });
+
+  it("holds the search back and shows the loading rows while the profile loads", () => {
+    currentUser.value = { user: undefined, isLoading: true };
+    mockResult({});
+    renderAssignedToMe();
+    expect(mockedUseSearch.mock.calls.at(-1)![1]).toEqual({ enabled: false });
+    expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+  });
+
+  it("explains, instead of loading forever, once the profile settles without an id", () => {
+    currentUser.value = { user: {}, isLoading: false };
+    mockResult({});
+    renderAssignedToMe();
+    expect(mockedUseSearch.mock.calls.at(-1)![1]).toEqual({ enabled: false });
+    expect(screen.getByText(/your user record could not be loaded/i)).toBeInTheDocument();
+  });
+
+  it("does not let Refresh search without the viewer's id", () => {
+    currentUser.value = { user: {}, isLoading: false };
+    const refetch = vi.fn();
+    mockResult({ refetch });
+    renderAssignedToMe();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh incidents" }));
+    expect(refetch).not.toHaveBeenCalled();
   });
 });
 

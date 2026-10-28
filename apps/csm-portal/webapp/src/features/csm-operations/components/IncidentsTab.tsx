@@ -165,10 +165,19 @@ export default function IncidentsTab(): JSX.Element {
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
   const currentUserEmail = useIdTokenClaims()?.email;
-  const currentUserId = useCurrentUser().user?.id;
-  // "Assigned to me" needs our id; until `/users/me` supplies it, searching
-  // would drop the filter and list everyone's incidents.
+  const {
+    user: currentUser,
+    isLoading: isCurrentUserLoading,
+    error: currentUserError,
+  } = useCurrentUser();
+  const currentUserId = currentUser?.id;
+  // "Assigned to me" needs our id; without it, searching would drop the
+  // filter and list everyone's incidents, so the search (Refresh included)
+  // is held back. Once `/users/me` has settled without an id (it omits it
+  // when the entity service is down, or fails outright), say so instead of
+  // loading forever.
   const awaitingCurrentUser = filters.assignedToMe && !currentUserId;
+  const currentUserUnavailable = awaitingCurrentUser && !isCurrentUserLoading;
 
   // Date columns sort by a click on their header; newest created first until then.
   const [sort, setSort] = useState<ListSort<IncidentSortField>>({ field: "createdOn", order: "desc" });
@@ -350,7 +359,9 @@ export default function IncidentsTab(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Box sx={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 1 }}>
         <RefreshButton
-          onRefresh={() => void refetch()}
+          onRefresh={() => {
+            if (!awaitingCurrentUser) void refetch();
+          }}
           isFetching={isFetching}
           updatedAt={dataUpdatedAt}
           label="Refresh incidents"
@@ -472,7 +483,7 @@ export default function IncidentsTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading || isFetching || awaitingCurrentUser ? (
+              {isLoading || isFetching || (awaitingCurrentUser && !currentUserUnavailable) ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     {canWrite && <TableCell padding="checkbox" />}
@@ -488,6 +499,15 @@ export default function IncidentsTab(): JSX.Element {
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
+              ) : currentUserUnavailable ? (
+                <TableRow>
+                  <TableCell colSpan={columnCount} align="center">
+                    <QueryErrorState
+                      message={'Your user record could not be loaded, so "Assigned to me" cannot be applied. Untick it to see the other incidents, or reload the page to try again.'}
+                      error={currentUserError}
+                    />
+                  </TableCell>
+                </TableRow>
               ) : isError ? (
                 <TableRow>
                   <TableCell colSpan={columnCount} align="center">
