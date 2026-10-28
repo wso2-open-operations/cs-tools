@@ -7723,6 +7723,87 @@ so that function, and the internal caller's right to stamp the flags, are gone:
   code's own `ForbiddenError` instead of `work_item`'s RLS `NotFoundError`; the tests' doc comments
   say so, and the suite is also run as `csm_app` (RLS enforced).
 
+## Standard changes: templates, proposals and the CAB
+
+A **standard change** is pre-authorised at the level of its *template* (ITIL 4 change enablement):
+the CAB approves a template once, and every change request raised from it follows it without a CAB
+stage of its own. Before this, choosing Standard opened the ordinary create form with every field
+free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
+service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
+migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
+`STD` / `SCP`, the two change request columns) and `100026` (row-level security). PostgreSQL data
+sources only; every route is `internalOnly`.
+
+**Tables.** `standard_change_template` (STD number, name unique among live templates ignoring case,
+state `ACTIVE` / `SUSPENDED` / `RETIRED`, owner, `current_version_id`, the review flag),
+`standard_change_template_version` (immutable: the content a change request takes, its `parameters`
+JSON array, who approved it and from which proposal), `standard_change_proposal` (a work item, so it
+reuses `approval_stage` / `approval_stage_approver` for its CAB stage; kind `NEW` / `MODIFY` /
+`RETIRE`, state `DRAFT` / `CAB_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN`, the same content
+columns as a version) and `standard_change_proposal_evidence` (closed change requests the proposer
+cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
+`standard_change_parameter_values` (JSONB object) record what a change request was raised from. All
+four tables are internal-only under row-level security (`100026`).
+
+**Proposals.** Anyone internal proposes; the proposer does the templating: generalise the plans and
+mark the varying bits as `{{key}}` placeholders, each declared as a parameter (text, textarea,
+number, date, select; up to 30). A new proposal can start from a closed change request (its content
+is copied and it becomes the first evidence) or copy an earlier proposal (a rejected one, say).
+Evidence is any number of closed change requests: the CAB judges it. Submit checks completeness
+(name, rationale, subject, the three plans, impact, a risk that is not high, every placeholder
+declared) and opens one "CAB Approval" stage on the CAB group (`domain.CABApprovalGroupName`), its
+active internal members, the proposer listed cancelled. A CAB member decides on their own row; the
+first decision settles it and cancels the others. **Approved**: `NEW` writes the template and version
+1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and clears the review flag, `RETIRE`
+retires it. **Rejected** needs a comment; the catalogue is untouched and the proposal stays as the
+record. A modification or retirement starts from the current version and is refused (409) when the
+template moved on since; at most one is open per template (unique partial index). The approval stage
+writes `approval_stage.raw_status` in the enum's own spelling (`APPROVED` / `REJECTED`).
+
+**Raising a change request** (`changeRequestService.prepareStandardChange`, wired by
+`WithStandardChangeTemplates` in `routes.go`): `POST /change-requests` with
+`standardChangeTemplateId` (+ optional `standardChangeTemplateVersionId`, the version the client
+rendered) and `standardChangeParameters`. Type standard needs a template, a template needs type
+standard (or none). The template must be `ACTIVE`; its current version is rendered with the values
+(rich-text fields HTML-escape them, a textarea's lines become `<br>`, the subject stays plain text and
+is held to 512 characters) and overwrites subject, description, justification, the plans,
+risk/impact analysis, category, impact, risk, rollback duration, planning visibility and the two
+customer boxes. Sending any of those (or `implementationDeviation`) is a 400. The repository records
+the version and values in the create transaction under `FOR SHARE` on the template, refusing (409)
+a template suspended, retired or revised in between. On dual-write the previous system gets the
+rendered content and none of the template fields (`DATA_SOURCE=servicenow` refuses them: 400).
+
+**On the change request afterwards.**
+- **Frozen**: a PATCH that changes a template-specified field is a 400 in every state
+  (`checkStandardChangeTemplateFields`, before the approved-content lock); resending the stored value
+  is accepted. The parameters cannot be edited either (decision: a typo in New is a cancel and
+  re-raise; editing them would need a re-render the dual-write mirror does not have).
+- **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
+  standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
+- **Request Approval** needs the template still `ACTIVE` and still at the version raised from (409
+  `standard_change_template_unavailable`): a revised template's old version is no longer authorised.
+- **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
+  implementation plan sets `review_required` on the template with the change request and a reason
+  (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
+  identity). It does not suspend the template; the owner or a CAB member clears it, or approving a
+  modification does.
+- **Read**: `standardChange` on the detail (template, STD number, version, parameters with values),
+  staff only, best-effort like the tags.
+
+**Error codes**: `change_request_standard_template_field` (400) and
+`standard_change_template_unavailable` (409).
+
+**Who may**: suspend / resume / clear the flag: the template's owner or a CAB member. Edit, submit,
+withdraw a proposal: its proposer. Decide: a CAB member other than the proposer.
+
+**Not done**: no import of the previous system's standard change templates (decision: they are
+re-proposed through this flow); no notices (mail / chat) on submit or decision.
+
+Tests: `standard_change_template_test.go` (parameters, completeness, placeholders, rendering),
+`standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
+(real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
+without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
+
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s
 
 Found in production logs after the plural/singular fix shipped: every
