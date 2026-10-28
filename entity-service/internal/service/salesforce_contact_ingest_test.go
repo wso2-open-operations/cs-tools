@@ -339,7 +339,7 @@ func TestContactWriter_WriteFailureRecordsLedgerAndStops(t *testing.T) {
 	c := sampleWriterContact()
 	c.Memberships = []salesentity.ContactMembership{{ID: sampleStr(testMembershipID)}}
 	h := newIngestHarness(sampleProjectContact("REGISTERED", "Portal user"), c, false)
-	h.contacts.upsertErr = &apierror.ConflictError{Msg: "more than one user matches the contact email; cannot resolve the membership"}
+	h.contacts.upsertErr = &apierror.ConflictError{Msg: "a user with this email already exists"}
 
 	err := h.svc.HandleEvent(context.Background(), contactEvent("UPDATED"))
 	var ce *apierror.ConflictError
@@ -350,7 +350,7 @@ func TestContactWriter_WriteFailureRecordsLedgerAndStops(t *testing.T) {
 		t.Error("the fan-out must not run after a failed contact write")
 	}
 	if len(h.states.upserts) != 1 || h.states.upserts[0].Status != domain.SalesforceIngestFailed ||
-		*h.states.upserts[0].LastError != "more than one user matches the contact email; cannot resolve the membership" {
+		*h.states.upserts[0].LastError != "a user with this email already exists" {
 		t.Errorf("FAILED ledger row = %+v", h.states.upserts)
 	}
 }
