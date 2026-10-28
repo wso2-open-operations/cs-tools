@@ -459,10 +459,33 @@ export default function IncidentsFilterBar({
               />
             </Grid>
 
+            {/* The two yes/no filters share one cell, so the dropdown grid
+                keeps its rows of three. Pinned to the row's top (Product's
+                helper text makes the row taller) and inset to line up with
+                the fields' text. */}
             <Grid
               size={{ xs: 12, sm: 6, md: 4 }}
-              sx={{ display: "flex", alignItems: "center", height: 40 }}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                alignSelf: "flex-start",
+                flexWrap: "wrap",
+                columnGap: 2,
+                minHeight: 40,
+                pl: 1.5,
+              }}
             >
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    id="incident-filter-assigned-to-me"
+                    size="small"
+                    checked={filters.assignedToMe}
+                    onChange={(e) => onChange({ ...filters, assignedToMe: e.target.checked })}
+                  />
+                }
+                label="Assigned to me"
+              />
               <FormControlLabel
                 control={
                   <Checkbox

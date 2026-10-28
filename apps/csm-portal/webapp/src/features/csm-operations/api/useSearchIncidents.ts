@@ -26,10 +26,12 @@ import type {
  * Search incidents via `POST /incidents/search` (ServiceNow data source
  * only). Returns the raw paged response so the listing can drive
  * server-side pagination from `total`. `keepPreviousData` keeps the table
- * populated while the next page/filter loads.
+ * populated while the next page/filter loads. `enabled: false` holds the
+ * search back until the payload can be built.
  */
 export function useSearchIncidents(
   payload: BeIncidentSearchPayload,
+  { enabled = true }: { enabled?: boolean } = {},
 ): UseQueryResult<BeIncidentSearchResponse, Error> {
   const api = useBackendApi();
 
@@ -40,6 +42,7 @@ export function useSearchIncidents(
         "/incidents/search",
         payload,
       ),
+    enabled,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });

@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_INCIDENT_FILTERS } from "@features/csm-operations/utils/incidents";
 import {
+  INCIDENT_FILTER_PARAM_KEYS,
   readIncidentFiltersFromUrl,
   writeIncidentFiltersToUrl,
 } from "./incidentsFiltersUrl";
@@ -46,6 +47,7 @@ describe("readIncidentFiltersFromUrl", () => {
       categories: [],
       serviceIds: [],
       assigneeIds: [],
+      assignedToMe: false,
       updatedStartDate: "",
       updatedEndDate: "",
       anyOf: [],
@@ -147,6 +149,7 @@ describe("writeIncidentFiltersToUrl", () => {
       categories: ["SOFTWARE"],
       serviceIds: ["svc-1"],
       assigneeIds: ["user-1"],
+      assignedToMe: true,
       updatedStartDate: "2026-02-01",
       updatedEndDate: "2026-02-10",
       anyOf: [
@@ -156,6 +159,22 @@ describe("writeIncidentFiltersToUrl", () => {
     };
     const round = readIncidentFiltersFromUrl(writeIncidentFiltersToUrl(filters));
     expect(round).toEqual(filters);
+  });
+
+  it("writes assignedToMe as incMine=1 and omits it when off", () => {
+    expect(
+      writeIncidentFiltersToUrl({ ...DEFAULT_INCIDENT_FILTERS, assignedToMe: true }).get("incMine"),
+    ).toBe("1");
+    expect(writeIncidentFiltersToUrl(DEFAULT_INCIDENT_FILTERS).has("incMine")).toBe(false);
+  });
+
+  it("reads only incMine=1 as assignedToMe", () => {
+    expect(readIncidentFiltersFromUrl(new URLSearchParams("incMine=1")).assignedToMe).toBe(true);
+    expect(readIncidentFiltersFromUrl(new URLSearchParams("incMine=yes")).assignedToMe).toBe(false);
+  });
+
+  it("lists incMine among the params a reset clears", () => {
+    expect(INCIDENT_FILTER_PARAM_KEYS).toContain("incMine");
   });
 
   it("omits incSreTeams when no SRE team is selected", () => {

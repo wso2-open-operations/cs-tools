@@ -164,6 +164,11 @@ export default function IncidentsTab(): JSX.Element {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
   const debouncedSearch = useDebouncedValue(filters.search.trim(), 300);
+  const currentUserEmail = useIdTokenClaims()?.email;
+  const currentUserId = useCurrentUser().user?.id;
+  // "Assigned to me" needs our id; until `/users/me` supplies it, searching
+  // would drop the filter and list everyone's incidents.
+  const awaitingCurrentUser = filters.assignedToMe && !currentUserId;
 
   // Date columns sort by a click on their header; newest created first until then.
   const [sort, setSort] = useState<ListSort<IncidentSortField>>({ field: "createdOn", order: "desc" });
@@ -174,15 +179,15 @@ export default function IncidentsTab(): JSX.Element {
 
   const payload = useMemo(
     () => ({
-      filters: buildIncidentSearchFilters(filters, debouncedSearch),
+      filters: buildIncidentSearchFilters(filters, debouncedSearch, currentUserId),
       sortBy: sort,
       pagination: { offset: page * rowsPerPage, limit: rowsPerPage },
     }),
-    [filters, debouncedSearch, sort, page, rowsPerPage],
+    [filters, debouncedSearch, currentUserId, sort, page, rowsPerPage],
   );
 
   const { data, isLoading, isError, error, isFetching, refetch, dataUpdatedAt } =
-    useSearchIncidents(payload);
+    useSearchIncidents(payload, { enabled: !awaitingCurrentUser });
 
   const incidents = useMemo(() => data?.incidents ?? [], [data]);
   const total = data?.total ?? 0;
@@ -191,8 +196,6 @@ export default function IncidentsTab(): JSX.Element {
   // the default visible set is empty since none of these were columns at
   // all before this feature, so a returning user sees no change until they
   // open the picker.
-  const currentUserEmail = useIdTokenClaims()?.email;
-  const currentUserId = useCurrentUser().user?.id;
   const [isFiltersOpen, setIsFiltersOpen] = useFilterBarCollapsed(
     "incidents",
     getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
@@ -358,7 +361,7 @@ export default function IncidentsTab(): JSX.Element {
           header={["Number", "Subject", "Caller", "State", "Priority", "Opened", "Updated"]}
           toRow={incidentToCsvRow}
           fetchPage={fetchIncidentsPage}
-          disabled={isError}
+          disabled={isError || awaitingCurrentUser}
         />
         <Button
           variant="contained"
@@ -469,7 +472,7 @@ export default function IncidentsTab(): JSX.Element {
               </TableRow>
             </TableHead>
             <TableBody>
-              {isLoading || isFetching ? (
+              {isLoading || isFetching || awaitingCurrentUser ? (
                 Array.from({ length: rowsPerPage }).map((_, i) => (
                   <TableRow key={i}>
                     {canWrite && <TableCell padding="checkbox" />}

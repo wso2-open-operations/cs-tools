@@ -38,6 +38,7 @@ export const INCIDENT_FILTER_PARAM_KEYS = [
   "incCategories",
   "incServices",
   "incAssignees",
+  "incMine",
   "incUpdatedFrom",
   "incUpdatedTo",
   "incAnyOf",
@@ -155,6 +156,7 @@ export function readIncidentFiltersFromUrl(
     categories: parseCsv(params.get("incCategories"), INCIDENT_FILTER_CATEGORIES),
     serviceIds: parseTeamIdsCsv(params.get("incServices")),
     assigneeIds: parseTeamIdsCsv(params.get("incAssignees")),
+    assignedToMe: params.get("incMine") === "1",
     ...parseUpdatedRange(params.get("incUpdatedFrom"), params.get("incUpdatedTo")),
     anyOf: parseAnyOfParam(params.get("incAnyOf"), INCIDENT_ANY_OF_FIELDS),
   };
@@ -177,6 +179,7 @@ export function writeIncidentFiltersToUrl(f: IncidentFilters): URLSearchParams {
   if (f.categories.length) out.set("incCategories", f.categories.join(","));
   if (f.serviceIds.length) out.set("incServices", f.serviceIds.join(","));
   if (f.assigneeIds.length) out.set("incAssignees", f.assigneeIds.join(","));
+  if (f.assignedToMe) out.set("incMine", "1");
   if (f.updatedStartDate) out.set("incUpdatedFrom", f.updatedStartDate);
   if (f.updatedEndDate) out.set("incUpdatedTo", f.updatedEndDate);
   const anyOf = writeAnyOfParam(f.anyOf);

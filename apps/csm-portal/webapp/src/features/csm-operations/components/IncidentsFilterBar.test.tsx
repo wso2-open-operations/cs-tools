@@ -121,6 +121,24 @@ describe("IncidentsFilterBar", () => {
     });
   });
 
+  it("toggles Assigned to me, keeping the other filters", () => {
+    const { onChange } = renderFilterBar({
+      filters: { ...DEFAULT_INCIDENT_FILTERS, states: ["NEW"] },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Assigned to me" }));
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_INCIDENT_FILTERS,
+      states: ["NEW"],
+      assignedToMe: true,
+    });
+  });
+
+  it("reflects an active Assigned to me filter as checked and counts it", () => {
+    renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, assignedToMe: true } });
+    expect(screen.getByRole("checkbox", { name: "Assigned to me" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+  });
+
   it("reflects an already-active SLA-violated filter as checked", () => {
     renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, slaViolated: true } });
     expect(screen.getByRole("checkbox", { name: /sla violated/i })).toBeChecked();

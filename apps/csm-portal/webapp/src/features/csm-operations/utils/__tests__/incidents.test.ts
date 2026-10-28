@@ -142,6 +142,7 @@ describe("buildIncidentSearchFilters", () => {
       categories: [],
       serviceIds: [],
       assigneeIds: [],
+      assignedToMe: false,
       updatedStartDate: "",
       updatedEndDate: "",
       anyOf: [],
@@ -182,6 +183,48 @@ describe("buildIncidentSearchFilters", () => {
         { field: "assignmentGroupId", op: "in", values: ["team-apollo"] },
       ],
     });
+  });
+
+  it("sends assignedToMe as the viewer's id in the assignedUserId entry", () => {
+    expect(
+      buildIncidentSearchFilters({ ...DEFAULT_INCIDENT_FILTERS, assignedToMe: true }, "", "user-me"),
+    ).toEqual({ filters: [{ field: "assignedUserId", op: "in", values: ["user-me"] }] });
+  });
+
+  it("combines assignedToMe with a state filter", () => {
+    expect(
+      buildIncidentSearchFilters(
+        { ...DEFAULT_INCIDENT_FILTERS, assignedToMe: true, states: ["NEW", "IN_PROGRESS"] },
+        "",
+        "user-me",
+      ),
+    ).toEqual({
+      filters: [
+        { field: "state", op: "in", values: ["NEW", "IN_PROGRESS"] },
+        { field: "assignedUserId", op: "in", values: ["user-me"] },
+      ],
+    });
+  });
+
+  it("joins assignedToMe with picked assignees in one entry, without repeating the viewer", () => {
+    expect(
+      buildIncidentSearchFilters(
+        { ...DEFAULT_INCIDENT_FILTERS, assigneeIds: ["user-1"], assignedToMe: true },
+        "",
+        "user-me",
+      ).filters,
+    ).toEqual([{ field: "assignedUserId", op: "in", values: ["user-1", "user-me"] }]);
+    expect(
+      buildIncidentSearchFilters(
+        { ...DEFAULT_INCIDENT_FILTERS, assigneeIds: ["user-me"], assignedToMe: true },
+        "",
+        "user-me",
+      ).filters,
+    ).toEqual([{ field: "assignedUserId", op: "in", values: ["user-me"] }]);
+  });
+
+  it("ignores assignedToMe when unchecked, even with a known viewer", () => {
+    expect(buildIncidentSearchFilters(DEFAULT_INCIDENT_FILTERS, "", "user-me")).toEqual({});
   });
 
   it("omits the generic filters array entirely when no field-filter-backed control is set", () => {

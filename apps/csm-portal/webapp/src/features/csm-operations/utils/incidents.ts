@@ -200,6 +200,10 @@ export interface IncidentFilters {
   serviceIds: string[];
   /** Assignee user ids — `{ field: "assignedUserId", op: "in" }`. */
   assigneeIds: string[];
+  /** Only the incidents assigned to whoever is viewing. Kept as a flag rather
+   * than the viewer's id so a shared link or saved view shows each viewer
+   * their own; resolved to the id in `buildIncidentSearchFilters`. */
+  assignedToMe: boolean;
   /** `YYYY-MM-DD` UTC dates bounding the last update, or empty. */
   updatedStartDate: string;
   updatedEndDate: string;
@@ -239,6 +243,7 @@ export const DEFAULT_INCIDENT_FILTERS: IncidentFilters = {
   categories: [],
   serviceIds: [],
   assigneeIds: [],
+  assignedToMe: false,
   updatedStartDate: "",
   updatedEndDate: "",
   anyOf: [],
@@ -257,6 +262,7 @@ export function countActiveIncidentFilters(filters: IncidentFilters): number {
     (filters.categories.length > 0 ? 1 : 0) +
     (filters.serviceIds.length > 0 ? 1 : 0) +
     (filters.assigneeIds.length > 0 ? 1 : 0) +
+    (filters.assignedToMe ? 1 : 0) +
     (filters.updatedStartDate ? 1 : 0) +
     (filters.updatedEndDate ? 1 : 0) +
     completeAnyOfGroups(filters.anyOf).length
@@ -293,11 +299,21 @@ export function incidentDateOnlyToUTCEnd(dateOnly: string): string {
  * `false` and "absent" as the same thing, so sending `false` would be
  * meaningless and misleading to read back. `createdOn` becomes up to two
  * separate `gte`/`lte` entries (one value each), not a single ranged entry.
+ *
+ * `currentUserId` resolves `assignedToMe`; it joins any picked assignees in
+ * the one `assignedUserId` entry, so the two together match either. Callers
+ * must not search with `assignedToMe` set and no id (see `IncidentsTab`), or
+ * the list would silently show everyone's.
  */
 export function buildIncidentSearchFilters(
   filters: IncidentFilters,
   debouncedSearch: string,
+  currentUserId?: string,
 ): NonNullable<BeIncidentSearchPayload["filters"]> {
+  const assigneeIds =
+    filters.assignedToMe && currentUserId && !filters.assigneeIds.includes(currentUserId)
+      ? [...filters.assigneeIds, currentUserId]
+      : filters.assigneeIds;
   const fieldFilters: NonNullable<BeIncidentSearchPayload["filters"]>["filters"] = [
     ...(filters.slaViolated
       ? [{ field: "slaViolated" as const, op: "eq" as const, values: ["true"] }]
@@ -335,8 +351,8 @@ export function buildIncidentSearchFilters(
     ...(filters.serviceIds.length > 0
       ? [{ field: "businessServiceId" as const, op: "in" as const, values: filters.serviceIds }]
       : []),
-    ...(filters.assigneeIds.length > 0
-      ? [{ field: "assignedUserId" as const, op: "in" as const, values: filters.assigneeIds }]
+    ...(assigneeIds.length > 0
+      ? [{ field: "assignedUserId" as const, op: "in" as const, values: assigneeIds }]
       : []),
     ...(filters.updatedStartDate
       ? [
