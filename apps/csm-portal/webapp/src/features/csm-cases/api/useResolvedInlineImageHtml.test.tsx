@@ -58,6 +58,12 @@ function wrapper({ children }: { children: ReactNode }) {
 const ATTACHMENT_SYSID = "0123456789abcdef0123456789abcdef";
 const HTML = `<p>see <img src="/inline/${ATTACHMENT_SYSID}.iix"></p>`;
 
+// These cases cover the older ServiceNow flow, so the entity-service flow
+// (on by default) is switched off for the whole file.
+beforeEach(() => {
+  window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as unknown as typeof window.config;
+});
+
 describe("useResolvedInlineImageHtml", () => {
   beforeEach(() => {
     postMock.mockReset();

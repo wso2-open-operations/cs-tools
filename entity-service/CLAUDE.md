@@ -1779,7 +1779,7 @@ An image embedded in a comment is not deleted on its own (400). A repeated delet
 the activity feed skip it (`listedStoredAttachmentSQL`, which also hides `FAILED` rows and uploads
 still in flight). Each delete writes an `attachment deleted` audit line like the link lines.
 
-**Limits on links.** One download call takes at most 20 ids, and one caller (`callerId`) may have 60 shares created per minute across download and upload links (`shareLimiter`, in memory and per pod); beyond that the call is a 429 and nothing is created. Every share is a stored record in SFTPGo, so a client should ask for a link only when a user opens, downloads or sees one attachment, never for a whole list.
+**Limits on links.** One download call takes exactly one id (one file per request), and one caller (`callerId`) may have 60 shares created per minute across download and upload links (`shareLimiter`, in memory and per pod); beyond that the call is a 429 and nothing is created. Every share is a stored record in SFTPGo, so a client should ask for a link only when a user opens, downloads or sees one attachment, never for a whole list.
 
 **Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
 under the attachment tables' RLS (migration 100026): an external caller needs to be a

@@ -22,22 +22,22 @@ afterEach(() => {
 });
 
 describe("isEntityAttachmentsEnabled", () => {
-  it("is off when the key is absent", () => {
+  it("is on when the key is absent", () => {
     window.config = {} as typeof window.config;
-    expect(isEntityAttachmentsEnabled()).toBe(false);
+    expect(isEntityAttachmentsEnabled()).toBe(true);
   });
 
-  it("is on only for true or the string \"true\"", () => {
-    for (const raw of [true, "true", " TRUE "]) {
+  it("is off only for false or the string \"false\"", () => {
+    for (const raw of [false, "false", " FALSE "]) {
       window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: raw } as typeof window.config;
-      expect(isEntityAttachmentsEnabled()).toBe(true);
+      expect(isEntityAttachmentsEnabled()).toBe(false);
     }
   });
 
-  it("is off for anything else", () => {
-    for (const raw of [false, "false", "1", "yes", "", 1]) {
+  it("is on for anything else", () => {
+    for (const raw of [true, "true", "0", "no", "", 0]) {
       window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: raw } as unknown as typeof window.config;
-      expect(isEntityAttachmentsEnabled()).toBe(false);
+      expect(isEntityAttachmentsEnabled()).toBe(true);
     }
   });
 });

@@ -141,14 +141,14 @@ window.config = {
 
   // ── Entity-service attachments ──────────────────────────────────────────────
   //
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED  (optional — default: false)
-  //   true  – downloads, uploads and deletes of case and deployment attachments
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED  (optional — default: true)
+  //   true  – (default) downloads, uploads and deletes of case and deployment attachments
   //           go through entity-service's stored-attachment routes (files held
   //           in SFTPGo), and comment images are streamed by entity-service.
   //           The browser talks to SFTPGo directly for the file itself, so
   //           SFTPGo's public address must allow this portal's origin (CORS).
-  //   false – the existing attachment flow is used unchanged.
-  CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false,
+  //   false – the older ServiceNow attachment flow is used.
+  CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
 
   // ── Top banners ─────────────────────────────────────────────────────────────
   //

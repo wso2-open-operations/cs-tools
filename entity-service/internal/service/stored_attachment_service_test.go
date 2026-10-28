@@ -309,12 +309,13 @@ func TestResolveLinks_UnstoredFilesGetAReasonNotALink(t *testing.T) {
 	repo.rows[ids[1]] = domain.StoredAttachmentRow{ID: ids[1], Status: "FAILED"}
 	repo.rows[ids[2]] = domain.StoredAttachmentRow{ID: ids[2], Status: "COMPLETE"} // no storage key
 
-	resp, err := newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: ids})
-	if err != nil {
-		t.Fatalf("ResolveLinks: %v", err)
-	}
 	want := []string{domain.AttachmentUnavailableNotStored, domain.AttachmentUnavailableFailed, domain.AttachmentUnavailableNotStored}
-	for i, l := range resp.Links {
+	for i, id := range ids {
+		resp, err := newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{id}})
+		if err != nil {
+			t.Fatalf("ResolveLinks: %v", err)
+		}
+		l := resp.Links[0]
 		if l.Available || l.URL != "" || l.Reason != want[i] {
 			t.Errorf("link %d = %+v, want unavailable with reason %s", i, l, want[i])
 		}
@@ -339,21 +340,26 @@ func TestResolveLinks_AStorageFailureOnlyAffectsThatEntry(t *testing.T) {
 	}
 }
 
-func TestResolveLinks_HiddenIdsAreLeftOutAndOrderIsKept(t *testing.T) {
+func TestResolveLinks_AHiddenIdGetsNoLink(t *testing.T) {
 	repo, store := newFakeStoredRepo(), newFakeStore()
-	a, b, hidden := "b1000000-0000-0000-0000-00000000000a", "b1000000-0000-0000-0000-00000000000b", "b1000000-0000-0000-0000-00000000000f"
+	a, hidden := "b1000000-0000-0000-0000-00000000000a", "b1000000-0000-0000-0000-00000000000f"
 	key := "k/x"
 	repo.rows[a] = domain.StoredAttachmentRow{ID: a, Status: "COMPLETE", StorageKey: &key}
-	repo.rows[b] = domain.StoredAttachmentRow{ID: b, Status: "COMPLETE", StorageKey: &key}
 
 	resp, err := newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{
-		Kind: domain.StoredAttachmentComment, IDs: []string{b, hidden, a, b},
+		Kind: domain.StoredAttachmentComment, IDs: []string{hidden},
 	})
 	if err != nil {
 		t.Fatalf("ResolveLinks: %v", err)
 	}
-	if len(resp.Links) != 2 || resp.Links[0].ID != b || resp.Links[1].ID != a {
-		t.Errorf("links = %+v, want [b a] (hidden id absent, duplicate collapsed, request order)", resp.Links)
+	if len(resp.Links) != 0 || len(store.shares) != 0 {
+		t.Errorf("links = %+v shares = %d, want none for an id the caller cannot see", resp.Links, len(store.shares))
+	}
+	resp, err = newStoredSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{
+		Kind: domain.StoredAttachmentComment, IDs: []string{a},
+	})
+	if err != nil || len(resp.Links) != 1 || resp.Links[0].ID != a {
+		t.Errorf("links = %+v err = %v, want the one visible attachment", resp.Links, err)
 	}
 }
 
@@ -500,7 +506,7 @@ func TestLinkFromContent(t *testing.T) {
 
 func TestResolveLinks_RejectsBadRequests(t *testing.T) {
 	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
-	many := make([]string, maxAttachmentLinkIDs+1)
+	many := make([]string, maxDownloadLinkIDs+1)
 	for i := range many {
 		many[i] = saAttID
 	}

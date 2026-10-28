@@ -41,7 +41,12 @@ import (
 )
 
 const (
-	// maxAttachmentLinkIDs bounds one POST /attachments/download call.
+	// maxDownloadLinkIDs is how many attachments one POST /attachments/download
+	// call may ask for: one file per request. The ids array is kept so the
+	// request shape does not change if the limit is ever raised.
+	maxDownloadLinkIDs = 1
+	// maxAttachmentLinkIDs bounds how many inline images of one comment are
+	// linked to it.
 	maxAttachmentLinkIDs = 20
 	// attachmentLinkConcurrency bounds how many shares one call creates at once.
 	attachmentLinkConcurrency = 8
@@ -224,8 +229,8 @@ func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.A
 	if len(req.IDs) == 0 {
 		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: "ids is required"}
 	}
-	if len(req.IDs) > maxAttachmentLinkIDs {
-		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("ids cannot exceed %d entries", maxAttachmentLinkIDs)}
+	if len(req.IDs) > maxDownloadLinkIDs {
+		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("ids cannot exceed %d entry: request one file at a time", maxDownloadLinkIDs)}
 	}
 	if err := validateUUIDs("ids", req.IDs); err != nil {
 		return domain.AttachmentLinksResponse{}, err

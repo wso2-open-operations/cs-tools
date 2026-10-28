@@ -214,11 +214,11 @@ window.config = {
   // Attachments through entity-service's stored-attachment flow: uploads and
   // downloads use short-lived SFTPGo share links (the browser talks to SFTPGo
   // directly, so its public proxy must allow CORS from this origin), and a
-  // comment's images are streamed through the backend. Off by default; only
-  // `true` turns it on, and the entity-service must have SFTPGO_URL,
+  // comment's images are streamed through the backend. On by default; only
+  // `false` turns it off, and the entity-service must have SFTPGO_URL,
   // SFTPGO_USER and SFTPGO_PASSWORD set. Off means every attachment action
-  // behaves exactly as before.
-  CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false,
+  // uses the older ServiceNow flow.
+  CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
 
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded

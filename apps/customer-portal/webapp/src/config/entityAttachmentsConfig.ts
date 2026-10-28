@@ -17,9 +17,9 @@
 /**
  * Whether attachments are read, uploaded and deleted through entity-service's
  * stored-attachment routes (files held in SFTPGo) instead of the older flow.
- * Off unless `CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED` is exactly `true` in
- * `window.config`, so a config that predates the key changes nothing.
+ * On unless `CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED` is exactly `false` in
+ * `window.config`, so a config that predates the key uses the SFTPGo flow.
  */
 export function isEntityAttachmentsEnabled(): boolean {
-  return window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED === true;
+  return window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED !== false;
 }
