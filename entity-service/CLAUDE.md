@@ -10810,8 +10810,18 @@ What the chain left behind:
   `source_case_id` (to `work_item`). 0044 is `CREATE TABLE IF NOT EXISTS`, so a
   database where 000027 ran before 0044 (the old plain glob ran the 6-digit files
   first; only possible where the plural `products`/`users`/`cases` existed, i.e.
-  old local databases) still lacks those three. Nothing converges them yet: a
-  follow-up, since `knowledge_article` is csm-sync-service's table.
+  old local databases) lacked those three until
+  `0262_knowledge_article_user_and_case_fks.sql` (numbered after csm-sync-service's
+  own 0261, since the table is the sync's). For each column it leaves a foreign key
+  to the right table that is already there, under any name, alone; otherwise it adds
+  0044's constraint (`knowledge_article_<column>_fkey`, `ON DELETE SET NULL`) NOT
+  VALID and validates it. Rows that point at a missing user or work item are kept
+  and the constraint stays NOT VALID with a NOTICE; nothing is nulled for you (the
+  file's header has the `UPDATE ... SET <column> = NULL` and `VALIDATE CONSTRAINT`
+  to run by hand). A database the sync built already has all three, and 0262 does
+  nothing there. `knowledge_article_fk_migration_test.go` checks the column list
+  against 0044's own `REFERENCES` lines and, with `CASE_STATS_TEST_DSN`, that a
+  table made by 000027 ends up identical to 0044's.
 - `knowledge_base_manager_user` / `knowledge_base_manager_group` and their three
   indexes existed only in `000027`. `kb_manager_repo.go` reads them, and
   csm-sync-service does not map knowledge base managers, so they are
