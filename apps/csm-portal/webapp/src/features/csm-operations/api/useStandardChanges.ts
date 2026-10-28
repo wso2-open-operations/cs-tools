@@ -1,0 +1,272 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
+import { useBackendApi } from "@api/backend/client";
+import type {
+  BeChangeRequestSearchPayload,
+  BeChangeRequestSearchResponse,
+  BeChangeRequestSearchView,
+  BeCreateStandardChangeProposalPayload,
+  BeDecideStandardChangeProposalPayload,
+  BeSearchStandardChangeProposalsPayload,
+  BeSearchStandardChangeProposalsResponse,
+  BeSearchStandardChangeTemplatesPayload,
+  BeSearchStandardChangeTemplatesResponse,
+  BeStandardChangeProposal,
+  BeStandardChangeTemplate,
+  BeStandardChangeTemplateVersion,
+  BeUpdateStandardChangeProposalPayload,
+} from "@api/backend/types";
+
+// Operations > Standard Changes: the CAB-approved template catalogue and the
+// proposals that create, revise or retire its templates. Every route is a thin
+// BFF proxy of entity-service, which decides who may act (the proposer edits and
+// submits, a CAB member decides, the owner or a CAB member suspends): a refusal
+// keeps its message and `errorCode`, so callers show `err.message`.
+
+/** Every standard change query lives under this key, so one write refreshes them all. */
+export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
+const TEMPLATES_KEY = [...STANDARD_CHANGES_KEY, "templates"] as const;
+const PROPOSALS_KEY = [...STANDARD_CHANGES_KEY, "proposals"] as const;
+
+const TEMPLATES = "/standard-change-templates";
+const PROPOSALS = "/standard-change-proposals";
+
+const enc = encodeURIComponent;
+
+/** One page of the catalogue (`POST /standard-change-templates/search`). */
+export function useSearchStandardChangeTemplates(
+  payload: BeSearchStandardChangeTemplatesPayload,
+): UseQueryResult<BeSearchStandardChangeTemplatesResponse, Error> {
+  const api = useBackendApi();
+  return useQuery<BeSearchStandardChangeTemplatesResponse, Error>({
+    queryKey: [...TEMPLATES_KEY, "search", payload],
+    queryFn: () =>
+      api.post<BeSearchStandardChangeTemplatesPayload, BeSearchStandardChangeTemplatesResponse>(
+        `${TEMPLATES}/search`,
+        payload,
+      ),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Type-ahead over the ACTIVE templates (the only ones a change request can be raised from), for `AsyncEntitySelect`. */
+export function useSearchActiveStandardChangeTemplatesForSelect(
+  query: string,
+  enabled: boolean,
+): UseQueryResult<BeStandardChangeTemplate[], Error> {
+  const api = useBackendApi();
+  const q = query.trim();
+  return useQuery<BeStandardChangeTemplate[], Error>({
+    queryKey: [...TEMPLATES_KEY, "select", q],
+    queryFn: async () => {
+      const body: BeSearchStandardChangeTemplatesPayload = {
+        states: ["active"],
+        pagination: { offset: 0, limit: 20 },
+      };
+      if (q) body.query = q;
+      const res = await api.post<BeSearchStandardChangeTemplatesPayload, BeSearchStandardChangeTemplatesResponse>(
+        `${TEMPLATES}/search`,
+        body,
+      );
+      return res.templates ?? [];
+    },
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+/** A template with its current version and version history; `null` when not found. */
+export function useGetStandardChangeTemplate(
+  id: string | undefined,
+): UseQueryResult<BeStandardChangeTemplate | null, Error> {
+  const api = useBackendApi();
+  return useQuery<BeStandardChangeTemplate | null, Error>({
+    queryKey: [...TEMPLATES_KEY, "detail", id],
+    queryFn: () => api.get<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id!)}`),
+    enabled: !!id,
+  });
+}
+
+/** One version as the CAB approved it (immutable, so cached for good). */
+export function useGetStandardChangeTemplateVersion(
+  templateId: string | undefined,
+  versionId: string | undefined,
+): UseQueryResult<BeStandardChangeTemplateVersion | null, Error> {
+  const api = useBackendApi();
+  return useQuery<BeStandardChangeTemplateVersion | null, Error>({
+    queryKey: [...TEMPLATES_KEY, "version", templateId, versionId],
+    queryFn: () =>
+      api.get<BeStandardChangeTemplateVersion>(`${TEMPLATES}/${enc(templateId!)}/versions/${enc(versionId!)}`),
+    enabled: !!templateId && !!versionId,
+    staleTime: Infinity,
+  });
+}
+
+/** One page of proposals (`POST /standard-change-proposals/search`). */
+export function useSearchStandardChangeProposals(
+  payload: BeSearchStandardChangeProposalsPayload,
+): UseQueryResult<BeSearchStandardChangeProposalsResponse, Error> {
+  const api = useBackendApi();
+  return useQuery<BeSearchStandardChangeProposalsResponse, Error>({
+    queryKey: [...PROPOSALS_KEY, "search", payload],
+    queryFn: () =>
+      api.post<BeSearchStandardChangeProposalsPayload, BeSearchStandardChangeProposalsResponse>(
+        `${PROPOSALS}/search`,
+        payload,
+      ),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** A proposal with its content, evidence and CAB approvers; `null` when not found. */
+export function useGetStandardChangeProposal(
+  id: string | undefined,
+): UseQueryResult<BeStandardChangeProposal | null, Error> {
+  const api = useBackendApi();
+  return useQuery<BeStandardChangeProposal | null, Error>({
+    queryKey: [...PROPOSALS_KEY, "detail", id],
+    queryFn: () => api.get<BeStandardChangeProposal>(`${PROPOSALS}/${enc(id!)}`),
+    enabled: !!id,
+  });
+}
+
+/**
+ * Every write reads the standard change queries again when it settles, refused
+ * or not: a decision writes a template, a suspension changes what the catalogue
+ * and the create form offer, and a refusal (409) usually means the page is stale.
+ */
+function useStandardChangeMutation<TVars, TResult>(
+  fn: (vars: TVars) => Promise<TResult>,
+): UseMutationResult<TResult, Error, TVars> {
+  const qc = useQueryClient();
+  return useMutation<TResult, Error, TVars>({
+    mutationFn: fn,
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: STANDARD_CHANGES_KEY });
+    },
+  });
+}
+
+/** `POST /standard-change-templates/{id}/suspend` (the owner or a CAB member). */
+export function useSuspendStandardChangeTemplate(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) =>
+    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/suspend`),
+  );
+}
+
+/** `POST /standard-change-templates/{id}/resume` (the owner or a CAB member). */
+export function useResumeStandardChangeTemplate(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) =>
+    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/resume`),
+  );
+}
+
+/** `POST /standard-change-templates/{id}/clear-review` (the owner or a CAB member). */
+export function useClearStandardChangeTemplateReview(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) =>
+    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/clear-review`),
+  );
+}
+
+/** `POST /standard-change-proposals`: a new draft (new, modify or retire). */
+export function useCreateStandardChangeProposal(): UseMutationResult<
+  BeStandardChangeProposal,
+  Error,
+  BeCreateStandardChangeProposalPayload
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((body: BeCreateStandardChangeProposalPayload) =>
+    api.post<BeCreateStandardChangeProposalPayload, BeStandardChangeProposal>(PROPOSALS, body),
+  );
+}
+
+/** `PATCH /standard-change-proposals/{id}`: a draft, by its proposer. */
+export function useUpdateStandardChangeProposal(): UseMutationResult<
+  BeStandardChangeProposal,
+  Error,
+  { id: string; patch: BeUpdateStandardChangeProposalPayload }
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation(({ id, patch }: { id: string; patch: BeUpdateStandardChangeProposalPayload }) =>
+    api.patch<BeUpdateStandardChangeProposalPayload, BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}`, patch),
+  );
+}
+
+/** `POST /standard-change-proposals/{id}/submit`: sends a complete draft to the CAB. */
+export function useSubmitStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) =>
+    api.postEmpty<BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/submit`),
+  );
+}
+
+/** `POST /standard-change-proposals/{id}/withdraw`: the proposer, while a draft or in CAB review. */
+export function useWithdrawStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) =>
+    api.postEmpty<BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/withdraw`),
+  );
+}
+
+/** `POST /standard-change-proposals/{id}/decision`: a CAB member on their own row. */
+export function useDecideStandardChangeProposal(): UseMutationResult<
+  BeStandardChangeProposal,
+  Error,
+  { id: string } & BeDecideStandardChangeProposalPayload
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation(({ id, ...body }: { id: string } & BeDecideStandardChangeProposalPayload) =>
+    api.post<BeDecideStandardChangeProposalPayload, BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/decision`, body),
+  );
+}
+
+/**
+ * Type-ahead over CLOSED change requests, for a proposal's evidence (a proposal
+ * cites completed changes to show the change is repeatable).
+ */
+export function useSearchClosedChangeRequestsForSelect(
+  query: string,
+  enabled: boolean,
+): UseQueryResult<BeChangeRequestSearchView[], Error> {
+  const api = useBackendApi();
+  const q = query.trim();
+  return useQuery<BeChangeRequestSearchView[], Error>({
+    queryKey: [...STANDARD_CHANGES_KEY, "closed-change-requests", q],
+    queryFn: async () => {
+      const res = await api.post<BeChangeRequestSearchPayload, BeChangeRequestSearchResponse>("/change-requests/search", {
+        filters: { searchQuery: q, states: ["closed"] },
+        pagination: { offset: 0, limit: 20 },
+      });
+      return res.changeRequests ?? [];
+    },
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+}

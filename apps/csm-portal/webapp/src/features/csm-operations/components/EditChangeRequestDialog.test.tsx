@@ -1648,3 +1648,84 @@ describe("EditChangeRequestDialog — required-field markers", () => {
     expect(workNote()).not.toBeRequired();
   });
 });
+
+describe("EditChangeRequestDialog — a change raised from a standard change template", () => {
+  const TEMPLATED: Partial<BeChangeRequestDetail> = {
+    state: "new",
+    type: "standard",
+    impact: "low",
+    category: "software",
+    rollbackDurationText: "15 mins",
+    customerApprovalRequired: false,
+    customerReviewRequired: false,
+    description: "<p>Rotate the certificate on gw-1.</p>",
+    implementationPlan: "<p>Steps.</p>",
+    rollbackPlan: "<p>Restore.</p>",
+    testPlan: "<p>Check.</p>",
+    standardChange: {
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      versionId: "ver-2",
+      version: 2,
+      parameters: [{ key: "host", label: "Host", type: "text", required: true, value: "gw-1" }],
+    },
+  };
+  const HINT = "Set by the standard change template.";
+
+  it("says which template the change follows and why its fields are read-only", () => {
+    renderDialog(TEMPLATED);
+    const notice = screen.getByRole("status", { name: "" });
+    expect(notice).toHaveTextContent(/raised from standard change template STD0000001 \(version 2\)/i);
+    expect(notice).toHaveTextContent(/specified by the standard change template: it cannot be changed here/i);
+  });
+
+  it("disables every field the template specifies, each with a short hint", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("textbox", { name: /^subject/i })).toBeDisabled();
+    for (const name of ["Impact", "Category"]) {
+      expect(screen.getByRole("combobox", { name }), name).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Customer Review" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /^rollback duration/i })).toBeDisabled();
+    expect(screen.getByLabelText("Implementation Plan visible to customers")).toBeDisabled();
+    for (const plan of [/^description/i, /^justification/i, /^risk and impact/i, /^implementation plan/i, /^rollback plan/i, /^test plan/i]) {
+      expect(planEditor(plan), String(plan)).toBeDisabled();
+    }
+    expect(screen.getAllByText(HINT).length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("keeps the type Standard, with the reason", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("combobox", { name: /^type/i })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/stays a standard change/i)).toBeInTheDocument();
+  });
+
+  it("leaves what the template does not specify editable", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("combobox", { name: /^priority/i })).not.toHaveAttribute("aria-disabled");
+    expect(planEditor(/^affected services/i)).toBeEnabled();
+    expect(planEditor(/^affected components/i)).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: /work note/i })).toBeEnabled();
+    expect(screen.getByLabelText("Customer Project")).toBeEnabled();
+  });
+
+  it("never sends a template field, so a save carries only what was edited", () => {
+    const { onSave } = renderDialog(TEMPLATED);
+    fireEvent.change(screen.getByRole("textbox", { name: /work note/i }), { target: { value: "Checked the host." } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ workNote: "Checked the host." });
+  });
+
+  it("does not need a subject from the form (the template gives it)", () => {
+    renderDialog({ ...TEMPLATED, subject: "" });
+    expect(screen.queryByText("A change request needs a subject.")).not.toBeInTheDocument();
+  });
+
+  it("leaves a change not raised from a template as it was", () => {
+    renderDialog({ ...TEMPLATED, standardChange: null });
+    expect(screen.getByRole("textbox", { name: /^subject/i })).toBeEnabled();
+    expect(planEditor(/^implementation plan/i)).toBeEnabled();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+  });
+});

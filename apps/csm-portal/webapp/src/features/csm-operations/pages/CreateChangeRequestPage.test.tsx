@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { clearUserPreferredTimeZone, setUserPreferredTimeZone } from "@utils/dateTime";
@@ -37,9 +37,12 @@ let locationState:
   | { from?: string }
   | undefined;
 
+// The query string, for `?standardChangeTemplateId=` (empty everywhere else).
+let locationSearch = "";
+
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
-  useLocation: () => ({ state: locationState }),
+  useLocation: () => ({ state: locationState, search: locationSearch }),
 }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: showErrorMock }),
@@ -70,6 +73,22 @@ vi.mock("@features/csm-cases/api/useGetCsmCaseDetail", () => ({
 }));
 vi.mock("@features/settings/api/useGetUsersMe", () => ({
   useGetUsersMe: () => ({ data: undefined }),
+}));
+// The standard change template a Standard change is raised from (GET
+// /standard-change-templates/{id}). `templateFixture` is what the page loads for
+// any id; undefined = nothing loaded. The picker's own search is the stubbed
+// AsyncEntitySelect below, so its hook only needs to exist.
+let templateFixture: Record<string, unknown> | null | undefined;
+const refetchTemplateMock = vi.fn();
+vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
+  useGetStandardChangeTemplate: (id: string | undefined) => ({
+    data: id ? templateFixture : undefined,
+    isLoading: false,
+    isError: false,
+    isSuccess: !!id,
+    refetch: refetchTemplateMock,
+  }),
+  useSearchActiveStandardChangeTemplatesForSelect: () => ({ data: [], isFetching: false, isError: false }),
 }));
 // CreateChangeRequestPage imports BackendApiError from the real API client
 // module, which reads window.config at module load and throws outside a
@@ -1008,9 +1027,10 @@ describe("CreateChangeRequestPage — required change type (Normal / Standard / 
     expect(screen.queryByText(/select a change type to continue/i)).not.toBeInTheDocument();
   });
 
+  // Standard is raised from a template and sends no subject: see the "Standard
+  // change raised from a template" describe for its payload.
   it.each([
     ["Normal", "normal"],
-    ["Standard", "standard"],
     ["Emergency", "emergency"],
   ] as const)("sends type=%s as the backend enum value '%s' in the create payload", (label, value) => {
     render(<CreateChangeRequestPage />);
@@ -1035,7 +1055,7 @@ describe("CreateChangeRequestPage — required change type (Normal / Standard / 
   it("surfaces the backend's 400 'type is required' message verbatim if it ever slips through", async () => {
     const { BackendApiError } = await import("@api/backend/client");
     render(<CreateChangeRequestPage />);
-    fillSubject("Standard");
+    fillSubject("Normal");
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
     const [, options] = postChangeRequestMutateMock.mock.calls[0];
     const message = "type is required: a change request must be one of standard, normal or emergency";
@@ -1045,10 +1065,19 @@ describe("CreateChangeRequestPage — required change type (Normal / Standard / 
   });
 
   it("pre-selects a cloned change's type when it is one of the three", () => {
+    locationState = { subject: "Clone me", type: "emergency" };
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByRole("radio", { name: /^emergency/i })).toBeChecked();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeEnabled();
+  });
+
+  it("pre-selects Standard for a clone of an older Standard change, but asks for a template before Create", () => {
+    // Raised before the catalogue: no template to carry, so one has to be picked.
     locationState = { subject: "Clone me", type: "standard" };
     render(<CreateChangeRequestPage />);
     expect(screen.getByRole("radio", { name: /^standard/i })).toBeChecked();
-    expect(screen.getByRole("button", { name: /create change request/i })).toBeEnabled();
+    expect(screen.getByText(/select a standard change template to continue/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
   });
 
   it("leaves the type unselected when a clone's source type is not one of the three (e.g. azure)", () => {
@@ -1340,8 +1369,10 @@ describe("CreateChangeRequestPage — an Emergency change proceeds without custo
     expect(screen.getAllByText(EMERGENCY_LINE)).toHaveLength(1);
   });
 
-  it("keeps Normal and Standard as before: both boxes live, and ticked ones are sent", () => {
-    for (const type of ["Normal", "Standard"] as const) {
+  // Standard is no longer here: its customer settings are the template's (see the
+  // "Standard change raised from a template" describe).
+  it("keeps Normal as before: both boxes live, and ticked ones are sent", () => {
+    for (const type of ["Normal"] as const) {
       postChangeRequestMutateMock.mockReset();
       const { unmount } = render(<CreateChangeRequestPage />);
       fillSubject(type);
@@ -2071,5 +2102,304 @@ describe("CreateChangeRequestPage — required-field markers", () => {
     const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload).toMatchObject({ customerApprovalRequired: true });
     expect(payload).not.toHaveProperty("projectId");
+  });
+});
+
+describe("CreateChangeRequestPage — Standard change raised from a template", () => {
+  const VERSION = {
+    id: "ver-2",
+    templateId: "tpl-1",
+    version: 2,
+    proposal: null,
+    approvedOn: "2026-10-01T00:00:00Z",
+    approvedBy: "cab@example.com",
+    subject: "Rotate the TLS certificate on {{host}}",
+    description: "<p>Rotate the certificate on {{host}} in {{env}}.</p>",
+    justification: null,
+    implementationPlan: "<p>Steps: {{notes}}</p>",
+    riskImpactAnalysis: null,
+    backoutPlan: "<p>Restore the previous certificate.</p>",
+    testPlan: "<p>Check {{count}} endpoints.</p>",
+    category: "software",
+    impact: "low",
+    risk: "low",
+    rollbackDurationText: "15 mins",
+    isPlanningVisibleToCustomers: true,
+    customerApprovalRequired: false,
+    customerReviewRequired: false,
+    parameters: [
+      { key: "host", label: "Host", type: "text", required: true, helpText: "The gateway host name." },
+      { key: "count", label: "Endpoints", type: "number", required: true },
+      { key: "when", label: "Window date", type: "date", required: false },
+      { key: "env", label: "Environment", type: "select", required: true, options: ["staging", "production"] },
+      { key: "notes", label: "Notes", type: "textarea", required: false },
+    ],
+  };
+  const TEMPLATE = {
+    id: "tpl-1",
+    number: "STD0000001",
+    name: "Rotate a TLS certificate",
+    state: "active",
+    owner: null,
+    currentVersion: VERSION,
+    reviewRequired: false,
+    reviewRequiredReason: null,
+    reviewRequiredOn: null,
+    reviewRequiredChangeRequest: null,
+    openProposal: null,
+    usage: { total: 0, open: 0, closed: 0, rolledBack: 0, canceled: 0, lastUsedOn: null },
+    createdOn: "",
+    createdBy: "",
+    updatedOn: "",
+    updatedBy: "",
+  };
+  /** Every field the template specifies: none of them may be sent beside it. */
+  const TEMPLATE_FIELDS = [
+    "subject",
+    "description",
+    "justification",
+    "implementationPlan",
+    "riskImpactAnalysis",
+    "backoutPlan",
+    "testPlan",
+    "category",
+    "impact",
+    "risk",
+    "rollbackDurationText",
+    "isPlanningVisibleToCustomers",
+    "customerApprovalRequired",
+    "customerReviewRequired",
+    "implementationDeviation",
+  ];
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    locationState = undefined;
+    locationSearch = "";
+    templateFixture = TEMPLATE;
+    navigateMock.mockReset();
+    postChangeRequestMutateMock.mockReset();
+    patchChangeRequestMutateMock.mockReset();
+    showErrorMock.mockReset();
+    refetchTemplateMock.mockReset();
+  });
+  afterEach(() => {
+    locationSearch = "";
+    templateFixture = undefined;
+  });
+
+  function pickTemplate(id = "tpl-1"): void {
+    fireEvent.change(screen.getByRole("textbox", { name: "Standard change template" }), { target: { value: id } });
+  }
+
+  function fillSpecifics(): void {
+    fireEvent.change(screen.getByRole("textbox", { name: /^host/i }), { target: { value: "gw-1.example.com" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^endpoints/i }), { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /^environment/i }), { target: { value: "production" } });
+  }
+
+  function preview(): HTMLElement {
+    return screen.getByRole("region", { name: /what the template specifies/i });
+  }
+
+  it("asks for a template instead of the subject, impact, category, customer steps and planning", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    expect(screen.getByRole("textbox", { name: "Standard change template" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^subject/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^impact/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^category/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Customer Approval" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Customer Review" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Planning")).not.toBeInTheDocument();
+    expect(screen.queryAllByLabelText("editor")).toHaveLength(0);
+    expect(screen.getByText(/select a standard change template to continue/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
+    // What the template does not specify stays editable.
+    expect(screen.getByRole("combobox", { name: /^priority/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Assignment group")).toBeEnabled();
+    expect(screen.getByLabelText("Customer Project")).toBeEnabled();
+    expect(screen.getByLabelText("Work notes")).toBeEnabled();
+  });
+
+  it("renders one change specifics input per parameter, by type", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    const specifics = screen.getByRole("group", { name: /change specifics/i });
+    const host = within(specifics).getByRole("textbox", { name: /^host/i });
+    expect(host).toBeRequired();
+    expect(host).toHaveAccessibleDescription("The gateway host name.");
+    expect(within(specifics).getByRole("textbox", { name: /^endpoints/i })).toHaveAttribute("inputmode", "decimal");
+    expect(within(specifics).getByLabelText(/^window date/i)).toHaveAttribute("type", "date");
+    const env = within(specifics).getByRole("combobox", { name: /^environment/i });
+    expect(within(env).getAllByRole("option").map((o) => o.textContent)).toEqual(["-- Select --", "staging", "production"]);
+    const notes = within(specifics).getByRole("textbox", { name: /^notes/i });
+    expect(notes.tagName).toBe("TEXTAREA");
+    expect(notes).not.toBeRequired();
+  });
+
+  it("shows what the template specifies read-only, rendered with the values as they are typed", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    const region = preview();
+    expect(within(region).getByText(/version 2/i)).toBeInTheDocument();
+    // Before a value is given, the placeholder is shown, highlighted.
+    expect(region.querySelector('mark[data-param="host"]')).toHaveTextContent("{{host}}");
+    fireEvent.change(screen.getByRole("textbox", { name: /^host/i }), { target: { value: "gw-1  <b>x</b>" } });
+    // Plain subject: whitespace collapsed; rich text: the value is text, never markup.
+    expect(region).toHaveTextContent("Rotate the TLS certificate on gw-1 <b>x</b>");
+    expect(region.querySelector("b")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: /^notes/i }), { target: { value: "one\ntwo" } });
+    const notesMark = region.querySelector('mark[data-param="notes"]')!;
+    expect(notesMark.innerHTML).toBe("one<br>two");
+    // Nothing the template specifies can be typed into.
+    expect(within(region).queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("sends exactly the template, the version shown and the change specifics, and none of the template's fields", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fillSpecifics();
+    fireEvent.change(screen.getByRole("textbox", { name: /^notes/i }), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock).toHaveBeenCalledTimes(1);
+    const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toEqual({
+      type: "standard",
+      standardChangeTemplateId: "tpl-1",
+      standardChangeTemplateVersionId: "ver-2",
+      // Declared keys only, trimmed; a blank optional value is left out.
+      standardChangeParameters: { host: "gw-1.example.com", count: "3", env: "production" },
+    });
+    for (const field of TEMPLATE_FIELDS) expect(payload, field).not.toHaveProperty(field);
+  });
+
+  it("sends the fields the template does not specify beside it", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fillSpecifics();
+    fireEvent.change(screen.getByLabelText("Assignment group"), { target: { value: "grp-1" } });
+    fireEvent.change(screen.getByLabelText("Customer Project"), { target: { value: "proj-a" } });
+    fireEvent.change(screen.getByLabelText("Work notes"), { target: { value: "Internal note" } });
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toMatchObject({ groupId: "grp-1", projectId: "proj-a", workNote: "Internal note" });
+    for (const field of TEMPLATE_FIELDS) expect(payload, field).not.toHaveProperty(field);
+  });
+
+  it("holds the create back and says what is missing when a required value is blank or malformed", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fireEvent.change(screen.getByRole("textbox", { name: /^endpoints/i }), { target: { value: "three" } });
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Host is required.")).toBeInTheDocument();
+    expect(screen.getByText("Endpoints must be a number.")).toBeInTheDocument();
+  });
+
+  it("preselects the template from ?standardChangeTemplateId= with the type Standard", () => {
+    locationSearch = "?standardChangeTemplateId=tpl-1";
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByRole("radio", { name: /^standard/i })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Standard change template" })).toHaveValue("tpl-1");
+    expect(screen.getByRole("textbox", { name: "Standard change template" })).toHaveAttribute(
+      "data-known-label",
+      "STD0000001 — Rotate a TLS certificate",
+    );
+    expect(preview()).toBeInTheDocument();
+  });
+
+  it.each(["suspended", "retired"])("refuses a %s template up front", (state) => {
+    templateFixture = { ...TEMPLATE, state };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    expect(screen.getByText(new RegExp(`this template is ${state}`, "i"))).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /change specifics/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
+  });
+
+  it("says the template moved on when the create is refused with standard_change_template_unavailable, and reloads it", async () => {
+    const { BackendApiError } = await import("@api/backend/client");
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fillSpecifics();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const [, options] = postChangeRequestMutateMock.mock.calls[0]!;
+    const message = 'the standard change template "Rotate a TLS certificate" has been revised (now version 3) since you opened it; read it again';
+    const err = Object.assign(new (BackendApiError as unknown as new (s: number, m: string) => Error)(409, message), {
+      payload: { message, errorCode: "standard_change_template_unavailable" },
+    });
+    act(() => options.onError(err));
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    expect(alert).toHaveTextContent(/suspended, retired or revised/i);
+    expect(showErrorMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeDisabled();
+    fireEvent.click(within(alert).getByRole("button", { name: /reload template/i }));
+    expect(refetchTemplateMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeEnabled();
+  });
+
+  it("shows any other refusal in the error banner as written", async () => {
+    const { BackendApiError } = await import("@api/backend/client");
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fillSpecifics();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const [, options] = postChangeRequestMutateMock.mock.calls[0]!;
+    const err = new (BackendApiError as unknown as new (s: number, m: string) => Error)(400, "Host (host) must be a single line");
+    act(() => options.onError(err));
+    expect(showErrorMock).toHaveBeenCalledWith("Host (host) must be a single line", err);
+  });
+
+  it("raises a clone of a templated change from the same template with the same values, never its frozen fields", () => {
+    locationState = {
+      sourceNumber: "CHG0001234",
+      type: "standard",
+      standardChangeTemplateId: "tpl-1",
+      standardChangeTemplateLabel: "STD0000001 — Rotate a TLS certificate",
+      standardChangeParameters: { host: "gw-9", count: "2", env: "staging", gone: "a key the current version dropped" },
+    };
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByText(/copied the standard change template and its change specifics/i)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^standard/i })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-9");
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.standardChangeParameters).toEqual({ host: "gw-9", count: "2", env: "staging" });
+    for (const field of TEMPLATE_FIELDS) expect(payload, field).not.toHaveProperty(field);
+  });
+
+  it("restores the template and the change specifics from an in-progress draft", () => {
+    const { unmount } = render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fireEvent.change(screen.getByRole("textbox", { name: /^host/i }), { target: { value: "gw-2" } });
+    unmount();
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByRole("textbox", { name: "Standard change template" })).toHaveValue("tpl-1");
+    expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-2");
+  });
+
+  it("switching back to Normal brings the ordinary form back and sends no template", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate();
+    fillSubject("Normal");
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toMatchObject({ type: "normal", subject: "Roll out fix to production" });
+    expect(payload).not.toHaveProperty("standardChangeTemplateId");
+    expect(payload).not.toHaveProperty("standardChangeParameters");
   });
 });

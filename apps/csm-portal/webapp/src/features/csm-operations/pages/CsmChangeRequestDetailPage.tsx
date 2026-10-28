@@ -33,6 +33,7 @@ import {
   ClipboardCheck,
   CopyPlus,
   FileText,
+  Library,
   MessageSquare,
   MessageSquarePlus,
   Paperclip,
@@ -80,6 +81,12 @@ import ChangeRequestTransitionReasonDialog from "@features/csm-operations/compon
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import ImplementationDeviationSection from "@features/csm-operations/components/ImplementationDeviationSection";
+import StandardChangeTemplateBanner from "@features/csm-operations/components/StandardChangeTemplateBanner";
+import { useCreateStandardChangeProposal } from "@features/csm-operations/api/useStandardChanges";
+import {
+  standardChangeProposalPath,
+  standardChangeTemplatePath,
+} from "@features/csm-operations/utils/standardChanges";
 import { PLAN_RICH_TEXT_SX } from "@features/csm-operations/utils/planRichText";
 import {
   buildCloneChangeRequestNavState,
@@ -341,6 +348,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { showError } = useErrorBanner();
   const { user } = useCurrentUser();
   const patchCr = usePatchChangeRequest();
+  const proposeStandard = useCreateStandardChangeProposal();
   const [editOpen, setEditOpen] = useState(false);
   // Kept in the URL (`?tab=`), not local state, so a shared/bookmarked link
   // to a specific tab survives a refresh.
@@ -800,6 +808,20 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     });
   };
 
+  // A completed change request can be proposed as a standard change template: a
+  // new proposal starts from its content (and cites it as evidence); the
+  // proposer then generalises it and sends it to the CAB from the proposal page.
+  const crPath = `/operations/change-requests/${cr.id}`;
+  const proposeAsStandardChange = (): void => {
+    proposeStandard.mutate(
+      { kind: "new", sourceChangeRequestId: cr.id },
+      {
+        onSuccess: (proposal) => navigate(standardChangeProposalPath(proposal.id), { state: { from: crPath } }),
+        onError: (err) => showError(backendErrorMessage(err, "Could not start the standard change proposal."), err),
+      },
+    );
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <Box
@@ -892,6 +914,18 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             >
               Clone
             </Button>
+            {canWrite && cr.state === "closed" && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<Library size={14} />}
+                onClick={proposeAsStandardChange}
+                loading={proposeStandard.isPending}
+                sx={{ flexShrink: 0 }}
+              >
+                Propose as standard change
+              </Button>
+            )}
             <Button
               variant="outlined"
               size="small"
@@ -948,6 +982,15 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             onProposeDifferent={openReschedule}
           />
         </Box>
+      )}
+
+      {cr.standardChange && (
+        <StandardChangeTemplateBanner
+          standardChange={cr.standardChange}
+          onOpenTemplate={() =>
+            navigate(standardChangeTemplatePath(cr.standardChange!.template.id), { state: { from: crPath } })
+          }
+        />
       )}
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>

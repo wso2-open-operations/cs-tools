@@ -1833,6 +1833,14 @@ export interface CloneChangeRequestNavState {
   projectId?: string;
   projectLabel?: string;
   category?: BeChangeRequestCategory;
+  /** A change raised from a standard change template: the clone is raised from
+   * the same template, with the same change specifics. What the template
+   * specifies is never carried (it is the template's current version that
+   * applies, and the create refuses those fields beside a template). */
+  standardChangeTemplateId?: string;
+  /** Display label for `standardChangeTemplateId` until the template loads. */
+  standardChangeTemplateLabel?: string;
+  standardChangeParameters?: Record<string, string>;
 }
 
 /** Rich-text field carried into the clone form only when it has real content. */
@@ -1856,6 +1864,25 @@ function cloneableHtml(html?: string | null): string | undefined {
 export function buildCloneChangeRequestNavState(
   cr: BeChangeRequestDetail,
 ): CloneChangeRequestNavState {
+  // Raised from a template: carry the template and the values, never what the
+  // template specifies (subject, plans, impact, category, customer boxes): the
+  // new change follows the template's current version.
+  if (cr.standardChange) {
+    const std = cr.standardChange;
+    const values: Record<string, string> = {};
+    for (const p of std.parameters ?? []) if (p.value) values[p.key] = p.value;
+    return {
+      sourceNumber: cr.number,
+      type: "standard",
+      standardChangeTemplateId: std.template.id,
+      standardChangeTemplateLabel: [std.templateNumber, std.template.name].filter(Boolean).join(" — ") || undefined,
+      standardChangeParameters: values,
+      assignedEngineerId: cr.assignedEngineer?.id || undefined,
+      assignedEngineerLabel: cr.assignedEngineer?.name || undefined,
+      projectId: cr.project?.id || undefined,
+      projectLabel: cr.project?.name || undefined,
+    };
+  }
   return {
     sourceNumber: cr.number,
     subject: cr.subject ?? undefined,
@@ -1889,6 +1916,38 @@ export const CLONE_SOURCE_GAP_MESSAGE =
   "Priority, assignment group, " +
   "linked case, and affected product aren't copied and need to be re-entered. " +
   "Deployments, deployment products, schedule, and approval fields are intentionally left blank for you to set for the new environment. The Customer Group follows the customer project.";
+
+/** The clone banner's disclosure for a change raised from a standard change template. */
+export const STANDARD_CLONE_SOURCE_GAP_MESSAGE =
+  "Copied the standard change template and its change specifics, the assigned engineer and the customer project. " +
+  "What the template specifies comes from its current version, not from the source. " +
+  "Priority, assignment group, linked case, deployments and schedule need to be set for the new change.";
+
+/** True for a change request raised from a standard change template (what the template specifies is frozen). */
+export function isRaisedFromStandardTemplate(cr: Pick<BeChangeRequestDetail, "standardChange">): boolean {
+  return !!cr.standardChange;
+}
+
+/** Why a field the template specifies cannot be edited on a change raised from it (400 `change_request_standard_template_field`). */
+export const STANDARD_TEMPLATE_FIELD_LOCKED_REASON =
+  "Specified by the standard change template: it cannot be changed here. Record a deviation from the implementation plan once it is implemented, or propose a revision of the template.";
+
+/** Why the type of a change raised from a template cannot change. */
+export const STANDARD_TEMPLATE_TYPE_LOCKED_REASON =
+  "Raised from a standard change template, so it stays a standard change. Cancel it and raise a new change request to use another type.";
+
+/**
+ * True when Request Approval schedules the change outright: a Standard change
+ * is pre-authorised, and with no customer approval to ask for it goes straight
+ * to Scheduled (the backend's flow). The action bar then labels it "Schedule";
+ * it still sends `{state: "assess"}`.
+ */
+export function requestApprovalSchedulesDirectly(cr: Pick<BeChangeRequestDetail, "type" | "customerApprovalRequired">): boolean {
+  return cr.type?.trim().toLowerCase() === "standard" && cr.customerApprovalRequired === false;
+}
+
+/** The Request Approval label of a change it schedules outright (see {@link requestApprovalSchedulesDirectly}). */
+export const SCHEDULE_STANDARD_CHANGE_LABEL = "Schedule";
 
 // ---------------------------------------------------------------------------
 // "Originating service request" picker — unified parent-record search
@@ -2026,6 +2085,10 @@ export interface ChangeRequestDraft {
   category?: string;
   comment?: string;
   workNote?: string;
+  /** Optional: a standard change's template, its label and the change specifics. */
+  standardChangeTemplateId?: string;
+  standardChangeTemplateLabel?: string;
+  standardChangeParameters?: Record<string, string>;
 }
 
 /** Which of the create form's three entry points (or none — opened fresh) a
@@ -2035,6 +2098,7 @@ export type ChangeRequestDraftContext =
   | { kind: "clone"; sourceNumber?: string }
   | { kind: "case"; caseId: string }
   | { kind: "incident"; incidentId: string }
+  | { kind: "template"; templateId: string }
   | { kind: "new" };
 
 const DRAFT_STORAGE_PREFIX = "csm.createChangeRequest.draft.";
@@ -2060,6 +2124,8 @@ export function changeRequestDraftKey(context: ChangeRequestDraftContext): strin
       return `${DRAFT_STORAGE_PREFIX}case:${context.caseId}`;
     case "incident":
       return `${DRAFT_STORAGE_PREFIX}incident:${context.incidentId}`;
+    case "template":
+      return `${DRAFT_STORAGE_PREFIX}template:${context.templateId}`;
     case "new":
       return `${DRAFT_STORAGE_PREFIX}new`;
   }

@@ -128,6 +128,11 @@ const useGroupDetailMock = vi.fn();
 vi.mock("@features/csm-operations/api/useGroupDetail", () => ({
   useGroupDetail: (id: string | undefined) => useGroupDetailMock(id),
 }));
+// "Propose as standard change" (a closed change request): starts a proposal.
+const proposeStandardMutateMock = vi.fn();
+vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
+  useCreateStandardChangeProposal: () => ({ mutate: proposeStandardMutateMock, isPending: false }),
+}));
 const decideApprovalMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useDecideChangeRequestApproval", () => ({
   useDecideChangeRequestApproval: () => ({ mutate: decideApprovalMutateMock, isPending: false }),
@@ -4091,7 +4096,10 @@ describe("CsmChangeRequestDetailPage — lifecycle: Standard (Request Approval -
 
     const view = lcOpenAs(LC_CREATOR);
     expect(currentStep()).toBe("New");
-    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    // Pre-authorised and with no customer approval to ask for, its Request
+    // Approval reads "Schedule"; it is the same `{state: "assess"}`.
+    expect(screen.queryByRole("button", { name: "Request Approval" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
 
     expect(currentStep()).toBe("Scheduled");
     expect(screen.getByText(/no approval stages recorded/i)).toBeInTheDocument();
@@ -4843,5 +4851,106 @@ describe("CsmChangeRequestDetailPage — opening an Assignment group on the Appr
     expect(within(dialog).getByRole("heading", { name: "Group Members (2)" })).toBeInTheDocument();
     expect(within(dialog).getByText("max.member@acme.example")).toBeInTheDocument();
     expect(useGroupDetailMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("CsmChangeRequestDetailPage — standard changes", () => {
+  const STANDARD_CR: BeChangeRequestDetail = {
+    ...BASE_CR,
+    type: "standard",
+    customerApprovalRequired: false,
+    standardChange: {
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      versionId: "ver-2",
+      version: 2,
+      parameters: [
+        { key: "host", label: "Host", type: "text", required: true, value: "gw-1.example.com" },
+        { key: "notes", label: "Notes", type: "textarea", required: false, value: null },
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    proposeStandardMutateMock.mockReset();
+  });
+
+  it("says which template and version it was raised from, links to the template and lists the change specifics", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveTextContent(/raised from standard change template STD0000001 Rotate a TLS certificate \(version 2\)/i);
+    expect(within(banner).getByText("Host")).toBeInTheDocument();
+    expect(within(banner).getByText("gw-1.example.com")).toBeInTheDocument();
+    expect(within(banner).getByText("Notes").nextElementSibling).toHaveTextContent("—");
+    fireEvent.click(within(banner).getByRole("button", { name: /STD0000001/ }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
+      state: { from: "/operations/change-requests/chg-1" },
+    });
+  });
+
+  it("shows no template banner for a change request not raised from one", () => {
+    mockQueryResult({ data: BASE_CR });
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Standard change template" })).not.toBeInTheDocument();
+  });
+
+  it("clones a templated change with its template and values, not what the template specifies", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, subject: "Rotate the TLS certificate on gw-1.example.com", implementationPlan: "<p>Steps</p>" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^clone$/i }));
+    const [path, options] = navigateMock.mock.calls.at(-1)!;
+    expect(path).toBe("/operations/change-requests/new");
+    expect(options.state).toMatchObject({
+      type: "standard",
+      standardChangeTemplateId: "tpl-1",
+      standardChangeParameters: { host: "gw-1.example.com" },
+    });
+    expect(options.state).not.toHaveProperty("subject");
+    expect(options.state).not.toHaveProperty("implementationPlan");
+  });
+
+  describe("Propose as standard change", () => {
+    const CLOSED: BeChangeRequestDetail = { ...BASE_CR, state: "closed", legalNextStates: [] };
+
+    it("starts a new proposal from a closed change request and opens it", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /propose as standard change/i }));
+      expect(proposeStandardMutateMock).toHaveBeenCalledWith(
+        { kind: "new", sourceChangeRequestId: "chg-1" },
+        expect.anything(),
+      );
+      const [, options] = proposeStandardMutateMock.mock.calls[0]!;
+      options.onSuccess({ id: "scp-1" });
+      expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
+        state: { from: "/operations/change-requests/chg-1" },
+      });
+    });
+
+    it("shows a refusal in the error banner", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /propose as standard change/i }));
+      const [, options] = proposeStandardMutateMock.mock.calls[0]!;
+      const err = new BackendApiError(400, "only a closed change request can start a proposal");
+      options.onError(err);
+      expect(showErrorMock).toHaveBeenCalledWith("only a closed change request can start a proposal", err);
+    });
+
+    it.each(["new", "implement", "review", "canceled", "rollback"])("is not offered in %s", (state) => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: { ...BASE_CR, state } });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+    });
+
+    it("is not offered without write access", () => {
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+    });
   });
 });

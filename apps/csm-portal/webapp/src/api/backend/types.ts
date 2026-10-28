@@ -2947,6 +2947,11 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   workStart?: string | null;
   workEnd?: string | null;
   gitReference?: string | null;
+  /** The standard change template this change request was raised from (staff
+   * only; absent on one not raised from a template, and on another data source).
+   * What the template specifies cannot be edited (400
+   * `change_request_standard_template_field`). */
+  standardChange?: BeChangeRequestStandardChange | null;
 }
 
 /**
@@ -3140,7 +3145,10 @@ export interface BeChangeRequestApprovalDecisionResponse {
  * backend answers a client that still sends either with a 400.
  */
 export interface BeCreateChangeRequestPayload {
-  subject: string;
+  /** Required, except for a change raised from a standard change template
+   * ({@link standardChangeTemplateId}), whose subject the template gives: it is
+   * then never sent. */
+  subject?: string;
   priority?: BeChangeRequestPriority;
   impact?: BeChangeRequestImpact;
   /** Required: one of "normal" | "standard" | "emergency" (the create form
@@ -3185,6 +3193,19 @@ export interface BeCreateChangeRequestPayload {
    * before closing. The create form always sends it (`false` for an Emergency
    * change, which proceeds without customer consent). */
   customerReviewRequired?: boolean;
+  /**
+   * Raises the change request from a standard change template (type
+   * `standard`). The template's current version gives the subject, the plans,
+   * the risk and impact analysis, category, impact, risk, rollback duration,
+   * planning visibility and the two customer boxes: none of them may be sent
+   * with it (400 `change_request_standard_template_field`). A template that is
+   * not active is a 409 `standard_change_template_unavailable`.
+   */
+  standardChangeTemplateId?: string;
+  /** The template version the form showed; a template revised since is the same 409. */
+  standardChangeTemplateVersionId?: string;
+  /** The values of the version's parameters, by key. */
+  standardChangeParameters?: Record<string, string>;
 }
 
 /**
@@ -5497,3 +5518,252 @@ export interface BeSpecialistHandoffSummary {
   githubIssueExpected?: boolean;
 }
 
+
+// ---------------------------------------------------------------------------
+// Standard changes: the CAB-approved template catalogue and its proposals
+// (`/standard-change-templates/...`, `/standard-change-proposals/...`; entity
+// service `domain/standard_change.go`)
+// ---------------------------------------------------------------------------
+
+export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
+export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
+export type BeStandardChangeProposalState = "draft" | "cab_review" | "approved" | "rejected" | "withdrawn";
+export type BeStandardChangeParameterType = "text" | "textarea" | "number" | "date" | "select";
+/** A change request's risk (`change_request_risk_enum`). A standard change is never `high`. */
+export type BeChangeRequestRisk = "high" | "moderate" | "low";
+
+/** One value a template leaves open; the template's text refers to it as `{{key}}`. */
+export interface BeStandardChangeParameter {
+  /** Lower-case letters, digits and underscores, starting with a letter (at most 50). */
+  key: string;
+  label: string;
+  type: BeStandardChangeParameterType;
+  required: boolean;
+  helpText?: string | null;
+  /** The choices of a select parameter, in the order shown. */
+  options?: string[] | null;
+}
+
+/** What a template fixes on every change request raised from it. On a draft proposal any part may be missing. */
+export interface BeStandardChangeContent {
+  /** Plain text: the change request's subject. */
+  subject: string | null;
+  description: string | null;
+  justification: string | null;
+  implementationPlan: string | null;
+  riskImpactAnalysis: string | null;
+  backoutPlan: string | null;
+  testPlan: string | null;
+  category: BeChangeRequestCategory | null;
+  impact: BeChangeRequestImpact | null;
+  risk: BeChangeRequestRisk | null;
+  rollbackDurationText: string | null;
+  isPlanningVisibleToCustomers: boolean;
+  customerApprovalRequired: boolean;
+  customerReviewRequired: boolean;
+  parameters: BeStandardChangeParameter[] | null;
+}
+
+export interface BeStandardChangeTemplateUsage {
+  total: number;
+  /** Not yet closed, canceled or rolled back. */
+  open: number;
+  closed: number;
+  rolledBack: number;
+  canceled: number;
+  lastUsedOn: string | null;
+}
+
+/** One CAB-approved version of a template; never changed once written. */
+export interface BeStandardChangeTemplateVersion extends BeStandardChangeContent {
+  id: string;
+  templateId: string;
+  version: number;
+  /** The proposal it was approved from. */
+  proposal: BeEntityRef | null;
+  approvedOn: string;
+  approvedBy: string;
+}
+
+export interface BeStandardChangeTemplateVersionSummary {
+  id: string;
+  version: number;
+  proposal: BeEntityRef | null;
+  approvedOn: string;
+  approvedBy: string;
+}
+
+export interface BeStandardChangeTemplate {
+  id: string;
+  /** STD number. */
+  number: string;
+  name: string;
+  state: BeStandardChangeTemplateState;
+  owner: BeUserReference | null;
+  /** The version a new change request follows. */
+  currentVersion: BeStandardChangeTemplateVersion | null;
+  /** Raised when a change raised from it was rolled back or deviated from its plan. */
+  reviewRequired: boolean;
+  reviewRequiredReason: string | null;
+  reviewRequiredOn: string | null;
+  reviewRequiredChangeRequest: BeEntityRef | null;
+  /** The modification or retirement now in draft or CAB review, if any. */
+  openProposal: BeEntityRef | null;
+  usage: BeStandardChangeTemplateUsage;
+  createdOn: string;
+  createdBy: string;
+  updatedOn: string;
+  updatedBy: string;
+  /** On `GET /standard-change-templates/{id}` only, newest first. */
+  versions?: BeStandardChangeTemplateVersionSummary[];
+}
+
+export interface BeSearchStandardChangeTemplatesPayload {
+  /** Empty means active and suspended. */
+  states?: BeStandardChangeTemplateState[];
+  /** Matches the name or number, ignoring case. */
+  query?: string;
+  pagination: BePagination;
+}
+
+export interface BeSearchStandardChangeTemplatesResponse {
+  templates: BeStandardChangeTemplate[] | null;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** A closed change request a proposal cites as evidence. */
+export interface BeStandardChangeEvidence {
+  id: string;
+  number: string;
+  subject: string;
+  state: string | null;
+  closedOn: string | null;
+}
+
+/** One CAB member asked to decide a proposal. */
+export interface BeStandardChangeProposalApprover {
+  id: string;
+  approver: BeUserReference | null;
+  /** REQUESTED, APPROVED, REJECTED or CANCELLED. */
+  state: string;
+  comments: string | null;
+  updatedOn: string;
+  /** The caller's own REQUESTED row while the proposal is in CAB review. */
+  canDecide: boolean;
+}
+
+export interface BeStandardChangeProposal extends BeStandardChangeContent {
+  id: string;
+  /** SCP number. */
+  number: string;
+  kind: BeStandardChangeProposalKind;
+  state: BeStandardChangeProposalState;
+  /** The template's name. */
+  name: string;
+  rationale: string | null;
+  /** The template acted on (modify, retire), or the one an approved new proposal created. */
+  template: BeEntityRef | null;
+  /** The version a modification was started from. */
+  baseVersion: number | null;
+  sourceChangeRequest: BeEntityRef | null;
+  evidence: BeStandardChangeEvidence[] | null;
+  approvers: BeStandardChangeProposalApprover[] | null;
+  proposedBy: BeUserReference | null;
+  createdOn: string;
+  updatedOn: string;
+  submittedOn: string | null;
+  decidedOn: string | null;
+  decidedBy: BeUserReference | null;
+  decisionComment: string | null;
+  /** The version an approved new or modify proposal wrote. */
+  resultingVersion: number | null;
+  /** What the caller may do now (advisory: every action re-checks). */
+  canEdit: boolean;
+  canSubmit: boolean;
+  canWithdraw: boolean;
+}
+
+/** `POST /standard-change-proposals`. */
+export interface BeCreateStandardChangeProposalPayload {
+  kind: BeStandardChangeProposalKind;
+  /** modify / retire: the template. */
+  templateId?: string;
+  /** new: a closed change request to start from (it becomes the first evidence). */
+  sourceChangeRequestId?: string;
+  /** new: another proposal whose content the draft starts from. */
+  copyFromProposalId?: string;
+  name?: string;
+}
+
+/** `PATCH /standard-change-proposals/{id}`: absent fields are left as they are; the two lists replace the whole list. */
+export interface BeUpdateStandardChangeProposalPayload {
+  name?: string;
+  rationale?: string;
+  subject?: string;
+  description?: string;
+  justification?: string;
+  implementationPlan?: string;
+  riskImpactAnalysis?: string;
+  backoutPlan?: string;
+  testPlan?: string;
+  category?: BeChangeRequestCategory;
+  impact?: BeChangeRequestImpact;
+  risk?: BeChangeRequestRisk;
+  rollbackDurationText?: string;
+  isPlanningVisibleToCustomers?: boolean;
+  customerApprovalRequired?: boolean;
+  customerReviewRequired?: boolean;
+  parameters?: BeStandardChangeParameter[];
+  evidenceChangeRequestIds?: string[];
+}
+
+export interface BeDecideStandardChangeProposalPayload {
+  decision: "approved" | "rejected";
+  /** Required for a rejection. */
+  comment?: string;
+}
+
+export interface BeSearchStandardChangeProposalsPayload {
+  states?: BeStandardChangeProposalState[];
+  kinds?: BeStandardChangeProposalKind[];
+  templateId?: string;
+  proposedByMe?: boolean;
+  /** In CAB review, with a pending approval of the caller's. */
+  awaitingMyDecision?: boolean;
+  query?: string;
+  pagination: BePagination;
+}
+
+export interface BeStandardChangeProposalSummary {
+  id: string;
+  number: string;
+  kind: BeStandardChangeProposalKind;
+  state: BeStandardChangeProposalState;
+  name: string;
+  template: BeEntityRef | null;
+  proposedBy: BeUserReference | null;
+  createdOn: string;
+  updatedOn: string;
+  submittedOn: string | null;
+  decidedOn: string | null;
+}
+
+export interface BeSearchStandardChangeProposalsResponse {
+  proposals: BeStandardChangeProposalSummary[] | null;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** What a change request raised from a template carries about it. */
+export interface BeChangeRequestStandardChange {
+  template: BeEntityRef;
+  /** The template's STD number. */
+  templateNumber: string;
+  versionId: string;
+  version: number;
+  /** The version's parameters with the values the change request was raised with. */
+  parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
+}

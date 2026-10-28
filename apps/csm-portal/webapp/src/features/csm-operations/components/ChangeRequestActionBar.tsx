@@ -36,6 +36,8 @@ import {
   requestApprovalNeedsDeviationClearedReason,
   requestApprovalNeedsProjectReason,
   rollbackPendingReviewReason,
+  requestApprovalSchedulesDirectly,
+  SCHEDULE_STANDARD_CHANGE_LABEL,
   type PendingCustomerReview,
   isOfferedChangeRequestTarget,
 } from "@features/csm-operations/utils/changeRequests";
@@ -280,13 +282,22 @@ export default function ChangeRequestActionBar({
   // With the customer's proposed time waiting for WSO2, the one `authorize` button reads
   // "Propose a different time" (the counter) instead of "Re-schedule"; the banner carries Accept.
   const proposalPending = !!pendingCustomerProposal(cr);
+  // A Standard change with no customer approval to ask for is pre-authorised:
+  // Request Approval schedules it outright, so it reads "Schedule" (it still sends
+  // `{state: "assess"}`; the backend schedules it). With customer approval it is
+  // still a request, the customer's.
+  const schedulesDirectly = requestApprovalSchedulesDirectly(cr);
+  const labelFor = (target: string): string =>
+    target === "assess" && schedulesDirectly
+      ? SCHEDULE_STANDARD_CHANGE_LABEL
+      : changeRequestTransitionLabel(target, cr.state, proposalPending);
 
   const blockedReason = (target: string): string | null =>
     lockedReason ?? TARGET_BLOCKED_REASON[target]?.(cr, { pendingCustomerReview }) ?? null;
 
   const renderPrimary = (target: string): JSX.Element => {
     const { color, icon } = configFor(target);
-    const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+    const label = labelFor(target);
     const reason = blockedReason(target);
     if (reason) {
       return (
@@ -334,7 +345,7 @@ export default function ChangeRequestActionBar({
       {primaryTarget && renderPrimary(primaryTarget)}
       {secondaryTargets.map((target) => {
         const { color, icon } = configFor(target);
-        const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+        const label = labelFor(target);
         const button = (
           <Button
             key={target}
@@ -389,7 +400,7 @@ export default function ChangeRequestActionBar({
           >
             {menuTargets.map((target) => {
               const { color, icon } = configFor(target);
-              const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+              const label = labelFor(target);
               const reason = blockedReason(target);
               const destructive = isDestructiveChangeRequestTransition(target);
               const disabled = isPending || !!reason;
