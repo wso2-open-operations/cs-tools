@@ -373,7 +373,9 @@ Migration 0235 does the same for the other seven SME rotations' teams (keys `asg
   (`ANY`), with the tier (L1, L2 or L3) on the assignment, as `SRE_TZ3` does.
   The weekend is the same as the weekdays.
 - **Who may edit.** `sme_rota_admin` does for SME what `cre_rota_admin` and
-  `sre_rota_admin` do for their families. Granting it stays a deployment step.
+  `sre_rota_admin` do for their families. A CSM admin grants it on the Rota
+  access tab (0225), like the other two; the `user_role` insert above is the
+  fallback.
 - **The catalogue** gains `rotas[]`, `zone.rotaCode` and `team.rotaCode`. All are
   additive; a client that ignores them sees what it saw before. The webapp
   scopes every view to one rota and offers a rota picker only where a family
