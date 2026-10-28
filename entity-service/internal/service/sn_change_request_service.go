@@ -807,6 +807,12 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	if req.Subject == "" {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "subject is required"}
 	}
+	// The standard change catalogue lives in PostgreSQL; this data source has no
+	// template to raise the change from. (The dual-write service strips these
+	// before it mirrors.)
+	if req.StandardChangeTemplateID != nil || req.StandardChangeTemplateVersionID != nil || len(req.StandardChangeParameters) > 0 {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "standard change templates are only supported on the PostgreSQL data source"}
+	}
 	// ServiceNow's create payload has no project or deployment field; refuse
 	// rather than drop them silently. (The PostgreSQL-first dual-write service
 	// strips them before it mirrors, so this only fires when ServiceNow is the

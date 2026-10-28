@@ -1048,6 +1048,13 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 		default:
 			cr.Tags = tags
 		}
+		// The standard change template it was raised from: staff only, best-effort
+		// like the tags.
+		if sc, err := readChangeRequestStandardChange(ctx, r.db, id); err != nil {
+			slog.WarnContext(ctx, "get change request: standard change lookup failed", "changeRequestId", id, "error", err)
+		} else {
+			cr.StandardChange = sc
+		}
 	}
 
 	// While the customer group's review request is pending (a live "Customer
@@ -1428,6 +1435,16 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		if err := validateCreationPhaseEdits(gates, req); err != nil {
 			return "", err
 		}
+		// A change request raised from a standard change template keeps what the
+		// template specifies, in every state, and stays standard; no other change
+		// request becomes standard by a PATCH (change_request_standard_change.go).
+		// Before the approved-content lock, whose words would be less specific.
+		if err := checkStandardChangeTypeEdit(gates, req.Type); err != nil {
+			return "", err
+		}
+		if err := checkStandardChangeTemplateFields(ctx, tx, id, gates, req); err != nil {
+			return "", err
+		}
 		// Once the change has been approved its fields are read-only (only work
 		// notes and the lifecycle move on): change_request_approved_lock.go. After
 		// the pure rules above, which keep their more specific words (a type that is
@@ -1755,6 +1772,12 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 			// the deviation in effect (the request's, else the stored one) is not
 			// blank (change_request_deviation.go).
 			if err := checkRequestApprovalDeviationCleared(ctx, tx, id, gates.state, req.ImplementationDeviation); err != nil {
+				return "", err
+			}
+			// ... and a change raised from a standard change template is
+			// pre-authorised only while that template is active and still at the
+			// version it was raised from.
+			if err := checkStandardChangeTemplateUsable(ctx, tx, gates); err != nil {
 				return "", err
 			}
 			effectiveState = &dest
@@ -2147,6 +2170,15 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		}
 	}
 
+	// A change raised from a standard change template that was rolled back, or
+	// deviated from its plan, flags the template for review. Last: it escalates
+	// the transaction's identity.
+	if effectiveState != nil || req.ImplementationDeviation != nil {
+		if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail); err != nil {
+			return "", err
+		}
+	}
+
 	return wiID, nil
 }
 
@@ -2494,6 +2526,14 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 				return createdChangeRequestRow{}, err
 			}
 		}
+		// Raised from a standard change template: the service rendered the
+		// template into req; record which version and the values, refused (409)
+		// when the template stopped being usable since (change_request_standard_change.go).
+		if req.StandardChangeTemplateVersionID != nil {
+			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, req.StandardChangeParameters); err != nil {
+				return createdChangeRequestRow{}, err
+			}
+		}
 		return row, nil
 	})
 }
@@ -2554,7 +2594,8 @@ func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.
 	})
 	if err != nil {
 		var ve *apierror.ValidationError
-		if errors.As(err, &ve) {
+		var ce *apierror.ConflictError
+		if errors.As(err, &ve) || errors.As(err, &ce) {
 			return domain.CreateChangeRequestResponse{}, err
 		}
 		// change_request_write_internal_only (migration 0145) permits only an
@@ -2691,7 +2732,8 @@ func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Contex
 	})
 	if err != nil {
 		var ve *apierror.ValidationError
-		if errors.As(err, &ve) {
+		var ce *apierror.ConflictError
+		if errors.As(err, &ve) || errors.As(err, &ce) {
 			return domain.CreateChangeRequestResponse{}, err
 		}
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
@@ -3486,6 +3528,12 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 	// Scheduled / Customer Approval, a customer outcome -> Scheduled /
 	// Closed / Canceled / Rollback): cancel what that left actionable.
 	if err := reconcileStaleApprovers(ctx, tx, id, actorEmail); err != nil {
+		return "", err
+	}
+	// A customer's failed review rolls the change back: a change raised from a
+	// standard change template then flags it for review. Last: it escalates the
+	// transaction's identity.
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail); err != nil {
 		return "", err
 	}
 

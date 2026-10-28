@@ -76,6 +76,11 @@ func stdCleanup(t *testing.T, s *repository.Scoped) {
 	t.Helper()
 	sys := repository.WithSystemIdentity(context.Background())
 	stmts := []string{
+		// Change requests raised from the tests' templates first (the version is a
+		// RESTRICT foreign key).
+		`DELETE FROM work_item WHERE id IN (SELECT cr.id FROM change_request cr
+			JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
+			JOIN standard_change_template t ON t.id = v.template_id WHERE t.name ILIKE '` + stdTag + `%')`,
 		`DELETE FROM change_request WHERE id IN (SELECT id FROM work_item WHERE subject ILIKE '` + stdTag + `%' AND type = 'CHANGE_REQUEST')`,
 		`DELETE FROM work_item WHERE subject ILIKE '` + stdTag + `%'`,
 		`DELETE FROM standard_change_template WHERE name ILIKE '` + stdTag + `%'`,

@@ -4682,6 +4682,21 @@ type CreateChangeRequestRequest struct {
 	// IsCustomerApproved / IsCustomerReviewed). Postgres data source only.
 	CustomerApprovalRequired *bool `json:"customerApprovalRequired,omitempty"`
 	CustomerReviewRequired   *bool `json:"customerReviewRequired,omitempty"`
+
+	// StandardChangeTemplateID raises the change request from a standard change
+	// template (PostgreSQL data sources only). It is required for type
+	// "standard" and refused with any other type. The template must be active.
+	// Everything the template specifies -- subject, description, justification,
+	// the implementation, backout and test plans, the risk and impact analysis,
+	// category, impact, risk, rollback duration, planning visibility and the two
+	// customer gates -- comes from its current version with the parameters
+	// filled in, and must not be sent. StandardChangeTemplateVersionID, when
+	// sent, is the version the caller rendered: a template revised since is a
+	// 409. StandardChangeParameters are the values for the version's
+	// parameters, by key.
+	StandardChangeTemplateID        *string           `json:"standardChangeTemplateId,omitempty"`
+	StandardChangeTemplateVersionID *string           `json:"standardChangeTemplateVersionId,omitempty"`
+	StandardChangeParameters        map[string]string `json:"standardChangeParameters,omitempty"`
 }
 
 // CreateChangeRequestResponse is the output for POST /change-requests.
@@ -5645,6 +5660,14 @@ type ChangeRequest struct {
 	// (best-effort, like the case read). A tag added to a change request is
 	// never mirrored to the previous system (unlike a case's).
 	Tags []Tag `json:"tags"`
+
+	// StandardChange names the standard change template (and version) the change
+	// request was raised from, with the values its parameters were given. Staff
+	// only, PostgreSQL data sources only; omitted for a change request not raised
+	// from a template, and for every other reader. While it is set, the fields the
+	// template specifies are read-only (errorCode
+	// change_request_standard_template_field).
+	StandardChange *ChangeRequestStandardChange `json:"standardChange,omitempty"`
 
 	// Group C2 -- carried for parity, read-through only; no write path is
 	// exposed for any of these seven.

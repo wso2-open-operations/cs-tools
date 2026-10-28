@@ -1638,6 +1638,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// retire them: internal callers only.
 		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
 		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
+		// From here on a standard change is raised from a template of this
+		// catalogue (the change request service is a pointer the handler shares; a
+		// ServiceNow-backed one is returned unchanged).
+		service.WithStandardChangeTemplates(activeChangeRequestSvc, standardChangeRepo)
 		portalBannerHandler = handler.NewPortalBannerHandler(
 			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
 		)
