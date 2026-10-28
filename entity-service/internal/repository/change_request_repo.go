@@ -2173,10 +2173,8 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	// A change raised from a standard change template that was rolled back, or
 	// deviated from its plan, flags the template for review. Last: it escalates
 	// the transaction's identity.
-	if effectiveState != nil || req.ImplementationDeviation != nil {
-		if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail); err != nil {
-			return "", err
-		}
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, effectiveState != nil, req.ImplementationDeviation != nil); err != nil {
+		return "", err
 	}
 
 	return wiID, nil
@@ -3533,7 +3531,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 	// A customer's failed review rolls the change back: a change raised from a
 	// standard change template then flags it for review. Last: it escalates the
 	// transaction's identity.
-	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail); err != nil {
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, true, false); err != nil {
 		return "", err
 	}
 

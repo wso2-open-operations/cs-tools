@@ -193,11 +193,18 @@ func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID
 }
 
 // flagStandardTemplateOnFailure flags the template a change request was raised
-// from for review when the change failed: it was rolled back, or implemented
-// with a deviation from the implementation plan. A no-op for any other change
-// request. It escalates the transaction's identity (flagStandardTemplateReview),
-// so it runs last in its transaction.
-func flagStandardTemplateOnFailure(ctx context.Context, tx pgx.Tx, id, actor string) error {
+// from for review when THIS write failed the change: it rolled the change back
+// (rolledBack: the write moved the state, which is then checked to be ROLLBACK),
+// or it recorded a deviation from the implementation plan (deviated: the write
+// carried one, which is then checked to be non-blank). A deviation stored earlier
+// does not flag again on a later state move, so a flag the owner cleared stays
+// cleared. A no-op for a change request not raised from a template. It escalates
+// the transaction's identity (flagStandardTemplateReview), so it runs last in its
+// transaction.
+func flagStandardTemplateOnFailure(ctx context.Context, tx pgx.Tx, id, actor string, rolledBack, deviated bool) error {
+	if !rolledBack && !deviated {
+		return nil
+	}
 	var state, deviation, version *string
 	err := tx.QueryRow(ctx, `SELECT state::text, implementation_deviation, standard_change_template_version_id::text
 		FROM change_request WHERE id = $1::uuid`, id).Scan(&state, &deviation, &version)
@@ -208,9 +215,9 @@ func flagStandardTemplateOnFailure(ctx context.Context, tx pgx.Tx, id, actor str
 		return fmt.Errorf("flag standard change template: %w", err)
 	}
 	switch {
-	case strings.EqualFold(stringOrEmpty(state), crStateRollback):
+	case rolledBack && strings.EqualFold(stringOrEmpty(state), crStateRollback):
 		return flagStandardTemplateReview(ctx, tx, id, "A change request raised from the template was rolled back", actor)
-	case deviation != nil && !IsBlankRichText(*deviation):
+	case deviated && deviation != nil && !IsBlankRichText(*deviation):
 		return flagStandardTemplateReview(ctx, tx, id, "A change request raised from the template deviated from its implementation plan", actor)
 	}
 	return nil

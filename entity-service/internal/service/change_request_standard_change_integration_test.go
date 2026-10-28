@@ -230,6 +230,18 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 		!strings.Contains(*got.ReviewRequiredReason, "deviated") {
 		t.Fatalf("after a deviation = review %v %+v", got.ReviewRequired, got.ReviewRequiredChangeRequest)
 	}
+	// Cleared, the flag stays cleared when the deviated change moves on: only the
+	// write that rolls a change back or records the deviation raises it.
+	if _, err := env.svc.ClearTemplateReview(stdCtx(stdCAB1), tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	review := domain.ChangeRequestStateReview
+	if _, err := crs.PatchChangeRequest(ctx, second.ChangeRequest.ID, domain.PatchChangeRequestRequest{State: &review}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = env.svc.GetTemplate(stdCtx(stdCAB1), tpl.ID); got.ReviewRequired {
+		t.Fatalf("a later state move raised the cleared flag again: %v", got.ReviewRequiredReason)
+	}
 
 	// A revised template: a change raised from version 1 and not yet approved
 	// cannot be any more.

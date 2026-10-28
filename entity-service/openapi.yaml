@@ -26418,11 +26418,13 @@ components:
     CreateChangeRequestRequest:
       type: object
       required:
-        - subject
         - type
       properties:
         subject:
           type: string
+          description: >-
+            Required, except on a change request raised from a standard change template
+            (standardChangeTemplateId), where the template gives it and sending one is a 400.
         type:
           type: string
           enum: [standard, normal, emergency]
@@ -31068,7 +31070,7 @@ components:
         testPlan: {type: string, nullable: true}
         category: {type: string, nullable: true}
         impact: {type: string, nullable: true, enum: [high, medium, low]}
-        risk: {type: string, nullable: true, enum: [moderate, low]}
+        risk: {type: string, nullable: true, enum: [high, moderate, low], description: 'A draft may hold high; submitting it is refused (a standard change cannot be high risk).'}
         rollbackDurationText: {type: string, nullable: true}
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
@@ -31244,7 +31246,7 @@ components:
         testPlan: {type: string}
         category: {type: string}
         impact: {type: string, enum: [high, medium, low]}
-        risk: {type: string, enum: [moderate, low]}
+        risk: {type: string, enum: [high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
         rollbackDurationText: {type: string}
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
