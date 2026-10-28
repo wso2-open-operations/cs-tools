@@ -10804,22 +10804,58 @@ What the chain left behind:
 - `000020`–`000026` built an older design (`knowledge_bases`, `kb_articles`,
   `kb_managers`, `kb_article_history`, their triggers and enum). `000027` dropped
   all of it.
-- `000027`'s `knowledge_base` and `knowledge_article` are `0044_kb_tables.sql`'s
-  (the shared table; csm-sync-service has the identical file).
+- `000027`'s `knowledge_base` is `0044_kb_tables.sql`'s (the shared table;
+  csm-sync-service has the identical file). Its `knowledge_article` is 0044's
+  **without the foreign keys** on `author_id` and `revised_by_id` (to `"user"`) and
+  `source_case_id` (to `work_item`). 0044 is `CREATE TABLE IF NOT EXISTS`, so a
+  database where 000027 ran before 0044 (the old plain glob ran the 6-digit files
+  first; only possible where the plural `products`/`users`/`cases` existed, i.e.
+  old local databases) still lacks those three. Nothing converges them yet: a
+  follow-up, since `knowledge_article` is csm-sync-service's table.
 - `knowledge_base_manager_user` / `knowledge_base_manager_group` and their three
   indexes existed only in `000027`. `kb_manager_repo.go` reads them, and
   csm-sync-service does not map knowledge base managers, so they are
   entity-service's alone.
 
-`0251_knowledge_base_manager_tables.sql` creates those two tables and indexes with
-`000027`'s exact definitions (no foreign key on `user_id` / `group_id`), every
-statement `IF NOT EXISTS`, nothing that drops or alters. A database that recorded
-`000020`–`000027` keeps its tables and rows; `0251` runs once there as a no-op.
+`0251_knowledge_base_manager_tables.sql` creates those two tables and indexes,
+every statement `IF NOT EXISTS`, and gives `knowledge_base_manager_user.user_id`
+the foreign key `000027` left out: `REFERENCES "user"(id) ON DELETE CASCADE`
+(constraint `knowledge_base_manager_user_user_id_fkey`). `group_id` has none, as in
+000027 (groups are not rows here; `group_name` is kept beside the id).
+
+- **Why the foreign key.** 000027's header said the real shared-database tables
+  carry FKs on `author_id`/`revised_by_id`/`user_id` to `"user"`, left out only
+  because the local database then had a plural `users` table (`git show
+  67f35215a:entity-service/migrations/000027_replace_kb_tables_with_real_schema.up.sql`).
+  The `knowledge_article` half of that matches csm-sync-service's 0044. 000020
+  cannot run on a database the sync built, so a deployed database cannot have the
+  manager tables from 000027 through `make migrate`. Dev, staging and production
+  were **not** inspected (no read-only access from here); the delete action of the
+  real constraint is not recorded either, and CASCADE matches `knowledge_base_id`
+  (`user_id` is NOT NULL, so SET NULL is impossible). Run `\d
+  knowledge_base_manager_user` there to confirm.
+- **Where the tables already exist** nothing is dropped, rewritten or deleted. A DO
+  block looks for any foreign key from `user_id` to `"user"`, whatever its name;
+  one that exists is left as it is. Otherwise (a database that ran 000027) it adds
+  the constraint `NOT VALID`, so every new row is checked, then validates it. If
+  existing rows name a user that does not exist, validation is skipped with a
+  NOTICE and the rows are kept: delete or correct them, then `ALTER TABLE
+  knowledge_base_manager_user VALIDATE CONSTRAINT
+  knowledge_base_manager_user_user_id_fkey`. Adding the constraint takes a brief
+  SHARE ROW EXCLUSIVE lock on `"user"`.
+- **Errors.** A 23503 on `POST /kb-manager-users` names the field
+  (`userId does not refer to an existing user`, `knowledgeBaseId does not refer to
+  an existing knowledge base`) by constraint name, and never returns `pgErr.Detail`.
+  It used to say "knowledge base does not exist" plus the Detail for both.
+
 A database where a fresh `make migrate` already died inside `000020` keeps an
 unused `kb_article_state_enum` type; it is harmless and can be dropped by hand.
-`kb_manager_migration_test.go` pins the shape, checks that the legacy files stay
-gone and (with `CASE_STATS_TEST_DSN`) that `0251` makes the same catalog as
-`000027` and leaves existing tables and rows untouched.
+`kb_manager_migration_test.go` pins the shape and checks that the legacy files stay
+gone and that no other migration creates the manager tables (another migration may
+alter them, index them or put policies on them). With `CASE_STATS_TEST_DSN` it
+checks that a fresh database and a 000027 one end with the same catalog, that rows
+are kept (with and without a user), that an existing user foreign key is left
+alone, and the repository's 23503 messages.
 
 ## Case feedback silently 404'd on the Postgres data source instead of a documented 503
 
