@@ -21,22 +21,26 @@
 // the foreign key from user_id to "user" that 000027 left out, and adds that
 // foreign key where the tables came from 000027, without touching their rows.
 //
-// The first three tests read the SQL and the migrations folder and need no
+// The first four tests read the SQL and the migrations folder and need no
 // database. The others run against a live PostgreSQL instance built from
 // migrations/ (knowledge_base and "user" must exist); the migration tests work
-// in throwaway schemas inside a transaction that is rolled back:
+// in throwaway schemas inside a transaction that is rolled back, and the one
+// about lock_timeout holds a lock on "user" from a second connection for about
+// five seconds:
 //
-//	CASE_STATS_TEST_DSN=postgres://... go test ./internal/repository/ -run 'KBManager|KBLegacyStragglers'
+//	CASE_STATS_TEST_DSN=postgres://... go test ./internal/repository/ -run 'KBManager|KBLegacyStragglers|MigrationLocking'
 
 package repository_test
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -92,11 +96,16 @@ func readKBManagerMigration(t *testing.T) string {
 
 // TestKBManagerMigrationOnlyAddsWhatIsMissing pins the shape: two tables and
 // three indexes, every one IF NOT EXISTS; user_id references "user" and
-// group_id references nothing; and the only ALTERs add and validate that one
-// foreign key. Nothing may remove or change what a database already has.
+// group_id references nothing; the only ALTERs add and validate that one
+// foreign key, in separate DO blocks under a lock_timeout. Nothing may remove
+// or change what a database already has.
 func TestKBManagerMigrationOnlyAddsWhatIsMissing(t *testing.T) {
 	body := strings.ToUpper(sqlWithoutComments(readKBManagerMigration(t)))
 	flat := strings.Join(strings.Fields(body), " ")
+
+	for _, problem := range migrationLockingProblems(body) {
+		t.Error(problem)
+	}
 
 	// Statement forms, so "ON DELETE CASCADE" and the DO block's own BEGIN
 	// are not hits; transaction control would break `make migrate`.
@@ -142,6 +151,71 @@ func TestKBManagerMigrationOnlyAddsWhatIsMissing(t *testing.T) {
 	}
 }
 
+var (
+	migrationDOBlock      = regexp.MustCompile(`(?s)\bDO\s+\$\$(.*?)\$\$\s*;`)
+	migrationQuietMessage = regexp.MustCompile(`\bRAISE\s+(NOTICE|INFO|LOG|DEBUG)\b`)
+)
+
+// migrationLockingProblems lists how a migration that adds foreign keys to
+// tables that may already hold rows (0251, 0262) breaks the locking rules:
+// lock_timeout is set by its first statement and reset by its last, the
+// constraints are added in one DO block and validated in another, so the
+// SHARE ROW EXCLUSIVE locks an ADD takes end before the validation scan, and
+// what it leaves for an operator is a RAISE WARNING, not a quieter level.
+// body is upper case with its comments removed.
+func migrationLockingProblems(body string) []string {
+	var problems []string
+	body = strings.TrimSpace(body)
+	if !strings.HasPrefix(body, "SET LOCK_TIMEOUT = '5S';") {
+		problems = append(problems, "the first statement must be SET lock_timeout = '5s'")
+	}
+	if !strings.HasSuffix(body, "RESET LOCK_TIMEOUT;") {
+		problems = append(problems, "the last statement must be RESET lock_timeout")
+	}
+	var adds, validates bool
+	for i, block := range migrationDOBlock.FindAllStringSubmatch(body, -1) {
+		add := strings.Contains(block[1], "ADD CONSTRAINT")
+		validate := strings.Contains(block[1], "VALIDATE CONSTRAINT")
+		if add && validate {
+			problems = append(problems, fmt.Sprintf("DO block %d both adds and validates a constraint; validate in a DO block of its own", i+1))
+		}
+		adds = adds || add
+		validates = validates || validate
+	}
+	if !adds || !validates {
+		problems = append(problems, "want one DO block that adds the constraints and another that validates them")
+	}
+	if m := migrationQuietMessage.FindString(body); m != "" {
+		problems = append(problems, fmt.Sprintf("%s: an outcome an operator must act on is a RAISE WARNING", m))
+	}
+	return problems
+}
+
+// TestMigrationLockingProblems is the checker above, both ways.
+func TestMigrationLockingProblems(t *testing.T) {
+	const add = "DO $$ BEGIN ALTER TABLE T ADD CONSTRAINT C FOREIGN KEY (X) REFERENCES U(ID) NOT VALID; END $$;"
+	const validate = "DO $$ BEGIN IF N > 0 THEN RAISE WARNING 'LEFT'; RETURN; END IF; ALTER TABLE T VALIDATE CONSTRAINT C; END $$;"
+	const set, reset = "SET LOCK_TIMEOUT = '5S';", "RESET LOCK_TIMEOUT;"
+	cases := []struct {
+		name, body string
+		want       []string
+	}{
+		{"separate blocks under a lock_timeout", set + "\nCREATE TABLE IF NOT EXISTS T (X INT);\n" + add + "\n" + validate + "\n" + reset, nil},
+		{"no lock_timeout", add + "\n" + validate + "\n" + reset, []string{"the first statement must be SET lock_timeout = '5s'"}},
+		{"lock_timeout after the first statement", "CREATE TABLE IF NOT EXISTS T (X INT);\n" + set + add + validate + reset, []string{"the first statement must be SET lock_timeout = '5s'"}},
+		{"no reset", set + add + validate, []string{"the last statement must be RESET lock_timeout"}},
+		{"add and validate in one block", set + "DO $$ BEGIN ALTER TABLE T ADD CONSTRAINT C FOREIGN KEY (X) REFERENCES U(ID) NOT VALID; ALTER TABLE T VALIDATE CONSTRAINT C; END $$;" + reset,
+			[]string{"DO block 1 both adds and validates a constraint; validate in a DO block of its own"}},
+		{"no validation", set + add + reset, []string{"want one DO block that adds the constraints and another that validates them"}},
+		{"a notice", set + add + strings.Replace(validate, "RAISE WARNING", "RAISE NOTICE", 1) + reset, []string{"RAISE NOTICE: an outcome an operator must act on is a RAISE WARNING"}},
+	}
+	for _, c := range cases {
+		if got := migrationLockingProblems(c.body); strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s: problems = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // kbManagerTableDefinition matches a statement that creates one of the two
 // manager tables: CREATE TABLE, optionally IF NOT EXISTS, optionally schema
 // qualified and quoted. A statement that only names a table (ALTER TABLE, an
@@ -150,6 +224,9 @@ var kbManagerTableDefinition = regexp.MustCompile(`(?i)\bCREATE\s+TABLE\s+(?:IF\
 
 // stripSQLComments removes -- comments to the end of the line and /* */
 // blocks, so a definition quoted in a comment is not taken for one.
+// sqlWithoutComments drops whole-line comments only, which is all the shape
+// tests need; a CREATE TABLE in some other migration can also sit after code
+// on a line or in a block comment.
 func stripSQLComments(sql string) string {
 	sql = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(sql, " ")
 	return regexp.MustCompile(`--[^\n]*`).ReplaceAllString(sql, "")
@@ -269,13 +346,62 @@ func kbManagerCatalog(t *testing.T, ctx context.Context, tx pgx.Tx, schema strin
 	return out
 }
 
-// kbManagerMigrationTx opens the rolled-back transaction the migration tests
-// work in, with one schema per name.
-func kbManagerMigrationTx(t *testing.T, schemas ...string) (context.Context, pgx.Tx) {
+// migrationWarnings collects the WARNINGs the server sends on the connection
+// a migration test runs on.
+type migrationWarnings struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (w *migrationWarnings) add(n *pgconn.Notice) {
+	if n.SeverityUnlocalized != "WARNING" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.msgs = append(w.msgs, n.Message)
+}
+
+// take returns the WARNINGs received since the last call.
+func (w *migrationWarnings) take() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	msgs := w.msgs
+	w.msgs = nil
+	return msgs
+}
+
+// expectWarnings fails unless exactly want (in order) arrived since the last
+// call.
+func (w *migrationWarnings) expectWarnings(t *testing.T, what string, want ...string) {
 	t.Helper()
-	pool := caseStatsPool(t)
+	if got := w.take(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("%s: WARNINGs\n%q\nwant\n%q", what, got, want)
+	}
+}
+
+// kbManagerMigrationTx opens the rolled-back transaction the migration tests
+// work in, with one schema per name, on a connection of its own whose
+// WARNINGs are collected.
+func kbManagerMigrationTx(t *testing.T, schemas ...string) (context.Context, pgx.Tx, *migrationWarnings) {
+	t.Helper()
+	dsn := os.Getenv("CASE_STATS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CASE_STATS_TEST_DSN not set")
+	}
 	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	warnings := &migrationWarnings{}
+	cfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { warnings.add(n) }
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -283,7 +409,43 @@ func kbManagerMigrationTx(t *testing.T, schemas ...string) (context.Context, pgx
 	for _, schema := range schemas {
 		kbManagerExec(t, ctx, tx, "create schema "+schema, `CREATE SCHEMA `+schema)
 	}
-	return ctx, tx
+	return ctx, tx, warnings
+}
+
+// execWhileTableIsBusy runs sql in a savepoint of tx while another connection
+// holds ROW EXCLUSIVE on table in a transaction it has not committed, as a
+// writer that has not finished does, and returns sql's error. The savepoint
+// is rolled back and the other transaction ended before it returns.
+func execWhileTableIsBusy(t *testing.T, ctx context.Context, tx pgx.Tx, table, sql string) error {
+	t.Helper()
+	blocker, err := caseStatsPool(t).Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the busy transaction: %v", err)
+	}
+	defer func() { _ = blocker.Rollback(ctx) }()
+	if _, err := blocker.Exec(ctx, `LOCK TABLE `+table+` IN ROW EXCLUSIVE MODE`); err != nil {
+		t.Fatalf("lock %s: %v", table, err)
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		t.Fatalf("savepoint: %v", err)
+	}
+	_, execErr := sp.Exec(ctx, sql)
+	if err := sp.Rollback(ctx); err != nil {
+		t.Fatalf("roll back to the savepoint: %v", err)
+	}
+	return execErr
+}
+
+// expectLockTimeout fails unless err is the lock_timeout's 55P03. The test's
+// own statement_timeout ends the wait with 57014 instead when the migration
+// sets no lock_timeout.
+func expectLockTimeout(t *testing.T, err error) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("with the referenced table busy: err = %v, want 55P03 (lock_not_available) from the migration's lock_timeout", err)
+	}
 }
 
 // kbManagerUseSchema puts schema first on the search path. public stays on it
@@ -340,9 +502,9 @@ func kbManagerSeed(t *testing.T, ctx context.Context, tx pgx.Tx) {
 // TestKBManagerMigrationFreshAndOldDatabasesConverge runs 0251 where the
 // tables are missing (a fresh database) and where 000027 made them (no foreign
 // key on user_id): both end with the same columns, constraints and indexes,
-// the user foreign key validated.
+// the user foreign key validated, and neither run raises a WARNING.
 func TestKBManagerMigrationFreshAndOldDatabasesConverge(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "kb_manager_mig_fresh", "kb_manager_mig_old")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "kb_manager_mig_fresh", "kb_manager_mig_old")
 	migration := readKBManagerMigration(t)
 
 	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_fresh")
@@ -350,6 +512,7 @@ func TestKBManagerMigrationFreshAndOldDatabasesConverge(t *testing.T) {
 		t.Fatalf("test schema already has manager tables:\n%s", got)
 	}
 	kbManagerExec(t, ctx, tx, "run migration where the tables are missing", migration)
+	warnings.expectWarnings(t, "run where the tables are missing")
 	fresh := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_fresh")
 	if !strings.Contains(fresh+"\n", kbManagerUserFKLine+"\n") {
 		t.Fatalf("fresh tables lack the validated user foreign key:\n%s", fresh)
@@ -364,6 +527,7 @@ func TestKBManagerMigrationFreshAndOldDatabasesConverge(t *testing.T) {
 		t.Fatalf("000027's tables already have a user foreign key:\n%s", before)
 	}
 	kbManagerExec(t, ctx, tx, "run migration over 000027's tables", migration)
+	warnings.expectWarnings(t, "run over 000027's tables")
 
 	if old := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_old"); fresh != old {
 		t.Errorf("0251 leaves fresh and 000027 databases with different tables.\nfresh:\n%s\n\n000027 + 0251:\n%s", fresh, old)
@@ -374,7 +538,7 @@ func TestKBManagerMigrationFreshAndOldDatabasesConverge(t *testing.T) {
 // 000020-000027, with manager rows that name real users: running 0251 over
 // it, more than once, adds the validated foreign key and changes no row.
 func TestKBManagerMigrationKeepsExistingRows(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "kb_manager_mig_existing")
+	ctx, tx, _ := kbManagerMigrationTx(t, "kb_manager_mig_existing")
 	migration := readKBManagerMigration(t)
 
 	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_existing")
@@ -399,9 +563,10 @@ func TestKBManagerMigrationKeepsExistingRows(t *testing.T) {
 // TestKBManagerMigrationKeepsRowsThatNameNoUser: a 000027 database whose
 // manager table already holds a row for a user that does not exist. 0251 still
 // succeeds and deletes nothing; the foreign key is added NOT VALID, so new rows
-// are checked, and validating it is left until the row is dealt with.
+// are checked, and every run raises a WARNING with the count until the row is
+// dealt with. The header's cleanup then validates it.
 func TestKBManagerMigrationKeepsRowsThatNameNoUser(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "kb_manager_mig_orphans")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "kb_manager_mig_orphans")
 	migration := readKBManagerMigration(t)
 
 	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_orphans")
@@ -415,6 +580,8 @@ func TestKBManagerMigrationKeepsRowsThatNameNoUser(t *testing.T) {
 
 	for run := 1; run <= 2; run++ {
 		kbManagerExec(t, ctx, tx, "run migration", migration)
+		warnings.expectWarnings(t, fmt.Sprintf("run %d", run),
+			`knowledge_base_manager_user.user_id: 1 row(s) match no row of "user", so knowledge_base_manager_user_user_id_fkey stays NOT VALID until they are deleted or corrected (see 0251_knowledge_base_manager_tables.sql)`)
 		if got := kbManagerRows(t, ctx, tx); got != rowsBefore {
 			t.Fatalf("run %d changed rows.\nbefore: %s\nafter:  %s", run, rowsBefore, got)
 		}
@@ -436,8 +603,10 @@ func TestKBManagerMigrationKeepsRowsThatNameNoUser(t *testing.T) {
 	}
 	_ = sp.Rollback(ctx)
 
-	// What the migration's NOTICE tells an operator to do.
-	kbManagerExec(t, ctx, tx, "delete the row", `DELETE FROM knowledge_base_manager_user WHERE user_id = $1`, orphanUserID)
+	// What the migration's header tells an operator to do.
+	kbManagerExec(t, ctx, tx, "delete the rows", `
+		DELETE FROM knowledge_base_manager_user m
+		 WHERE NOT EXISTS (SELECT 1 FROM "user" u WHERE u.id = m.user_id)`)
 	kbManagerExec(t, ctx, tx, "validate by hand", `ALTER TABLE knowledge_base_manager_user VALIDATE CONSTRAINT knowledge_base_manager_user_user_id_fkey`)
 	if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_orphans"); !strings.Contains(got+"\n", kbManagerUserFKLine+"\n") {
 		t.Errorf("after validating by hand, want the foreign key validated:\n%s", got)
@@ -448,7 +617,7 @@ func TestKBManagerMigrationKeepsRowsThatNameNoUser(t *testing.T) {
 // manager table already has a foreign key from user_id to "user", under its
 // own name and delete action, keeps it and gets no second one.
 func TestKBManagerMigrationLeavesAnExistingUserForeignKeyAlone(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "kb_manager_mig_has_fk")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "kb_manager_mig_has_fk")
 
 	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_has_fk")
 	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbManager000027DDL)
@@ -457,8 +626,78 @@ func TestKBManagerMigrationLeavesAnExistingUserForeignKeyAlone(t *testing.T) {
 	before := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_has_fk")
 
 	kbManagerExec(t, ctx, tx, "run migration", readKBManagerMigration(t))
+	warnings.expectWarnings(t, "run with a user foreign key already there")
 	if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_has_fk"); got != before {
 		t.Errorf("tables changed.\nbefore:\n%s\n\nafter:\n%s", before, got)
+	}
+}
+
+// TestKBManagerMigrationWarnsWhenTheNameIsTaken: a 000027 table where another
+// constraint already holds knowledge_base_manager_user_user_id_fkey. 0251 does
+// not fail on it: it adds nothing, leaves the table as it was and says so in a
+// WARNING on every run.
+func TestKBManagerMigrationWarnsWhenTheNameIsTaken(t *testing.T) {
+	ctx, tx, warnings := kbManagerMigrationTx(t, "kb_manager_mig_name_taken")
+
+	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_name_taken")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbManager000027DDL)
+	kbManagerExec(t, ctx, tx, "take the name for something else",
+		`ALTER TABLE knowledge_base_manager_user ADD CONSTRAINT knowledge_base_manager_user_user_id_fkey CHECK (true)`)
+	before := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_name_taken")
+
+	for run := 1; run <= 2; run++ {
+		kbManagerExec(t, ctx, tx, "run migration", readKBManagerMigration(t))
+		warnings.expectWarnings(t, fmt.Sprintf("run %d", run),
+			`knowledge_base_manager_user.user_id: constraint knowledge_base_manager_user_user_id_fkey already exists and is not a foreign key from this column to "user", so no foreign key was added for it (see 0251_knowledge_base_manager_tables.sql)`)
+		if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_name_taken"); got != before {
+			t.Errorf("run %d changed the tables.\nbefore:\n%s\n\nafter:\n%s", run, before, got)
+		}
+	}
+}
+
+// TestKBManagerMigrationValidatesWhatAnEarlierRunLeft: a run that stopped
+// after the ADD (a lock_timeout in the validation, say) left the constraint
+// NOT VALID. The next run validates it.
+func TestKBManagerMigrationValidatesWhatAnEarlierRunLeft(t *testing.T) {
+	ctx, tx, warnings := kbManagerMigrationTx(t, "kb_manager_mig_half_done")
+
+	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_half_done")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbManager000027DDL)
+	kbManagerSeed(t, ctx, tx)
+	kbManagerExec(t, ctx, tx, "add the constraint as the first DO block does", `
+		ALTER TABLE knowledge_base_manager_user
+			ADD CONSTRAINT knowledge_base_manager_user_user_id_fkey
+			FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE NOT VALID`)
+
+	kbManagerExec(t, ctx, tx, "run migration", readKBManagerMigration(t))
+	warnings.expectWarnings(t, "run over a constraint left NOT VALID")
+	if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_half_done"); !strings.Contains(got+"\n", kbManagerUserFKLine+"\n") {
+		t.Errorf("want the foreign key validated:\n%s", got)
+	}
+}
+
+// TestKBManagerMigrationGivesUpWhenUserIsBusy: adding the foreign key needs
+// SHARE ROW EXCLUSIVE on "user", which waits for every transaction that has
+// written to it, and every writer that comes after waits behind it. With
+// "user" held by another transaction, 0251 gives up after its lock_timeout
+// instead of holding writers back for as long as that transaction lasts; run
+// again once it has ended, it adds and validates the key.
+func TestKBManagerMigrationGivesUpWhenUserIsBusy(t *testing.T) {
+	ctx, tx, _ := kbManagerMigrationTx(t, "kb_manager_mig_busy")
+	migration := readKBManagerMigration(t)
+
+	kbManagerUseSchema(t, ctx, tx, "kb_manager_mig_busy")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbManager000027DDL)
+	kbManagerExec(t, ctx, tx, "bound the wait if the migration sets no lock_timeout", `SET LOCAL statement_timeout = '20s'`)
+
+	expectLockTimeout(t, execWhileTableIsBusy(t, ctx, tx, `"user"`, migration))
+	if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_busy"); strings.Contains(got, "user_id_fkey") {
+		t.Errorf("the run that gave up left a constraint behind:\n%s", got)
+	}
+
+	kbManagerExec(t, ctx, tx, "run migration again", migration)
+	if got := kbManagerCatalog(t, ctx, tx, "kb_manager_mig_busy"); !strings.Contains(got+"\n", kbManagerUserFKLine+"\n") {
+		t.Errorf("the second run did not add the validated user foreign key:\n%s", got)
 	}
 }
 

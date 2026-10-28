@@ -10812,16 +10812,16 @@ What the chain left behind:
   first; only possible where the plural `products`/`users`/`cases` existed, i.e.
   old local databases) lacked those three until
   `0262_knowledge_article_user_and_case_fks.sql` (numbered after csm-sync-service's
-  own 0261, since the table is the sync's). For each column it leaves a foreign key
-  to the right table that is already there, under any name, alone; otherwise it adds
-  0044's constraint (`knowledge_article_<column>_fkey`, `ON DELETE SET NULL`) NOT
-  VALID and validates it. Rows that point at a missing user or work item are kept
-  and the constraint stays NOT VALID with a NOTICE; nothing is nulled for you (the
-  file's header has the `UPDATE ... SET <column> = NULL` and `VALIDATE CONSTRAINT`
-  to run by hand). A database the sync built already has all three, and 0262 does
-  nothing there. `knowledge_article_fk_migration_test.go` checks the column list
+  own 0261, since the table is the sync's). For each column it adds 0044's
+  constraint (`knowledge_article_<column>_fkey`, `ON DELETE SET NULL`) unless a
+  foreign key from the column to the right table is already there, under any name;
+  "Adding a missing foreign key" below says how, and when a key is not added or
+  not validated. Where 0044 made the table all three keys are there, and 0262
+  changes nothing. `knowledge_article_fk_migration_test.go` checks the column list
   against 0044's own `REFERENCES` lines and, with `CASE_STATS_TEST_DSN`, that a
-  table made by 000027 ends up identical to 0044's.
+  table made by 000027 ends up identical to 0044's, the WARNINGs, the lock_timeout
+  (with `work_item` held by another transaction) and the orphan count under
+  `work_item`'s row-level policies.
 - `knowledge_base_manager_user` / `knowledge_base_manager_group` and their three
   indexes existed only in `000027`. `kb_manager_repo.go` reads them, and
   csm-sync-service does not map knowledge base managers, so they are
@@ -10839,33 +10839,71 @@ the foreign key `000027` left out: `REFERENCES "user"(id) ON DELETE CASCADE`
   67f35215a:entity-service/migrations/000027_replace_kb_tables_with_real_schema.up.sql`).
   The `knowledge_article` half of that matches csm-sync-service's 0044. 000020
   cannot run on a database the sync built, so a deployed database cannot have the
-  manager tables from 000027 through `make migrate`. Dev, staging and production
-  were **not** inspected (no read-only access from here); the delete action of the
-  real constraint is not recorded either, and CASCADE matches `knowledge_base_id`
-  (`user_id` is NOT NULL, so SET NULL is impossible). Run `\d
-  knowledge_base_manager_user` there to confirm.
-- **Where the tables already exist** nothing is dropped, rewritten or deleted. A DO
-  block looks for any foreign key from `user_id` to `"user"`, whatever its name;
-  one that exists is left as it is. Otherwise (a database that ran 000027) it adds
-  the constraint `NOT VALID`, so every new row is checked, then validates it. If
-  existing rows name a user that does not exist, validation is skipped with a
-  NOTICE and the rows are kept: delete or correct them, then `ALTER TABLE
-  knowledge_base_manager_user VALIDATE CONSTRAINT
-  knowledge_base_manager_user_user_id_fkey`. Adding the constraint takes a brief
-  SHARE ROW EXCLUSIVE lock on `"user"`.
+  manager tables from 000027 through `make migrate`. The delete action of the real
+  constraint is not recorded; CASCADE matches `knowledge_base_id` (`user_id` is NOT
+  NULL, so SET NULL is impossible).
+- **Where the tables already exist** nothing is dropped, rewritten or deleted;
+  where 000027 made them, every `CREATE` is a no-op. Unless a foreign key from
+  `user_id` to `"user"` is already there, under any name, 0251 adds
+  `knowledge_base_manager_user_user_id_fkey` as described below.
 - **Errors.** A 23503 on `POST /kb-manager-users` names the field
   (`userId does not refer to an existing user`, `knowledgeBaseId does not refer to
   an existing knowledge base`) by constraint name, and never returns `pgErr.Detail`.
   It used to say "knowledge base does not exist" plus the Detail for both.
 
+**Adding a missing foreign key (0251, 0262).** Both add a key to a table that may
+already hold rows, so neither may hold a strong lock for long, nor leave anything
+undone without saying so:
+- **Two statements.** A first DO block adds the constraint `NOT VALID`: no row is
+  read, and every new or changed row is checked from then on. The ADD takes SHARE
+  ROW EXCLUSIVE on the table and on the one it references (`"user"` or
+  `work_item`), which waits for every open transaction that has written to either
+  and holds every later writer behind it, so the block commits straight after the
+  add. A second DO block, a transaction of its own under `make migrate` (`psql -f`,
+  autocommit), counts the rows that point nowhere and validates the constraint
+  under SHARE UPDATE EXCLUSIVE and ROW SHARE, which block no reads or writes; it
+  also validates a constraint an earlier run added but did not get to validate.
+  The compose runner applies a file with `psql -1`, as one transaction, so there
+  the first block's locks last to the end of the file (local stacks only).
+- **`lock_timeout` is 5s**, `SET` at the top of the file and `RESET` at the end, as
+  0207 and 0210 do. A lock not granted in time fails that statement with 55P03
+  (`lock_not_available`) and keeps nothing it did; `make migrate` stops without
+  recording the file. Run it again once the tables are quiet.
+- **Two outcomes are left for an operator**, each a `RAISE WARNING` naming the
+  table, column and constraint. Rows that point at a user or work item that does
+  not exist are counted and kept as they are, and the constraint stays NOT VALID
+  (still enforced for new rows). A constraint that already holds the name the file
+  would give the key, and is not that key, means no key is added for that column.
+  The file is recorded either way and never runs again, so these WARNINGs are the
+  only signal it gives. `SELECT conrelid::regclass, conname FROM pg_constraint
+  WHERE contype = 'f' AND NOT convalidated;` lists every foreign key left NOT
+  VALID; `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE
+  conrelid = 'knowledge_article'::regclass AND contype = 'f';` (likewise
+  `knowledge_base_manager_user`) lists the keys a table has. Each file's header
+  gives the cleanup: delete (0251) or clear (0262) the rows, then `VALIDATE
+  CONSTRAINT`; for a taken name, rename the other constraint and add the key by
+  hand. Run 0262's `UPDATE` as a superuser or after `SELECT
+  set_config('app.is_internal', 'true', false)`: `work_item`'s row-level policies
+  otherwise hide every work item from it, and it clears every `source_case_id`.
+  0262 counts its orphans as an internal session for the same reason.
+- **What dev, staging and production have was not checked against their
+  catalogs.** That `knowledge_article` there carries 0044's three keys, and that
+  the real `knowledge_base_manager_user.user_id` references `"user"`, rest on
+  000027's header and csm-sync-service's 0044. The second query above, or `\d
+  knowledge_article` and `\d knowledge_base_manager_user`, run read-only on each
+  settles it.
+
 A database where a fresh `make migrate` already died inside `000020` keeps an
 unused `kb_article_state_enum` type; it is harmless and can be dropped by hand.
-`kb_manager_migration_test.go` pins the shape and checks that the legacy files stay
-gone and that no other migration creates the manager tables (another migration may
-alter them, index them or put policies on them). With `CASE_STATS_TEST_DSN` it
-checks that a fresh database and a 000027 one end with the same catalog, that rows
-are kept (with and without a user), that an existing user foreign key is left
-alone, and the repository's 23503 messages.
+`kb_manager_migration_test.go` pins the shape (including the lock_timeout and the
+two DO blocks, with a checker that is itself tested both ways) and checks that the
+legacy files stay gone and that no other migration creates the manager tables
+(another migration may alter them, index them or put policies on them). With
+`CASE_STATS_TEST_DSN` it checks that a fresh database and a 000027 one end with the
+same catalog, that rows are kept (with and without a user), that an existing user
+foreign key is left alone, the WARNINGs, a taken name, a constraint an earlier run
+left NOT VALID, the lock_timeout (with `"user"` held by another transaction), and
+the repository's 23503 messages.
 
 ## Case feedback silently 404'd on the Postgres data source instead of a documented 503
 

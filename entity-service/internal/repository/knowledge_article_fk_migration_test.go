@@ -22,7 +22,9 @@
 //
 // The first test reads the SQL and needs no database. The others run against
 // a live PostgreSQL instance built from migrations/ ("user" and work_item must
-// exist), in throwaway schemas inside a transaction that is rolled back:
+// exist), in throwaway schemas inside a transaction that is rolled back; the
+// one about lock_timeout holds a lock on work_item from a second connection
+// for about five seconds:
 //
 //	CASE_STATS_TEST_DSN=postgres://... go test ./internal/repository/ -run KnowledgeArticleFKMigration
 
@@ -31,6 +33,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -111,10 +114,14 @@ func kaFKLine(column, target string) string {
 
 // TestKnowledgeArticleFKMigrationShape: 0262 adds exactly the foreign keys
 // 0044 puts on columns that 000027 left plain, under 0044's constraint names,
-// NOT VALID and then validated, and nothing in it can remove or rewrite what a
-// database already has.
+// NOT VALID in one DO block and validated in another, under a lock_timeout,
+// and nothing in it can remove or rewrite what a database already has.
 func TestKnowledgeArticleFKMigrationShape(t *testing.T) {
 	body := strings.ToUpper(sqlWithoutComments(readMigration(t, kaFKMigrationPath)))
+
+	for _, problem := range migrationLockingProblems(body) {
+		t.Error(problem)
+	}
 
 	for _, banned := range []string{`\bDROP\s`, `\bTRUNCATE\b`, `\bDELETE\s+FROM\b`, `\bUPDATE\s+\S+\s+SET\b`, `\bINSERT\s+INTO\b`, `\bCREATE\s`, `\bCOMMIT\b`, `\bROLLBACK\b`, `\bSTART\s+TRANSACTION\b`, `\bBEGIN\s*(;|TRANSACTION\b|WORK\b|ISOLATION\b)`} {
 		if regexp.MustCompile(banned).MatchString(body) {
@@ -138,15 +145,23 @@ func TestKnowledgeArticleFKMigrationShape(t *testing.T) {
 			declared[m[1]] = m[2]
 		}
 	}
-	added := map[string]string{}
-	for _, m := range regexp.MustCompile(`\('(\w+)',\s*'("?\w+"?)'::regclass,\s*'(\w+)'\)`).FindAllStringSubmatch(sqlWithoutComments(readMigration(t, kaFKMigrationPath)), -1) {
-		added[m[1]] = m[2]
-		if want := "knowledge_article_" + m[1] + "_fkey"; m[3] != want {
-			t.Errorf("constraint for %s is named %s, want 0044's %s", m[1], m[3], want)
-		}
+	// Each DO block lists the columns it works on: the one that adds and the
+	// one that validates must both list exactly 0044's.
+	blocks := migrationDOBlock.FindAllStringSubmatch(sqlWithoutComments(readMigration(t, kaFKMigrationPath)), -1)
+	if len(blocks) != 2 {
+		t.Fatalf("0262 has %d DO blocks, want 2 (add, then validate)", len(blocks))
 	}
-	if len(declared) != 3 || !equalStringMaps(declared, added) {
-		t.Errorf("0262 adds %v, 0044 declares %v", added, declared)
+	for i, block := range blocks {
+		listed := map[string]string{}
+		for _, m := range regexp.MustCompile(`\('(\w+)',\s*'("?\w+"?)'::regclass,\s*'(\w+)'\)`).FindAllStringSubmatch(block[1], -1) {
+			listed[m[1]] = m[2]
+			if want := "knowledge_article_" + m[1] + "_fkey"; m[3] != want {
+				t.Errorf("DO block %d: constraint for %s is named %s, want 0044's %s", i+1, m[1], m[3], want)
+			}
+		}
+		if len(declared) != 3 || !equalStringMaps(declared, listed) {
+			t.Errorf("DO block %d lists %v, 0044 declares %v", i+1, listed, declared)
+		}
 	}
 }
 
@@ -230,9 +245,9 @@ func kaSeed(t *testing.T, ctx context.Context, tx pgx.Tx) {
 
 // TestKnowledgeArticleFKMigrationConverges: where 0044 made knowledge_article
 // 0262 changes nothing; where 000027 made it, 0262 brings it to exactly what
-// 0044 makes, run once or twice, with its rows untouched.
+// 0044 makes, run once or twice, with its rows untouched and no WARNING.
 func TestKnowledgeArticleFKMigrationConverges(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "ka_fk_mig_fresh", "ka_fk_mig_old")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_fresh", "ka_fk_mig_old")
 	migration := readMigration(t, kaFKMigrationPath)
 
 	fresh := kaFreshCatalog(t, ctx, tx, "ka_fk_mig_fresh")
@@ -242,6 +257,7 @@ func TestKnowledgeArticleFKMigrationConverges(t *testing.T) {
 		}
 	}
 	kbManagerExec(t, ctx, tx, "run 0262 over 0044's table", migration)
+	warnings.expectWarnings(t, "run over 0044's table")
 	if got := tableCatalog(t, ctx, tx, "ka_fk_mig_fresh", "knowledge_article"); got != fresh {
 		t.Errorf("0262 changed 0044's table.\nbefore:\n%s\n\nafter:\n%s", fresh, got)
 	}
@@ -256,6 +272,7 @@ func TestKnowledgeArticleFKMigrationConverges(t *testing.T) {
 
 	for run := 1; run <= 2; run++ {
 		kbManagerExec(t, ctx, tx, "run 0262 over 000027's table", migration)
+		warnings.expectWarnings(t, fmt.Sprintf("run %d over 000027's table", run))
 		if got := tableCatalog(t, ctx, tx, "ka_fk_mig_old", "knowledge_article"); got != fresh {
 			t.Errorf("run %d: 000027 + 0262 differs from 0044.\n0044:\n%s\n\n000027 + 0262:\n%s", run, fresh, got)
 		}
@@ -267,11 +284,11 @@ func TestKnowledgeArticleFKMigrationConverges(t *testing.T) {
 
 // TestKnowledgeArticleFKMigrationKeepsRowsThatPointNowhere: a 000027 table
 // whose rows name a user and a work item that do not exist. 0262 succeeds and
-// changes no row; those two constraints stay NOT VALID (new rows are checked),
-// the third is validated. Clearing the values as the header says and
-// validating by hand then reaches 0044's table.
+// changes no row; those two constraints stay NOT VALID (new rows are checked)
+// with a WARNING each on every run, the third is validated. Clearing the
+// values as the header says and validating by hand then reaches 0044's table.
 func TestKnowledgeArticleFKMigrationKeepsRowsThatPointNowhere(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "ka_fk_mig_fresh", "ka_fk_mig_orphans")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_fresh", "ka_fk_mig_orphans")
 	migration := readMigration(t, kaFKMigrationPath)
 	fresh := kaFreshCatalog(t, ctx, tx, "ka_fk_mig_fresh")
 
@@ -291,6 +308,9 @@ func TestKnowledgeArticleFKMigrationKeepsRowsThatPointNowhere(t *testing.T) {
 
 	for run := 1; run <= 2; run++ {
 		kbManagerExec(t, ctx, tx, "run 0262", migration)
+		warnings.expectWarnings(t, fmt.Sprintf("run %d", run),
+			`knowledge_article.author_id: 1 row(s) match no row of "user", so knowledge_article_author_id_fkey stays NOT VALID until they are cleared or corrected (see 0262_knowledge_article_user_and_case_fks.sql)`,
+			`knowledge_article.source_case_id: 1 row(s) match no row of work_item, so knowledge_article_source_case_id_fkey stays NOT VALID until they are cleared or corrected (see 0262_knowledge_article_user_and_case_fks.sql)`)
 		got := tableCatalog(t, ctx, tx, "ka_fk_mig_orphans", "knowledge_article") + "\n"
 		for _, line := range []string{
 			kaFKLine("author_id", `"user"`) + " NOT VALID",
@@ -319,7 +339,9 @@ func TestKnowledgeArticleFKMigrationKeepsRowsThatPointNowhere(t *testing.T) {
 	}
 	_ = sp.Rollback(ctx)
 
-	// What the header tells an operator to do.
+	// What the header tells an operator to do, with work_item's row-level
+	// policies lifted as it says.
+	kbManagerExec(t, ctx, tx, "act as an internal session", `SELECT set_config('app.is_internal', 'true', false)`)
 	for _, c := range []struct{ column, target string }{{"author_id", `"user"`}, {"source_case_id", "work_item"}} {
 		kbManagerExec(t, ctx, tx, "clear "+c.column, `
 			UPDATE knowledge_article a SET `+c.column+` = NULL
@@ -335,9 +357,9 @@ func TestKnowledgeArticleFKMigrationKeepsRowsThatPointNowhere(t *testing.T) {
 // TestKnowledgeArticleFKMigrationLeavesExistingConstraintsAlone: a foreign key
 // that is already there under another name and delete action is kept and not
 // doubled, and a constraint holding 0044's name for something else blocks
-// only its own column; the others are still added.
+// only its own column, with a WARNING; the others are still added.
 func TestKnowledgeArticleFKMigrationLeavesExistingConstraintsAlone(t *testing.T) {
-	ctx, tx := kbManagerMigrationTx(t, "ka_fk_mig_has_fk")
+	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_has_fk")
 
 	kbManagerUseSchema(t, ctx, tx, "ka_fk_mig_has_fk")
 	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbTables000027DDL)
@@ -347,6 +369,8 @@ func TestKnowledgeArticleFKMigrationLeavesExistingConstraintsAlone(t *testing.T)
 		`ALTER TABLE knowledge_article ADD CONSTRAINT knowledge_article_revised_by_id_fkey CHECK (true)`)
 
 	kbManagerExec(t, ctx, tx, "run 0262", readMigration(t, kaFKMigrationPath))
+	warnings.expectWarnings(t, "run with existing constraints",
+		`knowledge_article.revised_by_id: constraint knowledge_article_revised_by_id_fkey already exists and is not a foreign key from this column to "user", so no foreign key was added for it (see 0262_knowledge_article_user_and_case_fks.sql)`)
 
 	var fks []string
 	rows, err := tx.Query(ctx, `
@@ -372,5 +396,108 @@ func TestKnowledgeArticleFKMigrationLeavesExistingConstraintsAlone(t *testing.T)
 	}
 	if strings.Join(fks, "\n") != strings.Join(want, "\n") {
 		t.Errorf("constraints:\n%s\nwant:\n%s", strings.Join(fks, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestKnowledgeArticleFKMigrationValidatesWhatAnEarlierRunLeft: a run that
+// stopped after the first DO block (a lock_timeout in the validation, say)
+// left 0044's constraints NOT VALID. The next run validates them.
+func TestKnowledgeArticleFKMigrationValidatesWhatAnEarlierRunLeft(t *testing.T) {
+	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_fresh", "ka_fk_mig_half_done")
+	fresh := kaFreshCatalog(t, ctx, tx, "ka_fk_mig_fresh")
+
+	kbManagerUseSchema(t, ctx, tx, "ka_fk_mig_half_done")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbTables000027DDL)
+	kaSeed(t, ctx, tx)
+	for _, c := range []struct{ column, target string }{{"author_id", `"user"`}, {"revised_by_id", `"user"`}, {"source_case_id", "work_item"}} {
+		kbManagerExec(t, ctx, tx, "add "+c.column+"'s constraint as the first DO block does",
+			`ALTER TABLE knowledge_article ADD CONSTRAINT knowledge_article_`+c.column+`_fkey FOREIGN KEY (`+c.column+`) REFERENCES `+c.target+`(id) ON DELETE SET NULL NOT VALID`)
+	}
+
+	kbManagerExec(t, ctx, tx, "run 0262", readMigration(t, kaFKMigrationPath))
+	warnings.expectWarnings(t, "run over constraints left NOT VALID")
+	if got := tableCatalog(t, ctx, tx, "ka_fk_mig_half_done", "knowledge_article"); got != fresh {
+		t.Errorf("want 0044's table, every key validated.\n0044:\n%s\n\nnow:\n%s", fresh, got)
+	}
+}
+
+// TestKnowledgeArticleFKMigrationGivesUpWhenWorkItemIsBusy: adding the
+// source_case_id key needs SHARE ROW EXCLUSIVE on work_item, which waits for
+// every transaction that has written to it, and every writer that comes after
+// waits behind it. With work_item held by another transaction, 0262 gives up
+// after its lock_timeout, keeping none of the keys its first DO block added,
+// instead of holding writers back for as long as that transaction lasts; run
+// again once it has ended, it adds and validates all three.
+func TestKnowledgeArticleFKMigrationGivesUpWhenWorkItemIsBusy(t *testing.T) {
+	ctx, tx, _ := kbManagerMigrationTx(t, "ka_fk_mig_busy", "ka_fk_mig_fresh")
+	migration := readMigration(t, kaFKMigrationPath)
+
+	kbManagerUseSchema(t, ctx, tx, "ka_fk_mig_busy")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbTables000027DDL)
+	old := tableCatalog(t, ctx, tx, "ka_fk_mig_busy", "knowledge_article")
+	kbManagerExec(t, ctx, tx, "bound the wait if the migration sets no lock_timeout", `SET LOCAL statement_timeout = '20s'`)
+
+	expectLockTimeout(t, execWhileTableIsBusy(t, ctx, tx, "work_item", migration))
+	if got := tableCatalog(t, ctx, tx, "ka_fk_mig_busy", "knowledge_article"); got != old {
+		t.Errorf("the run that gave up changed the table.\nbefore:\n%s\n\nafter:\n%s", old, got)
+	}
+
+	// Only now: 0044's table references work_item, and creating it locks
+	// work_item until this transaction ends, which the other connection's
+	// lock above would have waited on.
+	fresh := kaFreshCatalog(t, ctx, tx, "ka_fk_mig_fresh")
+	kbManagerUseSchema(t, ctx, tx, "ka_fk_mig_busy")
+	kbManagerExec(t, ctx, tx, "run 0262 again", migration)
+	if got := tableCatalog(t, ctx, tx, "ka_fk_mig_busy", "knowledge_article"); got != fresh {
+		t.Errorf("the second run did not reach 0044's table.\n0044:\n%s\n\nnow:\n%s", fresh, got)
+	}
+}
+
+// TestKnowledgeArticleFKMigrationCountsUnderRowLevelPolicies: a migrating role
+// that is not a superuser is held to work_item's row-level policies, which
+// show it no work item. 0262 counts the orphans as an internal session, so an
+// article that points at a real work item is not taken for one, no WARNING is
+// raised and the key is validated.
+func TestKnowledgeArticleFKMigrationCountsUnderRowLevelPolicies(t *testing.T) {
+	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_rls")
+	var canCreateRole bool
+	if err := tx.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole FROM pg_roles WHERE rolname = current_user`).Scan(&canCreateRole); err != nil {
+		t.Fatalf("read the test role: %v", err)
+	}
+	if !canCreateRole {
+		t.Skip("needs a DSN whose role may create a role")
+	}
+
+	const workItemID = "3a111111-0000-0000-0000-0000000000b1"
+	kbManagerUseSchema(t, ctx, tx, "ka_fk_mig_rls")
+	kbManagerExec(t, ctx, tx, "create the tables as 000027 did", kbTables000027DDL)
+	kbManagerExec(t, ctx, tx, "insert a work item", `
+		INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type)
+		VALUES ($1, now(), now(), 'ka-fk-mig-test', 'ka-fk-mig-test', 'KA-FK-MIG-TEST-1', 'ka-fk-mig-test', 'INCIDENT')`, workItemID)
+	kbManagerExec(t, ctx, tx, "insert an article from that work item", `
+		INSERT INTO knowledge_article (id, created_on, updated_on, created_by, updated_by, title, source_case_id)
+		VALUES (gen_random_uuid(), now(), now(), 'ka-fk-mig-test', 'ka-fk-mig-test', 'From a case', $1)`, workItemID)
+	for _, stmt := range []string{
+		`CREATE ROLE ka_fk_mig_rls_migrator NOSUPERUSER NOBYPASSRLS`,
+		`GRANT USAGE ON SCHEMA ka_fk_mig_rls TO ka_fk_mig_rls_migrator`,
+		`ALTER TABLE knowledge_article OWNER TO ka_fk_mig_rls_migrator`,
+		`GRANT SELECT, REFERENCES ON work_item, "user" TO ka_fk_mig_rls_migrator`,
+		`SET LOCAL ROLE ka_fk_mig_rls_migrator`,
+	} {
+		kbManagerExec(t, ctx, tx, stmt, stmt)
+	}
+	var seen int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM work_item WHERE id = $1`, workItemID).Scan(&seen); err != nil {
+		t.Fatalf("read work_item as the migrating role: %v", err)
+	}
+	if seen != 0 {
+		t.Fatalf("the migrating role sees the work item without the internal flag; the test proves nothing")
+	}
+
+	kbManagerExec(t, ctx, tx, "run 0262 as that role", readMigration(t, kaFKMigrationPath))
+	warnings.expectWarnings(t, "run as a role held to work_item's policies")
+	kbManagerExec(t, ctx, tx, "back to the test's own role", `RESET ROLE`)
+	if got := tableCatalog(t, ctx, tx, "ka_fk_mig_rls", "knowledge_article") + "\n"; !strings.Contains(got, kaFKLine("source_case_id", "work_item")+"\n") {
+		t.Errorf("want source_case_id's key validated:\n%s", got)
 	}
 }
