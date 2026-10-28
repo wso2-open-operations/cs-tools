@@ -1427,6 +1427,9 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	// reused by everything below that needs the gates (it stays valid: the
 	// change_request row is locked from here to the end of the transaction).
 	var gates changeRequestGateSnapshot
+	// deviationChanged: this PATCH records a deviation different from the stored
+	// one (a resend is not), which flags a standard change template for review.
+	var deviationChanged bool
 	if changeRequestPatchNeedsGate(req) {
 		var err error
 		if gates, err = lockChangeRequestForPatch(ctx, tx, id); err != nil {
@@ -1460,6 +1463,13 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		// (change_request_deviation.go).
 		if err := checkDeviationEditable(ctx, tx, id, gates, req.ImplementationDeviation); err != nil {
 			return "", err
+		}
+		if req.ImplementationDeviation != nil && gates.templateVersionID != nil {
+			stored, err := readStoredImplementationDeviation(ctx, tx, id)
+			if err != nil {
+				return "", fmt.Errorf("patch change request: read deviation: %w", err)
+			}
+			deviationChanged = !sameImplementationDeviation(stored, normalizeImplementationDeviation(req.ImplementationDeviation))
 		}
 		// A box turned on after Request Approval needs somebody who can be asked
 		// (rule 4b, after the rules that need no query).
@@ -2173,7 +2183,7 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	// A change raised from a standard change template that was rolled back, or
 	// deviated from its plan, flags the template for review. Last: it escalates
 	// the transaction's identity.
-	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, effectiveState != nil, req.ImplementationDeviation != nil); err != nil {
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, effectiveState != nil, deviationChanged); err != nil {
 		return "", err
 	}
 
@@ -2886,6 +2896,9 @@ func (r *changeRequestRepo) GetChangeRequestApprovals(ctx context.Context, id st
 	if err := r.vis.requireVisibleChangeRequest(ctx, r.db, id); err != nil {
 		return domain.ChangeRequestApprovals{}, err
 	}
+	if err := refuseOtherWorkItemType(ctx, r.db, id); err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
 	stageRows, err := r.db.Query(ctx, changeRequestApprovalStagesQuery, id)
 	if err != nil {
 		return domain.ChangeRequestApprovals{}, fmt.Errorf("get change request approvals: query stages: %w", err)
@@ -3362,6 +3375,12 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 // uses (answerCustomerStageViaPatch), so both mechanisms record the same stage
 // rows, move the state the same way and stamp the same flags.
 func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail string) (string, error) {
+	// The approval tables also hold the CAB stage of a standard change proposal
+	// (another work item type, decided only through its own route, which records
+	// the outcome on the proposal): never decided here.
+	if err := refuseOtherWorkItemType(ctx, tx, id); err != nil {
+		return "", err
+	}
 	var lockedID string
 	var lockedState *string
 	if err := tx.QueryRow(ctx, `SELECT id, state::text FROM change_request WHERE id = $1 FOR UPDATE`, id).Scan(&lockedID, &lockedState); err != nil && !errors.Is(err, pgx.ErrNoRows) {

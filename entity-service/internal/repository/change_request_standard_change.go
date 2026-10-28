@@ -196,9 +196,9 @@ func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID
 // from for review when THIS write failed the change: it rolled the change back
 // (rolledBack: the write moved the state, which is then checked to be ROLLBACK),
 // or it recorded a deviation from the implementation plan (deviated: the write
-// carried one, which is then checked to be non-blank). A deviation stored earlier
-// does not flag again on a later state move, so a flag the owner cleared stays
-// cleared. A no-op for a change request not raised from a template. It escalates
+// changed the stored one, which is then checked to be non-blank). A deviation
+// stored earlier, or resent unchanged, does not flag again, so a flag the owner
+// cleared stays cleared. A no-op for a change request not raised from a template. It escalates
 // the transaction's identity (flagStandardTemplateReview), so it runs last in its
 // transaction.
 func flagStandardTemplateOnFailure(ctx context.Context, tx pgx.Tx, id, actor string, rolledBack, deviated bool) error {
@@ -262,4 +262,23 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		out.Parameters = append(out.Parameters, cp)
 	}
 	return &out, nil
+}
+
+// refuseOtherWorkItemType answers 404 for a work item the caller can see that is
+// not a change request (a standard change proposal, whose CAB stage lives in the
+// same approval tables). A work item the caller cannot see is left to the caller's
+// own visibility handling.
+func refuseOtherWorkItemType(ctx context.Context, q crQuerier, id string) error {
+	var typ string
+	err := q.QueryRow(ctx, `SELECT type::text FROM work_item WHERE id = $1::uuid`, id).Scan(&typ)
+	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check work item type: %w", err)
+	}
+	if typ != "CHANGE_REQUEST" {
+		return &apierror.NotFoundError{Msg: "change request not found"}
+	}
+	return nil
 }

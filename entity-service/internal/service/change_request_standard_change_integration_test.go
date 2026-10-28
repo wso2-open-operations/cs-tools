@@ -123,9 +123,13 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "a template with type normal")
 	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.ImplementationPlan = stdp("<p>my own plan</p>") })
 	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "a template-specified field sent")
-	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.StandardChangeParameters = map[string]string{"env": "prod"} })
+	_, err = raise(func(r *domain.CreateChangeRequestRequest) {
+		r.StandardChangeParameters = map[string]string{"env": "prod"}
+	})
 	wantStdValidation(t, err, "Cluster (cluster) is required")
-	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.StandardChangeParameters = map[string]string{"cluster": "a", "env": "qa"} })
+	_, err = raise(func(r *domain.CreateChangeRequestRequest) {
+		r.StandardChangeParameters = map[string]string{"cluster": "a", "env": "qa"}
+	})
 	wantStdValidation(t, err, "must be one of: dev, prod")
 	other := tpl.CurrentVersion.TemplateID // not a version id
 	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.StandardChangeTemplateVersionID = &other })
@@ -148,6 +152,25 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if sc == nil || sc.Template.ID != tpl.ID || sc.VersionID != tpl.CurrentVersion.ID || sc.Version != 1 || len(sc.Parameters) != 2 ||
 		sc.Parameters[0].Value == nil || *sc.Parameters[0].Value != "aks-9" {
 		t.Fatalf("standardChange = %+v", sc)
+	}
+
+	// A proposal's CAB rows live in the change request approval tables, but the
+	// change request routes never reach them: it is decided on its own route only.
+	pending, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
+		Kind: domain.StandardChangeProposalKindNew, SourceChangeRequestID: stdp(env.crs["closed2"])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeProposalComplete(t, env, pending.ID, stdTag+" Pending")
+	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), pending.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = crs.DecideChangeRequestApproval(crCtx(t, stdCAB1), pending.ID, "rejected")
+	expectErr[*apierror.NotFoundError](t, err, "decide a proposal through the change request route")
+	_, err = crs.GetChangeRequestApprovals(crCtx(t, stdCAB1), pending.ID)
+	expectErr[*apierror.NotFoundError](t, err, "read a proposal's approvals through the change request route")
+	if p, _ := env.svc.GetProposal(stdCtx(stdCAB1), pending.ID); p.State != domain.StandardChangeProposalStateCABReview || approverStates(p)[stdCAB1] != "REQUESTED" {
+		t.Fatalf("the change request route touched the proposal: %s %v", p.State, approverStates(p))
 	}
 
 	// Frozen in New already; resending a stored value is accepted.

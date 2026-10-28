@@ -328,18 +328,33 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("version 1 is kept unchanged: %+v %v", v1, err)
 	}
 
-	// A new template with a live template's name is refused at approval and changes nothing.
+	// A new template with a live template's name is refused at submit, while the
+	// draft can still be renamed ...
 	dup, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
 		Kind: domain.StandardChangeProposalKindNew, SourceChangeRequestID: stdp(env.crs["closed2"])})
 	if err != nil {
 		t.Fatal(err)
 	}
 	makeProposalComplete(t, env, dup.ID, strings.ToUpper(name))
+	_, err = env.svc.SubmitProposal(stdCtx(stdProposer), dup.ID)
+	expectErr[*apierror.ConflictError](t, err, "submit a duplicate name")
+	other := name + " (other)"
+	if _, err := env.svc.UpdateProposal(stdCtx(stdProposer), dup.ID, domain.UpdateStandardChangeProposalRequest{Name: &other}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), dup.ID); err != nil {
+		t.Fatalf("submit under a free name: %v", err)
+	}
+	// ... and again at approval, should a template take the name meanwhile;
+	// the refused approval changes nothing.
+	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET name = $2 WHERE id = $1::uuid`, tpl.ID, other); err != nil {
 		t.Fatal(err)
 	}
 	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), dup.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
 	expectErr[*apierror.ConflictError](t, err, "approve a duplicate name")
+	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET name = $2 WHERE id = $1::uuid`, tpl.ID, name); err != nil {
+		t.Fatal(err)
+	}
 	if again, _ := env.svc.GetProposal(stdCtx(stdCAB1), dup.ID); again.State != domain.StandardChangeProposalStateCABReview || approverStates(again)[stdCAB1] != "REQUESTED" {
 		t.Fatalf("a refused approval wrote something: %s %v", again.State, approverStates(again))
 	}

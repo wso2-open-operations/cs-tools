@@ -89,13 +89,13 @@ type StandardChangeProposalCreate struct {
 
 // StandardChangeProposalFilter narrows SearchProposals.
 type StandardChangeProposalFilter struct {
-	States             []string // upper case
-	Kinds              []string // upper case
-	TemplateID         *string
-	ProposedByEmail    string // "" = anyone
-	AwaitingEmail      string // "" = no filter: proposals in CAB review with a REQUESTED row for this email
-	Query              string
-	Limit, Offset      int
+	States          []string // upper case
+	Kinds           []string // upper case
+	TemplateID      *string
+	ProposedByEmail string // "" = anyone
+	AwaitingEmail   string // "" = no filter: proposals in CAB review with a REQUESTED row for this email
+	Query           string
+	Limit, Offset   int
 }
 
 type standardChangeRepo struct {
@@ -132,11 +132,17 @@ func prefixed(alias, cols string) string {
 // that decodes them into c.
 func contentDest(c *domain.StandardChangeContent) ([]any, func() error) {
 	var category, impact, risk *string
+	// The booleans go through nullable locals: a template whose current version
+	// is missing (LEFT JOIN, templateSelect) reads all of them as NULL.
+	var planningVisible, approvalRequired, reviewRequired *bool
 	var params []byte
 	dest := []any{&c.Subject, &c.Description, &c.Justification, &c.ImplementationPlan, &c.RiskImpactAnalysis,
 		&c.BackoutPlan, &c.TestPlan, &category, &impact, &risk, &c.RollbackDurationText,
-		&c.IsPlanningVisibleToCustomers, &c.CustomerApprovalRequired, &c.CustomerReviewRequired, &params}
+		&planningVisible, &approvalRequired, &reviewRequired, &params}
 	return dest, func() error {
+		c.IsPlanningVisibleToCustomers = planningVisible != nil && *planningVisible
+		c.CustomerApprovalRequired = approvalRequired != nil && *approvalRequired
+		c.CustomerReviewRequired = reviewRequired != nil && *reviewRequired
 		if category != nil {
 			v := domain.ChangeRequestCategory(*category)
 			c.Category = &v
@@ -998,6 +1004,21 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		if err := checkTemplateStillCurrent(ctx, tx, id); err != nil {
 			return err
 		}
+		// The name is checked here too, while the proposer can still rename the
+		// draft; approval checks it again (a template may take the name meanwhile).
+		if p.Kind != domain.StandardChangeProposalKindRetire {
+			var taken bool
+			if err := tx.QueryRow(ctx, `
+				SELECT EXISTS (SELECT 1 FROM standard_change_template t
+				                WHERE lower(btrim(t.name)) = lower(btrim($1)) AND t.state <> 'RETIRED'
+				                  AND t.id IS DISTINCT FROM (SELECT template_id FROM standard_change_proposal WHERE id = $2::uuid))`,
+				p.Name, id).Scan(&taken); err != nil {
+				return fmt.Errorf("submit standard change proposal: check name: %w", err)
+			}
+			if taken {
+				return &apierror.ConflictError{Msg: fmt.Sprintf("a standard change template named %q already exists: rename the proposal and submit it again", p.Name)}
+			}
+		}
 		if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
 			return fmt.Errorf("submit standard change proposal: escalate identity: %w", err)
 		}
@@ -1140,7 +1161,7 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 	nameTaken := func(err error) error {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return &apierror.ConflictError{Msg: fmt.Sprintf("a standard change template named %q already exists: rename the proposal before it is approved", name)}
+			return &apierror.ConflictError{Msg: fmt.Sprintf("a standard change template named %q already exists (it took the name after this proposal was submitted): reject it, or ask the proposer to withdraw it and propose again under another name", name)}
 		}
 		return fmt.Errorf("apply standard change proposal: %w", err)
 	}

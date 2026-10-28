@@ -115,6 +115,10 @@ func TestCheckStandardChangeProposalComplete(t *testing.T) {
 	wantStdValidation(t, checkStandardChangeProposalComplete(p), "still needs: rationale, subject, testPlan, risk")
 
 	p = completeProposal()
+	p.RollbackDurationText = stdp(strings.Repeat("x", 256))
+	wantStdValidation(t, checkStandardChangeProposalComplete(p), "rollbackDurationText must be at most 255")
+
+	p = completeProposal()
 	high := domain.ChangeRequestRiskHigh
 	p.Risk = &high
 	wantStdValidation(t, checkStandardChangeProposalComplete(p), "cannot be high risk")
@@ -213,6 +217,8 @@ func TestRenderStandardChange(t *testing.T) {
 		{"text with newline", map[string]string{"cluster": "a\nb", "tags": "y"}, "single line"},
 		{"select not an option", map[string]string{"cluster": "x", "tags": "y", "owner": "team-c"}, "must be one of: team-a, team-b"},
 		{"number", map[string]string{"cluster": "x", "tags": "y", "count": "three"}, "must be a number"},
+		{"number NaN", map[string]string{"cluster": "x", "tags": "y", "count": "NaN"}, "must be a number"},
+		{"number Inf", map[string]string{"cluster": "x", "tags": "y", "count": "-Inf"}, "must be a number"},
 		{"date", map[string]string{"cluster": "x", "tags": "y", "on": "28/10/2026"}, "must be a date"},
 		{"text too long", map[string]string{"cluster": strings.Repeat("x", 501), "tags": "y"}, "at most 500"},
 	}
@@ -222,6 +228,11 @@ func TestRenderStandardChange(t *testing.T) {
 			wantStdValidation(t, err, c.want)
 		})
 	}
+
+	rb := version()
+	rb.RollbackDurationText = stdp("Restore within {{reason}}")
+	_, _, err = renderStandardChange(rb, map[string]string{"cluster": "x", "tags": "y", "reason": strings.Repeat("r", 300)})
+	wantStdValidation(t, err, "rollback duration this template makes")
 
 	long := version()
 	long.Subject = stdp("{{reason}}")

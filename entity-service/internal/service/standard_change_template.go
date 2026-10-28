@@ -19,6 +19,7 @@ package service
 import (
 	"fmt"
 	"html"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -46,6 +47,7 @@ const (
 	maxStandardChangeTextareaValue   = 4000
 	maxStandardChangeName            = 255
 	maxStandardChangeRenderedSubject = 512 // work_item.subject
+	maxStandardChangeRollbackText    = 255 // change_request.rollback_duration
 )
 
 var (
@@ -217,6 +219,9 @@ func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error 
 	if c.Subject != nil && utf8.RuneCountInString(*c.Subject) > maxStandardChangeName {
 		return &apierror.ValidationError{Msg: fmt.Sprintf("subject must be at most %d characters", maxStandardChangeName)}
 	}
+	if c.RollbackDurationText != nil && utf8.RuneCountInString(*c.RollbackDurationText) > maxStandardChangeRollbackText {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("rollbackDurationText must be at most %d characters", maxStandardChangeRollbackText)}
+	}
 	params, err := normalizeStandardChangeParameters(c.Parameters)
 	if err != nil {
 		return err
@@ -260,7 +265,7 @@ func normalizeStandardChangeValue(p domain.StandardChangeParameter, raw string) 
 			return "", &apierror.ValidationError{Msg: fmt.Sprintf("%s (%s) must be at most %d characters", p.Label, p.Key, maxStandardChangeTextareaValue)}
 		}
 	case domain.StandardChangeParameterTypeNumber:
-		if _, err := strconv.ParseFloat(v, 64); err != nil {
+		if f, err := strconv.ParseFloat(v, 64); err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 			return "", &apierror.ValidationError{Msg: fmt.Sprintf("%s (%s) must be a number", p.Label, p.Key)}
 		}
 	case domain.StandardChangeParameterTypeDate:
@@ -335,6 +340,9 @@ func renderStandardChange(v domain.StandardChangeTemplateVersion, values map[str
 	}
 	if out.Subject != nil && utf8.RuneCountInString(*out.Subject) > maxStandardChangeRenderedSubject {
 		return domain.StandardChangeContent{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("the title this template makes with these values is longer than %d characters: shorten the values", maxStandardChangeRenderedSubject)}
+	}
+	if out.RollbackDurationText != nil && utf8.RuneCountInString(*out.RollbackDurationText) > maxStandardChangeRollbackText {
+		return domain.StandardChangeContent{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("the rollback duration this template makes with these values is longer than %d characters: shorten the values", maxStandardChangeRollbackText)}
 	}
 	return out, stored, nil
 }
