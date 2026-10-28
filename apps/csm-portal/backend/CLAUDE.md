@@ -462,6 +462,19 @@ This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s ow
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
 reached the browser; this is what stops them being sent at all to a caller who shouldn't see them.
 
+## Standard changes (`internal/handler/standard_changes.go`)
+
+Operations > Standard Changes: the CAB-approved standard change templates and the proposals that
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
+are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
+only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
+proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
+or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
+message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
+one); a 5xx is the generic fallback. A change request raised from a template is an ordinary
+`POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
+`standardChangeParameters`, forwarded like every other create field.
+
 ## Change request tags go through the case tag routes
 
 `GET /change-requests/{id}` is a raw pass-through, so the `tags` array the

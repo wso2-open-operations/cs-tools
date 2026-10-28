@@ -1335,6 +1335,13 @@ func (c *CustomerEntityClient) DeleteCaseAlertValue(ctx context.Context, valueID
 	return c.do(ctx, http.MethodDelete, "/team-schedule/case-alerts/settings/values/"+url.PathEscape(valueID), nil)
 }
 
+// StandardChangeCall calls one of entity-service's standard change catalogue routes
+// (/standard-change-templates/..., /standard-change-proposals/...) with the
+// caller's identity. path is built by the handler from validated ids only.
+func (c *CustomerEntityClient) StandardChangeCall(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, method, path, body)
+}
+
 // ListRunbooks calls GET /runbooks: the alert-name to runbook catalog.
 func (c *CustomerEntityClient) ListRunbooks(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, "/runbooks", nil)
