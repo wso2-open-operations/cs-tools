@@ -22,20 +22,20 @@ describe("isEntityAttachmentsEnabled", () => {
     (window as unknown as { config?: unknown }).config = undefined;
   });
 
-  it("is off unless the key is exactly true", () => {
+  it("is on unless the key is exactly false", () => {
     const set = (value: unknown) => {
       (window as unknown as { config?: unknown }).config = {
         CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: value,
       };
     };
-    expect(isEntityAttachmentsEnabled()).toBe(false);
+    expect(isEntityAttachmentsEnabled()).toBe(true);
     (window as unknown as { config?: unknown }).config = {};
-    expect(isEntityAttachmentsEnabled()).toBe(false);
-    set("true");
-    expect(isEntityAttachmentsEnabled()).toBe(false);
-    set(false);
-    expect(isEntityAttachmentsEnabled()).toBe(false);
+    expect(isEntityAttachmentsEnabled()).toBe(true);
+    set("false");
+    expect(isEntityAttachmentsEnabled()).toBe(true);
     set(true);
     expect(isEntityAttachmentsEnabled()).toBe(true);
+    set(false);
+    expect(isEntityAttachmentsEnabled()).toBe(false);
   });
 });

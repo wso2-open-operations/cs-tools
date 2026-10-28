@@ -84,6 +84,12 @@ function beAttachment(id: string): BeAttachment {
   };
 }
 
+// These cases cover the older ServiceNow flow, so the entity-service flow
+// (on by default) is switched off for the whole file.
+beforeEach(() => {
+  window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as unknown as typeof window.config;
+});
+
 describe("useGetCsmCaseAttachments", () => {
   beforeEach(() => {
     postMock.mockReset();

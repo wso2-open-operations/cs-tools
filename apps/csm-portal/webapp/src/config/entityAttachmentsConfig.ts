@@ -20,15 +20,14 @@
  * this deployment.
  *
  * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED`
- * key. Off is the default and means no behaviour change at all: every
- * attachment action takes the path it took before this flag existed. Only
- * `true` — the boolean, or the string `"true"` for platforms that inject
- * config as strings — turns it on; any other value is off.
+ * key. On is the default: a missing key or any other value keeps the flow on.
+ * Only `false` — the boolean, or the string `"false"` for platforms that inject
+ * config as strings — turns it off and restores the older ServiceNow flow.
  *
  * Read at call time (not module load) so a test can set `window.config` per
  * case; the value is fixed for a real page load anyway.
  */
 export function isEntityAttachmentsEnabled(): boolean {
   const raw = window.config?.CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED;
-  return raw === true || (typeof raw === "string" && raw.trim().toLowerCase() === "true");
+  return !(raw === false || (typeof raw === "string" && raw.trim().toLowerCase() === "false"));
 }
