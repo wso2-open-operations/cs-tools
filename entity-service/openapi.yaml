@@ -31279,7 +31279,7 @@ components:
         name: {type: string, nullable: true}
     UpdateStandardChangeProposalRequest:
       type: object
-      description: Omitted fields are left as they are; parameters and evidenceChangeRequestIds replace the whole list.
+      description: Omitted fields are left as they are; an empty category, impact or risk clears it; parameters and evidenceChangeRequestIds replace the whole list.
       properties:
         name: {type: string}
         rationale: {type: string}
@@ -31291,8 +31291,8 @@ components:
         backoutPlan: {type: string}
         testPlan: {type: string}
         category: {type: string}
-        impact: {type: string, enum: [high, medium, low]}
-        risk: {type: string, enum: [high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
+        impact: {type: string, enum: ['', high, medium, low]}
+        risk: {type: string, enum: ['', high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
         rollbackDurationText: {type: string}
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}

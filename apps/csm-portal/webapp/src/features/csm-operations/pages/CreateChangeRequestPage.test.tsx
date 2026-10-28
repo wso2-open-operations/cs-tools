@@ -2302,6 +2302,24 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     expect(screen.getByText("Endpoints must be a number.")).toBeInTheDocument();
   });
 
+  it("shows no clone banner when opened from a template page (its state only says where it came from)", () => {
+    locationSearch = "?standardChangeTemplateId=tpl-1";
+    locationState = { from: "/operations/standard-changes/tpl-1" };
+    render(<CreateChangeRequestPage />);
+    expect(screen.queryByText(/cloned from/i)).not.toBeInTheDocument();
+  });
+
+  it("clears the change specifics when another template is picked", () => {
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickTemplate("tpl-1");
+    fillSpecifics();
+    expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-1.example.com");
+    pickTemplate("tpl-2");
+    expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("");
+    expect(within(preview()).queryByText(/gw-1\.example\.com/)).not.toBeInTheDocument();
+  });
+
   it("preselects the template from ?standardChangeTemplateId= with the type Standard", () => {
     locationSearch = "?standardChangeTemplateId=tpl-1";
     render(<CreateChangeRequestPage />);

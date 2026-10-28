@@ -276,7 +276,8 @@ type CreateStandardChangeProposalRequest struct {
 
 // UpdateStandardChangeProposalRequest is the body of PATCH /standard-change-proposals/{id}.
 // Only a draft can be edited, only by its proposer. Absent fields are left as
-// they are; Parameters and EvidenceChangeRequestIDs replace the whole list.
+// they are; Parameters and EvidenceChangeRequestIDs replace the whole list. An
+// empty Category, Impact or Risk clears it.
 type UpdateStandardChangeProposalRequest struct {
 	Name                         *string                    `json:"name,omitempty"`
 	Rationale                    *string                    `json:"rationale,omitempty"`

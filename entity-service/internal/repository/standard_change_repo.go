@@ -890,14 +890,22 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 		str("backout_plan", req.BackoutPlan)
 		str("test_plan", req.TestPlan)
 		str("rollback_duration_text", req.RollbackDurationText)
+		// An empty category, impact or risk clears it (the editor's "-- Select --").
+		enumOrClear := func(col, v string) {
+			if v == "" {
+				sets = append(sets, col+" = NULL")
+				return
+			}
+			add(col, v, "")
+		}
 		if req.Category != nil {
-			add("category", string(*req.Category), "")
+			enumOrClear("category", string(*req.Category))
 		}
 		if req.Impact != nil {
-			add("impact", string(*req.Impact), "")
+			enumOrClear("impact", string(*req.Impact))
 		}
 		if req.Risk != nil {
-			add("risk", string(*req.Risk), "")
+			enumOrClear("risk", string(*req.Risk))
 		}
 		if req.IsPlanningVisibleToCustomers != nil {
 			add("is_planning_visible_to_customers", *req.IsPlanningVisibleToCustomers, "")

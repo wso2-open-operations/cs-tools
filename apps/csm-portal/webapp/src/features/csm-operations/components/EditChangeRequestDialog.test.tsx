@@ -1285,11 +1285,11 @@ describe("EditChangeRequestDialog — the fields the create form sets", () => {
   });
 
   it("changes the type in New, and sends only that", () => {
-    const { onSave } = renderDialog({ state: "new" });
+    const { onSave } = renderDialog({ state: "new", type: "normal" });
     expect(select("Type")).not.toHaveAttribute("aria-disabled", "true");
-    choose("Type", "Standard");
+    choose("Type", "Emergency");
     fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({ type: "standard" });
+    expect(onSave).toHaveBeenCalledWith({ type: "emergency" });
   });
 
   it("turns both customer boxes off when the type becomes Emergency in New, in the same request", () => {
@@ -1646,6 +1646,25 @@ describe("EditChangeRequestDialog — required-field markers", () => {
     cleanup();
     renderDialog({ state: "new" });
     expect(workNote()).not.toBeRequired();
+  });
+});
+
+describe("EditChangeRequestDialog — Standard is offered only to a change that already is one", () => {
+  const typeOptions = (): string[] => {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  };
+
+  it("lists Normal and Emergency, not Standard, for a Normal change in New", () => {
+    renderDialog({ state: "new", type: "normal" });
+    const options = typeOptions();
+    expect(options).toEqual(expect.arrayContaining(["Normal", "Emergency"]));
+    expect(options).not.toContain("Standard");
+  });
+
+  it("keeps Standard for an older Standard change in New (not raised from a template)", () => {
+    renderDialog({ state: "new", type: "standard" });
+    expect(typeOptions()).toContain("Standard");
   });
 });
 

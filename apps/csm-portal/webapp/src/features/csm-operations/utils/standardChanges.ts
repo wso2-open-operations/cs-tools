@@ -289,7 +289,11 @@ export function standardChangeValueError(p: BeStandardChangeParameter, raw: stri
     case "textarea":
       return v.length > STANDARD_CHANGE_TEXTAREA_VALUE_MAX ? `At most ${STANDARD_CHANGE_TEXTAREA_VALUE_MAX} characters.` : null;
     case "number":
-      return Number.isFinite(Number(v)) ? null : `${p.label} must be a number.`;
+      // Decimal notation only, as the server reads it (strconv.ParseFloat): no 0x / 0b / 0o
+      // prefixes, no Infinity or NaN.
+      return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v) && Number.isFinite(Number(v))
+        ? null
+        : `${p.label} must be a number.`;
     case "date":
       return /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
         ? null

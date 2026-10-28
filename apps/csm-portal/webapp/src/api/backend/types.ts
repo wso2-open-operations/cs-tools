@@ -5708,9 +5708,10 @@ export interface BeUpdateStandardChangeProposalPayload {
   riskImpactAnalysis?: string;
   backoutPlan?: string;
   testPlan?: string;
-  category?: BeChangeRequestCategory;
-  impact?: BeChangeRequestImpact;
-  risk?: BeChangeRequestRisk;
+  /** An empty string clears it (the editor's "-- Select --"). */
+  category?: BeChangeRequestCategory | "";
+  impact?: BeChangeRequestImpact | "";
+  risk?: BeChangeRequestRisk | "";
   rollbackDurationText?: string;
   isPlanningVisibleToCustomers?: boolean;
   customerApprovalRequired?: boolean;

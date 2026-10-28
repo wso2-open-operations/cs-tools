@@ -197,9 +197,10 @@ function buildProposalPatch(kind: string, form: ProposalForm): BeUpdateStandardC
   if (kind === "retire") return patch;
   patch.subject = form.subject.trim();
   for (const { field } of RICH_FIELDS) patch[field] = richOut(form[field]);
-  if (form.category) patch.category = form.category;
-  if (form.impact) patch.impact = form.impact;
-  if (form.risk) patch.risk = form.risk;
+  // Always sent: an empty value clears the stored one, so "-- Select --" saves as shown.
+  patch.category = form.category;
+  patch.impact = form.impact;
+  patch.risk = form.risk;
   patch.rollbackDurationText = form.rollbackDurationText.trim();
   patch.isPlanningVisibleToCustomers = form.isPlanningVisibleToCustomers;
   patch.customerApprovalRequired = form.customerApprovalRequired;

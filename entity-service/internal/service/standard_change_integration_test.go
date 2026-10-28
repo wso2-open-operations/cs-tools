@@ -467,6 +467,15 @@ func stdEvidence(t *testing.T, env *stdEnv) {
 	if err != nil || len(p.Evidence) != 2 {
 		t.Fatalf("evidence = %+v, %v", p.Evidence, err)
 	}
+	// An empty category, impact or risk clears it.
+	software, low := domain.ChangeRequestCategory("software"), domain.ChangeRequestImpactLow
+	if p, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{Category: &software, Impact: &low}); err != nil || p.Category == nil || p.Impact == nil {
+		t.Fatalf("set category and impact: %+v %v", p.StandardChangeContent, err)
+	}
+	none, noImpact := domain.ChangeRequestCategory(""), domain.ChangeRequestImpact("")
+	if p, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{Category: &none, Impact: &noImpact}); err != nil || p.Category != nil || p.Impact != nil {
+		t.Fatalf("clear category and impact: %v %v %v", p.Category, p.Impact, err)
+	}
 	bad := []domain.StandardChangeParameter{{Key: "Bad", Label: "x", Type: "text"}}
 	_, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{Parameters: &bad})
 	expectErr[*apierror.ValidationError](t, err, "a bad parameter key")

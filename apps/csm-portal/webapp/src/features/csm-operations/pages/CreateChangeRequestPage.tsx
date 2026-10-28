@@ -207,8 +207,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
     | CreateChangeRequestFromCaseNavState
     | CreateChangeRequestFromIncidentNavState
     | undefined;
+  // A clone carries the source's fields; state that only says where the user came
+  // from ({ from }, e.g. "Raise a change request" on a standard change template) is
+  // not a clone.
   const cloneState =
-    locationState && !("caseId" in locationState) && !("incidentId" in locationState)
+    locationState &&
+    !("caseId" in locationState) &&
+    !("incidentId" in locationState) &&
+    Object.keys(locationState).some((k) => k !== "from")
       ? locationState
       : undefined;
   const fromCaseState =
@@ -925,6 +931,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
                   onChange={(next, item) => {
                     setTemplateId(next);
                     setTemplateLabel(item ? `${item.number} — ${item.name}` : undefined);
+                    // Another template's values do not carry over, even under the same key.
+                    if (next !== templateId) setParameterValues({});
                     setShowParameterErrors(false);
                     setTemplateUnavailable(null);
                   }}

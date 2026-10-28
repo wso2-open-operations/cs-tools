@@ -171,6 +171,14 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     expect(screen.getByText("Saved.")).toBeInTheDocument();
   });
 
+  it("clears a category set back to -- Select -- (an empty value clears it on the server)", () => {
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^category/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "-- Select --" }));
+    fireEvent.click(saveButton());
+    expect(lastPatch()).toMatchObject({ category: "", impact: "low", risk: "low" });
+  });
+
   it("shows a refused save in the backend's words", () => {
     renderPage();
     fireEvent.click(saveButton());

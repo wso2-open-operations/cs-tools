@@ -799,7 +799,9 @@ export default function EditChangeRequestDialog({
                   </Typography>
                 </MenuItem>
               )}
-              {CHANGE_REQUEST_CREATE_TYPE_OPTIONS.map((o) => (
+              {/* Standard only for a change that already is one: a change becomes a standard
+                  change by being raised from a template, never by an edit (the server refuses it). */}
+              {CHANGE_REQUEST_CREATE_TYPE_OPTIONS.filter((o) => o.value !== "standard" || initialType === "standard").map((o) => (
                 <MenuItem key={o.value} value={o.value}>
                   {o.label}
                 </MenuItem>

@@ -382,13 +382,13 @@ func (s *standardChangeService) UpdateProposal(ctx context.Context, id string, r
 		}
 		req.Subject = &n
 	}
-	if req.Category != nil && !validStandardChangeCategory[*req.Category] {
+	if req.Category != nil && *req.Category != "" && !validStandardChangeCategory[*req.Category] {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "category is not a change request category"}
 	}
-	if req.Impact != nil && !validChangeRequestImpact[*req.Impact] {
+	if req.Impact != nil && *req.Impact != "" && !validChangeRequestImpact[*req.Impact] {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "impact must be one of high, medium or low"}
 	}
-	if req.Risk != nil && !validChangeRequestRisk[*req.Risk] {
+	if req.Risk != nil && *req.Risk != "" && !validChangeRequestRisk[*req.Risk] {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "risk must be one of high, moderate or low"}
 	}
 	if req.Parameters != nil {

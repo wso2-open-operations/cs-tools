@@ -145,6 +145,11 @@ describe("values", () => {
     [{ type: "text" }, "x".repeat(501), /At most 500/],
     [{ type: "textarea" }, "x".repeat(4001), /At most 4000/],
     [{ type: "number" }, "12abc", /must be a number/],
+    // The server reads decimal notation only (strconv.ParseFloat).
+    [{ type: "number" }, "0x1F", /must be a number/],
+    [{ type: "number" }, "0b101", /must be a number/],
+    [{ type: "number" }, "0o17", /must be a number/],
+    [{ type: "number" }, "Infinity", /must be a number/],
     [{ type: "date" }, "31/12/2026", /YYYY-MM-DD/],
     [{ type: "select", options: ["a", "b"] }, "c", /one of: a, b/],
   ] as const)("refuses a malformed value for %o", (extra, value, message) => {
@@ -154,6 +159,8 @@ describe("values", () => {
   it.each([
     [{ type: "textarea" }, "one\ntwo"],
     [{ type: "number" }, "-1.5"],
+    [{ type: "number" }, "1e3"],
+    [{ type: "number" }, ".5"],
     [{ type: "date" }, "2026-12-31"],
     [{ type: "select", options: ["a", "b"] }, "b"],
   ] as const)("accepts a well-formed value for %o", (extra, value) => {

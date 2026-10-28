@@ -520,7 +520,8 @@ export default function BulkEditChangeRequestsDialog({
                     setCustomerReview(NO_CHANGE);
                   }
                 },
-                CHANGE_REQUEST_CREATE_TYPE_OPTIONS,
+                // Never Standard: a change becomes one only by being raised from a template.
+                CHANGE_REQUEST_CREATE_TYPE_OPTIONS.filter((o) => o.value !== "standard"),
                 {
                   disabled: fieldsDisabled || !allNew,
                   helper: emergency

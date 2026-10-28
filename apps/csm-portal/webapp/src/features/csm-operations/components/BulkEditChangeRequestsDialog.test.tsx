@@ -157,6 +157,14 @@ beforeEach(() => {
 });
 
 describe("BulkEditChangeRequestsDialog", () => {
+  it("never offers Standard: a change becomes one only by being raised from a template", async () => {
+    const dialog = renderDialog([cr("a"), cr("b")]);
+    await loaded(dialog);
+    const options = optionsOf(dialog, "Type");
+    expect(options).toEqual(expect.arrayContaining(["Normal", "Emergency"]));
+    expect(options).not.toContain("Standard");
+  });
+
   it("opens wide, so its columns and plan panels never squeeze a field", async () => {
     const dialog = renderDialog([cr("a")]);
     await loaded(dialog);
@@ -170,7 +178,7 @@ describe("BulkEditChangeRequestsDialog", () => {
     expect(apply).toBeDisabled();
 
     type(dialog, "Short description", " Rotate the gateway certificates ");
-    pick(dialog, "Type", "Standard");
+    pick(dialog, "Type", "Normal");
     pick(dialog, "Category", "Software");
     pick(dialog, "Impact", "Medium");
     pick(dialog, "Priority", "High");
@@ -192,7 +200,7 @@ describe("BulkEditChangeRequestsDialog", () => {
     fireEvent.click(apply);
     expect(onApply).toHaveBeenCalledWith({
       title: "Rotate the gateway certificates",
-      type: "standard",
+      type: "normal",
       category: "software",
       impact: "medium",
       priority: "high",
