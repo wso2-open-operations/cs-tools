@@ -351,6 +351,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var runbookHandler *handler.RunbookHandler
+	// standardChangeHandler serves the standard change catalogue and its proposals
+	// (migration 0252); Postgres only. standardChangeRepo is also what the change
+	// request create and PATCH use to apply a template.
+	var standardChangeHandler *handler.StandardChangeHandler
+	var standardChangeRepo repository.StandardChangeRepository
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
@@ -1629,6 +1634,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
+		// Standard change templates and the proposals that create, modify or
+		// retire them: internal callers only.
+		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
+		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
 		portalBannerHandler = handler.NewPortalBannerHandler(
 			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
 		)
@@ -2117,6 +2126,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /runbooks/import", internalOnly(accessSvc, runbookHandler.ImportRunbooks))
 		mux.HandleFunc("PUT /runbooks/{id}", internalOnly(accessSvc, runbookHandler.UpdateRunbook))
 		mux.HandleFunc("DELETE /runbooks/{id}", internalOnly(accessSvc, runbookHandler.DeleteRunbook))
+	}
+	if standardChangeHandler != nil {
+		// Standard changes (Operations > Standard Changes): internal callers only.
+		mux.HandleFunc("POST /standard-change-templates/search", internalOnly(accessSvc, standardChangeHandler.SearchTemplates))
+		mux.HandleFunc("GET /standard-change-templates/{id}", internalOnly(accessSvc, standardChangeHandler.GetTemplate))
+		mux.HandleFunc("GET /standard-change-templates/{id}/versions/{versionId}", internalOnly(accessSvc, standardChangeHandler.GetTemplateVersion))
+		mux.HandleFunc("POST /standard-change-templates/{id}/suspend", internalOnly(accessSvc, standardChangeHandler.SuspendTemplate))
+		mux.HandleFunc("POST /standard-change-templates/{id}/resume", internalOnly(accessSvc, standardChangeHandler.ResumeTemplate))
+		mux.HandleFunc("POST /standard-change-templates/{id}/clear-review", internalOnly(accessSvc, standardChangeHandler.ClearTemplateReview))
+		mux.HandleFunc("POST /standard-change-proposals", internalOnly(accessSvc, standardChangeHandler.CreateProposal))
+		mux.HandleFunc("POST /standard-change-proposals/search", internalOnly(accessSvc, standardChangeHandler.SearchProposals))
+		mux.HandleFunc("GET /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.GetProposal))
+		mux.HandleFunc("PATCH /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.UpdateProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/submit", internalOnly(accessSvc, standardChangeHandler.SubmitProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/withdraw", internalOnly(accessSvc, standardChangeHandler.WithdrawProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/decision", internalOnly(accessSvc, standardChangeHandler.DecideProposal))
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that

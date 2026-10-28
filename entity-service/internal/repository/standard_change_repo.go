@@ -468,6 +468,8 @@ func (r *standardChangeRepo) IsCABMember(ctx context.Context, email string) (boo
 // Proposals
 // ---------------------------------------------------------------------------
 
+// CreateProposal opens a draft, copying a closed change request's content when it is named.
+// crvis: internal callers only (internalOnly routes); reads the source change request to copy its plan into a proposal
 func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, in StandardChangeProposalCreate) (string, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		kind := strings.ToUpper(string(in.Kind))
@@ -771,6 +773,8 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	return &p, rows.Err()
 }
 
+// SearchProposals lists proposals, newest first.
+// crvis: internal callers only (internalOnly routes); reads the CAB rows of standard change proposals, never a change request's
 func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChangeProposalFilter) ([]domain.StandardChangeProposalSummary, int, error) {
 	where := `WHERE (cardinality($1::text[]) = 0 OR p.state = ANY($1::text[]))
 	   AND (cardinality($2::text[]) = 0 OR p.kind = ANY($2::text[]))
@@ -1078,9 +1082,9 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		if !internal[strings.ToLower(userID)] {
 			return &apierror.ForbiddenError{Msg: "only active internal (WSO2) users can decide a standard change proposal"}
 		}
-		decision, raw := "REJECTED", "rejected"
+		decision := "REJECTED"
 		if approve {
-			decision, raw = "APPROVED", "approved"
+			decision = "APPROVED"
 		}
 		if _, err := tx.Exec(ctx, `UPDATE approval_stage_approver SET state = $2, comments = $3, updated_on = NOW(), updated_by = $4 WHERE id = $1::uuid`,
 			rowID, decision, comment, actor); err != nil {
@@ -1090,7 +1094,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			stageID, actor); err != nil {
 			return fmt.Errorf("decide standard change proposal: cancel the others: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE approval_stage SET raw_status = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1::uuid`, stageID, raw, actor); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE approval_stage SET raw_status = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1::uuid`, stageID, decision, actor); err != nil {
 			return fmt.Errorf("decide standard change proposal: stage: %w", err)
 		}
 
