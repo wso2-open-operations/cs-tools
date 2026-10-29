@@ -48,6 +48,7 @@ const (
 	maxStandardChangeName            = 255
 	maxStandardChangeRenderedSubject = 512 // work_item.subject
 	maxStandardChangeRollbackText    = 255 // change_request.rollback_duration
+	maxStandardChangeSuspendReason   = 1000
 )
 
 var (
@@ -345,4 +346,17 @@ func renderStandardChange(v domain.StandardChangeTemplateVersion, values map[str
 		return domain.StandardChangeContent{}, nil, &apierror.ValidationError{Msg: fmt.Sprintf("the rollback duration this template makes with these values is longer than %d characters: shorten the values", maxStandardChangeRollbackText)}
 	}
 	return out, stored, nil
+}
+
+// normalizeSuspendReason trims a suspension reason: nil when blank, a
+// ValidationError when longer than maxStandardChangeSuspendReason characters.
+func normalizeSuspendReason(reason string) (*string, error) {
+	r := strings.TrimSpace(reason)
+	if r == "" {
+		return nil, nil
+	}
+	if utf8.RuneCountInString(r) > maxStandardChangeSuspendReason {
+		return nil, &apierror.ValidationError{Msg: fmt.Sprintf("reason must be at most %d characters", maxStandardChangeSuspendReason)}
+	}
+	return &r, nil
 }

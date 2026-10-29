@@ -48,8 +48,9 @@ type StandardChangeRepository interface {
 	// GetVersion returns one version; nil when there is none with that id.
 	GetVersion(ctx context.Context, id string) (*domain.StandardChangeTemplateVersion, error)
 	// SetTemplateState moves a template from one of from to to (suspend /
-	// resume); a ConflictError when it is in none of them.
-	SetTemplateState(ctx context.Context, id, actor string, from []string, to string) (*domain.StandardChangeTemplate, error)
+	// resume); a ConflictError when it is in none of them. Moving to SUSPENDED
+	// records reason (nil for none), when and by whom; any other move clears them.
+	SetTemplateState(ctx context.Context, id, actor string, from []string, to string, reason *string) (*domain.StandardChangeTemplate, error)
 	// ClearReviewRequired clears the "review required" flag.
 	ClearReviewRequired(ctx context.Context, id, actor string) (*domain.StandardChangeTemplate, error)
 	// FlagReviewRequired raises the "review required" flag of the template a
@@ -201,6 +202,7 @@ func contentArgs(c domain.StandardChangeContent) ([]any, error) {
 const templateSelect = `SELECT t.id::text, t.number, t.name, t.state,
 	ow.id::text, ow.email, COALESCE(NULLIF(ow.name, ''), NULLIF(btrim(COALESCE(ow.first_name, '') || ' ' || COALESCE(ow.last_name, '')), ''), ow.email),
 	t.review_required, t.review_required_reason, t.review_required_on,
+	t.suspended_reason, t.suspended_on, t.suspended_by,
 	rcr.id::text, rwi.number,
 	op.id::text, op.number,
 	COALESCE(u.total, 0), COALESCE(u.open, 0), COALESCE(u.closed, 0), COALESCE(u.rolled_back, 0), COALESCE(u.canceled, 0), u.last_used_on,
@@ -245,6 +247,7 @@ func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 	dest := []any{&t.ID, &t.Number, &t.Name, &state,
 		&ownerID, &ownerEmail, &ownerName,
 		&t.ReviewRequired, &t.ReviewRequiredReason, &t.ReviewRequiredOn,
+		&t.SuspendedReason, &t.SuspendedOn, &t.SuspendedBy,
 		&rcrID, &rcrNumber, &opID, &opNumber,
 		&t.Usage.Total, &t.Usage.Open, &t.Usage.Closed, &t.Usage.RolledBack, &t.Usage.Canceled, &t.Usage.LastUsedOn,
 		&t.CreatedOn, &t.CreatedBy, &t.UpdatedOn, &t.UpdatedBy,
@@ -253,6 +256,11 @@ func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 		return t, err
 	}
 	t.State = domain.StandardChangeTemplateState(strings.ToLower(state))
+	if t.State != domain.StandardChangeTemplateStateSuspended {
+		// Every write that leaves SUSPENDED clears them; this covers a row a
+		// hand-made update left behind.
+		t.SuspendedReason, t.SuspendedOn, t.SuspendedBy = nil, nil, nil
+	}
 	if ownerID != nil {
 		t.Owner = domain.NewUserReference(*ownerID, stringOrEmpty(ownerEmail), stringOrEmpty(ownerName))
 	}
@@ -374,7 +382,7 @@ func getVersion(ctx context.Context, q crQuerier, id string) (*domain.StandardCh
 	return &v, nil
 }
 
-func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor string, from []string, to string) (*domain.StandardChangeTemplate, error) {
+func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor string, from []string, to string, reason *string) (*domain.StandardChangeTemplate, error) {
 	var current *string
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT state FROM standard_change_template WHERE id = $1::uuid FOR UPDATE`, id).Scan(&current); err != nil {
@@ -392,7 +400,16 @@ func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor str
 		if !ok {
 			return &apierror.ConflictError{Msg: fmt.Sprintf("the template is %s, so it cannot be moved to %s", strings.ToLower(*current), strings.ToLower(to))}
 		}
-		_, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = $2, updated_on = NOW(), updated_by = $3 WHERE id = $1::uuid`, id, to, actor)
+		suspended := to == "SUSPENDED"
+		if !suspended {
+			reason = nil
+		}
+		_, err := tx.Exec(ctx, `UPDATE standard_change_template
+			SET state = $2, updated_on = NOW(), updated_by = $3,
+			    suspended_reason = $4,
+			    suspended_on = CASE WHEN $5::boolean THEN NOW() END,
+			    suspended_by = CASE WHEN $5::boolean THEN $3 END
+			WHERE id = $1::uuid`, id, to, actor, reason, suspended)
 		return err
 	})
 	if err != nil {
@@ -474,12 +491,12 @@ func (r *standardChangeRepo) IsCABMember(ctx context.Context, email string) (boo
 // Proposals
 // ---------------------------------------------------------------------------
 
-// CreateProposal opens a draft, copying a closed change request's content when it is named.
-// crvis: internal callers only (internalOnly routes); reads the source change request to copy its plan into a proposal
 // untitledStandardChangeName names a new proposal started with no name and nothing
 // to take one from.
 const untitledStandardChangeName = "Untitled standard change"
 
+// CreateProposal opens a draft, copying a closed change request's content when it is named.
+// crvis: internal callers only (internalOnly routes); reads the source change request to copy its plan into a proposal
 func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, in StandardChangeProposalCreate) (string, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		kind := strings.ToUpper(string(in.Kind))
@@ -1182,7 +1199,8 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 
 	switch kind {
 	case "RETIRE":
-		if _, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = 'RETIRED', updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, *tplID, actor); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = 'RETIRED', updated_on = NOW(), updated_by = $2,
+			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
 			return nil, nil, fmt.Errorf("apply standard change proposal: retire: %w", err)
 		}
 		return tplID, nil, nil

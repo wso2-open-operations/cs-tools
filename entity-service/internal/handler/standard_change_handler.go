@@ -70,9 +70,14 @@ func (h *StandardChangeHandler) GetTemplateVersion(w http.ResponseWriter, r *htt
 	h.answer(w, r, http.StatusOK, v, err)
 }
 
-// SuspendTemplate handles POST /standard-change-templates/{id}/suspend.
+// SuspendTemplate handles POST /standard-change-templates/{id}/suspend. The body
+// {reason} is optional: an empty body suspends without a reason.
 func (h *StandardChangeHandler) SuspendTemplate(w http.ResponseWriter, r *http.Request) {
-	t, err := h.svc.SuspendTemplate(r.Context(), r.PathValue("id"))
+	var req domain.SuspendStandardChangeTemplateRequest
+	if !decodeOptionalRequest(w, r, &req) {
+		return
+	}
+	t, err := h.svc.SuspendTemplate(r.Context(), r.PathValue("id"), req)
 	h.answer(w, r, http.StatusOK, t, err)
 }
 

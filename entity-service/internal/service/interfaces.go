@@ -157,7 +157,8 @@ type StandardChangeService interface {
 	SearchTemplates(ctx context.Context, req domain.SearchStandardChangeTemplatesRequest) (domain.SearchStandardChangeTemplatesResponse, error)
 	GetTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
 	GetTemplateVersion(ctx context.Context, templateID, versionID string) (domain.StandardChangeTemplateVersion, error)
-	SuspendTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	// SuspendTemplate suspends an active template, recording the optional reason.
+	SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error)
 	ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
 	ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
 	CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)

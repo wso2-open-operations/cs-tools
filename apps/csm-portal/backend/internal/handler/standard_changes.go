@@ -17,8 +17,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -65,9 +68,10 @@ func (h *StandardChangeHandler) GetTemplateVersion(w http.ResponseWriter, r *htt
 	h.noBody(w, r, http.MethodGet, "/standard-change-templates/{id}", "/versions/"+versionID, "Failed to load the template version.")
 }
 
-// SuspendTemplate handles POST /standard-change-templates/{id}/suspend.
+// SuspendTemplate handles POST /standard-change-templates/{id}/suspend. The body
+// {reason} is optional; an empty body is forwarded as none.
 func (h *StandardChangeHandler) SuspendTemplate(w http.ResponseWriter, r *http.Request) {
-	h.noBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/suspend", "Failed to suspend the template.")
+	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/suspend", "Failed to suspend the template.")
 }
 
 // ResumeTemplate handles POST /standard-change-templates/{id}/resume.
@@ -140,6 +144,44 @@ func (h *StandardChangeHandler) noBody(w http.ResponseWriter, r *http.Request, m
 	}
 	path := strings.Replace(base, "{id}", id, 1) + suffix
 	h.forward(w, r, user.UserID, method, path, nil, http.StatusOK, fallback)
+}
+
+// optionalBody is noBody for a call whose JSON body may be left out: an empty
+// body is forwarded as none; any other must be a JSON object within the size cap
+// of the other body routes. entity-service checks its fields.
+func (h *StandardChangeHandler) optionalBody(w http.ResponseWriter, r *http.Request, method, base, suffix, fallback string) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	var body []byte
+	if r.Body != nil {
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+				return
+			}
+			writeError(w, http.StatusBadRequest, errMsgReadBody)
+			return
+		}
+		if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 {
+			if trimmed[0] != '{' || !json.Valid(trimmed) {
+				writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+				return
+			}
+			body = raw
+		}
+	}
+	path := strings.Replace(base, "{id}", id, 1) + suffix
+	h.forward(w, r, user.UserID, method, path, body, http.StatusOK, fallback)
 }
 
 // withBody forwards a call with the request's JSON body, checked for size and shape.

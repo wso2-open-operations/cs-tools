@@ -167,6 +167,12 @@ type StandardChangeTemplate struct {
 	ReviewRequiredReason        *string    `json:"reviewRequiredReason"`
 	ReviewRequiredOn            *time.Time `json:"reviewRequiredOn"`
 	ReviewRequiredChangeRequest *EntityRef `json:"reviewRequiredChangeRequest"`
+	// SuspendedReason, SuspendedOn and SuspendedBy (an email) record the suspension;
+	// all null unless the template is suspended. The reason is optional, so it may
+	// be null on a suspended template.
+	SuspendedReason *string    `json:"suspendedReason"`
+	SuspendedOn     *time.Time `json:"suspendedOn"`
+	SuspendedBy     *string    `json:"suspendedBy"`
 	// OpenProposal is the modification or retirement now in draft or CAB review,
 	// if any (there is at most one).
 	OpenProposal *EntityRef                  `json:"openProposal"`
@@ -196,8 +202,11 @@ type SearchStandardChangeTemplatesResponse struct {
 	Offset    int                      `json:"offset"`
 }
 
-// SuspendStandardChangeTemplateRequest is the body of POST /standard-change-templates/{id}/suspend.
+// SuspendStandardChangeTemplateRequest is the optional body of POST
+// /standard-change-templates/{id}/suspend (an empty body is the same as {}).
 type SuspendStandardChangeTemplateRequest struct {
+	// Reason says why the template is suspended: optional, blank means none, at
+	// most 1000 characters.
 	Reason string `json:"reason"`
 }
 

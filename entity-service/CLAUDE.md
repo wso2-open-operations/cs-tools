@@ -7731,7 +7731,8 @@ stage of its own. Before this, choosing Standard opened the ordinary create form
 free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
 migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
-`STD` / `SCP`, the two change request columns) and `100026` (row-level security). PostgreSQL data
+`STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by) and
+`100026` (row-level security). PostgreSQL data
 sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, name unique among live templates ignoring case,
@@ -7796,10 +7797,17 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 **Who may**: suspend / resume / clear the flag: the template's owner or a CAB member. Edit, submit,
 withdraw a proposal: its proposer. Decide: a CAB member other than the proposer.
 
+**Suspension.** `POST .../suspend` takes an optional body `{reason}` (`decodeOptionalRequest`: an
+empty body is `{}`; trimmed, blank is none, at most 1000 characters or 400). `SetTemplateState`
+writes `suspended_reason` / `suspended_on` / `suspended_by` (the actor's email) on the move to
+`SUSPENDED` and clears all three on any other move; a retirement clears them too. The template reads
+them as `suspendedReason` / `suspendedOn` / `suspendedBy`, null unless the template is suspended.
+
 **Not done**: no import of the previous system's standard change templates (decision: they are
 re-proposed through this flow); no notices (mail / chat) on submit or decision.
 
-Tests: `standard_change_template_test.go` (parameters, completeness, placeholders, rendering),
+Tests: `standard_change_template_test.go` (parameters, completeness, placeholders, rendering, the
+suspension reason), `handler/standard_change_handler_test.go` (the optional suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`).

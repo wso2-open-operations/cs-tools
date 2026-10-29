@@ -196,7 +196,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 
 	// Request Approval needs the template usable.
 	assess := domain.ChangeRequestStateAssess
-	if _, err := env.svc.SuspendTemplate(stdCtx(stdCAB1), tpl.ID); err != nil {
+	if _, err := env.svc.SuspendTemplate(stdCtx(stdCAB1), tpl.ID, domain.SuspendStandardChangeTemplateRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = raise(nil)

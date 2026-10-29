@@ -11568,9 +11568,18 @@ paths:
       description: >-
         No change request can be raised from a suspended template, and one already
         raised cannot be sent for approval. The template's owner or a member of the CAB
-        Approval group. 409 when it is not active.
+        Approval group. 409 when it is not active. The body is optional: an empty body
+        suspends without a reason. The reason, the time and the caller are recorded on
+        the template (suspendedReason, suspendedOn, suspendedBy) until it is resumed or
+        retired.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendStandardChangeTemplateRequest'
       responses:
         "200":
           description: The template.
@@ -31180,6 +31189,19 @@ components:
         reviewRequiredChangeRequest:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
+        suspendedReason:
+          type: string
+          nullable: true
+          description: Why the template was suspended. Null unless it is suspended, and may be null on a suspended template (the reason is optional).
+        suspendedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the template was suspended. Null unless it is suspended.
+        suspendedBy:
+          type: string
+          nullable: true
+          description: Email of who suspended the template. Null unless it is suspended.
         openProposal:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
@@ -31192,6 +31214,14 @@ components:
           type: array
           items: {$ref: '#/components/schemas/StandardChangeTemplateVersionSummary'}
           description: On GET /standard-change-templates/{id} only, newest first.
+    SuspendStandardChangeTemplateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+          description: Why the template is suspended. Optional; trimmed, and blank means none. At most 1000 characters (400 when longer).
     SearchStandardChangeTemplatesRequest:
       type: object
       properties:

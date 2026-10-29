@@ -284,16 +284,57 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("search = %+v, %v", list, err)
 	}
 
-	// Suspend / resume: the owner or a CAB member.
-	_, err = env.svc.SuspendTemplate(stdCtx(stdOutsider), tpl.ID)
+	if tpl.SuspendedReason != nil || tpl.SuspendedOn != nil || tpl.SuspendedBy != nil {
+		t.Fatalf("an active template carries a suspension: %v %v %v", tpl.SuspendedReason, tpl.SuspendedOn, tpl.SuspendedBy)
+	}
+
+	// Suspend / resume: the owner or a CAB member. The reason is optional, at
+	// most 1000 characters, and recorded with who suspended it and when.
+	suspendWhy := domain.SuspendStandardChangeTemplateRequest{Reason: "  Rolled back twice on prod  "}
+	_, err = env.svc.SuspendTemplate(stdCtx(stdOutsider), tpl.ID, suspendWhy)
 	expectErr[*apierror.ForbiddenError](t, err, "outsider suspends")
-	if tpl, err = env.svc.SuspendTemplate(stdCtx(stdCAB2), tpl.ID); err != nil || tpl.State != domain.StandardChangeTemplateStateSuspended {
+	_, err = env.svc.SuspendTemplate(stdCtx(stdCAB2), tpl.ID, domain.SuspendStandardChangeTemplateRequest{Reason: strings.Repeat("x", 1001)})
+	expectErr[*apierror.ValidationError](t, err, "over-long suspension reason")
+	if got, _ := env.svc.GetTemplate(stdCtx(stdOutsider), tpl.ID); got.State != domain.StandardChangeTemplateStateActive {
+		t.Fatalf("a refused suspension moved the template: %v", got.State)
+	}
+	if tpl, err = env.svc.SuspendTemplate(stdCtx(stdCAB2), tpl.ID, suspendWhy); err != nil || tpl.State != domain.StandardChangeTemplateStateSuspended {
 		t.Fatalf("suspend: %v %v", tpl.State, err)
 	}
-	_, err = env.svc.SuspendTemplate(stdCtx(stdCAB2), tpl.ID)
+	if tpl.SuspendedReason == nil || *tpl.SuspendedReason != "Rolled back twice on prod" || tpl.SuspendedOn == nil ||
+		tpl.SuspendedBy == nil || *tpl.SuspendedBy != stdCAB2 {
+		t.Fatalf("suspension not recorded: %v %v %v", tpl.SuspendedReason, tpl.SuspendedOn, tpl.SuspendedBy)
+	}
+	read, err := env.svc.GetTemplate(stdCtx(stdOutsider), tpl.ID)
+	if err != nil || read.SuspendedReason == nil || *read.SuspendedReason != "Rolled back twice on prod" ||
+		read.SuspendedOn == nil || read.SuspendedBy == nil || *read.SuspendedBy != stdCAB2 {
+		t.Fatalf("suspension not read back: %+v, %v", read, err)
+	}
+	listed, err := env.svc.SearchTemplates(stdCtx(stdOutsider), domain.SearchStandardChangeTemplatesRequest{Query: stdp(tpl.Number)})
+	if err != nil || listed.Total != 1 || listed.Templates[0].SuspendedReason == nil {
+		t.Fatalf("suspension not in the list: %+v, %v", listed, err)
+	}
+	_, err = env.svc.SuspendTemplate(stdCtx(stdCAB2), tpl.ID, domain.SuspendStandardChangeTemplateRequest{})
 	expectErr[*apierror.ConflictError](t, err, "suspend twice")
 	if tpl, err = env.svc.ResumeTemplate(stdCtx(stdProposer), tpl.ID); err != nil || tpl.State != domain.StandardChangeTemplateStateActive {
 		t.Fatalf("resume by the owner: %v %v", tpl.State, err)
+	}
+	if tpl.SuspendedReason != nil || tpl.SuspendedOn != nil || tpl.SuspendedBy != nil {
+		t.Fatalf("resume left the suspension: %v %v %v", tpl.SuspendedReason, tpl.SuspendedOn, tpl.SuspendedBy)
+	}
+	var rawReason, rawBy *string
+	if err := env.scoped.QueryRow(repository.WithSystemIdentity(context.Background()),
+		`SELECT suspended_reason, suspended_by FROM standard_change_template WHERE id = $1::uuid`, tpl.ID).Scan(&rawReason, &rawBy); err != nil ||
+		rawReason != nil || rawBy != nil {
+		t.Fatalf("resume did not clear the columns: %v %v %v", rawReason, rawBy, err)
+	}
+	// A blank reason is no reason, and it is cleared again on resume.
+	if tpl, err = env.svc.SuspendTemplate(stdCtx(stdProposer), tpl.ID, domain.SuspendStandardChangeTemplateRequest{Reason: "   "}); err != nil ||
+		tpl.SuspendedReason != nil || tpl.SuspendedBy == nil || *tpl.SuspendedBy != stdProposer || tpl.SuspendedOn == nil {
+		t.Fatalf("suspend without a reason: %+v, %v", tpl, err)
+	}
+	if tpl, err = env.svc.ResumeTemplate(stdCtx(stdCAB1), tpl.ID); err != nil || tpl.State != domain.StandardChangeTemplateStateActive || tpl.SuspendedBy != nil {
+		t.Fatalf("resume by a CAB member: %+v %v", tpl, err)
 	}
 
 	// Modify: starts from v1, one open at a time, approval writes v2 and clears the review flag.
@@ -379,12 +420,21 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), r.ID); err != nil {
 		t.Fatal(err)
 	}
+	// A suspended template can be retired; retiring clears the suspension.
+	if _, err := env.svc.SuspendTemplate(stdCtx(stdCAB1), tpl.ID, domain.SuspendStandardChangeTemplateRequest{Reason: "Going away"}); err != nil {
+		t.Fatalf("suspend before retiring: %v", err)
+	}
 	if _, err := env.svc.DecideProposal(stdCtx(stdCAB2), r.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
 		t.Fatal(err)
 	}
 	tpl, _ = env.svc.GetTemplate(stdCtx(stdOutsider), tpl.ID)
 	if tpl.State != domain.StandardChangeTemplateStateRetired {
 		t.Fatalf("retired = %s", tpl.State)
+	}
+	var retiredBy *string
+	if err := env.scoped.QueryRow(sys, `SELECT suspended_by FROM standard_change_template WHERE id = $1::uuid`, tpl.ID).Scan(&retiredBy); err != nil ||
+		retiredBy != nil || tpl.SuspendedReason != nil {
+		t.Fatalf("retiring kept the suspension: %v %v %v", retiredBy, tpl.SuspendedReason, err)
 	}
 	_, err = env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindModify, TemplateID: &tpl.ID})
 	expectErr[*apierror.ConflictError](t, err, "modify a retired template")

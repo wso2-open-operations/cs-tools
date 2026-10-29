@@ -168,15 +168,17 @@ func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id
 	return nil
 }
 
-func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"ACTIVE"}, "SUSPENDED")
+func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error) {
+	return s.moveTemplate(ctx, id, []string{"ACTIVE"}, "SUSPENDED", req.Reason)
 }
 
 func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"SUSPENDED"}, "ACTIVE")
+	return s.moveTemplate(ctx, id, []string{"SUSPENDED"}, "ACTIVE", "")
 }
 
-func (s *standardChangeService) moveTemplate(ctx context.Context, id string, from []string, to string) (domain.StandardChangeTemplate, error) {
+// moveTemplate moves the template's state; reason (blank for none) is recorded
+// only on a move to SUSPENDED (the repository clears it on any other move).
+func (s *standardChangeService) moveTemplate(ctx context.Context, id string, from []string, to, reason string) (domain.StandardChangeTemplate, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
@@ -184,7 +186,11 @@ func (s *standardChangeService) moveTemplate(ctx context.Context, id string, fro
 	if err := s.mayManageTemplate(ctx, actor, id); err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	t, err := s.repo.SetTemplateState(ctx, id, actor, from, to)
+	r, err := normalizeSuspendReason(reason)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	t, err := s.repo.SetTemplateState(ctx, id, actor, from, to, r)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}

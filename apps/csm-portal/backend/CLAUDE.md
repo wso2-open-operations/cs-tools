@@ -471,7 +471,8 @@ only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a
 proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
 or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
 message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
-one); a 5xx is the generic fallback. A change request raised from a template is an ordinary
+one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
+is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
 `POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
 `standardChangeParameters`, forwarded like every other create field.
 

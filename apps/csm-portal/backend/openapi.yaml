@@ -13703,9 +13703,25 @@ paths:
       operationId: suspendStandardChangeTemplate
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
-        (400, 403, 404, 409) is returned with its own message and errorCode.
+        (400, 403, 404, 409) is returned with its own message and errorCode. The body
+        is optional: an empty one suspends without a reason. A body that is not a JSON
+        object is a 400 and one over 1 MiB a 413, before the entity service is called.
+        The template then carries suspendedReason, suspendedOn and suspendedBy until it
+        is resumed or retired.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+                  description: Why the template is suspended. Optional; blank means none. Longer than 1000 characters is a 400 from the entity service.
       responses:
         "200":
           description: Ok.
@@ -13740,6 +13756,12 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
           description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: The body is over 1 MiB.
           content:
             application/json:
               schema:

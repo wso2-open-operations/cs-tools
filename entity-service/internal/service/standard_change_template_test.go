@@ -239,3 +239,22 @@ func TestRenderStandardChange(t *testing.T) {
 	_, _, err = renderStandardChange(long, map[string]string{"cluster": "x", "tags": "y", "reason": strings.Repeat("r ", 300)})
 	wantStdValidation(t, err, "longer than 512")
 }
+
+func TestNormalizeSuspendReason(t *testing.T) {
+	for _, blank := range []string{"", "   ", "\n\t"} {
+		if r, err := normalizeSuspendReason(blank); err != nil || r != nil {
+			t.Fatalf("normalizeSuspendReason(%q) = %v, %v; want nil, nil", blank, r, err)
+		}
+	}
+	r, err := normalizeSuspendReason("  Rolled back twice on prod  ")
+	if err != nil || r == nil || *r != "Rolled back twice on prod" {
+		t.Fatalf("not trimmed: %v, %v", r, err)
+	}
+	// The limit counts characters, not bytes.
+	atLimit := strings.Repeat("é", maxStandardChangeSuspendReason)
+	if r, err := normalizeSuspendReason(atLimit); err != nil || r == nil || *r != atLimit {
+		t.Fatalf("1000 characters refused: %v", err)
+	}
+	_, err = normalizeSuspendReason(atLimit + "x")
+	wantStdValidation(t, err, "reason must be at most 1000 characters")
+}

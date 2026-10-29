@@ -164,6 +164,57 @@ func TestStandardChangeHandler_RefusesBadIdsAndBodiesBeforeCalling(t *testing.T)
 	}
 }
 
+func TestStandardChangeHandler_SuspendForwardsTheOptionalReason(t *testing.T) {
+	suspend := func(body string) (*httptest.ResponseRecorder, *fakeStandardChangeClient) {
+		fake := &fakeStandardChangeClient{}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(body)))
+		r.SetPathValue("id", stdID)
+		w := httptest.NewRecorder()
+		NewStandardChangeHandler(fake).SuspendTemplate(w, r)
+		return w, fake
+	}
+
+	w, fake := suspend(`{"reason":"Rolled back twice"}`)
+	if w.Code != http.StatusOK || fake.path != "/standard-change-templates/"+stdID+"/suspend" || string(fake.body) != `{"reason":"Rolled back twice"}` {
+		t.Fatalf("with a reason: %d, %s %s", w.Code, fake.path, fake.body)
+	}
+	for _, empty := range []string{"", "  \n"} {
+		w, fake = suspend(empty)
+		if w.Code != http.StatusOK || fake.calls != 1 || fake.body != nil {
+			t.Fatalf("empty body %q: %d, %d calls, forwarded %q", empty, w.Code, fake.calls, fake.body)
+		}
+	}
+	for _, bad := range []string{`{"reason":`, `"just a string"`, `[1]`, `{} trailing`} {
+		w, fake = suspend(bad)
+		if w.Code != http.StatusBadRequest || fake.calls != 0 {
+			t.Fatalf("body %q: %d, %d calls", bad, w.Code, fake.calls)
+		}
+	}
+	w, fake = suspend(`{"reason":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`)
+	if w.Code != http.StatusRequestEntityTooLarge || fake.calls != 0 {
+		t.Fatalf("an oversized body: %d, %d calls", w.Code, fake.calls)
+	}
+
+	// entity-service's refusal of a too-long reason keeps its words.
+	fake = &fakeStandardChangeClient{err: &apierror.Error{StatusCode: http.StatusBadRequest,
+		Body: `{"code":0,"message":"reason must be at most 1000 characters"}`}}
+	r := withUser(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"reason":"x"}`)))
+	r.SetPathValue("id", stdID)
+	w = httptest.NewRecorder()
+	NewStandardChangeHandler(fake).SuspendTemplate(w, r)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "at most 1000 characters") {
+		t.Fatalf("refusal: %d %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{}`))
+	r.SetPathValue("id", stdID)
+	NewStandardChangeHandler(fake).SuspendTemplate(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("no user: %d", w.Code)
+	}
+}
+
 func TestStandardChangeHandler_KeepsTheEntityReasonAndCode(t *testing.T) {
 	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict} {
 		fake := &fakeStandardChangeClient{err: &apierror.Error{StatusCode: status,
