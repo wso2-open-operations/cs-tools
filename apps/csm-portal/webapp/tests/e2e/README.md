@@ -167,34 +167,73 @@ scripts/csm-compose/seed-standard-changes.sh    # from the repository root (enti
 
 What it checks:
 
-- **The page heading** (what users complained about): on Operations > Change requests > Standard change catalogue
-  (`?view=catalogue`) and > Standard change proposals (`?view=proposals`) the heading is exactly "Standard changes" with
-  that view's own line, and neither says anything about service requests, incidents, problems or runbooks. Every other
-  Operations tab (the change request list included) keeps "Operations" and its Operations-wide line.
+- **One tab, two places**: Operations > Change requests has a two-entry strip, "Change requests" (the list, no `view`) |
+  "Standard changes" (`?view=standard`). Standard changes opens on the catalogue; its proposals are a secondary view of
+  the same tab (the toggle, a group named "Templates or proposals", `&show=proposals`, filters `&scope=mine|awaiting` and
+  `&state=<state>` in the URL). The proposals open on **all** proposals (no `scope`; the "Show" select reads "All
+  proposals" and offers "All proposals", "Proposed by me", "Awaiting my decision" in that order). The toggle and the
+  select have distinct accessible names ("Show" is the select's only). Entering Standard changes from a filtered list
+  (`crQ` and `crStates`) keeps those `cr*` parameters in the URL, unread; Back, and the "Change requests" tab, return
+  to the list with the filter applied (the search box holds it and the list reads "No change requests found."), and
+  going back to the list drops only `view` / `show` / `scope` / `state`.
+- **The page heading** (what users complained about): on the catalogue and on the proposals the heading is exactly
+  "Standard changes" with "Pre-authorised change requests, raised from templates the CAB has approved.", and says
+  nothing about service requests, incidents, problems or runbooks. Every other Operations tab (the change request list
+  included) keeps "Operations" and its Operations-wide line. The sidebar is checked first: each Operations entry is
+  polled until it is visible (none is skipped), and only then that there is no "Standard changes" entry of its own.
 - **The seed is listed**: the catalogue shows the seed's five templates with their state and version (the suspended
-  "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2); the suspended template's page shows the
-  reason it was suspended and who did it; the proposals sub-view lists the seed's rejected, in-CAB-review and draft
-  proposals and its approved revision, each in its state.
-- **Old links and the sidebar**: `/operations?tab=standard_changes`, `/operations?tab=standard_changes&view=proposals`,
-  `/operations/standard-changes` and `/operations/standard-changes?view=proposals` each land on the right sub-view, and
-  the sidebar's "Change requests" is the one highlighted entry there, on a template page and on a proposal page.
+  "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2); the suspended template's page shows
+  the seed's current reason in full ("The owner is reworking the restart procedure for clustered deployments. ...") and
+  who suspended it; the proposals list the seed's rejected, in-CAB-review and draft proposals and its approved revision,
+  each in its state.
+- **Breadcrumbs, Back, pins and the sidebar**: a template page reads "Change requests › Standard changes › STD…", a
+  proposal page "Change requests › Standard changes › Proposals › SCP…"; Back returns to the view (and filter) the record
+  was opened from, while the trail's "Proposals" opens all the proposals (`?view=standard&show=proposals`, "All
+  proposals", "Any state"); "Pin this page" names the catalogue "Standard changes" even with the list's `cr*` filters
+  in the URL (no filter count, and the pin opens `?view=standard` without them), the proposals with a filter "Standard
+  change proposals: 1 filter" and a template by its number, and a pinned tab opens its place; the sidebar's "Change
+  requests" is the one highlighted entry throughout.
+- **Old links**: `/operations?tab=standard_changes` and `?tab=standard-changes` (each bare, with `&view=catalogue` and
+  with `&view=proposals`), `/operations/standard-changes` (bare, `?view=catalogue`, `?view=proposals`) and the previous
+  sub-views `/operations/change-requests?view=catalogue` / `?view=proposals` (bare, `&scope=awaiting`, `&state=draft`,
+  `&scope=mine&state=rejected`, and each sub-view with the list's `crQ`) each land on the right place with the scope and
+  state selects showing the filters kept, with no history entry of their own (one Back returns to the page they were
+  opened from); the ones that carried `crQ` return to the filtered list through the "Change requests" tab.
+- **The attention strip** above the catalogue: hidden for `jane`, who has nothing pending (checked once both counts have
+  been answered); for `carol` (asked about the seed's proposal in CAB review) and `bob` (the seed's draft) it reads the
+  counts Postgres holds, worded as the page words them, and each part links to the proposals filtered to it
+  (`scope=awaiting`; `scope=mine&state=draft`), which list exactly that many. Not shown on the proposals view. `jane`,
+  who has proposed nothing (checked in Postgres), opens the proposals on all of them and sees bob's seeded ones;
+  "Proposed by me" then lists none.
 - **The whole flow**: `bob` proposes a standard change from a closed change request ("Propose as standard change"),
-  templates it (name, category, a text and a select parameter, `{{placeholders}}` in the subject and the implementation,
-  backout and test plans, typed and through "Insert {{…}}"), and the live preview renders every placeholder with the
-  sample values; he saves and submits it to the CAB; `carol` (CAB) approves it; the template is in the catalogue as active
-  version 1; `alice` raises a change request from it on the create form (type Standard, the template, the change
-  specifics, the read-only preview). The change request holds the template's content rendered with her values (subject,
-  implementation / backout / test plans, impact, category, rollback duration on the page; risk, which the page does not
-  show, from the API and Postgres), shows the "Raised from standard change template" banner, and its lifecycle bar shows
-  Assess and Authorize as not taken. In Edit every field the template specifies (subject, type, impact, category, rollback
-  duration, the plans, the customer boxes, plan visibility) is disabled while priority, assignment and affected services
-  stay editable. She schedules it ("Schedule" is Request Approval), implements, reviews and rolls it back; the template then
-  reads "Review needed", linking to that change request.
+  templates it (name, category, impact **Medium** -- not the create form's default, Low --, description, justification,
+  risk and impact analysis, plan visible to customers, a text and a select parameter, `{{placeholders}}` in the subject
+  and the implementation, backout and test plans, typed and through "Insert {{…}}"). Before sample values are typed the
+  live preview shows every placeholder as an open, highlighted mark (`mark[data-param]`, `{{host}}` / `{{env}}`); with
+  only the host typed, filled `{{host}}` and open `{{env}}` marks sit side by side on the same preview (and in the
+  subject), and their computed styles are compared there: neither has the browser's own yellow `<mark>` background, the
+  open one is monospace and not underlined, the filled one is in the text's font with a dotted underline, and their
+  backgrounds, fonts and underlines differ; after the environment too, every mark is filled with the values. He saves and submits it to the CAB; `carol` (CAB) reaches it through her attention
+  strip and approves it; the template's page shows the current version with its placeholders highlighted, and it is in
+  the catalogue as active version 1 (impact Medium). `alice` raises a change request from it on the create form (type
+  Standard, the template, the change specifics, the read-only preview with filled marks); the create request sends none
+  of the template's fields. The change request holds the template's content rendered with her values (subject,
+  implementation / backout / test plans, impact, category, rollback duration on the page; description, justification,
+  risk and impact analysis, plan visibility, impact and risk from the API and Postgres, compared with the template
+  version the API returns), shows the "Raised from standard change template" banner, and its lifecycle bar shows Assess
+  and Authorize as not taken. In Edit every field the template specifies (subject, type, impact, category, rollback
+  duration, description, justification, risk and impact analysis, the plans, the customer boxes, plan visibility) is
+  disabled **and shows the template's value** (impact Medium, category Software, customer boxes unticked, plan visibility
+  on) while priority, assignment and affected services stay editable. Through the BFF, a PATCH of `implementationPlan`,
+  `title` or `impact` is refused with 400 `change_request_standard_template_field` and changes nothing, while resending
+  the stored plan with a work note is accepted (the note is recorded). She schedules it ("Schedule" is Request
+  Approval), implements, reviews and rolls it back; the template then reads "Review needed", linking to that change
+  request.
 
 Every persona signs in through the local mock identity provider (no password).
 
 It WRITES: a change request raised and walked to Closed through the CSM backend's API (the evidence), the proposal, the
-template and the change request raised from it, all named with `QA-STD-E2E`. Before and after, it deletes from Postgres,
+template and the change request raised from it (with one work note), all named with `QA-STD-E2E`. Before and after, it deletes from Postgres,
 in one transaction, the proposals, change requests and templates carrying that tag (and every change request raised from
 a tagged template) together with the `event_outbox` rows of exactly those records (that table has no foreign key, so they
 would otherwise be left pointing at nothing), and nothing else. So it is skipped unless the stack is named:
@@ -206,5 +245,6 @@ E2E_CSM_BFF_URL=http://localhost:8082 E2E_OIDC_URL=http://localhost:9100 E2E_ENT
 ```
 
 Set `E2E_SHOT_DIR=<dir>` to also save a picture of each step: the region the step is about (the app's main area scrolls
-inside a 100dvh shell, so a full-page picture would only show its top). The webapp must be a build that has the Change
-requests sub-views (rebuild the compose service `csm-portal-webapp` after changing them).
+inside a 100dvh shell, so a full-page picture would only show its top). The webapp must be a build that has the merged
+Standard changes tab (rebuild the compose service `csm-portal-webapp` after changing it:
+`docker-compose -p csmcr up -d --build csm-portal-webapp` from the repository root).

@@ -35,14 +35,19 @@
 #     optional value inside a sentence would render "... no later than ." when
 #     left empty;
 #   * evidence that relates: a NEW proposal cites only closed change requests
-#     whose subject matches its own keywords (never "[E2E] ..." or "QA-STD-E2E"
-#     test leftovers), and starts from the first of them when its spec says so;
-#     with no match it cites nothing;
+#     whose subject names its specific operation AND that have a written
+#     implementation plan (never "[E2E] ..." or "QA-STD-E2E" test leftovers, nor
+#     the seed generator's filler), and starts from the first of them when its
+#     spec says so; with none it starts from nothing, cites nothing and says
+#     nothing about evidence in its rationale;
 #   * "Scale a Kubernetes deployment's replicas" revised to version 2 through an
 #     approved MODIFY proposal, which cites the two change requests alice raised
 #     from version 1 and walked to Closed, each recording the deviation that
 #     motivated version 2 (the autoscaler undid the scale);
-#   * "Restart an API Manager node" SUSPENDED by its owner, with the reason;
+#   * "Restart an API Manager node" SUSPENDED by its owner (bob), with a reason
+#     that is his own statement and needs no other record: the restart
+#     procedure for clustered deployments is being reworked (it claims no
+#     revision, CAB review or incident, and none exists);
 #   * one proposal REJECTED by the CAB (with its comment), one still IN CAB
 #     REVIEW, one DRAFT;
 #   * change requests raised from templates by alice: one left in New, one
@@ -55,7 +60,19 @@
 # among bob's own proposals and carried on from the state it is in (a draft is
 # completed and submitted, one in CAB review is decided) rather than duplicated;
 # a change request is found again by its rendered subject and walked on from its
-# state. Run it twice: the second run reports "0 created, 0 write request(s)".
+# state. Run it twice: the second run reports "0 created, 0 updated, 0 write
+# request(s)".
+#
+# CONVERGING AN EARLIER VERSION'S DATA. What an earlier version of this script
+# left is brought to what this version would leave where the real flow allows it:
+#   * the suspended template's reason: when the stored reason differs from this
+#     script's, its owner (bob) resumes it and suspends it again with the current
+#     reason (counted as "updated");
+#   * a proposal that is no longer a draft (approved, rejected, in CAB review)
+#     cannot be edited, so its evidence cannot be corrected in place. When such a
+#     seed proposal cites a change request this script would no longer choose as
+#     evidence, the run prints a NOTE naming it and ends with a hint to rebuild
+#     with --reset, the documented way to replace it.
 #
 # --reset (off by default) first DELETES, in one transaction on the local
 # Postgres, what an earlier run of this script left, so the next run rebuilds it
@@ -94,7 +111,7 @@ RESET="no"
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET="yes" ;;
-    -h | --help) sed -n '18,89p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '18,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -126,7 +143,9 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 CREATED=0 # records this run created
+UPDATED=0 # records this run brought in line with what this version leaves
 WRITES=0  # every write request this run sent (not counting searches and reads)
+STALE=""  # proposals citing evidence this version would no longer choose
 
 log() { printf '%s\n' "$*"; }
 step() { printf '  - %s\n' "$*"; }
@@ -212,34 +231,76 @@ change_request_json() {
     '[(.changeRequests // .results // .items // [])[] | select(.subject == $s)][0] // empty'
 }
 
+# The subjects the local seed generator gives its filler change requests
+# (scripts/csm-compose/seed-generator/words.go, crSubjects): generic, with no
+# plan, raised for whichever project -- never evidence for anything.
+# Without that file, the generator's description still marks its filler.
+FILLER_CR_SUBJECTS="$({ sed -n '/^var crSubjects/,/^}/s/^[[:space:]]*"\(.*\)",$/\1/p' \
+  "$REPO_ROOT/scripts/csm-compose/seed-generator/words.go" 2>/dev/null || true; } |
+  jq -Rsc 'split("\n") | map(select(. != ""))')"
+
 # load_closed_change_requests: CLOSED_CRS, the closed change requests on this
-# stack that may serve as evidence, as a JSON array of {id, number, subject}:
-# test leftovers ("[E2E] ..." and the standard change spec's QA-STD-E2E rows)
-# are never evidence.
+# stack that may serve as evidence, as a JSON array of {id, number, subject}.
+# Never evidence: test leftovers ("[E2E] ..." and the standard change spec's
+# QA-STD-E2E rows) and the seed generator's filler (its subjects, or its
+# "Generated for local dev testing" description).
 load_closed_change_requests() {
   local offset=0 page all="[]"
   while :; do
     must "search closed change requests" POST /change-requests/search "$TOK_ALICE" \
       "$(jq -nc --argjson o "$offset" '{filters:{states:["closed"]}, pagination:{limit:50, offset:$o}}')"
-    page="$(printf '%s' "$BODY" | jq -c '[(.changeRequests // .results // .items // [])[] | {id, number, subject}]')"
+    page="$(printf '%s' "$BODY" | jq -c '[(.changeRequests // .results // .items // [])[] | {id, number, subject, description}]')"
     all="$(jq -nc --argjson a "$all" --argjson p "$page" '$a + $p')"
     [ "$(printf '%s' "$page" | jq length)" -eq 50 ] || break
     offset=$((offset + 50))
   done
-  CLOSED_CRS="$(printf '%s' "$all" | jq -c \
-    '[.[] | select((.subject // "") as $s | ($s | startswith("[E2E]") | not) and ($s | contains("QA-STD-E2E") | not))]')"
+  CLOSED_CRS="$(printf '%s' "$all" | jq -c --argjson filler "$FILLER_CR_SUBJECTS" \
+    '[.[] | select((.subject // "") as $s | (.description // "") as $d
+        | ($s | startswith("[E2E]") | not) and ($s | contains("QA-STD-E2E") | not)
+          and ($filler | index($s) | not) and ($d | startswith("Generated for local dev testing") | not))
+      | {id, number, subject}]')"
 }
 
-# related_evidence REGEX: the ids of the closed change requests whose subject
-# matches REGEX (ignoring case), oldest number first, at most three; "[]" when
-# none relates.
+# related_evidence REGEX: sets EVIDENCE to the ids of the closed change requests
+# that genuinely relate, oldest number first, at most three; "[]" when none
+# does. Related means: the subject matches REGEX (ignoring case; each spec's
+# REGEX names the specific operation, not a word as broad as "upgrade") AND the
+# change request has an implementation plan with some text in it -- a change
+# nobody wrote a plan for shows nothing a template could be drawn from.
+EVIDENCE="[]"
 related_evidence() {
-  printf '%s' "$CLOSED_CRS" | jq -c --arg re "$1" \
-    '[.[] | select(.subject | test($re; "i"))] | sort_by(.number) | [.[].id][0:3]'
+  local candidates id plan
+  EVIDENCE="[]"
+  candidates="$(printf '%s' "$CLOSED_CRS" | jq -r --arg re "$1" \
+    '[.[] | select(.subject | test($re; "i"))] | sort_by(.number) | .[].id')"
+  for id in $candidates; do
+    must "read closed change request" GET "/change-requests/$id" "$TOK_ALICE"
+    plan="$(printf '%s' "$BODY" | jq -r '(.implementationPlan // .changeRequest.implementationPlan // "")
+      | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; "")')"
+    [ -n "$plan" ] || continue
+    EVIDENCE="$(jq -nc --argjson a "$EVIDENCE" --arg i "$id" '$a + [$i]')"
+    [ "$(printf '%s' "$EVIDENCE" | jq length)" -lt 3 ] || break
+  done
 }
 
 # ---------------------------------------------------------------------------
 # Proposals
+
+# check_cited_evidence PROPOSAL_JSON CHOSEN_IDS_JSON: a proposal past draft
+# cannot be edited, so evidence an earlier version of this script cited is only
+# reported: when it cites a change request not in CHOSEN_IDS_JSON (what this
+# version would choose now), print a NOTE and remember it for the closing hint.
+check_cited_evidence() {
+  local proposal="$1" chosen="$2" extra number state
+  state="$(printf '%s' "$proposal" | jq -r .state)"
+  [ "$state" != "draft" ] || return 0
+  extra="$(printf '%s' "$proposal" | jq -r --argjson c "$chosen" \
+    '[(.evidence // [])[] | select(.id as $i | $c | index($i) | not) | "\(.number) \"\(.subject)\""] | join(", ")')"
+  [ -n "$extra" ] || return 0
+  number="$(printf '%s' "$proposal" | jq -r .number)"
+  step "NOTE: $number ($state) cites $extra, which this script would no longer choose as evidence; a proposal past draft cannot be edited"
+  STALE="${STALE:+$STALE, }$number"
+}
 
 # drive_proposal ID TARGET SPEC_FILE EVIDENCE_IDS_JSON [REJECT_COMMENT]
 # Carries a proposal of bob's from whatever state it is in to TARGET (draft,
@@ -251,6 +312,7 @@ drive_proposal() {
   must "read proposal" GET "/standard-change-proposals/$id" "$TOK_BOB"
   state="$(printf '%s' "$BODY" | jq -r .state)"
   number="$(printf '%s' "$BODY" | jq -r .number)"
+  check_cited_evidence "$BODY" "$evidence"
   if [ "$state" = "draft" ] && [ "$target" = "draft" ] && [ "${FOUND_EXISTING:-}" = "yes" ]; then
     # A draft found again is left alone: someone may be editing it in the portal.
     step "$number is already a draft: left as it is"
@@ -294,11 +356,18 @@ ensure_new_proposal() {
   name="$(jq -r .patch.name "$spec")"
   log "* $name  (target: $target)"
   FOUND_EXISTING="no"
+  related_evidence "$(jq -r '.evidenceMatch // "(?!)"' "$spec")"
+  evidence="$EVIDENCE"
   if [ "$target" = "approved" ] && [ -n "$(template_json "$name")" ]; then
     step "template already exists: skipped"
+    # The approved proposal that created it may cite what an earlier version chose.
+    found="$(proposal_json "$name" new)"
+    if [ -n "$found" ]; then
+      must "read proposal" GET "/standard-change-proposals/$(printf '%s' "$found" | jq -r .id)" "$TOK_BOB"
+      check_cited_evidence "$BODY" "$evidence"
+    fi
     return 0
   fi
-  evidence="$(related_evidence "$(jq -r '.evidenceMatch // "(?!)"' "$spec")")"
   source=""
   [ "$(jq -r '.startFromEvidence // false' "$spec")" = "true" ] && source="$(printf '%s' "$evidence" | jq -r '.[0] // empty')"
   found="$(proposal_json "$name" new)"
@@ -331,6 +400,15 @@ ensure_modified() {
   version="$(printf '%s' "$t" | jq -r '.currentVersion.version')"
   if [ "$version" -ge 2 ]; then
     step "already at version $version: skipped"
+    # The approved modification that got it there may cite what an earlier version chose.
+    must "search modifications" POST /standard-change-proposals/search "$TOK_BOB" \
+      "$(jq -nc --arg q "$name" '{kinds:["modify"], proposedByMe:true, query:$q, pagination:{limit:50, offset:0}}')"
+    id="$(printf '%s' "$BODY" | jq -r --arg t "$(printf '%s' "$t" | jq -r .id)" \
+      '[.proposals[] | select(.state == "approved" and .template.id == $t)] | sort_by(.createdOn) | last | .id // empty')"
+    if [ -n "$id" ]; then
+      must "read proposal" GET "/standard-change-proposals/$id" "$TOK_BOB"
+      check_cited_evidence "$BODY" "$evidence"
+    fi
     return 0
   fi
   open="$(printf '%s' "$t" | jq -r '.openProposal.id // empty')"
@@ -349,16 +427,29 @@ ensure_modified() {
 }
 
 # ensure_suspended TEMPLATE_NAME REASON: suspended by its owner (bob), with REASON.
+# A template suspended with another reason (an earlier version of this script's)
+# is resumed and suspended again by its owner, so the stored reason converges.
 ensure_suspended() {
-  local name="$1" reason="$2" t
+  local name="$1" reason="$2" t id stored
   log "* $name  (target: suspended)"
   t="$(template_json "$name")"
   [ -n "$t" ] || die "template \"$name\" does not exist"
+  id="$(printf '%s' "$t" | jq -r .id)"
   case "$(printf '%s' "$t" | jq -r .state)" in
     suspended)
-      step "already suspended: skipped (reason: $(printf '%s' "$t" | jq -r '.suspendedReason // "none given"'))" ;;
+      stored="$(printf '%s' "$t" | jq -r '.suspendedReason // ""')"
+      if [ "$stored" = "$reason" ]; then
+        step "already suspended with this reason: skipped"
+        return 0
+      fi
+      step "suspended with an earlier reason (\"$(printf '%s' "$stored" | cut -c1-60)...\"): resuming to suspend again"
+      must "resume $name" POST "/standard-change-templates/$id/resume" "$TOK_BOB"
+      must "suspend $name" POST "/standard-change-templates/$id/suspend" "$TOK_BOB" \
+        "$(jq -nc --arg r "$reason" '{reason:$r}')"
+      UPDATED=$((UPDATED + 1))
+      step "suspended again by its owner (reason stored: $(printf '%s' "$BODY" | jq -r '.suspendedReason // .template.suspendedReason // "?" | .[0:60]')...)" ;;
     active)
-      must "suspend $name" POST "/standard-change-templates/$(printf '%s' "$t" | jq -r .id)/suspend" "$TOK_BOB" \
+      must "suspend $name" POST "/standard-change-templates/$id/suspend" "$TOK_BOB" \
         "$(jq -nc --arg r "$reason" '{reason:$r}')"
       step "suspended by its owner (reason stored: $(printf '%s' "$BODY" | jq -r '.suspendedReason // .template.suspendedReason // "?" | .[0:60]')...)" ;;
     *) step "is $(printf '%s' "$t" | jq -r .state): left as it is" ;;
@@ -519,7 +610,7 @@ cat >"$WORK/scale-v2.json" <<'JSON'
 JSON
 
 cat >"$WORK/update-level.json" <<'JSON'
-{"evidenceMatch": "\\b(upgrade|update level|product update)\\b", "startFromEvidence": true,
+{"evidenceMatch": "\\b(update level|product update|wso2 updates?)\\b", "startFromEvidence": true,
  "evidenceNote": "<p>The cited evidence is earlier product upgrade work closed on this stack; the proposal was started from the first change request cited.</p>",
  "patch": {
   "name": "Apply a WSO2 product update level to a deployment",
@@ -804,7 +895,7 @@ log ""
 log "Template lifecycle"
 ensure_modified "$SCALE" "$WORK/scale-v2.json" "$SCALE_EVIDENCE"
 ensure_suspended "Restart an API Manager node" \
-  "A Traffic Manager restart on a clustered deployment dropped its throttling counters. The plan is being revised to exclude the Traffic Manager profile; raise node restarts as normal changes until then."
+  "The owner is reworking the restart procedure for clustered deployments. Raise node restarts as normal changes until this template is resumed."
 log ""
 
 log "Proposals in other states"
@@ -837,4 +928,10 @@ must "list proposals" POST /standard-change-proposals/search "$TOK_BOB" \
   '{"pagination":{"limit":50,"offset":0}}'
 printf '%s' "$BODY" | jq -r '.proposals[] | "  \(.number)  \(.kind)  \(.state)  \(.name)"'
 log ""
-log "Done: $CREATED created, $WRITES write request(s) in all."
+if [ -n "$STALE" ]; then
+  log "HINT: $STALE cite(s) evidence this version of the script would no longer choose."
+  log "      A proposal past draft cannot be edited; rebuild the seed with:"
+  log "        $0 --reset"
+  log ""
+fi
+log "Done: $CREATED created, $UPDATED updated, $WRITES write request(s) in all."

@@ -16,43 +16,79 @@
 
 // Standard changes, end to end on the real local stack, through the UI:
 //
-//   1. Operations > Change requests carries the standard change catalogue and
-//      proposals as sub-views. Each is headed "Standard changes" with its own
-//      line, and neither the heading nor the line says anything about service
-//      requests, incidents, problems or runbooks; every other Operations tab
-//      keeps the Operations heading. Every old link to the separate tab lands
-//      on the right sub-view. The catalogue lists the seed's five templates
+//   1. Operations > Change requests has a two-entry strip, "Change requests"
+//      (the list, no `view`) | "Standard changes" (`?view=standard`). Standard
+//      changes opens on the catalogue; the proposals are its secondary view
+//      (the "Templates or proposals" toggle, `&show=proposals`, with `scope` and
+//      `state` in the URL; the scope select is named "Show", a name the toggle
+//      does not share). The proposals open on all proposals (no `scope`). Both
+//      are headed "Standard changes" with the same line, which says nothing
+//      about service requests, incidents, problems or runbooks; every other
+//      Operations tab (each one checked once the sidebar has rendered it) keeps
+//      the Operations heading. Entering Standard changes keeps the list's `cr*`
+//      filters in the URL, unread; the "Change requests" tab drops only
+//      Standard changes' parameters, so the list comes back with its filter
+//      applied. Every old link (the separate tab, in both spellings and both
+//      forms, each with `view=catalogue` / `view=proposals` and without, and the
+//      previous `?view=catalogue` / `?view=proposals` sub-views, with a scope,
+//      a state or the list's `cr*` filters) lands on the right place with its
+//      filters kept, and a rewrite of an old sub-view adds no history entry.
+//      The catalogue lists the seed's five templates
 //      (scripts/csm-compose/seed-standard-changes.sh) with their states and
-//      versions (the suspended one, the one at version 2), the suspended one's
-//      page shows the reason it was suspended, the proposals sub-view lists the
-//      seed's rejected, in-CAB-review and draft proposals and its revision, and
-//      the sidebar's "Change requests" is the active entry on a template page
-//      and on a proposal page.
-//   2. bob proposes a standard change from a CLOSED change request (its detail
-//      page's "Propose as standard change"), templates it (name, category, a
+//      versions, the suspended one's page shows the seed's reason, the
+//      proposals list the seed's rejected, in-CAB-review and draft proposals
+//      and its revision, the breadcrumbs read "Change requests › Standard
+//      changes › [Proposals ›] <number>" (the "Proposals" crumb opens all the
+//      proposals), Back returns to the view a record was opened from, "Pin
+//      this page" names each place ("Standard changes" however the list was
+//      filtered, "Standard change proposals: 1 filter", a template by its
+//      number) and the sidebar's "Change requests" is the one active entry
+//      throughout.
+//   2. The "needs your attention" strip above the catalogue: hidden for jane,
+//      who has nothing pending; for carol (a CAB member asked about the seed's
+//      proposal in CAB review) and bob (who has the seed's draft) it reads the
+//      counts Postgres holds, in words, each part a link to the proposals
+//      filtered to it, which lists that seeded proposal. Hidden on the
+//      proposals view, which for jane, who proposed nothing, opens on all the
+//      proposals: bob's seeded ones.
+//   3. bob proposes a standard change from a CLOSED change request (its detail
+//      page's "Propose as standard change"), templates it (name, category,
+//      impact Medium -- not the create form's default, Low -- description,
+//      justification, risk and impact analysis, plan visible to customers, a
 //      text and a select parameter, {{placeholders}} in the subject and the
-//      implementation, backout and test plans, typed and inserted with
-//      "Insert {{…}}"; the live preview renders every one with the sample
-//      values), saves it and submits it to the CAB; carol, a CAB member,
-//      approves it on the proposal page; the template is in the catalogue as
+//      implementation, backout and test plans, typed and inserted with "Insert
+//      {{…}}"). The live preview shows every placeholder highlighted and open
+//      ({{host}} / {{env}}) before sample values are typed, open and filled
+//      side by side (styled differently: the filled one with a dotted
+//      underline) once only the host is typed, and filled with them all
+//      after. He saves and submits it to the CAB; carol finds it through her
+//      attention strip and approves it; the template's page shows the current
+//      version with its placeholders highlighted, and it is in the catalogue as
 //      active version 1; alice raises a change request from it on the create
 //      form (type Standard, the template, the change specifics, the read-only
 //      preview). The change request holds the template's content rendered with
 //      her values (subject, the three plans, impact, risk, category, rollback
-//      duration), shows the "Raised from standard change template" banner, its
-//      lifecycle bar never passes through Assess or Authorize, and in Edit
-//      every field the template specifies is disabled while the others
-//      (priority, assignment, affected services) stay editable. She schedules
-//      it (Request Approval reads "Schedule"), implements, reviews and rolls it
-//      back; the template then reads "Review needed", linking to that change
-//      request.
+//      duration on the page; description, justification, risk and impact
+//      analysis, plan visibility, impact and risk from the API and Postgres,
+//      compared with the template's own version), shows the "Raised from
+//      standard change template" banner, its lifecycle bar never passes through
+//      Assess or Authorize, and in Edit every field the template specifies is
+//      disabled AND shows the template's value while the others (priority,
+//      assignment, affected services) stay editable. The backend holds the same
+//      line: a PATCH through the BFF that changes a field the template
+//      specifies is refused with 400 change_request_standard_template_field,
+//      while resending the stored value with a work note is accepted. She
+//      schedules it (Request Approval reads "Schedule"), implements, reviews
+//      and rolls it back; the template then reads "Review needed", linking to
+//      that change request.
 //
 // It WRITES to the stack: a closed change request raised and walked through the
 // CSM backend's API (the evidence), the proposal, the template and the change
-// request raised from it, all named with TAG. Before and after, the clean-up
-// deletes from Postgres everything carrying TAG (and every change request raised
-// from a TAG template), with the event-outbox rows of the records it deletes,
-// and nothing else. So it runs only when the stack is named:
+// request raised from it, all named with TAG (and a work note on that change
+// request). Before and after, the clean-up deletes from Postgres everything
+// carrying TAG (and every change request raised from a TAG template), with the
+// event-outbox rows of the records it deletes, and nothing else. So it runs only
+// when the stack is named:
 //
 //   E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csmcr-postgres-1 \
 //   E2E_CSM_BFF_URL=http://localhost:8082 E2E_OIDC_URL=http://localhost:9100 \
@@ -62,14 +98,15 @@
 // The seed must have been run first (scripts/csm-compose/seed-standard-changes.sh).
 // The personas sign in through the local mock identity provider (no password):
 // bob proposes, carol decides as a member of the "CAB Approval" group (the
-// proposer cannot decide his own), alice raises and moves the change request.
+// proposer cannot decide his own), alice raises and moves the change request,
+// jane (in no approval group, with no proposals) has nothing pending.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { ChangeRequestDetailPage } from "../../pages/ChangeRequestDetailPage";
-import { EXAMPLE_CORP_ABT_GROUP_ID, realStackNamed, staff, walkTo } from "../../utils/realStackApi";
+import { EXAMPLE_CORP_ABT_GROUP_ID, realStackNamed, staff, STAFF, walkTo } from "../../utils/realStackApi";
 
 const POSTGRES_CONTAINER = process.env.E2E_POSTGRES_CONTAINER?.trim();
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3001";
@@ -90,8 +127,14 @@ const SOURCE_TEST = "Read a known key and compare it with the primary.";
  */
 const TEMPLATE = {
   category: "Software",
-  impact: "Low",
+  /** Not the create form's default (Low), so the change request's impact can only have come from the template. */
+  impact: "Medium",
   risk: "Low",
+  description: "Restart the cache service on one node to clear a stuck eviction loop.",
+  justification: "A stuck eviction loop slows every read on the node; a restart clears it.",
+  riskImpactAnalysis: "One node is out of the pool for about a minute; the others serve its reads.",
+  /** Not the create form's default (off), as above. */
+  planVisibleToCustomers: true,
   rollbackDuration: "15 mins",
   subject: (host: string, env: string) => `${TAG} Restart the cache service on ${host} (${env})`,
   implementationTyped: "Drain {{host}} in {{env}}, restart the cache service, put it back in the pool on ",
@@ -103,29 +146,37 @@ const TEMPLATE = {
   test: (env: string) => `Read a known key and compare it with the primary in ${env}`,
 } as const;
 
-const USERS = {
-  alice: "alice.perera@example.com",
-  bob: "bob.fernando@example.com",
-  carol: "carol.silva@example.com",
-} as const;
+/** The personas (the mock identity provider signs any of them in). jane has nothing pending in standard changes. */
+const USERS = STAFF;
 
-/** The Operations heading, which every Operations tab but the two standard change sub-views keeps. */
+/** Where Standard changes lives (`utils/standardChanges.ts`). */
+const STANDARD_CHANGES = "/operations/change-requests?view=standard";
+/** The URL's path and query, with the query exactly `search` (no `?` for none). */
+function exactly(path: string, search = ""): RegExp {
+  return new RegExp(`${escapeRegExp(path)}${search ? `\\?${escapeRegExp(search)}` : ""}$`);
+}
+
+/** The Operations heading, which every Operations tab but Standard changes keeps. */
 const OPERATIONS_HEADING = {
   title: "Operations",
   subtitle: "Service requests, change requests, incidents, problems, and runbooks across customers.",
 };
-const CATALOGUE_HEADING = {
+/** Standard changes' heading, the same for the catalogue and the proposals. */
+const STANDARD_CHANGES_HEADING = {
   title: "Standard changes",
   subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
 };
-const PROPOSALS_HEADING = {
-  title: "Standard changes",
-  subtitle: "Proposals to the CAB to add, revise or retire a standard change template.",
-};
 /** What the user complained about: the standard change views headed with the entities they have nothing to do with. */
 const OTHER_OPERATIONS_ENTITIES = /service requests?|incidents?|problems?|runbooks?/i;
-/** The Operations tabs of the sidebar (a deployment may restrict some; those are skipped). */
+/** The Operations tabs of the sidebar, as the local stack shows them to bob (each must be there). */
 const OPERATIONS_TABS = ["Service requests", "Change requests", "Incidents", "Problem management", "Outages", "Runbooks"];
+
+/**
+ * A filter of the change request list (its own `cr*` parameters): a search no change request matches, and a state.
+ * Standard changes keeps it in the URL, unread, and the list comes back with it applied.
+ */
+const CR_LIST_SEARCH = `qa-std-e2e-filter-${RUN}`;
+const CR_LIST_FILTERS = `crQ=${CR_LIST_SEARCH}&crStates=closed`;
 
 /**
  * What scripts/csm-compose/seed-standard-changes.sh leaves, by the names it gives (its
@@ -139,7 +190,9 @@ const SEEDED_TEMPLATES = [
   { name: "Add an IP range to a customer's gateway allowlist", version: "v1", state: "Active" },
 ] as const;
 const SUSPENDED_TEMPLATE = "Restart an API Manager node";
-const SUSPENDED_REASON_START = "A Traffic Manager restart on a clustered deployment dropped its throttling counters.";
+/** The reason the seed suspends it with (seed-standard-changes.sh replaces an older one on a re-run). */
+const SUSPENDED_REASON =
+  "The owner is reworking the restart procedure for clustered deployments. Raise node restarts as normal changes until this template is resumed.";
 const REVISED_TEMPLATE = "Scale a Kubernetes deployment's replicas";
 /** bob's proposals in states other than approved, and his approved revision. */
 const SEEDED_PROPOSALS = [
@@ -305,6 +358,12 @@ async function expectRenderedContent(scope: Locator, host: string, env: string):
   await expect(renderedField(scope, "Impact")).toHaveText(TEMPLATE.impact);
   await expect(renderedField(scope, "Risk")).toHaveText(TEMPLATE.risk);
   await expect(renderedField(scope, "Rollback duration")).toHaveText(TEMPLATE.rollbackDuration);
+  await expect(renderedField(scope, "Implementation plan visible to customers")).toHaveText("Yes");
+  await expect(renderedField(scope, "Customer approval")).toHaveText("No");
+  await expect(renderedField(scope, "Customer review")).toHaveText("No");
+  await expect(renderedSection(scope, "Description")).toHaveText(TEMPLATE.description);
+  await expect(renderedSection(scope, "Justification")).toHaveText(TEMPLATE.justification);
+  await expect(renderedSection(scope, "Risk and impact analysis")).toHaveText(TEMPLATE.riskImpactAnalysis);
   await expect(renderedSection(scope, "Implementation plan")).toHaveText(TEMPLATE.implementation(host, env));
   await expect(renderedSection(scope, "Backout plan")).toHaveText(TEMPLATE.backout(host));
   await expect(renderedSection(scope, "Test plan")).toHaveText(TEMPLATE.test(env));
@@ -312,9 +371,169 @@ async function expectRenderedContent(scope: Locator, host: string, env: string):
   await expect(scope).not.toContainText("{{");
 }
 
+/** How often each placeholder appears in what the template specifies (subject and plans, as bob writes them below). */
+const PLACEHOLDER_COUNT = { host: 4, env: 3 } as const;
+
+/** The marks `StandardChangeContentView` wraps a placeholder in: open (`{{key}}`, no value) or filled with a value. */
+function openMarks(scope: Locator, key: string): Locator {
+  return scope.locator(`mark[data-param="${key}"]:not([data-filled])`);
+}
+function filledMarks(scope: Locator, key: string): Locator {
+  return scope.locator(`mark[data-param="${key}"][data-filled="true"]`);
+}
+
+/** What a mark's computed style says about how it is drawn. */
+interface MarkStyle {
+  backgroundColor: string;
+  fontFamily: string;
+  textDecorationLine: string;
+  textDecorationStyle: string;
+}
+async function markStyle(mark: Locator): Promise<MarkStyle> {
+  return mark.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      backgroundColor: s.backgroundColor,
+      fontFamily: s.fontFamily,
+      textDecorationLine: s.textDecorationLine,
+      textDecorationStyle: s.textDecorationStyle,
+    };
+  });
+}
+
+/** Chromium's own `<mark>` background (yellow), which a mark the app did not style would still have. */
+const USER_AGENT_MARK_BACKGROUND = "rgb(255, 255, 0)";
+
+/**
+ * A mark is drawn as the app styles it (`StandardChangeContentView`'s PLACEHOLDER_MARK_SX), not as a bare `<mark>`:
+ * a background of its own that is not the browser's yellow; an open one in monospace with no underline, a filled one
+ * in the text's own font with a dotted underline.
+ */
+async function expectHighlighted(mark: Locator, kind: "open" | "filled"): Promise<MarkStyle> {
+  const style = await markStyle(mark);
+  expect(style.backgroundColor, `a ${kind} placeholder mark has a background of its own`).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
+  expect(style.backgroundColor, `a ${kind} placeholder mark is styled by the app, not the browser's yellow`).not.toBe(USER_AGENT_MARK_BACKGROUND);
+  if (kind === "open") {
+    expect(style.fontFamily, "an open placeholder is in monospace").toMatch(/monospace/);
+    expect(style.textDecorationLine, "an open placeholder is not underlined").toBe("none");
+  } else {
+    expect(style.fontFamily, "a filled placeholder is in the text's own font").not.toMatch(/monospace/);
+    expect(style.textDecorationLine, "a filled placeholder is underlined").toBe("underline");
+    expect(style.textDecorationStyle, "... dotted").toBe("dotted");
+  }
+  return style;
+}
+
+/**
+ * With some placeholders filled and others not, on the same page in the same state, the open and the filled marks are
+ * drawn differently (background, font and underline), each as the app styles it.
+ */
+async function expectOpenAndFilledDiffer(open: Locator, filled: Locator): Promise<void> {
+  const openStyle = await expectHighlighted(open, "open");
+  const filledStyle = await expectHighlighted(filled, "filled");
+  expect(filledStyle.backgroundColor, "open and filled marks have different backgrounds").not.toBe(openStyle.backgroundColor);
+  expect(filledStyle.fontFamily, "open and filled marks have different fonts").not.toBe(openStyle.fontFamily);
+  expect(filledStyle.textDecorationLine, "only the filled mark is underlined").not.toBe(openStyle.textDecorationLine);
+}
+
+/** Every {{host}} / {{env}} in `scope` shows as an open, highlighted placeholder (none filled), in the subject and the plans. */
+async function expectOpenPlaceholders(scope: Locator): Promise<void> {
+  for (const key of ["host", "env"] as const) {
+    const open = openMarks(scope, key);
+    await expect(open, `open {{${key}}} marks`).toHaveCount(PLACEHOLDER_COUNT[key]);
+    await expect(open).toHaveText(Array(PLACEHOLDER_COUNT[key]).fill(`{{${key}}}`));
+    await expect(filledMarks(scope, key)).toHaveCount(0);
+    await expectHighlighted(open.first(), "open");
+  }
+  await expect(openMarks(renderedField(scope, "Subject"), "host")).toHaveCount(1);
+  await expect(openMarks(renderedField(scope, "Subject"), "env")).toHaveCount(1);
+  await expect(openMarks(renderedSection(scope, "Implementation plan"), "host")).toHaveCount(2);
+  await expect(openMarks(renderedSection(scope, "Test plan"), "env")).toHaveCount(1);
+}
+
+/** Every {{host}} / {{env}} in `scope` shows as a filled, highlighted mark with the value; none is left open. */
+async function expectFilledPlaceholders(scope: Locator, values: { host: string; env: string }): Promise<void> {
+  for (const key of ["host", "env"] as const) {
+    const filled = filledMarks(scope, key);
+    await expect(filled, `filled {{${key}}} marks`).toHaveCount(PLACEHOLDER_COUNT[key]);
+    await expect(filled).toHaveText(Array(PLACEHOLDER_COUNT[key]).fill(values[key]));
+    await expect(openMarks(scope, key)).toHaveCount(0);
+    await expectHighlighted(filled.first(), "filled");
+  }
+}
+
 /** The Plan tab's section titled `title` (the text under its heading). */
 function planSection(main: Locator, title: string): Locator {
   return main.getByText(title, { exact: true }).locator("xpath=following-sibling::*[1]");
+}
+
+/** The page's breadcrumb trail reads `links`, then the record's number. */
+async function expectBreadcrumb(main: Locator, links: string[], current: RegExp): Promise<void> {
+  const trail = main.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(trail.getByRole("link")).toHaveText(links);
+  await expect(trail.locator('[aria-current="page"]')).toHaveText(current);
+}
+
+/** "Pin this page", then the pinned tab in the top bar is named `label`. */
+async function pinThisPage(page: Page, label: string | RegExp): Promise<void> {
+  await page.getByRole("button", { name: "Pin this page to top nav bar" }).click();
+  await expect(page.getByRole("button", { name: "Unpin this page" })).toBeVisible();
+  const name = typeof label === "string" ? new RegExp(`^${escapeRegExp(label)} — pinned tab$`) : label;
+  await expect(page.getByRole("button", { name })).toBeVisible();
+}
+
+/** The "needs your attention" strip above the catalogue. */
+function attentionStrip(main: Locator): Locator {
+  return main.getByRole("status", { name: "Needs your attention" });
+}
+
+/**
+ * What Postgres holds for `email`, by the backend's own definitions (entity-service's `SearchProposals`): proposals in
+ * CAB review on which they have a REQUESTED approver row, and their own drafts.
+ */
+async function pendingFor(email: string): Promise<{ awaiting: number; drafts: number }> {
+  const out = await psql(`
+    SELECT (SELECT count(*) FROM standard_change_proposal p
+             WHERE p.state = 'CAB_REVIEW'
+               AND EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+                            WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND lower(u.email) = lower('${email}'))),
+           (SELECT count(*) FROM standard_change_proposal p JOIN work_item wi ON wi.id = p.id
+             WHERE p.state = 'DRAFT' AND lower(wi.created_by) = lower('${email}'));`);
+  const [awaiting, drafts] = out.split("|").map(Number);
+  return { awaiting, drafts };
+}
+
+/** How many standard change proposals `email` has started, in Postgres. */
+async function proposalsBy(email: string): Promise<number> {
+  return Number(
+    await psql(`SELECT count(*) FROM work_item WHERE type = 'STANDARD_CHANGE_PROPOSAL' AND lower(created_by) = lower('${email}');`),
+  );
+}
+
+/** The strip's parts for these counts, as the page words them ("1 proposal awaits ...", "2 drafts of yours"). */
+function attentionParts({ awaiting, drafts }: { awaiting: number; drafts: number }): string[] {
+  const parts: string[] = [];
+  if (awaiting > 0) parts.push(`${awaiting} ${awaiting === 1 ? "proposal awaits" : "proposals await"} your CAB decision`);
+  if (drafts > 0) parts.push(`${drafts} ${drafts === 1 ? "draft" : "drafts"} of yours`);
+  return parts;
+}
+
+/** Opens Standard changes and waits until the strip's two counts have been answered (so "no strip" means none, not "not yet"). */
+async function openStandardChangesCounted(page: Page): Promise<void> {
+  const counted = (key: string) =>
+    page.waitForResponse(
+      (r) =>
+        r.request().method() === "POST" &&
+        r.url().endsWith("/standard-change-proposals/search") &&
+        (r.request().postData() ?? "").includes(key),
+    );
+  const [awaiting, drafts] = await Promise.all([
+    counted('"awaitingMyDecision":true'),
+    counted('"proposedByMe":true'),
+    page.goto(STANDARD_CHANGES),
+  ]);
+  expect(awaiting.status()).toBe(200);
+  expect(drafts.status()).toBe(200);
 }
 
 test.describe("standard changes (real stack)", () => {
@@ -332,39 +551,81 @@ test.describe("standard changes (real stack)", () => {
     if (POSTGRES_CONTAINER && realStackNamed()) await cleanUp();
   });
 
-  test("standard changes sit under Operations > Change requests, headed as such, old links land there, and the seed is listed", async ({ browser }) => {
-    test.setTimeout(180_000);
+  test("Standard changes is one tab of Operations > Change requests, headed as such, old links land there, and the seed is listed", async ({ browser }) => {
+    test.setTimeout(240_000);
 
     const page = await signedIn(browser, USERS.bob, "/operations");
     try {
       const main = page.getByRole("main");
       const nav = sidebar(page);
       await expectHeading(main, OPERATIONS_HEADING);
-      // There is no "Standard changes" entry of its own in Operations.
+      // The sidebar has rendered every Operations entry (each polled until it is visible, none skipped) ...
+      for (const tab of OPERATIONS_TABS) {
+        await expect(nav.getByRole("button", { name: tab, exact: true }), `the sidebar's "${tab}" entry`).toBeVisible();
+      }
+      // ... so this negative is about a rendered sidebar: there is no "Standard changes" entry of its own in Operations.
       await expect(nav.getByRole("button", { name: /^Standard changes?$/ })).toHaveCount(0);
+      await expect(nav.getByText(/^Standard changes?$/)).toHaveCount(0);
 
       // Every other Operations tab, the change request list included, keeps the Operations heading.
       for (const tab of OPERATIONS_TABS) {
         const entry = nav.getByRole("button", { name: tab, exact: true });
-        if ((await entry.count()) === 0) continue;
         await entry.click();
         await expect(page, `the ${tab} tab`).toHaveURL(/\/operations\/[a-z-]+$/);
         await expectHeading(main, OPERATIONS_HEADING);
       }
 
       await nav.getByRole("button", { name: "Change requests", exact: true }).click();
-      await expect(page).toHaveURL(/\/operations\/change-requests$/);
+      await expect(page).toHaveURL(exactly("/operations/change-requests"));
       await expectHeading(main, OPERATIONS_HEADING);
       const subNav = main.getByRole("tablist", { name: "Change requests" });
-      await expect(subNav.getByRole("tab")).toHaveText(["Change requests", "Standard change catalogue", "Standard change proposals"]);
+      await expect(subNav.getByRole("tab")).toHaveText(["Change requests", "Standard changes"]);
       await expect(subNav.getByRole("tab", { name: "Change requests" })).toHaveAttribute("aria-selected", "true");
 
-      // ---- the catalogue: headed "Standard changes", the seed's five templates with their states and versions ----
-      await subNav.getByRole("tab", { name: "Standard change catalogue" }).click();
-      await expect(page).toHaveURL(/\/operations\/change-requests\?view=catalogue$/);
-      await expectHeading(main, CATALOGUE_HEADING);
+      // The unfiltered list has change requests (so "none found" below is the filter's doing).
+      const listSearch = main.getByPlaceholder("Search by number or subject…");
+      const noneFound = main.getByText("No change requests found.", { exact: true });
+      // A loaded row carries a change request number (CHG0039104, CS-PORTAL-000088, ...); a loading skeleton has no text.
+      await expect(main.getByRole("row").filter({ hasText: /\b[A-Z][A-Z-]*\d{4,}\b/ }).first()).toBeVisible({ timeout: 20_000 });
+      await expect(listSearch).toHaveValue("");
+      await expect(noneFound).toHaveCount(0);
+
+      // ---- Standard changes: the list's own filters ride along unread, and come back on the way out ----------------
+      /** The filtered list is shown with its filter applied: the search box holds it and no change request matches. */
+      const expectFilteredList = async (): Promise<void> => {
+        await expect(page).toHaveURL(exactly("/operations/change-requests", CR_LIST_FILTERS));
+        await expect(subNav.getByRole("tab", { name: "Change requests" })).toHaveAttribute("aria-selected", "true");
+        await expectHeading(main, OPERATIONS_HEADING);
+        await expect(listSearch).toHaveValue(CR_LIST_SEARCH);
+        await expect(noneFound).toBeVisible();
+      };
+      await page.goto(`/operations/change-requests?${CR_LIST_FILTERS}`);
+      await expectFilteredList();
+      await subNav.getByRole("tab", { name: "Standard changes" }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
+      await expect(subNav.getByRole("tab", { name: "Standard changes" })).toHaveAttribute("aria-selected", "true");
+      await expectHeading(main, STANDARD_CHANGES_HEADING);
       await expectChangeRequestsActive(page);
+      // The list's filters do not apply here: its search box is not on the page.
+      await expect(listSearch).toHaveCount(0);
+      // The toolbar: the Templates | Proposals toggle on the catalogue, and Propose.
+      const toggle = main.getByRole("group", { name: "Templates or proposals", exact: true });
+      await expect(toggle.getByRole("button")).toHaveText(["Templates", "Proposals"]);
+      await expect(toggle.getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
       await expect(main.getByRole("button", { name: "Propose a standard change" })).toBeVisible();
+      // The strip is a push: Back returns to the filtered list it came from.
+      await page.goBack();
+      await expectFilteredList();
+      await page.goForward();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
+      // The "Change requests" tab returns to the list as it was left, its filter applied, ...
+      await subNav.getByRole("tab", { name: "Change requests" }).click();
+      await expectFilteredList();
+      // ... and back again, the filter still riding along.
+      await subNav.getByRole("tab", { name: "Standard changes" }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
+
+      // ---- the catalogue: the seed's five templates with their states and versions -------------------------------
       const catalogue = main.getByRole("table", { name: "Standard change templates" });
       const templateSearch = main.getByRole("textbox", { name: "Search templates by number or name" });
       for (const seeded of SEEDED_TEMPLATES) {
@@ -379,36 +640,64 @@ test.describe("standard changes (real stack)", () => {
       }
       await templateSearch.fill("");
       await expect(catalogue.getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(1);
-      await shot(page, "01-catalogue-under-change-requests", main);
+      await shot(page, "01-standard-changes-catalogue", main);
+      // Pinned with the list's two filters in the URL: named "Standard changes", with no filter count.
+      await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
+      await pinThisPage(page, "Standard changes");
+      await expect(page.getByRole("button", { name: /^Standard changes: \d+ filters? — pinned tab$/ })).toHaveCount(0);
 
-      // The suspended template's page says why, and the sidebar still highlights Change requests.
+      // The suspended template's page says why; its trail and the sidebar place it under Change requests.
       await catalogue.getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE }).click();
       await expect(page).toHaveURL(/\/operations\/standard-changes\/[^/?]+$/);
       await expect(main.getByRole("heading", { name: SUSPENDED_TEMPLATE })).toBeVisible();
       const suspended = main.getByRole("region", { name: "Suspended" });
-      await expect(suspended).toContainText(`Suspended: ${SUSPENDED_REASON_START}`);
+      await expect(suspended).toContainText(`Suspended: ${SUSPENDED_REASON}`);
       await expect(suspended).toContainText(/\(by .+ on .+\)/);
       await expect(main.getByText("Version 1", { exact: true })).toBeVisible();
-      await expect(main.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Standard change catalogue");
+      await expectBreadcrumb(main, ["Change requests", "Standard changes"], /^STD\d+$/);
       await expectChangeRequestsActive(page);
       await shot(page, "02-suspended-template-with-reason", suspended);
+      // Pinned by its number (the Recent entry the page records), not as "Operations".
+      const suspendedNumber = (await main.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]').textContent())!.trim();
+      await pinThisPage(page, suspendedNumber);
+      // Back returns to the catalogue it was opened from, as it was (the list's filters still riding along).
+      await main.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
 
-      // The revised template is at version 2.
-      await page.goto("/operations/change-requests?view=catalogue");
+      // The revised template is at version 2; the trail's "Standard changes" leads back to the catalogue.
       await templateSearch.fill(REVISED_TEMPLATE);
       await catalogue.getByRole("row").filter({ hasText: REVISED_TEMPLATE }).click();
       await expect(main.getByRole("heading", { name: REVISED_TEMPLATE })).toBeVisible();
       await expect(main.getByText("Version 2", { exact: true })).toBeVisible();
       await expect(main.getByText("Active", { exact: true })).toBeVisible();
       await expectChangeRequestsActive(page);
+      await main.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Standard changes" }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard"));
+      await expect(catalogue).toBeVisible();
 
-      // ---- the proposals: headed "Standard changes", bob's seeded proposals in their states ----------------------
-      await page.goto("/operations/change-requests");
-      await subNav.getByRole("tab", { name: "Standard change proposals" }).click();
-      await expect(page).toHaveURL(/\/operations\/change-requests\?view=proposals$/);
-      await expectHeading(main, PROPOSALS_HEADING);
+      // ---- the proposals: the secondary view of the same tab, same heading, bob's seeded proposals in their states --
+      await toggle.getByRole("button", { name: "Proposals" }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
+      await expect(toggle.getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+      await expect(subNav.getByRole("tab", { name: "Standard changes" })).toHaveAttribute("aria-selected", "true");
+      await expectHeading(main, STANDARD_CHANGES_HEADING);
       await expectChangeRequestsActive(page);
+      // The strip is the catalogue's only.
+      await expect(attentionStrip(main)).toHaveCount(0);
       const proposals = main.getByRole("table", { name: "Standard change proposals" });
+      // The toggle and the scope select have names of their own: "Show" is the select's only.
+      const scopeSelect = main.getByRole("combobox", { name: "Show", exact: true });
+      await expect(scopeSelect).toHaveCount(1);
+      await expect(main.getByRole("group", { name: "Templates or proposals", exact: true })).toHaveCount(1);
+      await expect(main.getByRole("group", { name: "Show", exact: true })).toHaveCount(0);
+      await expect(main.getByRole("combobox", { name: "Templates or proposals", exact: true })).toHaveCount(0);
+      // The proposals open on all of them (no scope in the URL), and the select offers the three scopes in this order.
+      await expect(scopeSelect).toHaveText("All proposals");
+      await scopeSelect.click();
+      await expect(page.getByRole("listbox").getByRole("option")).toHaveText(["All proposals", "Proposed by me", "Awaiting my decision"]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
       const proposalSearch = main.getByRole("textbox", { name: "Search proposals by number or name" });
       for (const seeded of SEEDED_PROPOSALS) {
         await proposalSearch.fill(seeded.name);
@@ -423,45 +712,191 @@ test.describe("standard changes (real stack)", () => {
       }
       await proposalSearch.fill("");
       await expect(proposals.getByRole("row").filter({ hasText: SEEDED_PROPOSALS[0].name })).toHaveCount(1);
-      await shot(page, "03-proposals-under-change-requests", main);
+      await shot(page, "03-standard-change-proposals", main);
 
-      // A proposal page: the sidebar still highlights Change requests.
+      // The proposals' filters are in the URL (replaced, not pushed), and the place pins with them counted.
+      await pick(page, scopeSelect, "Proposed by me");
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=mine"));
+      await expect(proposals.getByRole("row").filter({ hasText: SEEDED_PROPOSALS[0].name })).toHaveCount(1);
+      await pinThisPage(page, "Standard change proposals: 1 filter");
+
+      // A proposal page: the trail adds Proposals, the sidebar still highlights Change requests, Back returns to the filtered list.
       const rejected = SEEDED_PROPOSALS[0];
-      await proposals.getByRole("row").filter({ hasText: rejected.name }).click();
-      await expect(page).toHaveURL(/\/operations\/standard-change-proposals\/[^/?]+$/);
-      await expect(main.getByRole("heading", { name: rejected.name })).toBeVisible();
+      const openRejected = async (): Promise<void> => {
+        await proposals.getByRole("row").filter({ hasText: rejected.name }).click();
+        await expect(page).toHaveURL(/\/operations\/standard-change-proposals\/[^/?]+$/);
+        await expect(main.getByRole("heading", { name: rejected.name })).toBeVisible();
+      };
+      await openRejected();
       await expect(main.getByText("Rejected", { exact: true }).first()).toBeVisible();
-      await expect(main.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Standard change proposals");
+      await expectBreadcrumb(main, ["Change requests", "Standard changes", "Proposals"], /^SCP\d+$/);
       await expectChangeRequestsActive(page);
+      await main.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=mine"));
+      await expect(scopeSelect).toHaveText("Proposed by me");
+      // The trail's "Proposals" opens all the proposals, whatever filter the record was opened from.
+      await openRejected();
+      await main.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Proposals", exact: true }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
+      await expect(scopeSelect).toHaveText("All proposals");
+      await expect(main.getByRole("combobox", { name: "State", exact: true })).toHaveText("Any state");
+      await expect(proposals.getByRole("row").filter({ hasText: rejected.name })).toHaveCount(1);
 
-      // ---- every old link to the separate tab lands on the right sub-view ----------------------------------------
-      const legacy: Array<{ from: string; view: "catalogue" | "proposals" }> = [
-        { from: "/operations?tab=standard_changes", view: "catalogue" },
-        { from: "/operations?tab=standard_changes&view=proposals", view: "proposals" },
-        { from: "/operations/standard-changes", view: "catalogue" },
-        { from: "/operations/standard-changes?view=proposals", view: "proposals" },
+      // Leaving for the list drops Standard changes' parameters.
+      await subNav.getByRole("tab", { name: "Change requests" }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests"));
+      await expectHeading(main, OPERATIONS_HEADING);
+
+      // A pinned place opens where it was pinned.
+      await page.getByRole("button", { name: /^Standard changes — pinned tab$/ }).click();
+      await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard"));
+      await expect(catalogue).toBeVisible();
+
+      // ---- every old link lands on the right place --------------------------------------------------------------
+      const stateSelect = main.getByRole("combobox", { name: "State", exact: true });
+      const crList = `crQ=${CR_LIST_SEARCH}`;
+      const legacy: Array<{ from: string; to: string; scope?: string; state?: string; listFilter?: string }> = [
+        // The separate tab, in both spellings and both forms, with and without the old tab's own `view`.
+        { from: "/operations?tab=standard_changes", to: "view=standard" },
+        { from: "/operations?tab=standard_changes&view=catalogue", to: "view=standard" },
+        { from: "/operations?tab=standard_changes&view=proposals", to: "view=standard&show=proposals", scope: "All proposals" },
+        { from: "/operations?tab=standard-changes", to: "view=standard" },
+        { from: "/operations?tab=standard-changes&view=catalogue", to: "view=standard" },
+        { from: "/operations?tab=standard-changes&view=proposals", to: "view=standard&show=proposals", scope: "All proposals" },
+        { from: "/operations/standard-changes", to: "view=standard" },
+        { from: "/operations/standard-changes?view=catalogue", to: "view=standard" },
+        { from: "/operations/standard-changes?view=proposals", to: "view=standard&show=proposals", scope: "All proposals" },
+        // The two sub-views Standard changes replaced, with the proposals' filters ...
+        { from: "/operations/change-requests?view=catalogue", to: "view=standard" },
+        { from: "/operations/change-requests?view=proposals", to: "view=standard&show=proposals", scope: "All proposals", state: "Any state" },
+        { from: "/operations/change-requests?view=proposals&scope=awaiting", to: "view=standard&show=proposals&scope=awaiting", scope: "Awaiting my decision" },
+        { from: "/operations/change-requests?view=proposals&state=draft", to: "view=standard&show=proposals&state=draft", scope: "All proposals", state: "Draft" },
+        {
+          from: "/operations/change-requests?view=proposals&scope=mine&state=rejected",
+          to: "view=standard&show=proposals&scope=mine&state=rejected",
+          scope: "Proposed by me",
+          state: "Rejected",
+        },
+        // ... and with the list's own `cr*` filters, kept for the way back to the list.
+        { from: `/operations/change-requests?view=catalogue&${crList}`, to: `view=standard&${crList}`, listFilter: crList },
+        {
+          from: `/operations/change-requests?${crList}&view=proposals&scope=awaiting`,
+          to: `view=standard&show=proposals&scope=awaiting&${crList}`,
+          scope: "Awaiting my decision",
+          listFilter: crList,
+        },
       ];
-      for (const { from, view } of legacy) {
+      for (const { from, to, scope, state, listFilter } of legacy) {
+        // Each is opened from the change request list, so Back shows whether the old URL stayed in the history.
+        await page.goto("/operations/change-requests");
+        await expect(subNav.getByRole("tab", { name: "Change requests" })).toHaveAttribute("aria-selected", "true");
         await page.goto(from);
-        await expect(page, `${from} lands on the ${view}`).toHaveURL(new RegExp(`/operations/change-requests\\?view=${view}$`));
-        if (view === "catalogue") {
-          await expect(subNav.getByRole("tab", { name: "Standard change catalogue" })).toHaveAttribute("aria-selected", "true");
-          await expect(catalogue).toBeVisible();
-          await expectHeading(main, CATALOGUE_HEADING);
-        } else {
-          await expect(subNav.getByRole("tab", { name: "Standard change proposals" })).toHaveAttribute("aria-selected", "true");
-          await expect(proposals).toBeVisible();
-          await expectHeading(main, PROPOSALS_HEADING);
-        }
+        await expect(page, `${from} lands on ?${to}`).toHaveURL(exactly("/operations/change-requests", to));
+        await expect(subNav.getByRole("tab", { name: "Standard changes" })).toHaveAttribute("aria-selected", "true");
+        await expectHeading(main, STANDARD_CHANGES_HEADING);
+        const toProposals = to.includes("show=proposals");
+        await expect(toggle.getByRole("button", { name: toProposals ? "Proposals" : "Templates" })).toHaveAttribute("aria-pressed", "true");
+        await expect(toProposals ? proposals : catalogue).toBeVisible();
+        if (scope) await expect(scopeSelect, `${from}: scope`).toHaveText(scope);
+        if (state) await expect(stateSelect, `${from}: state`).toHaveText(state);
         await expectChangeRequestsActive(page);
+        // The rewrite replaced the old URL: one Back is the list it was opened from.
+        await page.goBack();
+        await expect(page, `${from}: no history entry of its own`).toHaveURL(exactly("/operations/change-requests"));
+        if (listFilter) {
+          // The list's filter it carried comes back with the "Change requests" tab.
+          await page.goForward();
+          await expect(page).toHaveURL(exactly("/operations/change-requests", to));
+          await subNav.getByRole("tab", { name: "Change requests" }).click();
+          await expect(page, `${from}: back to the filtered list`).toHaveURL(exactly("/operations/change-requests", listFilter));
+          await expect(listSearch).toHaveValue(CR_LIST_SEARCH);
+          await expect(noneFound).toBeVisible();
+        }
       }
     } finally {
       await page.context().close();
     }
   });
 
+  test("the attention strip above the catalogue: nothing for jane, carol's CAB decision and bob's draft, each linking to them", async ({ browser }) => {
+    test.setTimeout(180_000);
+
+    // jane: no proposal awaits her and she has no draft, so there is no strip at all.
+    expect(await pendingFor(USERS.jane), "jane has nothing pending in Postgres").toEqual({ awaiting: 0, drafts: 0 });
+    const jane = await signedIn(browser, USERS.jane, "/operations");
+    try {
+      const main = jane.getByRole("main");
+      await openStandardChangesCounted(jane);
+      await expect(main.getByRole("table", { name: "Standard change templates" }).getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(1);
+      await expect(attentionStrip(main)).toHaveCount(0);
+      await expect(main.getByText(/your CAB decision|of yours/)).toHaveCount(0);
+      await shot(jane, "04-no-attention-strip", main);
+
+      // The proposals open on all of them: jane proposed nothing, yet she sees bob's seeded proposals.
+      expect(await proposalsBy(USERS.jane), "jane has proposed nothing (Postgres)").toBe(0);
+      await main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" }).click();
+      await expect(jane).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
+      await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText("All proposals");
+      const proposals = main.getByRole("table", { name: "Standard change proposals" });
+      const search = main.getByRole("textbox", { name: "Search proposals by number or name" });
+      for (const seeded of SEEDED_PROPOSALS) {
+        await search.fill(seeded.name);
+        const row = proposals.getByRole("row").filter({ hasText: seeded.name }).filter({ hasText: seeded.kind });
+        await expect(row, `jane sees bob's "${seeded.name}" (${seeded.kind})`).toHaveCount(1);
+        await expect(row.getByRole("cell").nth(5)).toHaveText("Bob Fernando");
+      }
+      await search.fill("");
+      await shot(jane, "04b-all-proposals-for-jane", main);
+      // Her own proposals are none, which is what "Proposed by me" lists.
+      await pick(jane, main.getByRole("combobox", { name: "Show", exact: true }), "Proposed by me");
+      await expect(jane).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=mine"));
+      await expect(proposals.getByText("No proposals found.", { exact: true })).toBeVisible();
+      await expect(proposals.getByRole("row").filter({ hasText: SEEDED_PROPOSALS[0].name })).toHaveCount(0);
+    } finally {
+      await jane.context().close();
+    }
+
+    // carol (CAB) is asked about the seed's proposal in CAB review; bob has the seed's draft. Each link opens the
+    // proposals filtered to it, which lists that proposal.
+    const inCabReview = SEEDED_PROPOSALS.find((p) => p.state === "CAB review")!;
+    const draft = SEEDED_PROPOSALS.find((p) => p.state === "Draft")!;
+    const cases = [
+      { who: USERS.carol, part: "awaiting", search: "view=standard&show=proposals&scope=awaiting", scope: "Awaiting my decision", state: "Any state", lists: inCabReview },
+      { who: USERS.bob, part: "drafts", search: "view=standard&show=proposals&scope=mine&state=draft", scope: "Proposed by me", state: "Draft", lists: draft },
+    ] as const;
+    for (const c of cases) {
+      const pending = await pendingFor(c.who);
+      expect(pending[c.part], `${c.who} has a ${c.part === "awaiting" ? "proposal awaiting a decision" : "draft"} (${SEED_HINT})`).toBeGreaterThan(0);
+      const parts = attentionParts(pending);
+      const page = await signedIn(browser, c.who, "/operations");
+      try {
+        const main = page.getByRole("main");
+        await openStandardChangesCounted(page);
+        const strip = attentionStrip(main);
+        await expect(strip, `${c.who}'s strip`).toHaveText(parts.join(" · "));
+        await expect(strip.getByRole("link")).toHaveText(parts);
+        await shot(page, `05-attention-strip-${c.part}`, strip);
+        const link = strip.getByRole("link", { name: c.part === "awaiting" ? /your CAB decision$/ : /of yours$/ });
+        await link.click();
+        await expect(page).toHaveURL(exactly("/operations/change-requests", c.search));
+        await expect(main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+        await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText(c.scope);
+        await expect(main.getByRole("combobox", { name: "State" })).toHaveText(c.state);
+        await expect(attentionStrip(main)).toHaveCount(0);
+        const proposals = main.getByRole("table", { name: "Standard change proposals" });
+        const row = proposals.getByRole("row").filter({ hasText: c.lists.name });
+        await expect(row).toHaveCount(1);
+        await expect(row.getByRole("cell").nth(3)).toHaveText(c.lists.state);
+        // Every row the link lists is what the count counted.
+        await expect(proposals.getByRole("row")).toHaveCount(1 + pending[c.part]);
+      } finally {
+        await page.context().close();
+      }
+    }
+  });
+
   test("propose from a closed change request, the CAB approves, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(360_000);
 
     // The evidence: a closed change request, raised and walked through the real API.
     const created = await staff("jane").create({
@@ -490,8 +925,7 @@ test.describe("standard changes (real stack)", () => {
       proposalUrl = new URL(bob.url()).pathname;
 
       const main = bob.getByRole("main");
-      await expect(main.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Change requests");
-      await expect(main.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Standard change proposals");
+      await expectBreadcrumb(main, ["Change requests", "Standard changes", "Proposals"], /^SCP\d+$/);
       await expectChangeRequestsActive(bob);
       await expect(main.getByText(`Started from:`)).toContainText(source!.number);
       const evidence = main.getByRole("table", { name: "Evidence" });
@@ -518,12 +952,20 @@ test.describe("standard changes (real stack)", () => {
       await params.getByLabel("Type of parameter 2").selectOption("select");
       await params.getByLabel("Options of parameter 2").fill("Production\nStaging");
 
-      // What the template specifies, with placeholders in the subject and the three plans: typed, and through "Insert {{…}}".
+      // What the template specifies: every field a change request raised from it takes, with placeholders in the
+      // subject and the three plans (typed, and through "Insert {{…}}").
       await specifies.getByRole("textbox", { name: /^Subject/ }).fill(TEMPLATE_SUBJECT);
       await pick(bob, specifies.getByRole("combobox", { name: "Category" }), TEMPLATE.category);
       await pick(bob, specifies.getByRole("combobox", { name: "Impact" }), TEMPLATE.impact);
       await pick(bob, specifies.getByRole("combobox", { name: "Risk" }), TEMPLATE.risk);
       await specifies.getByRole("textbox", { name: "Rollback duration" }).fill(TEMPLATE.rollbackDuration);
+      const planVisible = specifies.getByRole("checkbox", { name: "Implementation plan visible to customers" });
+      await planVisible.setChecked(TEMPLATE.planVisibleToCustomers);
+      await expect(specifies.getByRole("checkbox", { name: "Customer approval" })).not.toBeChecked();
+      await expect(specifies.getByRole("checkbox", { name: "Customer review" })).not.toBeChecked();
+      await replaceRichText(bob, richEditor(specifies, "Description"), TEMPLATE.description);
+      await replaceRichText(bob, richEditor(specifies, "Justification"), TEMPLATE.justification);
+      await replaceRichText(bob, richEditor(specifies, "Risk and impact analysis"), TEMPLATE.riskImpactAnalysis);
       await replaceRichText(bob, richEditor(specifies, "Implementation plan"), TEMPLATE.implementationTyped);
       await specifies.getByRole("button", { name: "Insert a placeholder into Implementation plan" }).click();
       await bob.getByRole("menuitem", { name: /\{\{host\}\}/ }).click();
@@ -537,13 +979,30 @@ test.describe("standard changes (real stack)", () => {
       await expect(main.getByText(/The text refers to placeholders no parameter declares/)).toHaveCount(0);
       await expect(main.getByText(/Declared but not used in the text/)).toHaveCount(0);
 
-      // The live preview renders every placeholder with the sample values, the inserted ones included.
+      // The live preview: before any sample value every placeholder is shown open and highlighted, ...
       const preview = main.getByRole("region", { name: "Preview", exact: true });
-      await preview.getByRole("textbox", { name: /^Host name/ }).fill("cache-07");
-      await preview.getByRole("combobox", { name: /^Environment/ }).selectOption("Staging");
       const rendered = preview.getByRole("region", { name: "Preview of a change request raised from this template" });
+      await expect(renderedSection(rendered, "Description")).toHaveText(TEMPLATE.description);
+      await expectOpenPlaceholders(rendered);
+      await expect(renderedField(rendered, "Subject")).toHaveText(TEMPLATE_SUBJECT);
+      await shot(bob, "06-proposal-preview-open-placeholders", preview);
+      // ... with only the host typed, {{host}} filled and {{env}} still open side by side on the same preview, drawn
+      // differently (the filled one with the dotted underline), ...
+      await preview.getByRole("textbox", { name: /^Host name/ }).fill("cache-07");
+      await expect(filledMarks(rendered, "host")).toHaveCount(PLACEHOLDER_COUNT.host);
+      await expect(filledMarks(rendered, "host")).toHaveText(Array(PLACEHOLDER_COUNT.host).fill("cache-07"));
+      await expect(openMarks(rendered, "env")).toHaveCount(PLACEHOLDER_COUNT.env);
+      await expect(openMarks(rendered, "host")).toHaveCount(0);
+      await expectOpenAndFilledDiffer(openMarks(rendered, "env").first(), filledMarks(rendered, "host").first());
+      // The same holds inside one field: the subject carries both.
+      const subjectField = renderedField(rendered, "Subject");
+      await expectOpenAndFilledDiffer(openMarks(subjectField, "env"), filledMarks(subjectField, "host"));
+      await shot(bob, "06b-proposal-preview-open-and-filled", preview);
+      // ... and with every value, filled (the inserted ones included), still marked.
+      await preview.getByRole("combobox", { name: /^Environment/ }).selectOption("Staging");
       await expectRenderedContent(rendered, "cache-07", "Staging");
-      await shot(bob, "04-proposal-preview-with-sample-values", preview);
+      await expectFilledPlaceholders(rendered, { host: "cache-07", env: "Staging" });
+      await shot(bob, "07-proposal-preview-with-sample-values", preview);
 
       await expect(main.getByText("Ready to send to the CAB. Submitting saves first.")).toBeVisible();
       const [saved] = await Promise.all([
@@ -559,17 +1018,32 @@ test.describe("standard changes (real stack)", () => {
       await expect(approvers.getByRole("row").filter({ hasText: "Carol Silva" })).toContainText("Requested");
       // The proposer is not one of the deciders, and has no Approve of his own.
       await expect(main.getByRole("region", { name: "CAB approval" }).getByRole("button", { name: "Approve" })).toHaveCount(0);
-      await shot(bob, "05-proposal-in-cab-review", main.getByRole("region", { name: "CAB approval" }));
+      await shot(bob, "08-proposal-in-cab-review", main.getByRole("region", { name: "CAB approval" }));
     } finally {
       await bob.context().close();
     }
 
-    // ---- carol approves it for the CAB -------------------------------------------------------------------------
-    const carol = await signedIn(browser, USERS.carol, proposalUrl);
+    // ---- carol finds it through her attention strip and approves it for the CAB ---------------------------------
+    const carol = await signedIn(browser, USERS.carol, "/operations");
     let templatePath = "";
+    let templateId = "";
     let templateNumber = "";
     try {
       const main = carol.getByRole("main");
+      const pending = await pendingFor(USERS.carol);
+      expect(pending.awaiting, "bob's proposal now awaits carol").toBeGreaterThan(0);
+      await openStandardChangesCounted(carol);
+      const strip = attentionStrip(main);
+      await expect(strip).toHaveText(attentionParts(pending).join(" · "));
+      await strip.getByRole("link", { name: /your CAB decision$/ }).click();
+      await expect(carol).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals&scope=awaiting"));
+      await main.getByRole("textbox", { name: "Search proposals by number or name" }).fill(TEMPLATE_NAME);
+      const mine = main.getByRole("table", { name: "Standard change proposals" }).getByRole("row").filter({ hasText: TEMPLATE_NAME });
+      await expect(mine).toHaveCount(1);
+      await expect(mine.getByRole("cell").nth(3)).toHaveText("CAB review");
+      await mine.click();
+      await expect(carol).toHaveURL(new RegExp(`${escapeRegExp(proposalUrl)}$`));
+
       const cab = main.getByRole("region", { name: "CAB approval" });
       await expect(cab.getByRole("button", { name: "Approve" })).toBeVisible({ timeout: 20_000 });
       await cab.getByRole("button", { name: "Approve" }).click();
@@ -585,19 +1059,51 @@ test.describe("standard changes (real stack)", () => {
       await decision.getByRole("button", { name: TEMPLATE_NAME }).click();
       await expect(carol).toHaveURL(/\/operations\/standard-changes\/[^/]+$/);
       templatePath = new URL(carol.url()).pathname;
+      templateId = decodeURIComponent(templatePath.split("/").pop()!);
       await expect(main.getByRole("heading", { name: TEMPLATE_NAME })).toBeVisible();
       await expect(main.getByText("Active", { exact: true })).toBeVisible();
       await expect(main.getByText("Version 1", { exact: true })).toBeVisible();
       await expect(main.getByText("Review needed", { exact: true })).toHaveCount(0);
       await expectChangeRequestsActive(carol);
       templateNumber = (await main.getByText(/^STD\d+$/).first().textContent())!.trim();
-      await shot(carol, "06-template-active-v1");
+      await expectBreadcrumb(main, ["Change requests", "Standard changes"], new RegExp(`^${templateNumber}$`));
+      // The current version, with every placeholder highlighted (open: a template has no values).
+      const currentVersion = main
+        .locator(".MuiCard-root")
+        .filter({ has: carol.getByText("What the template specifies (version 1)", { exact: true }) });
+      await expect(currentVersion).toHaveCount(1);
+      await expect(renderedField(currentVersion, "Impact")).toHaveText(TEMPLATE.impact);
+      await expect(renderedSection(currentVersion, "Description")).toHaveText(TEMPLATE.description);
+      await expectOpenPlaceholders(currentVersion);
+      await shot(carol, "09-template-active-v1-placeholders", currentVersion);
+      // There is no proposal left for her to decide.
+      expect((await pendingFor(USERS.carol)).awaiting).toBe(pending.awaiting - 1);
     } finally {
       await carol.context().close();
     }
 
+    // What the template's version holds, as the API returns it: what the change request raised from it must equal.
+    const templateRead = await staff("alice").request<{
+      currentVersion: {
+        description: string;
+        justification: string;
+        riskImpactAnalysis: string;
+        isPlanningVisibleToCustomers: boolean;
+        impact: string;
+        risk: string;
+        category: string;
+      };
+    }>("GET", `/standard-change-templates/${templateId}`);
+    expect(templateRead.status, JSON.stringify(templateRead.body)).toBe(200);
+    const version = templateRead.body.currentVersion;
+    expect(version.impact).toBe("medium");
+    expect(version.isPlanningVisibleToCustomers).toBe(TEMPLATE.planVisibleToCustomers);
+    expect(version.description).toContain(TEMPLATE.description);
+    expect(version.justification).toContain(TEMPLATE.justification);
+    expect(version.riskImpactAnalysis).toContain(TEMPLATE.riskImpactAnalysis);
+
     // ---- alice finds it in the catalogue, raises a change request from it and walks it to a rollback ------------
-    const alice = await signedIn(browser, USERS.alice, "/operations/change-requests?view=catalogue");
+    const alice = await signedIn(browser, USERS.alice, STANDARD_CHANGES);
     try {
       const main = alice.getByRole("main");
       await main.getByRole("textbox", { name: "Search templates by number or name" }).fill(TEMPLATE_NAME);
@@ -606,6 +1112,7 @@ test.describe("standard changes (real stack)", () => {
       await expect(row).toContainText(templateNumber);
       await expect(row).toContainText("v1");
       await expect(row).toContainText("Active");
+      await expect(row.getByRole("cell").nth(4)).toHaveText(TEMPLATE.impact);
 
       // The create form: type Standard, the template, its change specifics, the read-only preview.
       await alice.goto("/operations/change-requests/new");
@@ -618,10 +1125,11 @@ test.describe("standard changes (real stack)", () => {
       await specifics.getByRole("combobox", { name: /^Environment/ }).selectOption("Production");
       const preview = alice.getByRole("region", { name: "What the template specifies (version 1)" });
       await expectRenderedContent(preview, "cache-42", "Production");
+      await expectFilledPlaceholders(preview, { host: "cache-42", env: "Production" });
       // Read-only: the template's text is shown, not offered as fields.
       await expect(preview.getByRole("textbox")).toHaveCount(0);
       await expect(alice.getByRole("textbox", { name: /^Subject/ })).toHaveCount(0);
-      await shot(alice, "07-create-from-template", preview);
+      await shot(alice, "10-create-from-template", preview);
       const group = alice.getByRole("combobox", { name: /^Assignment group/ });
       await group.fill("Example Corp ABT");
       await alice.getByRole("option", { name: "Example Corp ABT" }).click();
@@ -630,6 +1138,11 @@ test.describe("standard changes (real stack)", () => {
         alice.getByRole("button", { name: "Create change request" }).click(),
       ]);
       expect(createdResponse.status(), await createdResponse.text()).toBe(201);
+      // The form sent none of the fields the template specifies: the impact below can only be the template's.
+      const sent = createdResponse.request().postDataJSON() as Record<string, unknown>;
+      for (const field of ["impact", "category", "description", "justification", "impactDescription", "riskImpactAnalysis", "implementationPlan", "isPlanningVisibleToCustomers"]) {
+        expect(sent, `the create request does not send ${field}`).not.toHaveProperty(field);
+      }
       await expect(alice).toHaveURL(/\/operations\/change-requests\/(?!new(?:[/?#]|$))[^/]+$/, { timeout: 15_000 });
       const raisedId = new URL(alice.url()).pathname.split("/").pop()!;
 
@@ -643,7 +1156,7 @@ test.describe("standard changes (real stack)", () => {
       await expect(banner).toContainText("(version 1)");
       await expect(banner.locator("dt")).toHaveText(["Host name", "Environment"]);
       await expect(banner.locator("dd")).toHaveText(["cache-42", "Production"]);
-      await shot(alice, "08-raised-change-request-banner", banner);
+      await shot(alice, "11-raised-change-request-banner", banner);
 
       // A standard change is pre-authorised: the lifecycle bar never takes it through Assess or Authorize (no customer
       // steps either: the template asks for neither).
@@ -658,7 +1171,7 @@ test.describe("standard changes (real stack)", () => {
         "Closed, upcoming",
         "Canceled, not taken",
       ]);
-      await shot(alice, "09-lifecycle-standard-change", detail.lifecycleStepper());
+      await shot(alice, "12-lifecycle-standard-change", detail.lifecycleStepper());
 
       // What the template specifies, rendered with alice's values, is what the change request holds.
       await expect(detail.overviewCell("Impact")).toContainText(TEMPLATE.impact);
@@ -671,20 +1184,28 @@ test.describe("standard changes (real stack)", () => {
       await expect(main).not.toContainText("{{");
       await shot(
         alice,
-        "10-raised-change-request-plan",
+        "13-raised-change-request-plan",
         planSection(main, "Implementation plan").locator("xpath=ancestor::*[contains(@class, 'MuiCard-root')][1]"),
       );
-      // The portal shows no risk on a change request: read it, and the rest once more, as the API returns them.
+      // The portal shows no risk on a change request, nor some of the template's other fields: read them, and the
+      // rest once more, as the API returns them, against the template's version.
       const stored = await staff("alice").get(raisedId);
       expect(stored.status).toBe(200);
       const body = stored.body as unknown as Record<string, unknown>;
       expect(body.subject ?? body.title).toBe(subject);
-      expect(String(body.impact).toLowerCase()).toBe("low");
-      expect(String(typeof body.category === "object" && body.category ? (body.category as { id?: string }).id : body.category).toLowerCase()).toBe("software");
+      expect(String(body.impact).toLowerCase()).toBe(version.impact);
+      expect(String(typeof body.category === "object" && body.category ? (body.category as { id?: string }).id : body.category).toLowerCase()).toBe(version.category);
       expect(body.rollbackDurationText).toBe(TEMPLATE.rollbackDuration);
-      expect(await psql(`SELECT risk FROM change_request WHERE id = '${raisedId}';`)).toBe("LOW");
+      expect(body.description, "description").toBe(version.description);
+      expect(body.justification, "justification").toBe(version.justification);
+      expect(body.impactDescription, "risk and impact analysis").toBe(version.riskImpactAnalysis);
+      expect(body.isPlanningVisibleToCustomers, "plan visible to customers").toBe(version.isPlanningVisibleToCustomers);
+      expect(body.customerApprovalRequired).toBe(false);
+      expect(body.customerReviewRequired).toBe(false);
+      expect(await psql(`SELECT risk || '|' || impact || '|' || is_planning_visible_to_customers FROM change_request WHERE id = '${raisedId}';`)).toBe("LOW|MEDIUM|true");
 
-      // Edit: every field the template specifies is disabled, the type stays Standard; the others stay editable.
+      // Edit: every field the template specifies is disabled and shows the template's value, the type stays Standard;
+      // the others stay editable.
       await detail.editButton().click();
       const edit = detail.editDialog();
       await expect(edit).toBeVisible();
@@ -694,27 +1215,73 @@ test.describe("standard changes (real stack)", () => {
       await expect(edit.getByRole("combobox", { name: /^Type/ })).toBeDisabled();
       await expect(edit.getByRole("combobox", { name: /^Type/ })).toContainText("Standard");
       await expect(edit.getByRole("combobox", { name: /^Impact/ })).toBeDisabled();
+      await expect(edit.getByRole("combobox", { name: /^Impact/ })).toHaveText(TEMPLATE.impact);
       await expect(edit.getByRole("combobox", { name: /^Category/ })).toBeDisabled();
+      await expect(edit.getByRole("combobox", { name: /^Category/ })).toHaveText(TEMPLATE.category);
       await expect(edit.getByRole("textbox", { name: /^Rollback duration/ })).toBeDisabled();
       await expect(edit.getByRole("textbox", { name: /^Rollback duration/ })).toHaveValue(TEMPLATE.rollbackDuration);
-      await expect(edit.getByRole("checkbox", { name: "Customer Approval" })).toBeDisabled();
-      await expect(edit.getByRole("checkbox", { name: "Customer Review" })).toBeDisabled();
-      await expect(edit.getByRole("switch", { name: "Implementation Plan visible to customers" })).toBeDisabled();
-      for (const label of ["Description", "Justification", "Risk and impact analysis", "Implementation plan", "Rollback plan", "Test plan"]) {
-        await expect(richEditor(edit, label), `${label} is the template's`).toHaveAttribute("contenteditable", "false");
+      for (const box of ["Customer Approval", "Customer Review"]) {
+        await expect(edit.getByRole("checkbox", { name: box }), box).toBeDisabled();
+        await expect(edit.getByRole("checkbox", { name: box }), `${box}: the template's (no)`).not.toBeChecked();
       }
-      await expect(richEditor(edit, "Implementation plan")).toHaveText(TEMPLATE.implementation("cache-42", "Production"));
+      const planSwitch = edit.getByRole("switch", { name: "Implementation Plan visible to customers" });
+      await expect(planSwitch).toBeDisabled();
+      await expect(planSwitch, "plan visibility: the template's (yes)").toBeChecked();
+      const templateText: Array<[string, string]> = [
+        ["Description", TEMPLATE.description],
+        ["Justification", TEMPLATE.justification],
+        ["Risk and impact analysis", TEMPLATE.riskImpactAnalysis],
+        ["Implementation plan", TEMPLATE.implementation("cache-42", "Production")],
+        ["Rollback plan", TEMPLATE.backout("cache-42")],
+        ["Test plan", TEMPLATE.test("Production")],
+      ];
+      for (const [label, text] of templateText) {
+        await expect(richEditor(edit, label), `${label} is the template's`).toHaveAttribute("contenteditable", "false");
+        await expect(richEditor(edit, label), `${label} shows the template's text`).toHaveText(text);
+      }
       await expect(edit.getByText("Set by the standard change template.").first()).toBeVisible();
       // What the template does not specify is still the engineer's to set.
       await expect(edit.getByRole("combobox", { name: /^Priority/ })).toBeEnabled();
       await expect(edit.getByRole("combobox", { name: /^Assignment group/ })).toBeEnabled();
       await expect(edit.getByRole("combobox", { name: /^Assigned to/ })).toBeEnabled();
       await expect(richEditor(edit, "Affected services")).toHaveAttribute("contenteditable", "true");
-      await shot(alice, "11-edit-template-fields-disabled", edit);
+      await shot(alice, "14-edit-template-fields-disabled", edit);
       await edit.getByRole("button", { name: "Cancel" }).click();
       await expect(edit).toBeHidden();
 
+      // The backend holds the same line, whatever the page offers: through the BFF, a PATCH that changes a field the
+      // template specifies is refused with its own error code and changes nothing ...
+      const before = await staff("alice").get(raisedId);
+      const storedPlan = (before.body as unknown as Record<string, unknown>).implementationPlan as string;
+      expect(storedPlan).toContain("cache-42");
+      for (const change of [
+        { implementationPlan: "<p>Something other than the template's plan.</p>" },
+        { title: `${TAG} Another subject (${RUN})` },
+        { impact: "low" },
+      ]) {
+        const refused = await staff("alice").patch(raisedId, change);
+        const refusal = refused.body as unknown as { errorCode?: string; message?: string };
+        expect(refused.status, `${JSON.stringify(change)}: ${JSON.stringify(refused.body)}`).toBe(400);
+        expect(refusal.errorCode).toBe("change_request_standard_template_field");
+        expect(refusal.message).toMatch(/raised from a standard change template/);
+      }
+      const unchanged = (await staff("alice").get(raisedId)).body as unknown as Record<string, unknown>;
+      expect(unchanged.implementationPlan).toBe(storedPlan);
+      expect(unchanged.subject ?? unchanged.title).toBe(subject);
+      expect(String(unchanged.impact).toLowerCase()).toBe("medium");
+      // ... while the stored value resent, with a work note, is accepted (a no-op for the plan).
+      const workNote = `${TAG} work note beside the plan the template set (${RUN})`;
+      const resent = await staff("alice").patch(raisedId, { implementationPlan: storedPlan, workNote });
+      expect(resent.status, JSON.stringify(resent.body)).toBe(200);
+      expect(((await staff("alice").get(raisedId)).body as unknown as Record<string, unknown>).implementationPlan).toBe(storedPlan);
+      expect(
+        await psql(`SELECT count(*) FROM comment WHERE work_item_id = '${raisedId}' AND content LIKE '%${workNote}%';`),
+        "the work note was recorded",
+      ).toBe("1");
+
       // Request Approval reads "Schedule" (the template is pre-authorised, no customer approval): straight to Scheduled.
+      await alice.reload();
+      await expect(detail.lifecycleStepper()).toBeVisible({ timeout: 20_000 });
       await expect(detail.requestApprovalButton()).toHaveCount(0);
       await alice.getByRole("button", { name: "Schedule", exact: true }).click();
       await expect(detail.currentStep()).toContainText("Scheduled", { timeout: 15_000 });
@@ -748,13 +1315,13 @@ test.describe("standard changes (real stack)", () => {
       await expect(review).toBeVisible({ timeout: 20_000 });
       await expect(review).toContainText(/rolled back/i);
       await expect(main.getByText("Active", { exact: true })).toBeVisible();
-      await shot(alice, "12-template-review-needed", review);
+      await shot(alice, "15-template-review-needed", review);
       await review.getByRole("button").filter({ hasNotText: "Clear review" }).click();
       await expect(alice).toHaveURL(new RegExp(`/operations/change-requests/${raisedId}$`));
       await expect(detail.currentStep()).toContainText("Rollback");
 
       // And the catalogue flags it.
-      await alice.goto("/operations/change-requests?view=catalogue");
+      await alice.goto(STANDARD_CHANGES);
       await main.getByRole("textbox", { name: "Search templates by number or name" }).fill(TEMPLATE_NAME);
       const flagged = main.getByRole("table", { name: "Standard change templates" }).getByRole("row").filter({ hasText: TEMPLATE_NAME });
       await expect(flagged).toContainText("Review needed");
