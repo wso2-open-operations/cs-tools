@@ -46,7 +46,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Ban, Braces, Check, CopyPlus, Save, Send, Trash2, X } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import QueryErrorState from "@components/QueryErrorState";
@@ -54,6 +54,7 @@ import StandardChangeBreadcrumbs from "@features/csm-operations/components/Stand
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import {
@@ -93,6 +94,7 @@ import {
   standardChangeProposalPath,
   standardChangeProposalStateColor,
   standardChangeProposalStateLabel,
+  standardChangeRecentEntry,
   standardChangeTemplatePath,
   undeclaredPlaceholders,
   unusedParameters,
@@ -865,6 +867,12 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGE_PROPOSALS_PATH;
   const here = `${location.pathname}${location.search}`;
   const { data: proposal, isLoading, isError, error, refetch } = useGetStandardChangeProposal(id);
+  // Recent and "Pin this page" name the page after the proposal, as a change
+  // request's or an incident's own page is named after it.
+  const recordView = useRecordRecentView();
+  useEffect(() => {
+    if (proposal?.id) recordView(standardChangeRecentEntry("proposal", proposal));
+  }, [proposal, recordView]);
   const withdraw = useWithdrawStandardChangeProposal();
   const decide = useDecideStandardChangeProposal();
   const copy = useCreateStandardChangeProposal();
@@ -886,7 +894,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
       Back
     </Button>
   );
-  const Trail = <StandardChangeBreadcrumbs view="proposals" current={proposal?.number} />;
+  const Trail = <StandardChangeBreadcrumbs show="proposals" current={proposal?.number} />;
 
   if (isLoading) {
     return (

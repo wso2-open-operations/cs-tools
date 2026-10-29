@@ -23,6 +23,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  Link,
   MenuItem,
   Paper,
   Select,
@@ -35,32 +36,40 @@ import {
   TablePagination,
   TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Plus, Search, X } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useState, type JSX } from "react";
-import { useLocation } from "react-router";
+import { Inbox, Plus, Search, X } from "@wso2/oxygen-ui-icons-react";
+import { Fragment, useEffect, useState, type JSX, type ReactNode } from "react";
+import { Link as RouterLink, useLocation, useSearchParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import {
+  useCountStandardChangeProposals,
   useCreateStandardChangeProposal,
   useSearchStandardChangeProposals,
   useSearchStandardChangeTemplates,
 } from "@features/csm-operations/api/useStandardChanges";
 import { changeRequestImpactLabel } from "@features/csm-operations/utils/changeRequests";
 import {
+  CHANGE_REQUESTS_PATH,
   changeRequestRiskLabel,
+  proposalScope,
+  proposalStateFilter,
   STANDARD_CHANGE_PROPOSAL_STATES,
   standardChangeProposalKindLabel,
   standardChangeProposalPath,
   standardChangeProposalStateColor,
   standardChangeProposalStateLabel,
+  standardChangesSearch,
   standardChangeTemplatePath,
   standardChangeTemplateStateColor,
   standardChangeTemplateStateLabel,
-  type StandardChangesView,
+  type ProposalScope,
+  type StandardChangesShow,
 } from "@features/csm-operations/utils/standardChanges";
 import type {
   BeSearchStandardChangeProposalsPayload,
@@ -89,12 +98,11 @@ function templateStates(filter: TemplateStateFilter): BeStandardChangeTemplateSt
   return [filter];
 }
 
-/** Whose proposals the Proposals view lists. */
-type ProposalScope = "mine" | "awaiting" | "all";
-const PROPOSAL_SCOPES: ReadonlyArray<{ value: ProposalScope; label: string }> = [
+/** Whose proposals the proposals view lists (`?scope=`). */
+const PROPOSAL_SCOPE_OPTIONS: ReadonlyArray<{ value: ProposalScope; label: string }> = [
+  { value: "all", label: "All proposals" },
   { value: "mine", label: "Proposed by me" },
   { value: "awaiting", label: "Awaiting my decision" },
-  { value: "all", label: "All proposals" },
 ];
 
 function formatDate(value?: string | null): string {
@@ -144,7 +152,13 @@ function SearchField({ value, onChange, label }: { value: string; onChange: (v: 
   );
 }
 
-function TemplateCatalogue(): JSX.Element {
+/** What every view's filter bar starts and ends with: the Templates | Proposals switch, and Propose. */
+interface ToolbarSlots {
+  leading: ReactNode;
+  trailing: ReactNode;
+}
+
+function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   const [search, setSearch] = useState("");
@@ -164,6 +178,7 @@ function TemplateCatalogue(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Paper sx={{ p: 2, display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+        {leading}
         <SearchField
           label="Search templates by number or name"
           value={search}
@@ -190,6 +205,7 @@ function TemplateCatalogue(): JSX.Element {
             ))}
           </Select>
         </FormControl>
+        {trailing}
       </Paper>
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
@@ -302,13 +318,18 @@ function TemplateCatalogue(): JSX.Element {
   );
 }
 
-function ProposalList(): JSX.Element {
+function ProposalList({ leading, trailing }: ToolbarSlots): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const query = useDebounced(search.trim());
-  const [scope, setScope] = useState<ProposalScope>("mine");
-  const [stateFilter, setStateFilter] = useState<BeStandardChangeProposalState | "">("");
+  // Both filters are in the URL, so a filtered list is linkable (the
+  // attention line above the catalogue links straight to one).
+  const scope = proposalScope(searchParams);
+  const stateFilter = proposalStateFilter(searchParams);
+  const setFilters = (next: { scope: ProposalScope; state: BeStandardChangeProposalState | "" }): void =>
+    setSearchParams((prev) => standardChangesSearch(prev, "proposals", next), { replace: true });
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
@@ -324,6 +345,7 @@ function ProposalList(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Paper sx={{ p: 2, display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+        {leading}
         <SearchField
           label="Search proposals by number or name"
           value={search}
@@ -339,11 +361,11 @@ function ProposalList(): JSX.Element {
             label="Show"
             value={scope}
             onChange={(e) => {
-              setScope(e.target.value as ProposalScope);
+              setFilters({ scope: e.target.value as ProposalScope, state: stateFilter });
               setPage(0);
             }}
           >
-            {PROPOSAL_SCOPES.map((o) => (
+            {PROPOSAL_SCOPE_OPTIONS.map((o) => (
               <MenuItem key={o.value} value={o.value}>
                 {o.label}
               </MenuItem>
@@ -358,7 +380,7 @@ function ProposalList(): JSX.Element {
             value={stateFilter || "any"}
             onChange={(e) => {
               const v = String(e.target.value);
-              setStateFilter(v === "any" ? "" : (v as BeStandardChangeProposalState));
+              setFilters({ scope, state: v === "any" ? "" : (v as BeStandardChangeProposalState) });
               setPage(0);
             }}
           >
@@ -370,6 +392,7 @@ function ProposalList(): JSX.Element {
             ))}
           </Select>
         </FormControl>
+        {trailing}
       </Paper>
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
@@ -470,18 +493,77 @@ function ProposalList(): JSX.Element {
   );
 }
 
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 /**
- * The standard change sub-views of Operations > Change requests (see
- * `ChangeRequestsArea`, which owns the sub-navigation and the `?view=` it is
- * kept in): the catalogue of CAB-approved standard change templates (a
- * standard change can only be raised from an active one) and the proposals that
- * create, revise or retire them. A row opens with `state.from` set to this URL,
- * so Back from a template or proposal returns to the sub-view it was opened from.
+ * "2 proposals await your CAB decision · 1 draft of yours" above the
+ * catalogue, each part a link to the proposals filtered to it. Only what
+ * applies to the viewer is said, and nothing at all when nothing does. It is a
+ * hint, not the list: nothing is shown until both counts are in (so it does not
+ * flash in piece by piece), and a count that fails is left out without a word.
+ * The links are built from the current query, so the change request list's
+ * `cr*` filters kept in it survive a trip through the proposals.
  */
-export default function StandardChangesTab({ view }: { view: StandardChangesView }): JSX.Element {
+function AttentionLine(): JSX.Element | null {
+  const [searchParams] = useSearchParams();
+  const proposalsHref = (filters: Parameters<typeof standardChangesSearch>[2]): string =>
+    `${CHANGE_REQUESTS_PATH}?${standardChangesSearch(searchParams, "proposals", filters).toString()}`;
+  const awaiting = useCountStandardChangeProposals({ awaitingMyDecision: true });
+  const drafts = useCountStandardChangeProposals({ proposedByMe: true, states: ["draft"] });
+  if (awaiting.isPending || drafts.isPending) return null;
+
+  const parts: Array<{ key: string; text: string; to: string }> = [];
+  const awaitingCount = awaiting.isSuccess ? awaiting.data : 0;
+  const draftCount = drafts.isSuccess ? drafts.data : 0;
+  if (awaitingCount > 0) {
+    parts.push({
+      key: "awaiting",
+      text: `${plural(awaitingCount, "proposal awaits", "proposals await")} your CAB decision`,
+      to: proposalsHref({ scope: "awaiting" }),
+    });
+  }
+  if (draftCount > 0) {
+    parts.push({
+      key: "drafts",
+      text: `${plural(draftCount, "draft", "drafts")} of yours`,
+      to: proposalsHref({ scope: "mine", state: "draft" }),
+    });
+  }
+  if (parts.length === 0) return null;
+
+  return (
+    <Alert severity="info" icon={<Inbox size={18} />} role="status" aria-label="Needs your attention">
+      {parts.map((p, i) => (
+        <Fragment key={p.key}>
+          {i > 0 && " · "}
+          <Link component={RouterLink} to={p.to} underline="hover" color="inherit" sx={{ fontWeight: 500 }}>
+            {p.text}
+          </Link>
+        </Fragment>
+      ))}
+    </Alert>
+  );
+}
+
+/**
+ * Standard changes, the second sub-view of Operations > Change requests (see
+ * `ChangeRequestsArea`, which owns the sub-navigation and the `?view=standard`
+ * it is kept in). It opens on the catalogue of CAB-approved standard change
+ * templates (a standard change can only be raised from an active one), under a
+ * line saying what needs the viewer's attention, if anything does. The
+ * proposals that create, revise or retire templates are a secondary view of the
+ * same tab (`&show=proposals`, the Templates | Proposals switch beside the
+ * search), with their filters in the URL too. A row opens with `state.from` set
+ * to this URL, so Back from a template or proposal returns to the view it was
+ * opened from.
+ */
+export default function StandardChangesTab({ show }: { show: StandardChangesShow }): JSX.Element {
   const { canWrite } = usePortalAccess();
   const navigate = useNavTransition();
   const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
   const createProposal = useCreateStandardChangeProposal();
 
   const propose = (): void => {
@@ -496,26 +578,40 @@ export default function StandardChangesTab({ view }: { view: StandardChangesView
     );
   };
 
+  const toggle = (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={show}
+      aria-label="Templates or proposals"
+      onChange={(_, next: StandardChangesShow | null) => {
+        if (next && next !== show) setSearchParams((prev) => standardChangesSearch(prev, next));
+      }}
+    >
+      <ToggleButton value="templates" sx={{ textTransform: "none", px: 1.5 }}>
+        Templates
+      </ToggleButton>
+      <ToggleButton value="proposals" sx={{ textTransform: "none", px: 1.5 }}>
+        Proposals
+      </ToggleButton>
+    </ToggleButtonGroup>
+  );
+  const proposeButton = canWrite ? (
+    <Button
+      variant="contained"
+      size="small"
+      startIcon={<Plus size={16} />}
+      loading={createProposal.isPending}
+      onClick={propose}
+      sx={{ ml: "auto", whiteSpace: "nowrap" }}
+    >
+      Propose a standard change
+    </Button>
+  ) : null;
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 720 }}>
-          Standard changes are pre-authorised, templated change requests: the CAB approves a template once, and a
-          change request raised from an active template needs no CAB approval of its own. Any completed change
-          request can be proposed as a template.
-        </Typography>
-        {canWrite && (
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<Plus size={16} />}
-            loading={createProposal.isPending}
-            onClick={propose}
-          >
-            Propose a standard change
-          </Button>
-        )}
-      </Box>
+      {show === "templates" && <AttentionLine />}
 
       {createProposal.isError && (
         <Alert severity="error" onClose={() => createProposal.reset()}>
@@ -523,7 +619,11 @@ export default function StandardChangesTab({ view }: { view: StandardChangesView
         </Alert>
       )}
 
-      {view === "catalogue" ? <TemplateCatalogue /> : <ProposalList />}
+      {show === "templates" ? (
+        <TemplateCatalogue leading={toggle} trailing={proposeButton} />
+      ) : (
+        <ProposalList leading={toggle} trailing={proposeButton} />
+      )}
     </Box>
   );
 }

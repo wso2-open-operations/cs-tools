@@ -32,12 +32,14 @@ const mocks = vi.hoisted(() => ({
   resume: vi.fn(),
   clearReview: vi.fn(),
   create: vi.fn(),
+  recordView: vi.fn(),
 }));
 
 const idle = (mutate: ReturnType<typeof vi.fn>) => ({ mutate, isPending: false });
 
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
 vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => mocks.navigate }));
+vi.mock("@features/csm-recent/hooks/useRecentViews", () => ({ useRecordRecentView: () => mocks.recordView }));
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   MAX_SUSPEND_REASON_LENGTH: 1000,
   useGetStandardChangeTemplate: () => ({ data: mocks.template, isLoading: false, isError: false, refetch: vi.fn() }),
@@ -137,6 +139,7 @@ const HERE = { state: { from: "/operations/standard-changes/tpl-1" } };
 
 beforeEach(() => {
   mocks.navigate.mockReset();
+  mocks.recordView.mockReset();
   mocks.access = { canWrite: true };
   mocks.template = TEMPLATE;
   mocks.versionCalls = [];
@@ -314,24 +317,42 @@ describe("StandardChangeTemplateDetailPage — review flag", () => {
 });
 
 describe("StandardChangeTemplateDetailPage — part of Change requests", () => {
-  it("says where it sits: Change requests › Standard change catalogue › its number", () => {
+  it("says where it sits: Change requests › Standard changes › its number", () => {
     renderPage();
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getAllByRole("link").map((l) => l.textContent)).toEqual(["Change requests", "Standard changes"]);
     expect(within(trail).getByRole("link", { name: "Change requests" })).toHaveAttribute(
       "href",
       "/operations/change-requests",
     );
-    expect(within(trail).getByRole("link", { name: "Standard change catalogue" })).toHaveAttribute(
+    expect(within(trail).getByRole("link", { name: "Standard changes" })).toHaveAttribute(
       "href",
-      "/operations/change-requests?view=catalogue",
+      "/operations/change-requests?view=standard",
     );
     expect(within(trail).getByText("STD0000001")).toHaveAttribute("aria-current", "page");
   });
 
-  it("goes Back to the standard change catalogue inside Change requests when it was not opened from a list", () => {
+  it("goes Back to Standard changes inside Change requests when it was not opened from a list", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=catalogue");
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=standard");
+  });
+
+  it("is recorded in Recent under its number and name, so a pin of it is not just 'Operations'", () => {
+    renderPage();
+    expect(mocks.recordView).toHaveBeenCalledWith({
+      kind: "standard_change",
+      id: "tpl-1",
+      title: "STD0000001 · Rotate a TLS certificate",
+      subtitle: "Standard change template",
+      href: "/operations/standard-changes/tpl-1",
+    });
+  });
+
+  it("records nothing before the template has loaded", () => {
+    mocks.template = undefined;
+    renderPage();
+    expect(mocks.recordView).not.toHaveBeenCalled();
   });
 
   it("goes Back to where it was opened from", () => {

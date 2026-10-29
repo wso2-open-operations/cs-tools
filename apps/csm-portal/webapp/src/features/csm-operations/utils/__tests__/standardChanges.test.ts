@@ -16,26 +16,36 @@
 
 import { describe, expect, it } from "vitest";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { CR_FILTER_PARAM_KEYS } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
 import {
   appendPlaceholderToHtml,
+  canonicalStandardChangesSearch,
+  CHANGE_REQUEST_LIST_PARAM_PREFIX,
+  changeRequestListSearch,
   changeRequestsView,
-  changeRequestsViewPath,
   contentPlaceholderKeys,
   hasParameterIssues,
   highlightStandardChangeHtml,
   insertPlaceholderAt,
   isLegacyStandardChangesTab,
+  isLegacyStandardChangesView,
   isStandardChangeTemplateUnavailable,
   legacyStandardChangesHref,
   normalizeStandardChangeParameters,
   placeholderKeys,
+  proposalScope,
+  proposalStateFilter,
   renderStandardChangePlainText,
   splitPlaceholders,
-  STANDARD_CHANGE_CATALOGUE_PATH,
   STANDARD_CHANGE_PROPOSALS_PATH,
+  STANDARD_CHANGES_PATH,
   standardChangeParametersPayload,
   standardChangeProposalGaps,
   standardChangeProposalPath,
+  standardChangeRecentEntry,
+  standardChangesPath,
+  standardChangesSearch,
+  standardChangesShow,
   standardChangeTemplatePath,
   standardChangeValueError,
   standardChangeValuesValid,
@@ -279,20 +289,110 @@ it("recognises the refusal of a template that moved on by its code, not its word
 });
 
 describe("standard changes inside Operations > Change requests", () => {
-  it("reads the sub-view from ?view=, the change request list without one or for a value it does not know", () => {
-    expect(changeRequestsView(new URLSearchParams(""))).toBe("list");
-    expect(changeRequestsView(new URLSearchParams("crQ=x"))).toBe("list");
-    expect(changeRequestsView(new URLSearchParams("view=catalogue"))).toBe("catalogue");
-    expect(changeRequestsView(new URLSearchParams("view=proposals&crQ=x"))).toBe("proposals");
-    expect(changeRequestsView(new URLSearchParams("view=standard_changes"))).toBe("list");
+  const q = (search: string): URLSearchParams => new URLSearchParams(search);
+
+  it("reads Standard changes from ?view=standard, and from the two old sub-view values", () => {
+    expect(changeRequestsView(q(""))).toBe("list");
+    expect(changeRequestsView(q("crQ=x"))).toBe("list");
+    expect(changeRequestsView(q("view=standard"))).toBe("standard");
+    expect(changeRequestsView(q("view=standard&show=proposals"))).toBe("standard");
+    expect(changeRequestsView(q("view=catalogue"))).toBe("standard");
+    expect(changeRequestsView(q("view=proposals&crQ=x"))).toBe("standard");
+    expect(changeRequestsView(q("view=standard_changes"))).toBe("list");
+    expect(changeRequestsView(q("show=proposals"))).toBe("list");
   });
 
-  it("links each sub-view, the template and the proposal pages", () => {
-    expect(changeRequestsViewPath("list")).toBe("/operations/change-requests");
-    expect(STANDARD_CHANGE_CATALOGUE_PATH).toBe("/operations/change-requests?view=catalogue");
-    expect(STANDARD_CHANGE_PROPOSALS_PATH).toBe("/operations/change-requests?view=proposals");
+  it("opens on the catalogue, and on the proposals for show=proposals or the old view=proposals", () => {
+    expect(standardChangesShow(q("view=standard"))).toBe("templates");
+    expect(standardChangesShow(q("view=standard&show=nonsense"))).toBe("templates");
+    expect(standardChangesShow(q("view=catalogue"))).toBe("templates");
+    expect(standardChangesShow(q("view=standard&show=proposals"))).toBe("proposals");
+    expect(standardChangesShow(q("view=proposals"))).toBe("proposals");
+  });
+
+  it("knows the old two-sub-view form", () => {
+    expect(isLegacyStandardChangesView(q("view=catalogue"))).toBe(true);
+    expect(isLegacyStandardChangesView(q("view=proposals"))).toBe(true);
+    expect(isLegacyStandardChangesView(q("view=standard"))).toBe(false);
+    expect(isLegacyStandardChangesView(q(""))).toBe(false);
+  });
+
+  it("reads the proposals' filters, falling back to all proposals in any state for what it does not know", () => {
+    expect(proposalScope(q(""))).toBe("all");
+    expect(proposalScope(q("scope=awaiting"))).toBe("awaiting");
+    expect(proposalScope(q("scope=mine"))).toBe("mine");
+    expect(proposalScope(q("scope=all"))).toBe("all");
+    expect(proposalScope(q("scope=everyone"))).toBe("all");
+    expect(proposalStateFilter(q(""))).toBe("");
+    expect(proposalStateFilter(q("state=draft"))).toBe("draft");
+    expect(proposalStateFilter(q("state=cab_review"))).toBe("cab_review");
+    expect(proposalStateFilter(q("state=open"))).toBe("");
+  });
+
+  it("links Standard changes, its proposals (filtered or not), the template and the proposal pages", () => {
+    expect(STANDARD_CHANGES_PATH).toBe("/operations/change-requests?view=standard");
+    expect(STANDARD_CHANGE_PROPOSALS_PATH).toBe("/operations/change-requests?view=standard&show=proposals");
+    expect(standardChangesPath("proposals", { scope: "awaiting" })).toBe(
+      "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+    );
+    expect(standardChangesPath("proposals", { scope: "mine", state: "draft" })).toBe(
+      "/operations/change-requests?view=standard&show=proposals&scope=mine&state=draft",
+    );
+    // All proposals is the default, so its URL is the plain one.
+    expect(standardChangesPath("proposals", { scope: "all" })).toBe(STANDARD_CHANGE_PROPOSALS_PATH);
+    // The proposals' filters mean nothing on the catalogue.
+    expect(standardChangesPath("templates", { scope: "awaiting", state: "draft" })).toBe(STANDARD_CHANGES_PATH);
     expect(standardChangeTemplatePath("tpl 1")).toBe("/operations/standard-changes/tpl%201");
     expect(standardChangeProposalPath("scp-1")).toBe("/operations/standard-change-proposals/scp-1");
+  });
+
+  it("keeps the change request list's filters on the way into Standard changes, and anything else", () => {
+    expect(standardChangesSearch(q("crQ=gateway&crStates=new"), "templates").toString()).toBe(
+      "view=standard&crQ=gateway&crStates=new",
+    );
+    expect(standardChangesSearch(q("crQ=gateway&other=1"), "proposals").toString()).toBe(
+      "view=standard&show=proposals&crQ=gateway&other=1",
+    );
+  });
+
+  it("brings the list back exactly as it was after a trip through Standard changes", () => {
+    const list = q("crQ=gateway&crStates=new%2Cassess&crAnyOf=1");
+    const templates = standardChangesSearch(list, "templates");
+    const proposals = standardChangesSearch(templates, "proposals", { scope: "awaiting", state: "draft" });
+    const back = standardChangesSearch(proposals, "templates");
+    expect(changeRequestListSearch(proposals).toString()).toBe(list.toString());
+    expect(changeRequestListSearch(back).toString()).toBe(list.toString());
+  });
+
+  it("names the list's parameter prefix after every one of its filters", () => {
+    CR_FILTER_PARAM_KEYS.forEach((key) => expect(key.startsWith(CHANGE_REQUEST_LIST_PARAM_PREFIX)).toBe(true));
+  });
+
+  it("drops the proposals' filters on the way to the catalogue, and sets the ones it is given", () => {
+    const proposals = q("view=standard&show=proposals&scope=all&state=rejected");
+    expect(standardChangesSearch(proposals, "templates").toString()).toBe("view=standard");
+    expect(standardChangesSearch(proposals, "proposals", { scope: "awaiting" }).toString()).toBe(
+      "view=standard&show=proposals&scope=awaiting",
+    );
+    expect(standardChangesSearch(proposals, "proposals", { scope: "all", state: "rejected" }).toString()).toBe(
+      "view=standard&show=proposals&state=rejected",
+    );
+  });
+
+  it("drops Standard changes' own parameters on the way back to the list, and keeps the rest", () => {
+    expect(changeRequestListSearch(q("view=standard&show=proposals&scope=all&state=draft&other=1")).toString()).toBe(
+      "other=1",
+    );
+    expect(changeRequestListSearch(q("crQ=x")).toString()).toBe("crQ=x");
+  });
+
+  it("rewrites the old sub-view form to the current one, keeping the proposals' filters and the list's", () => {
+    expect(canonicalStandardChangesSearch(q("view=catalogue")).toString()).toBe("view=standard");
+    // The old proposals link lands on the plain proposals URL: all proposals.
+    expect(canonicalStandardChangesSearch(q("view=proposals")).toString()).toBe("view=standard&show=proposals");
+    expect(canonicalStandardChangesSearch(q("view=proposals&scope=awaiting&crQ=x")).toString()).toBe(
+      "view=standard&show=proposals&scope=awaiting&crQ=x",
+    );
   });
 
   it("sends an old standard changes link to the catalogue, or to the proposals it named", () => {
@@ -300,11 +400,33 @@ describe("standard changes inside Operations > Change requests", () => {
     expect(isLegacyStandardChangesTab("standard-changes")).toBe(true);
     expect(isLegacyStandardChangesTab("change_requests")).toBe(false);
     expect(isLegacyStandardChangesTab(null)).toBe(false);
-    expect(legacyStandardChangesHref("?tab=standard_changes")).toBe("/operations/change-requests?view=catalogue");
+    expect(legacyStandardChangesHref("?tab=standard_changes")).toBe("/operations/change-requests?view=standard");
     expect(legacyStandardChangesHref("?tab=standard_changes&view=proposals")).toBe(
-      "/operations/change-requests?view=proposals",
+      "/operations/change-requests?view=standard&show=proposals",
     );
-    expect(legacyStandardChangesHref("")).toBe("/operations/change-requests?view=catalogue");
-    expect(legacyStandardChangesHref("?view=other&x=1", "#h")).toBe("/operations/change-requests?view=catalogue&x=1#h");
+    expect(legacyStandardChangesHref("")).toBe("/operations/change-requests?view=standard");
+    expect(legacyStandardChangesHref("?view=other&x=1", "#h")).toBe("/operations/change-requests?view=standard&x=1#h");
+  });
+
+  it("names a template's or a proposal's Recent entry after the record, number first", () => {
+    expect(
+      standardChangeRecentEntry("template", { id: "tpl-3", number: "STD0000003", name: "Apply a WSO2 product update level" }),
+    ).toEqual({
+      kind: "standard_change",
+      id: "tpl-3",
+      title: "STD0000003 · Apply a WSO2 product update level",
+      subtitle: "Standard change template",
+      href: "/operations/standard-changes/tpl-3",
+    });
+    expect(standardChangeRecentEntry("proposal", { id: "scp-5", number: "SCP0000005", name: "Restart a node" })).toEqual({
+      kind: "standard_change",
+      id: "scp-5",
+      title: "SCP0000005 · Restart a node",
+      subtitle: "Standard change proposal",
+      href: "/operations/standard-change-proposals/scp-5",
+    });
+    expect(standardChangeRecentEntry("proposal", { id: "scp-6", number: "SCP0000006", name: "  " }).title).toBe(
+      "SCP0000006 · Untitled proposal",
+    );
   });
 });

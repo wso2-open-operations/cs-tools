@@ -723,7 +723,7 @@ func main() {
 	route("DELETE /team-schedule/case-alerts/settings/routes/{routeId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertRoute)
 	route("PUT /team-schedule/case-alerts/settings/values", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertValues)
 	route("DELETE /team-schedule/case-alerts/settings/values/{valueId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertValue)
-	// Operations > Standard Changes: the CAB-approved standard change templates and the
+	// Operations > Change requests > Standard changes: the CAB-approved standard change templates and the
 	// proposals that create, revise or retire them. Reading is for whoever sees
 	// Operations; every write is checked again by entity-service (the proposer edits
 	// and submits, a CAB member decides, the owner or the CAB suspends).

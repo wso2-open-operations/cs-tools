@@ -13534,7 +13534,7 @@ paths:
 
   /standard-change-templates/search:
     post:
-      summary: Search the standard change catalogue (Operations > Standard Changes).
+      summary: Search the standard change catalogue (Operations > Change requests > Standard changes).
       operationId: searchStandardChangeTemplates
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal

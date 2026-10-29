@@ -2132,7 +2132,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("DELETE /runbooks/{id}", internalOnly(accessSvc, runbookHandler.DeleteRunbook))
 	}
 	if standardChangeHandler != nil {
-		// Standard changes (Operations > Standard Changes): internal callers only.
+		// Standard changes (Operations > Change requests > Standard changes): internal callers only.
 		mux.HandleFunc("POST /standard-change-templates/search", internalOnly(accessSvc, standardChangeHandler.SearchTemplates))
 		mux.HandleFunc("GET /standard-change-templates/{id}", internalOnly(accessSvc, standardChangeHandler.GetTemplate))
 		mux.HandleFunc("GET /standard-change-templates/{id}/versions/{versionId}", internalOnly(accessSvc, standardChangeHandler.GetTemplateVersion))

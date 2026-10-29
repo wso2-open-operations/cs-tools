@@ -16,8 +16,9 @@
 
 /**
  * Operations' header, the Change requests tab's sub-navigation (the change
- * request list, the standard change catalogue and the standard change
- * proposals) and where the old links to the separate standard changes tab land.
+ * request list and Standard changes, whose catalogue and proposals are one
+ * sub-view) and where the old links (the separate standard changes tab, and
+ * the two sub-views that came after it) land.
  * The tabs' own contents are stubbed: each has its own tests.
  */
 
@@ -27,6 +28,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
 import "@testing-library/jest-dom/vitest";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
+import { currentPageEntry } from "@features/csm-recent/currentPageEntry";
 
 vi.mock("@features/csm-cases/components/CsmIssuesView", () => ({
   default: () => <div data-testid="tab-content">service requests</div>,
@@ -47,7 +49,7 @@ vi.mock("@features/csm-operations/components/RunbooksTab", () => ({
   default: () => <div data-testid="tab-content">runbooks</div>,
 }));
 vi.mock("@features/csm-operations/components/StandardChangesTab", () => ({
-  default: ({ view }: { view: string }) => <div data-testid="tab-content">{`standard changes: ${view}`}</div>,
+  default: ({ show }: { show: string }) => <div data-testid="tab-content">{`standard changes: ${show}`}</div>,
 }));
 
 import OperationsPage from "@features/csm-operations/pages/OperationsPage";
@@ -142,17 +144,16 @@ describe("OperationsPage — header", () => {
   });
 
   it.each([
-    [
-      "/operations/change-requests?view=catalogue",
-      "Pre-authorised change requests, raised from templates the CAB has approved.",
-    ],
-    [
-      "/operations/change-requests?view=proposals",
-      "Proposals to the CAB to add, revise or retire a standard change template.",
-    ],
-  ])("on %s it is about standard changes, and names nothing else Operations holds", (entry, subtitle) => {
+    ["/operations/change-requests?view=standard"],
+    ["/operations/change-requests?view=standard&show=proposals"],
+    ["/operations/change-requests?view=catalogue"],
+    ["/operations/change-requests?view=proposals"],
+  ])("on %s it is about standard changes, and names nothing else Operations holds", (entry) => {
     renderAt(entry);
-    expect(heading()).toEqual({ title: "Standard changes", subtitle });
+    expect(heading()).toEqual({
+      title: "Standard changes",
+      subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+    });
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
     expect(screen.queryByText(OPERATIONS_SUBTITLE)).not.toBeInTheDocument();
     expect(screen.queryByText(/service requests|incidents|problems|runbooks/i)).not.toBeInTheDocument();
@@ -161,7 +162,7 @@ describe("OperationsPage — header", () => {
   it("switches the heading with the sub-view", () => {
     renderAt("/operations/change-requests");
     expect(heading().title).toBe("Operations");
-    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard change proposals" }));
+    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard changes" }));
     expect(heading().title).toBe("Standard changes");
     fireEvent.click(within(subNav()).getByRole("tab", { name: "Change requests" }));
     expect(heading()).toEqual({ title: "Operations", subtitle: OPERATIONS_SUBTITLE });
@@ -175,15 +176,11 @@ describe("OperationsPage — header", () => {
 });
 
 describe("OperationsPage — Change requests sub-navigation", () => {
-  it("shows the change request list by default, with the list first in the sub-navigation", () => {
+  it("reads exactly: Change requests | Standard changes, with the list first and shown by default", () => {
     renderAt("/operations/change-requests");
     expect(content()).toBe("change request list");
     const tabs = within(subNav()).getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual([
-      "Change requests",
-      "Standard change catalogue",
-      "Standard change proposals",
-    ]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["Change requests", "Standard changes"]);
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
@@ -200,34 +197,87 @@ describe("OperationsPage — Change requests sub-navigation", () => {
   });
 
   it.each([
-    ["catalogue", "Standard change catalogue"],
-    ["proposals", "Standard change proposals"],
-  ])("opens the %s from its own link", (view, label) => {
-    renderAt(`/operations/change-requests?view=${view}`);
-    expect(content()).toBe(`standard changes: ${view}`);
-    expect(within(subNav()).getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
+    ["/operations/change-requests?view=standard", "templates"],
+    ["/operations/change-requests?view=standard&show=proposals", "proposals"],
+  ])("opens %s from its own link, on the %s", (entry, show) => {
+    renderAt(entry);
+    expect(content()).toBe(`standard changes: ${show}`);
+    expect(currentUrl()).toBe(entry);
+    expect(within(subNav()).getByRole("tab", { name: "Standard changes" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("switches sub-view in the URL, keeping the list's filters for the way back", () => {
-    renderAt("/operations/change-requests?crQ=gateway");
+  it.each([
+    ["/operations/change-requests?view=catalogue", "/operations/change-requests?view=standard", "templates"],
+    ["/operations/change-requests?view=proposals", "/operations/change-requests?view=standard&show=proposals", "proposals"],
+    [
+      "/operations/change-requests?view=proposals&scope=awaiting",
+      "/operations/change-requests?view=standard&show=proposals&scope=awaiting",
+      "proposals",
+    ],
+    [
+      "/operations/change-requests?crQ=gateway&view=catalogue",
+      "/operations/change-requests?view=standard&crQ=gateway",
+      "templates",
+    ],
+  ])("rewrites the old %s link to %s, on the %s", (entry, to, show) => {
+    renderAt(entry);
+    expect(currentUrl()).toBe(to);
+    expect(content()).toBe(`standard changes: ${show}`);
+    expect(within(subNav()).getByRole("tab", { name: "Standard changes" })).toHaveAttribute("aria-selected", "true");
+  });
 
-    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard change catalogue" }));
-    expect(currentUrl()).toBe("/operations/change-requests?crQ=gateway&view=catalogue");
-    expect(content()).toBe("standard changes: catalogue");
+  it("rewrites an old link in place, without a history entry of its own", () => {
+    render(
+      <MemoryRouter initialEntries={["/operations/incidents", "/operations/change-requests?view=proposals"]}>
+        <Routes>
+          <Route
+            path="/operations/:tab"
+            element={
+              <>
+                <OperationsPage />
+                <Probe />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(currentUrl()).toBe("/operations/change-requests?view=standard&show=proposals");
+    fireEvent.click(screen.getByRole("button", { name: "history back" }));
+    expect(currentUrl()).toBe("/operations/incidents");
+  });
 
-    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard change proposals" }));
-    expect(currentUrl()).toBe("/operations/change-requests?crQ=gateway&view=proposals");
-    expect(content()).toBe("standard changes: proposals");
+  it("keeps the list's filters while on Standard changes, so the list comes back exactly as it was", () => {
+    renderAt("/operations/change-requests?crQ=gateway&crStates=new");
 
+    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard changes" }));
+    expect(currentUrl()).toBe("/operations/change-requests?view=standard&crQ=gateway&crStates=new");
+    expect(content()).toBe("standard changes: templates");
+    // They are not Standard changes' filters: a pin of it names the place alone.
+    expect(currentPageEntry("/operations/change-requests", "?view=standard&crQ=gateway&crStates=new").title).toBe(
+      "Standard changes",
+    );
+
+    fireEvent.click(within(subNav()).getByRole("tab", { name: "Change requests" }));
+    expect(currentUrl()).toBe("/operations/change-requests?crQ=gateway&crStates=new");
+    expect(content()).toBe("change request list");
+  });
+
+  it("drops Standard changes' own parameters on the way back to the list, keeping the list's", () => {
+    renderAt("/operations/change-requests?view=standard&show=proposals&scope=awaiting&state=draft&crQ=gateway");
     fireEvent.click(within(subNav()).getByRole("tab", { name: "Change requests" }));
     expect(currentUrl()).toBe("/operations/change-requests?crQ=gateway");
     expect(content()).toBe("change request list");
+
+    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard changes" }));
+    expect(currentUrl()).toBe("/operations/change-requests?view=standard&crQ=gateway");
+    expect(content()).toBe("standard changes: templates");
   });
 
   it("makes each sub-view its own history entry", () => {
     renderAt("/operations/change-requests");
-    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard change proposals" }));
-    expect(currentUrl()).toBe("/operations/change-requests?view=proposals");
+    fireEvent.click(within(subNav()).getByRole("tab", { name: "Standard changes" }));
+    expect(currentUrl()).toBe("/operations/change-requests?view=standard");
     fireEvent.click(screen.getByRole("button", { name: "history back" }));
     expect(currentUrl()).toBe("/operations/change-requests");
     expect(content()).toBe("change request list");
@@ -236,23 +286,25 @@ describe("OperationsPage — Change requests sub-navigation", () => {
   it("no longer has a standard changes tab of its own", () => {
     renderAt("/operations/standard-changes");
     // The old tab's path is redirected into Change requests, never rendered as a tab.
-    expect(currentUrl()).toBe("/operations/change-requests?view=catalogue");
-    expect(content()).toBe("standard changes: catalogue");
+    expect(currentUrl()).toBe("/operations/change-requests?view=standard");
+    expect(content()).toBe("standard changes: templates");
   });
 });
 
 describe("old links to the standard changes tab", () => {
   it.each([
-    ["/operations?tab=standard_changes", "/operations/change-requests?view=catalogue"],
-    ["/operations?tab=standard_changes&view=proposals", "/operations/change-requests?view=proposals"],
-    ["/operations?tab=standard-changes", "/operations/change-requests?view=catalogue"],
-    ["/operations/standard-changes", "/operations/change-requests?view=catalogue"],
-    ["/operations/standard-changes?view=proposals", "/operations/change-requests?view=proposals"],
-    ["/operations/standard-changes?view=bogus", "/operations/change-requests?view=catalogue"],
-    ["/operations?tab=standard_changes&foo=1#top", "/operations/change-requests?foo=1&view=catalogue#top"],
-  ])("%s lands on %s", (from, to) => {
+    ["/operations?tab=standard_changes", "/operations/change-requests?view=standard", "templates"],
+    ["/operations?tab=standard_changes&view=proposals", "/operations/change-requests?view=standard&show=proposals", "proposals"],
+    ["/operations?tab=standard-changes", "/operations/change-requests?view=standard", "templates"],
+    ["/operations?tab=standard-changes&view=proposals", "/operations/change-requests?view=standard&show=proposals", "proposals"],
+    ["/operations/standard-changes", "/operations/change-requests?view=standard", "templates"],
+    ["/operations/standard-changes?view=proposals", "/operations/change-requests?view=standard&show=proposals", "proposals"],
+    ["/operations/standard-changes?view=bogus", "/operations/change-requests?view=standard", "templates"],
+    ["/operations?tab=standard_changes&foo=1#top", "/operations/change-requests?view=standard&foo=1#top", "templates"],
+  ])("%s lands on %s", (from, to, show) => {
     renderAt(from);
     expect(currentUrl()).toBe(to);
+    expect(content()).toBe(`standard changes: ${show}`);
   });
 
   it("leaves every other old ?tab= link to the usual redirect", () => {

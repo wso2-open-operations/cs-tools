@@ -464,7 +464,7 @@ reached the browser; this is what stops them being sent at all to a caller who s
 
 ## Standard changes (`internal/handler/standard_changes.go`)
 
-Operations > Standard Changes: the CAB-approved standard change templates and the proposals that
+Operations > Change requests > Standard changes: the CAB-approved standard change templates and the proposals that
 create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
 are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
 only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or

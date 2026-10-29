@@ -33,24 +33,34 @@ function humanizeSegment(segment: string): string {
 }
 
 /**
- * `search` with `param` removed, once it has been resolved to a nav node (the
- * `tab` parameter) or to a named place inside one (a node's `views`). Either
- * selects the destination rather than filtering it, so counting it as a filter
- * would label the Incidents tab "Operations: 1 filter" and the standard change
- * catalogue "Change requests: 1 filter".
+ * `search` with `names` removed, once they have been resolved to a nav node
+ * (the `tab` parameter) or to a named place inside one (a node's `views`).
+ * Either selects the destination rather than filtering it, so counting it as a
+ * filter would label the Incidents tab "Operations: 1 filter" and Standard
+ * changes "Change requests: 1 filter".
  */
-function searchWithout(search: string, param: string): string {
+function searchWithout(search: string, names: readonly string[]): string {
   const params = new URLSearchParams(search);
-  params.delete(param);
+  names.forEach((name) => params.delete(name));
   const rest = params.toString();
   return rest ? `?${rest}` : "";
 }
 
-/** `href` with `param=value` set on its query. */
-function withParam(href: string, param: string, value: string): string {
+/** `search` with every parameter whose name starts with `prefix` removed. */
+function searchWithoutPrefix(search: string, prefix: string): string {
+  const params = new URLSearchParams(search);
+  [...new Set(params.keys())]
+    .filter((name) => name.startsWith(prefix))
+    .forEach((name) => params.delete(name));
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}
+
+/** `href` with each `[param, value]` set on its query, in order. */
+function withParams(href: string, pairs: ReadonlyArray<readonly [string, string]>): string {
   const [path, query = ""] = href.split("?");
   const params = new URLSearchParams(query);
-  params.set(param, value);
+  pairs.forEach(([param, value]) => params.set(param, value));
   return `${path}?${params.toString()}`;
 }
 
@@ -78,7 +88,6 @@ function summarizeQuery(search: string): string {
  * this. `id` is the full href so distinct filtered views pin separately.
  */
 export function currentPageEntry(pathname: string, search: string): PageEntry {
-  const href = pathname + search;
   // Match the most specific node, so a second-level tab pins under its own name
   // ("Accounts") rather than its section's ("Customers"). The matched prefix is
   // the node's canonical path here — a query-param tab's `href` points at the
@@ -92,17 +101,25 @@ export function currentPageEntry(pathname: string, search: string): PageEntry {
   // separately.
   const tab = onNavRoot ? navTabForSearch(match.node, search) : undefined;
   const node = tab ?? (onNavRoot ? match.node : undefined);
-  const tabFilters = tab ? searchWithout(search, "tab") : search;
+  const tabSearch = tab ? searchWithout(search, ["tab"]) : search;
 
-  // Likewise a named place inside the page (a node's `views`: the standard
-  // change catalogue inside Change requests) is the destination, named after
-  // itself, with its own canonical href so each place pins separately.
-  const view = node ? navViewForSearch(node, tabFilters) : undefined;
+  // Likewise a named place inside the page (a node's `views`: Standard changes
+  // inside Change requests, and its proposals) is the destination, named after
+  // itself, with its own canonical href so each place pins separately. The
+  // parameters such a place keeps for the page's default one (the change
+  // request list's `cr*` filters on Standard changes) are not its filters:
+  // they are left out of its title and of its href alike.
+  const view = node ? navViewForSearch(node, tabSearch) : undefined;
+  const ignored = view?.ignoreParamPrefix;
+  const tabFilters = ignored ? searchWithoutPrefix(tabSearch, ignored) : tabSearch;
+  const href = pathname + (ignored ? searchWithoutPrefix(search, ignored) : search);
   const nodeHref = tab ? tab.href : match?.prefix;
   const canonicalHref =
-    view && nodeHref ? withParam(nodeHref, view.param, view.value) : nodeHref;
+    view && nodeHref ? withParams(nodeHref, view.params) : nodeHref;
   const label = view ? view.label : node?.label;
-  const filters = view ? searchWithout(tabFilters, view.param) : tabFilters;
+  const filters = view
+    ? searchWithout(tabFilters, view.params.map(([param]) => param))
+    : tabFilters;
 
   if (filters && filters !== "?") {
     const base = label ?? humanizeSegment(pathname.split("/")[1] ?? "");

@@ -19,23 +19,25 @@ import { type JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import {
   CHANGE_REQUESTS_PATH,
-  changeRequestsViewPath,
-  STANDARD_CHANGES_VIEW_LABELS,
-  type StandardChangesView,
+  STANDARD_CHANGE_PROPOSALS_PATH,
+  STANDARD_CHANGES_PATH,
+  type StandardChangesShow,
 } from "@features/csm-operations/utils/standardChanges";
 
 /**
- * "Change requests › Standard change catalogue › STD0000001" above a template's
- * or a proposal's own page: both are part of Operations > Change requests, and
- * the trail says so and links back to the list and to the sub-view. It is a
- * fixed trail beside the page's own Back (which returns to wherever the page
- * was opened from).
+ * "Change requests › Standard changes › STD0000001" above a template's own
+ * page, and "Change requests › Standard changes › Proposals › SCP0000001"
+ * above a proposal's: both are part of Operations > Change requests, and the
+ * trail says so and links back to the list, to Standard changes (its
+ * catalogue) and, for a proposal, to all the proposals. It is a fixed trail beside
+ * the page's own Back (which returns to wherever the page was opened from).
  */
 export default function StandardChangeBreadcrumbs({
-  view,
+  show,
   current,
 }: {
-  view: StandardChangesView;
+  /** Which part of Standard changes the record belongs to. */
+  show: StandardChangesShow;
   /** The record's number, once loaded. */
   current?: string;
 }): JSX.Element {
@@ -44,9 +46,14 @@ export default function StandardChangeBreadcrumbs({
       <Link component={RouterLink} to={CHANGE_REQUESTS_PATH} underline="hover" color="inherit">
         Change requests
       </Link>
-      <Link component={RouterLink} to={changeRequestsViewPath(view)} underline="hover" color="inherit">
-        {STANDARD_CHANGES_VIEW_LABELS[view]}
+      <Link component={RouterLink} to={STANDARD_CHANGES_PATH} underline="hover" color="inherit">
+        Standard changes
       </Link>
+      {show === "proposals" && (
+        <Link component={RouterLink} to={STANDARD_CHANGE_PROPOSALS_PATH} underline="hover" color="inherit">
+          Proposals
+        </Link>
+      )}
       {current && (
         <Typography variant="body2" color="text.primary" aria-current="page">
           {current}

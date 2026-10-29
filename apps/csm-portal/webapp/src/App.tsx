@@ -522,8 +522,8 @@ export default function App(): JSX.Element {
                       new path form, or lands on the first usable tab if
                       there's no `?tab=` at all. An old link to the
                       standard changes tab (`?tab=standard_changes`, or the
-                      `/operations/standard-changes` path) lands on the
-                      standard change catalogue inside Change requests
+                      `/operations/standard-changes` path) lands on
+                      Standard changes inside Change requests
                       (`OperationsLegacyRedirects`). */}
                   <Route path="operations">
                     <Route index element={<OperationsIndexRedirect />} />

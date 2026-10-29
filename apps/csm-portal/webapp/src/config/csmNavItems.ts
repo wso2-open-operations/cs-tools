@@ -109,10 +109,10 @@ export interface CsmNavNode {
   /**
    * Named places inside this node's page that a query parameter selects, as
    * opposed to filters of it: the parameter, and each value's label. "Pin this
-   * page" and Recent name such a URL after the place ("Standard change
-   * catalogue"), not as a filtered view of the node ("Change requests: 1
-   * filter"). A value not listed here is read as an ordinary filter. Not nav
-   * entries: they are never in the sidebar, Quick-nav or a tab strip.
+   * page" and Recent name such a URL after the place ("Standard changes"), not
+   * as a filtered view of the node ("Change requests: 1 filter"). A value not
+   * listed here is read as an ordinary filter. Not nav entries: they are never
+   * in the sidebar, Quick-nav or a tab strip.
    */
   views?: CsmNavViews;
   icon?: ComponentType<{ size?: number | string }>;
@@ -123,13 +123,30 @@ export interface CsmNavNode {
 export interface CsmNavViews {
   param: string;
   labels: Readonly<Record<string, string>>;
+  /**
+   * A narrower place inside one of these: under a value of `param`, another
+   * parameter names it (Standard changes' proposals, `view=standard&show=proposals`).
+   * Without that parameter, or with a value it does not name, the place is the
+   * outer one.
+   */
+  within?: Readonly<Record<string, CsmNavViews>>;
+  /**
+   * Parameters starting with this belong to the page's default place (the
+   * change request list's `cr*` filters) and are kept in the URL, unread, while
+   * one of these places is shown. They are not filters of the place, so "Pin
+   * this page" and Recent ignore them there (and leave them out of its href).
+   * Read on the outermost level only.
+   */
+  ignoreParamPrefix?: string;
 }
 
 /** One of a node's {@link CsmNavNode.views}, as a URL selects it. */
 export interface CsmNavView {
-  param: string;
-  value: string;
+  /** The parameters that select the place, outermost first, with their values. */
+  params: ReadonlyArray<readonly [string, string]>;
   label: string;
+  /** The node's {@link CsmNavViews.ignoreParamPrefix}, when it has one. */
+  ignoreParamPrefix?: string;
 }
 
 /** A top-level sidebar section. Always carries an icon. */
@@ -181,8 +198,8 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Change requests",
         href: "/operations?tab=change_requests",
         tab: "change_requests",
-        // Standard changes are templated change requests: their catalogue and
-        // proposals are sub-views of this tab (`?view=`, see
+        // Standard changes are templated change requests: they are a sub-view
+        // of this tab (`?view=standard`, the proposals `&show=proposals`, see
         // csm-operations/utils/standardChanges.ts), and a template's or a
         // proposal's own page belongs to it too. `/operations/change-requests`
         // must stay first: it is the tab's own destination (`navNodeHref`).
@@ -191,15 +208,27 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
           "/operations/standard-changes",
           "/operations/standard-change-proposals",
         ],
-        // The standard change sub-views are places, not filters of the list.
-        // Same parameter and labels as `CHANGE_REQUESTS_VIEW_PARAM` /
-        // `STANDARD_CHANGES_VIEW_LABELS` (a test keeps them equal; this module
-        // stays free of feature imports).
+        // Standard changes and its proposals are places, not filters of the
+        // list. Same parameters and labels as `CHANGE_REQUESTS_VIEW_PARAM` /
+        // `STANDARD_CHANGES_SHOW_PARAM` / `STANDARD_CHANGES_LABELS` (a test
+        // keeps them equal; this module stays free of feature imports). The
+        // old `catalogue` / `proposals` values are still named, as links to
+        // them still land there. The list's own `cr*` filters stay in the URL
+        // on Standard changes (so the list comes back as it was left) but are
+        // not its filters: `CHANGE_REQUEST_LIST_PARAM_PREFIX`.
         views: {
           param: "view",
+          ignoreParamPrefix: "cr",
           labels: {
-            catalogue: "Standard change catalogue",
+            standard: "Standard changes",
+            catalogue: "Standard changes",
             proposals: "Standard change proposals",
+          },
+          within: {
+            standard: {
+              param: "show",
+              labels: { proposals: "Standard change proposals" },
+            },
           },
         },
         icon: GitPullRequest,
@@ -688,10 +717,26 @@ export function navViewForSearch(
   search: string,
 ): CsmNavView | undefined {
   if (!node.views) return undefined;
-  const { param, labels } = node.views;
-  const value = new URLSearchParams(search).get(param);
+  const view = viewForParams(node.views, new URLSearchParams(search));
+  const prefix = node.views.ignoreParamPrefix;
+  return view && prefix ? { ...view, ignoreParamPrefix: prefix } : view;
+}
+
+function viewForParams(
+  views: CsmNavViews,
+  params: URLSearchParams,
+): CsmNavView | undefined {
+  const { param, labels, within } = views;
+  const value = params.get(param);
   if (!value || !Object.hasOwn(labels, value)) return undefined;
-  return { param, value, label: labels[value] };
+  const inner =
+    within && Object.hasOwn(within, value)
+      ? viewForParams(within[value], params)
+      : undefined;
+  return {
+    params: [[param, value], ...(inner?.params ?? [])],
+    label: inner?.label ?? labels[value],
+  };
 }
 
 /** The top-level section owning `pathname`, ignoring its tabs. */

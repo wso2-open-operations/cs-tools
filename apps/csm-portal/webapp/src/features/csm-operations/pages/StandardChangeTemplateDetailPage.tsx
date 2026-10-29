@@ -37,13 +37,14 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, FilePlus, Pause, Play, Archive, PencilLine } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import StandardChangeBreadcrumbs from "@features/csm-operations/components/StandardChangeBreadcrumbs";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
+import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import {
   MAX_SUSPEND_REASON_LENGTH,
@@ -59,8 +60,9 @@ import StandardChangeContentView, {
 } from "@features/csm-operations/components/StandardChangeContentView";
 import {
   raiseFromTemplatePath,
-  STANDARD_CHANGE_CATALOGUE_PATH,
+  STANDARD_CHANGES_PATH,
   standardChangeProposalPath,
+  standardChangeRecentEntry,
   standardChangeTemplateStateColor,
   standardChangeTemplateStateLabel,
 } from "@features/csm-operations/utils/standardChanges";
@@ -110,10 +112,16 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   const { canWrite } = usePortalAccess();
-  const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGE_CATALOGUE_PATH;
+  const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGES_PATH;
   const here = `${location.pathname}${location.search}`;
 
   const { data: template, isLoading, isError, error, refetch } = useGetStandardChangeTemplate(id);
+  // Recent and "Pin this page" name the page after the template, as a change
+  // request's or an incident's own page is named after it.
+  const recordView = useRecordRecentView();
+  useEffect(() => {
+    if (template?.id) recordView(standardChangeRecentEntry("template", template));
+  }, [template, recordView]);
   // An older version picked from the history; null = the current one.
   const [versionId, setVersionId] = useState<string | null>(null);
   const viewingOlder = !!versionId && versionId !== template?.currentVersion?.id;
@@ -139,7 +147,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
       Back
     </Button>
   );
-  const Trail = <StandardChangeBreadcrumbs view="catalogue" current={template?.number} />;
+  const Trail = <StandardChangeBreadcrumbs show="templates" current={template?.number} />;
 
   if (isLoading) {
     return (

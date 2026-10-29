@@ -40,11 +40,12 @@ import type {
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
-// Operations > Standard Changes: the CAB-approved template catalogue and the
-// proposals that create, revise or retire its templates. Every route is a thin
-// BFF proxy of entity-service, which decides who may act (the proposer edits and
-// submits, a CAB member decides, the owner or a CAB member suspends): a refusal
-// keeps its message and `errorCode`, so callers show `err.message`.
+// Operations > Change requests > Standard changes: the CAB-approved template
+// catalogue and the proposals that create, revise or retire its templates.
+// Every route is a thin BFF proxy of entity-service, which decides who may act
+// (the proposer edits and submits, a CAB member decides, the owner or a CAB
+// member suspends): a refusal keeps its message and `errorCode`, so callers
+// show `err.message`.
 
 /** Every standard change query lives under this key, so one write refreshes them all. */
 export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
@@ -139,6 +140,29 @@ export function useSearchStandardChangeProposals(
         payload,
       ),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * How many proposals match `filter` (the search's `total`, asking for one row),
+ * for the "needs your attention" line above the catalogue. It is a hint, not
+ * the list: a failure is not retried and the caller says nothing about it.
+ */
+export function useCountStandardChangeProposals(
+  filter: Omit<BeSearchStandardChangeProposalsPayload, "pagination">,
+): UseQueryResult<number, Error> {
+  const api = useBackendApi();
+  return useQuery<number, Error>({
+    queryKey: [...PROPOSALS_KEY, "count", filter],
+    queryFn: async () => {
+      const res = await api.post<BeSearchStandardChangeProposalsPayload, BeSearchStandardChangeProposalsResponse>(
+        `${PROPOSALS}/search`,
+        { ...filter, pagination: { offset: 0, limit: 1 } },
+      );
+      return res.total ?? 0;
+    },
+    retry: false,
+    staleTime: 30_000,
   });
 }
 

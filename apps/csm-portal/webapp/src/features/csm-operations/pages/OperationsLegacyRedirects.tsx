@@ -24,8 +24,8 @@ import {
 
 /**
  * The bare `/operations` index. An old `?tab=standard_changes` link (standard
- * changes were briefly a tab of their own) lands on the standard change
- * catalogue inside Change requests, or on its proposals for `&view=proposals`;
+ * changes were briefly a tab of their own) lands on Standard changes inside
+ * Change requests (its catalogue), or on its proposals for `&view=proposals`;
  * every other `?tab=` is `LegacyQueryTabRedirect`'s, as before.
  */
 export function OperationsIndexRedirect(): JSX.Element {

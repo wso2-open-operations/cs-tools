@@ -34,11 +34,13 @@ const mocks = vi.hoisted(() => ({
   withdraw: vi.fn(),
   decide: vi.fn(),
   create: vi.fn(),
+  recordView: vi.fn(),
   calls: [] as string[],
 }));
 
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
 vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => mocks.navigate }));
+vi.mock("@features/csm-recent/hooks/useRecentViews", () => ({ useRecordRecentView: () => mocks.recordView }));
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useGetStandardChangeProposal: () => ({ data: mocks.proposal, isLoading: false, isError: false, refetch: vi.fn() }),
   useUpdateStandardChangeProposal: () => ({ mutate: mocks.update, mutateAsync: mocks.updateAsync, isPending: false }),
@@ -124,6 +126,7 @@ const submitButton = (): HTMLElement => screen.getByRole("button", { name: /subm
 
 beforeEach(() => {
   mocks.navigate.mockReset();
+  mocks.recordView.mockReset();
   mocks.access = { canWrite: true };
   mocks.proposal = DRAFT;
   mocks.calls = [];
@@ -449,18 +452,47 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
 });
 
 describe("StandardChangeProposalPage — part of Change requests", () => {
-  it("says where it sits: Change requests › Standard change proposals › its number", () => {
+  it("says where it sits: Change requests › Standard changes › Proposals › its number", () => {
     renderPage();
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getAllByRole("link").map((l) => l.textContent)).toEqual([
+      "Change requests",
+      "Standard changes",
+      "Proposals",
+    ]);
     expect(within(trail).getByRole("link", { name: "Change requests" })).toHaveAttribute(
       "href",
       "/operations/change-requests",
     );
-    expect(within(trail).getByRole("link", { name: "Standard change proposals" })).toHaveAttribute(
+    expect(within(trail).getByRole("link", { name: "Standard changes" })).toHaveAttribute(
       "href",
-      "/operations/change-requests?view=proposals",
+      "/operations/change-requests?view=standard",
+    );
+    // All proposals, not only the viewer's: the proposals view's default scope.
+    expect(within(trail).getByRole("link", { name: "Proposals" })).toHaveAttribute(
+      "href",
+      "/operations/change-requests?view=standard&show=proposals",
     );
     expect(within(trail).getByText("SCP0000001")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("is recorded in Recent under its number and name, so a pin of it is not just 'Operations'", () => {
+    renderPage();
+    expect(mocks.recordView).toHaveBeenCalledWith({
+      kind: "standard_change",
+      id: "scp-1",
+      title: "SCP0000001 · Rotate a TLS certificate",
+      subtitle: "Standard change proposal",
+      href: "/operations/standard-change-proposals/scp-1",
+    });
+  });
+
+  it("is recorded as an untitled proposal while it has no name", () => {
+    mocks.proposal = { ...DRAFT, name: "" };
+    renderPage();
+    expect(mocks.recordView).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "SCP0000001 · Untitled proposal" }),
+    );
   });
 
   it("does not carry the Operations-wide heading: its own heading is the proposal's name", () => {
@@ -469,10 +501,10 @@ describe("StandardChangeProposalPage — part of Change requests", () => {
     expect(screen.queryByRole("heading", { name: "Operations" })).not.toBeInTheDocument();
   });
 
-  it("goes Back to the standard change proposals inside Change requests when it was not opened from a list", () => {
+  it("goes Back to all standard change proposals inside Change requests when it was not opened from a list", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=proposals");
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=standard&show=proposals");
   });
 
   it("goes Back to where it was opened from", () => {

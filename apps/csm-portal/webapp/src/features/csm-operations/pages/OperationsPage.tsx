@@ -26,34 +26,29 @@ import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePathSectionTabs } from "@hooks/useSectionTabs";
-import { changeRequestsView, type StandardChangesView } from "@features/csm-operations/utils/standardChanges";
+import { changeRequestsView } from "@features/csm-operations/utils/standardChanges";
 
 interface PageHeading {
   title: string;
   subtitle: string;
 }
 
-/** The heading of every Operations tab but the standard change sub-views. */
+/** The heading of every Operations tab but Standard changes. */
 const OPERATIONS_HEADING: PageHeading = {
   title: "Operations",
   subtitle: "Service requests, change requests, incidents, problems, and runbooks across customers.",
 };
 
 /**
- * The heading of the standard change sub-views of Change requests. A standard
- * change is a templated change request, so these are about change requests and
- * nothing else: the Operations-wide line (service requests, incidents,
- * problems, runbooks) does not describe them.
+ * The heading of the Standard changes sub-view of Change requests (its
+ * catalogue and its proposals alike). A standard change is a templated change
+ * request, so this is about change requests and nothing else: the
+ * Operations-wide line (service requests, incidents, problems, runbooks) does
+ * not describe it.
  */
-const STANDARD_CHANGES_HEADINGS: Readonly<Record<StandardChangesView, PageHeading>> = {
-  catalogue: {
-    title: "Standard changes",
-    subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
-  },
-  proposals: {
-    title: "Standard changes",
-    subtitle: "Proposals to the CAB to add, revise or retire a standard change template.",
-  },
+const STANDARD_CHANGES_HEADING: PageHeading = {
+  title: "Standard changes",
+  subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
 };
 
 /**
@@ -61,10 +56,10 @@ const STANDARD_CHANGES_HEADINGS: Readonly<Record<StandardChangesView, PageHeadin
  * split into Service Requests / Change Requests / Incidents / Problems tabs.
  * Service requests are case-typed, so they list through the shared issues view;
  * the others each have their own search endpoint and listing. Standard changes
- * (templated change requests) are sub-views of Change requests
- * (`ChangeRequestsArea`), not a tab of their own; on those two sub-views the
- * page heading is about standard changes (`STANDARD_CHANGES_HEADINGS`) instead
- * of the Operations-wide one, which names entities they have nothing to do with.
+ * (templated change requests) are a sub-view of Change requests
+ * (`ChangeRequestsArea`), not a tab of their own; there the page heading is
+ * about standard changes (`STANDARD_CHANGES_HEADING`) instead of the
+ * Operations-wide one, which names entities they have nothing to do with.
  *
  * Which tabs exist comes from the navigation tree, so a deployment can restrict
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
@@ -86,7 +81,7 @@ export default function OperationsPage(): JSX.Element {
   const backState = useLocation().state as { from?: string } | undefined;
   const [searchParams] = useSearchParams();
   const changeRequestsSubView = activeTab === "change-requests" ? changeRequestsView(searchParams) : "list";
-  const heading = changeRequestsSubView === "list" ? OPERATIONS_HEADING : STANDARD_CHANGES_HEADINGS[changeRequestsSubView];
+  const heading = changeRequestsSubView === "standard" ? STANDARD_CHANGES_HEADING : OPERATIONS_HEADING;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>

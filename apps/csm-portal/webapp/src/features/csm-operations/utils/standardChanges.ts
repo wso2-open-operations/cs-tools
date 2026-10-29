@@ -422,38 +422,168 @@ export function raiseFromTemplatePath(templateId: string): string {
 
 /**
  * Standard changes are templated change requests, so they live inside
- * Operations > Change requests (`/operations/change-requests`) as two sub-views
- * next to the change request list, chosen by `?view=`: no `view` (or one this
- * page does not know) is the list, exactly as before the sub-views existed;
- * `catalogue` is the template catalogue and `proposals` the proposals to the
- * CAB. The parameter is in the URL so a sub-view is linkable and Back from a
- * template or proposal returns to it. The change request list's own filters
- * are all `cr`-prefixed, so they never collide with it.
+ * Operations > Change requests (`/operations/change-requests`) as ONE sub-view
+ * next to the change request list, chosen by `?view=standard`: no `view` (or
+ * one this page does not know) is the list, exactly as before. Inside it the
+ * template catalogue is the default and the proposals to the CAB a secondary
+ * view (`&show=proposals`), whose filters are `scope` (all proposals by
+ * default; mine / awaiting my decision when picked) and `state`. Everything is
+ * in the URL so each place is linkable and Back from a template or a proposal
+ * returns to it. The change request list's own filters are all `cr`-prefixed
+ * (`CHANGE_REQUEST_LIST_PARAM_PREFIX`), so they never collide with these: they
+ * do not apply to Standard changes, but they are kept in the URL while there,
+ * so going back to the list finds it exactly as it was; these are dropped on
+ * the way back to the list.
+ *
+ * Earlier links had two sub-views, `?view=catalogue` and `?view=proposals`;
+ * both are still read (`changeRequestsView`, `standardChangesShow`) and
+ * rewritten to the current form (`canonicalStandardChangesSearch`).
  */
 export const CHANGE_REQUESTS_PATH = "/operations/change-requests";
 export const CHANGE_REQUESTS_VIEW_PARAM = "view";
+/** The `view` value of Standard changes. */
+export const STANDARD_CHANGES_VIEW = "standard";
+/** Which part of Standard changes: absent for the catalogue, `proposals` for the proposals. */
+export const STANDARD_CHANGES_SHOW_PARAM = "show";
+/** The proposals view's "whose proposals" filter. */
+export const PROPOSAL_SCOPE_PARAM = "scope";
+/** The proposals view's state filter. */
+export const PROPOSAL_STATE_PARAM = "state";
+/**
+ * Every parameter of the change request list's own filters starts with this
+ * (`CR_FILTER_PARAM_KEYS`). They are kept, unread, while on Standard changes,
+ * and a pin of Standard changes ignores them (the Change requests nav node's
+ * `views.ignoreParamPrefix`, which a test keeps equal to this).
+ */
+export const CHANGE_REQUEST_LIST_PARAM_PREFIX = "cr";
 
-export type StandardChangesView = "catalogue" | "proposals";
-export type ChangeRequestsView = "list" | StandardChangesView;
+/** The `view` values of the two sub-views Standard changes replaced; still read. */
+const LEGACY_VIEWS = ["catalogue", "proposals"] as const;
 
-export const STANDARD_CHANGES_VIEW_LABELS: Readonly<Record<StandardChangesView, string>> = {
-  catalogue: "Standard change catalogue",
+export type ChangeRequestsView = "list" | "standard";
+export type StandardChangesShow = "templates" | "proposals";
+/** Whose proposals the proposals view lists. */
+export type ProposalScope = "all" | "mine" | "awaiting";
+export const PROPOSAL_SCOPES: readonly ProposalScope[] = ["all", "mine", "awaiting"];
+/** The scope the proposals view opens on, and the one its URL leaves out. */
+export const DEFAULT_PROPOSAL_SCOPE: ProposalScope = "all";
+
+/** What Recent, "Pin this page" and the breadcrumbs call the two places. */
+export const STANDARD_CHANGES_LABELS: Readonly<Record<StandardChangesShow, string>> = {
+  templates: "Standard changes",
   proposals: "Standard change proposals",
 };
+
+function isLegacyView(view: string | null): view is (typeof LEGACY_VIEWS)[number] {
+  return (LEGACY_VIEWS as readonly string[]).includes(view ?? "");
+}
 
 /** The Change requests sub-view a URL's query selects. */
 export function changeRequestsView(params: URLSearchParams): ChangeRequestsView {
   const view = params.get(CHANGE_REQUESTS_VIEW_PARAM);
-  return view === "catalogue" || view === "proposals" ? view : "list";
+  return view === STANDARD_CHANGES_VIEW || isLegacyView(view) ? "standard" : "list";
 }
 
-/** The canonical URL of a Change requests sub-view. */
-export function changeRequestsViewPath(view: ChangeRequestsView): string {
-  return view === "list" ? CHANGE_REQUESTS_PATH : `${CHANGE_REQUESTS_PATH}?${CHANGE_REQUESTS_VIEW_PARAM}=${view}`;
+/** Which part of Standard changes a URL's query selects: the catalogue unless it asks for the proposals. */
+export function standardChangesShow(params: URLSearchParams): StandardChangesShow {
+  return params.get(STANDARD_CHANGES_SHOW_PARAM) === "proposals" || params.get(CHANGE_REQUESTS_VIEW_PARAM) === "proposals"
+    ? "proposals"
+    : "templates";
 }
 
-export const STANDARD_CHANGE_CATALOGUE_PATH = changeRequestsViewPath("catalogue");
-export const STANDARD_CHANGE_PROPOSALS_PATH = changeRequestsViewPath("proposals");
+/** True for a query in the old two-sub-view form (`?view=catalogue|proposals`), which `canonicalStandardChangesSearch` rewrites. */
+export function isLegacyStandardChangesView(params: URLSearchParams): boolean {
+  return isLegacyView(params.get(CHANGE_REQUESTS_VIEW_PARAM));
+}
+
+/** The proposals view's scope filter; "all" without one (or for a value it does not know). */
+export function proposalScope(params: URLSearchParams): ProposalScope {
+  const scope = params.get(PROPOSAL_SCOPE_PARAM);
+  return (PROPOSAL_SCOPES as readonly string[]).includes(scope ?? "") ? (scope as ProposalScope) : DEFAULT_PROPOSAL_SCOPE;
+}
+
+/** The proposals view's state filter; "" (any state) without one or for a state that does not exist. */
+export function proposalStateFilter(params: URLSearchParams): BeStandardChangeProposalState | "" {
+  const state = params.get(PROPOSAL_STATE_PARAM);
+  return (STANDARD_CHANGE_PROPOSAL_STATES as readonly string[]).includes(state ?? "")
+    ? (state as BeStandardChangeProposalState)
+    : "";
+}
+
+/** The parameters only Standard changes reads; dropped on the way back to the change request list. */
+const STANDARD_CHANGES_PARAMS = [
+  CHANGE_REQUESTS_VIEW_PARAM,
+  STANDARD_CHANGES_SHOW_PARAM,
+  PROPOSAL_SCOPE_PARAM,
+  PROPOSAL_STATE_PARAM,
+] as const;
+
+/**
+ * The query of a place inside Standard changes, built from the current one:
+ * `view=standard` first, then `show=proposals` and the proposals' filters when
+ * that is where it goes (the default scope, all, is left out). The proposals'
+ * filters are dropped on the way to the catalogue. Anything else in the query
+ * is kept, the change request list's own `cr*` filters included: they do not
+ * apply here, but switching back to the list restores them from it (and a pin
+ * of the page ignores them, so it reads "Standard changes", not "Standard
+ * changes: 3 filters").
+ */
+export function standardChangesSearch(
+  current: URLSearchParams,
+  show: StandardChangesShow,
+  filters: { scope?: ProposalScope; state?: BeStandardChangeProposalState | "" } = {},
+): URLSearchParams {
+  const next = new URLSearchParams();
+  next.set(CHANGE_REQUESTS_VIEW_PARAM, STANDARD_CHANGES_VIEW);
+  if (show === "proposals") {
+    next.set(STANDARD_CHANGES_SHOW_PARAM, "proposals");
+    if (filters.scope && filters.scope !== DEFAULT_PROPOSAL_SCOPE) next.set(PROPOSAL_SCOPE_PARAM, filters.scope);
+    if (filters.state) next.set(PROPOSAL_STATE_PARAM, filters.state);
+  }
+  current.forEach((value, key) => {
+    if ((STANDARD_CHANGES_PARAMS as readonly string[]).includes(key)) return;
+    next.append(key, value);
+  });
+  return next;
+}
+
+/**
+ * The current form of a Standard changes query: an old `?view=catalogue` or
+ * `?view=proposals` becomes `?view=standard[&show=proposals]`, keeping the
+ * proposals' filters and everything else (the list's `cr*` filters too).
+ */
+export function canonicalStandardChangesSearch(current: URLSearchParams): URLSearchParams {
+  const show = standardChangesShow(current);
+  return standardChangesSearch(current, show, {
+    scope: proposalScope(current),
+    state: proposalStateFilter(current),
+  });
+}
+
+/**
+ * The query of the change request list, built from the current one: Standard
+ * changes' own parameters dropped, everything else (the list's own `cr*`
+ * filters, kept while on Standard changes) kept, so the list comes back as it
+ * was left.
+ */
+export function changeRequestListSearch(current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(current);
+  STANDARD_CHANGES_PARAMS.forEach((k) => next.delete(k));
+  return next;
+}
+
+/** The URL of a place inside Standard changes (the catalogue by default). */
+export function standardChangesPath(
+  show: StandardChangesShow = "templates",
+  filters: { scope?: ProposalScope; state?: BeStandardChangeProposalState | "" } = {},
+): string {
+  return `${CHANGE_REQUESTS_PATH}?${standardChangesSearch(new URLSearchParams(), show, filters).toString()}`;
+}
+
+/** The catalogue: `/operations/change-requests?view=standard`. */
+export const STANDARD_CHANGES_PATH = standardChangesPath();
+/** The proposals (all of them): `/operations/change-requests?view=standard&show=proposals`. */
+export const STANDARD_CHANGE_PROPOSALS_PATH = standardChangesPath("proposals");
 
 /**
  * Where a link to the old, separate Operations tab lands: the standard change
@@ -465,8 +595,7 @@ export const STANDARD_CHANGE_PROPOSALS_PATH = changeRequestsViewPath("proposals"
 export function legacyStandardChangesHref(search: string, hash = ""): string {
   const params = new URLSearchParams(search);
   params.delete("tab");
-  params.set(CHANGE_REQUESTS_VIEW_PARAM, params.get(CHANGE_REQUESTS_VIEW_PARAM) === "proposals" ? "proposals" : "catalogue");
-  return `${CHANGE_REQUESTS_PATH}?${params.toString()}${hash}`;
+  return `${CHANGE_REQUESTS_PATH}?${canonicalStandardChangesSearch(params).toString()}${hash}`;
 }
 
 /** True for an old `?tab=` value that named the standard changes tab. */
@@ -480,6 +609,26 @@ export function standardChangeTemplatePath(id: string): string {
 
 export function standardChangeProposalPath(id: string): string {
   return `/operations/standard-change-proposals/${encodeURIComponent(id)}`;
+}
+
+/**
+ * The Recent entry a template's or a proposal's own page records on a visit
+ * (so "Pin this page" there reads "STD0000003 · Apply a product update"
+ * rather than "Operations"), shaped as `useRecordRecentView` takes it; the
+ * same "number · name" title a change request's page records.
+ */
+export function standardChangeRecentEntry(
+  kind: "template" | "proposal",
+  record: { id: string; number?: string | null; name?: string | null },
+): { kind: "standard_change"; id: string; title: string; subtitle: string; href: string } {
+  const name = record.name?.trim() || (kind === "proposal" ? "Untitled proposal" : "");
+  return {
+    kind: "standard_change",
+    id: record.id,
+    title: [record.number?.trim(), name].filter((s): s is string => !!s).join(" · ") || record.id,
+    subtitle: kind === "template" ? "Standard change template" : "Standard change proposal",
+    href: kind === "template" ? standardChangeTemplatePath(record.id) : standardChangeProposalPath(record.id),
+  };
 }
 
 /** What a proposal still needs before the CAB can be asked (the server's `checkStandardChangeProposalComplete`), worded for the form. */

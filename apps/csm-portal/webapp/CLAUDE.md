@@ -639,22 +639,56 @@ thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCod
 write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
 declarations, values, `{{key}}` placeholders, completeness, the preview's rendering): `utils/standardChanges.ts`.
 
-- **Inside Operations > Change requests, not a tab of their own.** Standard changes are templated change requests, so the
-  Change requests tab has a sub-navigation (`ChangeRequestsArea`, `?view=`): the change request list (no `view`, exactly
-  as before, with its own `cr*` URL filters), **Standard change catalogue** (`?view=catalogue`: server-side search, state
-  filter, "Review needed" chip) and **Standard change proposals** (`?view=proposals`: mine / awaiting my decision / all,
-  state), both rendered by `StandardChangesTab` with a short intro and "Propose a standard change" (`kind: "new"`). The
-  Change requests nav node owns `/operations/standard-changes` and `/operations/standard-change-proposals`, so it is the
-  one highlighted on a template or proposal page; those pages carry a "Change requests › <sub-view> › <number>" trail
-  (`StandardChangeBreadcrumbs`) and their Back falls back to their sub-view. On the two sub-views the page heading is
-  "Standard changes" with a line about pre-authorised templated change requests (`STANDARD_CHANGES_HEADINGS` in
-  `OperationsPage`), never the Operations-wide "Service requests, change requests, incidents, problems, and runbooks"
-  line, which every other Operations tab (the change request list included) keeps; the template and proposal pages are
-  their own routes and carry neither. The Change requests nav node declares the sub-views as `views` (`CsmNavNode.views`,
-  `navViewForSearch`), so "Pin this page" and Recent name them "Standard change catalogue" / "Standard change
-  proposals" rather than "Change requests: 1 filter". Old links to the separate tab this replaced (`/operations?tab=standard_changes[&view=proposals]`,
-  `/operations/standard-changes[?view=proposals]`) are redirected there (`OperationsLegacyRedirects`,
-  `legacyStandardChangesHref`).
+- **Inside Operations > Change requests, as one sub-view.** Standard changes are templated change requests, so the
+  Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
+  before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
+  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, "Propose a standard change",
+  `kind: "new"`); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
+  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
+  fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
+  me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
+  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
+  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your CAB decision · N
+    draft(s) of yours", each part a link to the proposals filtered to it (`scope=awaiting`; `scope=mine&state=draft`),
+    built from the current query so the list's `cr*` filters ride along.
+    Counts come from `useCountStandardChangeProposals` (`POST /standard-change-proposals/search` with
+    `{awaitingMyDecision:true}` / `{proposedByMe:true, states:["draft"]}`, limit 1, `total` read, no retry). Nothing is
+    shown until both counts are in, a part with 0 is left out, nothing at all when both are 0, and a failed count is
+    left out silently (no banner).
+  - **The list's filters do not apply to Standard changes, but they are kept.** Entering it keeps the `cr*`
+    parameters in the URL, unread (`standardChangesSearch` copies everything but Standard changes' own parameters),
+    and going back to the list drops only `view`/`show`/`scope`/`state` (`changeRequestListSearch`), so clicking
+    "Change requests" restores the list exactly as it was left. A pin / Recent entry of Standard changes ignores
+    them: the Change requests nav node's `views.ignoreParamPrefix: "cr"` (equal to
+    `CHANGE_REQUEST_LIST_PARAM_PREFIX`, a test checks; every `CR_FILTER_PARAM_KEYS` entry starts with it) makes
+    `currentPageEntry` leave them out of the title and the href, so it reads "Standard changes", not "Standard
+    changes: 2 filters". Because such a pin's href is shorter than the URL, `PinThisPageButton` finds the page's
+    entry by the URL or, failing that, by the href `currentPageEntry` gives it; matching the URL alone showed "Pin"
+    on a page that was pinned, and the next click unpinned it. Switching the strip pushes a history entry; a filter
+    change replaces it.
+  - **Old URLs.** `?view=catalogue` / `?view=proposals` (the two sub-views this replaced) are read
+    (`changeRequestsView`, `standardChangesShow`) and rewritten in place to `?view=standard[&show=proposals]`
+    (`canonicalStandardChangesSearch`, replace, no history entry; the list's `cr*` filters are kept). The older separate tab
+    (`/operations?tab=standard_changes|standard-changes[&view=proposals]`, `/operations/standard-changes[?view=proposals]`)
+    is redirected the same way (`OperationsLegacyRedirects`, `legacyStandardChangesHref`).
+  - **Heading.** On Standard changes the page heading is "Standard changes" with "Pre-authorised change requests,
+    raised from templates the CAB has approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
+    and the proposals alike, never the Operations-wide "Service requests, change requests, incidents, problems, and
+    runbooks" line, which every other Operations tab (the change request list included) keeps.
+  - **Template and proposal pages.** The Change requests nav node owns `/operations/standard-changes` and
+    `/operations/standard-change-proposals`, so it is the one highlighted there; the pages carry "Change requests ›
+    Standard changes › <STD number>" and "Change requests › Standard changes › Proposals › <SCP number>"
+    (`StandardChangeBreadcrumbs`, `show` prop), and Back falls back to Standard changes / all its proposals. Each records a
+    Recent entry (`standardChangeRecentEntry`, kind `standard_change`, "STD0000003 · <name>", grouped as "Standard
+    changes" in Recent), so "Pin this page" there names the record, not "Operations".
+  - **Pins of the tab.** The Change requests nav node declares the places as `views` with a nested `within`
+    (`CsmNavNode.views`, `navViewForSearch`): `view=standard` pins as "Standard changes",
+    `view=standard&show=proposals` as "Standard change proposals" (its `scope`/`state` count as filters, `cr*` never
+    does), and the old
+    `catalogue` / `proposals` values are named the same way.
 - **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
   highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
   change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /

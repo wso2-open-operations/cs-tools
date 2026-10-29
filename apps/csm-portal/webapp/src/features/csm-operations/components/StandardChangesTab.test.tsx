@@ -15,7 +15,7 @@
 // under the License.
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   access: { canWrite: true },
   templateSearch: vi.fn(),
   proposalSearch: vi.fn(),
+  proposalCount: vi.fn(),
   createProposal: vi.fn(),
 }));
 
@@ -38,10 +39,12 @@ vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => mocks.naviga
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useSearchStandardChangeTemplates: (payload: unknown) => mocks.templateSearch(payload),
   useSearchStandardChangeProposals: (payload: unknown) => mocks.proposalSearch(payload),
+  useCountStandardChangeProposals: (filter: unknown) => mocks.proposalCount(filter),
   useCreateStandardChangeProposal: () => ({ mutate: mocks.createProposal, isPending: false, isError: false, reset: vi.fn() }),
 }));
 
 import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
+import { standardChangesShow } from "@features/csm-operations/utils/standardChanges";
 
 const TEMPLATES = [
   {
@@ -84,12 +87,16 @@ function Probe(): JSX.Element {
   return <div data-testid="location">{`${l.pathname}${l.search}`}</div>;
 }
 
-const CATALOGUE = "/operations/change-requests?view=catalogue";
-const PROPOSALS_VIEW = "/operations/change-requests?view=proposals";
+const CATALOGUE = "/operations/change-requests?view=standard";
+const PROPOSALS_VIEW = "/operations/change-requests?view=standard&show=proposals";
 
-/** The sub-view rendered as `ChangeRequestsArea` renders it: from the URL it is mounted at. */
+/** The tab as `ChangeRequestsArea` renders it: which part is shown comes from the URL. */
+function TabAtUrl(): JSX.Element {
+  const [params] = useSearchParams();
+  return <StandardChangesTab show={standardChangesShow(params)} />;
+}
+
 function renderTab(entry = CATALOGUE): void {
-  const view = new URLSearchParams(entry.split("?")[1] ?? "").get("view") === "proposals" ? "proposals" : "catalogue";
   render(
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
@@ -97,7 +104,7 @@ function renderTab(entry = CATALOGUE): void {
           path="/operations/change-requests"
           element={
             <>
-              <StandardChangesTab view={view} />
+              <TabAtUrl />
               <Probe />
             </>
           }
@@ -106,6 +113,22 @@ function renderTab(entry = CATALOGUE): void {
     </MemoryRouter>,
   );
 }
+
+const currentUrl = (): string => screen.getByTestId("location").textContent ?? "";
+
+type CountResult = { data?: number; isPending: boolean; isSuccess: boolean; isError: boolean };
+const count = (n: number): CountResult => ({ data: n, isPending: false, isSuccess: true, isError: false });
+const PENDING: CountResult = { isPending: true, isSuccess: false, isError: false };
+const FAILED: CountResult = { isPending: false, isSuccess: false, isError: true };
+
+/** What the two counts answer: proposals awaiting my CAB decision, and my drafts. */
+function counts(awaiting: CountResult, drafts: CountResult): void {
+  mocks.proposalCount.mockImplementation((filter: Record<string, unknown>) =>
+    filter.awaitingMyDecision ? awaiting : drafts,
+  );
+}
+
+const attention = (): HTMLElement | null => screen.queryByRole("status", { name: "Needs your attention" });
 
 const lastTemplatePayload = (): Record<string, unknown> => mocks.templateSearch.mock.calls.at(-1)![0];
 const lastProposalPayload = (): Record<string, unknown> => mocks.proposalSearch.mock.calls.at(-1)![0];
@@ -131,6 +154,8 @@ beforeEach(() => {
     isError: false,
     refetch: vi.fn(),
   });
+  mocks.proposalCount.mockReset();
+  counts(count(0), count(0));
 });
 
 describe("StandardChangesTab — catalogue", () => {
@@ -174,14 +199,21 @@ describe("StandardChangesTab — catalogue", () => {
     });
   });
 
-  it("introduces standard changes as pre-authorised, templated change requests", () => {
+  it("has Templates | Proposals beside the search, on Templates, and nothing else in a strip of its own", () => {
     renderTab();
-    expect(screen.getByText(/standard changes are pre-authorised, templated change requests/i)).toBeInTheDocument();
-    expect(screen.getByText(/the CAB approves a template once/i)).toBeInTheDocument();
-    expect(screen.getByText(/any completed change request can be proposed as a template/i)).toBeInTheDocument();
-    // The proposals live in their own sub-view, not in a second strip in this one.
+    const show = screen.getByRole("group", { name: "Templates or proposals" });
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Templates", "Proposals"]);
+    expect(within(show).getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(show).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Standard change proposals" })).not.toBeInTheDocument();
+    // The proposals' scope select keeps "Show"; the toggle has a name of its own.
+    expect(screen.queryByRole("group", { name: "Show" })).not.toBeInTheDocument();
+  });
+
+  it("opens the old ?view=catalogue link on the catalogue", () => {
+    renderTab("/operations/change-requests?view=catalogue");
+    expect(screen.getByRole("table", { name: "Standard change templates" })).toBeInTheDocument();
   });
 
   it("shows an empty state", () => {
@@ -192,11 +224,24 @@ describe("StandardChangesTab — catalogue", () => {
 });
 
 describe("StandardChangesTab — proposals", () => {
-  it("lists my proposals first", () => {
+  it("is the secondary view, reached from Proposals beside the search and linkable", () => {
+    renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Proposals" }));
+    expect(currentUrl()).toBe(PROPOSALS_VIEW);
+    expect(screen.getByRole("table", { name: "Standard change proposals" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Standard change templates" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    expect(currentUrl()).toBe(CATALOGUE);
+    expect(screen.getByRole("table", { name: "Standard change templates" })).toBeInTheDocument();
+  });
+
+  it("lists all proposals first", () => {
     renderTab(PROPOSALS_VIEW);
     expect(screen.queryByRole("table", { name: "Standard change templates" })).not.toBeInTheDocument();
-    expect(screen.getByText(/standard changes are pre-authorised, templated change requests/i)).toBeInTheDocument();
-    expect(lastProposalPayload()).toEqual({ proposedByMe: true, pagination: { offset: 0, limit: 20 } });
+    expect(lastProposalPayload()).toEqual({ pagination: { offset: 0, limit: 20 } });
+    expect(screen.getByRole("combobox", { name: "Show" })).toHaveTextContent("All proposals");
     const row = within(screen.getByRole("table", { name: "Standard change proposals" })).getAllByRole("row")[1]!;
     expect(row).toHaveTextContent("SCP0000001");
     expect(row).toHaveTextContent("New template");
@@ -204,21 +249,169 @@ describe("StandardChangesTab — proposals", () => {
     expect(row).toHaveTextContent("Jane Doe");
   });
 
-  it("lists the proposals awaiting my decision, or all, in a state", () => {
+  it("opens the old ?view=proposals link on all proposals", () => {
+    renderTab("/operations/change-requests?view=proposals");
+    expect(screen.getByRole("table", { name: "Standard change proposals" })).toBeInTheDocument();
+    expect(lastProposalPayload()).toEqual({ pagination: { offset: 0, limit: 20 } });
+  });
+
+  it("offers All proposals first, then the two filters", () => {
+    renderTab(PROPOSALS_VIEW);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Show" }));
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "All proposals",
+      "Proposed by me",
+      "Awaiting my decision",
+    ]);
+  });
+
+  it("lists the proposals awaiting my decision, or mine, in a state, keeping the filters in the URL", () => {
     renderTab(PROPOSALS_VIEW);
     choose("Show", "Awaiting my decision");
     expect(lastProposalPayload()).toEqual({ awaitingMyDecision: true, pagination: { offset: 0, limit: 20 } });
-    choose("Show", "All proposals");
+    expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&scope=awaiting`);
+    choose("Show", "Proposed by me");
     choose("State", "Rejected");
-    expect(lastProposalPayload()).toEqual({ states: ["rejected"], pagination: { offset: 0, limit: 20 } });
+    expect(lastProposalPayload()).toEqual({ proposedByMe: true, states: ["rejected"], pagination: { offset: 0, limit: 20 } });
+    expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&scope=mine&state=rejected`);
+    choose("Show", "All proposals");
+    choose("State", "Any state");
+    expect(lastProposalPayload()).toEqual({ pagination: { offset: 0, limit: 20 } });
+    expect(currentUrl()).toBe(PROPOSALS_VIEW);
   });
 
-  it("opens a proposal with Back returning to the proposals view", () => {
-    renderTab(PROPOSALS_VIEW);
+  it.each([
+    ["&scope=awaiting", { awaitingMyDecision: true }, "Awaiting my decision", "Any state"],
+    ["&scope=mine&state=draft", { proposedByMe: true, states: ["draft"] }, "Proposed by me", "Draft"],
+    ["&scope=all&state=cab_review", { states: ["cab_review"] }, "All proposals", "CAB review"],
+    ["&scope=nonsense&state=open", {}, "All proposals", "Any state"],
+  ])("reads its filters from a link (%s)", (query, payload, scopeLabel, stateLabel) => {
+    renderTab(`${PROPOSALS_VIEW}${query}`);
+    expect(lastProposalPayload()).toEqual({ ...payload, pagination: { offset: 0, limit: 20 } });
+    expect(screen.getByRole("combobox", { name: "Show" })).toHaveTextContent(scopeLabel);
+    expect(screen.getByRole("combobox", { name: "State" })).toHaveTextContent(stateLabel);
+  });
+
+  it("drops its filters on the way back to the templates", () => {
+    renderTab(`${PROPOSALS_VIEW}&scope=mine&state=rejected`);
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    expect(currentUrl()).toBe(CATALOGUE);
+  });
+
+  it("keeps the change request list's filters in the URL, unread, through every switch and filter", () => {
+    renderTab(`${CATALOGUE}&crQ=gateway&crStates=new`);
+    fireEvent.click(screen.getByRole("button", { name: "Proposals" }));
+    expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&crQ=gateway&crStates=new`);
+    choose("Show", "Awaiting my decision");
+    expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&scope=awaiting&crQ=gateway&crStates=new`);
+    expect(lastProposalPayload()).toEqual({ awaitingMyDecision: true, pagination: { offset: 0, limit: 20 } });
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    expect(currentUrl()).toBe(`${CATALOGUE}&crQ=gateway&crStates=new`);
+  });
+
+  it("opens a proposal with Back returning to the proposals view, filters and all", () => {
+    renderTab(`${PROPOSALS_VIEW}&scope=awaiting`);
     fireEvent.click(screen.getByText("SCP0000001"));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
-      state: { from: PROPOSALS_VIEW },
+      state: { from: `${PROPOSALS_VIEW}&scope=awaiting` },
     });
+  });
+});
+
+describe("StandardChangesTab — what needs your attention", () => {
+  it("asks for the proposals awaiting my CAB decision and my own drafts", () => {
+    renderTab();
+    expect(mocks.proposalCount).toHaveBeenCalledWith({ awaitingMyDecision: true });
+    expect(mocks.proposalCount).toHaveBeenCalledWith({ proposedByMe: true, states: ["draft"] });
+  });
+
+  it("says nothing when nothing applies to me", () => {
+    counts(count(0), count(0));
+    renderTab();
+    expect(attention()).not.toBeInTheDocument();
+    expect(screen.queryByText(/your CAB decision|of yours/)).not.toBeInTheDocument();
+  });
+
+  it("says both, each a link to the proposals filtered to it", () => {
+    counts(count(2), count(1));
+    renderTab();
+    const line = attention()!;
+    expect(line).toHaveTextContent("2 proposals await your CAB decision · 1 draft of yours");
+    expect(within(line).getByRole("link", { name: "2 proposals await your CAB decision" })).toHaveAttribute(
+      "href",
+      `${PROPOSALS_VIEW}&scope=awaiting`,
+    );
+    expect(within(line).getByRole("link", { name: "1 draft of yours" })).toHaveAttribute(
+      "href",
+      `${PROPOSALS_VIEW}&scope=mine&state=draft`,
+    );
+  });
+
+  it("keeps the change request list's filters in its links", () => {
+    counts(count(2), count(1));
+    renderTab(`${CATALOGUE}&crQ=gateway`);
+    expect(screen.getByRole("link", { name: "2 proposals await your CAB decision" })).toHaveAttribute(
+      "href",
+      `${PROPOSALS_VIEW}&scope=awaiting&crQ=gateway`,
+    );
+    expect(screen.getByRole("link", { name: "1 draft of yours" })).toHaveAttribute(
+      "href",
+      `${PROPOSALS_VIEW}&scope=mine&state=draft&crQ=gateway`,
+    );
+  });
+
+  it("says only what applies, in the singular or plural", () => {
+    counts(count(1), count(0));
+    renderTab();
+    expect(attention()).toHaveTextContent(/^1 proposal awaits your CAB decision$/);
+  });
+
+  it("says only my drafts when nothing awaits my decision", () => {
+    counts(count(0), count(3));
+    renderTab();
+    expect(attention()).toHaveTextContent(/^3 drafts of yours$/);
+    expect(within(attention()!).getAllByRole("link")).toHaveLength(1);
+  });
+
+  it("opens the filtered proposals from a link", () => {
+    counts(count(2), count(1));
+    renderTab();
+    fireEvent.click(screen.getByRole("link", { name: "2 proposals await your CAB decision" }));
+    expect(currentUrl()).toBe(`${PROPOSALS_VIEW}&scope=awaiting`);
+    expect(lastProposalPayload()).toEqual({ awaitingMyDecision: true, pagination: { offset: 0, limit: 20 } });
+    expect(screen.getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each([
+    ["the first count", PENDING, count(1)],
+    ["the second count", count(2), PENDING],
+    ["both counts", PENDING, PENDING],
+  ])("shows nothing while %s is loading, so it does not appear piece by piece", (_, awaiting, drafts) => {
+    counts(awaiting, drafts);
+    renderTab();
+    expect(attention()).not.toBeInTheDocument();
+  });
+
+  it("leaves out a count that failed, without a word about it", () => {
+    counts(FAILED, count(1));
+    renderTab();
+    expect(attention()).toHaveTextContent(/^1 draft of yours$/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says nothing at all when both counts fail", () => {
+    counts(FAILED, FAILED);
+    renderTab();
+    expect(attention()).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // The catalogue itself is unaffected.
+    expect(screen.getByRole("table", { name: "Standard change templates" })).toBeInTheDocument();
+  });
+
+  it("is above the catalogue only, not on the proposals view", () => {
+    counts(count(2), count(1));
+    renderTab(PROPOSALS_VIEW);
+    expect(attention()).not.toBeInTheDocument();
   });
 });
 

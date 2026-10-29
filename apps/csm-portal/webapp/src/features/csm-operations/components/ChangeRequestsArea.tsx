@@ -15,46 +15,59 @@
 // under the License.
 
 import { Box, Tab, Tabs } from "@wso2/oxygen-ui";
-import { type JSX } from "react";
+import { useEffect, type JSX } from "react";
 import { useSearchParams } from "react-router";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
 import {
-  CHANGE_REQUESTS_VIEW_PARAM,
+  canonicalStandardChangesSearch,
+  changeRequestListSearch,
   changeRequestsView,
-  STANDARD_CHANGES_VIEW_LABELS,
+  isLegacyStandardChangesView,
+  STANDARD_CHANGES_LABELS,
+  standardChangesSearch,
+  standardChangesShow,
   type ChangeRequestsView,
 } from "@features/csm-operations/utils/standardChanges";
 
 const SUB_VIEWS: ReadonlyArray<{ value: ChangeRequestsView; label: string }> = [
   { value: "list", label: "Change requests" },
-  { value: "catalogue", label: STANDARD_CHANGES_VIEW_LABELS.catalogue },
-  { value: "proposals", label: STANDARD_CHANGES_VIEW_LABELS.proposals },
+  { value: "standard", label: STANDARD_CHANGES_LABELS.templates },
 ];
 
 /**
  * Operations > Change requests. Standard changes are templated change requests,
- * so they are not a tab of their own beside this one: they are two sub-views of
- * it, next to the change request list -- the standard change catalogue and the
- * proposals to the CAB. The sub-view is the `?view=` query parameter
- * (`changeRequestsView`), so each is linkable and Back from a template or a
- * proposal returns to it. Without the parameter this is the change request list,
- * with its own `cr*` URL filters, exactly as before the sub-views existed.
+ * so they are not a tab of their own beside this one: they are one sub-view of
+ * it, next to the change request list (`?view=standard`), which opens on the
+ * template catalogue and holds the proposals to the CAB as a secondary view
+ * (`StandardChangesTab`). The sub-view is in the URL (`changeRequestsView`), so
+ * it is linkable and Back from a template or a proposal returns to it. Without
+ * it this is the change request list, with its own `cr*` URL filters, exactly
+ * as before.
  *
- * Switching sub-view only sets or drops `view`; the list's own filter
- * parameters stay in the URL, so going back to the list finds them as they were.
+ * The list's `cr*` filters do not apply to Standard changes, but they stay in
+ * the URL while there (unread), so switching back to "Change requests" finds
+ * the list exactly as it was left; Standard changes' own parameters are
+ * dropped on the way out. A pin of Standard changes ignores the `cr*` ones, so
+ * it reads "Standard changes", not "Standard changes: 3 filters". A link in
+ * the old two-sub-view form (`?view=catalogue|proposals`) is rewritten in
+ * place to the current one.
  */
 export default function ChangeRequestsArea(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = changeRequestsView(searchParams);
+  const legacy = isLegacyStandardChangesView(searchParams);
+
+  useEffect(() => {
+    if (legacy) {
+      setSearchParams((prev) => canonicalStandardChangesSearch(prev), { replace: true });
+    }
+  }, [legacy, setSearchParams]);
 
   const select = (next: ChangeRequestsView): void =>
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev);
-      if (next === "list") params.delete(CHANGE_REQUESTS_VIEW_PARAM);
-      else params.set(CHANGE_REQUESTS_VIEW_PARAM, next);
-      return params;
-    });
+    setSearchParams((prev) =>
+      next === "list" ? changeRequestListSearch(prev) : standardChangesSearch(prev, "templates"),
+    );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -72,7 +85,7 @@ export default function ChangeRequestsArea(): JSX.Element {
         </Tabs>
       </Box>
 
-      {view === "list" ? <ChangeRequestsTab /> : <StandardChangesTab view={view} />}
+      {view === "list" ? <ChangeRequestsTab /> : <StandardChangesTab show={standardChangesShow(searchParams)} />}
     </Box>
   );
 }

@@ -192,22 +192,55 @@ describe("navNodeMatchForPath", () => {
 describe("navViewForSearch", () => {
   const changeRequests = navNodeById("operations.change-requests")!;
 
-  it("names the standard change sub-views of Change requests", () => {
-    expect(navViewForSearch(changeRequests, "?view=catalogue")).toEqual({
-      param: "view",
-      value: "catalogue",
-      label: "Standard change catalogue",
+  it("names Standard changes inside Change requests, and its proposals inside it", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard")).toEqual({
+      params: [["view", "standard"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
     });
+    expect(navViewForSearch(changeRequests, "?view=standard&show=proposals&scope=awaiting")).toEqual({
+      params: [
+        ["view", "standard"],
+        ["show", "proposals"],
+      ],
+      label: "Standard change proposals",
+      ignoreParamPrefix: "cr",
+    });
+  });
+
+  it("is not changed by the list's own cr* filters kept in the URL", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard&crQ=gateway&crStates=new")).toEqual(
+      navViewForSearch(changeRequests, "?view=standard"),
+    );
+  });
+
+  it("still names the two old sub-view values, which land in the same places", () => {
+    expect(navViewForSearch(changeRequests, "?view=catalogue")?.label).toBe("Standard changes");
     expect(navViewForSearch(changeRequests, "?crQ=x&view=proposals")?.label).toBe(
       "Standard change proposals",
     );
   });
 
+  it("is the outer place when the inner parameter is absent, unknown, or under another value", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard&show=nonsense")).toEqual({
+      params: [["view", "standard"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
+    });
+    // `show` narrows only Standard changes, not the old catalogue value.
+    expect(navViewForSearch(changeRequests, "?view=catalogue&show=proposals")).toEqual({
+      params: [["view", "catalogue"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
+    });
+  });
+
   it("is undefined without the parameter, for a value it does not name, and on a node with no views", () => {
     expect(navViewForSearch(changeRequests, "")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?show=proposals")).toBeUndefined();
     expect(navViewForSearch(changeRequests, "?view=nonsense")).toBeUndefined();
     expect(navViewForSearch(changeRequests, "?view=toString")).toBeUndefined();
-    expect(navViewForSearch(navNodeById("operations.incidents")!, "?view=catalogue")).toBeUndefined();
+    expect(navViewForSearch(navNodeById("operations.incidents")!, "?view=standard")).toBeUndefined();
   });
 });
 
