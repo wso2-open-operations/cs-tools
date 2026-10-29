@@ -460,12 +460,12 @@ func TestKnowledgeArticleFKMigrationGivesUpWhenWorkItemIsBusy(t *testing.T) {
 // raised and the key is validated.
 func TestKnowledgeArticleFKMigrationCountsUnderRowLevelPolicies(t *testing.T) {
 	ctx, tx, warnings := kbManagerMigrationTx(t, "ka_fk_mig_rls")
-	var canCreateRole bool
-	if err := tx.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole FROM pg_roles WHERE rolname = current_user`).Scan(&canCreateRole); err != nil {
+	var isSuperuser bool
+	if err := tx.QueryRow(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&isSuperuser); err != nil {
 		t.Fatalf("read the test role: %v", err)
 	}
-	if !canCreateRole {
-		t.Skip("needs a DSN whose role may create a role")
+	if !isSuperuser {
+		t.Skip("needs a superuser DSN: it inserts a work item past work_item's row-level policies and hands knowledge_article to a new role")
 	}
 
 	const workItemID = "3a111111-0000-0000-0000-0000000000b1"
