@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -404,5 +405,91 @@ func TestCommentService_CreateComment_LinksTheImagesItShows(t *testing.T) {
 	if len(linker.calls) != 1 || linker.calls[0].comment != "comment-1" || linker.calls[0].workItem != testUUID ||
 		linker.calls[0].author != "jane.doe@example.com" || linker.calls[0].content != html {
 		t.Errorf("linker calls = %+v, want one call for the saved comment, its work item and its author", linker.calls)
+	}
+}
+
+type rewritingLinker struct {
+	recordingLinker
+	got string
+}
+
+func (r *rewritingLinker) ExtractInlineImages(_ context.Context, workItemID, author, content string) (string, error) {
+	r.got = workItemID + "|" + author + "|" + content
+	return strings.ReplaceAll(content, "data:image/png;base64,AAAA", "/11111111-1111-4111-8111-111111111111"), nil
+}
+
+func TestCommentService_CreateComment_SavesTheExtractedContent(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	var saved string
+	repo := &stubCommentRepo{
+		createComment: func(_ context.Context, _ string, _ domain.ReferenceType, _ string, content string, _ string) (repository.CommentRow, error) {
+			saved = content
+			return repository.CommentRow{ID: "comment-1", WorkItemID: testUUID}, nil
+		},
+	}
+	linker := &rewritingLinker{}
+	svc := WithCommentInlineImageLinker(NewCommentService(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}), linker)
+
+	in := `<img src="data:image/png;base64,AAAA">`
+	if _, err := svc.CreateComment(ctx, domain.CreateCommentRequest{ReferenceID: testUUID, ReferenceType: domain.ReferenceTypeCase, Type: domain.CommentTypeComment, Content: in}); err != nil {
+		t.Fatalf("CreateComment: %v", err)
+	}
+	if want := `<img src="/11111111-1111-4111-8111-111111111111">`; saved != want {
+		t.Errorf("saved content = %q, want %q", saved, want)
+	}
+	if linker.got != testUUID+"|jane.doe@example.com|"+in {
+		t.Errorf("extractor was given %q", linker.got)
+	}
+	if len(linker.calls) != 1 || linker.calls[0].content != saved {
+		t.Errorf("the linker must see the saved content: %+v", linker.calls)
+	}
+}
+
+// The ServiceNow mirror is given the content as the caller sent it, embedded
+// image included: ServiceNow extracts that itself and cannot resolve the
+// reference Postgres stores in its place.
+func TestCommentService_CreateComment_MirrorGetsTheOriginalContent(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	in := `<img src="data:image/png;base64,AAAA">`
+	req := domain.CreateCommentRequest{ReferenceID: testUUID, ReferenceType: domain.ReferenceTypeIncident, Type: domain.CommentTypeComment, Content: in}
+
+	called := make(chan domain.CreateCommentRequest, 1)
+	mirror := &stubMirrorCommentService{
+		createComment: func(_ context.Context, mirrorReq domain.CreateCommentRequest) (domain.CreateCommentResponse, error) {
+			called <- mirrorReq
+			return domain.CreateCommentResponse{}, nil
+		},
+	}
+	var saved string
+	repo := &stubCommentRepo{
+		createComment: func(_ context.Context, _ string, _ domain.ReferenceType, _ string, content string, _ string) (repository.CommentRow, error) {
+			saved = content
+			return repository.CommentRow{ID: testUUID}, nil
+		},
+	}
+	svc := NewCommentServiceWithSNWriteback(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), mirror)
+	svc = WithCommentInlineImageLinker(svc, &rewritingLinker{})
+
+	if _, err := svc.CreateComment(ctx, req); err != nil {
+		t.Fatalf("CreateComment: %v", err)
+	}
+	if want := `<img src="/11111111-1111-4111-8111-111111111111">`; saved != want {
+		t.Errorf("Postgres saved %q, want %q", saved, want)
+	}
+	select {
+	case got := <-called:
+		if got.Content != in {
+			t.Errorf("mirror got %q, want the original %q", got.Content, in)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.CreateComment was never called")
 	}
 }

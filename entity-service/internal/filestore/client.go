@@ -32,8 +32,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -225,6 +227,36 @@ func (c *Client) MkdirAll(ctx context.Context, dir string) error {
 		if _, lerr := c.ListDir(ctx, dir); lerr == nil {
 			return nil
 		}
+		return err
+	}
+	drainClose(resp.Body)
+	return nil
+}
+
+// PutFile writes data as dir/name, creating missing folders, through the user
+// API (a multipart POST to /api/v2/user/files/upload, field "filenames"). It is
+// for a file entity-service already holds and has checked itself (a comment image
+// extracted from a comment); a browser's file goes through a share instead. An
+// existing file of the same name is replaced.
+//
+// Not yet confirmed against a live server: the endpoint and its parameters are
+// read from SFTPGo's API reference.
+func (c *Client) PutFile(ctx context.Context, dir, name string, data []byte) error {
+	var form bytes.Buffer
+	mw := multipart.NewWriter(&form)
+	part, err := mw.CreateFormFile("filenames", path.Base(name))
+	if err != nil {
+		return fmt.Errorf("filestore: build upload: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return fmt.Errorf("filestore: build upload: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("filestore: build upload: %w", err)
+	}
+	q := url.Values{"path": {abs(dir)}, "mkdir_parents": {"true"}}
+	resp, err := c.exec(ctx, http.MethodPost, "/api/v2/user/files/upload", q, form.Bytes(), http.Header{"Content-Type": {mw.FormDataContentType()}})
+	if err != nil {
 		return err
 	}
 	drainClose(resp.Body)

@@ -80,6 +80,7 @@ var inlineImageTypes = map[string]bool{
 type fileStore interface {
 	CreateShare(ctx context.Context, spec filestore.ShareSpec) (string, error)
 	MkdirAll(ctx context.Context, dir string) error
+	PutFile(ctx context.Context, dir, name string, data []byte) error
 	ListDir(ctx context.Context, dir string) ([]filestore.Entry, error)
 	Rename(ctx context.Context, from, to string) error
 	RemoveFile(ctx context.Context, path string) error
@@ -341,8 +342,8 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	}
 	req.ContentType = strings.ToLower(strings.TrimSpace(req.ContentType))
 	if req.Kind == domain.StoredAttachmentComment {
-		if !inlineImageTypes[req.ContentType] {
-			return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "only PNG, JPEG, GIF and WebP images can be added to a comment"}
+		if _, ok := newInlineImageTypes[req.ContentType]; !ok {
+			return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "only PNG, JPEG and WebP images can be added to a comment"}
 		}
 	} else if req.ContentType == "" {
 		req.ContentType = "application/octet-stream"
@@ -497,8 +498,8 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 		if err != nil {
 			return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "read upload", err)
 		}
-		if !inlineImageTypes[strings.ToLower(strings.SplitN(http.DetectContentType(head), ";", 2)[0])] {
-			msg := "the file is not a PNG, JPEG, GIF or WebP image"
+		if _, ok := newInlineImageTypes[strings.ToLower(strings.SplitN(http.DetectContentType(head), ";", 2)[0])]; !ok {
+			msg := "the file is not a PNG, JPEG or WebP image"
 			return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, msg, &apierror.ValidationError{Msg: msg})
 		}
 	}
@@ -590,8 +591,10 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 }
 
 // inlineImageRef finds the comment images a comment's HTML shows: its <img src>
-// ends in .../attachments/inline/<attachment id>/content.
-var inlineImageRef = regexp.MustCompile(`attachments/inline/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/content`)
+// ends in .../attachments/inline/<attachment id>/content, or is the bare
+// reference src="/<attachment id>" that ExtractInlineImages writes (and that
+// comments migrated from the previous system use; the .iix suffix is tolerated).
+var inlineImageRef = regexp.MustCompile(`(?i)(?:attachments/inline/|\bsrc\s*=\s*["']/?)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/content|\.iix|["'])`)
 
 // inlineImageIDs returns the distinct attachment ids a comment's content refers
 // to, at most maxAttachmentLinkIDs.
