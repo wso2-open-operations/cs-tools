@@ -18,17 +18,25 @@ import { describe, expect, it } from "vitest";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import {
   appendPlaceholderToHtml,
+  changeRequestsView,
+  changeRequestsViewPath,
   contentPlaceholderKeys,
   hasParameterIssues,
   highlightStandardChangeHtml,
   insertPlaceholderAt,
+  isLegacyStandardChangesTab,
   isStandardChangeTemplateUnavailable,
+  legacyStandardChangesHref,
   normalizeStandardChangeParameters,
   placeholderKeys,
   renderStandardChangePlainText,
   splitPlaceholders,
+  STANDARD_CHANGE_CATALOGUE_PATH,
+  STANDARD_CHANGE_PROPOSALS_PATH,
   standardChangeParametersPayload,
   standardChangeProposalGaps,
+  standardChangeProposalPath,
+  standardChangeTemplatePath,
   standardChangeValueError,
   standardChangeValuesValid,
   undeclaredPlaceholders,
@@ -268,4 +276,35 @@ it("recognises the refusal of a template that moved on by its code, not its word
   expect(isStandardChangeTemplateUnavailable({ status: 409, payload: { errorCode: "standard_change_template_unavailable" } })).toBe(true);
   expect(isStandardChangeTemplateUnavailable({ status: 409, payload: { message: "standard_change_template_unavailable" } })).toBe(false);
   expect(isStandardChangeTemplateUnavailable(new Error("x"))).toBe(false);
+});
+
+describe("standard changes inside Operations > Change requests", () => {
+  it("reads the sub-view from ?view=, the change request list without one or for a value it does not know", () => {
+    expect(changeRequestsView(new URLSearchParams(""))).toBe("list");
+    expect(changeRequestsView(new URLSearchParams("crQ=x"))).toBe("list");
+    expect(changeRequestsView(new URLSearchParams("view=catalogue"))).toBe("catalogue");
+    expect(changeRequestsView(new URLSearchParams("view=proposals&crQ=x"))).toBe("proposals");
+    expect(changeRequestsView(new URLSearchParams("view=standard_changes"))).toBe("list");
+  });
+
+  it("links each sub-view, the template and the proposal pages", () => {
+    expect(changeRequestsViewPath("list")).toBe("/operations/change-requests");
+    expect(STANDARD_CHANGE_CATALOGUE_PATH).toBe("/operations/change-requests?view=catalogue");
+    expect(STANDARD_CHANGE_PROPOSALS_PATH).toBe("/operations/change-requests?view=proposals");
+    expect(standardChangeTemplatePath("tpl 1")).toBe("/operations/standard-changes/tpl%201");
+    expect(standardChangeProposalPath("scp-1")).toBe("/operations/standard-change-proposals/scp-1");
+  });
+
+  it("sends an old standard changes link to the catalogue, or to the proposals it named", () => {
+    expect(isLegacyStandardChangesTab("standard_changes")).toBe(true);
+    expect(isLegacyStandardChangesTab("standard-changes")).toBe(true);
+    expect(isLegacyStandardChangesTab("change_requests")).toBe(false);
+    expect(isLegacyStandardChangesTab(null)).toBe(false);
+    expect(legacyStandardChangesHref("?tab=standard_changes")).toBe("/operations/change-requests?view=catalogue");
+    expect(legacyStandardChangesHref("?tab=standard_changes&view=proposals")).toBe(
+      "/operations/change-requests?view=proposals",
+    );
+    expect(legacyStandardChangesHref("")).toBe("/operations/change-requests?view=catalogue");
+    expect(legacyStandardChangesHref("?view=other&x=1", "#h")).toBe("/operations/change-requests?view=catalogue&x=1#h");
+  });
 });

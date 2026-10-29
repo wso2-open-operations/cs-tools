@@ -84,15 +84,20 @@ function Probe(): JSX.Element {
   return <div data-testid="location">{`${l.pathname}${l.search}`}</div>;
 }
 
-function renderTab(entry = "/operations/standard-changes"): void {
+const CATALOGUE = "/operations/change-requests?view=catalogue";
+const PROPOSALS_VIEW = "/operations/change-requests?view=proposals";
+
+/** The sub-view rendered as `ChangeRequestsArea` renders it: from the URL it is mounted at. */
+function renderTab(entry = CATALOGUE): void {
+  const view = new URLSearchParams(entry.split("?")[1] ?? "").get("view") === "proposals" ? "proposals" : "catalogue";
   render(
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route
-          path="/operations/standard-changes"
+          path="/operations/change-requests"
           element={
             <>
-              <StandardChangesTab />
+              <StandardChangesTab view={view} />
               <Probe />
             </>
           }
@@ -161,12 +166,22 @@ describe("StandardChangesTab — catalogue", () => {
     await waitFor(() => expect(lastTemplatePayload()).toMatchObject({ query: "tls" }));
   });
 
-  it("opens a template with Back returning to this list", () => {
+  it("opens a template with Back returning to the catalogue inside Change requests", () => {
     renderTab();
     fireEvent.click(screen.getByText("Restart a gateway node"));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-changes/tpl-2", {
-      state: { from: "/operations/standard-changes" },
+      state: { from: CATALOGUE },
     });
+  });
+
+  it("introduces standard changes as pre-authorised, templated change requests", () => {
+    renderTab();
+    expect(screen.getByText(/standard changes are pre-authorised, templated change requests/i)).toBeInTheDocument();
+    expect(screen.getByText(/the CAB approves a template once/i)).toBeInTheDocument();
+    expect(screen.getByText(/any completed change request can be proposed as a template/i)).toBeInTheDocument();
+    // The proposals live in their own sub-view, not in a second strip in this one.
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Standard change proposals" })).not.toBeInTheDocument();
   });
 
   it("shows an empty state", () => {
@@ -177,10 +192,10 @@ describe("StandardChangesTab — catalogue", () => {
 });
 
 describe("StandardChangesTab — proposals", () => {
-  it("switches to the proposals view in the URL, my proposals first", () => {
-    renderTab();
-    fireEvent.click(screen.getByRole("tab", { name: "Proposals" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations/standard-changes?view=proposals");
+  it("lists my proposals first", () => {
+    renderTab(PROPOSALS_VIEW);
+    expect(screen.queryByRole("table", { name: "Standard change templates" })).not.toBeInTheDocument();
+    expect(screen.getByText(/standard changes are pre-authorised, templated change requests/i)).toBeInTheDocument();
     expect(lastProposalPayload()).toEqual({ proposedByMe: true, pagination: { offset: 0, limit: 20 } });
     const row = within(screen.getByRole("table", { name: "Standard change proposals" })).getAllByRole("row")[1]!;
     expect(row).toHaveTextContent("SCP0000001");
@@ -190,7 +205,7 @@ describe("StandardChangesTab — proposals", () => {
   });
 
   it("lists the proposals awaiting my decision, or all, in a state", () => {
-    renderTab("/operations/standard-changes?view=proposals");
+    renderTab(PROPOSALS_VIEW);
     choose("Show", "Awaiting my decision");
     expect(lastProposalPayload()).toEqual({ awaitingMyDecision: true, pagination: { offset: 0, limit: 20 } });
     choose("Show", "All proposals");
@@ -199,10 +214,10 @@ describe("StandardChangesTab — proposals", () => {
   });
 
   it("opens a proposal with Back returning to the proposals view", () => {
-    renderTab("/operations/standard-changes?view=proposals");
+    renderTab(PROPOSALS_VIEW);
     fireEvent.click(screen.getByText("SCP0000001"));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
-      state: { from: "/operations/standard-changes?view=proposals" },
+      state: { from: PROPOSALS_VIEW },
     });
   });
 });
@@ -214,7 +229,16 @@ describe("StandardChangesTab — Propose a standard change", () => {
     expect(mocks.createProposal).toHaveBeenCalledWith({ kind: "new" }, expect.anything());
     mocks.createProposal.mock.calls[0]![1].onSuccess({ id: "scp-9" });
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-9", {
-      state: { from: "/operations/standard-changes" },
+      state: { from: CATALOGUE },
+    });
+  });
+
+  it("is offered from the proposals view too, with Back returning there", () => {
+    renderTab(PROPOSALS_VIEW);
+    fireEvent.click(screen.getByRole("button", { name: /propose a standard change/i }));
+    mocks.createProposal.mock.calls[0]![1].onSuccess({ id: "scp-9" });
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-9", {
+      state: { from: PROPOSALS_VIEW },
     });
   });
 

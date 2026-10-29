@@ -33,17 +33,20 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, FilePlus, Pause, Play, Archive, PencilLine } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
+import StandardChangeBreadcrumbs from "@features/csm-operations/components/StandardChangeBreadcrumbs";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import {
+  MAX_SUSPEND_REASON_LENGTH,
   useClearStandardChangeTemplateReview,
   useCreateStandardChangeProposal,
   useGetStandardChangeTemplate,
@@ -56,7 +59,7 @@ import StandardChangeContentView, {
 } from "@features/csm-operations/components/StandardChangeContentView";
 import {
   raiseFromTemplatePath,
-  STANDARD_CHANGES_TAB_PATH,
+  STANDARD_CHANGE_CATALOGUE_PATH,
   standardChangeProposalPath,
   standardChangeTemplateStateColor,
   standardChangeTemplateStateLabel,
@@ -87,6 +90,12 @@ function Meta({ label, children }: { label: string; children: ReactNode }): JSX.
 /** A confirmation before a template is suspended or resumed. */
 type PendingConfirm = "suspend" | "resume" | null;
 
+/** "(by X on date)" after a suspension, from what the server recorded; "" when nothing was. */
+function suspendedBySuffix(by: string | null, on: string | null): string {
+  const parts = [by ? `by ${by}` : "", on ? `on ${formatDateTime(on)}` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(" ")})` : "";
+}
+
 /**
  * One standard change template (`/operations/standard-changes/:id`): its current
  * version (the text a change request raised from it takes, placeholders
@@ -101,7 +110,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   const { canWrite } = usePortalAccess();
-  const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGES_TAB_PATH;
+  const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGE_CATALOGUE_PATH;
   const here = `${location.pathname}${location.search}`;
 
   const { data: template, isLoading, isError, error, refetch } = useGetStandardChangeTemplate(id);
@@ -115,6 +124,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
   const clearReview = useClearStandardChangeTemplateReview();
   const createProposal = useCreateStandardChangeProposal();
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
+  // The optional reason typed in the Suspend confirmation.
+  const [suspendReason, setSuspendReason] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const BackButton = (
@@ -128,11 +139,13 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
       Back
     </Button>
   );
+  const Trail = <StandardChangeBreadcrumbs view="catalogue" current={template?.number} />;
 
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <Skeleton variant="rounded" height={120} />
         <Skeleton variant="rounded" height={320} />
       </Box>
@@ -142,6 +155,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <QueryErrorState
           message={errorText(error, "Failed to load the standard change template.")}
           error={error}
@@ -154,6 +168,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <Typography variant="h5">Standard change template not found</Typography>
       </Box>
     );
@@ -179,7 +194,12 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
     const which = confirm;
     setConfirm(null);
     setActionError(null);
-    if (which === "suspend") suspend.mutate(template.id, { onError: onError("Could not suspend the template.") });
+    if (which === "suspend") {
+      suspend.mutate(
+        { id: template.id, reason: suspendReason },
+        { onError: onError("Could not suspend the template.") },
+      );
+    }
     if (which === "resume") resume.mutate(template.id, { onError: onError("Could not resume the template.") });
   };
 
@@ -199,6 +219,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       {BackButton}
+      {Trail}
 
       <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap" }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
@@ -257,7 +278,10 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
                   color="warning"
                   startIcon={<Pause size={16} />}
                   disabled={busy}
-                  onClick={() => setConfirm("suspend")}
+                  onClick={() => {
+                    setSuspendReason("");
+                    setConfirm("suspend");
+                  }}
                 >
                   Suspend
                 </Button>
@@ -283,9 +307,17 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         </Alert>
       )}
       {template.state === "suspended" && (
-        <Alert severity="warning">
-          Suspended: no change request can be raised from this template, and one already raised from it cannot be
-          sent for approval, until it is resumed.
+        <Alert severity="warning" role="region" aria-label="Suspended">
+          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {`Suspended${template.suspendedReason ? `: ${template.suspendedReason}` : ""}${suspendedBySuffix(
+              template.suspendedBy,
+              template.suspendedOn,
+            )}`}
+          </Typography>
+          <Typography variant="body2">
+            No change request can be raised from this template, and one already raised from it cannot be sent for
+            approval, until it is resumed.
+          </Typography>
         </Alert>
       )}
       {template.state === "retired" && (
@@ -459,16 +491,33 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         </Box>
       </Card>
 
-      <Dialog open={confirm !== null} onClose={() => setConfirm(null)} aria-labelledby="std-confirm-title">
+      <Dialog
+        open={confirm !== null}
+        onClose={() => setConfirm(null)}
+        aria-labelledby="std-confirm-title"
+        fullWidth
+        maxWidth="sm"
+      >
         <DialogTitle id="std-confirm-title">
           {confirm === "suspend" ? `Suspend ${template.number}?` : `Resume ${template.number}?`}
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <DialogContentText>
             {confirm === "suspend"
               ? "No change request can be raised from a suspended template, and one already raised from it cannot be sent for approval. It can be resumed later."
               : "Change requests can be raised from it again, following its current version."}
           </DialogContentText>
+          {confirm === "suspend" && (
+            <TextField
+              label="Reason (optional)"
+              multiline
+              minRows={2}
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+              helperText={`Shown on the template while it is suspended. ${suspendReason.length}/${MAX_SUSPEND_REASON_LENGTH}`}
+              slotProps={{ htmlInput: { maxLength: MAX_SUSPEND_REASON_LENGTH } }}
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button color="inherit" onClick={() => setConfirm(null)}>

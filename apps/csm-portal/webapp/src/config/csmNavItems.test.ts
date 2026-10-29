@@ -19,10 +19,12 @@ import {
   CSM_NAV_ITEMS,
   flattenNavNodes,
   navNodeById,
+  navNodeHref,
   navNodeMatchForPath,
   navNodePath,
   navNodeRoutes,
   navSectionForPath,
+  navViewForSearch,
 } from "@config/csmNavItems";
 
 describe("nav tree invariants", () => {
@@ -142,6 +144,35 @@ describe("navNodeMatchForPath", () => {
     });
   });
 
+  it("puts standard changes under Change requests, not in a tab of their own", () => {
+    // Standard changes are templated change requests: their catalogue and
+    // proposals are sub-views of the Change requests tab, and the template and
+    // proposal pages highlight it.
+    expect(navNodeById("operations.standard-changes")).toBeUndefined();
+    expect(
+      navNodeById("operations")!.children!.map((child) => child.label),
+    ).not.toContain("Standard changes");
+    const changeRequests = navNodeById("operations.change-requests")!;
+    expect(navNodeRoutes(changeRequests)).toEqual([
+      "/operations/change-requests",
+      "/operations/standard-changes",
+      "/operations/standard-change-proposals",
+    ]);
+    // Its own destination is still the change request list.
+    expect(navNodeHref(changeRequests)).toBe("/operations/change-requests");
+    expect(navNodeMatchForPath("/operations/standard-changes/tpl-1")).toMatchObject({
+      node: { id: "operations.change-requests" },
+      prefix: "/operations/standard-changes",
+    });
+    expect(navNodeMatchForPath("/operations/standard-change-proposals/scp-1")).toMatchObject({
+      node: { id: "operations.change-requests" },
+      prefix: "/operations/standard-change-proposals",
+    });
+    expect(navNodeMatchForPath("/operations/change-requests/chg-1")?.node.id).toBe(
+      "operations.change-requests",
+    );
+  });
+
   it("does not match a path that merely shares a prefix string", () => {
     expect(navNodeMatchForPath("/operations-archive")).toBeUndefined();
   });
@@ -155,6 +186,28 @@ describe("navNodeMatchForPath", () => {
       node: { id: "plg.dashboard" },
       prefix: "/plg/dashboard",
     });
+  });
+});
+
+describe("navViewForSearch", () => {
+  const changeRequests = navNodeById("operations.change-requests")!;
+
+  it("names the standard change sub-views of Change requests", () => {
+    expect(navViewForSearch(changeRequests, "?view=catalogue")).toEqual({
+      param: "view",
+      value: "catalogue",
+      label: "Standard change catalogue",
+    });
+    expect(navViewForSearch(changeRequests, "?crQ=x&view=proposals")?.label).toBe(
+      "Standard change proposals",
+    );
+  });
+
+  it("is undefined without the parameter, for a value it does not name, and on a node with no views", () => {
+    expect(navViewForSearch(changeRequests, "")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?view=nonsense")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?view=toString")).toBeUndefined();
+    expect(navViewForSearch(navNodeById("operations.incidents")!, "?view=catalogue")).toBeUndefined();
   });
 });
 

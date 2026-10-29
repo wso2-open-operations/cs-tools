@@ -145,13 +145,27 @@ describe("standard change writes", () => {
   }
 
   it.each([
-    ["suspend", useSuspendStandardChangeTemplate, "/standard-change-templates/tpl-1/suspend"],
     ["resume", useResumeStandardChangeTemplate, "/standard-change-templates/tpl-1/resume"],
     ["clear the review flag of", useClearStandardChangeTemplateReview, "/standard-change-templates/tpl-1/clear-review"],
   ] as const)("posts to %s a template, with no body, and refreshes every standard change query", async (_n, hook, path) => {
     const keys = await run(hook, "tpl-1");
     expect(postEmptyMock).toHaveBeenCalledWith(path);
     expect(keys).toContainEqual([...STANDARD_CHANGES_KEY]);
+  });
+
+  it("suspends a template with the reason, trimmed, and refreshes every standard change query", async () => {
+    const keys = await run(useSuspendStandardChangeTemplate, { id: "tpl-1", reason: "  Rolled back twice on prod \n" });
+    expect(postMock).toHaveBeenCalledWith("/standard-change-templates/tpl-1/suspend", { reason: "Rolled back twice on prod" });
+    expect(postEmptyMock).not.toHaveBeenCalled();
+    expect(keys).toContainEqual([...STANDARD_CHANGES_KEY]);
+  });
+
+  it.each([
+    ["no reason", undefined],
+    ["a blank reason", "   "],
+  ])("suspends a template with %s as an empty body", async (_n, reason) => {
+    await run(useSuspendStandardChangeTemplate, { id: "a/b", reason });
+    expect(postMock).toHaveBeenCalledWith("/standard-change-templates/a%2Fb/suspend", {});
   });
 
   it.each([
@@ -182,13 +196,13 @@ describe("standard change writes", () => {
   });
 
   it("refreshes after a refused write too, and hands the error to the caller", async () => {
-    postEmptyMock.mockRejectedValue(new Error("only the owner or a CAB member can suspend it"));
+    postMock.mockRejectedValue(new Error("only the owner or a CAB member can suspend it"));
     const client = newClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const { result } = renderHook(() => useSuspendStandardChangeTemplate(), { wrapper: wrapper(client) });
     let error: unknown;
     await act(async () => {
-      await result.current.mutateAsync("tpl-1").catch((e: unknown) => (error = e));
+      await result.current.mutateAsync({ id: "tpl-1", reason: "x" }).catch((e: unknown) => (error = e));
     });
     expect((error as Error).message).toBe("only the owner or a CAB member can suspend it");
     expect(invalidate).toHaveBeenCalledWith({ queryKey: STANDARD_CHANGES_KEY });

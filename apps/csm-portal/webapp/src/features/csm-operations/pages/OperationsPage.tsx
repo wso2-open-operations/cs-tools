@@ -17,22 +17,54 @@
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
-import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
+import ChangeRequestsArea from "@features/csm-operations/components/ChangeRequestsArea";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
-import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePathSectionTabs } from "@hooks/useSectionTabs";
+import { changeRequestsView, type StandardChangesView } from "@features/csm-operations/utils/standardChanges";
+
+interface PageHeading {
+  title: string;
+  subtitle: string;
+}
+
+/** The heading of every Operations tab but the standard change sub-views. */
+const OPERATIONS_HEADING: PageHeading = {
+  title: "Operations",
+  subtitle: "Service requests, change requests, incidents, problems, and runbooks across customers.",
+};
+
+/**
+ * The heading of the standard change sub-views of Change requests. A standard
+ * change is a templated change request, so these are about change requests and
+ * nothing else: the Operations-wide line (service requests, incidents,
+ * problems, runbooks) does not describe them.
+ */
+const STANDARD_CHANGES_HEADINGS: Readonly<Record<StandardChangesView, PageHeading>> = {
+  catalogue: {
+    title: "Standard changes",
+    subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+  },
+  proposals: {
+    title: "Standard changes",
+    subtitle: "Proposals to the CAB to add, revise or retire a standard change template.",
+  },
+};
 
 /**
  * Operations landing — the home for the managed-cloud operational entities,
  * split into Service Requests / Change Requests / Incidents / Problems tabs.
  * Service requests are case-typed, so they list through the shared issues view;
- * the others each have their own search endpoint and listing.
+ * the others each have their own search endpoint and listing. Standard changes
+ * (templated change requests) are sub-views of Change requests
+ * (`ChangeRequestsArea`), not a tab of their own; on those two sub-views the
+ * page heading is about standard changes (`STANDARD_CHANGES_HEADINGS`) instead
+ * of the Operations-wide one, which names entities they have nothing to do with.
  *
  * Which tabs exist comes from the navigation tree, so a deployment can restrict
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
@@ -52,6 +84,9 @@ export default function OperationsPage(): JSX.Element {
   // CsmIssuesView, which reads this same state) — skip here to avoid a
   // duplicate.
   const backState = useLocation().state as { from?: string } | undefined;
+  const [searchParams] = useSearchParams();
+  const changeRequestsSubView = activeTab === "change-requests" ? changeRequestsView(searchParams) : "list";
+  const heading = changeRequestsSubView === "list" ? OPERATIONS_HEADING : STANDARD_CHANGES_HEADINGS[changeRequestsSubView];
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -68,9 +103,9 @@ export default function OperationsPage(): JSX.Element {
       )}
 
       <Box>
-        <Typography variant="h5">Operations</Typography>
+        <Typography variant="h5">{heading.title}</Typography>
         <Typography variant="body2" color="text.secondary">
-          Service requests, change requests, incidents, problems, runbooks and standard changes across customers.
+          {heading.subtitle}
         </Typography>
       </Box>
 
@@ -96,7 +131,7 @@ export default function OperationsPage(): JSX.Element {
         />
       )}
 
-      {activeTab === "change-requests" && <ChangeRequestsTab />}
+      {activeTab === "change-requests" && <ChangeRequestsArea />}
 
       {activeTab === "incidents" && <IncidentsTab />}
 
@@ -105,8 +140,6 @@ export default function OperationsPage(): JSX.Element {
       {activeTab === "outages" && <OutagesTab />}
 
       {activeTab === "runbooks" && <RunbooksTab />}
-
-      {activeTab === "standard-changes" && <StandardChangesTab />}
     </Box>
   );
 }

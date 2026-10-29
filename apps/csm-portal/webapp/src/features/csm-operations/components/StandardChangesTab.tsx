@@ -27,7 +27,6 @@ import {
   Paper,
   Select,
   Skeleton,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -35,13 +34,12 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  Tabs,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Plus, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useState, type JSX } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useLocation } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -62,6 +60,7 @@ import {
   standardChangeTemplatePath,
   standardChangeTemplateStateColor,
   standardChangeTemplateStateLabel,
+  type StandardChangesView,
 } from "@features/csm-operations/utils/standardChanges";
 import type {
   BeSearchStandardChangeProposalsPayload,
@@ -472,17 +471,17 @@ function ProposalList(): JSX.Element {
 }
 
 /**
- * Operations -> Standard Changes: the catalogue of CAB-approved standard change
- * templates (a standard change can only be raised from an active one) and the
- * proposals that create, revise or retire them. The view (`?view=proposals`) is
- * in the URL, so Back from a proposal returns to the list it was opened from.
+ * The standard change sub-views of Operations > Change requests (see
+ * `ChangeRequestsArea`, which owns the sub-navigation and the `?view=` it is
+ * kept in): the catalogue of CAB-approved standard change templates (a
+ * standard change can only be raised from an active one) and the proposals that
+ * create, revise or retire them. A row opens with `state.from` set to this URL,
+ * so Back from a template or proposal returns to the sub-view it was opened from.
  */
-export default function StandardChangesTab(): JSX.Element {
+export default function StandardChangesTab({ view }: { view: StandardChangesView }): JSX.Element {
   const { canWrite } = usePortalAccess();
   const navigate = useNavTransition();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const view = searchParams.get("view") === "proposals" ? "proposals" : "catalogue";
   const createProposal = useCreateStandardChangeProposal();
 
   const propose = (): void => {
@@ -501,8 +500,9 @@ export default function StandardChangesTab(): JSX.Element {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
         <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 720 }}>
-          Standard changes are pre-authorised: the CAB approves a template once, and a change request raised from an
-          active template needs no approval of its own. Any completed change request can be proposed as a template.
+          Standard changes are pre-authorised, templated change requests: the CAB approves a template once, and a
+          change request raised from an active template needs no CAB approval of its own. Any completed change
+          request can be proposed as a template.
         </Typography>
         {canWrite && (
           <Button
@@ -522,21 +522,6 @@ export default function StandardChangesTab(): JSX.Element {
           {errorText(createProposal.error, "Could not start the proposal.")}
         </Alert>
       )}
-
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs
-          value={view}
-          onChange={(_, v) => {
-            const next = new URLSearchParams(searchParams);
-            if (v === "proposals") next.set("view", "proposals");
-            else next.delete("view");
-            setSearchParams(next, { replace: true });
-          }}
-        >
-          <Tab value="catalogue" label="Catalogue" sx={{ textTransform: "none" }} />
-          <Tab value="proposals" label="Proposals" sx={{ textTransform: "none" }} />
-        </Tabs>
-      </Box>
 
       {view === "catalogue" ? <TemplateCatalogue /> : <ProposalList />}
     </Box>

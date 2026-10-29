@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitForElementToBeRemoved, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -39,6 +39,7 @@ const idle = (mutate: ReturnType<typeof vi.fn>) => ({ mutate, isPending: false }
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
 vi.mock("@hooks/useNavTransition", () => ({ useNavTransition: () => mocks.navigate }));
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
+  MAX_SUSPEND_REASON_LENGTH: 1000,
   useGetStandardChangeTemplate: () => ({ data: mocks.template, isLoading: false, isError: false, refetch: vi.fn() }),
   useGetStandardChangeTemplateVersion: (templateId?: string, versionId?: string) => {
     mocks.versionCalls.push([templateId, versionId]);
@@ -107,6 +108,9 @@ const TEMPLATE = {
   reviewRequiredReason: null,
   reviewRequiredOn: null,
   reviewRequiredChangeRequest: null,
+  suspendedReason: null,
+  suspendedOn: null,
+  suspendedBy: null,
   openProposal: null,
   usage: { total: 12, open: 2, closed: 9, rolledBack: 1, canceled: 0, lastUsedOn: "2026-10-20T00:00:00Z" },
   createdOn: "",
@@ -119,9 +123,9 @@ const TEMPLATE = {
   ],
 };
 
-function renderPage(): void {
+function renderPage(state?: { from: string }): void {
   render(
-    <MemoryRouter initialEntries={["/operations/standard-changes/tpl-1"]}>
+    <MemoryRouter initialEntries={[{ pathname: "/operations/standard-changes/tpl-1", state }]}>
       <Routes>
         <Route path="/operations/standard-changes/:id" element={<StandardChangeTemplateDetailPage />} />
       </Routes>
@@ -206,9 +210,51 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
     const dialog = screen.getByRole("dialog", { name: /suspend STD0000001/i });
     fireEvent.click(within(dialog).getByRole("button", { name: "Suspend" }));
-    expect(mocks.suspend).toHaveBeenCalledWith("tpl-1", expect.anything());
+    expect(mocks.suspend).toHaveBeenCalledWith({ id: "tpl-1", reason: "" }, expect.anything());
     act(() => mocks.suspend.mock.calls[0]![1].onError(new Error("only the template's owner or a CAB member can suspend it")));
     expect(screen.getByText("only the template's owner or a CAB member can suspend it")).toBeInTheDocument();
+  });
+
+  it("sends the reason typed in the confirmation, and starts the next one empty", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+    const dialog = screen.getByRole("dialog", { name: /suspend STD0000001/i });
+    const reason = within(dialog).getByRole("textbox", { name: /reason \(optional\)/i });
+    expect(reason).toHaveAttribute("maxlength", "1000");
+    fireEvent.change(reason, { target: { value: "Rolled back twice on prod" } });
+    expect(within(dialog).getByText(/25\/1000/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend" }));
+    expect(mocks.suspend).toHaveBeenCalledWith({ id: "tpl-1", reason: "Rolled back twice on prod" }, expect.anything());
+
+    await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
+    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+    expect(screen.getByRole("textbox", { name: /reason \(optional\)/i })).toHaveValue("");
+  });
+
+  it("shows why, by whom and when a suspended template was suspended", () => {
+    mocks.template = {
+      ...TEMPLATE,
+      state: "suspended",
+      suspendedReason: "Rolled back twice on prod",
+      suspendedOn: "2026-10-20T09:30:00Z",
+      suspendedBy: "carol.silva@example.com",
+    };
+    renderPage();
+    const note = screen.getByRole("region", { name: "Suspended" });
+    expect(note).toHaveTextContent(/^Suspended: Rolled back twice on prod \(by carol\.silva@example\.com on .*2026.*\)/);
+    expect(note).toHaveTextContent(/no change request can be raised from this template/i);
+  });
+
+  it("says only that it is suspended when no reason was given", () => {
+    mocks.template = { ...TEMPLATE, state: "suspended", suspendedOn: "2026-10-20T09:30:00Z", suspendedBy: "carol.silva@example.com" };
+    renderPage();
+    const note = screen.getByRole("region", { name: "Suspended" });
+    expect(note).toHaveTextContent(/^Suspended \(by carol\.silva@example\.com on .*\)No change request/);
+  });
+
+  it("shows no suspension note on an active template", () => {
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Suspended" })).not.toBeInTheDocument();
   });
 
   it("resumes a suspended template, which cannot be raised from meanwhile", () => {
@@ -264,5 +310,33 @@ describe("StandardChangeTemplateDetailPage — review flag", () => {
   it("shows no flag when none is raised", () => {
     renderPage();
     expect(screen.queryByRole("region", { name: "Review needed" })).not.toBeInTheDocument();
+  });
+});
+
+describe("StandardChangeTemplateDetailPage — part of Change requests", () => {
+  it("says where it sits: Change requests › Standard change catalogue › its number", () => {
+    renderPage();
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Change requests" })).toHaveAttribute(
+      "href",
+      "/operations/change-requests",
+    );
+    expect(within(trail).getByRole("link", { name: "Standard change catalogue" })).toHaveAttribute(
+      "href",
+      "/operations/change-requests?view=catalogue",
+    );
+    expect(within(trail).getByText("STD0000001")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("goes Back to the standard change catalogue inside Change requests when it was not opened from a list", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=catalogue");
+  });
+
+  it("goes Back to where it was opened from", () => {
+    renderPage({ from: "/operations/change-requests/chg-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1");
   });
 });

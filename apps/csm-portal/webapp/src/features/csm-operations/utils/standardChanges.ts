@@ -420,10 +420,62 @@ export function raiseFromTemplatePath(templateId: string): string {
   return `/operations/change-requests/new?standardChangeTemplateId=${encodeURIComponent(templateId)}`;
 }
 
-export const STANDARD_CHANGES_TAB_PATH = "/operations/standard-changes";
+/**
+ * Standard changes are templated change requests, so they live inside
+ * Operations > Change requests (`/operations/change-requests`) as two sub-views
+ * next to the change request list, chosen by `?view=`: no `view` (or one this
+ * page does not know) is the list, exactly as before the sub-views existed;
+ * `catalogue` is the template catalogue and `proposals` the proposals to the
+ * CAB. The parameter is in the URL so a sub-view is linkable and Back from a
+ * template or proposal returns to it. The change request list's own filters
+ * are all `cr`-prefixed, so they never collide with it.
+ */
+export const CHANGE_REQUESTS_PATH = "/operations/change-requests";
+export const CHANGE_REQUESTS_VIEW_PARAM = "view";
+
+export type StandardChangesView = "catalogue" | "proposals";
+export type ChangeRequestsView = "list" | StandardChangesView;
+
+export const STANDARD_CHANGES_VIEW_LABELS: Readonly<Record<StandardChangesView, string>> = {
+  catalogue: "Standard change catalogue",
+  proposals: "Standard change proposals",
+};
+
+/** The Change requests sub-view a URL's query selects. */
+export function changeRequestsView(params: URLSearchParams): ChangeRequestsView {
+  const view = params.get(CHANGE_REQUESTS_VIEW_PARAM);
+  return view === "catalogue" || view === "proposals" ? view : "list";
+}
+
+/** The canonical URL of a Change requests sub-view. */
+export function changeRequestsViewPath(view: ChangeRequestsView): string {
+  return view === "list" ? CHANGE_REQUESTS_PATH : `${CHANGE_REQUESTS_PATH}?${CHANGE_REQUESTS_VIEW_PARAM}=${view}`;
+}
+
+export const STANDARD_CHANGE_CATALOGUE_PATH = changeRequestsViewPath("catalogue");
+export const STANDARD_CHANGE_PROPOSALS_PATH = changeRequestsViewPath("proposals");
+
+/**
+ * Where a link to the old, separate Operations tab lands: the standard change
+ * catalogue, or its proposals for `view=proposals` (the old tab's own switch).
+ * Covers both forms that tab had, `/operations?tab=standard_changes` and
+ * `/operations/standard-changes`; every other query parameter and the hash are
+ * kept, `tab` is dropped.
+ */
+export function legacyStandardChangesHref(search: string, hash = ""): string {
+  const params = new URLSearchParams(search);
+  params.delete("tab");
+  params.set(CHANGE_REQUESTS_VIEW_PARAM, params.get(CHANGE_REQUESTS_VIEW_PARAM) === "proposals" ? "proposals" : "catalogue");
+  return `${CHANGE_REQUESTS_PATH}?${params.toString()}${hash}`;
+}
+
+/** True for an old `?tab=` value that named the standard changes tab. */
+export function isLegacyStandardChangesTab(tab: string | null): boolean {
+  return tab === "standard_changes" || tab === "standard-changes";
+}
 
 export function standardChangeTemplatePath(id: string): string {
-  return `${STANDARD_CHANGES_TAB_PATH}/${encodeURIComponent(id)}`;
+  return `/operations/standard-changes/${encodeURIComponent(id)}`;
 }
 
 export function standardChangeProposalPath(id: string): string {

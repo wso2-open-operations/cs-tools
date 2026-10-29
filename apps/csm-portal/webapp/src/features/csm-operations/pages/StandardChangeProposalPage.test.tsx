@@ -107,9 +107,9 @@ const DRAFT: BeStandardChangeProposal = {
   canWithdraw: true,
 };
 
-function renderPage(): void {
+function renderPage(state?: { from: string }): void {
   render(
-    <MemoryRouter initialEntries={["/operations/standard-change-proposals/scp-1"]}>
+    <MemoryRouter initialEntries={[{ pathname: "/operations/standard-change-proposals/scp-1", state }]}>
       <Routes>
         <Route path="/operations/standard-change-proposals/:id" element={<StandardChangeProposalPage />} />
       </Routes>
@@ -445,5 +445,39 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
       state: { from: "/operations/standard-change-proposals/scp-1" },
     });
+  });
+});
+
+describe("StandardChangeProposalPage — part of Change requests", () => {
+  it("says where it sits: Change requests › Standard change proposals › its number", () => {
+    renderPage();
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Change requests" })).toHaveAttribute(
+      "href",
+      "/operations/change-requests",
+    );
+    expect(within(trail).getByRole("link", { name: "Standard change proposals" })).toHaveAttribute(
+      "href",
+      "/operations/change-requests?view=proposals",
+    );
+    expect(within(trail).getByText("SCP0000001")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not carry the Operations-wide heading: its own heading is the proposal's name", () => {
+    renderPage();
+    expect(screen.queryByText(/service requests|incidents|problems|runbooks/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Operations" })).not.toBeInTheDocument();
+  });
+
+  it("goes Back to the standard change proposals inside Change requests when it was not opened from a list", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=proposals");
+  });
+
+  it("goes Back to where it was opened from", () => {
+    renderPage({ from: "/operations/change-requests/chg-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1");
   });
 });

@@ -39,7 +39,6 @@ import {
   Megaphone,
   RefreshCw,
   ScrollText,
-  ClipboardCheck,
   Settings,
   Shield,
   UserCheck,
@@ -107,8 +106,30 @@ export interface CsmNavNode {
    * overrides) and its owner's.
    */
   shortcutTo?: string;
+  /**
+   * Named places inside this node's page that a query parameter selects, as
+   * opposed to filters of it: the parameter, and each value's label. "Pin this
+   * page" and Recent name such a URL after the place ("Standard change
+   * catalogue"), not as a filtered view of the node ("Change requests: 1
+   * filter"). A value not listed here is read as an ordinary filter. Not nav
+   * entries: they are never in the sidebar, Quick-nav or a tab strip.
+   */
+  views?: CsmNavViews;
   icon?: ComponentType<{ size?: number | string }>;
   children?: CsmNavNode[];
+}
+
+/** See {@link CsmNavNode.views}. */
+export interface CsmNavViews {
+  param: string;
+  labels: Readonly<Record<string, string>>;
+}
+
+/** One of a node's {@link CsmNavNode.views}, as a URL selects it. */
+export interface CsmNavView {
+  param: string;
+  value: string;
+  label: string;
 }
 
 /** A top-level sidebar section. Always carries an icon. */
@@ -160,7 +181,27 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Change requests",
         href: "/operations?tab=change_requests",
         tab: "change_requests",
-        routes: ["/operations/change-requests"],
+        // Standard changes are templated change requests: their catalogue and
+        // proposals are sub-views of this tab (`?view=`, see
+        // csm-operations/utils/standardChanges.ts), and a template's or a
+        // proposal's own page belongs to it too. `/operations/change-requests`
+        // must stay first: it is the tab's own destination (`navNodeHref`).
+        routes: [
+          "/operations/change-requests",
+          "/operations/standard-changes",
+          "/operations/standard-change-proposals",
+        ],
+        // The standard change sub-views are places, not filters of the list.
+        // Same parameter and labels as `CHANGE_REQUESTS_VIEW_PARAM` /
+        // `STANDARD_CHANGES_VIEW_LABELS` (a test keeps them equal; this module
+        // stays free of feature imports).
+        views: {
+          param: "view",
+          labels: {
+            catalogue: "Standard change catalogue",
+            proposals: "Standard change proposals",
+          },
+        },
         icon: GitPullRequest,
       },
       {
@@ -193,14 +234,6 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/operations?tab=runbooks",
         tab: "runbooks",
         icon: ScrollText,
-      },
-      {
-        id: "operations.standard-changes",
-        label: "Standard changes",
-        href: "/operations?tab=standard_changes",
-        tab: "standard_changes",
-        routes: ["/operations/standard-changes", "/operations/standard-change-proposals"],
-        icon: ClipboardCheck,
       },
     ],
   },
@@ -643,6 +676,22 @@ export function navTabForSearch(
   const tab = new URLSearchParams(search).get("tab");
   if (!tab) return undefined;
   return node.children?.find((child) => child.tab === tab);
+}
+
+/**
+ * The named place inside `node`'s page that `search` selects (see
+ * {@link CsmNavNode.views}), or `undefined` when the node has none or the
+ * parameter is absent or holds a value it does not name.
+ */
+export function navViewForSearch(
+  node: CsmNavNode,
+  search: string,
+): CsmNavView | undefined {
+  if (!node.views) return undefined;
+  const { param, labels } = node.views;
+  const value = new URLSearchParams(search).get(param);
+  if (!value || !Object.hasOwn(labels, value)) return undefined;
+  return { param, value, label: labels[value] };
 }
 
 /** The top-level section owning `pathname`, ignoring its tabs. */

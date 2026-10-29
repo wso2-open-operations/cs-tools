@@ -309,6 +309,11 @@ export function isEmergencyChangeRequestType(type: string | null | undefined): b
   return type?.trim().toLowerCase() === "emergency";
 }
 
+/** True when `type` is Standard (the backend's enum value "standard"; case and padding ignored). */
+export function isStandardChangeRequestType(type: string | null | undefined): boolean {
+  return type?.trim().toLowerCase() === "standard";
+}
+
 /**
  * The one line shown where an Emergency change's two customer boxes (Customer
  * Approval, Customer Review) sit disabled and unticked. An Emergency change acts
@@ -1943,7 +1948,7 @@ export const STANDARD_TEMPLATE_TYPE_LOCKED_REASON =
  * it still sends `{state: "assess"}`.
  */
 export function requestApprovalSchedulesDirectly(cr: Pick<BeChangeRequestDetail, "type" | "customerApprovalRequired">): boolean {
-  return cr.type?.trim().toLowerCase() === "standard" && cr.customerApprovalRequired === false;
+  return isStandardChangeRequestType(cr.type) && cr.customerApprovalRequired === false;
 }
 
 /** The Request Approval label of a change it schedules outright (see {@link requestApprovalSchedulesDirectly}). */

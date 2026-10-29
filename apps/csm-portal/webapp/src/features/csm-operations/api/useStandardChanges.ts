@@ -36,6 +36,7 @@ import type {
   BeStandardChangeProposal,
   BeStandardChangeTemplate,
   BeStandardChangeTemplateVersion,
+  BeSuspendStandardChangeTemplatePayload,
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
@@ -170,12 +171,26 @@ function useStandardChangeMutation<TVars, TResult>(
   });
 }
 
-/** `POST /standard-change-templates/{id}/suspend` (the owner or a CAB member). */
-export function useSuspendStandardChangeTemplate(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+/** The longest suspension reason the server takes. */
+export const MAX_SUSPEND_REASON_LENGTH = 1000;
+
+/**
+ * `POST /standard-change-templates/{id}/suspend` (the owner or a CAB member), with
+ * the optional reason trimmed: a blank one is left out of the body.
+ */
+export function useSuspendStandardChangeTemplate(): UseMutationResult<
+  BeStandardChangeTemplate,
+  Error,
+  { id: string; reason?: string }
+> {
   const api = useBackendApi();
-  return useStandardChangeMutation((id: string) =>
-    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/suspend`),
-  );
+  return useStandardChangeMutation(({ id, reason }: { id: string; reason?: string }) => {
+    const trimmed = reason?.trim();
+    return api.post<BeSuspendStandardChangeTemplatePayload, BeStandardChangeTemplate>(
+      `${TEMPLATES}/${enc(id)}/suspend`,
+      trimmed ? { reason: trimmed } : {},
+    );
+  });
 }
 
 /** `POST /standard-change-templates/{id}/resume` (the owner or a CAB member). */

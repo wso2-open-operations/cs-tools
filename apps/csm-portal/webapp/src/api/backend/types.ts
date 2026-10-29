@@ -5607,6 +5607,13 @@ export interface BeStandardChangeTemplate {
   reviewRequiredReason: string | null;
   reviewRequiredOn: string | null;
   reviewRequiredChangeRequest: BeEntityRef | null;
+  /**
+   * Why, when and by whom (an email) the template was suspended; all null unless
+   * it is suspended. The reason is optional, so it may be null on a suspended one.
+   */
+  suspendedReason: string | null;
+  suspendedOn: string | null;
+  suspendedBy: string | null;
   /** The modification or retirement now in draft or CAB review, if any. */
   openProposal: BeEntityRef | null;
   usage: BeStandardChangeTemplateUsage;
@@ -5616,6 +5623,12 @@ export interface BeStandardChangeTemplate {
   updatedBy: string;
   /** On `GET /standard-change-templates/{id}` only, newest first. */
   versions?: BeStandardChangeTemplateVersionSummary[];
+}
+
+/** Body of `POST /standard-change-templates/{id}/suspend` (optional). */
+export interface BeSuspendStandardChangeTemplatePayload {
+  /** Why it is suspended: optional, at most 1000 characters. */
+  reason?: string;
 }
 
 export interface BeSearchStandardChangeTemplatesPayload {

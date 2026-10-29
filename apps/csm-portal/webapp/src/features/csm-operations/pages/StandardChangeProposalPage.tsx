@@ -50,6 +50,7 @@ import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import QueryErrorState from "@components/QueryErrorState";
+import StandardChangeBreadcrumbs from "@features/csm-operations/components/StandardChangeBreadcrumbs";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
@@ -86,7 +87,7 @@ import {
   normalizeStandardChangeParameters,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
-  STANDARD_CHANGES_TAB_PATH,
+  STANDARD_CHANGE_PROPOSALS_PATH,
   standardChangeProposalGaps,
   standardChangeProposalKindLabel,
   standardChangeProposalPath,
@@ -861,7 +862,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   const { canWrite } = usePortalAccess();
-  const backTarget = (location.state as { from?: string } | undefined)?.from ?? `${STANDARD_CHANGES_TAB_PATH}?view=proposals`;
+  const backTarget = (location.state as { from?: string } | undefined)?.from ?? STANDARD_CHANGE_PROPOSALS_PATH;
   const here = `${location.pathname}${location.search}`;
   const { data: proposal, isLoading, isError, error, refetch } = useGetStandardChangeProposal(id);
   const withdraw = useWithdrawStandardChangeProposal();
@@ -885,11 +886,13 @@ export default function StandardChangeProposalPage(): JSX.Element {
       Back
     </Button>
   );
+  const Trail = <StandardChangeBreadcrumbs view="proposals" current={proposal?.number} />;
 
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <Skeleton variant="rounded" height={120} />
         <Skeleton variant="rounded" height={320} />
       </Box>
@@ -899,6 +902,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <QueryErrorState message={errorText(error, "Failed to load the proposal.")} error={error} onRetry={() => void refetch()} />
       </Box>
     );
@@ -907,6 +911,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {BackButton}
+        {Trail}
         <Typography variant="h5">Proposal not found</Typography>
       </Box>
     );
@@ -937,6 +942,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       {BackButton}
+      {Trail}
 
       <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap" }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
