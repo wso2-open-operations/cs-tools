@@ -31276,7 +31276,7 @@ components:
         templateId: {type: string, format: uuid, nullable: true, description: 'Required for modify and retire.'}
         sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
         copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
-        name: {type: string, nullable: true}
+        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
     UpdateStandardChangeProposalRequest:
       type: object
       description: Omitted fields are left as they are; an empty category, impact or risk clears it; parameters and evidenceChangeRequestIds replace the whole list.

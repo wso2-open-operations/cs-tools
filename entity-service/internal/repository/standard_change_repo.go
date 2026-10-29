@@ -476,6 +476,10 @@ func (r *standardChangeRepo) IsCABMember(ctx context.Context, email string) (boo
 
 // CreateProposal opens a draft, copying a closed change request's content when it is named.
 // crvis: internal callers only (internalOnly routes); reads the source change request to copy its plan into a proposal
+// untitledStandardChangeName names a new proposal started with no name and nothing
+// to take one from.
+const untitledStandardChangeName = "Untitled standard change"
+
 func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, in StandardChangeProposalCreate) (string, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
 		kind := strings.ToUpper(string(in.Kind))
@@ -577,7 +581,9 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			}
 		}
 		if name == "" {
-			return "", &apierror.ValidationError{Msg: "name is required"}
+			// A proposal started from nothing (the catalogue's "Propose a standard
+			// change") opens under a placeholder the proposer renames in the editor.
+			name = untitledStandardChangeName
 		}
 		if len([]rune(name)) > 255 {
 			return "", &apierror.ValidationError{Msg: "name must be at most 255 characters"}

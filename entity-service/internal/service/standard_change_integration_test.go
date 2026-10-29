@@ -83,6 +83,7 @@ func stdCleanup(t *testing.T, s *repository.Scoped) {
 			JOIN standard_change_template t ON t.id = v.template_id WHERE t.name ILIKE '` + stdTag + `%')`,
 		`DELETE FROM change_request WHERE id IN (SELECT id FROM work_item WHERE subject ILIKE '` + stdTag + `%' AND type = 'CHANGE_REQUEST')`,
 		`DELETE FROM work_item WHERE subject ILIKE '` + stdTag + `%'`,
+		`DELETE FROM work_item WHERE type = 'STANDARD_CHANGE_PROPOSAL' AND created_by LIKE 'std-%@scp.test'`,
 		`DELETE FROM standard_change_template WHERE name ILIKE '` + stdTag + `%'`,
 		`DELETE FROM group_member WHERE user_id IN (SELECT id FROM "user" WHERE email LIKE 'std-%@scp.test')`,
 		`DELETE FROM user_role WHERE user_id IN (SELECT id FROM "user" WHERE email LIKE 'std-%@scp.test')`,
@@ -481,6 +482,16 @@ func stdEvidence(t *testing.T, env *stdEnv) {
 	expectErr[*apierror.ValidationError](t, err, "a bad parameter key")
 	_, err = env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindModify})
 	expectErr[*apierror.ValidationError](t, err, "modify without a template")
+	// Started from nothing (the catalogue's "Propose a standard change"): a draft
+	// under a placeholder name the proposer renames.
+	blank, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindNew})
+	if err != nil || blank.Name != "Untitled standard change" || blank.State != domain.StandardChangeProposalStateDraft {
+		t.Fatalf("a proposal started from nothing = %q %s, %v", blank.Name, blank.State, err)
+	}
+	renamed := stdTag + " Renamed"
+	if blank, err = env.svc.UpdateProposal(stdCtx(stdProposer), blank.ID, domain.UpdateStandardChangeProposalRequest{Name: &renamed}); err != nil || blank.Name != renamed {
+		t.Fatalf("rename: %q %v", blank.Name, err)
+	}
 	if _, err := env.svc.CreateProposal(context.Background(), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindNew, Name: stdp("x")}); err == nil {
 		t.Fatal("a caller with no identity created a proposal")
 	}
