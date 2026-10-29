@@ -29,6 +29,7 @@ import {
   insertPlaceholderAt,
   isLegacyStandardChangesTab,
   isLegacyStandardChangesView,
+  isStandardChangeTemplateOtherCustomer,
   isStandardChangeTemplateUnavailable,
   legacyStandardChangesHref,
   normalizeStandardChangeParameters,
@@ -38,6 +39,8 @@ import {
   renderStandardChangePlainText,
   splitPlaceholders,
   STANDARD_CHANGE_PROPOSALS_PATH,
+  standardChangeProposalCustomerEditable,
+  standardChangeProposalCustomerFixedReason,
   STANDARD_CHANGES_PATH,
   standardChangeParametersPayload,
   standardChangeProposalGaps,
@@ -240,6 +243,7 @@ describe("what a proposal still needs before the CAB", () => {
   const complete = {
     name: "Rotate",
     rationale: "<p>Done often.</p>",
+    accountId: "acct-1",
     subject: "Rotate {{host}}",
     implementationPlan: "<p>a</p>",
     backoutPlan: "<p>b</p>",
@@ -257,6 +261,7 @@ describe("what a proposal still needs before the CAB", () => {
       standardChangeProposalGaps("modify", {
         name: " ",
         rationale: "<p><br></p>",
+        accountId: "",
         subject: "",
         implementationPlan: "",
         backoutPlan: "<p></p>",
@@ -279,6 +284,64 @@ describe("what a proposal still needs before the CAB", () => {
   it("asks a retirement only for its name and rationale", () => {
     expect(standardChangeProposalGaps("retire", { ...complete, subject: "", implementationPlan: "", impact: "", risk: "" })).toEqual([]);
     expect(standardChangeProposalGaps("retire", { ...complete, rationale: "" })).toEqual(["a rationale"]);
+  });
+
+  it("needs a customer for a new template, after the name and rationale (the server's order)", () => {
+    expect(standardChangeProposalGaps("new", { ...complete, accountId: "" })).toEqual(["a customer"]);
+    expect(standardChangeProposalGaps("new", { ...complete, accountId: "  " })).toEqual(["a customer"]);
+    expect(standardChangeProposalGaps("new", { ...complete, name: "", rationale: "", accountId: "", testPlan: "" })).toEqual([
+      "a name",
+      "a rationale",
+      "a customer",
+      "a test plan",
+    ]);
+  });
+
+  it("never asks a revision or retirement for a customer: it has its template's", () => {
+    expect(standardChangeProposalGaps("modify", { ...complete, accountId: "" })).toEqual([]);
+    expect(standardChangeProposalGaps("retire", { ...complete, accountId: "" })).toEqual([]);
+  });
+});
+
+describe("a standard change is one customer's", () => {
+  it("lets the customer be named only on a new proposal that did not start from a change request", () => {
+    expect(standardChangeProposalCustomerEditable({ kind: "new", sourceChangeRequest: null })).toBe(true);
+    expect(standardChangeProposalCustomerEditable({ kind: "new" })).toBe(true);
+    expect(standardChangeProposalCustomerEditable({ kind: "new", sourceChangeRequest: { id: "chg-1" } })).toBe(false);
+    expect(standardChangeProposalCustomerEditable({ kind: "modify", sourceChangeRequest: null })).toBe(false);
+    expect(standardChangeProposalCustomerEditable({ kind: "retire", sourceChangeRequest: null })).toBe(false);
+  });
+
+  it("keeps a copy's customer: only a copy of a proposal that had none names one", () => {
+    const copiedFrom = { id: "scp-1", name: "SCP0000001" };
+    expect(standardChangeProposalCustomerEditable({ kind: "new", copiedFrom, customer: { id: "acct-1" } })).toBe(false);
+    expect(standardChangeProposalCustomerEditable({ kind: "new", copiedFrom, customer: null })).toBe(true);
+    expect(standardChangeProposalCustomerFixedReason({ kind: "new", copiedFrom, customer: { id: "acct-1" } })).toBe(
+      "The customer of the proposal it was copied from (SCP0000001). To propose it for another customer, start a new proposal.",
+    );
+    expect(standardChangeProposalCustomerFixedReason({ kind: "new", copiedFrom, customer: null })).toBeNull();
+  });
+
+  it("says why a fixed customer is fixed", () => {
+    expect(standardChangeProposalCustomerFixedReason({ kind: "modify" })).toMatch(/template's customer/i);
+    expect(standardChangeProposalCustomerFixedReason({ kind: "retire" })).toMatch(/template's customer/i);
+    expect(standardChangeProposalCustomerFixedReason({ kind: "new", sourceChangeRequest: { id: "chg-1" } })).toMatch(
+      /change request it started from/i,
+    );
+    expect(standardChangeProposalCustomerFixedReason({ kind: "new", sourceChangeRequest: null })).toBeNull();
+  });
+
+  it("recognises the refusal of another customer's project by its code, not its words", () => {
+    expect(
+      isStandardChangeTemplateOtherCustomer({ status: 400, payload: { errorCode: "standard_change_template_other_customer" } }),
+    ).toBe(true);
+    expect(
+      isStandardChangeTemplateOtherCustomer({ status: 400, payload: { message: "standard_change_template_other_customer" } }),
+    ).toBe(false);
+    expect(
+      isStandardChangeTemplateOtherCustomer({ status: 409, payload: { errorCode: "standard_change_template_unavailable" } }),
+    ).toBe(false);
+    expect(isStandardChangeTemplateOtherCustomer(new Error("x"))).toBe(false);
   });
 });
 

@@ -7731,12 +7731,12 @@ stage of its own. Before this, choosing Standard opened the ordinary create form
 free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
 migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
-`STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by) and
-`100026` (row-level security). PostgreSQL data
+`STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by), `0254`
+(the customer: `account_id` on template and proposal) and `100026` (row-level security). PostgreSQL data
 sources only; every route is `internalOnly`.
 
-**Tables.** `standard_change_template` (STD number, name unique among live templates ignoring case,
-state `ACTIVE` / `SUSPENDED` / `RETIRED`, owner, `current_version_id`, the review flag),
+**Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
+live templates OF THAT CUSTOMER ignoring case and surrounding spaces, state `ACTIVE` / `SUSPENDED` / `RETIRED`, owner, `current_version_id`, the review flag),
 `standard_change_template_version` (immutable: the content a change request takes, its `parameters`
 JSON array, who approved it and from which proposal), `standard_change_proposal` (a work item, so it
 reuses `approval_stage` / `approval_stage_approver` for its CAB stage; kind `NEW` / `MODIFY` /
@@ -7745,6 +7745,97 @@ columns as a version) and `standard_change_proposal_evidence` (closed change req
 cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
 `standard_change_parameter_values` (JSONB object) record what a change request was raised from. All
 four tables are internal-only under row-level security (`100026`).
+
+**A template is one customer's** (migration 0254; the user's rule: "one standard change of a customer
+cannot be added against another customer"). A customer is an `account`; a change request's customer
+is its project's account.
+- `standard_change_template.account_id` / `standard_change_proposal.account_id` (`REFERENCES
+  account(id) ON DELETE RESTRICT`, indexed). The migration backfills a template's / proposal's account
+  only when the change requests it is known by (evidence, source, change requests raised from it, or
+  the template for a proposal) name exactly one account. Then, when **no template is left without
+  one** (every real deployment: 0252 and 0254 ship together, so no template predates customers),
+  `standard_change_template.account_id` becomes `NOT NULL` and the `NOT VALID` check
+  `standard_change_template_account_required` is dropped. Only when some are left (a local database
+  that ran 0252 alone) is the `NOT VALID` check kept instead, and it has a cost: a `NOT VALID` check
+  applies to ANY update of such a row, including the `ON DELETE SET NULL` cascades of its owner user,
+  `review_required_change_request_id` and `current_version_id`, so deleting one of those fails while
+  the row has no account. The fix there is `scripts/csm-compose/seed-standard-changes.sh --reset` (or
+  setting the rows' account) and running 0254 again, which then sets NOT NULL and drops the check;
+  0254 is idempotent either way. A template with no account (that local case only) cannot be UPDATEd:
+  suspend / resume / clear / revise / retire answer 409 ("no customer recorded"; `templateWriteErr`
+  maps both the check's 23514 and the column's 23502), Submit of its MODIFY / RETIRE is a 409, raising
+  a change request from it is a 409 `standard_change_template_unavailable`, and
+  `flagStandardTemplateReview` skips it rather than fail the change request's own write. Setting its
+  account is a manual SQL fix (no API).
+- `standard_change_proposal.copied_from_proposal_id` (0254, `REFERENCES standard_change_proposal(id)
+  ON DELETE SET NULL`, indexed): the proposal a NEW draft was copied from, read as `copiedFrom`
+  {id, name: its number} on the proposal (null when not a copy).
+- `standard_change_proposal.customer_locked` (0254, `BOOLEAN NOT NULL DEFAULT false`): the proposal's
+  customer can no longer change. Set on create for a MODIFY / RETIRE, a proposal from a change request
+  and a copy that has a customer; when a copy names its customer; at Submit. A column of its own because
+  `source_change_request_id` and `copied_from_proposal_id` are `ON DELETE SET NULL`: deleting the change
+  request or the copied proposal clears the link, and without the flag the draft would then read as
+  "started from nothing" and its customer could be moved (PATCH `accountId` on a locked draft: 400 "this
+  proposal's customer is fixed"). 0254 backfills it for every existing proposal that qualifies.
+- The live-name unique index is now `standard_change_template_account_live_name_key` on `(account_id,
+  lower(btrim(name))) WHERE state <> 'RETIRED'`; Submit's name check and approval's 23505 mapping are per
+  customer, so two customers may each have "Rotate the TLS certificate", one customer not twice.
+- **Proposal's customer** (`CreateProposal`): NEW from a closed change request takes that change
+  request's project's account (none: 400; a different `accountId`: 400); copied from a proposal takes
+  that proposal's (a different `accountId`: 400; a source with none takes the named one); MODIFY / RETIRE
+  carry their template's (a different `accountId`: 400); NEW from nothing takes the named `accountId`
+  (optional on create, must exist). PATCH `accountId` (`updateProposalCustomer`): only a NEW draft
+  **started from nothing** (no source change request, not a copy) may change it; a copy is for the
+  copied proposal's customer (400 "this proposal is a copy of proposal SCP..."), except that a copy of a
+  proposal that had no customer may name one while it has none (after which it is fixed); resending
+  its own is accepted on any draft; changing it re-checks the cited evidence against the new customer
+  (400, nothing changes). (Before `copied_from_proposal_id` a copy was indistinguishable from a draft
+  from nothing, so create-as-a-copy then PATCH moved it, with the copied proposal's source change
+  request, to another customer.) A NEW proposal cannot be
+  submitted without one (`checkStandardChangeProposalComplete`: "still needs: customer (accountId)").
+- **Evidence** (`checkEvidenceTx`, on every set, and again at Submit) must be closed change requests of
+  the proposal's customer: a 400 names each offender (`CHG.. (another customer: X)`, `(no customer)`,
+  `(implement)`); a proposal with no customer can cite none.
+- **Source change request** (`checkSourceChangeRequestTx`): the same rule, the same 400 shape ("the
+  change request a proposal starts from must be a change request of the proposal's customer that was
+  completed (closed): CHG.. (another customer: X)"), checked at create (from a change request, and for a
+  copy, which carries the copied proposal's source change request over) and again at Submit.
+- **The CAB's approval re-checks both** (`checkProposalCustomerAtDecision`, in `applyApprovedProposal`,
+  NEW and MODIFY): a source change request or a piece of evidence that is no longer a closed change
+  request of the proposal's customer (its project moved after Submit) makes the approval a **409** ("the
+  CAB cannot approve this proposal now: ... reject it, or ask the proposer to withdraw it and propose
+  again"), written nothing (the decision's transaction rolls back, the CAB rows stay REQUESTED). A
+  rejection is still accepted. Each evidence item reads its current `customer` {id, name}, so the CAB
+  sees which one moved.
+- **Projects move.** A change request's customer is its project's account, and the Salesforce project
+  sync (`salesforce_project_repo.go`, `updateSalesforceProjectQuery`) can re-parent a project to
+  another account. The sync is the source of truth and is NOT blocked; instead what depends on the
+  customer is checked again at the moment it matters: Submit re-checks the evidence and the source
+  change request against the proposal's customer as they are then; Request Approval of a templated
+  change request re-checks that its project (the request's, else the stored one) is the template's
+  customer's (`checkStandardChangeCustomerAtApproval`, after `checkStandardChangeTemplateUsable`): else
+  **400** `standard_change_template_other_customer` ("approval cannot be requested: ... The change
+  request's project now belongs to another customer: cancel this change request and raise a new one
+  from that customer's template"), nothing written. 400 rather than 409 so the code keeps one status
+  everywhere (every other "this template is not this project's customer's" refusal is that 400, and the
+  webapp's `isStandardChangeTemplateOtherCustomer` matches the 400). The detail's
+  `standardChange.customerMismatch` is true while the project's account differs from the template's
+  (`t.account_id IS DISTINCT FROM p.account_id`, so also a project with no account), in any state; the
+  webapp's template banner turns into a warning on it. A change already past New is left alone (the
+  CAB pre-authorisation was used when it was scheduled); the flag is how staff see it.
+- **Raising a change request** (R4): `POST /change-requests` with `standardChangeTemplateId` needs
+  `projectId`, a project of the template's account: else 400 `standard_change_template_other_customer`
+  (`repository.TemplateCustomerRefusal`, shared). Checked in `prepareStandardChange` (via
+  `StandardChangeRepository.ProjectAccount`), so before ServiceNow is called on dual-write, and again in
+  the create transaction (`recordChangeRequestTemplate`, under the template's `FOR SHARE`).
+- **PATCH** `projectId` of a templated change request to a project of another account is the same 400
+  in EVERY state (`checkStandardChangeProjectCustomer`, right after the row locks and before the
+  creation-phase rules, so New and later give the same code); another project of the same account is
+  left to the usual rules (allowed in New, frozen after); a resend is accepted.
+- **Reads**: `customer` {id, name} on the template, the proposal, the proposal search row and the change
+  request's `standardChange`; `accountId` filters `POST /standard-change-templates/search` and
+  `POST /standard-change-proposals/search` (400 when not a UUID).
+- Not done: no API to set a legacy template's customer.
 
 **Proposals.** Anyone internal proposes; the proposer does the templating: generalise the plans and
 mark the varying bits as `{{key}}` placeholders, each declared as a parameter (text, textarea,
@@ -7782,17 +7873,19 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
 - **Request Approval** needs the template still `ACTIVE` and still at the version raised from (409
-  `standard_change_template_unavailable`): a revised template's old version is no longer authorised.
+  `standard_change_template_unavailable`): a revised template's old version is no longer authorised;
+  and the project still the template's customer's (400 `standard_change_template_other_customer`, see
+  "Projects move" above).
 - **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
   implementation plan sets `review_required` on the template with the change request and a reason
   (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
   identity). It does not suspend the template; the owner or a CAB member clears it, or approving a
   modification does.
-- **Read**: `standardChange` on the detail (template, STD number, version, parameters with values),
-  staff only, best-effort like the tags.
+- **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`, version,
+  parameters with values), staff only, best-effort like the tags.
 
-**Error codes**: `change_request_standard_template_field` (400) and
-`standard_change_template_unavailable` (409).
+**Error codes**: `change_request_standard_template_field` (400),
+`standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).
 
 **Who may**: suspend / resume / clear the flag: the template's owner or a CAB member. Edit, submit,
 withdraw a proposal: its proposer. Decide: a CAB member other than the proposer.
@@ -7806,8 +7899,10 @@ them as `suspendedReason` / `suspendedOn` / `suspendedBy`, null unless the templ
 **Not done**: no import of the previous system's standard change templates (decision: they are
 re-proposed through this flow); no notices (mail / chat) on submit or decision.
 
-Tests: `standard_change_template_test.go` (parameters, completeness, placeholders, rendering, the
-suspension reason), `handler/standard_change_handler_test.go` (the optional suspend body),
+Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, placeholders,
+rendering, the suspension reason), `change_request_standard_change_customer_test.go` (the customer
+check before the previous system is called), `handler/standard_change_handler_test.go` (the optional
+suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`).

@@ -62,6 +62,7 @@ import {
   useDecideStandardChangeProposal,
   useGetStandardChangeProposal,
   useSearchClosedChangeRequestsForSelect,
+  useSearchStandardChangeCustomersForSelect,
   useSubmitStandardChangeProposal,
   useUpdateStandardChangeProposal,
   useWithdrawStandardChangeProposal,
@@ -82,6 +83,7 @@ import {
 } from "@features/csm-operations/utils/changeRequests";
 import {
   appendPlaceholderToHtml,
+  customerAccountPath,
   hasParameterIssues,
   insertPlaceholderAt,
   isStandardChangeProposalFinal,
@@ -89,6 +91,8 @@ import {
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
+  standardChangeProposalCustomerEditable,
+  standardChangeProposalCustomerFixedReason,
   standardChangeProposalGaps,
   standardChangeProposalKindLabel,
   standardChangeProposalPath,
@@ -105,6 +109,7 @@ import type {
   BeChangeRequestImpact,
   BeChangeRequestRisk,
   BeChangeRequestSearchView,
+  BeEntityRef,
   BeStandardChangeContent,
   BeStandardChangeEvidence,
   BeStandardChangeParameter,
@@ -142,6 +147,10 @@ type RichField = (typeof RICH_FIELDS)[number]["field"];
 /** The editable copy of a draft. */
 interface ProposalForm {
   name: string;
+  /** The customer (account) the proposal is for; "" while a new draft names none. */
+  accountId: string;
+  /** Its name, for the picker before a search has run. */
+  customerName: string;
   rationale: string;
   subject: string;
   description: string;
@@ -164,6 +173,8 @@ interface ProposalForm {
 function formFromProposal(p: BeStandardChangeProposal): ProposalForm {
   return {
     name: p.name ?? "",
+    accountId: p.customer?.id ?? "",
+    customerName: p.customer?.name ?? "",
     rationale: p.rationale ?? "",
     subject: p.subject ?? "",
     description: p.description ?? "",
@@ -189,14 +200,18 @@ const richOut = (html: string): string => (isBlankHtml(html) ? "" : html);
 /**
  * The PATCH for a draft: every field the form holds (absent = unchanged on the
  * server, so a field the form never set is left out). A retirement only carries
- * its name, rationale and evidence: the template it retires is what it is.
+ * its name, rationale and evidence: the template it retires is what it is. The
+ * customer is sent only where it can be named (`customerEditable`: a new
+ * proposal that did not start from a change request) and once one is chosen;
+ * elsewhere it is fixed and left out.
  */
-function buildProposalPatch(kind: string, form: ProposalForm): BeUpdateStandardChangeProposalPayload {
+function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: boolean): BeUpdateStandardChangeProposalPayload {
   const patch: BeUpdateStandardChangeProposalPayload = {
     name: form.name.trim(),
     rationale: richOut(form.rationale),
     evidenceChangeRequestIds: form.evidence.map((e) => e.id),
   };
+  if (customerEditable && form.accountId) patch.accountId = form.accountId;
   if (kind === "retire") return patch;
   patch.subject = form.subject.trim();
   for (const { field } of RICH_FIELDS) patch[field] = richOut(form[field]);
@@ -305,11 +320,18 @@ function EvidenceTable({
   onOpen,
   onRemove,
   disabled,
+  customerId,
 }: {
-  evidence: ProposalForm["evidence"];
+  evidence: Array<ProposalForm["evidence"][number] & Pick<Partial<BeStandardChangeEvidence>, "customer">>;
   onOpen: (id: string) => void;
   onRemove?: (id: string) => void;
   disabled?: boolean;
+  /**
+   * The proposal's customer: a change request whose project now belongs to
+   * another customer (or to none) is marked, since the CAB cannot approve the
+   * proposal while it cites one.
+   */
+  customerId?: string | null;
 }): JSX.Element {
   if (evidence.length === 0) {
     return (
@@ -338,7 +360,16 @@ function EvidenceTable({
                     {e.number || e.id}
                   </Link>
                 </TableCell>
-                <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{e.subject || "—"}</TableCell>
+                <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>
+                  {e.subject || "—"}
+                  {customerId && e.customer !== undefined && e.customer?.id?.toLowerCase() !== customerId.toLowerCase() && (
+                    <Typography variant="caption" color="warning.main" component="div">
+                      {e.customer?.name
+                        ? `Now a change request of another customer (${e.customer.name})`
+                        : "Now a change request of no customer"}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(e.closedOn)}</TableCell>
                 {onRemove && (
                   <TableCell align="right">
@@ -376,13 +407,32 @@ function ProposalEditor({
   // (a placeholder inserted): the editor reads its value only when it mounts.
   const [editorRev, setEditorRev] = useState<Record<string, number>>({});
   const [sampleValues, setSampleValues] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState<{ severity: "success" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ severity: "success" | "error" | "info"; text: string } | null>(null);
   const subjectRef = useRef<HTMLInputElement>(null);
   const rollbackRef = useRef<HTMLInputElement>(null);
   const update = useUpdateStandardChangeProposal();
   const submit = useSubmitStandardChangeProposal();
   const isRetire = proposal.kind === "retire";
   const busy = update.isPending || submit.isPending;
+  const customerEditable = standardChangeProposalCustomerEditable(proposal);
+  const customerFixedReason = standardChangeProposalCustomerFixedReason(proposal);
+
+  // A standard change is one customer's, and its evidence must be that
+  // customer's closed change requests: naming another customer drops the
+  // evidence already cited, and says so.
+  const changeCustomer = (next: string, item?: BeEntityRef): void => {
+    if (next === form.accountId) return;
+    const dropped = form.evidence.length;
+    setForm((f) => ({ ...f, accountId: next, customerName: item?.name ?? "", evidence: [] }));
+    setNotice(
+      dropped > 0
+        ? {
+            severity: "info",
+            text: `The evidence was removed (${dropped} change request${dropped === 1 ? "" : "s"}): it must be closed change requests of the proposal's customer. Add ${item?.name ?? "the new customer"}'s.`,
+          }
+        : null,
+    );
+  };
 
   const set = <K extends keyof ProposalForm>(key: K, value: ProposalForm[K]): void =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -408,7 +458,7 @@ function ProposalEditor({
   const save = (): void => {
     setNotice(null);
     update.mutate(
-      { id: proposal.id, patch: buildProposalPatch(proposal.kind, form) },
+      { id: proposal.id, patch: buildProposalPatch(proposal.kind, form, customerEditable) },
       {
         onSuccess: () => setNotice({ severity: "success", text: "Saved." }),
         onError: (err) => setNotice({ severity: "error", text: errorText(err, "Could not save the proposal.") }),
@@ -420,7 +470,7 @@ function ProposalEditor({
   const saveAndSubmit = async (): Promise<void> => {
     setNotice(null);
     try {
-      await update.mutateAsync({ id: proposal.id, patch: buildProposalPatch(proposal.kind, form) });
+      await update.mutateAsync({ id: proposal.id, patch: buildProposalPatch(proposal.kind, form, customerEditable) });
     } catch (err) {
       setNotice({ severity: "error", text: errorText(err, "Could not save the proposal.") });
       return;
@@ -472,6 +522,31 @@ function ProposalEditor({
           onChange={(e) => set("name", e.target.value.slice(0, NAME_MAX))}
           helperText={isRetire ? "The template being retired." : "The template's name in the catalogue."}
         />
+        {customerEditable ? (
+          <AsyncEntitySelect<BeEntityRef>
+            id="std-proposal-customer"
+            label="Customer"
+            placeholder="Search customers…"
+            required
+            value={form.accountId}
+            knownLabel={form.customerName || undefined}
+            onChange={changeCustomer}
+            disabled={busy}
+            hideClearButton
+            useSearch={useSearchStandardChangeCustomersForSelect}
+            getId={(a) => a.id}
+            getLabel={(a) => a.name}
+            helperText="Required. The customer the template is for: it is used only for their projects, and its evidence must be their closed change requests."
+          />
+        ) : (
+          <TextField
+            label="Customer"
+            size="small"
+            value={form.customerName || "—"}
+            helperText={customerFixedReason ?? undefined}
+            slotProps={{ input: { readOnly: true }, htmlInput: { "aria-readonly": true } }}
+          />
+        )}
         <ExpandableRichTextField
           id="std-proposal-rationale"
           label="Rationale"
@@ -700,7 +775,8 @@ function ProposalEditor({
 
       <Section title="Evidence">
         <Typography variant="body2" color="text.secondary">
-          Closed change requests that show this change has been done safely before. The CAB judges them.
+          Closed change requests of the proposal&apos;s customer that show this change has been done safely before. The
+          CAB judges them.
         </Typography>
         <EvidenceTable
           evidence={form.evidence}
@@ -712,7 +788,7 @@ function ProposalEditor({
           <AsyncEntitySelect<BeChangeRequestSearchView>
             id="std-proposal-evidence"
             label="Add a closed change request"
-            placeholder="Search closed change requests…"
+            placeholder={form.customerName ? `Search ${form.customerName}'s closed change requests…` : "Search closed change requests…"}
             value=""
             onChange={(next, item) => {
               if (!next || form.evidence.some((e) => e.id === next)) return;
@@ -721,8 +797,10 @@ function ProposalEditor({
                 { id: next, number: item?.number ?? next, subject: item?.subject ?? "", closedOn: null },
               ]);
             }}
-            disabled={busy}
+            disabled={busy || !form.accountId}
+            helperText={form.accountId ? undefined : "Name the customer first: the evidence must be that customer's closed change requests."}
             useSearch={useSearchClosedChangeRequestsForSelect}
+            searchExtra={form.accountId || undefined}
             getId={(cr) => cr.id}
             getLabel={(cr) => [cr.number, cr.subject].filter(Boolean).join(" — ") || cr.id}
             excludeIds={form.evidence.map((e) => e.id)}
@@ -970,27 +1048,41 @@ export default function StandardChangeProposalPage(): JSX.Element {
             {`Proposed by ${personLabel(proposal.proposedBy)} on ${formatDateTime(proposal.createdOn)}`}
             {proposal.submittedOn ? `; sent to the CAB ${formatDateTime(proposal.submittedOn)}` : ""}
           </Typography>
-          {(proposal.template || proposal.sourceChangeRequest) && (
-            <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-              {proposal.template && (
-                <Typography variant="body2">
-                  Template:{" "}
-                  <Link component="button" variant="body2" onClick={() => navigate(standardChangeTemplatePath(proposal.template!.id), { state: { from: here } })}>
-                    {proposal.template.name}
-                  </Link>
-                  {proposal.baseVersion != null && ` (from version ${proposal.baseVersion})`}
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            <Typography variant="body2">
+              Customer:{" "}
+              {proposal.customer ? (
+                <Link
+                  component="button"
+                  variant="body2"
+                  onClick={() => navigate(customerAccountPath(proposal.customer!.id), { state: { from: here } })}
+                >
+                  {proposal.customer.name}
+                </Link>
+              ) : (
+                <Typography component="span" variant="body2" color="text.secondary">
+                  not named yet
                 </Typography>
               )}
-              {proposal.sourceChangeRequest && (
-                <Typography variant="body2">
-                  Started from:{" "}
-                  <Link component="button" variant="body2" onClick={() => openChangeRequest(proposal.sourceChangeRequest!.id)}>
-                    {proposal.sourceChangeRequest.name}
-                  </Link>
-                </Typography>
-              )}
-            </Box>
-          )}
+            </Typography>
+            {proposal.template && (
+              <Typography variant="body2">
+                Template:{" "}
+                <Link component="button" variant="body2" onClick={() => navigate(standardChangeTemplatePath(proposal.template!.id), { state: { from: here } })}>
+                  {proposal.template.name}
+                </Link>
+                {proposal.baseVersion != null && ` (from version ${proposal.baseVersion})`}
+              </Typography>
+            )}
+            {proposal.sourceChangeRequest && (
+              <Typography variant="body2">
+                Started from:{" "}
+                <Link component="button" variant="body2" onClick={() => openChangeRequest(proposal.sourceChangeRequest!.id)}>
+                  {proposal.sourceChangeRequest.name}
+                </Link>
+              </Typography>
+            )}
+          </Box>
         </Box>
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
           {!editing && proposal.canWithdraw && (
@@ -1078,7 +1170,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
             </Section>
           )}
           <Section title="Evidence">
-            <EvidenceTable evidence={proposal.evidence ?? []} onOpen={openChangeRequest} />
+            <EvidenceTable evidence={proposal.evidence ?? []} onOpen={openChangeRequest} customerId={proposal.customer?.id} />
           </Section>
         </>
       )}

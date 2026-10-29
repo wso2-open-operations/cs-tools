@@ -89,7 +89,18 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
     refetch: refetchTemplateMock,
   }),
   useSearchActiveStandardChangeTemplatesForSelect: () => ({ data: [], isFetching: false, isError: false }),
+  // A project's customer (GET /projects/{id}): PROJECT_CUSTOMERS, per project id.
+  useProjectCustomer: (projectId: string | undefined) =>
+    projectId && projectId in PROJECT_CUSTOMERS
+      ? { data: PROJECT_CUSTOMERS[projectId], isSuccess: true, isError: false }
+      : { data: undefined, isSuccess: false, isError: false },
 }));
+// Each project's customer (account); proj-c has none recorded.
+const PROJECT_CUSTOMERS: Record<string, { id: string; name: string } | null> = {
+  "proj-a": { id: "acct-a", name: "Acme Corp" },
+  "proj-b": { id: "acct-b", name: "Beta Corp" },
+  "proj-c": null,
+};
 // CreateChangeRequestPage imports BackendApiError from the real API client
 // module, which reads window.config at module load and throws outside a
 // configured runtime. Mock it with a real class (so `instanceof` still
@@ -114,28 +125,40 @@ vi.mock("@api/backend/client", () => ({
 const PICKED_ITEMS: Record<string, { id: string; name: string }> = {};
 vi.mock("@components/AsyncEntitySelect", () => ({
   default: ({
+    id,
     label,
     value,
     knownLabel,
     required,
+    disabled,
     helperText,
+    searchExtra,
     onChange,
   }: {
+    id: string;
     label: string;
     value: string;
     knownLabel?: string;
     required?: boolean;
+    disabled?: boolean;
     helperText?: string;
+    searchExtra?: string;
     onChange: (next: string, item?: { id: string; name: string }) => void;
   }) => (
-    <input
-      aria-label={label}
-      data-known-label={knownLabel ?? ""}
-      data-helper-text={helperText ?? ""}
-      required={required}
-      value={value}
-      onChange={(e) => onChange(e.target.value, PICKED_ITEMS[e.target.value])}
-    />
+    <>
+      <input
+        aria-label={label}
+        aria-describedby={helperText ? `${id}-helper` : undefined}
+        data-known-label={knownLabel ?? ""}
+        data-helper-text={helperText ?? ""}
+        data-search-extra={searchExtra ?? ""}
+        disabled={disabled}
+        required={required}
+        value={value}
+        onChange={(e) => onChange(e.target.value, PICKED_ITEMS[e.target.value])}
+      />
+      {helperText && <span id={`${id}-helper`}>{helperText}</span>}
+    </>
   ),
 }));
 // The Customer Project picker is a generic async project search; stubbed as a
@@ -146,19 +169,24 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
   default: ({
     label,
     value,
-    required,
+    accountId,
     helperText,
+    required,
     onChange,
   }: {
     label: string;
     value: string;
-    required?: boolean;
+    accountId?: string;
     helperText?: string;
+    required?: boolean;
     onChange: (next: string, name?: string) => void;
   }) => (
     <input
       aria-label={label}
       data-helper-text={helperText ?? ""}
+      // The customer the real picker narrows its search to (server-side).
+      data-account-id={accountId ?? ""}
+      data-helper={helperText ?? ""}
       required={required}
       value={value}
       onChange={(e) => onChange(e.target.value, PROJECT_NAMES[e.target.value])}
@@ -2140,6 +2168,8 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     number: "STD0000001",
     name: "Rotate a TLS certificate",
     state: "active",
+    // A template is one customer's: Acme Corp, the customer of proj-a.
+    customer: { id: "acct-a", name: "Acme Corp" },
     owner: null,
     currentVersion: VERSION,
     reviewRequired: false,
@@ -2188,6 +2218,11 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     templateFixture = undefined;
   });
 
+  /** The Customer Project, whose customer (account) decides which templates can be used. */
+  function pickProject(id = "proj-a"): void {
+    fireEvent.change(screen.getByLabelText("Customer Project"), { target: { value: id } });
+  }
+
   function pickTemplate(id = "tpl-1"): void {
     fireEvent.change(screen.getByRole("textbox", { name: "Standard change template" }), { target: { value: id } });
   }
@@ -2225,6 +2260,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("renders one change specifics input per parameter, by type", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     const specifics = screen.getByRole("group", { name: /change specifics/i });
     const host = within(specifics).getByRole("textbox", { name: /^host/i });
@@ -2242,6 +2278,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("shows what the template specifies read-only, rendered with the values as they are typed", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     const region = preview();
     expect(within(region).getByText(/version 2/i)).toBeInTheDocument();
@@ -2261,6 +2298,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("sends exactly the template, the version shown and the change specifics, and none of the template's fields", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fillSpecifics();
     fireEvent.change(screen.getByRole("textbox", { name: /^notes/i }), { target: { value: "   " } });
@@ -2273,6 +2311,8 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
       standardChangeTemplateVersionId: "ver-2",
       // Declared keys only, trimmed; a blank optional value is left out.
       standardChangeParameters: { host: "gw-1.example.com", count: "3", env: "production" },
+      // A template is raised only for a project of its own customer.
+      projectId: "proj-a",
     });
     for (const field of TEMPLATE_FIELDS) expect(payload, field).not.toHaveProperty(field);
   });
@@ -2280,6 +2320,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("sends the fields the template does not specify beside it", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fillSpecifics();
     fireEvent.change(screen.getByLabelText("Assignment group"), { target: { value: "grp-1" } });
@@ -2294,6 +2335,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("holds the create back and says what is missing when a required value is blank or malformed", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fireEvent.change(screen.getByRole("textbox", { name: /^endpoints/i }), { target: { value: "three" } });
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
@@ -2312,6 +2354,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("clears the change specifics when another template is picked", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate("tpl-1");
     fillSpecifics();
     expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-1.example.com");
@@ -2336,6 +2379,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     templateFixture = { ...TEMPLATE, state };
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     expect(screen.getByText(new RegExp(`this template is ${state}`, "i"))).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: /change specifics/i })).not.toBeInTheDocument();
@@ -2346,6 +2390,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     const { BackendApiError } = await import("@api/backend/client");
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fillSpecifics();
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
@@ -2371,6 +2416,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     const { BackendApiError } = await import("@api/backend/client");
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fillSpecifics();
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
@@ -2387,6 +2433,8 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
       standardChangeTemplateId: "tpl-1",
       standardChangeTemplateLabel: "STD0000001 — Rotate a TLS certificate",
       standardChangeParameters: { host: "gw-9", count: "2", env: "staging", gone: "a key the current version dropped" },
+      projectId: "proj-a",
+      projectLabel: "Acme Project",
     };
     render(<CreateChangeRequestPage />);
     expect(screen.getByText(/copied the standard change template and its change specifics/i)).toBeInTheDocument();
@@ -2401,6 +2449,7 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
   it("restores the template and the change specifics from an in-progress draft", () => {
     const { unmount } = render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fireEvent.change(screen.getByRole("textbox", { name: /^host/i }), { target: { value: "gw-2" } });
     unmount();
@@ -2409,9 +2458,161 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-2");
   });
 
+  describe("a template is one customer's: the Customer Project's", () => {
+    const templateField = (): HTMLElement => screen.getByRole("textbox", { name: "Standard change template" });
+    const createButton = (): HTMLElement => screen.getByRole("button", { name: /create change request/i });
+
+    it("keeps the template picker disabled, with the reason, until a project is chosen", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      expect(templateField()).toBeDisabled();
+      expect(templateField()).toHaveAccessibleDescription(/select the customer project first/i);
+      expect(templateField()).toHaveAccessibleDescription(/belongs to one customer and is used only for that customer's projects/i);
+      expect(screen.getByLabelText("Customer Project")).toBeRequired();
+      expect(createButton()).toBeDisabled();
+    });
+
+    it("lists only the active templates of the project's customer once a project is chosen", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      pickProject("proj-a");
+      expect(templateField()).toBeEnabled();
+      expect(templateField()).toHaveAttribute("data-search-extra", "acct-a");
+      expect(templateField()).toHaveAccessibleDescription(/acme corp's active templates only/i);
+      pickProject("proj-b");
+      expect(templateField()).toHaveAttribute("data-search-extra", "acct-b");
+    });
+
+    it("offers no template for a project with no customer recorded", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      pickProject("proj-c");
+      expect(templateField()).toBeDisabled();
+      expect(templateField()).toHaveAccessibleDescription(/this project has no customer recorded/i);
+    });
+
+    it("clears the template and its values, with a notice, when the project changes to another customer's", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      pickProject("proj-a");
+      pickTemplate();
+      fillSpecifics();
+      pickProject("proj-b");
+      expect(templateField()).toHaveValue("");
+      expect(screen.queryByRole("group", { name: /change specifics/i })).not.toBeInTheDocument();
+      const notice = screen.getByText(
+        /the template STD0000001 — Rotate a TLS certificate was cleared, with its change specifics: it is Acme Corp's, and Beta Project is Beta Corp's/i,
+      );
+      expect(notice.closest('[role="status"]')).not.toBeNull();
+      expect(createButton()).toBeDisabled();
+      // A template of the new customer starts with no values from the old one.
+      templateFixture = { ...TEMPLATE, id: "tpl-9", customer: { id: "acct-b", name: "Beta Corp" } };
+      pickTemplate("tpl-9");
+      expect(screen.queryByText(/was cleared, with its change specifics/i)).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("");
+    });
+
+    it("says when the new project has no customer at all", () => {
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      pickProject("proj-a");
+      pickTemplate();
+      pickProject("proj-c");
+      expect(templateField()).toHaveValue("");
+      expect(screen.getByText(/it is Acme Corp's, and the selected project has no customer recorded/i)).toBeInTheDocument();
+    });
+
+    it("keeps the template and its values when the project changes to another of the same customer's", () => {
+      PROJECT_CUSTOMERS["proj-a2"] = { id: "acct-a", name: "Acme Corp" };
+      try {
+        render(<CreateChangeRequestPage />);
+        selectType("Standard");
+        pickProject("proj-a");
+        pickTemplate();
+        fillSpecifics();
+        pickProject("proj-a2");
+        expect(templateField()).toHaveValue("tpl-1");
+        expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-1.example.com");
+        expect(screen.queryByText(/was cleared/i)).not.toBeInTheDocument();
+        fireEvent.click(createButton());
+        expect(postChangeRequestMutateMock.mock.calls[0]![0]).toMatchObject({ projectId: "proj-a2", standardChangeTemplateId: "tpl-1" });
+      } finally {
+        delete PROJECT_CUSTOMERS["proj-a2"];
+      }
+    });
+
+    it("narrows the project to the preselected template's customer and asks for one before Create", () => {
+      locationSearch = "?standardChangeTemplateId=tpl-1";
+      render(<CreateChangeRequestPage />);
+      const project = screen.getByLabelText("Customer Project");
+      expect(project).toHaveAttribute("data-account-id", "acct-a");
+      expect(project).toHaveAttribute("data-helper", expect.stringMatching(/projects of acme corp, the customer of STD0000001/i));
+      expect(screen.getByText("Select a Customer Project of Acme Corp to continue.")).toBeInTheDocument();
+      expect(createButton()).toBeDisabled();
+      pickProject("proj-a");
+      // Chosen: the picker is no longer narrowed, so another customer's project can be picked (and clears the template).
+      expect(project).toHaveAttribute("data-account-id", "");
+      expect(screen.queryByText("Select a Customer Project of Acme Corp to continue.")).not.toBeInTheDocument();
+      fillSpecifics();
+      expect(createButton()).toBeEnabled();
+      fireEvent.click(createButton());
+      expect(postChangeRequestMutateMock.mock.calls[0]![0]).toMatchObject({ projectId: "proj-a", standardChangeTemplateId: "tpl-1" });
+    });
+
+    it("does not narrow the project picker for a Normal change", () => {
+      locationSearch = "";
+      render(<CreateChangeRequestPage />);
+      selectType("Normal");
+      expect(screen.getByLabelText("Customer Project")).toHaveAttribute("data-account-id", "");
+      expect(screen.getByLabelText("Customer Project")).not.toBeRequired();
+    });
+
+    it("refuses a template with no customer recorded up front", () => {
+      templateFixture = { ...TEMPLATE, customer: null };
+      locationSearch = "?standardChangeTemplateId=tpl-1";
+      render(<CreateChangeRequestPage />);
+      expect(screen.getByText(/this template has no customer recorded/i)).toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: /change specifics/i })).not.toBeInTheDocument();
+      expect(createButton()).toBeDisabled();
+    });
+
+    it("shows a refusal for another customer's project at the template, in the backend's words, not in the banner", async () => {
+      const { BackendApiError } = await import("@api/backend/client");
+      render(<CreateChangeRequestPage />);
+      selectType("Standard");
+      pickProject("proj-a");
+      pickTemplate();
+      fillSpecifics();
+      fireEvent.click(createButton());
+      const [, options] = postChangeRequestMutateMock.mock.calls[0]!;
+      const message =
+        "the standard change template \"Rotate a TLS certificate\" is Acme Corp's and cannot be used for a project of Beta Corp: a template is pre-authorised for its own customer's deployments only";
+      const err = Object.assign(new (BackendApiError as unknown as new (s: number, m: string) => Error)(400, message), {
+        payload: { message, errorCode: "standard_change_template_other_customer" },
+      });
+      act(() => options.onError(err));
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(message);
+      expect(alert).toHaveTextContent(/nothing was created/i);
+      expect(showErrorMock).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
+      // The same request would be refused again: Create waits for another template or project.
+      expect(createButton()).toBeDisabled();
+      PROJECT_CUSTOMERS["proj-a2"] = { id: "acct-a", name: "Acme Corp" };
+      try {
+        pickProject("proj-a2");
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(createButton()).toBeEnabled();
+      } finally {
+        delete PROJECT_CUSTOMERS["proj-a2"];
+      }
+    });
+  });
+
   it("switching back to Normal brings the ordinary form back and sends no template", () => {
     render(<CreateChangeRequestPage />);
     selectType("Standard");
+    pickProject();
     pickTemplate();
     fillSubject("Normal");
     fireEvent.click(screen.getByRole("button", { name: /create change request/i }));

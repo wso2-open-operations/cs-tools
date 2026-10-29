@@ -49,6 +49,7 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useDecideStandardChangeProposal: () => ({ mutate: mocks.decide, isPending: false, isError: false, reset: vi.fn() }),
   useCreateStandardChangeProposal: () => ({ mutate: mocks.create, isPending: false }),
   useSearchClosedChangeRequestsForSelect: () => ({ data: [], isFetching: false, isError: false }),
+  useSearchStandardChangeCustomersForSelect: () => ({ data: [], isFetching: false, isError: false }),
 }));
 // The Lexical editor does not run under jsdom: a textarea stands in, showing the
 // value the field mounted with (as the real editor does) and reporting edits.
@@ -57,13 +58,40 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     <textarea defaultValue={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
   ),
 }));
-// The evidence picker is a plain input reporting the picked change request.
-const PICKED: Record<string, { id: string; number: string; subject: string }> = {
+// The evidence and customer pickers are plain inputs reporting the picked record.
+const PICKED: Record<string, unknown> = {
   "chg-7": { id: "chg-7", number: "CHG0000007", subject: "Rotated the certificate on gw-7" },
+  "acct-2": { id: "acct-2", name: "Other Corp" },
 };
 vi.mock("@components/AsyncEntitySelect", () => ({
-  default: ({ label, onChange }: { label: string; onChange: (next: string, item?: unknown) => void }) => (
-    <input aria-label={label} onChange={(e) => onChange(e.target.value, PICKED[e.target.value])} />
+  default: ({
+    id,
+    label,
+    value,
+    disabled,
+    helperText,
+    searchExtra,
+    onChange,
+  }: {
+    id: string;
+    label: string;
+    value: string;
+    disabled?: boolean;
+    helperText?: string;
+    searchExtra?: string;
+    onChange: (next: string, item?: unknown) => void;
+  }) => (
+    <>
+      <input
+        aria-label={label}
+        aria-describedby={helperText ? `${id}-helper` : undefined}
+        data-value={value}
+        data-search-extra={searchExtra ?? ""}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value, PICKED[e.target.value])}
+      />
+      {helperText && <span id={`${id}-helper`}>{helperText}</span>}
+    </>
   ),
 }));
 
@@ -75,6 +103,7 @@ const DRAFT: BeStandardChangeProposal = {
   kind: "new",
   state: "draft",
   name: "Rotate a TLS certificate",
+  customer: { id: "acct-1", name: "Example Corp" },
   rationale: "<p>Done every quarter without incident.</p>",
   template: null,
   baseVersion: null,
@@ -334,6 +363,90 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     });
   });
 
+  describe("its customer: a standard change is one customer's", () => {
+    /** A new proposal started from nothing (the catalogue's "Propose a standard change"). */
+    const BLANK_NEW: BeStandardChangeProposal = { ...DRAFT, sourceChangeRequest: null, customer: null, evidence: [] };
+    const customerField = (): HTMLElement => screen.getByRole("textbox", { name: /^customer/i });
+    const evidencePicker = (): HTMLElement => screen.getByRole("textbox", { name: "Add a closed change request" });
+
+    it("shows the customer of a proposal started from a change request read-only, with why, and never sends it", () => {
+      renderPage();
+      expect(customerField()).toHaveValue("Example Corp");
+      expect(customerField()).toHaveAttribute("readonly");
+      expect(screen.getByText("The customer of the change request it started from.")).toBeInTheDocument();
+      fireEvent.click(saveButton());
+      expect(lastPatch()).not.toHaveProperty("accountId");
+    });
+
+    it("searches only that customer's closed change requests for evidence", () => {
+      renderPage();
+      expect(evidencePicker()).toBeEnabled();
+      expect(evidencePicker()).toHaveAttribute("data-search-extra", "acct-1");
+    });
+
+    it("asks a new proposal for its customer before evidence and before the CAB", () => {
+      mocks.proposal = BLANK_NEW;
+      renderPage();
+      expect(customerField()).not.toHaveAttribute("readonly");
+      expect(customerField()).toHaveAttribute("data-value", "");
+      expect(customerField()).toHaveAccessibleDescription(/required\. the customer the template is for/i);
+      expect(evidencePicker()).toBeDisabled();
+      expect(evidencePicker()).toHaveAccessibleDescription(/name the customer first/i);
+      expect(screen.getByText(/still needs a customer/i)).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
+      // Saving a draft with no customer yet is fine, and sends none.
+      expect(saveButton()).toBeEnabled();
+      fireEvent.click(saveButton());
+      expect(lastPatch()).not.toHaveProperty("accountId");
+    });
+
+    it("names the customer of a new proposal, which then decides the evidence offered and is sent", () => {
+      mocks.proposal = BLANK_NEW;
+      renderPage();
+      fireEvent.change(customerField(), { target: { value: "acct-2" } });
+      expect(customerField()).toHaveAttribute("data-value", "acct-2");
+      expect(evidencePicker()).toBeEnabled();
+      expect(evidencePicker()).toHaveAttribute("data-search-extra", "acct-2");
+      expect(screen.queryByText(/still needs a customer/i)).not.toBeInTheDocument();
+      expect(submitButton()).toBeEnabled();
+      fireEvent.click(saveButton());
+      expect(lastPatch()).toMatchObject({ accountId: "acct-2", evidenceChangeRequestIds: [] });
+    });
+
+    it("drops the evidence of the previous customer, and says so, when another customer is named", () => {
+      mocks.proposal = { ...DRAFT, sourceChangeRequest: null };
+      renderPage();
+      expect(within(screen.getByRole("table", { name: "Evidence" })).getByText("CHG0000001")).toBeInTheDocument();
+      fireEvent.change(customerField(), { target: { value: "acct-2" } });
+      expect(screen.queryByRole("table", { name: "Evidence" })).not.toBeInTheDocument();
+      expect(screen.getByText("No evidence cited.")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /the evidence was removed \(1 change request\): it must be closed change requests of the proposal's customer\. add other corp's/i,
+      );
+      fireEvent.click(saveButton());
+      expect(lastPatch()).toMatchObject({ accountId: "acct-2", evidenceChangeRequestIds: [] });
+    });
+
+    it("keeps the evidence when the same customer is picked again", () => {
+      mocks.proposal = { ...DRAFT, sourceChangeRequest: null };
+      renderPage();
+      fireEvent.change(customerField(), { target: { value: "acct-1" } });
+      expect(within(screen.getByRole("table", { name: "Evidence" })).getByText("CHG0000001")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it.each(["modify", "retire"] as const)("shows a %s proposal's customer (its template's) read-only", (kind) => {
+      mocks.proposal = { ...DRAFT, kind, sourceChangeRequest: null, template: { id: "tpl-1", name: "Rotate a TLS certificate" } };
+      renderPage();
+      expect(customerField()).toHaveValue("Example Corp");
+      expect(customerField()).toHaveAttribute("readonly");
+      expect(screen.getByText(/the template's customer/i)).toBeInTheDocument();
+      expect(screen.queryByText(/still needs a customer/i)).not.toBeInTheDocument();
+      fireEvent.click(saveButton());
+      expect(lastPatch()).not.toHaveProperty("accountId");
+    });
+  });
+
   it("withdraws after a confirmation", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
@@ -365,6 +478,40 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     const approvers = screen.getByRole("table", { name: "CAB approvers" });
     expect(within(approvers).getByText("Carol Cab")).toBeInTheDocument();
     expect(within(approvers).getByText("(you)")).toBeInTheDocument();
+  });
+
+  it("says whose standard change it is, linking to the customer", () => {
+    mocks.proposal = IN_REVIEW;
+    renderPage();
+    const link = screen.getByRole("button", { name: "Example Corp" });
+    expect(link.closest("p")).toHaveTextContent("Customer: Example Corp");
+    fireEvent.click(link);
+    expect(mocks.navigate).toHaveBeenCalledWith("/customers/accounts/acct-1", {
+      state: { from: "/operations/standard-change-proposals/scp-1" },
+    });
+  });
+
+  it("marks evidence that is now another customer's, which the CAB cannot approve with", () => {
+    mocks.proposal = {
+      ...IN_REVIEW,
+      evidence: [
+        { ...IN_REVIEW.evidence![0], customer: { id: "ACCT-1", name: "Example Corp" } },
+        { id: "chg-2", number: "CHG0000002", subject: "Moved", state: "closed", closedOn: null, customer: { id: "acct-2", name: "Other Corp" } },
+        { id: "chg-3", number: "CHG0000003", subject: "Orphaned", state: "closed", closedOn: null, customer: null },
+      ],
+    };
+    renderPage();
+    const table = screen.getByRole("table", { name: "Evidence" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows[1]).not.toHaveTextContent(/now a change request/i);
+    expect(rows[2]).toHaveTextContent("Now a change request of another customer (Other Corp)");
+    expect(rows[3]).toHaveTextContent("Now a change request of no customer");
+  });
+
+  it("says when a proposal has not named its customer yet", () => {
+    mocks.proposal = { ...IN_REVIEW, customer: null };
+    renderPage();
+    expect(screen.getByText("not named yet").closest("p")).toHaveTextContent("Customer: not named yet");
   });
 
   it("needs a comment to reject", () => {

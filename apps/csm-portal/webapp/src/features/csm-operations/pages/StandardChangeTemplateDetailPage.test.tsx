@@ -104,6 +104,7 @@ const TEMPLATE = {
   number: "STD0000001",
   name: "Rotate a TLS certificate",
   state: "active",
+  customer: { id: "acct-1", name: "Example Corp" },
   owner: { id: "u-1", name: "Jane Doe", email: "jane@example.com" },
   currentVersion: CURRENT,
   reviewRequired: false,
@@ -171,6 +172,28 @@ describe("StandardChangeTemplateDetailPage — content", () => {
     fireEvent.click(screen.getByRole("button", { name: /back to the current version/i }));
     expect(screen.queryByText(/not the current version/i)).not.toBeInTheDocument();
     expect(mocks.versionCalls.at(-1)).toEqual(["tpl-1", undefined]);
+  });
+});
+
+describe("StandardChangeTemplateDetailPage — its customer", () => {
+  it("says whose template it is, linking to the customer, and lists the customer beside the owner", () => {
+    renderPage();
+    const link = screen.getByRole("button", { name: "Example Corp" });
+    expect(link.closest("p")).toHaveTextContent("For Example Corp: used only for this customer's projects.");
+    fireEvent.click(link);
+    expect(mocks.navigate).toHaveBeenCalledWith("/customers/accounts/acct-1", HERE);
+    expect(screen.getByText("Customer").nextElementSibling).toHaveTextContent("Example Corp");
+    expect(screen.queryByRole("region", { name: "No customer recorded" })).not.toBeInTheDocument();
+  });
+
+  it("says an older template with no customer recorded cannot be used, and offers no change request from it", () => {
+    mocks.template = { ...TEMPLATE, customer: null };
+    renderPage();
+    const note = screen.getByRole("region", { name: "No customer recorded" });
+    expect(note).toHaveTextContent(/belongs to one customer and is used only for that customer's projects/i);
+    expect(note).toHaveTextContent(/no change request can be raised from it/i);
+    expect(screen.getByRole("button", { name: /raise a change request/i })).toBeDisabled();
+    expect(screen.getByText("Customer").nextElementSibling).toHaveTextContent("—");
   });
 });
 

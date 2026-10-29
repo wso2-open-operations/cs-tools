@@ -1926,7 +1926,7 @@ export interface BeProject {
 export interface BeProjectSearchPayload {
   pagination?: BePagination;
   searchQuery?: string;
-  /** Filter to projects belonging to this account (ServiceNow data source only). */
+  /** Filter to projects belonging to this account (both data sources). */
   accountId?: string;
   /** Excludes projects whose closure state is any of the given values, e.g.
    *  ["Restricted", "Suspended"] (ServiceNow data source only). */
@@ -5599,6 +5599,13 @@ export interface BeStandardChangeTemplate {
   number: string;
   name: string;
   state: BeStandardChangeTemplateState;
+  /**
+   * The customer (account) the template belongs to: a change request is raised
+   * from it only for one of this customer's projects, and its name is unique
+   * among this customer's live templates. Null only on an older template whose
+   * customer could not be told (it cannot be changed or used until one is set).
+   */
+  customer?: BeEntityRef | null;
   owner: BeUserReference | null;
   /** The version a new change request follows. */
   currentVersion: BeStandardChangeTemplateVersion | null;
@@ -5636,6 +5643,8 @@ export interface BeSearchStandardChangeTemplatesPayload {
   states?: BeStandardChangeTemplateState[];
   /** Matches the name or number, ignoring case. */
   query?: string;
+  /** Narrows the list to one customer's (account's) templates. */
+  accountId?: string;
   pagination: BePagination;
 }
 
@@ -5653,6 +5662,8 @@ export interface BeStandardChangeEvidence {
   subject: string;
   state: string | null;
   closedOn: string | null;
+  /** The change request's customer now (its project's account); null when it has none. */
+  customer?: BeEntityRef | null;
 }
 
 /** One CAB member asked to decide a proposal. */
@@ -5675,12 +5686,28 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   state: BeStandardChangeProposalState;
   /** The template's name. */
   name: string;
+  /**
+   * The customer (account) the proposal is for: what a new proposal names, or
+   * takes from the change request it starts from or the proposal it copies; the
+   * template's for a modification or retirement. Null on a new draft that has
+   * not named one yet (it cannot be submitted).
+   */
+  customer?: BeEntityRef | null;
   rationale: string | null;
   /** The template acted on (modify, retire), or the one an approved new proposal created. */
   template: BeEntityRef | null;
   /** The version a modification was started from. */
   baseVersion: number | null;
+  /**
+   * The closed change request a new proposal started from (or that a copy carried
+   * over); it must be a closed change request of the proposal's customer.
+   */
   sourceChangeRequest: BeEntityRef | null;
+  /**
+   * The proposal a new draft was copied from (`name` is its number); null or
+   * absent when it was not copied. A copy keeps the copied proposal's customer.
+   */
+  copiedFrom?: BeEntityRef | null;
   evidence: BeStandardChangeEvidence[] | null;
   approvers: BeStandardChangeProposalApprover[] | null;
   proposedBy: BeUserReference | null;
@@ -5708,11 +5735,22 @@ export interface BeCreateStandardChangeProposalPayload {
   /** new: another proposal whose content the draft starts from. */
   copyFromProposalId?: string;
   name?: string;
+  /**
+   * new: the customer (account) it is for. One started from a change request
+   * takes that change request's customer, a copy the copied proposal's, and a
+   * modify / retire its template's: a different one is a 400.
+   */
+  accountId?: string;
 }
 
 /** `PATCH /standard-change-proposals/{id}`: absent fields are left as they are; the two lists replace the whole list. */
 export interface BeUpdateStandardChangeProposalPayload {
   name?: string;
+  /**
+   * Names or changes the customer of a new draft that did not start from a
+   * change request; its evidence must then be that customer's (else a 400).
+   */
+  accountId?: string;
   rationale?: string;
   subject?: string;
   description?: string;
@@ -5743,6 +5781,8 @@ export interface BeSearchStandardChangeProposalsPayload {
   states?: BeStandardChangeProposalState[];
   kinds?: BeStandardChangeProposalKind[];
   templateId?: string;
+  /** Narrows the list to the proposals for one customer (account). */
+  accountId?: string;
   proposedByMe?: boolean;
   /** In CAB review, with a pending approval of the caller's. */
   awaitingMyDecision?: boolean;
@@ -5756,6 +5796,8 @@ export interface BeStandardChangeProposalSummary {
   kind: BeStandardChangeProposalKind;
   state: BeStandardChangeProposalState;
   name: string;
+  /** Null on a new draft that has not named its customer yet. */
+  customer?: BeEntityRef | null;
   template: BeEntityRef | null;
   proposedBy: BeUserReference | null;
   createdOn: string;
@@ -5776,6 +5818,15 @@ export interface BeChangeRequestStandardChange {
   template: BeEntityRef;
   /** The template's STD number. */
   templateNumber: string;
+  /** The template's customer, which is the account of this change request's project. */
+  customer?: BeEntityRef | null;
+  /**
+   * True when the change request's project is no longer a project of the
+   * template's customer (the project sync moved it to another account after the
+   * change was raised). Request Approval is then refused (400
+   * `standard_change_template_other_customer`).
+   */
+  customerMismatch?: boolean;
   versionId: string;
   version: number;
   /** The version's parameters with the values the change request was raised with. */

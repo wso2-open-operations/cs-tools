@@ -92,10 +92,11 @@ func TestChangeRequestStandardChangeIntegration(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(pool.Close)
-			crs := WithStandardChangeTemplates(
-				NewChangeRequestService(repository.NewChangeRequestRepository(repository.NewScoped(pool)), repository.NewUserRepository(pool)),
-				repository.NewStandardChangeRepository(repository.NewScoped(pool)))
+			crRepo := repository.NewChangeRequestRepository(repository.NewScoped(pool))
+			stdRepo := repository.NewStandardChangeRepository(repository.NewScoped(pool))
+			crs := WithStandardChangeTemplates(NewChangeRequestService(crRepo, repository.NewUserRepository(pool)), stdRepo)
 			stdChangeRequestFlow(t, env, crs)
+			t.Run("raised only for the template's customer", func(t *testing.T) { stdChangeRequestCustomer(t, env, crs, crRepo, stdRepo) })
 		})
 	}
 }
@@ -107,8 +108,9 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	normal := domain.ChangeRequestTypeNormal
 	group := cabGroupID
 	params := map[string]string{"cluster": " aks-9 ", "env": "prod"}
+	projectA := env.projects["A"]
 	raise := func(extra func(*domain.CreateChangeRequestRequest)) (domain.CreateChangeRequestResponse, error) {
-		req := domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, StandardChangeTemplateID: &tpl.ID, StandardChangeParameters: params}
+		req := domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, ProjectID: &projectA, StandardChangeTemplateID: &tpl.ID, StandardChangeParameters: params}
 		if extra != nil {
 			extra(&req)
 		}
@@ -152,6 +154,9 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if sc == nil || sc.Template.ID != tpl.ID || sc.VersionID != tpl.CurrentVersion.ID || sc.Version != 1 || len(sc.Parameters) != 2 ||
 		sc.Parameters[0].Value == nil || *sc.Parameters[0].Value != "aks-9" {
 		t.Fatalf("standardChange = %+v", sc)
+	}
+	if sc.Customer == nil || sc.Customer.ID != env.accounts["A"] || sc.Customer.Name != stdTag+" Customer A" {
+		t.Fatalf("standardChange.customer = %+v", sc.Customer)
 	}
 
 	// A proposal's CAB rows live in the change request approval tables, but the
@@ -289,5 +294,135 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	wantCode(t, err, apierror.CodeStandardChangeTemplateUnavailable, "request approval after the template was revised")
 	if c, _ := crs.GetChangeRequest(ctx, third.ChangeRequest.ID); c.StandardChange == nil || c.StandardChange.Version != 1 {
 		t.Fatalf("the change keeps the version it was raised from: %+v", c.StandardChange)
+	}
+}
+
+// stdChangeRequestCustomer: a change request is raised from a template only for a
+// project of the template's customer -- refused in the service (before the
+// previous system is called on dual-write) and again in the create transaction
+// -- and a PATCH never moves it to another customer's project, in any state.
+func stdChangeRequestCustomer(t *testing.T, env *stdEnv, crs ChangeRequestService, crRepo repository.ChangeRequestRepository, stdRepo repository.StandardChangeRepository) {
+	ctx := crCtx(t, stdCAB2)
+	tpl := stdApprovedTemplate(t, env, stdTag+" Customer key rotation")
+	if tpl.Customer == nil || tpl.Customer.ID != env.accounts["A"] {
+		t.Fatalf("the template is customer A's: %+v", tpl.Customer)
+	}
+	standard := domain.ChangeRequestTypeStandard
+	group := cabGroupID
+	params := map[string]string{"cluster": "aks-3", "env": "dev"}
+	req := func(project *string) domain.CreateChangeRequestRequest {
+		return domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, ProjectID: project,
+			StandardChangeTemplateID: &tpl.ID, StandardChangeParameters: params}
+	}
+	pa, pa2, pb := env.projects["A"], env.projects["A2"], env.projects["B"]
+
+	_, err := crs.CreateChangeRequest(ctx, req(&pb))
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "raise customer A's template for customer B's project")
+	_, err = crs.CreateChangeRequest(ctx, req(nil))
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "raise a template for no project")
+
+	// Dual-write: refused before the previous system is called.
+	mirror := &stubMirrorChangeRequestService{
+		createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+			t.Error("the previous system was called for another customer's project")
+			return domain.CreateChangeRequestResponse{}, nil
+		},
+	}
+	dual := WithStandardChangeTemplates(NewChangeRequestServiceWithSNMirror(crRepo, stubUserRepo{}, mirror), stdRepo)
+	_, err = dual.CreateChangeRequest(ctx, req(&pb))
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "dual-write: raise for customer B's project")
+
+	// The create transaction checks it again, whoever calls the repository.
+	direct := req(&pb)
+	direct.Subject = stdTag + " direct"
+	direct.StandardChangeTemplateVersionID = &tpl.CurrentVersion.ID
+	direct.StandardChangeTemplateID, direct.StandardChangeParameters = nil, map[string]string{"cluster": "aks-3", "env": "dev"}
+	_, err = crRepo.CreateChangeRequest(ctx, direct, stdCAB2)
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "the repository's create for customer B's project")
+	var left int
+	if err := env.scoped.QueryRow(repository.WithSystemIdentity(context.Background()),
+		`SELECT COUNT(*) FROM work_item WHERE subject = $1`, stdTag+" direct").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("a refused create left %d work item(s), %v", left, err)
+	}
+
+	// The template's customer's projects: either of them.
+	created, err := crs.CreateChangeRequest(ctx, req(&pa))
+	if err != nil {
+		t.Fatalf("raise for customer A's project: %v", err)
+	}
+	id := created.ChangeRequest.ID
+	if _, err := crs.CreateChangeRequest(ctx, req(&pa2)); err != nil {
+		t.Fatalf("raise for customer A's other project: %v", err)
+	}
+
+	// PATCH: another customer's project is refused in New; another project of the
+	// same customer is not; resending the stored one is accepted.
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{ProjectID: &pb})
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "move to customer B's project in New")
+	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{ProjectID: &pa2}); err != nil {
+		t.Fatalf("move to customer A's other project in New: %v", err)
+	}
+	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{ProjectID: &pa2, WorkNote: stdp("same project")}); err != nil {
+		t.Fatalf("resend the stored project: %v", err)
+	}
+	if cr, _ := crs.GetChangeRequest(ctx, id); !strings.EqualFold(cr.Project.ID, pa2) {
+		t.Fatalf("project after the moves = %+v", cr.Project)
+	}
+
+	// After Request Approval (a standard change is scheduled at once): still
+	// refused with the same code, and the project stays.
+	assess := domain.ChangeRequestStateAssess
+	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{State: &assess}); err != nil {
+		t.Fatalf("request approval: %v", err)
+	}
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{ProjectID: &pb})
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "move to customer B's project when scheduled")
+	if cr, _ := crs.GetChangeRequest(ctx, id); !strings.EqualFold(cr.Project.ID, pa2) {
+		t.Fatalf("a refused move changed the project: %+v", cr.Project)
+	}
+
+	// The Salesforce project sync (the source of truth for projects) is not
+	// blocked: it may move a project to another account after a change request
+	// was raised for it. Request Approval checks the project's account again, and
+	// the detail says when it no longer matches the template's.
+	fresh, err := crs.CreateChangeRequest(ctx, req(&pa2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid := fresh.ChangeRequest.ID
+	if cr, _ := crs.GetChangeRequest(ctx, fid); cr.StandardChange == nil || cr.StandardChange.CustomerMismatch {
+		t.Fatalf("a change request of the template's customer is a mismatch: %+v", cr.StandardChange)
+	}
+	sys := repository.WithSystemIdentity(context.Background())
+	reparent := func(account string) {
+		t.Helper()
+		if _, err := env.scoped.Exec(sys, `UPDATE project SET account_id = $2::uuid WHERE id = $1::uuid`, pa2, account); err != nil {
+			t.Fatalf("re-parent project A2: %v", err)
+		}
+	}
+	reparent(env.accounts["B"])
+	t.Cleanup(func() { reparent(env.accounts["A"]) })
+	for _, which := range []string{fid, id} {
+		cr, err := crs.GetChangeRequest(ctx, which)
+		if err != nil || cr.StandardChange == nil || !cr.StandardChange.CustomerMismatch {
+			t.Fatalf("after the project moved to customer B, standardChange = %+v, %v", cr.StandardChange, err)
+		}
+	}
+	_, err = crs.PatchChangeRequest(ctx, fid, domain.PatchChangeRequestRequest{State: &assess})
+	wantCode(t, err, apierror.CodeStandardChangeTemplateOtherCustomer, "request approval after the project moved to customer B")
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "approval cannot be requested") || !strings.Contains(ve.Msg, "now belongs to another customer") {
+		t.Fatalf("refusal = %v", err)
+	}
+	if cr, _ := crs.GetChangeRequest(ctx, fid); cr.State == nil || *cr.State != string(domain.ChangeRequestStateNew) {
+		t.Fatalf("a refused Request Approval moved the change to %v", cr.State)
+	}
+	// Moved back to the template's customer, it goes ahead.
+	reparent(env.accounts["A"])
+	if cr, _ := crs.GetChangeRequest(ctx, fid); cr.StandardChange == nil || cr.StandardChange.CustomerMismatch {
+		t.Fatalf("back with customer A, standardChange = %+v", cr.StandardChange)
+	}
+	if _, err := crs.PatchChangeRequest(ctx, fid, domain.PatchChangeRequestRequest{State: &assess}); err != nil {
+		t.Fatalf("request approval once the project is customer A's again: %v", err)
 	}
 }

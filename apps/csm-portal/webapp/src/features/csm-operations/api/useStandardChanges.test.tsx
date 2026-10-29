@@ -36,9 +36,11 @@ import {
   useGetStandardChangeProposal,
   useGetStandardChangeTemplate,
   useGetStandardChangeTemplateVersion,
+  useProjectCustomer,
   useResumeStandardChangeTemplate,
   useSearchActiveStandardChangeTemplatesForSelect,
   useSearchClosedChangeRequestsForSelect,
+  useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeProposals,
   useSearchStandardChangeTemplates,
   useSubmitStandardChangeProposal,
@@ -73,16 +75,25 @@ describe("standard change reads", () => {
     expect(postMock).toHaveBeenCalledWith("/standard-change-templates/search", body);
   });
 
-  it("offers only active templates to the create form's picker, with the typed query", async () => {
+  it("offers only the customer's active templates to the create form's picker, with the typed query", async () => {
     postMock.mockResolvedValue({ templates: [{ id: "tpl-1" }], total: 1 });
     const client = newClient();
-    const { result } = renderHook(() => useSearchActiveStandardChangeTemplatesForSelect(" tls ", true), { wrapper: wrapper(client) });
+    const { result } = renderHook(() => useSearchActiveStandardChangeTemplatesForSelect(" tls ", true, "acct-1"), {
+      wrapper: wrapper(client),
+    });
     await waitFor(() => expect(result.current.data).toEqual([{ id: "tpl-1" }]));
     expect(postMock).toHaveBeenCalledWith("/standard-change-templates/search", {
       states: ["active"],
+      accountId: "acct-1",
       query: "tls",
       pagination: { offset: 0, limit: 20 },
     });
+  });
+
+  it("searches no templates without a customer: a template is one customer's", () => {
+    const client = newClient();
+    renderHook(() => useSearchActiveStandardChangeTemplatesForSelect("tls", true, undefined), { wrapper: wrapper(client) });
+    expect(postMock).not.toHaveBeenCalled();
   });
 
   it("does not search for the picker until it is opened", () => {
@@ -120,15 +131,88 @@ describe("standard change reads", () => {
     expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/search", body);
   });
 
-  it("finds evidence among CLOSED change requests only", async () => {
-    postMock.mockResolvedValue({ changeRequests: [{ id: "chg-1" }], total: 1 });
+  it("finds evidence among the CLOSED change requests of the proposal's customer only, by its projects", async () => {
+    postMock.mockImplementation(async (path: string) =>
+      path === "/projects/search"
+        ? { projects: [{ id: "proj-1" }, { id: "proj-2" }], hasMore: false, total: 2 }
+        : { changeRequests: [{ id: "chg-1" }], total: 1 },
+    );
     const client = newClient();
-    const { result } = renderHook(() => useSearchClosedChangeRequestsForSelect("CHG1", true), { wrapper: wrapper(client) });
+    const { result } = renderHook(() => useSearchClosedChangeRequestsForSelect("CHG1", true, "acct-1"), {
+      wrapper: wrapper(client),
+    });
     await waitFor(() => expect(result.current.data).toEqual([{ id: "chg-1" }]));
+    expect(postMock).toHaveBeenCalledWith("/projects/search", { accountId: "acct-1", pagination: { offset: 0, limit: 50 } });
     expect(postMock).toHaveBeenCalledWith("/change-requests/search", {
-      filters: { searchQuery: "CHG1", states: ["closed"] },
+      filters: { searchQuery: "CHG1", states: ["closed"], projectIds: ["proj-1", "proj-2"] },
       pagination: { offset: 0, limit: 20 },
     });
+  });
+
+  it("pages through every project of the customer before searching its change requests", async () => {
+    const page = (from: number, n: number): Array<{ id: string }> =>
+      Array.from({ length: n }, (_, i) => ({ id: `proj-${from + i}` }));
+    postMock.mockImplementation(async (path: string, body: { pagination: { offset: number } }) => {
+      if (path !== "/projects/search") return { changeRequests: [], total: 0 };
+      return body.pagination.offset === 0
+        ? { projects: page(0, 50), hasMore: true, total: 52 }
+        : { projects: page(50, 2), hasMore: false, total: 52 };
+    });
+    const client = newClient();
+    renderHook(() => useSearchClosedChangeRequestsForSelect("", true, "acct-1"), { wrapper: wrapper(client) });
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/change-requests/search", expect.objectContaining({ filters: expect.anything() })),
+    );
+    expect(postMock).toHaveBeenCalledWith("/projects/search", { accountId: "acct-1", pagination: { offset: 50, limit: 50 } });
+    const crCall = postMock.mock.calls.find((c) => c[0] === "/change-requests/search")!;
+    expect(crCall[1].filters.projectIds).toHaveLength(52);
+  });
+
+  it("offers no evidence for a customer with no projects, and searches nothing without a customer", async () => {
+    postMock.mockResolvedValue({ projects: [], hasMore: false, total: 0 });
+    const client = newClient();
+    const { result } = renderHook(
+      () => ({
+        none: useSearchClosedChangeRequestsForSelect("CHG1", true, "acct-empty"),
+        noCustomer: useSearchClosedChangeRequestsForSelect("CHG1", true, undefined),
+      }),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(result.current.none.data).toEqual([]));
+    expect(result.current.noCustomer.data).toBeUndefined();
+    expect(postMock.mock.calls.map((c) => c[0])).toEqual(["/projects/search"]);
+  });
+
+  it("searches the customers (accounts) by name, as id and name", async () => {
+    postMock.mockResolvedValue({ accounts: [{ id: "acct-1", name: "Example Corp" }, { id: "acct-2", name: "" }], total: 2 });
+    const client = newClient();
+    const { result } = renderHook(() => useSearchStandardChangeCustomersForSelect(" exa ", true), { wrapper: wrapper(client) });
+    await waitFor(() =>
+      expect(result.current.data).toEqual([
+        { id: "acct-1", name: "Example Corp" },
+        { id: "acct-2", name: "acct-2" },
+      ]),
+    );
+    expect(postMock).toHaveBeenCalledWith("/accounts/search", {
+      pagination: { offset: 0, limit: 20 },
+      filters: { searchQuery: "exa" },
+    });
+  });
+
+  it("reads a project's customer from the project, null when it has none", async () => {
+    getMock.mockImplementation(async (path: string) =>
+      path === "/projects/proj-1" ? { id: "proj-1", account: { id: "acct-1", name: "Example Corp" } } : { id: "proj-2", account: { id: "" } },
+    );
+    const client = newClient();
+    const { result } = renderHook(
+      () => ({ one: useProjectCustomer("proj-1"), none: useProjectCustomer("proj-2"), nothing: useProjectCustomer(undefined) }),
+      { wrapper: wrapper(client) },
+    );
+    await waitFor(() => expect(result.current.one.data).toEqual({ id: "acct-1", name: "Example Corp" }));
+    await waitFor(() => expect(result.current.none.isSuccess).toBe(true));
+    expect(result.current.none.data).toBeNull();
+    expect(result.current.nothing.fetchStatus).toBe("idle");
+    expect(getMock.mock.calls.map((c) => c[0]).sort()).toEqual(["/projects/proj-1", "/projects/proj-2"]);
   });
 });
 

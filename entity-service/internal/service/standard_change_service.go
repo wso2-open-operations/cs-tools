@@ -108,7 +108,14 @@ func (s *standardChangeService) SearchTemplates(ctx context.Context, req domain.
 	if req.Query != nil {
 		q = *req.Query
 	}
-	list, total, err := s.repo.SearchTemplates(ctx, states, q, req.Pagination.Limit, req.Pagination.Offset)
+	account := ""
+	if req.AccountID != nil {
+		if err := checkUUIDFields(map[string]string{"accountId": *req.AccountID}); err != nil {
+			return domain.SearchStandardChangeTemplatesResponse{}, err
+		}
+		account = strings.ToLower(strings.TrimSpace(*req.AccountID))
+	}
+	list, total, err := s.repo.SearchTemplates(ctx, states, q, account, req.Pagination.Limit, req.Pagination.Offset)
 	if err != nil {
 		return domain.SearchStandardChangeTemplatesResponse{}, err
 	}
@@ -230,6 +237,9 @@ func (s *standardChangeService) CreateProposal(ctx context.Context, req domain.C
 	if req.CopyFromProposalID != nil {
 		ids["copyFromProposalId"] = *req.CopyFromProposalID
 	}
+	if req.AccountID != nil {
+		ids["accountId"] = *req.AccountID
+	}
 	if err := checkUUIDFields(ids); err != nil {
 		return domain.StandardChangeProposal{}, err
 	}
@@ -259,6 +269,7 @@ func (s *standardChangeService) CreateProposal(ctx context.Context, req domain.C
 	id, err := s.repo.CreateProposal(ctx, actor, repository.StandardChangeProposalCreate{
 		Kind: req.Kind, Name: name, TemplateID: lowerPtr(req.TemplateID),
 		SourceChangeRequestID: lowerPtr(req.SourceChangeRequestID), CopyFromProposalID: lowerPtr(req.CopyFromProposalID),
+		AccountID: lowerPtr(req.AccountID),
 	})
 	if err != nil {
 		return domain.StandardChangeProposal{}, err
@@ -335,6 +346,12 @@ func (s *standardChangeService) SearchProposals(ctx context.Context, req domain.
 		}
 		f.TemplateID = lowerPtr(req.TemplateID)
 	}
+	if req.AccountID != nil {
+		if err := checkUUIDFields(map[string]string{"accountId": *req.AccountID}); err != nil {
+			return domain.SearchStandardChangeProposalsResponse{}, err
+		}
+		f.AccountID = lowerPtr(req.AccountID)
+	}
 	if req.ProposedByMe || req.AwaitingMyDecision {
 		if viewer == "" {
 			return domain.SearchStandardChangeProposalsResponse{}, &apierror.UnauthorizedError{Msg: "x-user-id-token header is required"}
@@ -380,6 +397,12 @@ func (s *standardChangeService) UpdateProposal(ctx context.Context, id string, r
 			return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "name must be 1 to 255 characters"}
 		}
 		req.Name = &n
+	}
+	if req.AccountID != nil {
+		if err := checkUUIDFields(map[string]string{"accountId": *req.AccountID}); err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		req.AccountID = lowerPtr(req.AccountID)
 	}
 	if req.Subject != nil {
 		n := strings.TrimSpace(*req.Subject)

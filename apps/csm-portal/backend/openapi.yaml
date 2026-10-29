@@ -6157,6 +6157,10 @@ paths:
         `customerApprovalRequired` / `customerReviewRequired` cannot be true on
         one: such a create is a 400 ("Emergency changes proceed without customer
         consent, so customer approval and customer review cannot be required").
+        A change request raised from a standard change template
+        (`standardChangeTemplateId`) needs `projectId`, a project of the template's
+        customer: otherwise the entity service's 400 is returned with its message and
+        errorCode `standard_change_template_other_customer`.
       operationId: createChangeRequest
       security:
         - bearerAuth: []
@@ -13539,6 +13543,10 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
+        The body passes through as it is (entity-service's SearchStandardChangeTemplatesRequest):
+        `accountId` narrows the list to one customer's templates. Each template carries
+        `customer` {id, name}, the account it belongs to: a template is used only for that
+        customer's projects, and its name is unique among that customer's live templates.
       requestBody:
         required: true
         content:
@@ -13597,6 +13605,7 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
+        The template carries `customer` {id, name}.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -13885,6 +13894,11 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
+        `accountId` is the customer a new proposal is for. One started from a closed change request
+        takes that change request's project's customer, one copied from a proposal takes that
+        proposal's, and a modification or retirement its template's (a different accountId is a 400).
+        A new proposal cannot be submitted without a customer, and its evidence must be closed
+        change requests of that customer.
       requestBody:
         required: true
         content:
@@ -13943,6 +13957,8 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
+        The body passes through as it is: `accountId` narrows the list to the proposals for one
+        customer; each row carries `customer` {id, name} (null on a new draft that names none yet).
       requestBody:
         required: true
         content:
@@ -14053,6 +14069,8 @@ paths:
       description: >
         Forwarded to the entity service, which decides who may do it; its refusal
         (400, 403, 404, 409) is returned with its own message and errorCode.
+        `accountId` names or changes the customer of a new draft that did not start from a change
+        request; its evidence must then be that customer's (400 naming the others otherwise).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:

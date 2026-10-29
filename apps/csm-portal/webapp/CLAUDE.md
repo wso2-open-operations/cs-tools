@@ -689,6 +689,53 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     `view=standard&show=proposals` as "Standard change proposals" (its `scope`/`state` count as filters, `cr*` never
     does), and the old
     `catalogue` / `proposals` values are named the same way.
+- **A standard change is one customer's** (entity-service `CLAUDE.md` has the rules; a customer is an account, and a change
+  request's customer is its project's account). Every template and proposal carries `customer` {id, name} (null only on an
+  older template whose customer could not be told, or a new draft that has not named one); `customerAccountPath` links it.
+  What the webapp does with it:
+  - **Catalogue**: a Customer column (a dash when none) and a Customer filter (`AsyncEntitySelect` over
+    `useSearchStandardChangeCustomersForSelect`, `POST /accounts/search`) sent as the search's `accountId`. The proposals
+    list shows each proposal's customer too; the attention line is unchanged.
+  - **Template page**: "For <customer>: used only for this customer's projects." under the name and a Customer cell
+    beside Owner. A template with `customer: null` shows "No customer recorded" (`STANDARD_CHANGE_ONE_CUSTOMER_RULE`)
+    and Raise a change request is disabled (the backend answers it with 409 `standard_change_template_unavailable`).
+  - **Proposal**: the header says "Customer: <link>" (or "not named yet"). In the editor a **new** proposal that did not
+    start from a change request names it (`standardChangeProposalCustomerEditable`; required, never cleared once
+    named, sent as `accountId` in the PATCH only there); one started from a change request and a modify / retire
+    proposal show it read-only with `standardChangeProposalCustomerFixedReason`. A copy carries `copiedFrom` {id,
+    number} and keeps the copied proposal's customer: read-only with "The customer of the proposal it was copied
+    from (SCP...)"; only a copy of a proposal that had no customer names one, once (the backend accepts naming it
+    while it has none and refuses changing it after). Naming another customer drops the
+    evidence already cited, with an info notice (it was the other customer's; the backend would refuse the PATCH).
+    The evidence picker is disabled until there is a customer and searches only that customer's closed change
+    requests (`useSearchClosedChangeRequestsForSelect(query, enabled, accountId)`: the change request search has no
+    account filter, so it pages the customer's project ids first, `useCustomerProjectIds`, `POST /projects/search`
+    `{accountId}`, and searches with `projectIds`; no projects = no evidence, nothing searched). Submit is held back
+    with "still needs ... a customer" (`standardChangeProposalGaps`, in the backend's order: after name and rationale).
+  - **Create form, Standard**: the customer is the Customer Project's account (`useProjectCustomer`, `GET
+    /projects/{id}`). The template picker is disabled with the reason until a project with a customer is chosen, and
+    then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
+    accountId)`, `searchExtra`; it searches nothing without a customer). The Customer Project is required for
+    Standard. A template chosen before any project (`?standardChangeTemplateId=`, a clone, a draft) narrows the
+    project picker to its customer (`AsyncProjectSelect accountId`, a server-side `accountId` on `/projects/search`,
+    through `ChangeRequestScopeFields projectAccountId`) with a helper, and Create waits with "Select a Customer
+    Project of <customer> to continue."; once a project is chosen the picker is no longer narrowed. Choosing a project
+    of another customer (or one with none) clears the template and its change specifics during render, with an info
+    notice saying whose each is. A template with no customer is refused up front. A 400
+    `standard_change_template_other_customer` (`isStandardChangeTemplateOtherCustomer`) is shown at the template in the
+    backend's words (not the banner) and holds Create back until the template or the project changes.
+  - **Detail / Edit**: the template banner adds "Customer: <name>. The template is used only for this customer's
+    projects."; when the detail's `standardChange.customerMismatch` is true (the project sync moved the project to
+    another account after the change was raised) the banner turns `warning` and says the project is no longer one of
+    the customer's, approval cannot be requested, and to cancel and raise a new one
+    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code; in New the Edit dialog narrows the Customer Project picker to the template's customer
+    (`projectAccountId`) and says so in its template notice. The backend refuses a move to another customer's project
+    in every state with the same code; its words show in `saveError`.
+  - Tests: `utils/__tests__/standardChanges.test.ts` ("a standard change is one customer's"), `useStandardChanges.test.tsx`,
+    `StandardChangesTab.test.tsx`, `StandardChangeTemplateDetailPage.test.tsx` ("its customer"),
+    `StandardChangeProposalPage.test.tsx` ("its customer: ..."), `CreateChangeRequestPage.test.tsx` ("a template is one
+    customer's: the Customer Project's"), `EditChangeRequestDialog.test.tsx`, `CsmChangeRequestDetailPage.test.tsx`,
+    `AsyncProjectSelect.test.tsx` ("narrowed to one customer").
 - **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
   highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
   change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /
@@ -698,10 +745,10 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   one PATCH of the whole draft, Submit saves first); read-only otherwise, with the CAB approvers and Approve / Reject on the
   viewer's own `canDecide` row (a rejection needs a comment). "Copy into a new proposal" only for a rejected / withdrawn
   **new** proposal: the API's `copyFromProposalId` starts new templates only.
-- **Create form**: type Standard shows a template picker (active only), "Change specifics" (one input per parameter type) and a
+- **Create form**: type Standard shows a template picker (active only, of the project's customer), "Change specifics" (one input per parameter type) and a
   read-only preview of what the template specifies; the payload is `type`, `standardChangeTemplateId`,
-  `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters` and only the fields the template does not
-  specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
+  `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters`, `projectId` (required: a project of the
+  template's customer) and only the fields the template does not specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
   clone of a templated change carries the template and its values, never the frozen fields (`buildCloneChangeRequestNavState`).
 - **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
   every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard

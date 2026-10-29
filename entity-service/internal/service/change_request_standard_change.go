@@ -31,6 +31,9 @@ import (
 // change template needs of the catalogue.
 type standardChangeTemplateReader interface {
 	GetTemplate(ctx context.Context, id string) (*domain.StandardChangeTemplate, error)
+	// ProjectAccount is a project's customer: nil when there is no such project,
+	// an empty EntityRef when it has no account.
+	ProjectAccount(ctx context.Context, projectID string) (*domain.EntityRef, error)
 }
 
 // WithStandardChangeTemplates makes CreateChangeRequest raise standard changes
@@ -105,6 +108,13 @@ func (s *changeRequestService) prepareStandardChange(ctx context.Context, req do
 			Msg: fmt.Sprintf("the standard change template %q has been revised (now version %d) since you opened it; read it again", tpl.Name, tpl.CurrentVersion.Version)}
 	}
 
+	// A template is its customer's: the change request is raised for one of that
+	// customer's projects. Checked here, before the previous system is called on
+	// dual-write, and again in the create transaction.
+	if err := s.checkTemplateCustomer(ctx, *tpl, req.ProjectID); err != nil {
+		return req, err
+	}
+
 	content, stored, err := renderStandardChange(*tpl.CurrentVersion, req.StandardChangeParameters)
 	if err != nil {
 		return req, err
@@ -127,6 +137,27 @@ func (s *changeRequestService) prepareStandardChange(ctx context.Context, req do
 	req.StandardChangeTemplateVersionID = &versionID
 	req.StandardChangeParameters = stored
 	return req, nil
+}
+
+// checkTemplateCustomer refuses (400, CodeStandardChangeTemplateOtherCustomer) a
+// change request raised from tpl for no project, or for a project that is not
+// the template's customer's.
+func (s *changeRequestService) checkTemplateCustomer(ctx context.Context, tpl domain.StandardChangeTemplate, projectID *string) error {
+	var projectCustomer *domain.EntityRef
+	if projectID != nil && strings.TrimSpace(*projectID) != "" {
+		if !validate.IsUUID(strings.TrimSpace(*projectID)) {
+			return &apierror.ValidationError{Msg: "projectId must be a valid UUID"}
+		}
+		ref, err := s.standardChanges.ProjectAccount(ctx, strings.ToLower(strings.TrimSpace(*projectID)))
+		if err != nil {
+			return err
+		}
+		if ref == nil {
+			return &apierror.ValidationError{Msg: "projectId does not refer to a project"}
+		}
+		projectCustomer = ref
+	}
+	return repository.TemplateCustomerRefusal(tpl.Name, tpl.Customer, projectCustomer)
 }
 
 // refuseBecomingStandard keeps a change request that was not raised from a

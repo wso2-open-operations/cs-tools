@@ -33,11 +33,15 @@
 //      previous `?view=catalogue` / `?view=proposals` sub-views, with a scope,
 //      a state or the list's `cr*` filters) lands on the right place with its
 //      filters kept, and a rewrite of an old sub-view adds no history entry.
-//      The catalogue lists the seed's five templates
-//      (scripts/csm-compose/seed-standard-changes.sh) with their states and
-//      versions, the suspended one's page shows the seed's reason, the
-//      proposals list the seed's rejected, in-CAB-review and draft proposals
-//      and its revision, the breadcrumbs read "Change requests › Standard
+//      The catalogue lists the seed's six templates
+//      (scripts/csm-compose/seed-standard-changes.sh) with their customers,
+//      states and versions -- the same name for two customers (Example Corp's
+//      and Other Corp's "Rotate the TLS certificate on an API gateway") is two
+//      templates, each with its customer -- and its Customer filter narrows it
+//      to one customer's (server-side, `accountId`); the suspended one's page
+//      shows its customer and the seed's reason, the proposals list the seed's
+//      rejected, in-CAB-review and draft proposals and its revision with their
+//      customer, the breadcrumbs read "Change requests › Standard
 //      changes › [Proposals ›] <number>" (the "Proposals" crumb opens all the
 //      proposals), Back returns to the view a record was opened from, "Pin
 //      this page" names each place ("Standard changes" however the list was
@@ -51,8 +55,9 @@
 //      filtered to it, which lists that seeded proposal. Hidden on the
 //      proposals view, which for jane, who proposed nothing, opens on all the
 //      proposals: bob's seeded ones.
-//   3. bob proposes a standard change from a CLOSED change request (its detail
-//      page's "Propose as standard change"), templates it (name, category,
+//   3. bob proposes a standard change from a CLOSED change request of Example
+//      Corp (its detail page's "Propose as standard change"; the proposal takes
+//      that change request's customer, shown read-only), templates it (name, category,
 //      impact Medium -- not the create form's default, Low -- description,
 //      justification, risk and impact analysis, plan visible to customers, a
 //      text and a select parameter, {{placeholders}} in the subject and the
@@ -63,15 +68,23 @@
 //      underline) once only the host is typed, and filled with them all
 //      after. He saves and submits it to the CAB; carol finds it through her
 //      attention strip and approves it; the template's page shows the current
-//      version with its placeholders highlighted, and it is in the catalogue as
-//      active version 1; alice raises a change request from it on the create
-//      form (type Standard, the template, the change specifics, the read-only
-//      preview). The change request holds the template's content rendered with
+//      version with its placeholders highlighted and its customer (Example
+//      Corp), and it is in the catalogue as active version 1 of Example Corp;
+//      alice raises a change request from it on the create form (type
+//      Standard: the template picker waits for a Customer Project; with Other
+//      Corp's project it offers Other Corp's templates and none of Example
+//      Corp's -- not this one --, switching the project to Example Corp's
+//      clears the Other Corp template picked, and then the template, the
+//      change specifics, the read-only preview). Through the BFF the backend
+//      refuses raising a change from the template for Other Corp's project (or
+//      with no project) with 400 standard_change_template_other_customer and
+//      writes nothing, and refuses a PATCH moving the raised change to Other
+//      Corp's project (in New and once Scheduled). The change request holds the template's content rendered with
 //      her values (subject, the three plans, impact, risk, category, rollback
 //      duration on the page; description, justification, risk and impact
 //      analysis, plan visibility, impact and risk from the API and Postgres,
 //      compared with the template's own version), shows the "Raised from
-//      standard change template" banner, its lifecycle bar never passes through
+//      standard change template" banner with its customer, its lifecycle bar never passes through
 //      Assess or Authorize, and in Edit every field the template specifies is
 //      disabled AND shows the template's value while the others (priority,
 //      assignment, affected services) stay editable. The backend holds the same
@@ -106,7 +119,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { ChangeRequestDetailPage } from "../../pages/ChangeRequestDetailPage";
-import { EXAMPLE_CORP_ABT_GROUP_ID, realStackNamed, staff, STAFF, walkTo } from "../../utils/realStackApi";
+import { EXAMPLE_CORP, EXAMPLE_CORP_ABT_GROUP_ID, OTHER_CORP, realStackNamed, staff, STAFF, walkTo } from "../../utils/realStackApi";
 
 const POSTGRES_CONTAINER = process.env.E2E_POSTGRES_CONTAINER?.trim();
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3001";
@@ -182,24 +195,45 @@ const CR_LIST_FILTERS = `crQ=${CR_LIST_SEARCH}&crStates=closed`;
  * What scripts/csm-compose/seed-standard-changes.sh leaves, by the names it gives (its
  * own text, not read back from the database the page shows).
  */
+/**
+ * The customers (accounts) of the seed: Example Corp's project is 401 ("Example Corp Production"), Other Corp's is 402
+ * ("Other Corp Production", its only project). A standard change is one customer's.
+ */
+const EXAMPLE_CORP_CUSTOMER = "Example Corp";
+const OTHER_CORP_CUSTOMER = "Other Corp";
+/** The name the seed gives a template of each customer: one customer's template is not the other's. */
+const SHARED_TEMPLATE_NAME = "Rotate the TLS certificate on an API gateway";
 const SEEDED_TEMPLATES = [
-  { name: "Rotate the TLS certificate on an API gateway", version: "v1", state: "Active" },
-  { name: "Scale a Kubernetes deployment's replicas", version: "v2", state: "Active" },
-  { name: "Apply a WSO2 product update level to a deployment", version: "v1", state: "Active" },
-  { name: "Restart an API Manager node", version: "v1", state: "Suspended" },
-  { name: "Add an IP range to a customer's gateway allowlist", version: "v1", state: "Active" },
+  { name: SHARED_TEMPLATE_NAME, customer: EXAMPLE_CORP_CUSTOMER, version: "v1", state: "Active" },
+  { name: "Scale a Kubernetes deployment's replicas", customer: EXAMPLE_CORP_CUSTOMER, version: "v2", state: "Active" },
+  { name: "Apply a WSO2 product update level to a deployment", customer: EXAMPLE_CORP_CUSTOMER, version: "v1", state: "Active" },
+  { name: "Restart an API Manager node", customer: EXAMPLE_CORP_CUSTOMER, version: "v1", state: "Suspended" },
+  { name: "Add an IP range to a customer's gateway allowlist", customer: EXAMPLE_CORP_CUSTOMER, version: "v1", state: "Active" },
+  { name: SHARED_TEMPLATE_NAME, customer: OTHER_CORP_CUSTOMER, version: "v1", state: "Active" },
 ] as const;
+/** The catalogue's columns, in order. */
+const CATALOGUE_COLUMNS = ["Number", "Name", "Customer", "Version", "Risk", "Impact", "Used", "State"] as const;
+/** The proposals list's columns, in order. */
+const PROPOSAL_COLUMNS = ["Number", "Name", "Customer", "Kind", "State", "Template", "Proposed by", "Updated"] as const;
+/** The index of `column` in `columns` (so a column added later moves every lookup with it). */
+function col(columns: readonly string[], column: string): number {
+  const i = columns.indexOf(column);
+  if (i < 0) throw new Error(`no column ${column}`);
+  return i;
+}
+const T = (column: (typeof CATALOGUE_COLUMNS)[number]) => col(CATALOGUE_COLUMNS, column);
+const P = (column: (typeof PROPOSAL_COLUMNS)[number]) => col(PROPOSAL_COLUMNS, column);
 const SUSPENDED_TEMPLATE = "Restart an API Manager node";
 /** The reason the seed suspends it with (seed-standard-changes.sh replaces an older one on a re-run). */
 const SUSPENDED_REASON =
   "The owner is reworking the restart procedure for clustered deployments. Raise node restarts as normal changes until this template is resumed.";
 const REVISED_TEMPLATE = "Scale a Kubernetes deployment's replicas";
-/** bob's proposals in states other than approved, and his approved revision. */
+/** bob's proposals in states other than approved, and his approved revision (all Example Corp's). */
 const SEEDED_PROPOSALS = [
-  { name: "Purge API Manager analytics data older than a retention period", kind: "New template", state: "Rejected" },
-  { name: "Raise the memory limit of a Choreo component", kind: "New template", state: "CAB review" },
-  { name: "Enable debug logging on a Micro Integrator node for a fixed period", kind: "New template", state: "Draft" },
-  { name: REVISED_TEMPLATE, kind: "Revision", state: "Approved" },
+  { name: "Purge API Manager analytics data older than a retention period", kind: "New template", state: "Rejected", customer: EXAMPLE_CORP_CUSTOMER },
+  { name: "Raise the memory limit of a Choreo component", kind: "New template", state: "CAB review", customer: EXAMPLE_CORP_CUSTOMER },
+  { name: "Enable debug logging on a Micro Integrator node for a fixed period", kind: "New template", state: "Draft", customer: EXAMPLE_CORP_CUSTOMER },
+  { name: REVISED_TEMPLATE, kind: "Revision", state: "Approved", customer: EXAMPLE_CORP_CUSTOMER },
 ] as const;
 const SEED_HINT = "run scripts/csm-compose/seed-standard-changes.sh against the stack first";
 
@@ -369,6 +403,16 @@ async function expectRenderedContent(scope: Locator, host: string, env: string):
   await expect(renderedSection(scope, "Test plan")).toHaveText(TEMPLATE.test(env));
   // Every exact text above has been seen, so this cannot pass on a preview that has not rendered yet.
   await expect(scope).not.toContainText("{{");
+}
+
+/** The value of one labelled fact of the template page (Customer, Owner, Current version, ...). */
+function templateFact(main: Locator, label: string): Locator {
+  return main.getByText(label, { exact: true }).locator("xpath=following-sibling::*[1]");
+}
+
+/** The template page's "For <customer>: used only for this customer's projects." line. */
+function templateCustomerLine(main: Locator, customer: string): Locator {
+  return main.getByText(`For ${customer}: used only for this customer's projects.`, { exact: true });
 }
 
 /** How often each placeholder appears in what the template specifies (subject and plans, as bob writes them below). */
@@ -625,20 +669,68 @@ test.describe("standard changes (real stack)", () => {
       await subNav.getByRole("tab", { name: "Standard changes" }).click();
       await expect(page).toHaveURL(exactly("/operations/change-requests", `view=standard&${CR_LIST_FILTERS}`));
 
-      // ---- the catalogue: the seed's five templates with their states and versions -------------------------------
+      // ---- the catalogue: the seed's six templates with their customers, states and versions ---------------------
       const catalogue = main.getByRole("table", { name: "Standard change templates" });
+      await expect(catalogue.getByRole("columnheader")).toHaveText([...CATALOGUE_COLUMNS]);
       const templateSearch = main.getByRole("textbox", { name: "Search templates by number or name" });
+      /** The catalogue's row of `name` for `customer` (its Customer cell reads exactly that). */
+      const templateRow = (name: string, customer: string): Locator =>
+        catalogue
+          .getByRole("row")
+          .filter({ hasText: name })
+          .filter({ has: page.getByRole("cell", { name: customer, exact: true }) });
       for (const seeded of SEEDED_TEMPLATES) {
         await templateSearch.fill(seeded.name);
-        const row = catalogue.getByRole("row").filter({ hasText: seeded.name });
-        await expect(row, `seeded template "${seeded.name}" (${SEED_HINT})`).toHaveCount(1);
+        const row = templateRow(seeded.name, seeded.customer);
+        await expect(row, `seeded template "${seeded.name}" of ${seeded.customer} (${SEED_HINT})`).toHaveCount(1);
         const cells = row.getByRole("cell");
-        // Number, Name, Version, Risk, Impact, Used, State.
-        await expect(cells.nth(0)).toHaveText(/^STD\d+$/);
-        await expect(cells.nth(2), `${seeded.name}: version`).toHaveText(seeded.version);
-        await expect(cells.nth(6), `${seeded.name}: state`).toHaveText(seeded.state);
+        await expect(cells.nth(T("Number"))).toHaveText(/^STD\d+$/);
+        await expect(cells.nth(T("Customer")), `${seeded.name}: customer`).toHaveText(seeded.customer);
+        await expect(cells.nth(T("Version")), `${seeded.name}: version`).toHaveText(seeded.version);
+        await expect(cells.nth(T("State")), `${seeded.name}: state`).toHaveText(seeded.state);
       }
+      // The same name for two customers is two templates, each listed with its own customer (and its own number).
+      await templateSearch.fill(SHARED_TEMPLATE_NAME);
+      const shared = catalogue.getByRole("row").filter({ hasText: SHARED_TEMPLATE_NAME });
+      await expect(shared, `"${SHARED_TEMPLATE_NAME}" is one template of each customer (${SEED_HINT})`).toHaveCount(2);
+      await expect
+        .poll(async () => (await shared.locator(`td:nth-child(${T("Customer") + 1})`).allTextContents()).sort())
+        .toEqual([EXAMPLE_CORP_CUSTOMER, OTHER_CORP_CUSTOMER]);
+      const sharedNumbers = await shared.locator(`td:nth-child(${T("Number") + 1})`).allTextContents();
+      expect(new Set(sharedNumbers).size, "two templates, two numbers").toBe(2);
+      await shot(page, "01a-same-name-two-customers", catalogue);
       await templateSearch.fill("");
+      await expect(catalogue.getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(1);
+
+      // The Customer filter narrows the catalogue to one customer's templates, on the server (`accountId`).
+      const otherCorpLive = Number(
+        await psql(`SELECT count(*) FROM standard_change_template t JOIN account a ON a.id = t.account_id
+                     WHERE a.name = '${OTHER_CORP_CUSTOMER}' AND t.state <> 'RETIRED';`),
+      );
+      expect(otherCorpLive, `Other Corp has a live template (${SEED_HINT})`).toBeGreaterThan(0);
+      const customerFilter = main.getByRole("combobox", { name: "Customer", exact: true });
+      await customerFilter.click();
+      await customerFilter.fill(OTHER_CORP_CUSTOMER);
+      const [filtered] = await Promise.all([
+        page.waitForResponse(
+          (r) =>
+            r.request().method() === "POST" &&
+            r.url().endsWith("/standard-change-templates/search") &&
+            (r.request().postData() ?? "").includes('"accountId"'),
+        ),
+        page.getByRole("option", { name: OTHER_CORP_CUSTOMER, exact: true }).click(),
+      ]);
+      expect(filtered.status()).toBe(200);
+      const otherCorpId = (filtered.request().postDataJSON() as { accountId?: string }).accountId;
+      expect(otherCorpId).toBe(await psql(`SELECT account_id FROM project WHERE id = '${OTHER_CORP.id}';`));
+      await expect(catalogue.locator("tbody tr")).toHaveCount(otherCorpLive);
+      await expect(catalogue.locator(`tbody td:nth-child(${T("Customer") + 1})`)).toHaveText(Array(otherCorpLive).fill(OTHER_CORP_CUSTOMER));
+      await expect(templateRow(SHARED_TEMPLATE_NAME, OTHER_CORP_CUSTOMER)).toHaveCount(1);
+      await expect(catalogue.getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(0);
+      await shot(page, "01b-catalogue-filtered-by-customer", main);
+      // Back to every customer's (the filter is the page's own state, not the URL's).
+      await page.reload();
+      await expect(customerFilter).toHaveValue("");
       await expect(catalogue.getByRole("row").filter({ hasText: SUSPENDED_TEMPLATE })).toHaveCount(1);
       await shot(page, "01-standard-changes-catalogue", main);
       // Pinned with the list's two filters in the URL: named "Standard changes", with no filter count.
@@ -654,6 +746,10 @@ test.describe("standard changes (real stack)", () => {
       await expect(suspended).toContainText(`Suspended: ${SUSPENDED_REASON}`);
       await expect(suspended).toContainText(/\(by .+ on .+\)/);
       await expect(main.getByText("Version 1", { exact: true })).toBeVisible();
+      // Its customer, under the name and among its facts.
+      await expect(templateCustomerLine(main, EXAMPLE_CORP_CUSTOMER)).toBeVisible();
+      await expect(templateFact(main, "Customer")).toHaveText(EXAMPLE_CORP_CUSTOMER);
+      await expect(main.getByRole("region", { name: "No customer recorded" })).toHaveCount(0);
       await expectBreadcrumb(main, ["Change requests", "Standard changes"], /^STD\d+$/);
       await expectChangeRequestsActive(page);
       await shot(page, "02-suspended-template-with-reason", suspended);
@@ -666,7 +762,7 @@ test.describe("standard changes (real stack)", () => {
 
       // The revised template is at version 2; the trail's "Standard changes" leads back to the catalogue.
       await templateSearch.fill(REVISED_TEMPLATE);
-      await catalogue.getByRole("row").filter({ hasText: REVISED_TEMPLATE }).click();
+      await templateRow(REVISED_TEMPLATE, EXAMPLE_CORP_CUSTOMER).click();
       await expect(main.getByRole("heading", { name: REVISED_TEMPLATE })).toBeVisible();
       await expect(main.getByText("Version 2", { exact: true })).toBeVisible();
       await expect(main.getByText("Active", { exact: true })).toBeVisible();
@@ -699,17 +795,25 @@ test.describe("standard changes (real stack)", () => {
       await expect(page.getByRole("listbox")).toHaveCount(0);
       await expect(page).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
       const proposalSearch = main.getByRole("textbox", { name: "Search proposals by number or name" });
+      await expect(proposals.getByRole("columnheader")).toHaveText([...PROPOSAL_COLUMNS]);
       for (const seeded of SEEDED_PROPOSALS) {
         await proposalSearch.fill(seeded.name);
         const row = proposals.getByRole("row").filter({ hasText: seeded.name }).filter({ hasText: seeded.kind });
         await expect(row, `seeded proposal "${seeded.name}" (${seeded.kind}; ${SEED_HINT})`).toHaveCount(1);
         const cells = row.getByRole("cell");
-        // Number, Name, Kind, State, Template, Proposed by, Updated.
-        await expect(cells.nth(0)).toHaveText(/^SCP\d+$/);
-        await expect(cells.nth(2)).toHaveText(seeded.kind);
-        await expect(cells.nth(3), `${seeded.name}: state`).toHaveText(seeded.state);
-        await expect(cells.nth(5)).toHaveText("Bob Fernando");
+        await expect(cells.nth(P("Number"))).toHaveText(/^SCP\d+$/);
+        await expect(cells.nth(P("Customer")), `${seeded.name}: customer`).toHaveText(seeded.customer);
+        await expect(cells.nth(P("Kind"))).toHaveText(seeded.kind);
+        await expect(cells.nth(P("State")), `${seeded.name}: state`).toHaveText(seeded.state);
+        await expect(cells.nth(P("Proposed by"))).toHaveText("Bob Fernando");
       }
+      // The approved proposals of the template name both customers have: one of each customer.
+      await proposalSearch.fill(SHARED_TEMPLATE_NAME);
+      const sharedProposals = proposals.getByRole("row").filter({ hasText: SHARED_TEMPLATE_NAME }).filter({ hasText: "Approved" });
+      await expect(sharedProposals).toHaveCount(2);
+      await expect
+        .poll(async () => (await sharedProposals.locator(`td:nth-child(${P("Customer") + 1})`).allTextContents()).sort())
+        .toEqual([EXAMPLE_CORP_CUSTOMER, OTHER_CORP_CUSTOMER]);
       await proposalSearch.fill("");
       await expect(proposals.getByRole("row").filter({ hasText: SEEDED_PROPOSALS[0].name })).toHaveCount(1);
       await shot(page, "03-standard-change-proposals", main);
@@ -843,7 +947,7 @@ test.describe("standard changes (real stack)", () => {
         await search.fill(seeded.name);
         const row = proposals.getByRole("row").filter({ hasText: seeded.name }).filter({ hasText: seeded.kind });
         await expect(row, `jane sees bob's "${seeded.name}" (${seeded.kind})`).toHaveCount(1);
-        await expect(row.getByRole("cell").nth(5)).toHaveText("Bob Fernando");
+        await expect(row.getByRole("cell").nth(P("Proposed by"))).toHaveText("Bob Fernando");
       }
       await search.fill("");
       await shot(jane, "04b-all-proposals-for-jane", main);
@@ -886,7 +990,7 @@ test.describe("standard changes (real stack)", () => {
         const proposals = main.getByRole("table", { name: "Standard change proposals" });
         const row = proposals.getByRole("row").filter({ hasText: c.lists.name });
         await expect(row).toHaveCount(1);
-        await expect(row.getByRole("cell").nth(3)).toHaveText(c.lists.state);
+        await expect(row.getByRole("cell").nth(P("State"))).toHaveText(c.lists.state);
         // Every row the link lists is what the count counted.
         await expect(proposals.getByRole("row")).toHaveCount(1 + pending[c.part]);
       } finally {
@@ -898,11 +1002,13 @@ test.describe("standard changes (real stack)", () => {
   test("propose from a closed change request, the CAB approves, raise a change request from the template, roll it back: the template needs review", async ({ browser }) => {
     test.setTimeout(360_000);
 
-    // The evidence: a closed change request, raised and walked through the real API.
+    // The evidence: a closed change request of Example Corp (its project's customer), raised and walked through the
+    // real API.
     const created = await staff("jane").create({
       subject: SOURCE_SUBJECT,
       type: "normal",
       groupId: EXAMPLE_CORP_ABT_GROUP_ID,
+      projectId: EXAMPLE_CORP.id,
       customerApprovalRequired: false,
       customerReviewRequired: false,
       implementationPlan: "<p>Drain cache-01, restart the cache service, put it back in the pool.</p>",
@@ -928,6 +1034,21 @@ test.describe("standard changes (real stack)", () => {
       await expectBreadcrumb(main, ["Change requests", "Standard changes", "Proposals"], /^SCP\d+$/);
       await expectChangeRequestsActive(bob);
       await expect(main.getByText(`Started from:`)).toContainText(source!.number);
+      // The proposal is the customer's of the change request it started from: named in the header, and fixed (shown
+      // read-only, not a picker).
+      const customerLine = main.getByText(`Customer: ${EXAMPLE_CORP_CUSTOMER}`, { exact: true });
+      await expect(customerLine).toBeVisible();
+      await expect(customerLine.getByRole("button", { name: EXAMPLE_CORP_CUSTOMER, exact: true })).toBeVisible();
+      const customerField = main.getByRole("textbox", { name: "Customer", exact: true });
+      await expect(customerField).toHaveValue(EXAMPLE_CORP_CUSTOMER);
+      await expect(customerField).toHaveAttribute("readonly", "");
+      await expect(main.getByRole("combobox", { name: "Customer", exact: true })).toHaveCount(0);
+      expect(
+        await psql(`SELECT a.name FROM standard_change_proposal p JOIN account a ON a.id = p.account_id
+                     WHERE p.id = '${decodeURIComponent(proposalUrl.split("/").pop()!)}';`),
+        "the proposal's customer in Postgres",
+      ).toBe(EXAMPLE_CORP_CUSTOMER);
+      await shot(bob, "05c-proposal-customer-from-change-request", customerField.locator("xpath=ancestor::*[contains(@class, 'MuiCard-root')][1]"));
       const evidence = main.getByRole("table", { name: "Evidence" });
       await expect(evidence).toContainText(source!.number);
       // The change request's content was copied in.
@@ -1040,7 +1161,7 @@ test.describe("standard changes (real stack)", () => {
       await main.getByRole("textbox", { name: "Search proposals by number or name" }).fill(TEMPLATE_NAME);
       const mine = main.getByRole("table", { name: "Standard change proposals" }).getByRole("row").filter({ hasText: TEMPLATE_NAME });
       await expect(mine).toHaveCount(1);
-      await expect(mine.getByRole("cell").nth(3)).toHaveText("CAB review");
+      await expect(mine.getByRole("cell").nth(P("State"))).toHaveText("CAB review");
       await mine.click();
       await expect(carol).toHaveURL(new RegExp(`${escapeRegExp(proposalUrl)}$`));
 
@@ -1064,6 +1185,10 @@ test.describe("standard changes (real stack)", () => {
       await expect(main.getByText("Active", { exact: true })).toBeVisible();
       await expect(main.getByText("Version 1", { exact: true })).toBeVisible();
       await expect(main.getByText("Review needed", { exact: true })).toHaveCount(0);
+      // The template is the customer's of the proposal (and so of the change request it started from).
+      await expect(templateCustomerLine(main, EXAMPLE_CORP_CUSTOMER)).toBeVisible();
+      await expect(templateFact(main, "Customer")).toHaveText(EXAMPLE_CORP_CUSTOMER);
+      await expect(main.getByRole("button", { name: "Raise a change request" })).toBeEnabled();
       await expectChangeRequestsActive(carol);
       templateNumber = (await main.getByText(/^STD\d+$/).first().textContent())!.trim();
       await expectBreadcrumb(main, ["Change requests", "Standard changes"], new RegExp(`^${templateNumber}$`));
@@ -1084,7 +1209,9 @@ test.describe("standard changes (real stack)", () => {
 
     // What the template's version holds, as the API returns it: what the change request raised from it must equal.
     const templateRead = await staff("alice").request<{
+      customer: { id: string; name: string } | null;
       currentVersion: {
+        id: string;
         description: string;
         justification: string;
         riskImpactAnalysis: string;
@@ -1096,6 +1223,9 @@ test.describe("standard changes (real stack)", () => {
     }>("GET", `/standard-change-templates/${templateId}`);
     expect(templateRead.status, JSON.stringify(templateRead.body)).toBe(200);
     const version = templateRead.body.currentVersion;
+    // The template is Example Corp's: the account of the source change request's project.
+    const exampleCorpAccountId = await psql(`SELECT account_id FROM project WHERE id = '${EXAMPLE_CORP.id}';`);
+    expect(templateRead.body.customer).toMatchObject({ id: exampleCorpAccountId, name: EXAMPLE_CORP_CUSTOMER });
     expect(version.impact).toBe("medium");
     expect(version.isPlanningVisibleToCustomers).toBe(TEMPLATE.planVisibleToCustomers);
     expect(version.description).toContain(TEMPLATE.description);
@@ -1112,14 +1242,74 @@ test.describe("standard changes (real stack)", () => {
       await expect(row).toContainText(templateNumber);
       await expect(row).toContainText("v1");
       await expect(row).toContainText("Active");
-      await expect(row.getByRole("cell").nth(4)).toHaveText(TEMPLATE.impact);
+      await expect(row.getByRole("cell").nth(T("Impact"))).toHaveText(TEMPLATE.impact);
+      await expect(row.getByRole("cell").nth(T("Customer"))).toHaveText(EXAMPLE_CORP_CUSTOMER);
 
-      // The create form: type Standard, the template, its change specifics, the read-only preview.
+      // The create form: type Standard. A template is one customer's, the customer is the Customer Project's account,
+      // so the template picker waits for the project.
       await alice.goto("/operations/change-requests/new");
       await alice.getByRole("group", { name: /what type of change is required/i }).getByRole("radio", { name: /^Standard/ }).check();
       const templatePicker = alice.getByRole("combobox", { name: /^Standard change template/ });
-      await templatePicker.fill(RUN);
-      await alice.getByRole("option", { name: `${templateNumber} — ${TEMPLATE_NAME}` }).click();
+      const projectPicker = alice.getByRole("combobox", { name: /^Customer Project/ });
+      const options = alice.getByRole("listbox").getByRole("option");
+      await expect(templatePicker).toBeDisabled();
+      await expect(alice.getByText(/^Select the Customer Project first\./)).toBeVisible();
+      const chooseProject = async (name: string): Promise<void> => {
+        await projectPicker.click();
+        await projectPicker.fill(name);
+        await alice.getByRole("option", { name, exact: true }).click();
+        await expect(projectPicker).toHaveValue(name);
+      };
+      /** Types `query` into the template picker (its listbox then shows what the search found). */
+      const searchTemplates = async (query: string): Promise<void> => {
+        await templatePicker.click();
+        await templatePicker.fill(query);
+      };
+      const templateOption = (number: string, name: string): string => `${number} — ${name}`;
+      const [exampleTls, otherTls] = await Promise.all(
+        [EXAMPLE_CORP_CUSTOMER, OTHER_CORP_CUSTOMER].map((customer) =>
+          psql(`SELECT t.number FROM standard_change_template t JOIN account a ON a.id = t.account_id
+                 WHERE a.name = '${customer}' AND t.name = '${SHARED_TEMPLATE_NAME}' AND t.state = 'ACTIVE';`),
+        ),
+      );
+      expect(exampleTls, `Example Corp's "${SHARED_TEMPLATE_NAME}" (${SEED_HINT})`).toMatch(/^STD\d+$/);
+      expect(otherTls, `Other Corp's "${SHARED_TEMPLATE_NAME}" (${SEED_HINT})`).toMatch(/^STD\d+$/);
+
+      // Other Corp's project: Other Corp's active templates only. The new template (Example Corp's) is not offered, and
+      // of the two "Rotate the TLS certificate ..." templates only Other Corp's is.
+      await chooseProject(OTHER_CORP.name);
+      await expect(templatePicker).toBeEnabled();
+      await expect(alice.getByText(`${OTHER_CORP_CUSTOMER}'s active templates only`, { exact: false })).toBeVisible();
+      await searchTemplates(RUN);
+      await expect(alice.getByText("No matches found", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(options).toHaveCount(0);
+      await alice.keyboard.press("Escape");
+      await searchTemplates(SHARED_TEMPLATE_NAME);
+      await expect(options).toHaveText([templateOption(otherTls, SHARED_TEMPLATE_NAME)], { timeout: 15_000 });
+      await shot(alice, "10a-create-other-customer-templates", alice.getByRole("listbox"));
+      await options.first().click();
+      await expect(templatePicker).toHaveValue(templateOption(otherTls, SHARED_TEMPLATE_NAME));
+      await expect(alice.getByRole("group", { name: "Change specifics" })).toBeVisible();
+
+      // Switching the project to Example Corp's clears Other Corp's template (and its change specifics), saying why.
+      await chooseProject(EXAMPLE_CORP.name);
+      const cleared = alice.getByText(
+        `The template ${templateOption(otherTls, SHARED_TEMPLATE_NAME)} was cleared, with its change specifics: it is ${OTHER_CORP_CUSTOMER}'s, and ${EXAMPLE_CORP.name} is ${EXAMPLE_CORP_CUSTOMER}'s.`,
+        { exact: false },
+      );
+      await expect(cleared).toBeVisible();
+      await expect(templatePicker).toHaveValue("");
+      await expect(alice.getByRole("group", { name: "Change specifics" })).toHaveCount(0);
+      await expect(alice.getByText("Select a standard change template to continue.", { exact: true })).toBeVisible();
+      await shot(alice, "10b-create-template-cleared-for-another-customer", cleared);
+      // Example Corp's project: its own "Rotate the TLS certificate ..." template, not Other Corp's.
+      await searchTemplates(SHARED_TEMPLATE_NAME);
+      await expect(options).toHaveText([templateOption(exampleTls, SHARED_TEMPLATE_NAME)], { timeout: 15_000 });
+      await alice.keyboard.press("Escape");
+
+      // Then the new template, its change specifics and the read-only preview.
+      await searchTemplates(RUN);
+      await alice.getByRole("option", { name: templateOption(templateNumber, TEMPLATE_NAME) }).click();
       const specifics = alice.getByRole("group", { name: "Change specifics" });
       await specifics.getByRole("textbox", { name: /^Host name/ }).fill("cache-42");
       await specifics.getByRole("combobox", { name: /^Environment/ }).selectOption("Production");
@@ -1143,6 +1333,9 @@ test.describe("standard changes (real stack)", () => {
       for (const field of ["impact", "category", "description", "justification", "impactDescription", "riskImpactAnalysis", "implementationPlan", "isPlanningVisibleToCustomers"]) {
         expect(sent, `the create request does not send ${field}`).not.toHaveProperty(field);
       }
+      // ... and it is raised for the project of the template's customer.
+      expect(sent.projectId, "the create request names Example Corp's project").toBe(EXAMPLE_CORP.id);
+      expect(sent.standardChangeTemplateId).toBe(templateId);
       await expect(alice).toHaveURL(/\/operations\/change-requests\/(?!new(?:[/?#]|$))[^/]+$/, { timeout: 15_000 });
       const raisedId = new URL(alice.url()).pathname.split("/").pop()!;
 
@@ -1156,7 +1349,48 @@ test.describe("standard changes (real stack)", () => {
       await expect(banner).toContainText("(version 1)");
       await expect(banner.locator("dt")).toHaveText(["Host name", "Environment"]);
       await expect(banner.locator("dd")).toHaveText(["cache-42", "Production"]);
+      await expect(banner).toContainText(`Customer: ${EXAMPLE_CORP_CUSTOMER}. The template is used only for this customer's projects.`);
       await shot(alice, "11-raised-change-request-banner", banner);
+
+      // ---- one customer's template is not another's: the backend refuses, whatever the page offers ---------------
+      // Through the BFF, as alice: raising a change request from the template for Other Corp's project, or for no
+      // project at all, is refused with its own error code, and writes nothing.
+      const raisedFromTemplate = async (): Promise<string> =>
+        psql(`SELECT count(*) FROM change_request WHERE standard_change_template_version_id = '${version.id}';`);
+      const withSubject = async (): Promise<string> => psql(`SELECT count(*) FROM work_item WHERE subject = '${subject}';`);
+      const outboxRows = async (): Promise<string> => psql(`SELECT count(*) FROM event_outbox;`);
+      const [raisedBefore, subjectBefore, outboxBefore] = [await raisedFromTemplate(), await withSubject(), await outboxRows()];
+      expect(raisedBefore, "the one change request alice raised from the template").toBe("1");
+      expect(subjectBefore).toBe("1");
+      const withoutProject = Object.fromEntries(Object.entries(sent).filter(([key]) => key !== "projectId"));
+      for (const [label, body, message] of [
+        [
+          "Other Corp's project",
+          { ...withoutProject, projectId: OTHER_CORP.id },
+          `is ${EXAMPLE_CORP_CUSTOMER}'s and cannot be used for a project of ${OTHER_CORP_CUSTOMER}`,
+        ],
+        ["no project", withoutProject, `projectId is required: the standard change template "${TEMPLATE_NAME}" is ${EXAMPLE_CORP_CUSTOMER}'s`],
+      ] as const) {
+        const refused = await staff("alice").create(body);
+        const refusal = refused.body as unknown as { errorCode?: string; message?: string };
+        expect(refused.status, `raising from the template for ${label}: ${JSON.stringify(refused.body)}`).toBe(400);
+        expect(refusal.errorCode, label).toBe("standard_change_template_other_customer");
+        expect(refusal.message, label).toContain(message);
+      }
+      expect(await raisedFromTemplate(), "no change request was raised from the template by the refused requests").toBe(raisedBefore);
+      expect(await withSubject(), "no work item has the refused requests' subject").toBe(subjectBefore);
+      expect(await outboxRows(), "the refused requests wrote no event").toBe(outboxBefore);
+      /** A PATCH moving the raised change request to Other Corp's project is refused with the same code; the project stays. */
+      const expectMoveToOtherCustomerRefused = async (when: string): Promise<void> => {
+        const moved = await staff("alice").patch(raisedId, { projectId: OTHER_CORP.id });
+        const refusal = moved.body as unknown as { errorCode?: string; message?: string };
+        expect(moved.status, `${when}: ${JSON.stringify(moved.body)}`).toBe(400);
+        expect(refusal.errorCode, when).toBe("standard_change_template_other_customer");
+        expect(refusal.message, when).toContain(`cannot be used for a project of ${OTHER_CORP_CUSTOMER}`);
+        const after = await staff("alice").get(raisedId);
+        expect(after.body.project?.id, `${when}: the project is still Example Corp's`).toBe(EXAMPLE_CORP.id);
+      };
+      await expectMoveToOtherCustomerRefused("in New");
 
       // A standard change is pre-authorised: the lifecycle bar never takes it through Assess or Authorize (no customer
       // steps either: the template asks for neither).
@@ -1296,6 +1530,8 @@ test.describe("standard changes (real stack)", () => {
         "Closed, upcoming",
         "Canceled, not taken",
       ]);
+      // Past New the move to another customer's project is refused with the same code (not only as a frozen project).
+      await expectMoveToOtherCustomerRefused("once Scheduled");
       await alice.getByRole("button", { name: "Start implementation" }).click();
       await expect(detail.currentStep()).toContainText("Implement", { timeout: 15_000 });
       await alice.getByRole("button", { name: "Mark implemented" }).click();

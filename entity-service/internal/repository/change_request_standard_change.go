@@ -39,6 +39,12 @@ import (
 //     change by a PATCH (checkStandardChangeTypeEdit);
 //   - Request Approval needs the template still active and still at the version
 //     the change was raised from (checkStandardChangeTemplateUsable);
+//   - it is for a project of the template's customer, from creation on and in
+//     every state (recordChangeRequestTemplate, checkStandardChangeProjectCustomer);
+//     and since the Salesforce project sync (the source of truth for projects)
+//     may move a project to another account afterwards, Request Approval checks
+//     the project's account again (checkStandardChangeCustomerAtApproval) and the
+//     detail says when they no longer match (standardChange.customerMismatch);
 //   - a rollback, or a deviation from the implementation plan, flags the template
 //     for review (flagStandardTemplateOnFailure).
 //
@@ -140,6 +146,42 @@ func checkStandardChangeTemplateUsable(ctx context.Context, tx pgx.Tx, snap chan
 	return templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), *snap.templateVersionID, stringOrEmpty(name), "approval cannot be requested")
 }
 
+// checkStandardChangeCustomerAtApproval refuses (400,
+// CodeStandardChangeTemplateOtherCustomer) Request Approval of a templated change
+// request whose project (effectiveProject: the request's, else the stored one) is
+// not, at this moment, a project of the template's customer. Creation and every
+// PATCH keep the project with the template's customer, but the Salesforce project
+// sync is the source of truth for a project's account and is not blocked: it may
+// re-parent the project after the change was raised. The answer is the same 400
+// (and code) as every other "this template is not this project's customer's"
+// refusal, so a client tells them apart by the one code.
+func checkStandardChangeCustomerAtApproval(ctx context.Context, tx pgx.Tx, snap changeRequestGateSnapshot, effectiveProject *string) error {
+	if snap.templateVersionID == nil || (snap.state != "" && snap.state != "NEW") {
+		return nil
+	}
+	var name, accountID, accountName *string
+	err := tx.QueryRow(ctx, `
+		SELECT t.name, a.id::text, a.name
+		  FROM standard_change_template_version v JOIN standard_change_template t ON t.id = v.template_id
+		  LEFT JOIN account a ON a.id = t.account_id
+		 WHERE v.id = $1::uuid`, *snap.templateVersionID).Scan(&name, &accountID, &accountName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // checkStandardChangeTemplateUsable has answered it
+	}
+	if err != nil {
+		return fmt.Errorf("patch change request: read standard change template: %w", err)
+	}
+	if err := checkProjectOfTemplateCustomer(ctx, tx, stringOrEmpty(name), accountRef(accountID, accountName), effectiveProject); err != nil {
+		var ve *apierror.ValidationError
+		if errors.As(err, &ve) && ve.Code == apierror.CodeStandardChangeTemplateOtherCustomer && hasProjectID(effectiveProject) {
+			return &apierror.ValidationError{Code: ve.Code, Msg: "approval cannot be requested: " + ve.Msg +
+				". The change request's project now belongs to another customer: cancel this change request and raise a new one from that customer's template"}
+		}
+		return err
+	}
+	return nil
+}
+
 // templateUsableRefusal is the 409 for a template that cannot be used (state is
 // the stored upper-case state, "" when the template could not be read), nil when
 // it can.
@@ -162,19 +204,24 @@ func templateUsableRefusal(state, currentVersionID, versionID, name, what string
 
 // recordChangeRequestTemplate writes the template version and the parameter
 // values on a change request being created, in its transaction, after checking
-// (under FOR SHARE) that the version is still its template's current one and the
-// template is active.
-func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID, versionID string, values map[string]string) error {
-	var state, current, name *string
+// (under FOR SHARE) that the version is still its template's current one, the
+// template is active, and projectID (the change request's project) is one of
+// the template's customer's.
+func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID, versionID string, projectID *string, values map[string]string) error {
+	var state, current, name, accountID, accountName *string
 	err := tx.QueryRow(ctx, `
-		SELECT t.state, t.current_version_id::text, t.name
+		SELECT t.state, t.current_version_id::text, t.name, a.id::text, a.name
 		  FROM standard_change_template_version v JOIN standard_change_template t ON t.id = v.template_id
+		  LEFT JOIN account a ON a.id = t.account_id
 		 WHERE v.id = $1::uuid
-		 FOR SHARE OF t`, versionID).Scan(&state, &current, &name)
+		 FOR SHARE OF t`, versionID).Scan(&state, &current, &name, &accountID, &accountName)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("create change request: read standard change template: %w", err)
 	}
 	if err := templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), versionID, stringOrEmpty(name), "the change request cannot be raised"); err != nil {
+		return err
+	}
+	if err := checkProjectOfTemplateCustomer(ctx, tx, stringOrEmpty(name), accountRef(accountID, accountName), projectID); err != nil {
 		return err
 	}
 	if values == nil {
@@ -190,6 +237,71 @@ func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID
 		return fmt.Errorf("create change request: record standard change template: %w", err)
 	}
 	return nil
+}
+
+// TemplateCustomerRefusal is the 400 (CodeStandardChangeTemplateOtherCustomer)
+// for using the standard change template named templateName, whose customer is
+// templateCustomer (nil: none recorded), for a project whose customer is
+// projectCustomer (nil: no project; an empty ID: a project with no account). nil
+// when they are the same customer. Shared with the service, which checks it
+// before the previous system is called.
+func TemplateCustomerRefusal(templateName string, templateCustomer, projectCustomer *domain.EntityRef) error {
+	switch {
+	case templateCustomer == nil:
+		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
+			Msg: fmt.Sprintf("the standard change template %q has no customer recorded, so no change request can be raised from it until its customer is set", templateName)}
+	case projectCustomer == nil:
+		return &apierror.ValidationError{Code: apierror.CodeStandardChangeTemplateOtherCustomer,
+			Msg: fmt.Sprintf("projectId is required: the standard change template %q is %s's, and a change request is raised from it only for one of %s's projects", templateName, customerName(templateCustomer), customerName(templateCustomer))}
+	case !sameAccount(templateCustomer.ID, projectCustomer.ID):
+		return &apierror.ValidationError{Code: apierror.CodeStandardChangeTemplateOtherCustomer,
+			Msg: fmt.Sprintf("the standard change template %q is %s's and cannot be used for a project of %s: a template is pre-authorised for its own customer's deployments only",
+				templateName, customerName(templateCustomer), customerName(projectCustomer))}
+	}
+	return nil
+}
+
+// checkProjectOfTemplateCustomer reads the project's customer and refuses it when
+// it is not the template's (TemplateCustomerRefusal). An unknown project is a 400.
+func checkProjectOfTemplateCustomer(ctx context.Context, q crQuerier, templateName string, templateCustomer *domain.EntityRef, projectID *string) error {
+	var projectCustomer *domain.EntityRef
+	if hasProjectID(projectID) {
+		ref, err := projectAccount(ctx, q, *projectID)
+		if err != nil {
+			return err
+		}
+		if ref == nil {
+			return &apierror.ValidationError{Msg: "projectId does not refer to a project"}
+		}
+		projectCustomer = ref
+	}
+	return TemplateCustomerRefusal(templateName, templateCustomer, projectCustomer)
+}
+
+// checkStandardChangeProjectCustomer refuses (400,
+// CodeStandardChangeTemplateOtherCustomer) a PATCH that moves a change request
+// raised from a standard change template to a project of another customer, in
+// every state (after New the project is frozen anyway; in New this is what keeps
+// the change request with its template's customer). A move to another project of
+// the same customer is left to the other rules; resending the stored project is
+// accepted.
+func checkStandardChangeProjectCustomer(ctx context.Context, tx pgx.Tx, snap changeRequestGateSnapshot, requested *string) error {
+	if snap.templateVersionID == nil || requested == nil {
+		return nil
+	}
+	if snap.projectID != nil && strings.EqualFold(strings.TrimSpace(*snap.projectID), strings.TrimSpace(*requested)) {
+		return nil
+	}
+	var name, accountID, accountName *string
+	err := tx.QueryRow(ctx, `
+		SELECT t.name, a.id::text, a.name
+		  FROM standard_change_template_version v JOIN standard_change_template t ON t.id = v.template_id
+		  LEFT JOIN account a ON a.id = t.account_id
+		 WHERE v.id = $1::uuid`, *snap.templateVersionID).Scan(&name, &accountID, &accountName)
+	if err != nil {
+		return fmt.Errorf("patch change request: read standard change template: %w", err)
+	}
+	return checkProjectOfTemplateCustomer(ctx, tx, stringOrEmpty(name), accountRef(accountID, accountName), requested)
 }
 
 // flagStandardTemplateOnFailure flags the template a change request was raised
@@ -227,21 +339,28 @@ func flagStandardTemplateOnFailure(ctx context.Context, tx pgx.Tx, id, actor str
 // request not raised from a template.
 func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string) (*domain.ChangeRequestStandardChange, error) {
 	var out domain.ChangeRequestStandardChange
+	var accountID, accountName *string
 	var raw []byte
 	var paramsRaw []byte
 	err := q.QueryRow(ctx, `
-		SELECT t.id::text, t.name, t.number, v.id::text, v.version, COALESCE(v.parameters, '[]'::jsonb), cr.standard_change_parameter_values
+		SELECT t.id::text, t.name, t.number, a.id::text, a.name, v.id::text, v.version, COALESCE(v.parameters, '[]'::jsonb), cr.standard_change_parameter_values,
+		       t.account_id IS DISTINCT FROM p.account_id
 		  FROM change_request cr
+		  JOIN work_item wi ON wi.id = cr.id
+		  LEFT JOIN project p ON p.id = wi.project_id
 		  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
 		  JOIN standard_change_template t ON t.id = v.template_id
+		  LEFT JOIN account a ON a.id = t.account_id
 		 WHERE cr.id = $1::uuid`, id).
-		Scan(&out.Template.ID, &out.Template.Name, &out.TemplateNumber, &out.VersionID, &out.Version, &paramsRaw, &raw)
+		Scan(&out.Template.ID, &out.Template.Name, &out.TemplateNumber, &accountID, &accountName, &out.VersionID, &out.Version, &paramsRaw, &raw,
+			&out.CustomerMismatch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read change request standard change: %w", err)
 	}
+	out.Customer = accountRef(accountID, accountName)
 	var params []domain.StandardChangeParameter
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return nil, fmt.Errorf("read change request standard change: parameters: %w", err)

@@ -474,7 +474,12 @@ message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstr
 one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
 is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
 `POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
-`standardChangeParameters`, forwarded like every other create field.
+`standardChangeParameters`, forwarded like every other create field. A template is one customer's
+(entity-service migration 0254): templates and proposals carry `customer` {id, name}, the search
+bodies' `accountId` filter and a proposal's `accountId` pass through raw, and raising a change request
+from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
+400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
+(`standard_change_customer_test.go`).
 
 ## Change request tags go through the case tag routes
 

@@ -186,6 +186,11 @@ func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error 
 	if blankRich(p.Rationale) {
 		missing = append(missing, "rationale")
 	}
+	// A new template belongs to one customer, which the proposal names. A
+	// modification or retirement has its template's.
+	if p.Kind == domain.StandardChangeProposalKindNew && (p.Customer == nil || strings.TrimSpace(p.Customer.ID) == "") {
+		missing = append(missing, "customer (accountId)")
+	}
 	if p.Kind != domain.StandardChangeProposalKindRetire {
 		c := p.StandardChangeContent
 		if blankText(c.Subject) {

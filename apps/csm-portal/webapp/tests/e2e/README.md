@@ -181,11 +181,17 @@ What it checks:
   nothing about service requests, incidents, problems or runbooks. Every other Operations tab (the change request list
   included) keeps "Operations" and its Operations-wide line. The sidebar is checked first: each Operations entry is
   polled until it is visible (none is skipped), and only then that there is no "Standard changes" entry of its own.
-- **The seed is listed**: the catalogue shows the seed's five templates with their state and version (the suspended
-  "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2); the suspended template's page shows
-  the seed's current reason in full ("The owner is reworking the restart procedure for clustered deployments. ...") and
-  who suspended it; the proposals list the seed's rejected, in-CAB-review and draft proposals and its approved revision,
-  each in its state.
+- **The seed is listed, one customer's at a time**: the catalogue has a Customer column (its header row is checked
+  column by column) and shows the seed's six templates with their customer, state and version (five of Example Corp:
+  the suspended "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2, ...; one of Other
+  Corp). "Rotate the TLS certificate on an API gateway" is two templates, one of each customer, each listed with its
+  own customer and number, and its two approved proposals likewise. The Customer filter set to Other Corp sends
+  `accountId` (Other Corp's account, checked against project 402's in Postgres) and lists exactly Other Corp's live
+  templates (counted in Postgres), each with Other Corp in its Customer cell. The suspended template's page shows its
+  customer ("For Example Corp: used only for this customer's projects." and the Customer fact), the seed's current
+  reason in full ("The owner is reworking the restart procedure for clustered deployments. ...") and who suspended it;
+  the proposals list (also with a Customer column) shows the seed's rejected, in-CAB-review and draft proposals and its
+  approved revision, each in its state and with its customer.
 - **Breadcrumbs, Back, pins and the sidebar**: a template page reads "Change requests › Standard changes › STD…", a
   proposal page "Change requests › Standard changes › Proposals › SCP…"; Back returns to the view (and filter) the record
   was opened from, while the trail's "Proposals" opens all the proposals (`?view=standard&show=proposals`, "All
@@ -205,7 +211,9 @@ What it checks:
   (`scope=awaiting`; `scope=mine&state=draft`), which list exactly that many. Not shown on the proposals view. `jane`,
   who has proposed nothing (checked in Postgres), opens the proposals on all of them and sees bob's seeded ones;
   "Proposed by me" then lists none.
-- **The whole flow**: `bob` proposes a standard change from a closed change request ("Propose as standard change"),
+- **The whole flow**: `bob` proposes a standard change from a closed change request of Example Corp (raised for
+  project 401; "Propose as standard change"). The proposal takes that change request's customer: the header reads
+  "Customer: Example Corp", the Customer field is read-only (no picker), and Postgres holds the same account. He
   templates it (name, category, impact **Medium** -- not the create form's default, Low --, description, justification,
   risk and impact analysis, plan visible to customers, a text and a select parameter, `{{placeholders}}` in the subject
   and the implementation, backout and test plans, typed and through "Insert {{…}}"). Before sample values are typed the
@@ -214,10 +222,20 @@ What it checks:
   subject), and their computed styles are compared there: neither has the browser's own yellow `<mark>` background, the
   open one is monospace and not underlined, the filled one is in the text's font with a dotted underline, and their
   backgrounds, fonts and underlines differ; after the environment too, every mark is filled with the values. He saves and submits it to the CAB; `carol` (CAB) reaches it through her attention
-  strip and approves it; the template's page shows the current version with its placeholders highlighted, and it is in
-  the catalogue as active version 1 (impact Medium). `alice` raises a change request from it on the create form (type
-  Standard, the template, the change specifics, the read-only preview with filled marks); the create request sends none
-  of the template's fields. The change request holds the template's content rendered with her values (subject,
+  strip and approves it; the template's page shows the current version with its placeholders highlighted and its
+  customer (Example Corp, also from the API), and it is in the catalogue as active version 1 of Example Corp (impact
+  Medium). `alice` raises a change request from it on the create form. With type Standard the template picker is
+  disabled until a Customer Project is chosen. With Other Corp's project (402) it offers Other Corp's templates only:
+  a search for the new template finds nothing, and of the two "Rotate the TLS certificate ..." templates only Other
+  Corp's is offered. She picks that one, then switches the project to Example Corp's (401): the template and its change
+  specifics are cleared, with a notice that says whose each is. Now only Example Corp's "Rotate the TLS ..." is
+  offered. She picks the new template, fills the change specifics and sees the read-only preview with filled marks. The
+  create request sends `projectId` 401 and none of the template's fields. Through the BFF, as `alice`, raising a
+  change from the template for Other Corp's project, or with no `projectId`, is refused with 400
+  `standard_change_template_other_customer` in the backend's words. Neither request writes a change request, a work
+  item or an `event_outbox` row (all three counted in Postgres). A PATCH moving the raised change request to Other
+  Corp's project is refused with the same code in New and again once it is Scheduled, and its project stays 401. The
+  change request's banner reads "Customer: Example Corp. ...". The change request holds the template's content rendered with her values (subject,
   implementation / backout / test plans, impact, category, rollback duration on the page; description, justification,
   risk and impact analysis, plan visibility, impact and risk from the API and Postgres, compared with the template
   version the API returns), shows the "Raised from standard change template" banner, and its lifecycle bar shows Assess

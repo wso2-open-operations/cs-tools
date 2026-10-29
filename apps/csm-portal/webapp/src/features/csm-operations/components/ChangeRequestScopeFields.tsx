@@ -35,12 +35,19 @@ interface ChangeRequestScopeFieldsProps {
   /** Whether the Customer Project can be cleared once picked (default true). */
   projectClearable?: boolean;
   /**
+   * Offers only this customer's (account's) projects in the Customer Project
+   * picker: a change request raised from a standard change template is for a
+   * project of the template's customer only.
+   */
+  projectAccountId?: string;
+  /**
    * Marks the Customer Project required (asterisk + `aria-required`). Display
-   * only: the caller decides when (e.g. a customer step ticked on a change
-   * request that has yet to request approval) and owns any validation.
+   * only: the caller decides when (e.g. a standard change, or a customer step
+   * ticked on a change request that has yet to request approval) and owns any
+   * validation.
    */
   projectRequired?: boolean;
-  /** Text under the Customer Project picker (e.g. why it is required). */
+  /** Text under the Customer Project picker (e.g. why it is required or narrowed). */
   projectHelperText?: ReactNode;
 }
 
@@ -64,6 +71,7 @@ export default function ChangeRequestScopeFields({
   projectDisabled = false,
   idPrefix,
   projectClearable = true,
+  projectAccountId,
   projectRequired = false,
   projectHelperText,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
@@ -82,6 +90,7 @@ export default function ChangeRequestScopeFields({
         onChange={scope.setProject}
         disabled={disabled || projectDisabled}
         disableClearable={!projectClearable}
+        accountId={projectAccountId}
         required={projectRequired}
         helperText={projectHelperText}
       />

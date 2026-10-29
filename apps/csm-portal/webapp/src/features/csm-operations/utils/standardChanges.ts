@@ -65,6 +65,79 @@ export function isStandardChangeTemplateUnavailable(err: unknown): boolean {
   return backendErrorCode(err) === STANDARD_CHANGE_TEMPLATE_UNAVAILABLE;
 }
 
+/**
+ * The error code of a change request raised from a template for no project or
+ * for a project of another customer than the template's (or moved to one).
+ */
+export const STANDARD_CHANGE_TEMPLATE_OTHER_CUSTOMER = "standard_change_template_other_customer";
+
+/** True for a refusal that means the project is not one of the template's customer's. */
+export function isStandardChangeTemplateOtherCustomer(err: unknown): boolean {
+  return backendErrorCode(err) === STANDARD_CHANGE_TEMPLATE_OTHER_CUSTOMER;
+}
+
+/** A customer's (account's) own page. */
+export function customerAccountPath(accountId: string): string {
+  return `/customers/accounts/${encodeURIComponent(accountId)}`;
+}
+
+/**
+ * Whether a proposal's customer can be named or changed in its editor: only a
+ * new proposal started from nothing (no source change request, not a copy). One
+ * started from a change request takes that change request's customer, a copy
+ * the copied proposal's, and a modification or retirement its template's; the
+ * server refuses another. A copy of a proposal that had no customer yet names
+ * one, once (the server accepts naming it while it has none).
+ */
+export function standardChangeProposalCustomerEditable(proposal: {
+  kind: BeStandardChangeProposalKind;
+  sourceChangeRequest?: { id: string } | null;
+  copiedFrom?: { id: string } | null;
+  customer?: { id: string } | null;
+}): boolean {
+  if (proposal.kind !== "new" || proposal.sourceChangeRequest) {
+    return false;
+  }
+  return !proposal.copiedFrom || !proposal.customer;
+}
+
+/** Why a proposal's customer is fixed, for the read-only field's helper. */
+export function standardChangeProposalCustomerFixedReason(proposal: {
+  kind: BeStandardChangeProposalKind;
+  sourceChangeRequest?: { id: string } | null;
+  copiedFrom?: { id: string; name?: string } | null;
+  customer?: { id: string } | null;
+}): string | null {
+  if (proposal.kind === "modify" || proposal.kind === "retire") {
+    return "The template's customer: a revision or retirement is for the customer the template belongs to.";
+  }
+  if (proposal.sourceChangeRequest) {
+    return "The customer of the change request it started from.";
+  }
+  if (proposal.copiedFrom && proposal.customer) {
+    const from = proposal.copiedFrom.name ? ` (${proposal.copiedFrom.name})` : "";
+    return `The customer of the proposal it was copied from${from}. To propose it for another customer, start a new proposal.`;
+  }
+  return null;
+}
+
+/**
+ * The warning on a change request raised from a template whose project is no
+ * longer the template's customer's (`standardChange.customerMismatch`).
+ */
+export function standardChangeCustomerMismatchWarning(customerName?: string | null): string {
+  const whose = customerName ? `${customerName}'s` : "the template customer's";
+  return (
+    `This change request's Customer Project is no longer one of ${whose} projects: it has moved to another customer ` +
+    "since the change was raised. The template is pre-authorised only for its own customer, so approval cannot be " +
+    "requested. Cancel this change request and raise a new one from a template of the project's customer."
+  );
+}
+
+/** Said where a template is picked or a project chosen for one. */
+export const STANDARD_CHANGE_ONE_CUSTOMER_RULE =
+  "A standard change template belongs to one customer and is used only for that customer's projects.";
+
 export const STANDARD_CHANGE_PARAMETER_TYPE_OPTIONS: ReadonlyArray<{
   value: BeStandardChangeParameterType;
   label: string;
@@ -637,6 +710,8 @@ export function standardChangeProposalGaps(
   draft: {
     name: string;
     rationale: string;
+    /** The customer (account) id the proposal is for; "" when none is named. */
+    accountId: string;
     subject: string;
     implementationPlan: string;
     backoutPlan: string;
@@ -648,6 +723,9 @@ export function standardChangeProposalGaps(
   const gaps: string[] = [];
   if (!draft.name.trim()) gaps.push("a name");
   if (isBlankHtml(draft.rationale)) gaps.push("a rationale");
+  // A new template belongs to one customer, which the proposal names; a
+  // modification or retirement has its template's.
+  if (kind === "new" && !draft.accountId.trim()) gaps.push("a customer");
   if (kind === "retire") return gaps;
   if (!draft.subject.trim()) gaps.push("a subject");
   if (isBlankHtml(draft.implementationPlan)) gaps.push("an implementation plan");

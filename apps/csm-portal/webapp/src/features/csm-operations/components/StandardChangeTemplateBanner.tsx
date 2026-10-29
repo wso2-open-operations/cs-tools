@@ -17,12 +17,20 @@
 import { Alert, Box, Link, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { BeChangeRequestStandardChange } from "@api/backend/types";
+import { standardChangeCustomerMismatchWarning } from "@features/csm-operations/utils/standardChanges";
 
 /**
  * On a change request raised from a standard change template: which template and
  * version it follows (a link to the template) and the change specifics it was
- * raised with, by label. What the template specifies is frozen on the change
+ * raised with, by label, and the template's customer (the account of the change
+ * request's project). What the template specifies is frozen on the change
  * request; the parameters cannot be edited either.
+ *
+ * When the project is no longer the template's customer's (`customerMismatch`:
+ * the project sync, the source of truth for projects, moved it to another
+ * account after the change was raised) the banner turns into a warning that
+ * says so: the backend refuses Request Approval of such a change (400
+ * `standard_change_template_other_customer`).
  */
 export default function StandardChangeTemplateBanner({
   standardChange,
@@ -32,8 +40,9 @@ export default function StandardChangeTemplateBanner({
   onOpenTemplate: () => void;
 }): JSX.Element {
   const parameters = standardChange.parameters ?? [];
+  const mismatch = standardChange.customerMismatch === true;
   return (
-    <Alert severity="info" role="region" aria-label="Standard change template">
+    <Alert severity={mismatch ? "warning" : "info"} role="region" aria-label="Standard change template">
       <Typography variant="body2" sx={{ fontWeight: 600 }}>
         Raised from standard change template{" "}
         <Link component="button" variant="body2" onClick={onOpenTemplate} sx={{ fontWeight: 600, verticalAlign: "baseline" }}>
@@ -42,6 +51,16 @@ export default function StandardChangeTemplateBanner({
         </Link>{" "}
         (version {standardChange.version})
       </Typography>
+      {standardChange.customer?.name && (
+        <Typography variant="body2">
+          {`Customer: ${standardChange.customer.name}. The template is used only for this customer's projects.`}
+        </Typography>
+      )}
+      {mismatch && (
+        <Typography variant="body2" sx={{ fontWeight: 600 }} data-testid="standard-change-customer-mismatch">
+          {standardChangeCustomerMismatchWarning(standardChange.customer?.name)}
+        </Typography>
+      )}
       <Typography variant="body2" color="text.secondary">
         What the template specifies cannot be changed on this change request.
       </Typography>

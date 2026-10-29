@@ -59,7 +59,9 @@ import StandardChangeContentView, {
   StandardChangeParametersTable,
 } from "@features/csm-operations/components/StandardChangeContentView";
 import {
+  customerAccountPath,
   raiseFromTemplatePath,
+  STANDARD_CHANGE_ONE_CUSTOMER_RULE,
   STANDARD_CHANGES_PATH,
   standardChangeProposalPath,
   standardChangeRecentEntry,
@@ -244,6 +246,20 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
             {template.reviewRequired && <Chip size="small" variant="outlined" color="warning" label="Review needed" />}
           </Box>
           <Typography variant="h5">{template.name}</Typography>
+          {template.customer && (
+            <Typography variant="body2" color="text.secondary">
+              {"For "}
+              <Link
+                component="button"
+                variant="body2"
+                onClick={() => navigate(customerAccountPath(template.customer!.id), { state: { from: here } })}
+                sx={{ verticalAlign: "baseline" }}
+              >
+                {template.customer.name}
+              </Link>
+              {": used only for this customer's projects."}
+            </Typography>
+          )}
         </Box>
         <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
           {/* The create form is behind write access (RequireWriteAccess), like every "Create" of Operations. */}
@@ -252,7 +268,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
               variant="contained"
               size="small"
               startIcon={<FilePlus size={16} />}
-              disabled={template.state !== "active"}
+              disabled={template.state !== "active" || template.customer === null}
               onClick={() => navigate(raiseFromTemplatePath(template.id), { state: { from: here } })}
             >
               Raise a change request
@@ -328,6 +344,16 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
           </Typography>
         </Alert>
       )}
+      {template.customer === null && (
+        <Alert severity="warning" role="region" aria-label="No customer recorded">
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            No customer recorded
+          </Typography>
+          <Typography variant="body2">
+            {`${STANDARD_CHANGE_ONE_CUSTOMER_RULE} This template was written before that, and its customer could not be told, so no change request can be raised from it and it cannot be changed until its customer is set.`}
+          </Typography>
+        </Alert>
+      )}
       {template.state === "retired" && (
         <Alert severity="info">Retired: this template is kept as a record and can no longer be used.</Alert>
       )}
@@ -388,6 +414,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
             gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" },
           }}
         >
+          <Meta label="Customer">{template.customer?.name || "—"}</Meta>
           <Meta label="Owner">{template.owner?.name || template.owner?.email || "—"}</Meta>
           <Meta label="Current version">
             {current ? `${current.version}, approved ${formatDateTime(current.approvedOn)}` : "—"}

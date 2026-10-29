@@ -62,12 +62,15 @@ import ChangeRequestScopeFields, {
 import { useChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
 import {
   useGetStandardChangeTemplate,
+  useProjectCustomer,
   useSearchActiveStandardChangeTemplatesForSelect,
 } from "@features/csm-operations/api/useStandardChanges";
 import StandardChangeContentView from "@features/csm-operations/components/StandardChangeContentView";
 import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
 import {
+  isStandardChangeTemplateOtherCustomer,
   isStandardChangeTemplateUnavailable,
+  STANDARD_CHANGE_ONE_CUSTOMER_RULE,
   standardChangeParametersPayload,
   standardChangeTemplateStateLabel,
   standardChangeValuesValid,
@@ -360,7 +363,10 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const template: BeStandardChangeTemplate | null | undefined = templateQuery.data;
   const templateVersion = template?.currentVersion ?? null;
   const templateParameters = templateVersion?.parameters ?? [];
-  const templateUsable = !!template && template.state === "active" && !!templateVersion;
+  // A template is one customer's (null only on an older one whose customer could
+  // not be told: nothing can be raised from it until one is set).
+  const templateCustomer = template?.customer ?? null;
+  const templateUsable = !!template && template.state === "active" && !!templateVersion && !!templateCustomer;
   const pickedTemplateLabel = template ? `${template.number} — ${template.name}` : templateLabel;
   // Customer Project / Deployments / Deployment products (and the read-only
   // Customer Group, the project's registered contacts). The hook owns the
@@ -380,6 +386,74 @@ export default function CreateChangeRequestPage(): JSX.Element {
       label: draft.deploymentProductLabels?.[id] ?? id,
     })),
   });
+  // STANDARD: the customer is the chosen Customer Project's account. A template
+  // belongs to one customer and is used only for that customer's projects, so the
+  // template picker lists that customer's active templates only and waits for a
+  // project; a template chosen before any project (a template page's "Raise a
+  // change request", a clone, a draft) narrows the project picker to its
+  // customer instead.
+  const projectCustomerQuery = useProjectCustomer(isStandard && scope.projectId ? scope.projectId : undefined);
+  const projectCustomerKnown = isStandard && !!scope.projectId && projectCustomerQuery.isSuccess;
+  const projectCustomer = projectCustomerKnown ? (projectCustomerQuery.data ?? null) : null;
+  const customerMatches = projectCustomerKnown && !!templateCustomer && projectCustomer?.id === templateCustomer.id;
+  // Said where the template is picked when the project changed to another
+  // customer's and the template (with its values) had to be cleared.
+  const [templateClearedNotice, setTemplateClearedNotice] = useState<string | null>(null);
+  // The create was refused because the project is not one of the template's
+  // customer's (400 standard_change_template_other_customer): the backend's
+  // words, for the template and project they were said about.
+  const [otherCustomerRefusal, setOtherCustomerRefusal] = useState<{
+    message: string;
+    templateId: string;
+    projectId: string;
+  } | null>(null);
+  const otherCustomerMessage =
+    otherCustomerRefusal &&
+    otherCustomerRefusal.templateId === templateId &&
+    otherCustomerRefusal.projectId === scope.projectId
+      ? otherCustomerRefusal.message
+      : null;
+  // The project now belongs to another customer than the template: the template
+  // (and its change specifics) cannot be used for it, so it is cleared, with a
+  // short notice. Adjusted during render (React's pattern for state derived from
+  // a change), like the inference from the originating service request below.
+  if (
+    isStandard &&
+    template &&
+    template.id === templateId &&
+    projectCustomerKnown &&
+    (templateCustomer?.id ?? null) !== (projectCustomer?.id ?? null)
+  ) {
+    const projectName = scope.projectLabel || "the selected project";
+    setTemplateClearedNotice(
+      `The template ${template.number} — ${template.name} was cleared, with its change specifics: it is ${
+        templateCustomer ? `${templateCustomer.name}'s` : "no customer's"
+      }, and ${projectName} ${projectCustomer ? `is ${projectCustomer.name}'s` : "has no customer recorded"}. ${STANDARD_CHANGE_ONE_CUSTOMER_RULE}`,
+    );
+    setTemplateId("");
+    setTemplateLabel(undefined);
+    setParameterValues({});
+    setShowParameterErrors(false);
+    setTemplateUnavailable(null);
+  }
+  // Under the template picker: why it is disabled, or whose templates it lists.
+  const templatePickerHint = !scope.projectId
+    ? `Select the Customer Project first. ${STANDARD_CHANGE_ONE_CUSTOMER_RULE}`
+    : projectCustomerQuery.isError
+      ? "Couldn't look up the project's customer."
+      : !projectCustomerKnown
+        ? "Looking up the project's customer…"
+        : projectCustomer
+          ? `${projectCustomer.name}'s active templates only: a template is used only for its own customer's projects.`
+          : "This project has no customer recorded, so no standard change template can be used for it.";
+  // A template chosen before any project narrows the project picker to its customer.
+  const projectAccountId = isStandard && !scope.projectId && templateCustomer ? templateCustomer.id : undefined;
+  const projectHelperText = !isStandard
+    ? undefined
+    : projectAccountId && templateCustomer
+      ? `Projects of ${templateCustomer.name}, the customer of ${template!.number}: a template is used only for its own customer's projects.`
+      : "Required for a standard change: a project of the template's customer.";
+
   // The legacy ServiceNow form pre-selects "Other".
   const initialCategory = draft?.category ?? cloneState?.category ?? DEFAULT_CHANGE_REQUEST_CATEGORY;
   const [category, setCategory] = useState<string>(
@@ -572,7 +646,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // create-then-PATCH flow through with an incident's id would 404.
   const canSubmit =
     isCreatableChangeRequestType(type) &&
-    (isStandard ? templateUsable && !templateUnavailable : subject.trim().length > 0) &&
+    (isStandard
+      ? templateUsable && !templateUnavailable && !otherCustomerMessage && customerMatches
+      : subject.trim().length > 0) &&
     !isSubmitting &&
     !isIncidentParentSelected;
   // Non-blocking: a past planned start/end is unusual but not forbidden
@@ -707,6 +783,19 @@ export default function CreateChangeRequestPage(): JSX.Element {
         // it: say so where the template is shown and offer to read it again.
         if (isStandard && isStandardChangeTemplateUnavailable(err)) {
           setTemplateUnavailable(err instanceof Error && err.message ? err.message : "The template is no longer available as shown.");
+          return;
+        }
+        // The project is not one of the template's customer's: said at the
+        // template, in the backend's words, until the template or project changes.
+        if (isStandard && isStandardChangeTemplateOtherCustomer(err)) {
+          setOtherCustomerRefusal({
+            message:
+              err instanceof Error && err.message
+                ? err.message
+                : "The template belongs to another customer than the project's.",
+            templateId,
+            projectId: scope.projectId,
+          });
           return;
         }
         // The backend surfaces real validation messages on 4xx (e.g. an
@@ -935,13 +1024,30 @@ export default function CreateChangeRequestPage(): JSX.Element {
                     if (next !== templateId) setParameterValues({});
                     setShowParameterErrors(false);
                     setTemplateUnavailable(null);
+                    setTemplateClearedNotice(null);
                   }}
-                  disabled={isSubmitting}
+                  // A template is one customer's: none can be listed until the
+                  // project (and so the customer) is known.
+                  disabled={isSubmitting || !projectCustomer}
+                  error={!!otherCustomerMessage}
+                  helperText={templatePickerHint}
                   useSearch={useSearchActiveStandardChangeTemplatesForSelect}
+                  searchExtra={projectCustomer?.id}
                   getId={(t) => t.id}
                   getLabel={(t) => `${t.number} — ${t.name}`}
                   knownLabel={pickedTemplateLabel}
                 />
+                {templateClearedNotice && (
+                  <Alert severity="info" role="status" onClose={() => setTemplateClearedNotice(null)}>
+                    {templateClearedNotice}
+                  </Alert>
+                )}
+                {otherCustomerMessage && (
+                  <Alert severity="error" role="alert">
+                    {otherCustomerMessage} Pick a template of the project&apos;s customer, or a project of the
+                    template&apos;s customer; nothing was created.
+                  </Alert>
+                )}
                 {!templateId && (
                   <Typography variant="caption" color="error" role="status">
                     Select a standard change template to continue.
@@ -984,10 +1090,21 @@ export default function CreateChangeRequestPage(): JSX.Element {
                 {templateId && templateQuery.isSuccess && !template && (
                   <Alert severity="warning">The template was not found. Pick another one.</Alert>
                 )}
-                {template && !templateUsable && (
+                {template && template.state !== "active" && (
                   <Alert severity="warning">
                     {`This template is ${standardChangeTemplateStateLabel(template.state).toLowerCase()}: a change request cannot be raised from it. Pick an active template.`}
                   </Alert>
+                )}
+                {template && template.state === "active" && !templateCustomer && (
+                  <Alert severity="warning">
+                    This template has no customer recorded, so a change request cannot be raised from it until its
+                    customer is set. Pick another template.
+                  </Alert>
+                )}
+                {templateUsable && !scope.projectId && (
+                  <Typography variant="caption" color="error" role="status">
+                    {`Select a Customer Project of ${templateCustomer!.name} to continue.`}
+                  </Typography>
                 )}
               </Box>
               {templateUsable && (
@@ -1111,8 +1228,11 @@ export default function CreateChangeRequestPage(): JSX.Element {
               scope={scope}
               disabled={isSubmitting}
               idPrefix="cr"
-              projectRequired={projectNeededForApproval}
-              projectHelperText={projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined}
+              projectRequired={isStandard || projectNeededForApproval}
+              projectAccountId={projectAccountId}
+              projectHelperText={
+                projectHelperText ?? (projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined)
+              }
             />
           </Box>
 

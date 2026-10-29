@@ -390,6 +390,9 @@ export default function EditChangeRequestDialog({
   // stay editable (within that project) until Implement. The backend refuses
   // anything else, so the controls are disabled up front with the reason.
   const projectLocked = customerProjectLockedReason(cr.state);
+  // A templated change belongs to the template's customer: in New its project can
+  // only be swapped for another project of that customer.
+  const templateCustomer = cr.standardChange?.customer ?? null;
   const scopeLocked = changeRequestScopeLockedReason(cr.state);
   // Request Approval (New -> Assess) is still ahead: it needs an Assignment group,
   // and a Customer Project when a customer step is ticked on a non-Emergency change.
@@ -747,6 +750,7 @@ export default function EditChangeRequestDialog({
             <Alert severity="info" role="status" sx={FULL_ROW}>
               {`Raised from standard change template ${cr.standardChange.templateNumber} (version ${cr.standardChange.version}). `}
               {templateLock}
+              {templateCustomer && !projectLocked && ` Its customer is ${templateCustomer.name}: only ${templateCustomer.name}'s projects are offered as the Customer Project.`}
             </Alert>
           )}
           {approvedLock && deviationField}
@@ -990,6 +994,9 @@ export default function EditChangeRequestDialog({
               scope={scope}
               disabled={fieldsDisabled || !!scopeLocked}
               projectDisabled={!!projectLocked}
+              // Raised from a template: a project of the template's customer only
+              // (the backend refuses another customer's, in every state).
+              projectAccountId={templateCustomer?.id}
               idPrefix="cr-edit"
               // A saved project can be swapped for another but not removed —
               // the patch has no way to express "no project".

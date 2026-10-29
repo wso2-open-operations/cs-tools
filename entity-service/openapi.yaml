@@ -12044,8 +12044,9 @@ paths:
         approvers. Approved: a new template (version 1), a new version of the template,
         or the template retired. Rejected: needs a comment; nothing in the catalogue
         changes and the proposal is kept as the record. 409 when it is not in CAB
-        review, or the approval would clash (a live template of the same name, the
-        template moved on).
+        review, or the approval would clash (a live template of the same name for the
+        customer, the template moved on, or the source change request or a piece of
+        evidence is no longer a closed change request of the proposal's customer).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -26743,6 +26744,11 @@ components:
             test plans, riskImpactAnalysis, category, impact, risk, rollbackDurationText,
             isPlanningVisibleToCustomers and the two customer boxes: sending any of them (or
             implementationDeviation) is a 400 with errorCode change_request_standard_template_field.
+            A template is one customer's: projectId is required and must be a project of the
+            template's customer (400 errorCode standard_change_template_other_customer otherwise,
+            refused before the previous system is called on dual-write and again in the create
+            transaction); a template with no customer recorded is a 409
+            standard_change_template_unavailable.
         standardChangeTemplateVersionId:
           type: string
           format: uuid
@@ -31175,6 +31181,15 @@ components:
         number: {type: string, description: 'STD number.'}
         name: {type: string}
         state: {type: string, enum: [active, suspended, retired]}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: >
+            The customer (account) the template belongs to. A change request is raised from
+            it only for one of this customer's projects, and its name is unique among this
+            customer's live templates. Null only on a template written before templates
+            belonged to one customer whose customer could not be told (it cannot be changed
+            or used until its customer is set).
         owner:
           allOf: [{$ref: '#/components/schemas/UserReference'}]
           nullable: true
@@ -31229,6 +31244,7 @@ components:
           type: array
           items: {type: string, enum: [active, suspended, retired]}
         query: {type: string, nullable: true, description: 'Matches the name or number, ignoring case.'}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to one customer''s templates (400 when not a UUID).'}
         pagination: {$ref: '#/components/schemas/Pagination'}
     SearchStandardChangeTemplatesResponse:
       type: object
@@ -31248,6 +31264,10 @@ components:
         subject: {type: string}
         state: {type: string, nullable: true}
         closedOn: {type: string, format: date-time, nullable: true}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: "The change request's customer now (its project's account); null when it has none."
     StandardChangeProposalApprover:
       type: object
       properties:
@@ -31269,6 +31289,14 @@ components:
             kind: {type: string, enum: [new, modify, retire]}
             state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
             name: {type: string}
+            customer:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The customer (account) the proposal is for: what a new proposal names, or takes
+                from the change request it starts from or the proposal it copies; the template's
+                for a modification or retirement. Null on a new draft that has not named one yet,
+                which cannot be submitted.
             rationale: {type: string, nullable: true}
             template:
               allOf: [{$ref: '#/components/schemas/EntityRef'}]
@@ -31277,6 +31305,17 @@ components:
             sourceChangeRequest:
               allOf: [{$ref: '#/components/schemas/EntityRef'}]
               nullable: true
+              description: >
+                The closed change request a new proposal started from (or that a copy carried
+                over). It must be a closed change request of the proposal's customer, checked at
+                create and again at submit (400, in the evidence refusal's words).
+            copiedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The proposal a new draft was copied from (name: its number); null when it was not
+                copied. A copy is for the copied proposal's customer: only a new draft started from
+                nothing (no source change request, not a copy) may change its customer by PATCH.
             evidence:
               type: array
               items: {$ref: '#/components/schemas/StandardChangeEvidence'}
@@ -31307,11 +31346,33 @@ components:
         sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
         copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
         name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The customer (account) a new proposal is for. One started from a change request takes
+            that change request's project's customer (a change request with none cannot be started
+            from), one copied from a proposal takes that proposal's, and a modification or
+            retirement its template's: a different accountId is then a 400. Optional on a new
+            proposal started from nothing (it may be named later), but a new proposal cannot be
+            submitted without one. An id that is not an account is a 400.
     UpdateStandardChangeProposalRequest:
       type: object
-      description: Omitted fields are left as they are; an empty category, impact or risk clears it; parameters and evidenceChangeRequestIds replace the whole list.
+      description: >
+        Omitted fields are left as they are; an empty category, impact or risk clears it; parameters
+        and evidenceChangeRequestIds replace the whole list. Evidence must be closed change requests of
+        the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
       properties:
         name: {type: string}
+        accountId:
+          type: string
+          format: uuid
+          description: >
+            Names or changes the customer of a new draft that did not start from a change request; the
+            evidence it cites (or keeps) must be that customer's, else a 400 and nothing changes. A draft
+            started from a change request, and a modification or retirement, keep the customer they have:
+            resending it is accepted, another is a 400.
         rationale: {type: string}
         subject: {type: string}
         description: {type: string}
@@ -31349,6 +31410,7 @@ components:
           type: array
           items: {type: string, enum: [new, modify, retire]}
         templateId: {type: string, format: uuid, nullable: true}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
         proposedByMe: {type: boolean}
         awaitingMyDecision: {type: boolean}
         query: {type: string, nullable: true}
@@ -31361,6 +31423,9 @@ components:
         kind: {type: string, enum: [new, modify, retire]}
         state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
         name: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
         template:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
@@ -31388,6 +31453,17 @@ components:
       properties:
         template: {$ref: '#/components/schemas/EntityRef'}
         templateNumber: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The template's customer, which is the account of this change request's project.
+        customerMismatch:
+          type: boolean
+          description: >
+            True when the change request's project is no longer a project of the template's
+            customer (the Salesforce project sync moved the project to another account after the
+            change was raised). Request Approval is then refused with 400
+            `standard_change_template_other_customer`.
         versionId: {type: string, format: uuid}
         version: {type: integer}
         parameters:
@@ -31461,8 +31537,13 @@ components:
             `change_request_standard_template_field` (400: a create or PATCH of a change request
             raised from a standard change template sets or changes a field the template specifies,
             a standard change created with no template, or a change of type to or from standard;
-            nothing written), and `standard_change_template_unavailable` (409: the template is
-            suspended, retired or was revised since; nothing written).
+            nothing written), `standard_change_template_unavailable` (409: the template is
+            suspended, retired or was revised since, or has no customer recorded; nothing written), and
+            `standard_change_template_other_customer` (400: a change request raised from a standard change
+            template for no project or for a project of another customer than the template's, or a PATCH
+            that moves such a change request to another customer's project, in any state, or Request
+            Approval of one whose project the Salesforce project sync has since moved to another
+            customer; nothing written).
             The list grows, so this is
             deliberately not a closed enum: a value not listed here is a newer server's.
           example: change_request_on_hold

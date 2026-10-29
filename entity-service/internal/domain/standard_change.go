@@ -157,7 +157,12 @@ type StandardChangeTemplate struct {
 	Number string                      `json:"number"`
 	Name   string                      `json:"name"`
 	State  StandardChangeTemplateState `json:"state"`
-	Owner  *UserReference              `json:"owner"`
+	// Customer is the account the template belongs to (migration 0254): a change
+	// request is raised from it only for a project of this account, and its name
+	// is unique among this customer's live templates. Null only on a template
+	// written before 0254 whose customer could not be told.
+	Customer *EntityRef     `json:"customer"`
+	Owner    *UserReference `json:"owner"`
 	// CurrentVersion is the version a new change request follows.
 	CurrentVersion *StandardChangeTemplateVersion `json:"currentVersion"`
 	// ReviewRequired is raised when a change request raised from the template was
@@ -190,7 +195,9 @@ type SearchStandardChangeTemplatesRequest struct {
 	// States narrows the list; empty means active and suspended.
 	States []StandardChangeTemplateState `json:"states,omitempty"`
 	// Query matches the name or number, ignoring case.
-	Query      *string    `json:"query,omitempty"`
+	Query *string `json:"query,omitempty"`
+	// AccountID narrows the list to one customer's templates.
+	AccountID  *string    `json:"accountId,omitempty"`
 	Pagination Pagination `json:"pagination"`
 }
 
@@ -218,6 +225,8 @@ type StandardChangeEvidence struct {
 	Subject  string     `json:"subject"`
 	State    *string    `json:"state"`
 	ClosedOn *time.Time `json:"closedOn"`
+	// Customer is the change request's customer (its project's account) now.
+	Customer *EntityRef `json:"customer"`
 }
 
 // StandardChangeProposalApprover is one CAB member asked to decide a proposal.
@@ -242,6 +251,11 @@ type StandardChangeProposal struct {
 	State  StandardChangeProposalState `json:"state"`
 	// Name is the template's name (the work item's subject).
 	Name string `json:"name"`
+	// Customer is the account the proposal is for: what a NEW proposal names (or
+	// takes from the change request it starts from, or the proposal it copies),
+	// the template's for a modification or retirement. Null on a new draft that
+	// has not named one yet; such a draft cannot be submitted.
+	Customer *EntityRef `json:"customer"`
 	// Rationale says why this change is low risk and repeatable enough to be
 	// pre-authorised (or, for a retirement, why it should go).
 	Rationale *string `json:"rationale"`
@@ -251,6 +265,11 @@ type StandardChangeProposal struct {
 	// BaseVersion is the version a modification was started from.
 	BaseVersion         *int       `json:"baseVersion"`
 	SourceChangeRequest *EntityRef `json:"sourceChangeRequest"`
+	// CopiedFrom is the proposal a new draft was copied from (id and number), null
+	// for one that was not copied. A copy is for the copied proposal's customer:
+	// only a new draft started from nothing (no source change request, not a
+	// copy) may change its customer.
+	CopiedFrom *EntityRef `json:"copiedFrom"`
 	StandardChangeContent
 	Evidence     []StandardChangeEvidence         `json:"evidence"`
 	Approvers    []StandardChangeProposalApprover `json:"approvers"`
@@ -281,6 +300,12 @@ type CreateStandardChangeProposalRequest struct {
 	// example one the CAB rejected). The draft is new in every other respect.
 	CopyFromProposalID *string `json:"copyFromProposalId,omitempty"`
 	Name               *string `json:"name,omitempty"`
+	// AccountID is the customer a NEW proposal is for. One started from a change
+	// request takes that change request's customer, one copied from a proposal
+	// takes that proposal's, and a modification or retirement its template's: a
+	// different accountId is then a 400. Optional on a NEW proposal started from
+	// nothing (a draft may name it later), required to submit it.
+	AccountID *string `json:"accountId,omitempty"`
 }
 
 // UpdateStandardChangeProposalRequest is the body of PATCH /standard-change-proposals/{id}.
@@ -288,7 +313,12 @@ type CreateStandardChangeProposalRequest struct {
 // they are; Parameters and EvidenceChangeRequestIDs replace the whole list. An
 // empty Category, Impact or Risk clears it.
 type UpdateStandardChangeProposalRequest struct {
-	Name                         *string                    `json:"name,omitempty"`
+	Name *string `json:"name,omitempty"`
+	// AccountID sets the customer of a NEW draft that did not start from a change
+	// request; the evidence it cites must then be that customer's. A draft that
+	// started from a change request, and a modification or retirement, keep the
+	// customer they have (resending it is accepted, another is a 400).
+	AccountID                    *string                    `json:"accountId,omitempty"`
 	Rationale                    *string                    `json:"rationale,omitempty"`
 	Subject                      *string                    `json:"subject,omitempty"`
 	Description                  *string                    `json:"description,omitempty"`
@@ -321,6 +351,8 @@ type SearchStandardChangeProposalsRequest struct {
 	States     []StandardChangeProposalState `json:"states,omitempty"`
 	Kinds      []StandardChangeProposalKind  `json:"kinds,omitempty"`
 	TemplateID *string                       `json:"templateId,omitempty"`
+	// AccountID narrows the list to the proposals for one customer.
+	AccountID *string `json:"accountId,omitempty"`
 	// ProposedByMe narrows to the caller's own proposals.
 	ProposedByMe bool `json:"proposedByMe,omitempty"`
 	// AwaitingMyDecision narrows to proposals in CAB review on which the caller
@@ -337,6 +369,7 @@ type StandardChangeProposalSummary struct {
 	Kind        StandardChangeProposalKind  `json:"kind"`
 	State       StandardChangeProposalState `json:"state"`
 	Name        string                      `json:"name"`
+	Customer    *EntityRef                  `json:"customer"`
 	Template    *EntityRef                  `json:"template"`
 	ProposedBy  *UserReference              `json:"proposedBy"`
 	CreatedOn   time.Time                   `json:"createdOn"`
@@ -359,8 +392,17 @@ type ChangeRequestStandardChange struct {
 	Template EntityRef `json:"template"`
 	// TemplateNumber is the template's STD number.
 	TemplateNumber string `json:"templateNumber"`
-	VersionID      string `json:"versionId"`
-	Version        int    `json:"version"`
+	// Customer is the template's customer: the account of this change request's
+	// project (a template is used only for its own customer's projects).
+	Customer *EntityRef `json:"customer"`
+	// CustomerMismatch is true when the change request's project is not (any
+	// more) a project of the template's customer: the Salesforce project sync,
+	// the source of truth for projects, moved the project to another account
+	// after the change was raised. Request Approval is then refused (400
+	// standard_change_template_other_customer); the UI warns.
+	CustomerMismatch bool   `json:"customerMismatch"`
+	VersionID        string `json:"versionId"`
+	Version          int    `json:"version"`
 	// Parameters are the template version's parameters with the values this
 	// change request was raised with.
 	Parameters []ChangeRequestStandardChangeParameter `json:"parameters"`

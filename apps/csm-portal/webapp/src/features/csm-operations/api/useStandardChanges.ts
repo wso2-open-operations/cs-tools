@@ -23,12 +23,16 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
+import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import type {
   BeChangeRequestSearchPayload,
   BeChangeRequestSearchResponse,
   BeChangeRequestSearchView,
   BeCreateStandardChangeProposalPayload,
   BeDecideStandardChangeProposalPayload,
+  BeEntityRef,
+  BeProjectSearchPayload,
+  BeProjectSearchResponse,
   BeSearchStandardChangeProposalsPayload,
   BeSearchStandardChangeProposalsResponse,
   BeSearchStandardChangeTemplatesPayload,
@@ -73,18 +77,26 @@ export function useSearchStandardChangeTemplates(
   });
 }
 
-/** Type-ahead over the ACTIVE templates (the only ones a change request can be raised from), for `AsyncEntitySelect`. */
+/**
+ * Type-ahead over one customer's ACTIVE templates (the only ones a change
+ * request for that customer's project can be raised from), for
+ * `AsyncEntitySelect` (`searchExtra` = the customer's account id). A template is
+ * one customer's, so with no customer there is nothing to offer and nothing is
+ * searched.
+ */
 export function useSearchActiveStandardChangeTemplatesForSelect(
   query: string,
   enabled: boolean,
+  accountId?: string,
 ): UseQueryResult<BeStandardChangeTemplate[], Error> {
   const api = useBackendApi();
   const q = query.trim();
   return useQuery<BeStandardChangeTemplate[], Error>({
-    queryKey: [...TEMPLATES_KEY, "select", q],
+    queryKey: [...TEMPLATES_KEY, "select", accountId ?? "", q],
     queryFn: async () => {
       const body: BeSearchStandardChangeTemplatesPayload = {
         states: ["active"],
+        accountId,
         pagination: { offset: 0, limit: 20 },
       };
       if (q) body.query = q;
@@ -94,7 +106,7 @@ export function useSearchActiveStandardChangeTemplatesForSelect(
       );
       return res.templates ?? [];
     },
-    enabled,
+    enabled: enabled && !!accountId,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -285,27 +297,119 @@ export function useDecideStandardChangeProposal(): UseMutationResult<
   );
 }
 
+/** A safety bound on paging through one customer's projects. */
+const MAX_CUSTOMER_PROJECT_PAGES = 40;
+
 /**
- * Type-ahead over CLOSED change requests, for a proposal's evidence (a proposal
- * cites completed changes to show the change is repeatable).
+ * The ids of every project of one customer (account), paged through
+ * `POST /projects/search` with `accountId`. The change request search has no
+ * account filter, so a customer's change requests are found by its projects.
+ */
+export function useCustomerProjectIds(accountId: string | undefined): UseQueryResult<string[], Error> {
+  const api = useBackendApi();
+  return useQuery<string[], Error>({
+    queryKey: [...STANDARD_CHANGES_KEY, "customer-projects", accountId],
+    queryFn: async () => {
+      const ids: string[] = [];
+      for (let page = 0; page < MAX_CUSTOMER_PROJECT_PAGES; page++) {
+        const res = await api.post<BeProjectSearchPayload, BeProjectSearchResponse>("/projects/search", {
+          accountId,
+          pagination: { offset: ids.length, limit: BE_MAX_PAGE_LIMIT },
+        });
+        const rows = res.projects ?? [];
+        ids.push(...rows.map((p) => p.id));
+        if (rows.length < BE_MAX_PAGE_LIMIT || !res.hasMore) break;
+      }
+      return ids;
+    },
+    enabled: !!accountId,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Type-ahead over the CLOSED change requests of one customer, for a proposal's
+ * evidence (a proposal cites completed changes of its own customer to show the
+ * change is repeatable; the server refuses another customer's). `accountId` is
+ * the proposal's customer (`AsyncEntitySelect`'s `searchExtra`): with none
+ * nothing is searched, and a customer with no projects has no change requests.
  */
 export function useSearchClosedChangeRequestsForSelect(
   query: string,
   enabled: boolean,
-): UseQueryResult<BeChangeRequestSearchView[], Error> {
+  accountId?: string,
+): { data: BeChangeRequestSearchView[] | undefined; isFetching: boolean; isError: boolean } {
   const api = useBackendApi();
   const q = query.trim();
-  return useQuery<BeChangeRequestSearchView[], Error>({
-    queryKey: [...STANDARD_CHANGES_KEY, "closed-change-requests", q],
+  const projects = useCustomerProjectIds(enabled ? accountId : undefined);
+  const projectIds = projects.data;
+  const search = useQuery<BeChangeRequestSearchView[], Error>({
+    queryKey: [...STANDARD_CHANGES_KEY, "closed-change-requests", accountId ?? "", q, projectIds],
     queryFn: async () => {
       const res = await api.post<BeChangeRequestSearchPayload, BeChangeRequestSearchResponse>("/change-requests/search", {
-        filters: { searchQuery: q, states: ["closed"] },
+        filters: { searchQuery: q, states: ["closed"], projectIds },
         pagination: { offset: 0, limit: 20 },
       });
       return res.changeRequests ?? [];
     },
+    enabled: enabled && !!accountId && !!projectIds && projectIds.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  // A customer with no projects has no change requests to cite: an empty list, not a search.
+  const noProjects = !!projectIds && projectIds.length === 0;
+  return {
+    data: noProjects ? [] : search.data,
+    isFetching: projects.isFetching || search.isFetching,
+    isError: projects.isError || search.isError,
+  };
+}
+
+/**
+ * Type-ahead over the customers (accounts, `POST /accounts/search`), for naming
+ * the customer a standard change is for and for the catalogue's customer filter.
+ */
+export function useSearchStandardChangeCustomersForSelect(
+  query: string,
+  enabled: boolean,
+): UseQueryResult<BeEntityRef[], Error> {
+  const api = useBackendApi();
+  const q = query.trim();
+  return useQuery<BeEntityRef[], Error>({
+    queryKey: [...STANDARD_CHANGES_KEY, "customers", q],
+    queryFn: async () => {
+      const res = await api.post<
+        { pagination: { offset: number; limit: number }; filters?: { searchQuery: string } },
+        { accounts?: Array<{ id: string; name?: string | null }> | null }
+      >("/accounts/search", {
+        pagination: { offset: 0, limit: 20 },
+        ...(q ? { filters: { searchQuery: q } } : {}),
+      });
+      return (res.accounts ?? []).map((a) => ({ id: a.id, name: a.name || a.id }));
+    },
     enabled,
     placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * The customer (account) of a project (`GET /projects/{id}`): the customer a
+ * standard change raised for it must belong to. `null` when the project has no
+ * customer recorded or is not found.
+ */
+export function useProjectCustomer(projectId: string | undefined): UseQueryResult<BeEntityRef | null, Error> {
+  const api = useBackendApi();
+  return useQuery<BeEntityRef | null, Error>({
+    queryKey: [...STANDARD_CHANGES_KEY, "project-customer", projectId],
+    queryFn: async () => {
+      const project = await api.get<{ account?: { id?: string | null; name?: string | null } | null } | null>(
+        `/projects/${enc(projectId!)}`,
+      );
+      const account = project?.account;
+      return account?.id ? { id: account.id, name: account.name || account.id } : null;
+    },
+    enabled: !!projectId,
     staleTime: 60_000,
   });
 }

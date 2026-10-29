@@ -39,9 +39,10 @@ import (
 // state an action needs, that a modification still starts from the current
 // version); the service validates content and shapes requests before calling it.
 type StandardChangeRepository interface {
-	// SearchTemplates lists templates in the given (upper-case) states, newest
-	// first, with their current version and usage.
-	SearchTemplates(ctx context.Context, states []string, query string, limit, offset int) ([]domain.StandardChangeTemplate, int, error)
+	// SearchTemplates lists templates in the given (upper-case) states, by name,
+	// with their current version and usage; accountID ("" for any) narrows them
+	// to one customer's.
+	SearchTemplates(ctx context.Context, states []string, query, accountID string, limit, offset int) ([]domain.StandardChangeTemplate, int, error)
 	// GetTemplate returns one template with its current version, usage and
 	// version history; nil when there is none with that id.
 	GetTemplate(ctx context.Context, id string) (*domain.StandardChangeTemplate, error)
@@ -60,6 +61,9 @@ type StandardChangeRepository interface {
 	// IsCABMember reports whether the email is an active internal member of the
 	// "CAB Approval" group.
 	IsCABMember(ctx context.Context, email string) (bool, error)
+	// ProjectAccount returns the customer (account) of a project: nil when there
+	// is no such project, an empty EntityRef when it has no account.
+	ProjectAccount(ctx context.Context, projectID string) (*domain.EntityRef, error)
 
 	// CreateProposal writes a new draft and returns its id.
 	CreateProposal(ctx context.Context, actor string, in StandardChangeProposalCreate) (string, error)
@@ -86,6 +90,9 @@ type StandardChangeProposalCreate struct {
 	TemplateID            *string
 	SourceChangeRequestID *string
 	CopyFromProposalID    *string
+	// AccountID is the customer the caller named (nil for none); see
+	// domain.CreateStandardChangeProposalRequest.AccountID.
+	AccountID *string
 }
 
 // StandardChangeProposalFilter narrows SearchProposals.
@@ -93,6 +100,7 @@ type StandardChangeProposalFilter struct {
 	States          []string // upper case
 	Kinds           []string // upper case
 	TemplateID      *string
+	AccountID       *string
 	ProposedByEmail string // "" = anyone
 	AwaitingEmail   string // "" = no filter: proposals in CAB review with a REQUESTED row for this email
 	Query           string
@@ -199,7 +207,7 @@ func contentArgs(c domain.StandardChangeContent) ([]any, error) {
 
 // templateSelect reads a template, its current version (LEFT: a template always
 // has one, but a hand-made row might not) and its usage over every version.
-const templateSelect = `SELECT t.id::text, t.number, t.name, t.state,
+const templateSelect = `SELECT t.id::text, t.number, t.name, t.state, acc.id::text, acc.name,
 	ow.id::text, ow.email, COALESCE(NULLIF(ow.name, ''), NULLIF(btrim(COALESCE(ow.first_name, '') || ' ' || COALESCE(ow.last_name, '')), ''), ow.email),
 	t.review_required, t.review_required_reason, t.review_required_on,
 	t.suspended_reason, t.suspended_on, t.suspended_by,
@@ -209,6 +217,7 @@ const templateSelect = `SELECT t.id::text, t.number, t.name, t.state,
 	t.created_on, t.created_by, t.updated_on, t.updated_by,
 	v.id::text, v.version, v.proposal_id::text, pwi.number, v.approved_on, v.approved_by, ` + "%s" + `
 	FROM standard_change_template t
+	LEFT JOIN account acc ON acc.id = t.account_id
 	LEFT JOIN "user" ow ON ow.id = t.owner_user_id
 	LEFT JOIN change_request rcr ON rcr.id = t.review_required_change_request_id
 	LEFT JOIN work_item rwi ON rwi.id = rcr.id
@@ -237,6 +246,7 @@ func templateSelectSQL() string {
 func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 	var t domain.StandardChangeTemplate
 	var state string
+	var accountID, accountName *string
 	var ownerID, ownerEmail, ownerName *string
 	var rcrID, rcrNumber, opID, opNumber *string
 	var verID, verProposalID, verProposalNumber, verApprovedBy *string
@@ -244,7 +254,7 @@ func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 	var verApprovedOn *time.Time
 	var v domain.StandardChangeTemplateVersion
 	cdest, finish := contentDest(&v.StandardChangeContent)
-	dest := []any{&t.ID, &t.Number, &t.Name, &state,
+	dest := []any{&t.ID, &t.Number, &t.Name, &state, &accountID, &accountName,
 		&ownerID, &ownerEmail, &ownerName,
 		&t.ReviewRequired, &t.ReviewRequiredReason, &t.ReviewRequiredOn,
 		&t.SuspendedReason, &t.SuspendedOn, &t.SuspendedBy,
@@ -261,6 +271,7 @@ func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 		// hand-made update left behind.
 		t.SuspendedReason, t.SuspendedOn, t.SuspendedBy = nil, nil, nil
 	}
+	t.Customer = accountRef(accountID, accountName)
 	if ownerID != nil {
 		t.Owner = domain.NewUserReference(*ownerID, stringOrEmpty(ownerEmail), stringOrEmpty(ownerName))
 	}
@@ -291,14 +302,16 @@ func scanTemplate(row pgx.Row) (domain.StandardChangeTemplate, error) {
 }
 
 // crvis: internal callers only (internalOnly routes; the template tables are internal-only RLS); counts change requests, exposes none
-func (r *standardChangeRepo) SearchTemplates(ctx context.Context, states []string, query string, limit, offset int) ([]domain.StandardChangeTemplate, int, error) {
-	where := `WHERE t.state = ANY($1::text[]) AND ($2 = '' OR t.name ILIKE '%' || $2 || '%' ESCAPE '\' OR t.number ILIKE '%' || $2 || '%' ESCAPE '\')`
+func (r *standardChangeRepo) SearchTemplates(ctx context.Context, states []string, query, accountID string, limit, offset int) ([]domain.StandardChangeTemplate, int, error) {
+	where := `WHERE t.state = ANY($1::text[]) AND ($2 = '' OR t.name ILIKE '%' || $2 || '%' ESCAPE '\' OR t.number ILIKE '%' || $2 || '%' ESCAPE '\')
+	  AND ($3 = '' OR t.account_id = NULLIF($3, '')::uuid)`
 	q := escapeLikeWildcards(strings.TrimSpace(query))
+	acc := strings.ToLower(strings.TrimSpace(accountID))
 	var total int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM standard_change_template t `+where, states, q).Scan(&total); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM standard_change_template t `+where, states, q, acc).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("search standard change templates: count: %w", err)
 	}
-	rows, err := r.db.Query(ctx, templateSelectSQL()+" "+where+` ORDER BY lower(t.name), t.id LIMIT $3 OFFSET $4`, states, q, limit, offset)
+	rows, err := r.db.Query(ctx, templateSelectSQL()+" "+where+` ORDER BY lower(t.name), t.id LIMIT $4 OFFSET $5`, states, q, acc, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search standard change templates: %w", err)
 	}
@@ -410,7 +423,10 @@ func (r *standardChangeRepo) SetTemplateState(ctx context.Context, id, actor str
 			    suspended_on = CASE WHEN $5::boolean THEN NOW() END,
 			    suspended_by = CASE WHEN $5::boolean THEN $3 END
 			WHERE id = $1::uuid`, id, to, actor, reason, suspended)
-		return err
+		if err != nil {
+			return templateWriteErr("set standard change template state", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -424,7 +440,7 @@ func (r *standardChangeRepo) ClearReviewRequired(ctx context.Context, id, actor 
 		    review_required_change_request_id = NULL, updated_on = NOW(), updated_by = $2
 		WHERE id = $1::uuid`, id, actor)
 	if err != nil {
-		return nil, fmt.Errorf("clear standard change template review: %w", err)
+		return nil, templateWriteErr("clear standard change template review", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, &apierror.NotFoundError{Msg: "standard change template not found"}
@@ -462,11 +478,90 @@ func flagStandardTemplateReview(ctx context.Context, tx pgx.Tx, changeRequestID,
 		       review_required_change_request_id = $3::uuid, updated_on = NOW(), updated_by = $4
 		  FROM standard_change_template_version v
 		 WHERE v.id = $1::uuid AND t.id = v.template_id
+		   -- A template written before templates belonged to a customer cannot be
+		   -- updated (migration 0254's check) until it is given one; flagging it
+		   -- must not fail the change request's own write.
+		   AND t.account_id IS NOT NULL
 		   AND NOT (t.review_required AND t.review_required_change_request_id = $3::uuid AND t.review_required_reason = $2)`,
 		*versionID, reason, changeRequestID, actor); err != nil {
 		return fmt.Errorf("flag standard change template: %w", err)
 	}
 	return nil
+}
+
+// accountRef is a customer read through a LEFT JOIN: nil when there is none.
+func accountRef(id, name *string) *domain.EntityRef {
+	if id == nil {
+		return nil
+	}
+	return &domain.EntityRef{ID: *id, Name: stringOrEmpty(name)}
+}
+
+func (r *standardChangeRepo) ProjectAccount(ctx context.Context, projectID string) (*domain.EntityRef, error) {
+	return projectAccount(ctx, r.db, projectID)
+}
+
+// projectAccount is the customer of a project: nil when there is no such project,
+// an empty EntityRef when the project has no account.
+func projectAccount(ctx context.Context, q crQuerier, projectID string) (*domain.EntityRef, error) {
+	var id, name *string
+	err := q.QueryRow(ctx, `SELECT a.id::text, a.name FROM project p LEFT JOIN account a ON a.id = p.account_id WHERE p.id = $1::uuid`,
+		strings.TrimSpace(projectID)).Scan(&id, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read project customer: %w", err)
+	}
+	if ref := accountRef(id, name); ref != nil {
+		return ref, nil
+	}
+	return &domain.EntityRef{}, nil
+}
+
+// readAccount is an account by id: nil when there is none.
+func readAccount(ctx context.Context, q crQuerier, accountID string) (*domain.EntityRef, error) {
+	var ref domain.EntityRef
+	err := q.QueryRow(ctx, `SELECT id::text, name FROM account WHERE id = $1::uuid`, strings.TrimSpace(accountID)).Scan(&ref.ID, &ref.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read customer: %w", err)
+	}
+	return &ref, nil
+}
+
+// changeRequestAccount is the customer of a change request (its project's
+// account): found reports whether the change request exists; the ref is nil
+// when it has no project or the project no account.
+func changeRequestAccount(ctx context.Context, q crQuerier, changeRequestID string) (ref *domain.EntityRef, found bool, err error) {
+	var id, name *string
+	err = q.QueryRow(ctx, `SELECT a.id::text, a.name FROM change_request cr JOIN work_item wi ON wi.id = cr.id
+		LEFT JOIN project p ON p.id = wi.project_id LEFT JOIN account a ON a.id = p.account_id
+		WHERE cr.id = $1::uuid`, changeRequestID).Scan(&id, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read change request customer: %w", err)
+	}
+	return accountRef(id, name), true, nil
+}
+
+func sameAccount(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// customerName names a customer in a message.
+func customerName(ref *domain.EntityRef) string {
+	if ref == nil || ref.ID == "" {
+		return "no customer"
+	}
+	if ref.Name != "" {
+		return ref.Name
+	}
+	return ref.ID
 }
 
 func (r *standardChangeRepo) IsCABMember(ctx context.Context, email string) (bool, error) {
@@ -502,9 +597,21 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 		kind := strings.ToUpper(string(in.Kind))
 		var content domain.StandardChangeContent
 		var rationale *string
-		var templateID, baseVersionID, sourceCR *string
+		var templateID, baseVersionID, sourceCR, copiedFrom *string
+		// account is the customer the proposal is for (nil: a new draft that has
+		// not named one yet).
+		var account *string
 		name := strings.TrimSpace(in.Name)
 		evidence := []string{}
+		// fixedCustomer refuses a named customer other than the one the proposal
+		// takes from where it starts.
+		fixedCustomer := func(from string, ref *domain.EntityRef) error {
+			if in.AccountID == nil || (ref != nil && sameAccount(*in.AccountID, ref.ID)) {
+				return nil
+			}
+			return &apierror.ValidationError{Msg: fmt.Sprintf("accountId must be %s's customer (%s): a standard change belongs to one customer, and %s cannot be used for another",
+				from, customerName(ref), from)}
+		}
 
 		switch {
 		case in.CopyFromProposalID != nil:
@@ -518,8 +625,16 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			if src.Kind != domain.StandardChangeProposalKindNew {
 				return "", &apierror.ValidationError{Msg: "only a proposal for a new template can be copied"}
 			}
-			content, rationale = src.StandardChangeContent, src.Rationale
+			if src.Customer != nil {
+				if err := fixedCustomer("the copied proposal "+src.Number, src.Customer); err != nil {
+					return "", err
+				}
+				account = &src.Customer.ID
+			}
+			content, rationale, copiedFrom = src.StandardChangeContent, src.Rationale, &src.ID
 			if src.SourceChangeRequest != nil {
+				// Carried over, and checked below against the copy's customer like
+				// the evidence: a copy cites only its own customer's change requests.
 				sourceCR = &src.SourceChangeRequest.ID
 			}
 			for _, e := range src.Evidence {
@@ -552,6 +667,17 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			if state == nil || *state != crStateClosed {
 				return "", &apierror.ValidationError{Msg: "a standard change can only be proposed from a change request that was completed (closed); this one is " + strings.ToLower(stringOrEmpty(state))}
 			}
+			cust, _, err := changeRequestAccount(ctx, tx, *in.SourceChangeRequestID)
+			if err != nil {
+				return "", err
+			}
+			if cust == nil {
+				return "", &apierror.ValidationError{Msg: "a standard change belongs to one customer, and this change request has none (it is not raised for a customer's project), so it cannot be the start of one"}
+			}
+			if err := fixedCustomer("the change request", cust); err != nil {
+				return "", err
+			}
+			account = &cust.ID
 			if category != nil {
 				v := domain.ChangeRequestCategory(*category)
 				c.Category = &v
@@ -572,8 +698,10 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			}
 		case in.Kind == domain.StandardChangeProposalKindModify || in.Kind == domain.StandardChangeProposalKindRetire:
 			var state, tname string
-			var current *string
-			err := tx.QueryRow(ctx, `SELECT state, name, current_version_id::text FROM standard_change_template WHERE id = $1::uuid FOR SHARE`, *in.TemplateID).Scan(&state, &tname, &current)
+			var current, tplAccount, tplAccountName *string
+			err := tx.QueryRow(ctx, `SELECT t.state, t.name, t.current_version_id::text, a.id::text, a.name
+				FROM standard_change_template t LEFT JOIN account a ON a.id = t.account_id
+				WHERE t.id = $1::uuid FOR SHARE OF t`, *in.TemplateID).Scan(&state, &tname, &current, &tplAccount, &tplAccountName)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return "", &apierror.ValidationError{Msg: "templateId does not refer to a standard change template"}
 			}
@@ -583,6 +711,11 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			if state == "RETIRED" {
 				return "", &apierror.ConflictError{Msg: "the template is retired"}
 			}
+			// A modification or retirement is for the template's customer.
+			if err := fixedCustomer("the template", accountRef(tplAccount, tplAccountName)); err != nil {
+				return "", err
+			}
+			account = tplAccount
 			if current != nil {
 				v, err := getVersion(ctx, tx, *current)
 				if err != nil {
@@ -596,6 +729,24 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			if name == "" {
 				name = tname
 			}
+		}
+		if account == nil && in.AccountID != nil {
+			// A new proposal started from nothing (or copied from one that had no
+			// customer) is for the customer it names.
+			ref, err := readAccount(ctx, tx, *in.AccountID)
+			if err != nil {
+				return "", err
+			}
+			if ref == nil {
+				return "", &apierror.ValidationError{Msg: "accountId does not refer to a customer"}
+			}
+			account = &ref.ID
+		}
+		// The source change request is a closed change request of the proposal's
+		// customer (from a change request that was read above; for a copy, the
+		// copied proposal's may have changed hands since it was cited).
+		if err := checkSourceChangeRequestTx(ctx, tx, account, sourceCR); err != nil {
+			return "", err
 		}
 		if name == "" {
 			// A proposal started from nothing (the catalogue's "Propose a standard
@@ -618,9 +769,10 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			return "", err
 		}
 		_, err = tx.Exec(ctx, `
-			INSERT INTO standard_change_proposal (id, kind, state, template_id, base_version_id, source_change_request_id, rationale, `+contentColumns+`)
-			VALUES ($1::uuid, $2, 'DRAFT', $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21::jsonb)`,
-			append([]any{id, kind, templateID, baseVersionID, sourceCR, rationale}, args...)...)
+			INSERT INTO standard_change_proposal (id, kind, state, template_id, base_version_id, source_change_request_id, rationale, account_id, `+contentColumns+`, copied_from_proposal_id, customer_locked)
+			VALUES ($1::uuid, $2::text, 'DRAFT', $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23::uuid,
+			        $2::text <> 'NEW' OR $5::uuid IS NOT NULL OR ($23::uuid IS NOT NULL AND $7::uuid IS NOT NULL))`,
+			append(append([]any{id, kind, templateID, baseVersionID, sourceCR, rationale, account}, args...), copiedFrom)...)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -628,7 +780,7 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 			}
 			return "", fmt.Errorf("create standard change proposal: %w", err)
 		}
-		if err := setEvidenceTx(ctx, tx, id, actor, evidence); err != nil {
+		if err := setEvidenceTx(ctx, tx, id, actor, account, evidence); err != nil {
 			return "", err
 		}
 		return id, nil
@@ -636,50 +788,11 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 }
 
 // setEvidenceTx replaces a proposal's evidence: every id must be a closed change
-// request (a 400 names those that are not).
-//
-// crvis: internal callers only; reads change request states by id to validate evidence
-func setEvidenceTx(ctx context.Context, tx pgx.Tx, proposalID, actor string, ids []string) error {
-	seen := map[string]bool{}
-	clean := []string{}
-	for _, id := range ids {
-		k := strings.ToLower(strings.TrimSpace(id))
-		if k != "" && !seen[k] {
-			seen[k] = true
-			clean = append(clean, k)
-		}
-	}
-	if len(clean) > 0 {
-		rows, err := tx.Query(ctx, `
-			SELECT x.id, wi.number, cr.state::text
-			  FROM unnest($1::uuid[]) AS x(id)
-			  LEFT JOIN change_request cr ON cr.id = x.id
-			  LEFT JOIN work_item wi ON wi.id = cr.id`, clean)
-		if err != nil {
-			return fmt.Errorf("standard change evidence: %w", err)
-		}
-		var bad []string
-		for rows.Next() {
-			var id string
-			var number, state *string
-			if err := rows.Scan(&id, &number, &state); err != nil {
-				rows.Close()
-				return fmt.Errorf("standard change evidence: scan: %w", err)
-			}
-			switch {
-			case number == nil:
-				bad = append(bad, id+" (not a change request)")
-			case state == nil || *state != crStateClosed:
-				bad = append(bad, *number+" ("+strings.ToLower(stringOrEmpty(state))+")")
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("standard change evidence: %w", err)
-		}
-		if len(bad) > 0 {
-			return &apierror.ValidationError{Msg: "evidence must be change requests that were completed (closed): " + strings.Join(bad, ", ")}
-		}
+// request of the proposal's customer (account; a 400 names those that are not).
+func setEvidenceTx(ctx context.Context, tx pgx.Tx, proposalID, actor string, account *string, ids []string) error {
+	clean, err := checkEvidenceTx(ctx, tx, account, ids)
+	if err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM standard_change_proposal_evidence WHERE proposal_id = $1::uuid`, proposalID); err != nil {
 		return fmt.Errorf("standard change evidence: clear: %w", err)
@@ -694,6 +807,141 @@ func setEvidenceTx(ctx context.Context, tx pgx.Tx, proposalID, actor string, ids
 	return nil
 }
 
+// checkEvidenceTx de-duplicates (lower-cased) evidence ids and refuses (400) any
+// that is not a closed change request of the customer account: what the CAB
+// pre-authorises for one customer is judged on that customer's changes. With no
+// customer (a new draft that has not named one) no evidence can be cited.
+//
+// crvis: internal callers only; reads change request states and customers by id to validate evidence
+func checkEvidenceTx(ctx context.Context, tx pgx.Tx, account *string, ids []string) ([]string, error) {
+	seen := map[string]bool{}
+	clean := []string{}
+	for _, id := range ids {
+		k := strings.ToLower(strings.TrimSpace(id))
+		if k != "" && !seen[k] {
+			seen[k] = true
+			clean = append(clean, k)
+		}
+	}
+	if len(clean) == 0 {
+		return clean, nil
+	}
+	if account == nil {
+		return nil, &apierror.ValidationError{Msg: "name the proposal's customer (accountId) before citing evidence: evidence is that customer's completed change requests"}
+	}
+	bad, err := changeRequestsNotClosedOfCustomer(ctx, tx, *account, clean, "standard change evidence")
+	if err != nil {
+		return nil, err
+	}
+	if len(bad) > 0 {
+		return nil, &apierror.ValidationError{Msg: "evidence must be change requests of the proposal's customer that were completed (closed): " + strings.Join(bad, ", ")}
+	}
+	return clean, nil
+}
+
+// checkSourceChangeRequestTx refuses (400) a proposal's source change request
+// (nil: none) that is not a closed change request of the proposal's customer
+// account, in the evidence refusal's words. Checked when a proposal is created
+// (from a change request, or a copy that carries the copied proposal's) and
+// again at submit: a change request's customer is its project's account, and
+// the Salesforce project sync may move a project to another account meanwhile.
+//
+// crvis: internal callers only; reads a change request's state and customer by id
+func checkSourceChangeRequestTx(ctx context.Context, tx pgx.Tx, account, sourceCR *string) error {
+	if sourceCR == nil {
+		return nil
+	}
+	if account == nil {
+		return &apierror.ValidationError{Msg: "name the proposal's customer (accountId): the change request it starts from must be that customer's"}
+	}
+	bad, err := changeRequestsNotClosedOfCustomer(ctx, tx, *account, []string{strings.ToLower(strings.TrimSpace(*sourceCR))}, "standard change source change request")
+	if err != nil {
+		return err
+	}
+	if len(bad) > 0 {
+		return &apierror.ValidationError{Msg: "the change request a proposal starts from must be a change request of the proposal's customer that was completed (closed): " + strings.Join(bad, ", ")}
+	}
+	return nil
+}
+
+// checkProposalCustomerAtDecision refuses (409) the CAB's approval of a proposal whose
+// source change request or evidence is no longer a closed change request of the
+// proposal's customer, naming them. Nothing is written by the refused approval.
+//
+// crvis: internal callers only; reads a proposal's source and evidence change requests and their customers
+func checkProposalCustomerAtDecision(ctx context.Context, tx pgx.Tx, proposalID string, account *string) error {
+	var sourceCR *string
+	if err := tx.QueryRow(ctx, `SELECT source_change_request_id::text FROM standard_change_proposal WHERE id = $1::uuid`, proposalID).Scan(&sourceCR); err != nil {
+		return fmt.Errorf("check standard change proposal customer: %w", err)
+	}
+	rows, err := tx.Query(ctx, `SELECT change_request_id::text FROM standard_change_proposal_evidence WHERE proposal_id = $1::uuid`, proposalID)
+	if err != nil {
+		return fmt.Errorf("check standard change proposal customer: evidence: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("check standard change proposal customer: evidence: %w", err)
+	}
+	if account == nil && (sourceCR != nil || len(ids) > 0) {
+		return &apierror.ConflictError{Msg: "the CAB cannot approve this proposal now: it names no customer, so its source change request and evidence cannot be checked; reject it, or ask the proposer to withdraw it and propose again"}
+	}
+	refuse := func(err error) error {
+		var ve *apierror.ValidationError
+		if errors.As(err, &ve) {
+			return &apierror.ConflictError{Msg: "the CAB cannot approve this proposal now: " + ve.Msg + " (a project moved to another customer since it was submitted); reject it, or ask the proposer to withdraw it and propose again"}
+		}
+		return err
+	}
+	if err := checkSourceChangeRequestTx(ctx, tx, account, sourceCR); err != nil {
+		return refuse(err)
+	}
+	if _, err := checkEvidenceTx(ctx, tx, account, ids); err != nil {
+		return refuse(err)
+	}
+	return nil
+}
+
+// changeRequestsNotClosedOfCustomer names (number and why) each of ids (lower-case
+// uuids) that is not a closed change request of the account.
+//
+// crvis: internal callers only; reads change request states and customers by id
+func changeRequestsNotClosedOfCustomer(ctx context.Context, tx pgx.Tx, account string, clean []string, what string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT x.id::text, wi.number, cr.state::text, a.id::text, a.name
+		  FROM unnest($1::uuid[]) AS x(id)
+		  LEFT JOIN change_request cr ON cr.id = x.id
+		  LEFT JOIN work_item wi ON wi.id = cr.id
+		  LEFT JOIN project p ON p.id = wi.project_id
+		  LEFT JOIN account a ON a.id = p.account_id`, clean)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	var bad []string
+	for rows.Next() {
+		var id string
+		var number, state, accID, accName *string
+		if err := rows.Scan(&id, &number, &state, &accID, &accName); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("%s: scan: %w", what, err)
+		}
+		switch {
+		case number == nil:
+			bad = append(bad, id+" (not a change request)")
+		case accID == nil:
+			bad = append(bad, *number+" (no customer)")
+		case !sameAccount(*accID, account):
+			bad = append(bad, *number+" (another customer: "+customerName(accountRef(accID, accName))+")")
+		case state == nil || *state != crStateClosed:
+			bad = append(bad, *number+" ("+strings.ToLower(stringOrEmpty(state))+")")
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	return bad, nil
+}
+
 // crvis: internal callers only (internalOnly routes); names evidence change requests by number
 func (r *standardChangeRepo) GetProposal(ctx context.Context, id string) (*domain.StandardChangeProposal, error) {
 	return getProposal(ctx, r.db, id)
@@ -704,6 +952,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	var p domain.StandardChangeProposal
 	var kind, state string
 	var tplID, tplName, srcID, srcNumber, decidedByID, decidedByEmail, decidedByName *string
+	var accID, accName, copiedID, copiedNumber *string
 	var proposerID, proposerName *string
 	var proposerEmail string
 	cdest, finish := contentDest(&p.StandardChangeContent)
@@ -712,9 +961,12 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 		       t.id::text, COALESCE(t.number || ' ' || t.name, t.name), bv.version, scr.id::text, swi.number,
 		       wi.created_by, pu.id::text, COALESCE(NULLIF(pu.name, ''), NULLIF(btrim(COALESCE(pu.first_name, '') || ' ' || COALESCE(pu.last_name, '')), '')),
 		       wi.created_on, wi.updated_on, p.submitted_on, p.decided_on,
-		       du.id::text, du.email, COALESCE(NULLIF(du.name, ''), du.email), p.decision_comment, rv.version, `+prefixed("p", contentColumns)+`
+		       du.id::text, du.email, COALESCE(NULLIF(du.name, ''), du.email), p.decision_comment, rv.version,
+		       acc.id::text, acc.name, cwi.id::text, cwi.number, `+prefixed("p", contentColumns)+`
 		  FROM standard_change_proposal p
 		  JOIN work_item wi ON wi.id = p.id
+		  LEFT JOIN account acc ON acc.id = p.account_id
+		  LEFT JOIN work_item cwi ON cwi.id = p.copied_from_proposal_id
 		  LEFT JOIN standard_change_template t ON t.id = p.template_id
 		  LEFT JOIN standard_change_template_version bv ON bv.id = p.base_version_id
 		  LEFT JOIN standard_change_template_version rv ON rv.id = p.resulting_version_id
@@ -728,7 +980,8 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 			&tplID, &tplName, &p.BaseVersion, &srcID, &srcNumber,
 			&proposerEmail, &proposerID, &proposerName,
 			&p.CreatedOn, &p.UpdatedOn, &p.SubmittedOn, &p.DecidedOn,
-			&decidedByID, &decidedByEmail, &decidedByName, &p.DecisionNote, &p.ResultingVersion}, cdest...)...)
+			&decidedByID, &decidedByEmail, &decidedByName, &p.DecisionNote, &p.ResultingVersion,
+			&accID, &accName, &copiedID, &copiedNumber}, cdest...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -740,11 +993,15 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	}
 	p.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
 	p.State = domain.StandardChangeProposalState(strings.ToLower(state))
+	p.Customer = accountRef(accID, accName)
 	if tplID != nil {
 		p.Template = &domain.EntityRef{ID: *tplID, Name: stringOrEmpty(tplName)}
 	}
 	if srcID != nil {
 		p.SourceChangeRequest = &domain.EntityRef{ID: *srcID, Name: stringOrEmpty(srcNumber)}
+	}
+	if copiedID != nil {
+		p.CopiedFrom = &domain.EntityRef{ID: *copiedID, Name: stringOrEmpty(copiedNumber)}
 	}
 	p.ProposedBy = domain.NewUserReference(stringOrEmpty(proposerID), proposerEmail, stringOrEmpty(proposerName))
 	if decidedByID != nil {
@@ -753,10 +1010,12 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 
 	p.Evidence = []domain.StandardChangeEvidence{}
 	rows, err := q.Query(ctx, `
-		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on
+		SELECT cr.id::text, wi.number, wi.subject, LOWER(cr.state::text), cr.closed_on, ea.id::text, ea.name
 		  FROM standard_change_proposal_evidence e
 		  JOIN change_request cr ON cr.id = e.change_request_id
 		  JOIN work_item wi ON wi.id = cr.id
+		  LEFT JOIN project ep ON ep.id = wi.project_id
+		  LEFT JOIN account ea ON ea.id = ep.account_id
 		 WHERE e.proposal_id = $1::uuid
 		 ORDER BY cr.closed_on DESC NULLS LAST, wi.number`, id)
 	if err != nil {
@@ -764,10 +1023,12 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	}
 	for rows.Next() {
 		var e domain.StandardChangeEvidence
-		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn); err != nil {
+		var eaID, eaName *string
+		if err := rows.Scan(&e.ID, &e.Number, &e.Subject, &e.State, &e.ClosedOn, &eaID, &eaName); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("get standard change proposal: evidence: scan: %w", err)
 		}
+		e.Customer = accountRef(eaID, eaName)
 		p.Evidence = append(p.Evidence, e)
 	}
 	rows.Close()
@@ -812,8 +1073,9 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 	   AND ($5 = '' OR (p.state = 'CAB_REVIEW' AND EXISTS (
 	         SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
 	          WHERE a.work_item_id = p.id AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($5))))
-	   AND ($6 = '' OR wi.subject ILIKE '%' || $6 || '%' ESCAPE '\' OR wi.number ILIKE '%' || $6 || '%' ESCAPE '\')`
-	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query))}
+	   AND ($6 = '' OR wi.subject ILIKE '%' || $6 || '%' ESCAPE '\' OR wi.number ILIKE '%' || $6 || '%' ESCAPE '\')
+	   AND ($7::uuid IS NULL OR p.account_id = $7::uuid)`
+	args := []any{f.States, f.Kinds, f.TemplateID, strings.TrimSpace(f.ProposedByEmail), strings.TrimSpace(f.AwaitingEmail), escapeLikeWildcards(strings.TrimSpace(f.Query)), f.AccountID}
 	if f.States == nil {
 		args[0] = []string{}
 	}
@@ -828,10 +1090,11 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 	rows, err := r.db.Query(ctx, `
 		SELECT wi.id::text, wi.number, p.kind, p.state, wi.subject, t.id::text, COALESCE(t.number || ' ' || t.name, t.name),
 		       wi.created_by, pu.id::text, COALESCE(NULLIF(pu.name, ''), wi.created_by),
-		       wi.created_on, wi.updated_on, p.submitted_on, p.decided_on`+from+`
+		       wi.created_on, wi.updated_on, p.submitted_on, p.decided_on, acc.id::text, acc.name`+from+`
 		  LEFT JOIN standard_change_template t ON t.id = p.template_id
+		  LEFT JOIN account acc ON acc.id = p.account_id
 		  LEFT JOIN LATERAL (SELECT u.id, u.name FROM "user" u WHERE LOWER(u.email) = LOWER(wi.created_by) ORDER BY u.id LIMIT 1) pu ON TRUE
-		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $7 OFFSET $8`, append(args, f.Limit, f.Offset)...)
+		`+where+` ORDER BY wi.created_on DESC, wi.id LIMIT $8 OFFSET $9`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search standard change proposals: %w", err)
 	}
@@ -840,13 +1103,14 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 	for rows.Next() {
 		var s domain.StandardChangeProposalSummary
 		var kind, state, email string
-		var tid, tname, uid, uname *string
+		var tid, tname, uid, uname, accID, accName *string
 		if err := rows.Scan(&s.ID, &s.Number, &kind, &state, &s.Name, &tid, &tname, &email, &uid, &uname,
-			&s.CreatedOn, &s.UpdatedOn, &s.SubmittedOn, &s.DecidedOn); err != nil {
+			&s.CreatedOn, &s.UpdatedOn, &s.SubmittedOn, &s.DecidedOn, &accID, &accName); err != nil {
 			return nil, 0, fmt.Errorf("search standard change proposals: scan: %w", err)
 		}
 		s.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
 		s.State = domain.StandardChangeProposalState(strings.ToLower(state))
+		s.Customer = accountRef(accID, accName)
 		if tid != nil {
 			s.Template = &domain.EntityRef{ID: *tid, Name: stringOrEmpty(tname)}
 		}
@@ -874,6 +1138,23 @@ func lockProposal(ctx context.Context, tx pgx.Tx, id string) (kind, state, propo
 	return kind, state, proposer, nil
 }
 
+// standardTemplateNoCustomerMsg is the refusal for changing a template that has no
+// customer: one written before templates belonged to one (migration 0254), whose
+// customer could not be told.
+const standardTemplateNoCustomerMsg = "this standard change template has no customer recorded (it was written before templates belonged to one customer), so it cannot be changed until its customer is set"
+
+// templateWriteErr maps a write of standard_change_template refused by migration
+// 0254 (its NOT NULL, or on a database that still has templates without a
+// customer its NOT VALID check) to a 409; anything else is wrapped.
+func templateWriteErr(op string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && ((pgErr.Code == "23514" && pgErr.ConstraintName == "standard_change_template_account_required") ||
+		(pgErr.Code == "23502" && pgErr.TableName == "standard_change_template" && pgErr.ColumnName == "account_id")) {
+		return &apierror.ConflictError{Msg: standardTemplateNoCustomerMsg}
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 func sameEmail(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
@@ -892,6 +1173,10 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 		}
 		if kind == "RETIRE" && hasContentEdits(req) {
 			return &apierror.ValidationError{Msg: "a retirement proposal carries only its name, rationale and evidence"}
+		}
+		account, accountChanged, err := updateProposalCustomer(ctx, tx, id, kind, req.AccountID)
+		if err != nil {
+			return err
 		}
 		sets := []string{}
 		args := []any{id}
@@ -960,13 +1245,71 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 		if _, err := tx.Exec(ctx, `UPDATE work_item SET `+wiSets+` WHERE id = $1::uuid`, wiArgs...); err != nil {
 			return fmt.Errorf("update standard change proposal: work item: %w", err)
 		}
+		if accountChanged {
+			// A copy names its customer once; a draft started from nothing may change it until it is submitted.
+			if _, err := tx.Exec(ctx, `UPDATE standard_change_proposal SET account_id = $2::uuid, customer_locked = (copied_from_proposal_id IS NOT NULL) WHERE id = $1::uuid`, id, account); err != nil {
+				return fmt.Errorf("update standard change proposal: customer: %w", err)
+			}
+		}
 		if req.EvidenceChangeRequestIDs != nil {
-			if err := setEvidenceTx(ctx, tx, id, actor, *req.EvidenceChangeRequestIDs); err != nil {
+			if err := setEvidenceTx(ctx, tx, id, actor, account, *req.EvidenceChangeRequestIDs); err != nil {
+				return err
+			}
+		} else if accountChanged {
+			// The evidence already cited must be the new customer's too.
+			if _, err := checkEvidenceTx(ctx, tx, account, storedEvidence(ctx, tx, id)); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// storedEvidence is the ids of a proposal's evidence (nil on a read error, which
+// the caller's next statement reports).
+func storedEvidence(ctx context.Context, tx pgx.Tx, proposalID string) []string {
+	var ids []string
+	_ = tx.QueryRow(ctx, `SELECT COALESCE(array_agg(change_request_id::text), '{}') FROM standard_change_proposal_evidence WHERE proposal_id = $1::uuid`, proposalID).Scan(&ids)
+	return ids
+}
+
+// updateProposalCustomer applies a PATCH's accountId to a draft (read under its
+// lock): it returns the customer in effect afterwards and whether it changed. Only
+// a new draft started from nothing (no source change request, not a copy) may
+// change its customer; a copy of a proposal that had none may name one, once. On
+// any other a different accountId is a 400 and resending its own is accepted.
+func updateProposalCustomer(ctx context.Context, tx pgx.Tx, id, kind string, requested *string) (*string, bool, error) {
+	var stored, sourceCR, sourceNumber, copiedFrom, copiedNumber *string
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT p.account_id::text, p.source_change_request_id::text, sw.number,
+		       p.copied_from_proposal_id::text, cw.number, p.customer_locked
+		FROM standard_change_proposal p LEFT JOIN work_item sw ON sw.id = p.source_change_request_id
+		LEFT JOIN work_item cw ON cw.id = p.copied_from_proposal_id
+		WHERE p.id = $1::uuid`, id).Scan(&stored, &sourceCR, &sourceNumber, &copiedFrom, &copiedNumber, &locked); err != nil {
+		return nil, false, fmt.Errorf("update standard change proposal: read customer: %w", err)
+	}
+	if requested == nil || (stored != nil && sameAccount(*stored, *requested)) {
+		return stored, false, nil
+	}
+	switch {
+	case kind != "NEW":
+		return nil, false, &apierror.ValidationError{Msg: "a modification or retirement is for its template's customer: accountId cannot change it"}
+	case sourceCR != nil:
+		return nil, false, &apierror.ValidationError{Msg: fmt.Sprintf("this proposal started from change request %s, so it is for that change request's customer: accountId cannot change it", stringOrEmpty(sourceNumber))}
+	case copiedFrom != nil && stored != nil:
+		return nil, false, &apierror.ValidationError{Msg: fmt.Sprintf("this proposal is a copy of proposal %s, so it is for that proposal's customer: accountId cannot change it; to propose it for another customer, start a new proposal", stringOrEmpty(copiedNumber))}
+	case locked:
+		// What it started from is gone (deleted), but its customer stays fixed.
+		return nil, false, &apierror.ValidationError{Msg: "this proposal's customer is fixed (it started from a change request or a copy of another proposal): accountId cannot change it; to propose it for another customer, start a new proposal"}
+	}
+	ref, err := readAccount(ctx, tx, *requested)
+	if err != nil {
+		return nil, false, err
+	}
+	if ref == nil {
+		return nil, false, &apierror.ValidationError{Msg: "accountId does not refer to a customer"}
+	}
+	return &ref.ID, true, nil
 }
 
 func hasContentEdits(req domain.UpdateStandardChangeProposalRequest) bool {
@@ -1032,6 +1375,31 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		if err := check(*p); err != nil {
 			return err
 		}
+		if p.Customer == nil {
+			// A new proposal names its customer (the service's completeness check
+			// says so); a modification or retirement has its template's, which a
+			// template written before templates belonged to a customer may lack.
+			if p.Kind == domain.StandardChangeProposalKindNew {
+				return &apierror.ValidationError{Msg: "the proposal is not complete; it still needs: customer (accountId)"}
+			}
+			return &apierror.ConflictError{Msg: standardTemplateNoCustomerMsg}
+		}
+		// The evidence was checked when it was cited; checked again against the
+		// customer the CAB is asked about.
+		ids := make([]string, 0, len(p.Evidence))
+		for _, e := range p.Evidence {
+			ids = append(ids, e.ID)
+		}
+		if _, err := checkEvidenceTx(ctx, tx, &p.Customer.ID, ids); err != nil {
+			return err
+		}
+		// ... and so is the change request it started from (or that a copy carried
+		// over): its project may have moved to another account since.
+		if p.SourceChangeRequest != nil {
+			if err := checkSourceChangeRequestTx(ctx, tx, &p.Customer.ID, &p.SourceChangeRequest.ID); err != nil {
+				return err
+			}
+		}
 		if err := checkTemplateStillCurrent(ctx, tx, id); err != nil {
 			return err
 		}
@@ -1042,12 +1410,13 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 			if err := tx.QueryRow(ctx, `
 				SELECT EXISTS (SELECT 1 FROM standard_change_template t
 				                WHERE lower(btrim(t.name)) = lower(btrim($1)) AND t.state <> 'RETIRED'
+				                  AND t.account_id = $3::uuid
 				                  AND t.id IS DISTINCT FROM (SELECT template_id FROM standard_change_proposal WHERE id = $2::uuid))`,
-				p.Name, id).Scan(&taken); err != nil {
+				p.Name, id, p.Customer.ID).Scan(&taken); err != nil {
 				return fmt.Errorf("submit standard change proposal: check name: %w", err)
 			}
 			if taken {
-				return &apierror.ConflictError{Msg: fmt.Sprintf("a standard change template named %q already exists: rename the proposal and submit it again", p.Name)}
+				return &apierror.ConflictError{Msg: fmt.Sprintf("%s already has a standard change template named %q: rename the proposal and submit it again", customerName(p.Customer), p.Name)}
 			}
 		}
 		if err := setCallerIdentity(ctx, tx, SearchScope{Unrestricted: true}); err != nil {
@@ -1064,7 +1433,7 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeStageLabel, pool, creators); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'CAB_REVIEW', submitted_on = NOW() WHERE id = $1::uuid`, id)
+		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'CAB_REVIEW', submitted_on = NOW(), customer_locked = true WHERE id = $1::uuid`, id)
 		if err == nil {
 			_, err = tx.Exec(ctx, `UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1::uuid`, id, actor)
 		}
@@ -1178,38 +1547,50 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 		return nil, nil, err
 	}
 	var name, proposer string
-	var tplID *string
+	var tplID, account *string
 	var c domain.StandardChangeContent
 	cdest, finish := contentDest(&c)
-	if err := tx.QueryRow(ctx, `SELECT wi.subject, wi.created_by, p.template_id::text, `+prefixed("p", contentColumns)+`
+	if err := tx.QueryRow(ctx, `SELECT wi.subject, wi.created_by, p.template_id::text, p.account_id::text, `+prefixed("p", contentColumns)+`
 		FROM standard_change_proposal p JOIN work_item wi ON wi.id = p.id WHERE p.id = $1::uuid`, id).
-		Scan(append([]any{&name, &proposer, &tplID}, cdest...)...); err != nil {
+		Scan(append([]any{&name, &proposer, &tplID, &account}, cdest...)...); err != nil {
 		return nil, nil, fmt.Errorf("apply standard change proposal: %w", err)
 	}
 	if err := finish(); err != nil {
 		return nil, nil, err
 	}
+	// The CAB pre-authorises the template for the proposal's customer on that
+	// customer's changes: the source change request and the evidence are checked
+	// again now, since the Salesforce project sync may have moved one of their
+	// projects to another account after submit. A refusal changes nothing.
+	if kind != "RETIRE" {
+		if err := checkProposalCustomerAtDecision(ctx, tx, id, account); err != nil {
+			return nil, nil, err
+		}
+	}
 	nameTaken := func(err error) error {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return &apierror.ConflictError{Msg: fmt.Sprintf("a standard change template named %q already exists (it took the name after this proposal was submitted): reject it, or ask the proposer to withdraw it and propose again under another name", name)}
+			return &apierror.ConflictError{Msg: fmt.Sprintf("this customer already has a standard change template named %q (it took the name after this proposal was submitted): reject it, or ask the proposer to withdraw it and propose again under another name", name)}
 		}
-		return fmt.Errorf("apply standard change proposal: %w", err)
+		return templateWriteErr("apply standard change proposal", err)
 	}
 
 	switch kind {
 	case "RETIRE":
 		if _, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = 'RETIRED', updated_on = NOW(), updated_by = $2,
 			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
-			return nil, nil, fmt.Errorf("apply standard change proposal: retire: %w", err)
+			return nil, nil, templateWriteErr("apply standard change proposal: retire", err)
 		}
 		return tplID, nil, nil
 	case "NEW":
+		if account == nil {
+			return nil, nil, &apierror.ConflictError{Msg: "this proposal names no customer, and a standard change template belongs to one: reject it, or ask the proposer to withdraw it and propose again for a customer"}
+		}
 		var newID string
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO standard_change_template (name, owner_user_id, created_by, updated_by)
-			VALUES ($1, (SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($2) ORDER BY u.id LIMIT 1), $3, $3)
-			RETURNING id::text`, name, proposer, actor).Scan(&newID); err != nil {
+			INSERT INTO standard_change_template (name, owner_user_id, created_by, updated_by, account_id)
+			VALUES ($1, (SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($2) ORDER BY u.id LIMIT 1), $3, $3, $4::uuid)
+			RETURNING id::text`, name, proposer, actor, *account).Scan(&newID); err != nil {
 			return nil, nil, nameTaken(err)
 		}
 		tplID = &newID
@@ -1235,7 +1616,7 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 		   SET current_version_id = $2::uuid, review_required = false, review_required_reason = NULL,
 		       review_required_on = NULL, review_required_change_request_id = NULL, updated_on = NOW(), updated_by = $3
 		 WHERE id = $1::uuid`, *tplID, vid, actor); err != nil {
-		return nil, nil, fmt.Errorf("apply standard change proposal: current version: %w", err)
+		return nil, nil, templateWriteErr("apply standard change proposal: current version", err)
 	}
 	return tplID, &vid, nil
 }

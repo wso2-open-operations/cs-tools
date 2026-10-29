@@ -29,14 +29,21 @@
 #                              from the templates (and is their "Requested by")
 #
 # WHAT IT LEAVES (so every screen of the feature has something to show):
-#   * five templates, each proposed by bob, submitted and approved by carol, with
+#   * six templates, each proposed by bob, submitted and approved by carol, with
 #     generalised plans using {{key}} placeholders and parameters of every type
 #     (text, textarea, number, date, select), every one of them required: an
 #     optional value inside a sentence would render "... no later than ." when
 #     left empty;
-#   * evidence that relates: a NEW proposal cites only closed change requests
-#     whose subject names its specific operation AND that have a written
-#     implementation plan (never "[E2E] ..." or "QA-STD-E2E" test leftovers, nor
+#   * every template belongs to one customer (an account): five are Example
+#     Corp's (the account of project 401 "Example Corp Production") and one is
+#     Other Corp's (project 402). Other Corp's is "Rotate the TLS certificate on
+#     an API gateway", a name Example Corp also has: a template name is unique
+#     per customer, not across customers. Each NEW proposal names its customer,
+#     and a change request is raised from a template only for a project of the
+#     template's customer;
+#   * evidence that relates: a NEW proposal cites only closed change requests of
+#     its own customer whose subject names its specific operation AND that have a
+#     written implementation plan (never "[E2E] ..." or "QA-STD-E2E" test leftovers, nor
 #     the seed generator's filler), and starts from the first of them when its
 #     spec says so; with none it starts from nothing, cites nothing and says
 #     nothing about evidence in its rationale;
@@ -50,14 +57,17 @@
 #     revision, CAB review or incident, and none exists);
 #   * one proposal REJECTED by the CAB (with its comment), one still IN CAB
 #     REVIEW, one DRAFT;
-#   * change requests raised from templates by alice: one left in New, one
-#     Request-Approved (a standard change goes straight to Scheduled), the two
-#     closed ones above, and one walked Scheduled -> Implement -> Review ->
-#     ROLLED BACK, which raises "Review needed" on its template.
+#   * change requests raised from templates by alice, for Example Corp
+#     Production: one left in New, one Request-Approved (a standard change goes
+#     straight to Scheduled), the two closed ones above, and one walked
+#     Scheduled -> Implement -> Review -> ROLLED BACK, which raises "Review
+#     needed" on its template; and one for Other Corp Production, raised from
+#     Other Corp's own TLS template and left in New.
 #
 # IDEMPOTENT: every step looks first and does only what is missing. A template
-# whose name already exists is skipped; a proposal is found again by its name
-# among bob's own proposals and carried on from the state it is in (a draft is
+# whose name already exists FOR THAT CUSTOMER is skipped; a proposal is found
+# again by its name and customer among bob's own proposals and carried on from
+# the state it is in (a draft is
 # completed and submitted, one in CAB review is decided) rather than duplicated;
 # a change request is found again by its rendered subject and walked on from its
 # state. Run it twice: the second run reports "0 created, 0 updated, 0 write
@@ -68,17 +78,24 @@
 #   * the suspended template's reason: when the stored reason differs from this
 #     script's, its owner (bob) resumes it and suspends it again with the current
 #     reason (counted as "updated");
+#   * a seed draft with no customer (left before templates had customers) is
+#     given its customer (counted as "updated");
 #   * a proposal that is no longer a draft (approved, rejected, in CAB review)
-#     cannot be edited, so its evidence cannot be corrected in place. When such a
-#     seed proposal cites a change request this script would no longer choose as
-#     evidence, the run prints a NOTE naming it and ends with a hint to rebuild
-#     with --reset, the documented way to replace it.
+#     cannot be edited, so its evidence or customer cannot be corrected in place.
+#     When such a seed proposal cites a change request this script would no
+#     longer choose as evidence, or has no customer, the run prints a NOTE naming
+#     it and ends with a hint to rebuild with --reset, the documented way to
+#     replace it;
+#   * a seed template with no customer cannot be changed through the API at all
+#     (no customer can be set on it, and the database refuses any other update
+#     to it): the run stops and asks for --reset.
 #
 # --reset (off by default) first DELETES, in one transaction on the local
 # Postgres, what an earlier run of this script left, so the next run rebuilds it
 # from scratch:
-#   * the templates with this script's names whose NEW proposal bob raised, with
-#     their versions;
+#   * the templates with this script's names whose NEW proposal bob raised,
+#     whichever customer they are for (or none, if seeded before templates had
+#     customers), with their versions;
 #   * bob's proposals with this script's names, and his proposals about those
 #     templates (the MODIFY);
 #   * every change request raised from those templates;
@@ -126,10 +143,13 @@ PROPOSER="bob.fernando@example.com"
 CAB_DECIDER="carol.silva@example.com"
 ENGINEER="alice.perera@example.com"
 
-# The local seed's fixed rows: the assigned team every fixture uses, and the
-# customer project the change requests are raised for.
+# The local seed's fixed rows: the customer projects the change requests are
+# raised for (a template's customer is the account of its project), and Example
+# Corp's assigned team (its account's CRE team; Other Corp has none, so its
+# change request is raised without an assignment group).
 EXAMPLE_CORP_ABT_GROUP_ID="00000000-0000-0000-0000-000000000901"
 EXAMPLE_CORP_PROJECT_ID="00000000-0000-0000-0000-000000000401"
+OTHER_CORP_PROJECT_ID="00000000-0000-0000-0000-000000000402"
 
 for url in "$ES_URL" "$OIDC_URL"; do
   case "$url" in
@@ -203,23 +223,38 @@ must() {
 # ---------------------------------------------------------------------------
 # Lookups
 
-# template_json NAME: the template of that name (any state, ignoring case), or "".
+# template_json NAME: the current customer's template of that name (any state,
+# ignoring case), or "". Two customers may each have a template of the same name.
 template_json() {
   local name="$1"
   must "search templates" POST /standard-change-templates/search "$TOK_BOB" \
-    "$(jq -nc --arg q "$name" '{states:["active","suspended","retired"], query:$q, pagination:{limit:50, offset:0}}')"
-  printf '%s' "$BODY" | jq -c --arg n "$name" \
-    '[.templates[] | select((.name|ascii_downcase) == ($n|ascii_downcase))][0] // empty'
+    "$(jq -nc --arg q "$name" --arg a "$CUSTOMER_ACCOUNT_ID" '{states:["active","suspended","retired"], query:$q, accountId:$a, pagination:{limit:50, offset:0}}')"
+  printf '%s' "$BODY" | jq -c --arg n "$name" --arg a "$CUSTOMER_ACCOUNT_ID" \
+    '[.templates[] | select((.name|ascii_downcase) == ($n|ascii_downcase) and .customer.id == $a)][0] // empty'
 }
 
-# proposal_json NAME KIND: bob's latest proposal of that name and kind that was
-# not withdrawn, or "".
+# unowned_template_number NAME: the number of a template of that name with NO
+# customer (seeded before templates had customers), or "".
+unowned_template_number() {
+  local name="$1"
+  must "search templates" POST /standard-change-templates/search "$TOK_BOB" \
+    "$(jq -nc --arg q "$name" '{states:["active","suspended","retired"], query:$q, pagination:{limit:50, offset:0}}')"
+  printf '%s' "$BODY" | jq -r --arg n "$name" \
+    '[.templates[] | select((.name|ascii_downcase) == ($n|ascii_downcase) and .customer == null)][0].number // empty'
+}
+
+# proposal_json NAME KIND: bob's latest proposal of that name and kind for the
+# current customer that was not withdrawn, or "". Failing that, his latest one
+# with NO customer that is not approved (one an earlier version of this script
+# left): carried on rather than duplicated, see drive_proposal.
 proposal_json() {
   local name="$1" kind="$2"
   must "search proposals" POST /standard-change-proposals/search "$TOK_BOB" \
     "$(jq -nc --arg q "$name" --arg k "$kind" '{kinds:[$k], proposedByMe:true, query:$q, pagination:{limit:50, offset:0}}')"
-  printf '%s' "$BODY" | jq -c --arg n "$name" \
-    '[.proposals[] | select(.name == $n and .state != "withdrawn")] | sort_by(.createdOn) | last // empty'
+  printf '%s' "$BODY" | jq -c --arg n "$name" --arg a "$CUSTOMER_ACCOUNT_ID" \
+    '[.proposals[] | select(.name == $n and .state != "withdrawn")] | sort_by(.createdOn)
+     | ([.[] | select(.customer.id == $a)] | last)
+       // ([.[] | select(.customer == null and .state != "approved")] | last) // empty'
 }
 
 # change_request_json SUBJECT: the change request with exactly that subject, or "".
@@ -261,15 +296,56 @@ load_closed_change_requests() {
       | {id, number, subject}]')"
 }
 
+# project_account PROJECT_ID: sets ACCOUNT to the project's customer (account
+# id), "" for none or no project. Not run in a subshell, so the cache
+# (PROJECT_ACCOUNTS, "<project> <account>" lines: bash 3 has no associative
+# arrays) survives; it overwrites STATUS and BODY on a cache miss.
+PROJECT_ACCOUNTS=""
+ACCOUNT=""
+project_account() {
+  local project="$1" cached
+  ACCOUNT=""
+  [ -n "$project" ] || return 0
+  cached="$(printf '%s\n' "$PROJECT_ACCOUNTS" | awk -v p="$project" '$1 == p { print $2; exit }')"
+  if [ -n "$cached" ]; then
+    [ "$cached" = "-" ] || ACCOUNT="$cached"
+    return 0
+  fi
+  call GET "/projects/$project" "$TOK_ALICE"
+  [ "$STATUS" = "200" ] && ACCOUNT="$(printf '%s' "$BODY" | jq -r '.account.id // .project.account.id // empty')"
+  PROJECT_ACCOUNTS="$PROJECT_ACCOUNTS
+$project ${ACCOUNT:--}"
+}
+
+# use_customer PROJECT_ID GROUP_ID: makes the account of PROJECT_ID the current
+# customer, whose templates and proposals the steps after it look for, propose
+# and raise change requests from: sets CUSTOMER_PROJECT_ID, CUSTOMER_ACCOUNT_ID,
+# CUSTOMER_NAME and CUSTOMER_GROUP_ID (the assigned team of the change requests
+# raised for it; "" for none).
+CUSTOMER_PROJECT_ID=""
+CUSTOMER_ACCOUNT_ID=""
+CUSTOMER_NAME=""
+CUSTOMER_GROUP_ID=""
+use_customer() {
+  must "read project $1" GET "/projects/$1" "$TOK_ALICE"
+  CUSTOMER_ACCOUNT_ID="$(printf '%s' "$BODY" | jq -r '.account.id // .project.account.id // empty')"
+  CUSTOMER_NAME="$(printf '%s' "$BODY" | jq -r '.account.name // .project.account.name // empty')"
+  [ -n "$CUSTOMER_ACCOUNT_ID" ] || die "project $1 has no customer (account)"
+  CUSTOMER_PROJECT_ID="$1"
+  CUSTOMER_GROUP_ID="$2"
+}
+
 # related_evidence REGEX: sets EVIDENCE to the ids of the closed change requests
 # that genuinely relate, oldest number first, at most three; "[]" when none
-# does. Related means: the subject matches REGEX (ignoring case; each spec's
-# REGEX names the specific operation, not a word as broad as "upgrade") AND the
-# change request has an implementation plan with some text in it -- a change
-# nobody wrote a plan for shows nothing a template could be drawn from.
+# does. Related means: the change request is the current customer's (its
+# project's account is $CUSTOMER_ACCOUNT_ID: evidence must be the template's
+# customer's), the subject matches REGEX (ignoring case; each spec's REGEX names
+# the specific operation, not a word as broad as "upgrade") AND the change
+# request has an implementation plan with some text in it -- a change nobody
+# wrote a plan for shows nothing a template could be drawn from.
 EVIDENCE="[]"
 related_evidence() {
-  local candidates id plan
+  local candidates id plan project
   EVIDENCE="[]"
   candidates="$(printf '%s' "$CLOSED_CRS" | jq -r --arg re "$1" \
     '[.[] | select(.subject | test($re; "i"))] | sort_by(.number) | .[].id')"
@@ -278,6 +354,9 @@ related_evidence() {
     plan="$(printf '%s' "$BODY" | jq -r '(.implementationPlan // .changeRequest.implementationPlan // "")
       | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; "")')"
     [ -n "$plan" ] || continue
+    project="$(printf '%s' "$BODY" | jq -r '.project.id // .changeRequest.project.id // empty')"
+    project_account "$project"
+    [ "$ACCOUNT" = "$CUSTOMER_ACCOUNT_ID" ] || continue
     EVIDENCE="$(jq -nc --argjson a "$EVIDENCE" --arg i "$id" '$a + [$i]')"
     [ "$(printf '%s' "$EVIDENCE" | jq length)" -lt 3 ] || break
   done
@@ -313,13 +392,30 @@ drive_proposal() {
   state="$(printf '%s' "$BODY" | jq -r .state)"
   number="$(printf '%s' "$BODY" | jq -r .number)"
   check_cited_evidence "$BODY" "$evidence"
+  if [ "$state" != "draft" ] && [ "$(printf '%s' "$BODY" | jq -r '.customer == null')" = "true" ]; then
+    step "NOTE: $number ($state) has no customer (left before templates had customers); a proposal past draft cannot be edited"
+    STALE="${STALE:+$STALE, }$number"
+  fi
   if [ "$state" = "draft" ] && [ "$target" = "draft" ] && [ "${FOUND_EXISTING:-}" = "yes" ]; then
-    # A draft found again is left alone: someone may be editing it in the portal.
+    # A draft found again is left alone (someone may be editing it in the
+    # portal), except that one with no customer is given its customer.
+    if [ "$(printf '%s' "$BODY" | jq -r '.customer == null')" = "true" ]; then
+      must "name the customer of $number" PATCH "/standard-change-proposals/$id" "$TOK_BOB" \
+        "$(jq -nc --arg a "$CUSTOMER_ACCOUNT_ID" '{accountId:$a}')"
+      UPDATED=$((UPDATED + 1))
+      step "$number is already a draft: given its customer ($CUSTOMER_NAME), otherwise left as it is"
+      return 0
+    fi
     step "$number is already a draft: left as it is"
     return 0
   fi
   if [ "$state" = "draft" ]; then
     patch="$(jq -c --argjson ev "$evidence" '.patch + {evidenceChangeRequestIds: $ev}' "$spec")"
+    if [ "$(printf '%s' "$BODY" | jq -r '.kind == "new" and .sourceChangeRequest == null')" = "true" ]; then
+      # A new draft names its customer (a draft from an earlier version of this
+      # script may have none yet).
+      patch="$(printf '%s' "$patch" | jq -c --arg a "$CUSTOMER_ACCOUNT_ID" '. + {accountId: $a}')"
+    fi
     if [ "$evidence" != "[]" ]; then
       # Say what the evidence is only when there is some.
       patch="$(printf '%s' "$patch" | jq -c --arg note "$(jq -r '.evidenceNote // ""' "$spec")" '.rationale += $note')"
@@ -352,9 +448,9 @@ drive_proposal() {
 # "startFromEvidence" the proposal is started from the first of it, the way
 # "Propose as standard change" on a closed change request starts one.
 ensure_new_proposal() {
-  local spec="$1" target="$2" comment="${3:-}" name found body id evidence source
+  local spec="$1" target="$2" comment="${3:-}" name found body id evidence source unowned
   name="$(jq -r .patch.name "$spec")"
-  log "* $name  (target: $target)"
+  log "* $name  (for $CUSTOMER_NAME; target: $target)"
   FOUND_EXISTING="no"
   related_evidence "$(jq -r '.evidenceMatch // "(?!)"' "$spec")"
   evidence="$EVIDENCE"
@@ -368,6 +464,8 @@ ensure_new_proposal() {
     fi
     return 0
   fi
+  unowned="$(unowned_template_number "$name")"
+  [ -z "$unowned" ] || die "$unowned \"$name\" has no customer (seeded before templates had customers) and cannot be changed through the API; rebuild the seed with: $0 --reset"
   source=""
   [ "$(jq -r '.startFromEvidence // false' "$spec")" = "true" ] && source="$(printf '%s' "$evidence" | jq -r '.[0] // empty')"
   found="$(proposal_json "$name" new)"
@@ -377,9 +475,9 @@ ensure_new_proposal() {
     step "found $(printf '%s' "$found" | jq -r .number) ($(printf '%s' "$found" | jq -r .state))"
   else
     if [ -n "$source" ]; then
-      body="$(jq -nc --arg n "$name" --arg s "$source" '{kind:"new", name:$n, sourceChangeRequestId:$s}')"
+      body="$(jq -nc --arg n "$name" --arg s "$source" --arg a "$CUSTOMER_ACCOUNT_ID" '{kind:"new", name:$n, sourceChangeRequestId:$s, accountId:$a}')"
     else
-      body="$(jq -nc --arg n "$name" '{kind:"new", name:$n}')"
+      body="$(jq -nc --arg n "$name" --arg a "$CUSTOMER_ACCOUNT_ID" '{kind:"new", name:$n, accountId:$a}')"
     fi
     must "create proposal" POST /standard-change-proposals "$TOK_BOB" "$body"
     id="$(printf '%s' "$BODY" | jq -r '.id // .proposal.id')"
@@ -393,10 +491,10 @@ ensure_new_proposal() {
 # version 2 or later, through a MODIFY proposal bob raises and carol approves.
 ensure_modified() {
   local name="$1" spec="$2" evidence="$3" t version open id
-  log "* $name  (target: version 2 through a modification)"
+  log "* $name  (for $CUSTOMER_NAME; target: version 2 through a modification)"
   FOUND_EXISTING="no"
   t="$(template_json "$name")"
-  [ -n "$t" ] || die "template \"$name\" does not exist"
+  [ -n "$t" ] || die "$CUSTOMER_NAME has no template \"$name\""
   version="$(printf '%s' "$t" | jq -r '.currentVersion.version')"
   if [ "$version" -ge 2 ]; then
     step "already at version $version: skipped"
@@ -431,9 +529,9 @@ ensure_modified() {
 # is resumed and suspended again by its owner, so the stored reason converges.
 ensure_suspended() {
   local name="$1" reason="$2" t id stored
-  log "* $name  (target: suspended)"
+  log "* $name  (for $CUSTOMER_NAME; target: suspended)"
   t="$(template_json "$name")"
-  [ -n "$t" ] || die "template \"$name\" does not exist"
+  [ -n "$t" ] || die "$CUSTOMER_NAME has no template \"$name\""
   id="$(printf '%s' "$t" | jq -r .id)"
   case "$(printf '%s' "$t" | jq -r .state)" in
     suspended)
@@ -470,7 +568,9 @@ patch_state() {
 # renders with PARAMETERS_JSON: it is how the change request is found again.
 # DEVIATION is recorded in Review, before the change is closed. AT_VERSION: raise
 # it only while the template is at that version (its parameters are that
-# version's); otherwise a change request not found is skipped.
+# version's); otherwise a change request not found is skipped. It is raised from
+# the current customer's template for the current customer's project (and its
+# assigned team, when the customer has one).
 # Sets CR_ID to the change request's id ("" when skipped).
 CR_ID=""
 ensure_change_request() {
@@ -481,22 +581,22 @@ ensure_change_request() {
   cr="$(change_request_json "$subject")"
   if [ -z "$cr" ]; then
     t="$(template_json "$template")"
-    [ -n "$t" ] || die "template \"$template\" does not exist"
+    [ -n "$t" ] || die "$CUSTOMER_NAME has no template \"$template\""
     if [ -n "$at_version" ] && [ "$(printf '%s' "$t" | jq -r .currentVersion.version)" != "$at_version" ]; then
       step "not raised: $(printf '%s' "$t" | jq -r .number) is no longer at version $at_version"
       return 0
     fi
     must "raise from $template" POST /change-requests "$TOK_ALICE" "$(jq -nc \
       --arg t "$(printf '%s' "$t" | jq -r .id)" --argjson p "$params" \
-      --arg g "$EXAMPLE_CORP_ABT_GROUP_ID" --arg pr "$EXAMPLE_CORP_PROJECT_ID" --arg s "$start" --arg e "$end" \
+      --arg g "$CUSTOMER_GROUP_ID" --arg pr "$CUSTOMER_PROJECT_ID" --arg s "$start" --arg e "$end" \
       --arg rb "$ENGINEER_ID" \
-      '{type:"standard", standardChangeTemplateId:$t, standardChangeParameters:$p, groupId:$g, projectId:$pr,
-        requestedById:$rb, plannedStartDate:$s, plannedEndDate:$e}')"
+      '{type:"standard", standardChangeTemplateId:$t, standardChangeParameters:$p, projectId:$pr,
+        requestedById:$rb, plannedStartDate:$s, plannedEndDate:$e} + (if $g == "" then {} else {groupId:$g} end)')"
     id="$(printf '%s' "$BODY" | jq -r '.changeRequest.id // .id')"
     number="$(printf '%s' "$BODY" | jq -r '.changeRequest.number // .number')"
     state="new"
     CREATED=$((CREATED + 1))
-    step "raised $number from $(printf '%s' "$t" | jq -r .number) v$(printf '%s' "$t" | jq -r .currentVersion.version)"
+    step "raised $number from $(printf '%s' "$t" | jq -r .number) v$(printf '%s' "$t" | jq -r .currentVersion.version) for $CUSTOMER_NAME"
     rendered="$(printf '%s' "$BODY" | jq -r '.changeRequest.subject // .subject // empty')"
     [ -z "$rendered" ] || [ "$rendered" = "$subject" ] ||
       die "$number rendered the subject \"$rendered\", not \"$subject\": fix SUBJECT so a re-run finds it"
@@ -691,6 +791,13 @@ cat >"$WORK/allowlist.json" <<'JSON'
 }}
 JSON
 
+# Other Corp's own template of the same name: the same procedure, proposed and
+# approved for Other Corp (a template is pre-authorised for its own customer's
+# deployments only, so Example Corp's cannot be used for Other Corp's gateways).
+jq '.evidenceNote = "<p>The cited evidence is earlier certificate rotation work for Other Corp closed on this stack.</p>"
+    | .patch.rationale = "<p>Other Corp'"'"'s gateway certificates are issued for 90 days, so its gateways are rotated several times a quarter, always the same way: secret update, rolling restart one node at a time, fingerprint check. Done that way the rotation is invisible to Other Corp'"'"'s API consumers. Pre-authorising it for Other Corp removes a CAB round trip from a change whose only real risk is a bad chain, which the readiness check catches on the first node.</p>"' \
+  "$WORK/tls.json" >"$WORK/tls-other-corp.json"
+
 # The proposal the CAB rejects: deleting data is not a pre-authorisable change.
 cat >"$WORK/purge.json" <<'JSON'
 {"evidenceMatch": "\\b(purge|analytics (data|tables?))\\b",
@@ -762,6 +869,7 @@ cat >"$WORK/debug-logging.json" <<'JSON'
 }}
 JSON
 
+# Names only (--reset): Other Corp's TLS template has the name of Example Corp's.
 TEMPLATE_SPECS=(tls scale update-level restart allowlist)
 PROPOSAL_SPECS=(tls scale update-level restart allowlist purge memory debug-logging)
 
@@ -789,7 +897,7 @@ BEGIN;
 
 -- The seed's templates: this script's names, created by approving a NEW proposal bob raised.
 CREATE TEMP TABLE reset_template ON COMMIT DROP AS
-SELECT t.id, t.number, t.name
+SELECT t.id, t.number, t.name || ' (' || COALESCE((SELECT a.name FROM account a WHERE a.id = t.account_id), 'no customer') || ')' AS name
   FROM standard_change_template t
  WHERE t.name IN (SELECT jsonb_array_elements_text(:'template_names'::jsonb))
    AND EXISTS (SELECT 1 FROM standard_change_proposal p JOIN work_item w ON w.id = p.id
@@ -865,7 +973,8 @@ log "  proposer: $PROPOSER   CAB: $CAB_DECIDER   engineer: $ENGINEER"
 log "  closed change requests that may serve as evidence: $(printf '%s' "$CLOSED_CRS" | jq length)"
 log ""
 
-log "Templates"
+use_customer "$EXAMPLE_CORP_PROJECT_ID" "$EXAMPLE_CORP_ABT_GROUP_ID"
+log "Templates of $CUSTOMER_NAME"
 ensure_new_proposal "$WORK/tls.json" approved
 ensure_new_proposal "$WORK/scale.json" approved
 ensure_new_proposal "$WORK/update-level.json" approved
@@ -905,7 +1014,7 @@ ensure_new_proposal "$WORK/memory.json" cab_review
 ensure_new_proposal "$WORK/debug-logging.json" draft
 log ""
 
-log "Change requests raised from templates"
+log "Change requests raised from $CUSTOMER_NAME's templates"
 ensure_change_request "Add an IP range to a customer's gateway allowlist" \
   "Allow 203.0.113.0/24 on examplecorp-prod-apim (Production)" \
   '{"deployment_name":"examplecorp-prod-apim","environment":"Production","cidr":"203.0.113.0/24","rule_priority":"120","requested_by":"dave.mendis@examplecorp.com","review_on":"2027-04-30","business_reason":"Example Corp opened a new office in Colombo.\nIts egress range needs to reach the production gateway."}' \
@@ -920,13 +1029,26 @@ ensure_change_request "Apply a WSO2 product update level to a deployment" \
   rollback "2026-10-27 01:00:00" "2026-10-27 03:00:00"
 log ""
 
+# Another customer with a template of the same name: each customer's is its own,
+# pre-authorised for that customer's deployments only.
+use_customer "$OTHER_CORP_PROJECT_ID" ""
+log "Templates of $CUSTOMER_NAME"
+ensure_new_proposal "$WORK/tls-other-corp.json" approved
+log ""
+log "Change requests raised from $CUSTOMER_NAME's templates"
+ensure_change_request "Rotate the TLS certificate on an API gateway" \
+  "Rotate the TLS certificate on api.othercorp.io (Staging)" \
+  '{"gateway_host":"api.othercorp.io","environment":"Staging","certificate_issuer":"Let'"'"'s Encrypt","current_expiry":"2026-11-20","secret_path":"kv/othercorp/staging/gateway-tls","subject_alt_names":"api.othercorp.io\nstaging.othercorp.io","max_unavailable":"1"}' \
+  new "2026-11-18 04:00:00" "2026-11-18 05:00:00"
+log ""
+
 log "Catalogue now"
 must "list templates" POST /standard-change-templates/search "$TOK_BOB" \
   '{"states":["active","suspended","retired"],"pagination":{"limit":50,"offset":0}}'
-printf '%s' "$BODY" | jq -r '.templates[] | "  \(.number)  v\(.currentVersion.version)  \(.state)\(if .reviewRequired then "  REVIEW NEEDED" else "" end)  used \(.usage.total)x  \(.name)"'
+printf '%s' "$BODY" | jq -r '.templates[] | "  \(.number)  \(.customer.name // "no customer")  v\(.currentVersion.version)  \(.state)\(if .reviewRequired then "  REVIEW NEEDED" else "" end)  used \(.usage.total)x  \(.name)"'
 must "list proposals" POST /standard-change-proposals/search "$TOK_BOB" \
   '{"pagination":{"limit":50,"offset":0}}'
-printf '%s' "$BODY" | jq -r '.proposals[] | "  \(.number)  \(.kind)  \(.state)  \(.name)"'
+printf '%s' "$BODY" | jq -r '.proposals[] | "  \(.number)  \(.customer.name // "no customer")  \(.kind)  \(.state)  \(.name)"'
 log ""
 if [ -n "$STALE" ]; then
   log "HINT: $STALE cite(s) evidence this version of the script would no longer choose."

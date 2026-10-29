@@ -1435,6 +1435,13 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		if gates, err = lockChangeRequestForPatch(ctx, tx, id); err != nil {
 			return "", err
 		}
+		// A change request raised from a standard change template stays with the
+		// template's customer, in every state (change_request_standard_change.go).
+		// Before the creation-phase rules, so a move to another customer's
+		// project is refused with the same words and code in New and after.
+		if err := checkStandardChangeProjectCustomer(ctx, tx, gates, req.ProjectID); err != nil {
+			return "", err
+		}
 		if err := validateCreationPhaseEdits(gates, req); err != nil {
 			return "", err
 		}
@@ -1788,6 +1795,12 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 			// pre-authorised only while that template is active and still at the
 			// version it was raised from.
 			if err := checkStandardChangeTemplateUsable(ctx, tx, gates); err != nil {
+				return "", err
+			}
+			// ... and for a project of the template's customer at this moment: the
+			// Salesforce project sync may have moved the project to another account
+			// since the change was raised.
+			if err := checkStandardChangeCustomerAtApproval(ctx, tx, gates, effectiveProject); err != nil {
 				return "", err
 			}
 			effectiveState = &dest
@@ -2538,7 +2551,7 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 		// template into req; record which version and the values, refused (409)
 		// when the template stopped being usable since (change_request_standard_change.go).
 		if req.StandardChangeTemplateVersionID != nil {
-			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, req.StandardChangeParameters); err != nil {
+			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, projectID, req.StandardChangeParameters); err != nil {
 				return createdChangeRequestRow{}, err
 			}
 		}

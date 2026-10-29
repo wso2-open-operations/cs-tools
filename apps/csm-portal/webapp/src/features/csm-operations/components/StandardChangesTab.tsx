@@ -43,6 +43,7 @@ import {
 import { Inbox, Plus, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { Fragment, useEffect, useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useSearchParams } from "react-router";
+import AsyncEntitySelect from "@components/AsyncEntitySelect";
 import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -51,6 +52,7 @@ import {
   useCountStandardChangeProposals,
   useCreateStandardChangeProposal,
   useSearchStandardChangeProposals,
+  useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeTemplates,
 } from "@features/csm-operations/api/useStandardChanges";
 import { changeRequestImpactLabel } from "@features/csm-operations/utils/changeRequests";
@@ -72,6 +74,7 @@ import {
   type StandardChangesShow,
 } from "@features/csm-operations/utils/standardChanges";
 import type {
+  BeEntityRef,
   BeSearchStandardChangeProposalsPayload,
   BeSearchStandardChangeTemplatesPayload,
   BeStandardChangeProposalState,
@@ -158,12 +161,25 @@ interface ToolbarSlots {
   trailing: ReactNode;
 }
 
+/** A customer, or a dash for an older record that has none recorded. */
+function CustomerCell({ customer }: { customer?: BeEntityRef | null }): JSX.Element {
+  return customer?.name ? (
+    <>{customer.name}</>
+  ) : (
+    <Typography component="span" variant="body2" color="text.secondary">
+      —
+    </Typography>
+  );
+}
+
 function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
   const navigate = useNavTransition();
   const location = useLocation();
   const [search, setSearch] = useState("");
   const query = useDebounced(search.trim());
   const [stateFilter, setStateFilter] = useState<TemplateStateFilter>("live");
+  // A template is one customer's: the filter narrows the catalogue to one (server-side).
+  const [customer, setCustomer] = useState<{ id: string; label?: string }>({ id: "" });
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
@@ -171,9 +187,10 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
   const states = templateStates(stateFilter);
   if (states) payload.states = states;
   if (query) payload.query = query;
+  if (customer.id) payload.accountId = customer.id;
   const { data, isLoading, isError, error, refetch } = useSearchStandardChangeTemplates(payload);
   const templates = data?.templates ?? [];
-  const columns = 7;
+  const columns = 8;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -205,6 +222,23 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
             ))}
           </Select>
         </FormControl>
+        <Box sx={{ minWidth: 220, flex: "0 1 260px" }}>
+          <AsyncEntitySelect<BeEntityRef>
+            id="std-template-customer"
+            label="Customer"
+            placeholder="All customers"
+            shrinkLabel
+            value={customer.id}
+            knownLabel={customer.label}
+            onChange={(next, item) => {
+              setCustomer({ id: next, label: item?.name });
+              setPage(0);
+            }}
+            useSearch={useSearchStandardChangeCustomersForSelect}
+            getId={(a) => a.id}
+            getLabel={(a) => a.name}
+          />
+        </Box>
         {trailing}
       </Paper>
 
@@ -215,6 +249,7 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell sx={{ width: 120 }}>Number</TableCell>
                 <TableCell>Name</TableCell>
+                <TableCell sx={{ width: 180 }}>Customer</TableCell>
                 <TableCell sx={{ width: 80 }}>Version</TableCell>
                 <TableCell sx={{ width: 100 }}>Risk</TableCell>
                 <TableCell sx={{ width: 100 }}>Impact</TableCell>
@@ -274,6 +309,9 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
                             <Chip size="small" variant="outlined" color="warning" label="Review needed" />
                           )}
                         </Box>
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 220, wordBreak: "break-word" }}>
+                        <CustomerCell customer={t.customer} />
                       </TableCell>
                       <TableCell>{t.currentVersion ? `v${t.currentVersion.version}` : "—"}</TableCell>
                       <TableCell>{changeRequestRiskLabel(t.currentVersion?.risk)}</TableCell>
@@ -340,7 +378,7 @@ function ProposalList({ leading, trailing }: ToolbarSlots): JSX.Element {
   if (query) payload.query = query;
   const { data, isLoading, isError, error, refetch } = useSearchStandardChangeProposals(payload);
   const proposals = data?.proposals ?? [];
-  const columns = 7;
+  const columns = 8;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -402,6 +440,7 @@ function ProposalList({ leading, trailing }: ToolbarSlots): JSX.Element {
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell sx={{ width: 120 }}>Number</TableCell>
                 <TableCell>Name</TableCell>
+                <TableCell sx={{ width: 160 }}>Customer</TableCell>
                 <TableCell sx={{ width: 130 }}>Kind</TableCell>
                 <TableCell sx={{ width: 120 }}>State</TableCell>
                 <TableCell sx={{ width: 140 }}>Template</TableCell>
@@ -455,6 +494,9 @@ function ProposalList({ leading, trailing }: ToolbarSlots): JSX.Element {
                     >
                       <TableCell sx={{ whiteSpace: "nowrap" }}>{p.number}</TableCell>
                       <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{p.name || "Untitled proposal"}</TableCell>
+                      <TableCell sx={{ maxWidth: 200, wordBreak: "break-word" }}>
+                        <CustomerCell customer={p.customer} />
+                      </TableCell>
                       <TableCell>{standardChangeProposalKindLabel(p.kind)}</TableCell>
                       <TableCell>
                         <Chip

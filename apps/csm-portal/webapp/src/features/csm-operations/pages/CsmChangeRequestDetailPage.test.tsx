@@ -4862,6 +4862,7 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
     standardChange: {
       template: { id: "tpl-1", name: "Rotate a TLS certificate" },
       templateNumber: "STD0000001",
+      customer: { id: "acct-1", name: "Acme Corp" },
       versionId: "ver-2",
       version: 2,
       parameters: [
@@ -4887,6 +4888,34 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
     expect(navigateMock).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
       state: { from: "/operations/change-requests/chg-1" },
     });
+  });
+
+  it("says whose template it is: the customer of the change request's project", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveTextContent("Customer: Acme Corp. The template is used only for this customer's projects.");
+  });
+
+  it("warns when the project is no longer the template's customer's", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    expect(screen.queryByTestId("standard-change-customer-mismatch")).not.toBeInTheDocument();
+    cleanup();
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customerMismatch: true } } });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveClass("MuiAlert-standardWarning");
+    expect(within(banner).getByTestId("standard-change-customer-mismatch")).toHaveTextContent(
+      "This change request's Customer Project is no longer one of Acme Corp's projects: it has moved to another customer since the change was raised.",
+    );
+    expect(banner).toHaveTextContent(/approval cannot be requested/i);
+  });
+
+  it("names no customer when the response carries none", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customer: null } } });
+    renderPage();
+    expect(screen.getByRole("region", { name: "Standard change template" })).not.toHaveTextContent(/customer:/i);
   });
 
   it("shows no template banner for a change request not raised from one", () => {

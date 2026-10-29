@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   proposalSearch: vi.fn(),
   proposalCount: vi.fn(),
   createProposal: vi.fn(),
+  customerSearch: vi.fn(),
 }));
 
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
@@ -41,6 +42,8 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useSearchStandardChangeProposals: (payload: unknown) => mocks.proposalSearch(payload),
   useCountStandardChangeProposals: (filter: unknown) => mocks.proposalCount(filter),
   useCreateStandardChangeProposal: () => ({ mutate: mocks.createProposal, isPending: false, isError: false, reset: vi.fn() }),
+  // The customer filter's type-ahead (POST /accounts/search), as the real AsyncEntitySelect calls it.
+  useSearchStandardChangeCustomersForSelect: (query: string, enabled: boolean) => mocks.customerSearch(query, enabled),
 }));
 
 import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
@@ -52,6 +55,7 @@ const TEMPLATES = [
     number: "STD0000001",
     name: "Rotate a TLS certificate",
     state: "active",
+    customer: { id: "acct-1", name: "Example Corp" },
     currentVersion: { id: "ver-3", version: 3, risk: "low", impact: "medium" },
     reviewRequired: true,
     usage: { total: 12, open: 2, closed: 9, rolledBack: 1, canceled: 0, lastUsedOn: null },
@@ -61,6 +65,8 @@ const TEMPLATES = [
     number: "STD0000002",
     name: "Restart a gateway node",
     state: "suspended",
+    // An older template whose customer could not be told.
+    customer: null,
     currentVersion: { id: "ver-1", version: 1, risk: "moderate", impact: "low" },
     reviewRequired: false,
     usage: { total: 0, open: 0, closed: 0, rolledBack: 0, canceled: 0, lastUsedOn: null },
@@ -73,6 +79,7 @@ const PROPOSALS = [
     kind: "new",
     state: "cab_review",
     name: "Rotate a TLS certificate",
+    customer: { id: "acct-2", name: "Other Corp" },
     template: null,
     proposedBy: { id: "u-1", name: "Jane Doe", email: "jane@example.com" },
     createdOn: "2026-10-01T00:00:00Z",
@@ -156,6 +163,14 @@ beforeEach(() => {
   });
   mocks.proposalCount.mockReset();
   counts(count(0), count(0));
+  mocks.customerSearch.mockReset().mockReturnValue({
+    data: [
+      { id: "acct-1", name: "Example Corp" },
+      { id: "acct-2", name: "Other Corp" },
+    ],
+    isFetching: false,
+    isError: false,
+  });
 });
 
 describe("StandardChangesTab — catalogue", () => {
@@ -221,9 +236,59 @@ describe("StandardChangesTab — catalogue", () => {
     renderTab();
     expect(screen.getByText("No standard change templates found.")).toBeInTheDocument();
   });
+
+  it("shows each template's customer, and a dash for an older one with none recorded", () => {
+    renderTab();
+    const table = screen.getByRole("table", { name: "Standard change templates" });
+    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(["Number", "Name", "Customer", "Version", "Risk", "Impact", "Used", "State"]);
+    const [first, second] = within(table).getAllByRole("row").slice(1);
+    expect(within(first!).getAllByRole("cell")[2]).toHaveTextContent("Example Corp");
+    expect(within(second!).getAllByRole("cell")[2]).toHaveTextContent("—");
+  });
+
+  it("narrows the catalogue to one customer's templates on the server, and back to all", async () => {
+    renderTab();
+    expect(lastTemplatePayload()).not.toHaveProperty("accountId");
+    const customer = screen.getByRole("combobox", { name: "Customer" });
+    fireEvent.change(customer, { target: { value: "Oth" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Other Corp" }));
+    expect(lastTemplatePayload()).toEqual({ accountId: "acct-2", pagination: { offset: 0, limit: 20 } });
+    expect(customer).toHaveValue("Other Corp");
+    // The filter combines with the others.
+    choose("State", "Retired");
+    expect(lastTemplatePayload()).toEqual({ states: ["retired"], accountId: "acct-2", pagination: { offset: 0, limit: 20 } });
+    // Emptying the field clears the filter.
+    fireEvent.change(customer, { target: { value: "" } });
+    expect(lastTemplatePayload()).toEqual({ states: ["retired"], pagination: { offset: 0, limit: 20 } });
+  });
 });
 
 describe("StandardChangesTab — proposals", () => {
+  it("shows each proposal's customer, and a dash while a new draft names none", () => {
+    mocks.proposalSearch.mockReturnValue({
+      data: { proposals: [...PROPOSALS, { ...PROPOSALS[0], id: "scp-2", number: "SCP0000002", customer: null }], total: 2 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    renderTab(PROPOSALS_VIEW);
+    const table = screen.getByRole("table", { name: "Standard change proposals" });
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+      "Number",
+      "Name",
+      "Customer",
+      "Kind",
+      "State",
+      "Template",
+      "Proposed by",
+      "Updated",
+    ]);
+    const [first, second] = within(table).getAllByRole("row").slice(1);
+    expect(within(first!).getAllByRole("cell")[2]).toHaveTextContent("Other Corp");
+    expect(within(second!).getAllByRole("cell")[2]).toHaveTextContent("—");
+  });
+
   it("is the secondary view, reached from Proposals beside the search and linkable", () => {
     renderTab();
     fireEvent.click(screen.getByRole("button", { name: "Proposals" }));
