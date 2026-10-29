@@ -10803,7 +10803,7 @@ because they had the files recorded.
 What the chain left behind:
 - `000020`–`000026` built an older design (`knowledge_bases`, `kb_articles`,
   `kb_managers`, `kb_article_history`, their triggers and enum). `000027` dropped
-  all of it.
+  all of it, but `000020`'s `pg_trgm` extension stays installed; nothing uses it.
 - `000027`'s `knowledge_base` is `0044_kb_tables.sql`'s (the shared table;
   csm-sync-service has the identical file). Its `knowledge_article` is 0044's
   **without the foreign keys** on `author_id` and `revised_by_id` (to `"user"`) and
@@ -10843,8 +10843,9 @@ the foreign key `000027` left out: `REFERENCES "user"(id) ON DELETE CASCADE`
   constraint is not recorded; CASCADE matches `knowledge_base_id` (`user_id` is NOT
   NULL, so SET NULL is impossible).
 - **Where the tables already exist** nothing is dropped, rewritten or deleted;
-  where 000027 made them, every `CREATE` is a no-op. Unless a foreign key from
-  `user_id` to `"user"` is already there, under any name, 0251 adds
+  where 000027 made them, every `CREATE` changes nothing, though each `CREATE
+  INDEX IF NOT EXISTS` still takes SHARE on its table first. Unless a foreign key
+  from `user_id` to `"user"` is already there, under any name, 0251 adds
   `knowledge_base_manager_user_user_id_fkey` as described below.
 - **Errors.** A 23503 on `POST /kb-manager-users` names the field
   (`userId does not refer to an existing user`, `knowledgeBaseId does not refer to
@@ -10855,14 +10856,15 @@ the foreign key `000027` left out: `REFERENCES "user"(id) ON DELETE CASCADE`
 already hold rows, so neither may hold a strong lock for long, nor leave anything
 undone without saying so:
 - **Two statements.** A first DO block adds the constraint `NOT VALID`: no row is
-  read, and every new or changed row is checked from then on. The ADD takes SHARE
-  ROW EXCLUSIVE on the table and on the one it references (`"user"` or
-  `work_item`), which waits for every open transaction that has written to either
-  and holds every later writer behind it, so the block commits straight after the
-  add. A second DO block, a transaction of its own under `make migrate` (`psql -f`,
-  autocommit), counts the rows that point nowhere and validates the constraint
-  under SHARE UPDATE EXCLUSIVE and ROW SHARE, which block no reads or writes; it
-  also validates a constraint an earlier run added but did not get to validate.
+  read, and every inserted row, and every row whose key column is changed, is
+  checked from then on. The ADD takes SHARE ROW EXCLUSIVE on the table and on the
+  one it references (`"user"` or `work_item`), which waits for every open
+  transaction that has written to either and holds every later writer behind it,
+  so the block commits straight after the add. A second DO block, a transaction
+  of its own under `make migrate` (`psql -f`, autocommit), counts the rows that
+  point nowhere and validates the constraint under SHARE UPDATE EXCLUSIVE and ROW
+  SHARE, which block no reads or writes; it also validates a constraint an earlier
+  run added but did not get to validate.
   The compose runner applies a file with `psql -1`, as one transaction, so there
   the first block's locks last to the end of the file (local stacks only).
 - **`lock_timeout` is 5s**, `SET` at the top of the file and `RESET` at the end, as

@@ -45,12 +45,13 @@
 --    another constraint already holds 0044's name for it, nothing is added
 --    and a WARNING says so: that column stays without a foreign key.
 --    Otherwise the constraint is added under 0044's name, NOT VALID, so no
---    row is read and every new or changed row is checked from then on. Each
---    ADD takes SHARE ROW EXCLUSIVE on knowledge_article and on the table it
---    references ("user" or work_item): it waits for every open transaction
---    that has written to either table, and every writer of either that comes
---    after waits behind it. The locks are held until this statement commits,
---    which is straight after the adds.
+--    row is read, and from then on every inserted row and every row whose
+--    value in that column is changed is checked. Each ADD takes SHARE ROW
+--    EXCLUSIVE on knowledge_article and on the table it references ("user"
+--    or work_item): it waits for every open transaction that has written to
+--    either table, and every writer of either that comes after waits behind
+--    it. The locks are held until this statement commits, which is straight
+--    after the adds.
 -- 2. For each constraint under 0044's name that is still NOT VALID (added by
 --    statement 1 now, or by an earlier run that stopped before this one):
 --    the rows that point at a user or work item that does not exist are
