@@ -95,6 +95,9 @@ type commentService struct {
 	snMirror    CommentService
 	// imageLinker attaches the comment images a saved comment shows (nil: none).
 	imageLinker InlineImageLinker
+	// imageExtractor stores the images pasted into a comment (nil: they stay
+	// embedded in the comment).
+	imageExtractor InlineImageExtractor
 }
 
 // WithCommentInlineImageLinker attaches the linker that, when a comment is
@@ -103,6 +106,7 @@ type commentService struct {
 func WithCommentInlineImageLinker(svc CommentService, l InlineImageLinker) CommentService {
 	if cs, ok := svc.(*commentService); ok && l != nil {
 		cs.imageLinker = l
+		cs.imageExtractor, _ = l.(InlineImageExtractor)
 	}
 	return svc
 }
@@ -312,6 +316,18 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 		createdBy = user.Email
 	}
 
+	// The ServiceNow mirror below is given the content as the caller sent it:
+	// ServiceNow extracts an embedded image itself, and it cannot resolve the
+	// reference this service stores in its place.
+	originalContent := req.Content
+	if s.imageExtractor != nil && createdBy != commentCreatedByAgent {
+		content, err := s.imageExtractor.ExtractInlineImages(ctx, req.ReferenceID, createdBy, req.Content)
+		if err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+		req.Content = content
+	}
+
 	row, err := s.repo.CreateComment(ctx, req.ReferenceID, req.ReferenceType, enumType, req.Content, createdBy)
 	if err != nil {
 		return domain.CreateCommentResponse{}, err
@@ -331,8 +347,9 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	if s.snWriteback != nil {
 		// req.CreatedBy is "" or "agent" here; ServiceNow resolves the author from the token otherwise.
 		mirrorReq := req
+		mirrorReq.Content = originalContent
 		s.snWriteback.Dispatch(ctx, "comment", req.ReferenceID, "create",
-			map[string]any{"referenceId": req.ReferenceID, "referenceType": req.ReferenceType, "type": req.Type, "content": req.Content},
+			map[string]any{"referenceId": req.ReferenceID, "referenceType": req.ReferenceType, "type": req.Type, "content": originalContent},
 			func(writeCtx context.Context) error {
 				_, err := s.snMirror.CreateComment(writeCtx, mirrorReq)
 				return err
@@ -432,6 +449,20 @@ func (s *commentService) UpdateComment(ctx context.Context, req domain.UpdateCom
 	actorEmail, err := s.resolveCommentActor(ctx)
 	if err != nil {
 		return domain.UpdateCommentResponse{}, err
+	}
+
+	if s.imageExtractor != nil && strings.Contains(req.Content, "base64,") {
+		// The comment's work item is needed to store the images, so it is read
+		// first, and only for an edit that actually carries an embedded image.
+		current, err := s.repo.GetCommentByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
+		content, err := s.imageExtractor.ExtractInlineImages(ctx, current.WorkItemID, actorEmail, req.Content)
+		if err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
+		req.Content = content
 	}
 
 	row, err := s.repo.UpdateComment(ctx, req.ID, req.Content, actorEmail)

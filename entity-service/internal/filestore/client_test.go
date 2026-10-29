@@ -376,3 +376,30 @@ func TestMkdirAll_AFolderThatAlreadyExistsIsNotAnErrorEvenOnA500(t *testing.T) {
 		t.Error("MkdirAll succeeded although the folder neither exists nor could be created")
 	}
 }
+
+func TestPutFile_SendsOneMultipartFileIntoTheFolder(t *testing.T) {
+	f := newFake(t)
+	var query, field, name string
+	var body []byte
+	f.handlers["POST /api/v2/user/files/upload"] = func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("not multipart: %v", err)
+		}
+		for k, files := range r.MultipartForm.File {
+			field, name = k, files[0].Filename
+			fh, _ := files[0].Open()
+			body, _ = io.ReadAll(fh)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}
+	if err := f.client().PutFile(context.Background(), "csm/projects/p/workitems/w/inline_attachments", "cia1_pic.png", []byte("IMG")); err != nil {
+		t.Fatalf("PutFile: %v", err)
+	}
+	if query != "mkdir_parents=true&path=%2Fcsm%2Fprojects%2Fp%2Fworkitems%2Fw%2Finline_attachments" {
+		t.Errorf("query = %q", query)
+	}
+	if field != "filenames" || name != "cia1_pic.png" || string(body) != "IMG" {
+		t.Errorf("field=%q name=%q body=%q", field, name, body)
+	}
+}

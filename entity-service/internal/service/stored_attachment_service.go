@@ -80,6 +80,7 @@ var inlineImageTypes = map[string]bool{
 type fileStore interface {
 	CreateShare(ctx context.Context, spec filestore.ShareSpec) (string, error)
 	MkdirAll(ctx context.Context, dir string) error
+	PutFile(ctx context.Context, dir, name string, data []byte) error
 	ListDir(ctx context.Context, dir string) ([]filestore.Entry, error)
 	Rename(ctx context.Context, from, to string) error
 	RemoveFile(ctx context.Context, path string) error
@@ -341,8 +342,8 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	}
 	req.ContentType = strings.ToLower(strings.TrimSpace(req.ContentType))
 	if req.Kind == domain.StoredAttachmentComment {
-		if !inlineImageTypes[req.ContentType] {
-			return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "only PNG, JPEG, GIF and WebP images can be added to a comment"}
+		if _, ok := newInlineImageTypes[req.ContentType]; !ok {
+			return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "only PNG, JPEG and WebP images can be added to a comment"}
 		}
 	} else if req.ContentType == "" {
 		req.ContentType = "application/octet-stream"
@@ -497,8 +498,8 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 		if err != nil {
 			return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "read upload", err)
 		}
-		if !inlineImageTypes[strings.ToLower(strings.SplitN(http.DetectContentType(head), ";", 2)[0])] {
-			msg := "the file is not a PNG, JPEG, GIF or WebP image"
+		if _, ok := newInlineImageTypes[strings.ToLower(strings.SplitN(http.DetectContentType(head), ";", 2)[0])]; !ok {
+			msg := "the file is not a PNG, JPEG or WebP image"
 			return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, msg, &apierror.ValidationError{Msg: msg})
 		}
 	}
@@ -530,14 +531,27 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 // OpenInlineImage implements StoredAttachmentService. It is how a comment's
 // image is shown: entity-service reads it from SFTPGo and streams it, so access is
 // checked on every request and no link that could be forwarded ever exists.
+//
+// An image pasted into a comment here is a comment_attachment row. One migrated
+// from the previous system is a work_item_attachment row (its comment images were
+// stored as the work item's own attachments), so when there is no comment row the
+// work item's own is tried, and streamed only when it really is an image.
 func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
 	if !validate.IsUUID(id) {
 		return domain.StoredAttachmentContent{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
 	}
 	// Only a row the caller may see comes back; anything else is not found.
-	rows, err := s.repo.GetByIDs(ctx, domain.StoredAttachmentComment, []string{id})
+	kind := domain.StoredAttachmentComment
+	rows, err := s.repo.GetByIDs(ctx, kind, []string{id})
 	if err != nil {
 		return domain.StoredAttachmentContent{}, err
+	}
+	if len(rows) == 0 {
+		kind = domain.StoredAttachmentWorkItem
+		rows, err = s.repo.GetByIDs(ctx, kind, []string{id})
+		if err != nil {
+			return domain.StoredAttachmentContent{}, err
+		}
 	}
 	notFound := &apierror.NotFoundError{Msg: "attachment not found"}
 	if len(rows) != 1 {
@@ -545,6 +559,17 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	}
 	row := rows[0]
 	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
+		return domain.StoredAttachmentContent{}, notFound
+	}
+	// A migrated type may carry parameters ("image/png; charset=binary"); only the
+	// media type decides, and only it is sent back.
+	mediaType := ""
+	if row.ContentType != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.SplitN(*row.ContentType, ";", 2)[0]))
+	}
+	imageType := inlineImageTypes[mediaType]
+	if kind == domain.StoredAttachmentWorkItem && !imageType {
+		// Files of a work item are downloaded through a link, never shown here.
 		return domain.StoredAttachmentContent{}, notFound
 	}
 	body, size, err := s.store.Open(ctx, *row.StorageKey)
@@ -556,18 +581,20 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	}
 	slog.InfoContext(ctx, "attachment content served",
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
-		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(domain.StoredAttachmentComment),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
 	contentType := "application/octet-stream"
-	if row.ContentType != nil && inlineImageTypes[strings.ToLower(*row.ContentType)] {
-		contentType = strings.ToLower(*row.ContentType)
+	if imageType {
+		contentType = mediaType
 	}
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
 
 // inlineImageRef finds the comment images a comment's HTML shows: its <img src>
-// ends in .../attachments/inline/<attachment id>/content.
-var inlineImageRef = regexp.MustCompile(`attachments/inline/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/content`)
+// ends in .../attachments/inline/<attachment id>/content, or is the bare
+// reference src="/<attachment id>" that ExtractInlineImages writes (and that
+// comments migrated from the previous system use; the .iix suffix is tolerated).
+var inlineImageRef = regexp.MustCompile(`(?i)(?:attachments/inline/|\bsrc\s*=\s*["']/?)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/content|\.iix|["'])`)
 
 // inlineImageIDs returns the distinct attachment ids a comment's content refers
 // to, at most maxAttachmentLinkIDs.

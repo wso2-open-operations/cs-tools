@@ -19,6 +19,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,8 +62,10 @@ type fakeStoredRepo struct {
 	parent    domain.StoredAttachmentParent
 	parentErr error
 	rows      map[string]domain.StoredAttachmentRow
-	inserted  []domain.StoredAttachmentInsert
-	insertErr error
+	// workItemRows are found only by a work item lookup (a migrated comment image).
+	workItemRows map[string]domain.StoredAttachmentRow
+	inserted     []domain.StoredAttachmentInsert
+	insertErr    error
 
 	deleted      map[string]string // id -> deleted_by
 	deleteCtx    []bool            // whether each MarkDeleted ran as the system
@@ -115,10 +118,12 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	return row, nil
 }
 
-func (f *fakeStoredRepo) GetByIDs(_ context.Context, _ domain.StoredAttachmentKind, ids []string) ([]domain.StoredAttachmentRow, error) {
+func (f *fakeStoredRepo) GetByIDs(_ context.Context, kind domain.StoredAttachmentKind, ids []string) ([]domain.StoredAttachmentRow, error) {
 	var out []domain.StoredAttachmentRow
 	for _, id := range ids {
 		if r, ok := f.rows[id]; ok {
+			out = append(out, r)
+		} else if r, ok := f.workItemRows[id]; ok && kind == domain.StoredAttachmentWorkItem {
 			out = append(out, r)
 		}
 	}
@@ -189,6 +194,9 @@ type fakeStore struct {
 	fileErr  error
 	openErr  error
 	opened   []string
+	putErr   error
+	put      []string // dir/name of each file written with PutFile
+	putData  map[string][]byte
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{listing: map[string][]filestore.Entry{}} }
@@ -199,6 +207,18 @@ func (f *fakeStore) CreateShare(_ context.Context, spec filestore.ShareSpec) (st
 	}
 	f.shares = append(f.shares, spec)
 	return "share-" + spec.Name, nil
+}
+func (f *fakeStore) PutFile(_ context.Context, dir, name string, data []byte) error {
+	if f.putErr != nil {
+		return f.putErr
+	}
+	key := dir + "/" + name
+	f.put = append(f.put, key)
+	if f.putData == nil {
+		f.putData = map[string][]byte{}
+	}
+	f.putData[key] = data
+	return nil
 }
 func (f *fakeStore) MkdirAll(_ context.Context, dir string) error {
 	f.mkdirs = append(f.mkdirs, dir)
@@ -442,6 +462,48 @@ func TestOpenInlineImage(t *testing.T) {
 	var verr *apierror.ValidationError
 	if _, err := svc("COMPLETE", &png, &key, newFakeStore()).OpenInlineImage(ctx, "nope"); !errors.As(err, &verr) {
 		t.Errorf("bad id: err = %v, want ValidationError", err)
+	}
+}
+
+// An image migrated from the previous system is a work item attachment, not a
+// comment one; the inline route finds it there, and only when it is an image.
+func TestOpenInlineImage_MigratedImageIsAWorkItemAttachment(t *testing.T) {
+	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia1_pic.png"
+	png, pdf := "image/png", "application/pdf"
+	svc := func(ct *string, store *fakeStore) *storedAttachmentService {
+		repo := newFakeStoredRepo()
+		repo.workItemRows = map[string]domain.StoredAttachmentRow{
+			saAttID: {ID: saAttID, Number: "WIA1", Name: "pic.png", Status: "COMPLETE", ContentType: ct, StorageKey: &key},
+		}
+		return newStoredSvc(repo, store)
+	}
+	ctx := saCtx(t, saEmail)
+
+	store := newFakeStore()
+	c, err := svc(&png, store).OpenInlineImage(ctx, saAttID)
+	if err != nil {
+		t.Fatalf("OpenInlineImage: %v", err)
+	}
+	b, _ := io.ReadAll(c.Body)
+	if string(b) != "IMG" || c.ContentType != "image/png" || len(store.opened) != 1 || store.opened[0] != key {
+		t.Errorf("content = %q %+v opened=%v", b, c, store.opened)
+	}
+
+	// A migrated type with parameters is still an image, sent back without them.
+	withParams := "Image/PNG; charset=binary"
+	pc, err := svc(&withParams, newFakeStore()).OpenInlineImage(ctx, saAttID)
+	if err != nil || pc.ContentType != "image/png" {
+		t.Errorf("parameterised type: err=%v type=%q, want image/png", err, pc.ContentType)
+	}
+
+	// A work item file that is not an image is never streamed here.
+	var nf *apierror.NotFoundError
+	other := newFakeStore()
+	if _, err := svc(&pdf, other).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) || len(other.opened) != 0 {
+		t.Errorf("not an image: err = %v opened=%v, want NotFoundError and nothing read", err, other.opened)
+	}
+	if _, err := svc(nil, newFakeStore()).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
+		t.Errorf("no type: err = %v, want NotFoundError", err)
 	}
 }
 
@@ -1180,5 +1242,123 @@ func TestResolveLinks_ADeletedAttachmentHasNoLink(t *testing.T) {
 	}
 	if len(store.shares) != 0 {
 		t.Error("a share was created for a deleted attachment")
+	}
+}
+
+// pngBytes is the signature of a PNG plus padding: enough for the type check.
+var pngBytes = append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 24)...)
+
+func dataURI(subtype string, b []byte) string {
+	return "data:image/" + subtype + ";base64," + base64.StdEncoding.EncodeToString(b)
+}
+
+func TestExtractInlineImages_StoresTheImageAndKeepsOnlyItsId(t *testing.T) {
+	repo := newFakeStoredRepo()
+	store := newFakeStore()
+	svc := newStoredSvc(repo, store)
+	ctx := saCtx(t, saEmail)
+
+	html := `<p>Look:</p><img src="` + dataURI("png", pngBytes) + `" alt="x"><p>done</p>`
+	out, err := svc.ExtractInlineImages(ctx, saParentID, saEmail, html)
+	if err != nil {
+		t.Fatalf("ExtractInlineImages: %v", err)
+	}
+	want := `<p>Look:</p><img src="/` + saAttID + `" alt="x"><p>done</p>`
+	if out != want {
+		t.Errorf("content = %q, want %q", out, want)
+	}
+	if len(repo.inserted) != 1 || repo.inserted[0].ParentID != saParentID || repo.inserted[0].CreatedBy != saEmail ||
+		repo.inserted[0].ContentType != "image/png" || repo.inserted[0].SizeBytes != int64(len(pngBytes)) {
+		t.Errorf("inserted = %+v", repo.inserted)
+	}
+	if len(store.put) != 1 || !strings.Contains(store.put[0], "inline_attachments") || !strings.HasSuffix(store.put[0], ".png") {
+		t.Errorf("stored at %v", store.put)
+	}
+	if string(store.putData[store.put[0]]) != string(pngBytes) {
+		t.Error("the stored bytes are not the image")
+	}
+	if repo.completed[saAttID] == "" || len(repo.completeCtx) != 1 || !repo.completeCtx[0] {
+		t.Errorf("completed = %v (system=%v)", repo.completed, repo.completeCtx)
+	}
+}
+
+func TestExtractInlineImages_LeavesAloneWhatItShouldNotTouch(t *testing.T) {
+	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
+	ctx := saCtx(t, saEmail)
+	for name, html := range map[string]string{
+		"no image":        "<p>hello</p>",
+		"a stored image":  `<img src="/` + saAttID + `">`,
+		"a remote image":  `<img src="https://example.com/a.png">`,
+		"a non-img data":  `<a href="data:text/plain;base64,aGk=">x</a>`,
+		"no author email": "",
+	} {
+		author := saEmail
+		if name == "no author email" {
+			author, html = "", `<img src="`+dataURI("png", pngBytes)+`">`
+		}
+		out, err := svc.ExtractInlineImages(ctx, saParentID, author, html)
+		if err != nil || out != html {
+			t.Errorf("%s: out=%q err=%v, want it unchanged", name, out, err)
+		}
+	}
+}
+
+func TestExtractInlineImages_Refusals(t *testing.T) {
+	ctx := saCtx(t, saEmail)
+	var verr *apierror.ValidationError
+	big := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 200)...) // over the 100 byte test limit
+	for name, html := range map[string]string{
+		"gif":              `<img src="` + dataURI("gif", []byte("GIF89a....")) + `">`,
+		"svg":              `<img src="` + dataURI("svg+xml", []byte("<svg/>")) + `">`,
+		"too large":        `<img src="` + dataURI("png", big) + `">`,
+		"not really a png": `<img src="` + dataURI("png", []byte("<script>alert(1)</script>")) + `">`,
+		"bad base64":       `<img src="data:image/png;base64,abc">`,
+	} {
+		repo, store := newFakeStoredRepo(), newFakeStore()
+		_, err := newStoredSvc(repo, store).ExtractInlineImages(ctx, saParentID, saEmail, html)
+		if !errors.As(err, &verr) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+		if len(store.put) != 0 {
+			t.Errorf("%s: a file was written", name)
+		}
+	}
+	// jpg is accepted as an alias of jpeg when the bytes agree.
+	jpeg := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 24)...)
+	if _, err := newStoredSvc(newFakeStoredRepo(), newFakeStore()).ExtractInlineImages(ctx, saParentID, saEmail, `<img src="`+dataURI("jpg", jpeg)+`">`); err != nil {
+		t.Errorf("jpg: %v", err)
+	}
+}
+
+func TestExtractInlineImages_AHiddenWorkItemIsNotFoundAndStorageFailureStoresNothing(t *testing.T) {
+	ctx := saCtx(t, saEmail)
+	html := `<img src="` + dataURI("png", pngBytes) + `">`
+
+	hidden := newFakeStoredRepo()
+	hidden.parentErr = &apierror.NotFoundError{Msg: "work item not found"}
+	var nf *apierror.NotFoundError
+	if _, err := newStoredSvc(hidden, newFakeStore()).ExtractInlineImages(ctx, saParentID, saEmail, html); !errors.As(err, &nf) {
+		t.Errorf("hidden: err = %v, want NotFoundError", err)
+	}
+
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	store.putErr = errors.New("sftpgo down")
+	var su *apierror.ServiceUnavailableError
+	if _, err := newStoredSvc(repo, store).ExtractInlineImages(ctx, saParentID, saEmail, html); !errors.As(err, &su) {
+		t.Errorf("storage down: err = %v, want ServiceUnavailableError", err)
+	}
+	if repo.failed[saAttID] == "" || len(repo.completed) != 0 {
+		t.Errorf("the row must be failed, not completed: failed=%v completed=%v", repo.failed, repo.completed)
+	}
+}
+
+func TestInlineImageIDs_FindsEveryReferenceShape(t *testing.T) {
+	a, b, c := "b1000000-0000-0000-0000-00000000000a", "b1000000-0000-0000-0000-00000000000b", "b1000000-0000-0000-0000-00000000000c"
+	html := `<img src="https://p.example/attachments/inline/` + a + `/content">` +
+		`<img src="/` + b + `"><img src='` + c + `.iix'><img src="/` + b + `">` +
+		`<img src="https://example.com/` + a + `.png">`
+	got := inlineImageIDs(html)
+	if len(got) != 3 || got[0] != a || got[1] != b || got[2] != c {
+		t.Errorf("ids = %v, want [%s %s %s]", got, a, b, c)
 	}
 }

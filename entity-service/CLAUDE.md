@@ -1717,6 +1717,10 @@ response type is the stored image type (anything else is sent as `application/oc
 `nosniff`, a sandboxing `Content-Security-Policy` and `Cache-Control: private, max-age=300`. Each request
 writes an `attachment content served` audit line (callerId, correlationId, attachmentId, path). The portal
 backends pass it through (browser -> backend -> entity-service); only upload and download use share links.
+The id is looked up as a `comment_attachment` row first. When there is none it is looked up as a
+`work_item_attachment` row, because the migrator stores a comment's images as the work item's own
+attachments; that row is streamed only when its stored type is an image type (a PDF or other file is 404
+here and is downloaded through a link instead). The audit line's `kind` says which table served it.
 
 **Share cleanup.** Each link is a stored record in SFTPGo, and one that expired or was used up is not
 necessarily removed by SFTPGo itself (not confirmed either way). `POST /attachments/shares/cleanup`
@@ -1790,6 +1794,19 @@ are internal-only, which is why `ConfirmUpload` runs `MarkComplete`/`MarkFailed`
 `repository.WithSystemIdentity` after its own checks. There is deliberately no `AccessService`
 in this service. The three tables have no row-level id default except `work_item_attachment`
 (migration 0179), so `InsertPending` generates the id.
+
+**Images pasted into a comment are stored, not embedded.** A base64 `<img src="data:image/...">` in a new comment
+(or an edit) is moved out by `ExtractInlineImages` (`stored_attachment_inline_extract.go`) before the comment row
+is written: each becomes a `comment_attachment` row (type from the bytes, not the claim; PNG, JPEG/JPG and WebP
+only, at most `INLINE_IMAGE_MAX_BYTES`, at most 20 per comment) with its file written to SFTPGo
+(`filestore.PutFile`, `POST /api/v2/user/files/upload`, not yet run against a live server) under the work item's
+`inline_attachments` folder, and the comment keeps only `src="/<attachment id>"`, the same shape comments migrated
+from the previous system use and the portals already resolve. If any image cannot be stored the ones already stored
+are removed and the comment is not saved (400 for a bad image, 404 for a work item the caller cannot see, 503 for
+storage). Comments already saved are never rewritten, and a comment from a caller with no author email (an
+AI-assistant reply, a machine caller without an actor) is left as it is. The images are then linked to the comment
+by `LinkFromContent`, which also recognises `src="/<id>"` and `src="<id>.iix"`. Under dual-write the ServiceNow
+mirror is still sent the caller's original content (with the embedded image), since ServiceNow extracts it itself.
 
 **Inline comment images** are uploaded against the work item before the comment exists, so a new image is a
 `comment_attachment` row with `comment_id` NULL and `work_item_id` set (migration 0150), visible only to its

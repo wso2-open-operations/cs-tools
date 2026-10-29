@@ -1622,3 +1622,12 @@ type AttachmentUploadCleanupService interface {
 type InlineImageLinker interface {
 	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
 }
+
+// InlineImageExtractor moves the images pasted into a comment out of its HTML
+// before the comment is saved: each base64 data URI becomes a stored comment
+// attachment and the comment keeps src="/<attachment id>". Unlike linking it can
+// fail, and then the comment must not be saved. The linker the services are given
+// is used as an extractor too when it implements this.
+type InlineImageExtractor interface {
+	ExtractInlineImages(ctx context.Context, workItemID, authorEmail, content string) (string, error)
+}

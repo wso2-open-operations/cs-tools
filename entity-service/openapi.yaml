@@ -416,8 +416,10 @@ paths:
         SFTPGo and sends it, so the browser never talks to SFTPGo and no link
         exists that could be forwarded; access is checked on every request. An
         image the caller cannot see, that is not stored or that was deleted is
-        404. Not registered (404) unless SFTPGO_URL, SFTPGO_USER and
-        SFTPGO_PASSWORD are set.
+        404. The id is a comment image, or an image-typed work item attachment
+        (how comment images migrated from the previous system are stored); a
+        work item file that is not an image is 404 here. Not registered (404)
+        unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
       operationId: getInlineImageContent
       security:
         - clientAssertion: []

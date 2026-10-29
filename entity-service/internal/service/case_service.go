@@ -128,6 +128,9 @@ type caseService struct {
 
 	// imageLinker attaches the comment images a new comment shows (nil: none).
 	imageLinker InlineImageLinker
+	// imageExtractor stores the images pasted into a new comment (nil: they stay
+	// embedded in the comment).
+	imageExtractor InlineImageExtractor
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -203,6 +206,7 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 	if cs, ok := svc.(*caseService); ok && l != nil {
 		cs.imageLinker = l
+		cs.imageExtractor, _ = l.(InlineImageExtractor)
 	}
 	return svc
 }
@@ -1391,6 +1395,17 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
+	// The ServiceNow mirror further down is given the content as the caller sent
+	// it: ServiceNow extracts an embedded image itself, and it cannot resolve the
+	// reference this service stores in its place.
+	originalContent := req.Content
+	if s.imageExtractor != nil {
+		content, err := s.imageExtractor.ExtractInlineImages(ctx, req.CaseID, actorEmail, req.Content)
+		if err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+		req.Content = content
+	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {
@@ -1474,7 +1489,7 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// can ever act on.
 	if s.snWriteback != nil && req.Type != domain.CommentTypeActivity {
 		if m, ok := s.snMirror.(snCommentMirror); ok {
-			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, req.Content
+			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, originalContent
 			s.snWriteback.Dispatch(ctx, "case_comment", req.CaseID, "create",
 				map[string]any{"caseId": mirrorCaseID, "type": mirrorType, "content": mirrorContent},
 				func(writeCtx context.Context) error {
