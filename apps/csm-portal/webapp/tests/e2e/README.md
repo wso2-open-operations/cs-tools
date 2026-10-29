@@ -152,3 +152,59 @@ the stack is named:
 E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csm-platform-postgres-1 \
   npx playwright test tests/e2e/specs/team-schedule/sme-tiers.spec.ts
 ```
+
+## Standard changes: propose, CAB approval, raise from a template (real local stack)
+
+`specs/operations/standard-changes.spec.ts` drives the real stack through the UI.
+
+Prerequisite: the standard change seed. The first test checks the seed's own templates and proposals (by the names the
+script gives them), so seed the stack once before running the spec (it is idempotent; `--reset` rebuilds it from scratch and, on a stack
+started under another compose project name, needs `COMPOSE_PROJECT_NAME=<name>`, e.g. `csmcr`):
+
+```bash
+scripts/csm-compose/seed-standard-changes.sh    # from the repository root (entity-service :8081, mock OIDC :9100)
+```
+
+What it checks:
+
+- **The page heading** (what users complained about): on Operations > Change requests > Standard change catalogue
+  (`?view=catalogue`) and > Standard change proposals (`?view=proposals`) the heading is exactly "Standard changes" with
+  that view's own line, and neither says anything about service requests, incidents, problems or runbooks. Every other
+  Operations tab (the change request list included) keeps "Operations" and its Operations-wide line.
+- **The seed is listed**: the catalogue shows the seed's five templates with their state and version (the suspended
+  "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2); the suspended template's page shows the
+  reason it was suspended and who did it; the proposals sub-view lists the seed's rejected, in-CAB-review and draft
+  proposals and its approved revision, each in its state.
+- **Old links and the sidebar**: `/operations?tab=standard_changes`, `/operations?tab=standard_changes&view=proposals`,
+  `/operations/standard-changes` and `/operations/standard-changes?view=proposals` each land on the right sub-view, and
+  the sidebar's "Change requests" is the one highlighted entry there, on a template page and on a proposal page.
+- **The whole flow**: `bob` proposes a standard change from a closed change request ("Propose as standard change"),
+  templates it (name, category, a text and a select parameter, `{{placeholders}}` in the subject and the implementation,
+  backout and test plans, typed and through "Insert {{…}}"), and the live preview renders every placeholder with the
+  sample values; he saves and submits it to the CAB; `carol` (CAB) approves it; the template is in the catalogue as active
+  version 1; `alice` raises a change request from it on the create form (type Standard, the template, the change
+  specifics, the read-only preview). The change request holds the template's content rendered with her values (subject,
+  implementation / backout / test plans, impact, category, rollback duration on the page; risk, which the page does not
+  show, from the API and Postgres), shows the "Raised from standard change template" banner, and its lifecycle bar shows
+  Assess and Authorize as not taken. In Edit every field the template specifies (subject, type, impact, category, rollback
+  duration, the plans, the customer boxes, plan visibility) is disabled while priority, assignment and affected services
+  stay editable. She schedules it ("Schedule" is Request Approval), implements, reviews and rolls it back; the template then
+  reads "Review needed", linking to that change request.
+
+Every persona signs in through the local mock identity provider (no password).
+
+It WRITES: a change request raised and walked to Closed through the CSM backend's API (the evidence), the proposal, the
+template and the change request raised from it, all named with `QA-STD-E2E`. Before and after, it deletes from Postgres,
+in one transaction, the proposals, change requests and templates carrying that tag (and every change request raised from
+a tagged template) together with the `event_outbox` rows of exactly those records (that table has no foreign key, so they
+would otherwise be left pointing at nothing), and nothing else. So it is skipped unless the stack is named:
+
+```bash
+E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csmcr-postgres-1 \
+E2E_CSM_BFF_URL=http://localhost:8082 E2E_OIDC_URL=http://localhost:9100 E2E_ENTITY_SERVICE_URL=http://localhost:8081 \
+  npx playwright test tests/e2e/specs/operations/standard-changes.spec.ts
+```
+
+Set `E2E_SHOT_DIR=<dir>` to also save a picture of each step: the region the step is about (the app's main area scrolls
+inside a 100dvh shell, so a full-page picture would only show its top). The webapp must be a build that has the Change
+requests sub-views (rebuild the compose service `csm-portal-webapp` after changing them).
