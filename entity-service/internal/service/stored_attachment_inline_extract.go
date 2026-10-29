@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -140,8 +141,14 @@ func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workI
 			ProjectNumber: parent.ProjectNumber, WorkItemNumber: parent.Number,
 			Inline: true, AttachmentNumber: row.Number, Name: name,
 		})
-		if err := s.storeAndCheck(ctx, key, data); err != nil {
-			s.failQuietly(ctx, domain.StoredAttachmentComment, row.ID, "image could not be stored")
+		if orphan, err := s.storeAndCheck(ctx, key, data); err != nil {
+			reason := "image could not be stored"
+			if orphan != "" {
+				// The file could not be removed: keep where it is, on the row, so it
+				// can be cleaned up later instead of being lost.
+				reason += "; file may remain at " + orphan
+			}
+			s.failQuietly(ctx, domain.StoredAttachmentComment, row.ID, reason)
 			rollback()
 			return "", storageUnavailable(ctx, "store inline image", err)
 		}
@@ -173,19 +180,42 @@ func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workI
 
 // storeAndCheck writes the file and then looks for it: a write the server accepted
 // but put somewhere else must not leave a COMPLETE row whose file is missing.
-func (s *storedAttachmentService) storeAndCheck(ctx context.Context, key string, data []byte) error {
+//
+// When the write went through but the check fails, whatever is at key is removed
+// so it is not left behind unreferenced. That removal has its own short deadline,
+// independent of the request (which may already be cancelled). If it fails, the
+// key is returned as orphan so the caller can record it.
+func (s *storedAttachmentService) storeAndCheck(ctx context.Context, key string, data []byte) (orphan string, err error) {
 	dir, name := path.Dir(key), path.Base(key)
 	if err := s.store.PutFile(ctx, dir, name, data); err != nil {
-		return err
+		// The write itself failed: there may be nothing to clean, and trying to
+		// remove a file that is not there is not an error worth recording.
+		return "", err
 	}
+	if err := s.checkStored(ctx, dir, name, int64(len(data))); err != nil {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineImageCleanupTimeout)
+		defer cancel()
+		if rmErr := s.store.RemoveFile(cctx, key); rmErr != nil && !errors.Is(rmErr, filestore.ErrNotFound) {
+			slog.WarnContext(ctx, "inline image: could not remove an unverified file", "path", key, "error", rmErr)
+			return key, err
+		}
+		return "", err
+	}
+	return "", nil
+}
+
+func (s *storedAttachmentService) checkStored(ctx context.Context, dir, name string, size int64) error {
 	entries, err := s.store.ListDir(ctx, dir)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		if !e.IsDir() && e.Name == name && e.Size == int64(len(data)) {
+		if !e.IsDir() && e.Name == name && e.Size == size {
 			return nil
 		}
 	}
-	return fmt.Errorf("stored file %s is not in its folder with the expected size", key)
+	return fmt.Errorf("stored file %s/%s is not in its folder with the expected size", dir, name)
 }
+
+// inlineImageCleanupTimeout bounds the removal of a file that failed its check.
+const inlineImageCleanupTimeout = 10 * time.Second

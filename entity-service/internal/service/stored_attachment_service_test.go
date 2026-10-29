@@ -1370,6 +1370,29 @@ func TestExtractInlineImages_AFileThatIsNotWhereItWasWrittenFailsTheComment(t *t
 	if len(repo.completed) != 0 || repo.failed[saAttID] == "" {
 		t.Errorf("the row must be failed, not completed: failed=%v completed=%v", repo.failed, repo.completed)
 	}
+	// What was written is removed, so nothing is left behind unreferenced.
+	if len(store.files) != 1 || !strings.Contains(store.files[0], "inline_attachments") {
+		t.Errorf("the unverified file must be removed, removed = %v", store.files)
+	}
+	if strings.Contains(repo.failed[saAttID], "may remain") {
+		t.Errorf("nothing remains, but the row says so: %q", repo.failed[saAttID])
+	}
+}
+
+// When the unverified file cannot be removed either, where it is stays on the
+// row so it can be cleaned up later.
+func TestExtractInlineImages_AnUnremovableFileIsRecordedOnTheRow(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	store.dropListing = true
+	store.fileErr = errors.New("sftpgo refused")
+	_, err := newStoredSvc(repo, store).ExtractInlineImages(saCtx(t, saEmail), saParentID, saEmail, `<img src="`+dataURI("png", pngBytes)+`">`)
+	var su *apierror.ServiceUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("err = %v, want ServiceUnavailableError", err)
+	}
+	if got := repo.failed[saAttID]; !strings.Contains(got, "may remain at csm/") || !strings.Contains(got, "inline_attachments") {
+		t.Errorf("the row must record where the file is, got %q", got)
+	}
 }
 
 func TestInlineImageIDs_FindsEveryReferenceShape(t *testing.T) {
