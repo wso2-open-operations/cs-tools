@@ -32,6 +32,12 @@ func (s *stubGroupRepo) SearchGroups(context.Context, string, int, int) ([]domai
 	return []domain.Group{}, 0, nil
 }
 
+// SearchIncidentExtraGroups records that the extra-group search was called.
+func (s *stubGroupRepo) SearchIncidentExtraGroups(context.Context, string, int, int) ([]domain.Group, int, error) {
+	s.called = "extra groups"
+	return []domain.Group{}, 0, nil
+}
+
 // SearchSupportGroups records that the support-group search was called.
 func (s *stubGroupRepo) SearchSupportGroups(context.Context, string, int, int) ([]domain.Group, int, error) {
 	s.called = "support groups"
@@ -51,6 +57,29 @@ func TestSearchGroups_SupportGroupsOnlyPicksTheSupportGroupSet(t *testing.T) {
 		}
 		if repo.called != want {
 			t.Errorf("filters %+v searched %s, want %s", filters, repo.called, want)
+		}
+	}
+}
+
+// incidentExtraGroupsOnly picks the extra-group search, wins over
+// supportGroupsOnly, and leaves the other searches alone when false.
+func TestSearchGroups_IncidentExtraGroupsOnly(t *testing.T) {
+	for name, c := range map[string]struct {
+		filters *domain.SearchGroupsFilters
+		want    string
+	}{
+		"extra only":       {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true}, "extra groups"},
+		"both flags":       {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true, SupportGroupsOnly: true}, "extra groups"},
+		"explicit false":   {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: false}, "teams"},
+		"support only":     {&domain.SearchGroupsFilters{SupportGroupsOnly: true}, "support groups"},
+		"extra with query": {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true, SearchQuery: "soc"}, "extra groups"},
+	} {
+		repo := &stubGroupRepo{}
+		if _, err := NewGroupService(repo).SearchGroups(context.Background(), domain.SearchGroupsRequest{Filters: c.filters}); err != nil {
+			t.Fatalf("%s: SearchGroups: %v", name, err)
+		}
+		if repo.called != c.want {
+			t.Errorf("%s: searched %s, want %s", name, repo.called, c.want)
 		}
 	}
 }

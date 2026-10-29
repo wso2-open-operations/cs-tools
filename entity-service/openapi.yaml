@@ -27128,6 +27128,20 @@ components:
             not group ids. On the ServiceNow data source the set is built from
             ServiceNow's services (whose list carries no group's active flag)
             and matched, sorted by name and paged by this service.
+        incidentExtraGroupsOnly:
+          type: boolean
+          default: false
+          description: >-
+            true limits the result to the active groups the deployment has
+            configured as extra assignable groups for incidents (groups that
+            are not the support group of any service, for example a security
+            operations group). searchQuery and pagination apply, and total
+            counts the matching extra groups. The ids are group ids (what
+            assignmentGroupId takes). When no extra groups are configured the
+            result is empty, never every group. If supportGroupsOnly is also
+            true this filter wins and supportGroupsOnly is ignored. Supported
+            on the PostgreSQL data source only; other data sources
+            ignore it.
 
     ScheduleZone:
       type: object

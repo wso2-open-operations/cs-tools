@@ -39,6 +39,12 @@ type GroupRepository interface {
 	// ones work_item.assignment_group_id and service.support_group_id hold.
 	// It backs POST /groups/search's supportGroupsOnly filter.
 	SearchSupportGroups(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Group, int, error)
+	// SearchIncidentExtraGroups is SearchSupportGroups narrowed to the configured
+	// extra assignable groups (INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS, see
+	// incidentExtraGroupSQL): only active allowlisted groups, none when the
+	// allowlist is empty. It backs POST /groups/search's incidentExtraGroupsOnly
+	// filter.
+	SearchIncidentExtraGroups(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Group, int, error)
 }
 
 type groupRepo struct {
@@ -137,6 +143,21 @@ func (r *groupRepo) SearchGroups(ctx context.Context, searchQuery string, limit,
 // returns is active (the set excludes is_active = FALSE); a group with no
 // name is listed under its id.
 func (r *groupRepo) SearchSupportGroups(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Group, int, error) {
+	return r.searchGroupSet(ctx, incidentAssignableGroupSQL(1), searchQuery, limit, offset)
+}
+
+// SearchIncidentExtraGroups implements GroupRepository.
+//
+// The same "group" read and row shape as SearchSupportGroups, over
+// incidentExtraGroupSQL: the allowlisted groups alone, so a service's support
+// group is not listed unless it is allowlisted too.
+func (r *groupRepo) SearchIncidentExtraGroups(ctx context.Context, searchQuery string, limit, offset int) ([]domain.Group, int, error) {
+	return r.searchGroupSet(ctx, incidentExtraGroupSQL(1), searchQuery, limit, offset)
+}
+
+// searchGroupSet pages a group set statement (selecting g.id, g.name,
+// g.parent_id under alias g, with the allowlist at $1) filtered by name.
+func (r *groupRepo) searchGroupSet(ctx context.Context, setSQL, searchQuery string, limit, offset int) ([]domain.Group, int, error) {
 	where := ""
 	args := []any{extraGroupIDsArg(r.extraGroupIDs)}
 	if searchQuery != "" {
@@ -144,7 +165,7 @@ func (r *groupRepo) SearchSupportGroups(ctx context.Context, searchQuery string,
 		args = append(args, "%"+escaped+"%")
 		where = fmt.Sprintf(" AND g.name ILIKE $%d ESCAPE '\\'", len(args))
 	}
-	set := incidentAssignableGroupSQL(1) + where
+	set := setSQL + where
 
 	countQuery := "SELECT COUNT(*) FROM (" + set + ") sg"
 	dataQuery := fmt.Sprintf(`

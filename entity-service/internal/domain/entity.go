@@ -5988,6 +5988,11 @@ type SearchGroupsFilters struct {
 	// (the ones assignmentGroupId takes), not team-registry ids, which the
 	// search returns without this filter on the Postgres data source.
 	SupportGroupsOnly bool `json:"supportGroupsOnly,omitempty"`
+	// IncidentExtraGroupsOnly limits the result to the active groups the
+	// deployment has configured as extra incident assignment groups (and none
+	// when none are configured). Ids are "group" ids, as with SupportGroupsOnly.
+	// It wins over SupportGroupsOnly when both are set. Postgres data source only.
+	IncidentExtraGroupsOnly bool `json:"incidentExtraGroupsOnly,omitempty"`
 }
 
 // SearchGroupsRequest is the input for POST /groups/search.
