@@ -195,8 +195,10 @@ type fakeStore struct {
 	openErr  error
 	opened   []string
 	putErr   error
-	put      []string // dir/name of each file written with PutFile
-	putData  map[string][]byte
+	// dropListing makes PutFile accept a file without it showing in the folder.
+	dropListing bool
+	put         []string // dir/name of each file written with PutFile
+	putData     map[string][]byte
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{listing: map[string][]filestore.Entry{}} }
@@ -218,6 +220,9 @@ func (f *fakeStore) PutFile(_ context.Context, dir, name string, data []byte) er
 		f.putData = map[string][]byte{}
 	}
 	f.putData[key] = data
+	if !f.dropListing {
+		f.listing[dir] = append(f.listing[dir], filestore.Entry{Name: name, Size: int64(len(data))})
+	}
 	return nil
 }
 func (f *fakeStore) MkdirAll(_ context.Context, dir string) error {
@@ -1348,6 +1353,21 @@ func TestExtractInlineImages_AHiddenWorkItemIsNotFoundAndStorageFailureStoresNot
 		t.Errorf("storage down: err = %v, want ServiceUnavailableError", err)
 	}
 	if repo.failed[saAttID] == "" || len(repo.completed) != 0 {
+		t.Errorf("the row must be failed, not completed: failed=%v completed=%v", repo.failed, repo.completed)
+	}
+}
+
+// A write the server accepted but put somewhere else must not leave a COMPLETE
+// row whose file is missing.
+func TestExtractInlineImages_AFileThatIsNotWhereItWasWrittenFailsTheComment(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	store.dropListing = true
+	var su *apierror.ServiceUnavailableError
+	_, err := newStoredSvc(repo, store).ExtractInlineImages(saCtx(t, saEmail), saParentID, saEmail, `<img src="`+dataURI("png", pngBytes)+`">`)
+	if !errors.As(err, &su) {
+		t.Fatalf("err = %v, want ServiceUnavailableError", err)
+	}
+	if len(repo.completed) != 0 || repo.failed[saAttID] == "" {
 		t.Errorf("the row must be failed, not completed: failed=%v completed=%v", repo.failed, repo.completed)
 	}
 }

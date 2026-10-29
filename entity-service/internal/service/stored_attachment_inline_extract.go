@@ -140,7 +140,7 @@ func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workI
 			ProjectNumber: parent.ProjectNumber, WorkItemNumber: parent.Number,
 			Inline: true, AttachmentNumber: row.Number, Name: name,
 		})
-		if err := s.store.PutFile(ctx, path.Dir(key), path.Base(key), data); err != nil {
+		if err := s.storeAndCheck(ctx, key, data); err != nil {
 			s.failQuietly(ctx, domain.StoredAttachmentComment, row.ID, "image could not be stored")
 			rollback()
 			return "", storageUnavailable(ctx, "store inline image", err)
@@ -169,4 +169,23 @@ func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workI
 		"audit", true, "action", "extract", "callerId", auditCaller(ctx),
 		"workItemId", workItemID, "images", len(done))
 	return out.String(), nil
+}
+
+// storeAndCheck writes the file and then looks for it: a write the server accepted
+// but put somewhere else must not leave a COMPLETE row whose file is missing.
+func (s *storedAttachmentService) storeAndCheck(ctx context.Context, key string, data []byte) error {
+	dir, name := path.Dir(key), path.Base(key)
+	if err := s.store.PutFile(ctx, dir, name, data); err != nil {
+		return err
+	}
+	entries, err := s.store.ListDir(ctx, dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && e.Name == name && e.Size == int64(len(data)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("stored file %s is not in its folder with the expected size", key)
 }

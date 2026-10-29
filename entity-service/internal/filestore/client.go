@@ -32,7 +32,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
@@ -233,29 +232,20 @@ func (c *Client) MkdirAll(ctx context.Context, dir string) error {
 	return nil
 }
 
-// PutFile writes data as dir/name, creating missing folders, through the user
-// API (a multipart POST to /api/v2/user/files/upload, field "filenames"). It is
-// for a file entity-service already holds and has checked itself (a comment image
-// extracted from a comment); a browser's file goes through a share instead. An
-// existing file of the same name is replaced.
+// PutFile writes data as the file dir/name, creating missing folders, through the
+// user API's single-file upload: POST /api/v2/user/files/upload with the file's
+// bytes as the body and its full path in "path". It is for a file entity-service
+// already holds and has checked itself (a comment image extracted from a comment);
+// a browser's file goes through a share instead. A file of the same name is
+// replaced.
 //
-// Not yet confirmed against a live server: the endpoint and its parameters are
-// read from SFTPGo's API reference.
+// "path" is the file, not its folder: this endpoint takes no multipart form (that
+// is POST /api/v2/user/files, which takes the folder). Sending a form here, or the
+// folder as the path, succeeds and writes the wrong thing, so callers confirm the
+// file with ListDir.
 func (c *Client) PutFile(ctx context.Context, dir, name string, data []byte) error {
-	var form bytes.Buffer
-	mw := multipart.NewWriter(&form)
-	part, err := mw.CreateFormFile("filenames", path.Base(name))
-	if err != nil {
-		return fmt.Errorf("filestore: build upload: %w", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		return fmt.Errorf("filestore: build upload: %w", err)
-	}
-	if err := mw.Close(); err != nil {
-		return fmt.Errorf("filestore: build upload: %w", err)
-	}
-	q := url.Values{"path": {abs(dir)}, "mkdir_parents": {"true"}}
-	resp, err := c.exec(ctx, http.MethodPost, "/api/v2/user/files/upload", q, form.Bytes(), http.Header{"Content-Type": {mw.FormDataContentType()}})
+	q := url.Values{"path": {abs(path.Join(dir, path.Base(name)))}, "mkdir_parents": {"true"}}
+	resp, err := c.exec(ctx, http.MethodPost, "/api/v2/user/files/upload", q, data, http.Header{"Content-Type": {"application/octet-stream"}})
 	if err != nil {
 		return err
 	}
