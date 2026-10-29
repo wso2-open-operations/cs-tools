@@ -377,29 +377,23 @@ func TestMkdirAll_AFolderThatAlreadyExistsIsNotAnErrorEvenOnA500(t *testing.T) {
 	}
 }
 
-func TestPutFile_SendsOneMultipartFileIntoTheFolder(t *testing.T) {
+func TestPutFile_SendsTheBytesAsOneFileAtItsFullPath(t *testing.T) {
 	f := newFake(t)
-	var query, field, name string
+	var query, contentType string
 	var body []byte
 	f.handlers["POST /api/v2/user/files/upload"] = func(w http.ResponseWriter, r *http.Request) {
-		query = r.URL.RawQuery
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Errorf("not multipart: %v", err)
-		}
-		for k, files := range r.MultipartForm.File {
-			field, name = k, files[0].Filename
-			fh, _ := files[0].Open()
-			body, _ = io.ReadAll(fh)
-		}
+		query, contentType = r.URL.RawQuery, r.Header.Get("Content-Type")
+		body, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
 	}
 	if err := f.client().PutFile(context.Background(), "csm/projects/p/workitems/w/inline_attachments", "cia1_pic.png", []byte("IMG")); err != nil {
 		t.Fatalf("PutFile: %v", err)
 	}
-	if query != "mkdir_parents=true&path=%2Fcsm%2Fprojects%2Fp%2Fworkitems%2Fw%2Finline_attachments" {
+	// The path is the file, not its folder, and the body is the raw bytes, not a form.
+	if query != "mkdir_parents=true&path=%2Fcsm%2Fprojects%2Fp%2Fworkitems%2Fw%2Finline_attachments%2Fcia1_pic.png" {
 		t.Errorf("query = %q", query)
 	}
-	if field != "filenames" || name != "cia1_pic.png" || string(body) != "IMG" {
-		t.Errorf("field=%q name=%q body=%q", field, name, body)
+	if contentType != "application/octet-stream" || string(body) != "IMG" {
+		t.Errorf("contentType=%q body=%q", contentType, body)
 	}
 }
