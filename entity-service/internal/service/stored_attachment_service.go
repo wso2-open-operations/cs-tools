@@ -530,14 +530,27 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 // OpenInlineImage implements StoredAttachmentService. It is how a comment's
 // image is shown: entity-service reads it from SFTPGo and streams it, so access is
 // checked on every request and no link that could be forwarded ever exists.
+//
+// An image pasted into a comment here is a comment_attachment row. One migrated
+// from the previous system is a work_item_attachment row (its comment images were
+// stored as the work item's own attachments), so when there is no comment row the
+// work item's own is tried, and streamed only when it really is an image.
 func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
 	if !validate.IsUUID(id) {
 		return domain.StoredAttachmentContent{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
 	}
 	// Only a row the caller may see comes back; anything else is not found.
-	rows, err := s.repo.GetByIDs(ctx, domain.StoredAttachmentComment, []string{id})
+	kind := domain.StoredAttachmentComment
+	rows, err := s.repo.GetByIDs(ctx, kind, []string{id})
 	if err != nil {
 		return domain.StoredAttachmentContent{}, err
+	}
+	if len(rows) == 0 {
+		kind = domain.StoredAttachmentWorkItem
+		rows, err = s.repo.GetByIDs(ctx, kind, []string{id})
+		if err != nil {
+			return domain.StoredAttachmentContent{}, err
+		}
 	}
 	notFound := &apierror.NotFoundError{Msg: "attachment not found"}
 	if len(rows) != 1 {
@@ -545,6 +558,11 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	}
 	row := rows[0]
 	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
+		return domain.StoredAttachmentContent{}, notFound
+	}
+	imageType := row.ContentType != nil && inlineImageTypes[strings.ToLower(*row.ContentType)]
+	if kind == domain.StoredAttachmentWorkItem && !imageType {
+		// Files of a work item are downloaded through a link, never shown here.
 		return domain.StoredAttachmentContent{}, notFound
 	}
 	body, size, err := s.store.Open(ctx, *row.StorageKey)
@@ -556,10 +574,10 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	}
 	slog.InfoContext(ctx, "attachment content served",
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
-		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(domain.StoredAttachmentComment),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
 	contentType := "application/octet-stream"
-	if row.ContentType != nil && inlineImageTypes[strings.ToLower(*row.ContentType)] {
+	if imageType {
 		contentType = strings.ToLower(*row.ContentType)
 	}
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil

@@ -61,8 +61,10 @@ type fakeStoredRepo struct {
 	parent    domain.StoredAttachmentParent
 	parentErr error
 	rows      map[string]domain.StoredAttachmentRow
-	inserted  []domain.StoredAttachmentInsert
-	insertErr error
+	// workItemRows are found only by a work item lookup (a migrated comment image).
+	workItemRows map[string]domain.StoredAttachmentRow
+	inserted     []domain.StoredAttachmentInsert
+	insertErr    error
 
 	deleted      map[string]string // id -> deleted_by
 	deleteCtx    []bool            // whether each MarkDeleted ran as the system
@@ -115,10 +117,12 @@ func (f *fakeStoredRepo) InsertPending(_ context.Context, _ domain.StoredAttachm
 	return row, nil
 }
 
-func (f *fakeStoredRepo) GetByIDs(_ context.Context, _ domain.StoredAttachmentKind, ids []string) ([]domain.StoredAttachmentRow, error) {
+func (f *fakeStoredRepo) GetByIDs(_ context.Context, kind domain.StoredAttachmentKind, ids []string) ([]domain.StoredAttachmentRow, error) {
 	var out []domain.StoredAttachmentRow
 	for _, id := range ids {
 		if r, ok := f.rows[id]; ok {
+			out = append(out, r)
+		} else if r, ok := f.workItemRows[id]; ok && kind == domain.StoredAttachmentWorkItem {
 			out = append(out, r)
 		}
 	}
@@ -442,6 +446,41 @@ func TestOpenInlineImage(t *testing.T) {
 	var verr *apierror.ValidationError
 	if _, err := svc("COMPLETE", &png, &key, newFakeStore()).OpenInlineImage(ctx, "nope"); !errors.As(err, &verr) {
 		t.Errorf("bad id: err = %v, want ValidationError", err)
+	}
+}
+
+// An image migrated from the previous system is a work item attachment, not a
+// comment one; the inline route finds it there, and only when it is an image.
+func TestOpenInlineImage_MigratedImageIsAWorkItemAttachment(t *testing.T) {
+	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia1_pic.png"
+	png, pdf := "image/png", "application/pdf"
+	svc := func(ct *string, store *fakeStore) *storedAttachmentService {
+		repo := newFakeStoredRepo()
+		repo.workItemRows = map[string]domain.StoredAttachmentRow{
+			saAttID: {ID: saAttID, Number: "WIA1", Name: "pic.png", Status: "COMPLETE", ContentType: ct, StorageKey: &key},
+		}
+		return newStoredSvc(repo, store)
+	}
+	ctx := saCtx(t, saEmail)
+
+	store := newFakeStore()
+	c, err := svc(&png, store).OpenInlineImage(ctx, saAttID)
+	if err != nil {
+		t.Fatalf("OpenInlineImage: %v", err)
+	}
+	b, _ := io.ReadAll(c.Body)
+	if string(b) != "IMG" || c.ContentType != "image/png" || len(store.opened) != 1 || store.opened[0] != key {
+		t.Errorf("content = %q %+v opened=%v", b, c, store.opened)
+	}
+
+	// A work item file that is not an image is never streamed here.
+	var nf *apierror.NotFoundError
+	other := newFakeStore()
+	if _, err := svc(&pdf, other).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) || len(other.opened) != 0 {
+		t.Errorf("not an image: err = %v opened=%v, want NotFoundError and nothing read", err, other.opened)
+	}
+	if _, err := svc(nil, newFakeStore()).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
+		t.Errorf("no type: err = %v, want NotFoundError", err)
 	}
 }
 

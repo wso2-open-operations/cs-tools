@@ -1885,6 +1885,10 @@ response type is the stored image type (anything else is sent as `application/oc
 `nosniff`, a sandboxing `Content-Security-Policy` and `Cache-Control: private, max-age=300`. Each request
 writes an `attachment content served` audit line (callerId, correlationId, attachmentId, path). The portal
 backends pass it through (browser -> backend -> entity-service); only upload and download use share links.
+The id is looked up as a `comment_attachment` row first. When there is none it is looked up as a
+`work_item_attachment` row, because the migrator stores a comment's images as the work item's own
+attachments; that row is streamed only when its stored type is an image type (a PDF or other file is 404
+here and is downloaded through a link instead). The audit line's `kind` says which table served it.
 
 **Share cleanup.** Each link is a stored record in SFTPGo, and one that expired or was used up is not
 necessarily removed by SFTPGo itself (not confirmed either way). `POST /attachments/shares/cleanup`
