@@ -473,6 +473,13 @@ func TestOpenInlineImage_MigratedImageIsAWorkItemAttachment(t *testing.T) {
 		t.Errorf("content = %q %+v opened=%v", b, c, store.opened)
 	}
 
+	// A migrated type with parameters is still an image, sent back without them.
+	withParams := "Image/PNG; charset=binary"
+	pc, err := svc(&withParams, newFakeStore()).OpenInlineImage(ctx, saAttID)
+	if err != nil || pc.ContentType != "image/png" {
+		t.Errorf("parameterised type: err=%v type=%q, want image/png", err, pc.ContentType)
+	}
+
 	// A work item file that is not an image is never streamed here.
 	var nf *apierror.NotFoundError
 	other := newFakeStore()

@@ -560,7 +560,13 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
 		return domain.StoredAttachmentContent{}, notFound
 	}
-	imageType := row.ContentType != nil && inlineImageTypes[strings.ToLower(*row.ContentType)]
+	// A migrated type may carry parameters ("image/png; charset=binary"); only the
+	// media type decides, and only it is sent back.
+	mediaType := ""
+	if row.ContentType != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.SplitN(*row.ContentType, ";", 2)[0]))
+	}
+	imageType := inlineImageTypes[mediaType]
 	if kind == domain.StoredAttachmentWorkItem && !imageType {
 		// Files of a work item are downloaded through a link, never shown here.
 		return domain.StoredAttachmentContent{}, notFound
@@ -578,7 +584,7 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 		"attachmentId", row.ID, "path", *row.StorageKey)
 	contentType := "application/octet-stream"
 	if imageType {
-		contentType = strings.ToLower(*row.ContentType)
+		contentType = mediaType
 	}
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
