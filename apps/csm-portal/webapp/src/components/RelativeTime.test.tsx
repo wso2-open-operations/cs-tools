@@ -17,7 +17,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import RelativeTime from "@components/RelativeTime";
+import RelativeTime, { CopyPermalinkButton } from "@components/RelativeTime";
 
 describe("RelativeTime", () => {
   const iso = new Date(Date.now() - 60_000).toISOString();
@@ -45,6 +45,31 @@ describe("RelativeTime", () => {
     expect(
       screen.getByRole("button", { name: /copy link to this entry/i }),
     ).toBeInTheDocument();
+  });
+
+  it("leaves out the inline copy button when hideCopyButton is set, keeping the permalink anchor", () => {
+    render(<RelativeTime iso={iso} href="#cmt-1001-2" hideCopyButton />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "#cmt-1001-2");
+    expect(
+      screen.queryByRole("button", { name: /copy link/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("CopyPermalinkButton copies the absolute permalink URL when rendered on its own", async () => {
+    render(<CopyPermalinkButton href="#cmt-1001-2" />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /copy link to this entry/i }),
+    );
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        `${window.location.origin}${window.location.pathname}#cmt-1001-2`,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /copied/i })).toBeInTheDocument();
+    });
   });
 
   it("copies the absolute permalink URL to the clipboard and shows a transient confirmation", async () => {

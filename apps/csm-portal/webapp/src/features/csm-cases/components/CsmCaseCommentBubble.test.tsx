@@ -533,6 +533,114 @@ describe("CsmCaseCommentBubble", () => {
     expect(screen.queryByText("Internal note")).not.toBeInTheDocument();
   });
 
+  describe("copy-link button", () => {
+    // The button sits in the card header's top-right corner, after the
+    // timestamp's permalink rather than glued to it, where it is easy to
+    // notice. jsdom has no layout, so placement is asserted structurally.
+    function timestampPermalink(): HTMLElement {
+      const link = screen
+        .getAllByRole("link")
+        .find((a) => a.getAttribute("href") === "#c-1");
+      if (!link) throw new Error("timestamp permalink not rendered");
+      return link;
+    }
+
+    it("renders one copy-link button, apart from the timestamp and after it", () => {
+      renderWithProviders(<CsmCaseCommentBubble comment={makeComment({})} />);
+
+      const copy = screen.getByRole("button", {
+        name: /copy link to this entry/i,
+      });
+      const permalink = timestampPermalink();
+      expect(permalink.parentElement).not.toContainElement(copy);
+      expect(
+        permalink.compareDocumentPosition(copy) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("shows the button even when the caller has no comment-actions menu", () => {
+      mockCurrentUser.mockReturnValue({
+        email: "someone.else@example.com",
+        roles: ["cs_engineer"],
+      });
+      renderWithProviders(
+        <CsmCaseCommentBubble
+          comment={makeComment({ authorEmail: "jane.doe@example.com" })}
+          onEditComment={vi.fn()}
+          onDeleteComment={vi.fn()}
+        />,
+      );
+      expect(
+        screen.queryByRole("button", { name: "Comment actions" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /copy link to this entry/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("sits in the same right-hand group as the comment-actions menu, ahead of it", () => {
+      mockCurrentUser.mockReturnValue({ email: "jane.doe@example.com" });
+      renderWithProviders(
+        <CsmCaseCommentBubble
+          comment={makeComment({ authorEmail: "jane.doe@example.com" })}
+          onEditComment={vi.fn()}
+          onDeleteComment={vi.fn()}
+        />,
+      );
+      const copy = screen.getByRole("button", {
+        name: /copy link to this entry/i,
+      });
+      const actions = screen.getByRole("button", { name: "Comment actions" });
+      expect(copy.parentElement).toBe(actions.parentElement);
+      expect(
+        copy.compareDocumentPosition(actions) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("copies this comment's own permalink", async () => {
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+      renderWithProviders(<CsmCaseCommentBubble comment={makeComment({})} />);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy link to this entry/i }),
+      );
+
+      await waitFor(() => {
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+          `${window.location.origin}${window.location.pathname}#c-1`,
+        );
+      });
+    });
+
+    it("also shows it, after the timestamp, on a system entry", () => {
+      renderWithProviders(
+        <CsmCaseCommentBubble
+          comment={makeComment({
+            authorRole: "system",
+            bodyHtml: "<p>Case reassigned</p>",
+          })}
+        />,
+      );
+      const copy = screen.getByRole("button", {
+        name: /copy link to this entry/i,
+      });
+      const permalink = timestampPermalink();
+      expect(permalink.parentElement).not.toContainElement(copy);
+      expect(
+        permalink.compareDocumentPosition(copy) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // The time and the button are one right-hand block (top-aligned in the
+      // row, so a wrapping message keeps them in the corner), not two loose
+      // items of the row.
+      expect(permalink.parentElement?.parentElement).toBe(copy.parentElement);
+    });
+  });
+
   describe("edit/delete affordances", () => {
     it("shows the comment-actions menu for the comment's own author", () => {
       mockCurrentUser.mockReturnValue({ email: "jane.doe@example.com" });
