@@ -10820,8 +10820,9 @@ What the chain left behind:
   changes nothing. `knowledge_article_fk_migration_test.go` checks the column list
   against 0044's own `REFERENCES` lines and, with `CASE_STATS_TEST_DSN`, that a
   table made by 000027 ends up identical to 0044's, the WARNINGs, the lock_timeout
-  (with `work_item` held by another transaction) and the orphan count under
-  `work_item`'s row-level policies.
+  (with `work_item` held by another transaction) and, only with a superuser
+  `CASE_STATS_TEST_DSN`, the orphan count under `work_item`'s row-level policies:
+  under any other role that test skips, and plain `go test` still prints `ok`.
 - `knowledge_base_manager_user` / `knowledge_base_manager_group` and their three
   indexes existed only in `000027`. `kb_manager_repo.go` reads them, and
   csm-sync-service does not map knowledge base managers, so they are
