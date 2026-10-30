@@ -107,6 +107,10 @@ type Customer struct {
 	LostReasonCategory      *string       `json:"lostReasonCategory"`
 	DeactivationDate        *string       `json:"deactivationDate"`
 	IsPartner               *bool         `json:"isPartner"`
+	// PrimaryPartnerAccountID is the account's primary partner, if any. The
+	// ACP reopen check reads it: a primary partner gives an invoice the
+	// 60-day grace period, as in acp-closure-service.
+	PrimaryPartnerAccountID *string `json:"primaryPartnerAccountId"`
 }
 
 // CustomerAddress is the billing part of a Customer's address.
@@ -119,8 +123,10 @@ type CustomerAddress struct {
 }
 
 // CustomerUser is a Salesforce user referenced by a Customer (owner, renewal
-// manager). The ingest resolves it to a CSM user by email.
+// manager). The ingest resolves it to a CSM user by email; the ACP reopen
+// notice also greets the owner by name.
 type CustomerUser struct {
+	Name  *string `json:"name"`
 	Email *string `json:"email"`
 }
 

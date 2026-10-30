@@ -2238,6 +2238,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /acp/reopen-check:
+    post:
+      summary: >-
+        The daily ACP reopen check: every project whose suspensionProcessState
+        still records an ACP suspension is checked as a Salesforce event would
+        check it, reopening a track whose reason is gone and finishing a
+        project a person already set back to Open. One page per call, in
+        project id order; call again with nextCursor while more is true. A
+        page short of time stops early, after at least one project. Internal callers only. Registered only when
+        CSM_ACP_REOPEN_ENABLED is true. Backs operations/csm-scheduled-tasks.
+      operationId: checkACPReopen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ACPReopenCheckRequest'
+      responses:
+        "200":
+          description: What the page did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ACPReopenCheckResponse'
+        "400":
+          description: Bad request (a cursor that is not a project id).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: The projects could not be listed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /autoclosure/candidates:
     post:
       summary: >-
@@ -37031,6 +37073,47 @@ components:
     AutoclosureStage:
       type: string
       enum: [release_hold, first_reminder, second_reminder, close]
+    ACPReopenCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        cursor:
+          type: string
+          format: uuid
+          description: The last project id of the previous page; omit for the first page.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Projects to check in this call (default 10, at most 50).
+    ACPReopenCheckResponse:
+      type: object
+      required: [checked, reopened, finished, failed, failedProjectIds, nextCursor, more]
+      properties:
+        checked:
+          type: integer
+          description: Projects looked at in this page.
+        reopened:
+          type: integer
+          description: Projects with a track set back to Open.
+        finished:
+          type: integer
+          description: Projects a person had set back to Open, now finished (Salesforce Open, the email queued).
+        failed:
+          type: integer
+          description: Projects whose check failed (the error is logged; the next run tries again).
+        failedProjectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        nextCursor:
+          type: string
+          description: Where the next page starts (the last project id checked).
+        more:
+          type: boolean
+          description: True while projects are left; call again with nextCursor. False once every project is done.
     AutoclosureCandidatesRequest:
       type: object
       required: [stage]
