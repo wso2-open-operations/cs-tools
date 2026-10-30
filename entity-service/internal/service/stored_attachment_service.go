@@ -48,6 +48,9 @@ const (
 	// maxAttachmentLinkIDs bounds how many inline images of one comment are
 	// linked to it.
 	maxAttachmentLinkIDs = 20
+	// maxNewInlineImages bounds how many images pasted into one comment are
+	// stored. Comments migrated earlier may reference more; those are still linked.
+	maxNewInlineImages = 5
 	// attachmentLinkConcurrency bounds how many shares one call creates at once.
 	attachmentLinkConcurrency = 8
 	// maxSharesPerCallerPerMinute is how many shares (download or upload links)
