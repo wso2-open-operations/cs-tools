@@ -251,6 +251,9 @@ type WeekendRotaDay struct {
 // RotationDefinition is one row of the rotation definitions table.
 type RotationDefinition struct {
 	Rotation, Members, LocalTime, UTCWindow, Role string
+	// RoleNote is small print under the role (how a long window is shared);
+	// empty for none.
+	RoleNote string
 }
 
 // RenderWeekendRota writes the weekend summary in the layout the CRE weekend
@@ -279,8 +282,12 @@ func RenderWeekendRota(data WeekendRotaData) string {
 		b.WriteString(`<table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; font-size:14px; border-color:#dddddd;">` + "\n")
 		b.WriteString(`<tr style="background:#f2f2f2;"><th align="left">Rotation</th><th align="left">Local time</th><th align="left">UTC window</th><th align="left">Role</th></tr>` + "\n")
 		for _, r := range data.Definitions {
+			role := orDash(escapeHTML(r.Role))
+			if r.RoleNote != "" {
+				role += `<br/><span style="color:#666666; font-size:12px;">` + escapeHTML(r.RoleNote) + `</span>`
+			}
 			fmt.Fprintf(&b, `<tr><td>%s<br/><span style="color:#666666; font-size:12px;">%s</span></td><td>%s</td><td>%s</td><td>%s</td></tr>`+"\n",
-				orDash(escapeHTML(r.Rotation)), escapeHTML(r.Members), orDash(escapeHTML(r.LocalTime)), orDash(escapeHTML(r.UTCWindow)), orDash(escapeHTML(r.Role)))
+				orDash(escapeHTML(r.Rotation)), escapeHTML(r.Members), orDash(escapeHTML(r.LocalTime)), orDash(escapeHTML(r.UTCWindow)), role)
 		}
 		b.WriteString("</table>\n")
 		if len(data.ZoneNotes) > 0 {

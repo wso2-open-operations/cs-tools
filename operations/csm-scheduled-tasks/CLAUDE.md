@@ -206,7 +206,9 @@ schedules assume `TZ=UTC` like every other here.
   to everybody on the weekend, LK and Americas (with the LK on-call person) alike, in the layout the
   CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
   ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call"), the zone
+  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
+  window longer than 10 hours that has 2+ people every day asking them to split it into morning
+  and evening shifts), the zone
   legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the LK On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
@@ -294,8 +296,8 @@ schedules assume `TZ=UTC` like every other here.
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
   (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
   Definitions table, the zone note and the handover paragraphs. Rotation names come from config
-  (`CODE=Name`). Names are escaped. Every subject starts `[<family> Operations]`
-  (`[CRE Operations] Weekend Rotation – …`; a test adds `[Test] ` in front).
+  (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
+  (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
   tick until the next period, which for `rota_weekend_notice` is days later. So the rota days are
   counted from the run's period key (`Config.Anchor`, from `schedule.PeriodKey`), not the clock:
