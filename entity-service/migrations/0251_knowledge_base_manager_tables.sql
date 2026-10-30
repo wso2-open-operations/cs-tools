@@ -91,7 +91,13 @@
 -- validates it. The compose runner
 -- (scripts/csm-compose/migrate-and-seed.sh) applies the file with psql -1, as
 -- one transaction: there a failure keeps nothing of the file, and block 1's
--- locks last until the end of the file. It only serves local stacks.
+-- locks last until the end of the file. It only serves local stacks. A
+-- bootstrap or delta file from scripts/generate_schema_bootstrap.sh puts this
+-- file and the INSERT that records it in one psql run, so that run must stop
+-- on the first error (the generated file's first line, \set ON_ERROR_STOP on,
+-- does this in psql). If it carries on, a 55P03 here is logged, the INSERT
+-- still records the file although the statement that failed did nothing, and
+-- the file never runs again.
 --
 -- Checking (read only). The file is recorded and never runs again, so its
 -- WARNINGs are the only signal it gives. Run, then or later:
