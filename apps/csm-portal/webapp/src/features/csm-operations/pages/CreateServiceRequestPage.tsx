@@ -29,7 +29,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
@@ -40,6 +40,7 @@ import {
   type EncodedAttachment,
 } from "@components/attachments/encodeAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useNewServiceRequestDraft } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
@@ -111,16 +112,37 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const relatedCaseId = relatedCaseState?.relatedCaseId;
   const relatedCaseNumber = relatedCaseState?.relatedCaseNumber;
 
-  const [projectId, setProjectId] = useState(lockedProjectId);
-  const [deploymentId, setDeploymentId] = useState(relatedCaseState?.deploymentId ?? "");
-  const [deployedProductId, setDeployedProductId] = useState(
-    relatedCaseState?.deployedProductId ?? "",
+  // The draft outlives this page (it lives above the routes), so switching to
+  // an open case tab and back does not lose what was entered. It is restored
+  // only into a form opened the same way it was started (same locked project
+  // and related case); a different entry starts fresh rather than inheriting a
+  // stale draft. Cleared on a successful submit and on Cancel.
+  const draftStore = useNewServiceRequestDraft();
+  const entryKey = `${lockedProjectId}|${relatedCaseId ?? ""}`;
+  const [restored] = useState(() => {
+    const draft = draftStore.get();
+    return draft?.entryKey === entryKey ? draft : undefined;
+  });
+  // The entry this form was started from. What is entered belongs to it: if the
+  // same route is reached again with another entry while the form stays mounted,
+  // the initialisers below do not run again, so the values on screen must not be
+  // saved under the new entry's key.
+  const [startedFrom] = useState(entryKey);
+
+  const [projectId, setProjectId] = useState(restored?.projectId ?? lockedProjectId);
+  const [deploymentId, setDeploymentId] = useState(
+    restored?.deploymentId ?? relatedCaseState?.deploymentId ?? "",
   );
-  const [catalogId, setCatalogId] = useState("");
-  const [catalogItemId, setCatalogItemId] = useState("");
+  const [deployedProductId, setDeployedProductId] = useState(
+    restored?.deployedProductId ?? relatedCaseState?.deployedProductId ?? "",
+  );
+  const [catalogId, setCatalogId] = useState(restored?.catalogId ?? "");
+  const [catalogItemId, setCatalogItemId] = useState(restored?.catalogItemId ?? "");
   // Variable answers, keyed by variable id.
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>(restored?.answers ?? {});
+  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
+    restored?.attachments ?? [],
+  );
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
   // project is caught before the engineer fills out the rest of the form
@@ -182,6 +204,39 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const uploadedBy = useEngineerDisplayName();
   // Spans the whole submit (create + post-create attachment uploads).
   const [submitting, setSubmitting] = useState(false);
+
+  // Mirror the form into the draft store on every change. `submitted` stops it
+  // writing the draft back after a successful create (or a Cancel) has cleared
+  // it, and `submitting` holds it off while a create is in flight: submit
+  // clears the draft up front, so a form reopened mid-create starts empty
+  // instead of offering a complete, enabled copy that could be sent twice. A
+  // failed create flips `submitting` back and the draft is saved again.
+  const submitted = useRef(false);
+  useEffect(() => {
+    if (submitted.current || submitting || entryKey !== startedFrom) return;
+    draftStore.set({
+      entryKey,
+      projectId,
+      deploymentId,
+      deployedProductId,
+      catalogId,
+      catalogItemId,
+      answers,
+      attachments,
+    });
+  }, [
+    draftStore,
+    entryKey,
+    startedFrom,
+    projectId,
+    deploymentId,
+    deployedProductId,
+    catalogId,
+    catalogItemId,
+    answers,
+    attachments,
+    submitting,
+  ]);
 
   const catalogItems = useMemo(
     () => catalogs.data?.find((c) => c.id === catalogId)?.catalogItems ?? [],
@@ -314,6 +369,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       .map((v) => ({ id: v.id, value: encodeVariableValue(v, answers[v.id] ?? "") }))
       .filter((v) => v.value !== "");
 
+    draftStore.clear();
     setSubmitting(true);
     try {
       const created = await postCase.mutateAsync({
@@ -326,6 +382,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
         variables: variablePayload,
         relatedCaseId,
       });
+      // The draft was cleared when this create started and nothing has saved one
+      // since (the mirroring effect holds off while `submitting`), so none of this
+      // submission is left to clear. Clearing again here would discard a draft
+      // that a form reopened mid-create has started since.
+      submitted.current = true;
       // The create endpoint doesn't attach files for service requests, so upload
       // them to the new case afterwards. A partial failure still lands the case.
       const failed = await uploadAttachmentsToCase(
@@ -633,7 +694,17 @@ export default function CreateServiceRequestPage(): JSX.Element {
                     : null}
             </Typography>
           )}
-          <Button variant="outlined" onClick={() => navigate(backTarget)}>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              // An explicit discard: drop the draft too (flag first, so the
+              // mirroring effect cannot write it back) or it would reappear
+              // the next time the form opens.
+              submitted.current = true;
+              draftStore.clear();
+              navigate(backTarget);
+            }}
+          >
             Cancel
           </Button>
           <Button
