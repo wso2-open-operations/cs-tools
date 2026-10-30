@@ -1335,6 +1335,26 @@ func TestExtractInlineImages_Refusals(t *testing.T) {
 	}
 }
 
+func TestExtractInlineImages_AtMostFiveImagesPerComment(t *testing.T) {
+	ctx := saCtx(t, saEmail)
+	img := `<img src="` + dataURI("png", pngBytes) + `">`
+
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	if _, err := newStoredSvc(repo, store).ExtractInlineImages(ctx, saParentID, saEmail, strings.Repeat(img, maxNewInlineImages)); err != nil {
+		t.Fatalf("%d images: %v", maxNewInlineImages, err)
+	}
+
+	repo, store = newFakeStoredRepo(), newFakeStore()
+	_, err := newStoredSvc(repo, store).ExtractInlineImages(ctx, saParentID, saEmail, strings.Repeat(img, maxNewInlineImages+1))
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want ValidationError", err)
+	}
+	if len(store.put) != 0 || len(repo.inserted) != 0 {
+		t.Error("an over-limit comment stored something")
+	}
+}
+
 func TestExtractInlineImages_AHiddenWorkItemIsNotFoundAndStorageFailureStoresNothing(t *testing.T) {
 	ctx := saCtx(t, saEmail)
 	html := `<img src="` + dataURI("png", pngBytes) + `">`

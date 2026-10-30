@@ -1798,7 +1798,7 @@ in this service. The three tables have no row-level id default except `work_item
 **Images pasted into a comment are stored, not embedded.** A base64 `<img src="data:image/...">` in a new comment
 (or an edit) is moved out by `ExtractInlineImages` (`stored_attachment_inline_extract.go`) before the comment row
 is written: each becomes a `comment_attachment` row (type from the bytes, not the claim; PNG, JPEG/JPG and WebP
-only, at most `INLINE_IMAGE_MAX_BYTES`, at most 20 per comment) with its file written to SFTPGo
+only, at most `INLINE_IMAGE_MAX_BYTES`, at most 5 per comment) with its file written to SFTPGo
 (`filestore.PutFile`, `POST /api/v2/user/files/upload`, not yet run against a live server) under the work item's
 `inline_attachments` folder, and the comment keeps only `src="/<attachment id>"`, the same shape comments migrated
 from the previous system use and the portals already resolve. If any image cannot be stored the ones already stored
