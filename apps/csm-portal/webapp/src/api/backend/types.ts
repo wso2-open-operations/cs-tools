@@ -1963,6 +1963,19 @@ export interface BeProjectMetadata {
      * service request against this project.
      */
     srProductCategories?: string[] | null;
+    /**
+     * The CSM portal's own service request eligibility: whether WSO2 staff
+     * may raise a service request for this project. Unlike `hasSr`, true for
+     * every Cloud Support project, PDP subscription or not. Absent from an
+     * entity service that predates it.
+     */
+    hasCsmServiceRequestWriteAccess?: boolean;
+    /**
+     * The CSM portal's own product category list for service requests (adds
+     * `cl` for Cloud Support); same shape as `srProductCategories`, which it
+     * replaces on the CSM create page.
+     */
+    csmSrProductCategories?: string[] | null;
   };
 }
 

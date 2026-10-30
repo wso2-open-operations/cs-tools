@@ -57,6 +57,11 @@ type ProjectTypeRow struct {
 	AcceptedSeverityValues       []string
 	DefaultCaseProductCategories []string
 	SrProductCategories          []string
+	// CsmSrProductCategories (migration 0264) is the service request
+	// allow-list for WSO2 staff raising the request from the CSM portal;
+	// empty means the same as SrProductCategories. Carried only by
+	// GetProjectByID.
+	CsmSrProductCategories []string
 
 	// IsPdpSubscription is the owning project's own project.is_pdp_subscription
 	// flag (NULL read as false), not a project_type column -- carried on this
@@ -267,11 +272,11 @@ func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string
 		ptID, ptName *string
 		hasSRWrite, hasSRRead, hasCR, hasSraWrite, hasSraRead, hasEngagements, hasUpdates,
 		hasDeployWrite, hasDeployRead, hasTimeLogs, hasComponentAnalysis, hasUsageMetrics *bool
-		isPdpSubscription                   *bool
-		acceptedSeverities                  []string
-		defaultCaseCategories, srCategories []string
+		isPdpSubscription                                    *bool
+		acceptedSeverities                                   []string
+		defaultCaseCategories, srCategories, csmSrCategories []string
 	)
-	// ::TEXT[] on the three enum-array columns: this connection's pgx type map
+	// ::TEXT[] on the four enum-array columns: this connection's pgx type map
 	// has no custom enum types registered, so scanning case_severity_enum[]/
 	// deployed_product_category_enum[] directly into []string fails -- same
 	// reason every other enum column in this repository package is selected
@@ -285,6 +290,7 @@ func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string
 			pt.has_deployment_write_access, pt.has_deployment_read_access, pt.has_time_logs_read_access,
 			pt.has_component_analysis_read_access, pt.has_usage_metrics_read_access,
 			pt.accepted_severity_values::TEXT[], pt.default_case_product_categories::TEXT[], pt.sr_product_categories::TEXT[],
+			pt.csm_sr_product_categories::TEXT[],
 			p.is_pdp_subscription
 		 FROM project p
 		 LEFT JOIN project_type pt ON pt.id = p.project_type_id
@@ -296,6 +302,7 @@ func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string
 		&hasDeployWrite, &hasDeployRead, &hasTimeLogs,
 		&hasComponentAnalysis, &hasUsageMetrics,
 		&acceptedSeverities, &defaultCaseCategories, &srCategories,
+		&csmSrCategories,
 		&isPdpSubscription,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -337,6 +344,7 @@ func (r *referenceDataRepo) GetProjectByID(ctx context.Context, projectID string
 		AcceptedSeverityValues:         acceptedSeverities,
 		DefaultCaseProductCategories:   defaultCaseCategories,
 		SrProductCategories:            srCategories,
+		CsmSrProductCategories:         csmSrCategories,
 		IsPdpSubscription:              deref(isPdpSubscription),
 	}, nil
 }

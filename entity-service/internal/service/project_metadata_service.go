@@ -60,6 +60,13 @@ var pdpServiceRequestProjectTypes = map[string]bool{
 	projectTypeCloudEvaluationSupport: true,
 }
 
+// csmServiceRequestProjectTypes are the project types whose every project,
+// PDP subscription or not, lets WSO2 staff raise a service request from the
+// CSM portal (HasCsmServiceRequestWriteAccess).
+var csmServiceRequestProjectTypes = map[string]bool{
+	projectTypeCloudSupport: true,
+}
+
 var projectMetadataEnumTypes = []string{
 	caseStateEnumType, caseSeverityEnumType, caseIssueTypeEnumType,
 	deploymentTypeEnumType, engagementTypeEnumType, engagementPaymentTypeEnumType,
@@ -221,6 +228,17 @@ func (s *projectMetadataService) GetProjectMetadata(ctx context.Context, project
 		if projectType.IsPdpSubscription && pdpServiceRequestProjectTypes[projectType.Name] {
 			features.HasServiceRequestWriteAccess = true
 			features.HasServiceRequestReadAccess = true
+		}
+
+		// The CSM portal's rules: everything a customer may do, plus every
+		// Cloud Support project (CDP customers included), against the wider
+		// csm_sr_product_categories list where one is set. The customer
+		// portal reads only the two fields above, so it is unchanged.
+		features.HasCsmServiceRequestWriteAccess = features.HasServiceRequestWriteAccess ||
+			csmServiceRequestProjectTypes[projectType.Name]
+		features.CsmSrProductCategories = features.SrProductCategories
+		if len(projectType.CsmSrProductCategories) > 0 {
+			features.CsmSrProductCategories = lowercaseAll(projectType.CsmSrProductCategories)
 		}
 	}
 

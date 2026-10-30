@@ -205,3 +205,62 @@ func TestCaseService_CreateCase_EnforcementNotWiredSkipsCheck(t *testing.T) {
 		t.Fatalf("CreateCase: %v", err)
 	}
 }
+
+// TestCaseService_CreateCase_CsmSrProductCategoriesForCSMPortalCallers covers
+// migration 0264's csm_sr_product_categories: WSO2 staff raising a service
+// request outside the customer portal may use a CL product under Cloud
+// Support; a customer (and staff signed in to the customer portal) still
+// gets sr_product_categories only.
+func TestCaseService_CreateCase_CsmSrProductCategoriesForCSMPortalCallers(t *testing.T) {
+	cases := []struct {
+		name      string
+		scope     AccessScope
+		scopeErr  error
+		csmCats   []string
+		wantAllow bool
+	}{
+		{"csm portal staff, CL allowed", AccessScope{Unrestricted: true, HasInternalAccess: true}, nil, []string{"PDP", "CL"}, true},
+		{"customer, CL refused", AccessScope{}, nil, []string{"PDP", "CL"}, false},
+		{"staff via customer portal, CL refused", AccessScope{Unrestricted: true, ViaCustomerPortal: true}, nil, []string{"PDP", "CL"}, false},
+		{"unresolvable scope, CL refused", AccessScope{}, errors.New("no identity"), []string{"PDP", "CL"}, false},
+		{"no csm list, CL refused for staff", AccessScope{Unrestricted: true}, nil, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			referenceDataRepo := &fakeReferenceDataRepo{projectType: &repository.ProjectTypeRow{
+				Name:                   "Cloud Support",
+				SrProductCategories:    []string{"PDP"},
+				CsmSrProductCategories: tc.csmCats,
+			}}
+			deployedProductRepo := &stubDeployedProductRepo{
+				getDeployedProductCategory: func(context.Context, string) (*string, error) {
+					return categoryPtr("cl"), nil
+				},
+			}
+			repo := &stubCaseRepo{
+				createCase: func(_ context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
+					return domain.Case{ID: "case-1", CreatedBy: req.CreatedBy}, nil
+				},
+			}
+			svc := WithProductCategoryEnforcement(
+				NewCaseService(repo, stubUserRepo{}, nil, stubAccess{scope: tc.scope, err: tc.scopeErr}, nil),
+				referenceDataRepo, deployedProductRepo,
+			)
+
+			req := validServiceRequestCreateCaseRequest()
+			req.CreatedBy = "system"
+			_, err := svc.CreateCase(context.Background(), req)
+
+			if tc.wantAllow {
+				if err != nil {
+					t.Fatalf("CreateCase: %v, want allowed", err)
+				}
+				return
+			}
+			var validationErr *apierror.ValidationError
+			if !errors.As(err, &validationErr) {
+				t.Fatalf("CreateCase err = %v, want *apierror.ValidationError", err)
+			}
+		})
+	}
+}

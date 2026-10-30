@@ -32320,6 +32320,7 @@ components:
         - hasDeploymentReadAccess
         - hasComponentAnalysisReadAccess
         - hasUsageMetricsReadAccess
+        - hasCsmServiceRequestWriteAccess
       properties:
         projectType:
           $ref: '#/components/schemas/ReferenceTableItem'
@@ -32361,6 +32362,22 @@ components:
           items:
             type: string
           nullable: true
+        hasCsmServiceRequestWriteAccess:
+          type: boolean
+          description: >
+            Whether WSO2 staff may raise a service request for this project from the CSM
+            portal. Everything hasServiceRequestWriteAccess allows, plus every Cloud Support
+            project whether or not it has a PDP subscription. The customer portal does not
+            use it.
+        csmSrProductCategories:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >
+            The deployed product categories WSO2 staff may raise a service request against
+            from the CSM portal (project_type.csm_sr_product_categories, migration 0264);
+            the same as srProductCategories where none is set. Cloud Support adds cl.
 
     ProjectMetadataResponse:
       type: object

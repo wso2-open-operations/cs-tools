@@ -655,6 +655,12 @@ func (s *caseService) validateDeployedProductCategoryForType(ctx context.Context
 	if req.Type == "service_request" {
 		allowed = projectType.SrProductCategories
 		fieldLabel = "service request"
+		// WSO2 staff raising the request from the CSM portal use the wider
+		// csm_sr_product_categories list (migration 0264) where one is set;
+		// a customer, through either portal, keeps sr_product_categories.
+		if len(projectType.CsmSrProductCategories) > 0 && s.isCSMPortalCaller(ctx) {
+			allowed = projectType.CsmSrProductCategories
+		}
 	}
 	if len(allowed) == 0 {
 		return nil
@@ -1724,6 +1730,24 @@ func (s *caseService) isCustomerCommentAuthor(ctx context.Context) bool {
 		return false
 	}
 	return !scope.Unrestricted && !scope.HasInternalAccess
+}
+
+// isCSMPortalCaller answers "is WSO2 staff acting outside the customer
+// portal" for validateDeployedProductCategoryForType: an Unrestricted scope
+// (the CSM portal backend for a staff email, an M2M client, a staff user
+// token) that did not come through the customer portal. A staff member
+// signed in to the customer portal therefore gets the customer's rules. A
+// scope that cannot be resolved answers false: the customer's rules, never
+// the wider ones.
+func (s *caseService) isCSMPortalCaller(ctx context.Context) bool {
+	if s.access == nil {
+		return false
+	}
+	scope, err := s.access.ResolveScope(ctx)
+	if err != nil {
+		return false
+	}
+	return scope.Unrestricted && !scope.ViaCustomerPortal
 }
 
 // SearchCaseComments implements CaseService.

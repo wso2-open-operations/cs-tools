@@ -122,16 +122,14 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
 
-  // `hasSr` is precomputed by the backing data source, so an ineligible
-  // project is caught before the engineer fills out the rest of the form
-  // rather than on a rejected submit. `hasServiceRequestReadAccess` (from
-  // project metadata, checked below once it's loaded) is a separate,
-  // viewer-permission check — see BeProject.hasSr's doc comment for why both
-  // exist. Either being false makes the project ineligible.
+  // An ineligible project is caught before the engineer fills out the rest
+  // of the form rather than on a rejected submit. Eligibility comes from
+  // project metadata's `hasCsmServiceRequestWriteAccess` (below): the CSM
+  // portal's own rule, which also covers Cloud Support projects without a
+  // PDP subscription. `hasSr` and `hasServiceRequestReadAccess` are the
+  // customer-facing rule and are only used against an entity service that
+  // predates the CSM field (it is then absent).
   const selectedProject = useGetProject(projectId || undefined);
-  const isIneligibleForSr = projectId
-    ? selectedProject.data?.hasSr === false
-    : false;
   // Fail closed: a project-load error or a 404 (data === null) means
   // eligibility is unknown, not confirmed — canSubmit must not treat unknown
   // as eligible.
@@ -149,16 +147,28 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // (the memo below) as a defensive backstop. A missing/empty/failed-to-load
   // srProductCategories must never narrow the list to zero when it would
   // otherwise show options — fail open, not closed.
+  // `csmSrProductCategories` is the CSM portal's own list (it adds CL for
+  // Cloud Support); `srProductCategories` is the fallback for an older
+  // entity service.
   const projectMetadata = useProjectMetadata(projectId || undefined);
-  const srProductCategories = projectMetadata.data?.features?.srProductCategories;
-  // `hasServiceRequestReadAccess` gates the SR feature itself (viewer
-  // permission), separately from `hasSr` (project eligibility) above. Fail
-  // open while metadata is still loading/unloaded (`undefined`) — only an
+  const features = projectMetadata.data?.features;
+  const srProductCategories =
+    features?.csmSrProductCategories ?? features?.srProductCategories;
+  const csmSrAccess = features?.hasCsmServiceRequestWriteAccess;
+  const isIneligibleForSr = projectId
+    ? csmSrAccess !== undefined
+      ? csmSrAccess === false
+      : selectedProject.data?.hasSr === false
+    : false;
+  // Older entity service only: `hasServiceRequestReadAccess` gates the SR
+  // feature itself (viewer permission), separately from `hasSr`. Fail open
+  // while metadata is still loading/unloaded (`undefined`) — only an
   // explicit `false` once loaded blocks submission; the same fail-closed
   // `projectLoadFailed`/`isLoading` guard on `canSubmit` below already
   // prevents submitting before metadata resolves.
   const hasNoSrReadAccess =
-    projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
+    csmSrAccess === undefined &&
+    features?.hasServiceRequestReadAccess === false;
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(

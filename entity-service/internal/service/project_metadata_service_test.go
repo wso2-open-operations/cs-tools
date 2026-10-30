@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -199,6 +200,55 @@ func TestGetProjectMetadata_PdpServiceRequestAccess(t *testing.T) {
 			}
 			if !f.HasChangeRequestReadAccess || f.HasSraReadAccess {
 				t.Errorf("other flags changed: %+v", f)
+			}
+		})
+	}
+}
+
+// The CSM portal's service request rules (migration 0264): every Cloud
+// Support project is eligible, PDP subscription or not, and never narrower
+// than what a customer gets. The customer-facing fields are untouched.
+func TestGetProjectMetadata_CsmServiceRequestAccess(t *testing.T) {
+	cases := []struct {
+		name         string
+		typeName     string
+		pdp          bool
+		srCats       []string
+		csmCats      []string
+		wantCustomer bool
+		wantCsm      bool
+		wantCsmCats  []string
+	}{
+		{"cloud support without pdp (CDP)", "Cloud Support", false, []string{"PDP"}, []string{"PDP", "CL"}, false, true, []string{"pdp", "cl"}},
+		{"cloud support with pdp", "Cloud Support", true, []string{"PDP"}, []string{"PDP", "CL"}, true, true, []string{"pdp", "cl"}},
+		{"cloud evaluation support with pdp keeps customer access", "Cloud Evaluation Support", true, []string{"PDP"}, nil, true, true, []string{"pdp"}},
+		{"cloud evaluation support without pdp stays off", "Cloud Evaluation Support", false, []string{"PDP"}, nil, false, false, []string{"pdp"}},
+		{"no csm list falls back to sr list", "Managed Cloud Subscription", false, []string{"MS", "PC"}, nil, false, false, []string{"ms", "pc"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeReferenceDataRepo{
+				projectType: &repository.ProjectTypeRow{
+					ID: testUUID, Name: tc.typeName, IsPdpSubscription: tc.pdp,
+					SrProductCategories: tc.srCats, CsmSrProductCategories: tc.csmCats,
+				},
+			}
+			resp, err := NewProjectMetadataService(repo).GetProjectMetadata(context.Background(), testUUID)
+			if err != nil {
+				t.Fatalf("GetProjectMetadata: %v", err)
+			}
+			f := resp.Features
+			if f.HasServiceRequestWriteAccess != tc.wantCustomer || f.HasServiceRequestReadAccess != tc.wantCustomer {
+				t.Errorf("customer SR write/read = %v/%v, want both %v", f.HasServiceRequestWriteAccess, f.HasServiceRequestReadAccess, tc.wantCustomer)
+			}
+			if f.HasCsmServiceRequestWriteAccess != tc.wantCsm {
+				t.Errorf("HasCsmServiceRequestWriteAccess = %v, want %v", f.HasCsmServiceRequestWriteAccess, tc.wantCsm)
+			}
+			if !reflect.DeepEqual(f.SrProductCategories, lowercaseAll(tc.srCats)) {
+				t.Errorf("SrProductCategories = %v, want %v (customer list unchanged)", f.SrProductCategories, lowercaseAll(tc.srCats))
+			}
+			if !reflect.DeepEqual(f.CsmSrProductCategories, tc.wantCsmCats) {
+				t.Errorf("CsmSrProductCategories = %v, want %v", f.CsmSrProductCategories, tc.wantCsmCats)
 			}
 		})
 	}

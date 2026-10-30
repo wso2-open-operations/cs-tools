@@ -1958,6 +1958,12 @@ type ProjectFeatures struct {
 	// named Go enum type, matching this file's convention for enum-like fields.
 	DefaultCaseProductCategories []string `json:"defaultCaseProductCategories,omitempty"`
 	SrProductCategories          []string `json:"srProductCategories,omitempty"`
+	// HasCsmServiceRequestWriteAccess and CsmSrProductCategories are the
+	// service request rules for WSO2 staff raising a request from the CSM
+	// portal; the customer portal keeps using HasServiceRequestWriteAccess
+	// and SrProductCategories. See GetProjectMetadata.
+	HasCsmServiceRequestWriteAccess bool     `json:"hasCsmServiceRequestWriteAccess"`
+	CsmSrProductCategories          []string `json:"csmSrProductCategories,omitempty"`
 }
 
 // ProjectMetadataResponse is the response for GET /projects/{id}/metadata —

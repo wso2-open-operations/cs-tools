@@ -15,7 +15,7 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { BeProject, BeProjectMetadata } from "@api/backend/types";
 
@@ -32,6 +32,8 @@ let projectMetadataResult: {
   isLoading: boolean;
   isError: boolean;
 } = { data: undefined, isLoading: false, isError: false };
+// The selected project's customer-facing `hasSr`, per test (default true).
+let projectHasSr = true;
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
@@ -56,7 +58,7 @@ vi.mock("@hooks/useEngineerDisplayName", () => ({
 }));
 vi.mock("@features/csm-projects/api/useGetProject", () => ({
   useGetProject: () => ({
-    data: { id: "proj-1", hasSr: true, subscriptionType: "managed_cloud_subscription" },
+    data: { id: "proj-1", hasSr: projectHasSr, subscriptionType: "managed_cloud_subscription" },
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -279,6 +281,93 @@ describe("CreateServiceRequestPage — gating on hasServiceRequestReadAccess", (
       screen.queryByText(/isn't eligible to raise service requests/i),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
+  });
+});
+
+describe("CreateServiceRequestPage — CSM portal's own eligibility (hasCsmServiceRequestWriteAccess)", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    postCaseMutateAsyncMock.mockReset();
+    showErrorMock.mockReset();
+    projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    projectHasSr = true;
+  });
+  afterEach(() => {
+    projectHasSr = true;
+  });
+
+  it("allows a Cloud Support project without a PDP subscription (hasSr false) when the CSM rule allows it", () => {
+    projectHasSr = false;
+    projectMetadataResult = {
+      data: {
+        features: {
+          hasServiceRequestReadAccess: false,
+          srProductCategories: ["pdp"],
+          hasCsmServiceRequestWriteAccess: true,
+          csmSrProductCategories: ["ms", "pdp", "cl"],
+        },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectFullFlow();
+
+    expect(
+      screen.queryByText(/isn't eligible to raise service requests/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
+  });
+
+  it("filters deployed products by csmSrProductCategories, not srProductCategories", () => {
+    projectMetadataResult = {
+      data: {
+        features: {
+          srProductCategories: ["ms"],
+          hasCsmServiceRequestWriteAccess: true,
+          csmSrProductCategories: ["pc"],
+        },
+      },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+
+    fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
+    expect(screen.getByRole("option", { name: "Choreo Connect 1.0" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "API Manager 4.3.0" })).not.toBeInTheDocument();
+  });
+
+  it("blocks a project the CSM rule refuses, even with hasSr true", () => {
+    projectMetadataResult = {
+      data: { features: { hasServiceRequestReadAccess: true, hasCsmServiceRequestWriteAccess: false } },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectFullFlow();
+
+    expect(
+      screen.getByText(/isn't eligible to raise service requests/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("falls back to hasSr when the entity service predates the CSM rule (field absent)", () => {
+    projectHasSr = false;
+    projectMetadataResult = {
+      data: { features: { hasServiceRequestReadAccess: true } },
+      isLoading: false,
+      isError: false,
+    };
+    render(<CreateServiceRequestPage />);
+    selectFullFlow();
+
+    expect(
+      screen.getByText(/isn't eligible to raise service requests/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
   });
 });
 
