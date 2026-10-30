@@ -64,3 +64,24 @@ func TestProjectContactRegisteredPayload_WireNames(t *testing.T) {
 		}
 	}
 }
+
+// severityChangedWire is a fully filled SeverityChangedPayload as published.
+// csm-notification-service decodes it with DisallowUnknownFields, and its
+// events.TestValidate_EntityServiceSeverityChanged validates this exact
+// string: change both together.
+const severityChangedWire = `{"projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1001","caseTitle":"Gateway down","oldSeverity":"HIGH","newSeverity":"CATASTROPHIC","product":"WSO2 API Manager","team":"Phoenix","sreTeamId":"SRE-1","sreTeamName":"Apollo SRE Group","recipients":["watcher@example.com"],"projectName":"Customer 3 Project","changedAt":"2026-10-27T06:07:15.123456789Z"}`
+
+func TestSeverityChangedPayload_WireNames(t *testing.T) {
+	raw, err := json.Marshal(SeverityChangedPayload{
+		ProjectID: "PROJ-1", CaseID: "CASE-1", CaseNumber: "CS0001001", WSO2CaseID: "WSO2-1001", CaseTitle: "Gateway down",
+		OldSeverity: "HIGH", NewSeverity: "CATASTROPHIC", Product: "WSO2 API Manager", Team: "Phoenix",
+		SRETeamID: "SRE-1", SRETeamName: "Apollo SRE Group", Recipients: []string{"watcher@example.com"},
+		ProjectName: "Customer 3 Project", ChangedAt: "2026-10-27T06:07:15.123456789Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != severityChangedWire {
+		t.Errorf("payload =\n%s\nwant\n%s\n(csm-notification-service validates the latter; update both)", raw, severityChangedWire)
+	}
+}

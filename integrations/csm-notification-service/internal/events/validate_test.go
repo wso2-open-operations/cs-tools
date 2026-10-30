@@ -39,6 +39,7 @@ func TestValidate_Valid(t *testing.T) {
 		"case.assigned":                         {"CASE-1", TypeCaseAssigned, `{"assigneeName":"n","assigneeEmail":"e@x.com","projectId":"PROJ-1","caseId":"CASE-1","recipients":["r@x.com"]}`},
 		"case.acknowledged":                     {"CASE-1", TypeCaseAcknowledged, `{"caseId":"CASE-1","acknowledgerName":"n"}`},
 		"case.severity_changed":                 {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"LOW","recipients":["r@x.com"]}`},
+		"case.severity_changed new fields":      {"CASE-1", TypeSeverityChanged, `{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"HIGH","newSeverity":"CATASTROPHIC","recipients":["r@x.com"],"projectName":"Proj","changedAt":"2026-10-27T06:07:15.123456789Z"}`},
 		"case.workaround_provided":              {"CASE-1", TypeWorkaroundProvided, `{"caseId":"CASE-1"}`},
 		"incident.created":                      {"INC-1", TypeIncidentCreated, `{"product":"api-manager","title":"P1 outage","shortDescription":"Everything is down","callTo":"+15551234567"}`},
 		"incident.created omits product/callTo": {"INC-1", TypeIncidentCreated, `{"title":"P1 outage","shortDescription":"Everything is down"}`},
@@ -329,5 +330,17 @@ func TestValidate_OutageStatusPageDue(t *testing.T) {
 		if (err != nil) != c.wantErr {
 			t.Errorf("%s: err = %v, wantErr %v", c.name, err, c.wantErr)
 		}
+	}
+}
+
+// The case.severity_changed payload exactly as entity-service publishes it,
+// every field set: entity-service's events.TestSeverityChangedPayload_WireNames
+// pins this same string. A field renamed or added there without a matching
+// field here fails this strict decode, and every severity change would then
+// be dead-lettered. Change both together.
+func TestValidate_EntityServiceSeverityChanged(t *testing.T) {
+	const wire = `{"projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1001","caseTitle":"Gateway down","oldSeverity":"HIGH","newSeverity":"CATASTROPHIC","product":"WSO2 API Manager","team":"Phoenix","sreTeamId":"SRE-1","sreTeamName":"Apollo SRE Group","recipients":["watcher@example.com"],"projectName":"Customer 3 Project","changedAt":"2026-10-27T06:07:15.123456789Z"}`
+	if err := Validate("CASE-1", TypeSeverityChanged, json.RawMessage(wire)); err != nil {
+		t.Errorf("entity-service's case.severity_changed fails validation: %v", err)
 	}
 }

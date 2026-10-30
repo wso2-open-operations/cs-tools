@@ -705,8 +705,13 @@ is keyed by the case id, and `Trigger.Record` is `case`.
 - **Severity change**: any change stops the running chain and starts a new one
   for the new severity, from the first tier, even after acknowledgement. A
   severity a ladder does not page stops its chain (SRE below S0; S4 while it is
-  off). The event has no timestamp, so the chain runs from now, and a
-  redelivery is recognised by the chain already running at that severity.
+  off). The chain runs from now, and a redelivery is recognised by the chain
+  already running at that severity. The event's `changedAt` is not read for
+  timing: it only makes each change a distinct record, so each raise to S0
+  gets its own thread (`notifications.CaseS0ThreadKey`), even a second raise
+  from the same severity. `changedAt` and `projectName` (the S0 room card's
+  Project row) are new and this service decodes strictly: deploy it before
+  the entity-service that sends them.
 - **Stop**: CRE needs an engineer assigned AND that engineer's public comment
   (`acknowledgement.requireBoth`). SRE on an S0 case stops when any engineer is
   assigned, or -- on a case already assigned when it became S0 -- on the

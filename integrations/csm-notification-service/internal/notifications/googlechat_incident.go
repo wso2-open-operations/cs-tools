@@ -447,7 +447,9 @@ func IncidentThreadKey(incidentID string) string {
 // case S0 (created at S0, or raised to it). Both read that same record, so
 // both derive the same key from its bytes without sharing any state; a later
 // raise to S0 is a new record and so a new thread, and a redelivered record
-// keeps its thread.
+// keeps its thread. case.created carries createdAt and case.severity_changed
+// carries changedAt, so two raises with otherwise identical payloads still
+// differ; one without changedAt (an older publisher) can share a thread.
 func CaseS0ThreadKey(caseID string, record []byte) string {
 	sum := sha256.Sum256(record)
 	return IncidentThreadKey(caseID) + "-" + hex.EncodeToString(sum[:6])

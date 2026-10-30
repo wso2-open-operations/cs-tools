@@ -496,3 +496,35 @@ func TestDispatcher_S0RoomCardThreadIsPerS0Episode(t *testing.T) {
 		t.Errorf("both S0 episodes posted into thread %q; want a new thread for the raise", first)
 	}
 }
+
+// raisedToS0At is a raise from HIGH to S0 at the given changedAt, otherwise
+// the same record every time.
+func raisedToS0At(changedAt string) eventbus.Record {
+	return eventbus.Record{Value: []byte(fmt.Sprintf(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","caseTitle":"Something broke","oldSeverity":"HIGH","newSeverity":"CATASTROPHIC","product":"api-manager","team":"Phoenix","sreTeamName":"WSO2 IaaS Team","recipients":["test-recipient@example.com"],"projectName":"Proj","changedAt":%q}}`, changedAt))}
+}
+
+// A second raise from the same severity, with nothing else changed, is still
+// a new S0 episode: changedAt makes it a new record, so a new thread. Its card
+// shows the project, which case.severity_changed now carries.
+func TestDispatcher_S0RoomCardRepeatRaiseGetsItsOwnThread(t *testing.T) {
+	chat := &mockGoogleChatSender{hasAudienceSpace: mappedSpaces}
+	d := sreRoomDispatcher(chat)
+	first, again := raisedToS0At("2026-10-27T06:05:11Z"), raisedToS0At("2026-10-27T06:10:34Z")
+	for _, rec := range []eventbus.Record{first, again} {
+		if err := d.Handle(context.Background(), rec); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+	}
+	cards := roomCards(chat)
+	if len(cards) != 2 {
+		t.Fatalf("room cards = %d; want one per raise", len(cards))
+	}
+	if cards[0].alert.ThreadKey == cards[1].alert.ThreadKey {
+		t.Errorf("both raises posted into thread %q; want a new thread for the second", cards[0].alert.ThreadKey)
+	}
+	for i, c := range cards {
+		if c.alert.Project != "Proj" {
+			t.Errorf("card %d Project = %q; want Proj", i, c.alert.Project)
+		}
+	}
+}

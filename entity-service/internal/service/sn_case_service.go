@@ -2008,9 +2008,9 @@ func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherSe
 	// before.ProjectDetails is nilable on the Postgres data source (this
 	// function serves both, called directly from caseService.UpdateCase
 	// too) — see publishCaseAssigned's own comment.
-	projectID := ""
+	projectID, projectName := "", ""
 	if before.ProjectDetails != nil {
-		projectID = before.ProjectDetails.ID
+		projectID, projectName = before.ProjectDetails.ID, before.ProjectDetails.Name
 	}
 
 	sreTeamID, sreTeamName := caseSRETeam(ctx, resolveAccountSRETeam, before, "update case")
@@ -2027,6 +2027,8 @@ func publishSeverityChangedEvent(ctx context.Context, publisher EventPublisherSe
 		SRETeamID:   sreTeamID,
 		SRETeamName: sreTeamName,
 		Recipients:  recipients,
+		ProjectName: projectName,
+		ChangedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "update case: encode case.severity_changed payload failed", "caseId", caseID, "error", err)

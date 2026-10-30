@@ -19,6 +19,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
@@ -116,6 +117,12 @@ func TestSNCaseService_UpdateCase_PublishesSeverityChanged(t *testing.T) {
 	}
 	if len(payload.Recipients) != 1 || payload.Recipients[0] != "john.roe@example.com" {
 		t.Errorf("recipients = %v, want [john.roe@example.com]", payload.Recipients)
+	}
+	if payload.ProjectName != "Project Zeta" {
+		t.Errorf("projectName = %q, want %q", payload.ProjectName, "Project Zeta")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, payload.ChangedAt); err != nil {
+		t.Errorf("changedAt = %q, want an RFC 3339 time: %v", payload.ChangedAt, err)
 	}
 }
 

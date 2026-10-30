@@ -1510,7 +1510,13 @@ service's own `CLAUDE.md`, `dispatch.subjectLine`).
   "empty `Recipients` list skips the whole publish" precedent as
   `publishCaseCreated` — including the Chat alert, since this event has no
   Chat-only path the way `case.acknowledged` does; a severity change with
-  no watchers has nobody to notify by design.
+  no watchers has nobody to notify by design. `ProjectName` (from
+  `before.ProjectDetails`) is the S0 SRE room card's Project row, and
+  `ChangedAt` (UTC, RFC 3339 with nanoseconds, set once before the publish)
+  makes each change a distinct record: `csm-notification-service` hashes the
+  record into the S0 episode's Chat thread, so without it a second S2 → S0
+  with nothing else changed joins the first one's thread. Both fields are new
+  and that service decodes strictly: deploy it first.
 
 `caseProductName(cv)` (a small shared helper) resolves
 `cv.DeployedProductDetails.Product.Name` (e.g. `"WSO2 API Manager"`, `""`

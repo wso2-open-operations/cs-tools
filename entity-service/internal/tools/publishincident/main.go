@@ -75,6 +75,8 @@ func main() {
 	author := flag.String("author", "local.engineer@wso2.com", "with -case-event comment: who wrote it")
 	workNote := flag.Bool("work-note", false, "with -case-event comment: a work note rather than a public comment")
 	engineer := flag.Bool("engineer", true, "with -case-event comment: written by a support engineer (false = the customer)")
+	sreTeam := flag.String("sre-team", "", "with -record case -case-event created|severity: the account's SRE group (sreTeamName), e.g. \"Apollo SRE Group\"; empty is an account with none")
+	wso2CaseID := flag.String("wso2-case-id", "", "with -record case -case-event created|severity: the WSO2 case ID (wso2CaseId); empty leaves it out")
 	flag.BoolVar(&dryRun, "dry-run", false, "with -record case: print the envelope instead of publishing it")
 	flag.Parse()
 
@@ -91,6 +93,7 @@ func main() {
 			severity: severityLabel(*priority), from: severityLabel(*from), team: *team, title: *title,
 			account: *account, product: *product, assignee: *assignee, author: *author,
 			workNote: *workNote, engineer: *engineer, at: time.Now().UTC(),
+			sreTeam: *sreTeam, wso2CaseID: *wso2CaseID,
 		})
 		return
 	}
@@ -245,6 +248,7 @@ func publishOne(broker, topic, incidentID string, typ events.Type, body any) {
 // caseFields are what the case events carry, from the flags.
 type caseFields struct {
 	severity, from, team, title, account, product, assignee, author string
+	sreTeam, wso2CaseID                                             string
 	workNote, engineer                                              bool
 	at                                                              time.Time
 }
@@ -277,6 +281,7 @@ func publishCaseEvent(broker, topic, caseID, event string, f caseFields) {
 		typ, body = events.TypeSeverityChanged, map[string]any{
 			"projectId": "local-project", "caseId": caseID, "caseNumber": number, "caseTitle": f.title,
 			"oldSeverity": f.from, "newSeverity": f.severity, "team": f.team, "recipients": localRecipients,
+			"projectName": f.account, "changedAt": f.at.Format(time.RFC3339Nano),
 		}
 	case "assigned":
 		typ, body = events.TypeCaseAssigned, map[string]any{
@@ -298,6 +303,14 @@ func publishCaseEvent(broker, topic, caseID, event string, f caseFields) {
 	default:
 		fmt.Fprintln(os.Stderr, "-case-event must be created, severity, assigned, comment or closed")
 		os.Exit(1)
+	}
+	if event == "created" || event == "severity" {
+		if f.sreTeam != "" {
+			body["sreTeamName"] = f.sreTeam
+		}
+		if f.wso2CaseID != "" {
+			body["wso2CaseId"] = f.wso2CaseID
+		}
 	}
 	publishOne(broker, topic, caseID, typ, body)
 }

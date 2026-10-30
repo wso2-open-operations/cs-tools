@@ -451,6 +451,13 @@ type SeverityChangedPayload struct {
 	SRETeamID   string   `json:"sreTeamId,omitempty"`
 	SRETeamName string   `json:"sreTeamName,omitempty"`
 	Recipients  []string `json:"recipients"`
+	// ProjectName is the S0 SRE room card's Project row, as on case.created.
+	ProjectName string `json:"projectName,omitempty"`
+	// ChangedAt (RFC 3339) is when the publisher made the change. It is not
+	// read: it makes two otherwise identical changes (S2 → S0 twice, nothing
+	// else changed) different records, so each raise to S0 gets its own
+	// thread (notifications.CaseS0ThreadKey hashes the record).
+	ChangedAt string `json:"changedAt,omitempty"`
 	// ProjectOnboardingStatus/IsEvaluationAccount are deprecated and
 	// unused — see CaseCreatedPayload's own doc comment for why this
 	// decode-compatibility pair exists.

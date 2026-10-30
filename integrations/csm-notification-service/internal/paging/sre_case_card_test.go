@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 )
 
@@ -206,5 +208,42 @@ func TestSRECaseRung_EpisodeThreadOnlyOnTheSRELadder(t *testing.T) {
 	sre := sreCase("MS/PC SRE Group")
 	if got := sre.chatThreadKey(); got != notifications.IncidentThreadKey("case-1") {
 		t.Errorf("SRE case chain saved before CardThread = %q; want the case's one thread", got)
+	}
+}
+
+// A second raise from the same severity is a new S0 episode too: changedAt
+// makes it a new record, so the SRE ladder replies in a new thread, the one
+// the dispatcher's card for that record opens.
+func TestSRECaseRung_RepeatRaiseFromTheSameSeverityHasItsOwnThread(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	e := ladderEngine(LadderSRE, &fakeChat{}, store)
+	raisedAt := func(changedAt string) eventbus.Record {
+		return record(t, events.TypeSeverityChanged, events.SeverityChangedPayload{
+			ProjectID: "p-1", CaseID: testIncidentID, CaseNumber: "CS0099001", CaseTitle: "Gateway down",
+			OldSeverity: "HIGH", NewSeverity: "CATASTROPHIC", Team: "Atlas", Recipients: []string{"watcher@wso2.com"},
+			ChangedAt: changedAt,
+		})
+	}
+
+	var threads []string
+	for _, rec := range []eventbus.Record{raisedAt("2026-10-27T06:05:11Z"), raisedAt("2026-10-27T06:10:34Z")} {
+		if err := e.Handle(ctx, severityChanged(t, "CATASTROPHIC", "HIGH")); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Handle(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+		st, found, _ := store.Get(ctx, testIncidentID)
+		if !found {
+			t.Fatal("no SRE chain after the raise to S0")
+		}
+		if got, want := st.Plan.Trigger.chatThreadKey(), notifications.CaseS0ThreadKey(testIncidentID, rec.Value); got != want {
+			t.Errorf("thread = %q; want the raise's own %q", got, want)
+		}
+		threads = append(threads, st.Plan.Trigger.chatThreadKey())
+	}
+	if threads[0] == threads[1] {
+		t.Errorf("the second raise from HIGH reused thread %q; want a new one", threads[0])
 	}
 }

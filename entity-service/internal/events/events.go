@@ -340,6 +340,15 @@ type SeverityChangedPayload struct {
 	SRETeamID   string   `json:"sreTeamId,omitempty"`
 	SRETeamName string   `json:"sreTeamName,omitempty"`
 	Recipients  []string `json:"recipients"`
+	// ProjectName is the case's project, shown on csm-notification-service's
+	// S0 SRE room card, as CaseCreatedPayload.ProjectName is.
+	ProjectName string `json:"projectName,omitempty"`
+	// ChangedAt (RFC 3339, UTC, nanoseconds) is when this change was
+	// published. It makes two otherwise identical changes (S2 → S0 twice)
+	// different records: csm-notification-service hashes the record into the
+	// S0 episode's Chat thread, and without it the second raise joins the
+	// first one's thread. Set once before the publish, so a retry keeps it.
+	ChangedAt string `json:"changedAt,omitempty"`
 }
 
 // CaseCreatedPayload is the Payload shape for TypeCaseCreated — mirrors

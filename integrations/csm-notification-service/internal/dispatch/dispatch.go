@@ -1493,7 +1493,7 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// The S0 SRE room card runs beside everything below (see handleCaseCreated).
 	sreDone := closedDone
 	if rooms := d.caseSRERooms(ctx, events.TypeSeverityChanged, p.CaseID, p.NewSeverity, p.SRETeamName); len(rooms) > 0 && d.claim(sreRoomKey) {
-		card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.NewSeverity, p.CaseTitle, p.Product, "", d.links.CSMLink(p.CaseID))
+		card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.NewSeverity, p.CaseTitle, p.Product, p.ProjectName, d.links.CSMLink(p.CaseID))
 		card.ThreadKey = notifications.CaseS0ThreadKey(p.CaseID, record.Value)
 		sreDone = d.startCaseSRERoomCard(ctx, events.TypeSeverityChanged, p.CaseID, rooms, card)
 	}
