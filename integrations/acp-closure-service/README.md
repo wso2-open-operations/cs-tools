@@ -1,5 +1,10 @@
 # ACP Closure Service
 
+> **Moving.** ACP now also runs as the `acp_closure` sub-cron of
+> `operations/csm-scheduled-tasks` (see its CLAUDE.md, "ACP closure"), with the
+> same rules copied into `internal/acp`. This standalone service stays until
+> that sub-cron runs in production; until then, a rule change goes in both.
+
 Go implementation of Phase 1 of the Account Closure Process (ACP) migration
 from ServiceNow — subscription end-date closure only. Invoice- and
 compliance-based closure logic (Phase 2) is out of scope; see
@@ -144,8 +149,10 @@ knowing before trusting a sibling service's source or docs at face value:
 - After a renewal (date more than 90 days away again) or a paid invoice, ACP
   saves that track's `event_type` back to `open`, as legacy did, so the next
   term's reminders start over. It only does this while that track's own
-  closure state is Open, and never changes a closure state; reopening a
-  suspended project stays manual.
+  closure state is Open, and never changes a closure state. Reopening a
+  suspended project after a renewal or payment is automatic, done by
+  entity-service when the Salesforce change arrives (its CLAUDE.md, "ACP
+  reopen"), not by this service.
 
 ## Open dependencies
 

@@ -39,6 +39,9 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
+	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
@@ -1023,6 +1026,26 @@ func main() {
 		})
 	}
 
+	// The Account Closure Process -- see internal/acp's package doc and this
+	// component's CLAUDE.md, "ACP closure". OFF unless ACP_ENABLED=true: it
+	// emails customers and suspends their projects in CSM and Salesforce, so
+	// it is never on by accident, and no ACP_* setting is read (or required)
+	// while it is off.
+	if envBool("ACP_ENABLED", false) {
+		tasks = append(tasks, acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, emailClient, emailBaseURL, alertsEnabled, scheduleOverrides, recipientOverrides))
+	}
+	// entity-service's daily ACP reopen check -- see internal/acp's
+	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
+	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
+	// CSM_ACP_REOPEN_ENABLED=true (else POST /acp/reopen-check is a 404 and
+	// the run fails and alerts). Whether anything is written is
+	// entity-service's own dry run (CSM_ACP_REOPEN_DRY_RUN), not a setting here.
+	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
+		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
+
 	var tasksWithRecipients []string
 	for _, t := range tasks {
 		if !gronx.IsValid(t.Schedule) {
@@ -1080,6 +1103,129 @@ func main() {
 	start := time.Now()
 	eng.Tick(ctx, start)
 	slog.Info("tick complete", "elapsed", time.Since(start).String())
+}
+
+// acpTaskName is the acp_closure sub-cron's ledger key.
+const acpTaskName = "acp_closure"
+
+// acpReopenCheckTaskName is the acp_reopen_check sub-cron's ledger key.
+const acpReopenCheckTaskName = "acp_reopen_check"
+
+// acpReopenCheckCallTimeout bounds one page of the reopen check: longer than
+// the client's usual 25 seconds, since entity-service checks several
+// projects (a few Salesforce calls each) per page.
+const acpReopenCheckCallTimeout = 2 * time.Minute
+
+// acpReopenCheckTask builds the acp_reopen_check task. Called only when
+// ACP_REOPEN_CHECK_ENABLED=true.
+func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	client, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+		Timeout:      acpReopenCheckCallTimeout,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for the ACP reopen check; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	to, cc := recipientsFor(recipientOverrides, acpReopenCheckTaskName)
+	return registry.Task{
+		// 03:30 UTC is 09:00 in Colombo, every day: half an hour before
+		// acp_closure, so a project reopened here is not sent a reminder.
+		Name:         acpReopenCheckTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpReopenCheckTaskName, "30 3 * * *"),
+		Handler:      acp.RunReopenCheck(client),
+		RetryBackoff: acpRetryBackoff,
+		To:           to,
+		Cc:           cc,
+	}
+}
+
+// acpRetryBackoff is how long a failed ACP run waits before it is retried.
+// Longer than the driver's hour on purpose: a retry re-sends a notice whose
+// email went out but whose CSM record failed, so fewer retries mean fewer
+// such duplicates, and 4 hours still lands in the same working day.
+const acpRetryBackoff = 4 * time.Hour
+
+// acpTask builds the acp_closure task from the ACP_* settings, stopping
+// startup on a missing or unsafe one: a task that fails every weekday is
+// worse than one that never starts. Called only when ACP_ENABLED=true.
+func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	emailClient notify.Sender, emailBaseURL string, alertsEnabled bool,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	// CSM: entity-service itself, with this component's shared credentials.
+	// Its client id must be in entity-service's M2M_CLIENT_IDS, or every
+	// notice and suspension write (PATCH /projects/{id}) is refused.
+	csmClient, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for ACP; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	// Salesforce: sales-entity-service, with its own client credentials.
+	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+	})
+	if err != nil {
+		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	cfg := acp.Config{
+		// Fails toward a dry run: unset or malformed is true.
+		DryRun:                 envBool("ACP_DRY_RUN", true),
+		EmailEnabled:           envBool("ACP_EMAIL_SEND_ENABLED", false) && alertsEnabled,
+		AllowNonWSO2Recipients: envBool("ACP_ALLOW_NON_WSO2_RECIPIENTS", false),
+		StandingRecipients:     splitComma(os.Getenv("ACP_STANDING_CC_RECIPIENTS")),
+		TestProjectID:          strings.TrimSpace(os.Getenv("ACP_TEST_PROJECT_ID")),
+		ExcludedProjectIDs:     acp.ParseProjectIDs(os.Getenv("ACP_EXCLUDED_PROJECT_IDS")),
+	}
+	if cfg.DryRun && cfg.EmailEnabled {
+		slog.Warn("ACP_DRY_RUN and ACP_EMAIL_SEND_ENABLED are both true: notices are sent for real but not recorded, so the same notices are sent again on every run")
+	}
+	if cfg.EmailEnabled && emailBaseURL == "" {
+		slog.Error("ACP_EMAIL_SEND_ENABLED is true but EMAIL_BASE_URL is not set; refusing to start since no notice could be sent")
+		os.Exit(1)
+	}
+	// A tryout skips the ledger but talks to the real CSM and Salesforce, so
+	// unless it is scoped to one test project it would write to every open
+	// project. Like case_autoclosure, such a tryout is always a dry run.
+	if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == acpTaskName && !cfg.DryRun && cfg.TestProjectID == "" {
+		slog.Warn("TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
+		cfg.DryRun = true
+	}
+
+	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	return registry.Task{
+		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
+		// skips a weekend in Colombo time, for a retry that lands on one.
+		Name:     acpTaskName,
+		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler: acp.Run(acp.Clients{
+			CSM:         csmClient,
+			SalesEntity: salesEntityClient,
+			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+			// instead, the same as a report task's debug mail mode.
+			Email: notify.ForReport(emailClient, debugFor(recipientOverrides, acpTaskName)),
+		}, cfg),
+		RetryBackoff: acpRetryBackoff,
+		To:           to,
+		Cc:           cc,
+	}
 }
 
 // parseStringMap decodes a flat JSON object of string values, the same shape
