@@ -306,6 +306,10 @@ func (m *mockLinkResolver) OutageLink(outageID string) string {
 	return "https://csm.example/operations/outages/" + outageID
 }
 
+func (m *mockLinkResolver) ProjectLink(projectID string) string {
+	return "https://csm.example/customers/projects/" + projectID
+}
+
 func (m *mockLinkResolver) IncidentLink(incidentID string) string {
 	return "https://csm.example/operations/incidents/" + incidentID
 }

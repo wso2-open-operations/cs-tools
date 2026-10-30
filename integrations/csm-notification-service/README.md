@@ -312,6 +312,7 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_DEBUG_MODE` | No | off (exact `true` to enable) | Redirect case.* email to `EMAIL_DEBUG_RECIPIENTS`. Links are still resolved from the real recipients. | `true` |
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Comma-separated test addresses. With debug on and this empty, the email is skipped. | `qa@example.com` |
 | `DEFAULT_CSM_EMAIL_CC` | No | none | Comma-separated CC added to the CSM-portal-link group of case.* email only, never to the customer group and never in debug mode. | `team@example.com` |
+| `ACP_REACTIVATION_CC` | No | none | Comma-separated CC on the "Back to Open state" email (`project.reactivated`); never in debug mode. | `lifecycle@example.com,billing@example.com` |
 
 ### Google Chat
 

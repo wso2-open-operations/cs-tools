@@ -452,6 +452,30 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 				return fmt.Errorf("events: eventModifiedOn %q is not RFC 3339: %w", p.EventModifiedOn, err)
 			}
 		}
+	case TypeProjectReactivated:
+		var p ProjectReactivatedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.ProjectID == "" || strings.TrimSpace(p.ProjectName) == "" {
+			return fmt.Errorf("events: missing or invalid required field for %s", t)
+		}
+		if p.ProjectID != entityID {
+			return fmt.Errorf("events: payload projectId %q does not match entityId %q", p.ProjectID, entityID)
+		}
+		for _, r := range p.Recipients {
+			if !emailPattern.MatchString(r) {
+				return fmt.Errorf("events: invalid recipient for %s", t)
+			}
+		}
+		for _, reason := range p.Reasons {
+			if reason != ProjectReactivatedReasonRenewal && reason != ProjectReactivatedReasonInvoicePaid {
+				return fmt.Errorf("events: unknown reason %q for %s", reason, t)
+			}
+		}
+		if _, err := time.Parse(time.RFC3339Nano, p.ReactivatedOn); err != nil {
+			return fmt.Errorf("events: reactivatedOn %q is not RFC 3339: %w", p.ReactivatedOn, err)
+		}
 	case TypeSRCreated:
 		var p SRCreatedPayload
 		if err := decodeStrict(raw, &p); err != nil {

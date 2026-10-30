@@ -67,6 +67,9 @@ var projectContactInvitedReminderTemplateRaw string
 //go:embed templates/project_contact_registered.html
 var projectContactRegisteredTemplate string
 
+//go:embed templates/project_reactivated.html
+var projectReactivatedTemplateRaw string
+
 // wso2LogoURL is WSO2's own official logo asset, served from wso2.cachefly.net
 // (WSO2's public CDN for site assets — not third-party hosting). An earlier
 // version embedded the logo as an inline base64 data: URI instead, avoiding
@@ -102,6 +105,8 @@ var (
 	projectContactInvitedNewTemplate      = bakeLogo(projectContactInvitedNewTemplateRaw)
 	projectContactInvitedExistingTemplate = bakeLogo(projectContactInvitedExistingTemplateRaw)
 	projectContactInvitedReminderTemplate = bakeLogo(projectContactInvitedReminderTemplateRaw)
+
+	projectReactivatedTemplate = bakeLogo(projectReactivatedTemplateRaw)
 )
 
 // safeLinkSchemes is the allow-list of URL schemes sanitizeRichText permits
@@ -1281,5 +1286,46 @@ func RenderProjectContactRegisteredEmail(d ProjectContactRegisteredEmailData) st
 		"<!-- [PROJECT_NAME] -->", escapeHTML(d.ProjectName),
 		"<!-- [PROJECT_KEY] -->", escapeHTML(d.ProjectKey),
 		"<!-- [PORTAL_URL] -->", escapeHTML(d.PortalURL),
+	).Replace(tmpl)
+}
+
+// ProjectReactivatedEmailData fills the "Back to Open state" email, sent when
+// a project the Account Closure Process suspended is back to Open.
+type ProjectReactivatedEmailData struct {
+	// GreetingName follows "Dear": the account owner's first name.
+	GreetingName string
+	// ReasonLine is the sentence saying why the project reopened.
+	ReasonLine   string
+	ProjectName  string
+	ProjectKey   string
+	ProjectLink  string
+	AccountOwner string
+	StartDate    string
+	EndDate      string
+	// IntendedFor, when non-empty, shows a "Sent to: <value>" row — see
+	// RenderCommentAddedEmail's own doc comment for the convention.
+	IntendedFor string
+}
+
+// RenderProjectReactivatedEmail fills in the "Back to Open state" email. Every
+// value is escaped; an empty one shows as "-".
+func RenderProjectReactivatedEmail(d ProjectReactivatedEmailData) string {
+	tmpl := applyOptionalBlock(projectReactivatedTemplate, "INTENDED_FOR", d.IntendedFor)
+	orDash := func(v string) string {
+		if strings.TrimSpace(v) == "" {
+			return "-"
+		}
+		return escapeHTML(v)
+	}
+	return strings.NewReplacer(
+		"<!-- [INTENDED_FOR] -->", escapeHTML(d.IntendedFor),
+		"<!-- [GREETING_NAME] -->", escapeHTML(d.GreetingName),
+		"<!-- [REASON_LINE] -->", escapeHTML(d.ReasonLine),
+		"<!-- [PROJECT_NAME] -->", orDash(d.ProjectName),
+		"<!-- [PROJECT_KEY] -->", orDash(d.ProjectKey),
+		"<!-- [PROJECT_LINK] -->", escapeHTML(d.ProjectLink),
+		"<!-- [ACCOUNT_OWNER] -->", orDash(d.AccountOwner),
+		"<!-- [START_DATE] -->", orDash(d.StartDate),
+		"<!-- [END_DATE] -->", orDash(d.EndDate),
 	).Replace(tmpl)
 }

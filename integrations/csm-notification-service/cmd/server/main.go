@@ -375,7 +375,10 @@ func main() {
 		// resolveFullCaseDescription/resolveFullCommentContent).
 		WithFullContentFetcher(customerEntityClient).
 		WithIncidentChatFanout(incidentChatFanout).
-		WithIncidentRoutes(incidentRoutes)
+		WithIncidentRoutes(incidentRoutes).
+		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
+		// (project.reactivated), e.g. the customer lifecycle and billing lists.
+		WithACPReactivation(splitComma(os.Getenv("ACP_REACTIVATION_CC")))
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to

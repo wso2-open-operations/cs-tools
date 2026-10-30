@@ -57,6 +57,7 @@ func (noLinks) ResolveLinks(context.Context, []string, string, string) ([]recipi
 func (noLinks) CSMLink(string) string                            { return "" }
 func (noLinks) ChangeRequestLink(string, string, string) string  { return "" }
 func (noLinks) OutageLink(string) string                         { return "" }
+func (noLinks) ProjectLink(string) string                        { return "" }
 func (noLinks) ServiceRequestLink(string) string                 { return "" }
 func (noLinks) IncidentLink(string) string                       { return "" }
 func (noLinks) IsCustomer(context.Context, string) (bool, error) { return false, nil }
