@@ -390,12 +390,14 @@ export function toHyphenatedUuid(id: string): string {
 export type InlineImageResult =
   | { status: "ok"; blob: Blob }
   | { status: "not-found" }
+  | { status: "removed" }
   | { status: "error" };
 
 /**
  * Fetches a comment's inline image through entity-service (which checks access and
  * streams it). "not-found" (a 404) lets a caller fall back to the older flow;
- * any other failure is "error".
+ * "removed" (a 410, the image was deleted) does not, since there is nothing
+ * older to try; any other failure is "error".
  */
 export async function fetchInlineImageBlob(
   authFetch: AuthFetch,
@@ -406,6 +408,7 @@ export async function fetchInlineImageBlob(
     { method: "GET" },
   );
   if (response.status === 404) return { status: "not-found" };
+  if (response.status === 410) return { status: "removed" };
   if (!response.ok) return { status: "error" };
   return { status: "ok", blob: await response.blob() };
 }

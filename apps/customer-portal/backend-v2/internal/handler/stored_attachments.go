@@ -91,6 +91,13 @@ func mapStoredAttachmentError(w http.ResponseWriter, err error, fallbackMsg stri
 		writeErrorCode(w, http.StatusTooManyRequests, msg, apiErr.Code)
 		return
 	}
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusGone {
+		// A removed attachment (a deleted comment image): the message is ours, the
+		// code is entity-service's, so the webapp can say "removed" rather than
+		// "not available".
+		writeErrorCode(w, http.StatusGone, "This attachment was removed.", apiErr.Code)
+		return
+	}
 	mapUpstreamError(w, err, fallbackMsg)
 }
 

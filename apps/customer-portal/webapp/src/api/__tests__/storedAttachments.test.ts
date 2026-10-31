@@ -366,6 +366,8 @@ describe("storedAttachments", () => {
     expect(authFetch.mock.calls[0][0]).toBe(`${BASE}/attachments/inline/i-1/content`);
     authFetch.mockResolvedValueOnce(new Response("", { status: 404 }));
     expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "not-found" });
+    authFetch.mockResolvedValueOnce(new Response("", { status: 410 }));
+    expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "removed" });
     authFetch.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "error" });
   });

@@ -37,12 +37,13 @@ describe("useResolvedInlineImageHtml", () => {
 
     vi.mocked(useAttachmentPreviews).mockReturnValue({
       dataUrls: new Map([["abc123abc123abc123abc123abc123ab", "data:image/png;base64,AAA"]]),
-      isLoading: false,
+      removedIds: new Set<string>(),
+        isLoading: false,
     });
 
     const { result } = renderHook(() => useResolvedInlineImageHtml(html));
 
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([
+    expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([
       "abc123abc123abc123abc123abc123ab",
       "xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxy",
     ]);
@@ -51,9 +52,10 @@ describe("useResolvedInlineImageHtml", () => {
     expect(result.current.isLoading).toBe(false);
   });
 
-  it("replaces every image with a not-available note, showing the UUID, when all fetches fail", () => {
+  it("replaces every image with a not-available note, without showing the UUID, when all fetches fail", () => {
     vi.mocked(useAttachmentPreviews).mockReturnValue({
       dataUrls: new Map(),
+      removedIds: new Set(),
       isLoading: false,
     });
 
@@ -65,23 +67,44 @@ describe("useResolvedInlineImageHtml", () => {
 
     expect(result.current.resolvedHtml).not.toContain("service-now");
     expect(result.current.resolvedHtml).not.toContain("<img");
-    expect(result.current.resolvedHtml).toContain("Image not available");
+    expect(result.current.resolvedHtml).toContain("This image is not available.");
+    expect(result.current.resolvedHtml).not.toContain("removed");
+    expect(result.current.resolvedHtml).not.toContain("ID:");
+    // The id stays out of the visible text; it is only kept for support.
     expect(result.current.resolvedHtml).toContain(
-      "ID: d29f3f66-9773-c350-1823-38f11153af3f",
+      'data-attachment-id="d29f3f669773c350182338f11153af3f"',
     );
+  });
+
+  it("says an image was removed only for an id the server reported as removed", () => {
+    vi.mocked(useAttachmentPreviews).mockReturnValue({
+      dataUrls: new Map(),
+      removedIds: new Set(["abc123abc123abc123abc123abc123ab"]),
+      isLoading: false,
+    });
+
+    const { result } = renderHook(() =>
+      useResolvedInlineImageHtml(
+        "<img src='/abc123abc123abc123abc123abc123ab.iix'><img src='/xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxy.iix'>",
+      ),
+    );
+
+    expect(result.current.resolvedHtml).toContain("This image was removed.");
+    expect(result.current.resolvedHtml).toContain("This image is not available.");
   });
 
   it("keeps loading false when html has no inline images", () => {
     vi.mocked(useAttachmentPreviews).mockReturnValue({
       dataUrls: new Map(),
-      isLoading: true,
+      removedIds: new Set<string>(),
+        isLoading: true,
     });
 
     const { result } = renderHook(() =>
       useResolvedInlineImageHtml("<p>No images here</p>"),
     );
 
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([]);
+    expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([]);
     expect(result.current.resolvedHtml).toBe("<p>No images here</p>");
     expect(result.current.isLoading).toBe(false);
   });
@@ -94,12 +117,13 @@ describe("useResolvedInlineImageHtml", () => {
     it("requests the 32-hex id for a bare hyphenated uuid and resolves it", () => {
       vi.mocked(useAttachmentPreviews).mockReturnValue({
         dataUrls: new Map([[HEX, DATA]]),
+        removedIds: new Set<string>(),
         isLoading: false,
       });
       const { result } = renderHook(() =>
         useResolvedInlineImageHtml(`<p><img src="/${UUID}"><br></p>`),
       );
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([HEX]);
       expect(result.current.resolvedHtml).toContain(`src="${DATA}"`);
     });
 
@@ -111,29 +135,32 @@ describe("useResolvedInlineImageHtml", () => {
     ])("resolves %s", (_name, src) => {
       vi.mocked(useAttachmentPreviews).mockReturnValue({
         dataUrls: new Map([[HEX, DATA]]),
+        removedIds: new Set<string>(),
         isLoading: false,
       });
       const { result } = renderHook(() =>
         useResolvedInlineImageHtml(`<img src="${src}">`),
       );
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([HEX]);
       expect(result.current.resolvedHtml).toContain(`src="${DATA}"`);
     });
 
     it("dedupes the same attachment across bare and .iix forms", () => {
       vi.mocked(useAttachmentPreviews).mockReturnValue({
         dataUrls: new Map([[HEX, DATA]]),
+        removedIds: new Set<string>(),
         isLoading: false,
       });
       const html = `<img src="/${UUID}"><img src="/${HEX}.iix"><img src="/${HEX}">`;
       const { result } = renderHook(() => useResolvedInlineImageHtml(html));
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([HEX]);
       expect(result.current.resolvedHtml.match(/data:image\/png/g)).toHaveLength(3);
     });
 
     it("strips an unresolved bare-id src like an unresolved .iix src", () => {
       vi.mocked(useAttachmentPreviews).mockReturnValue({
         dataUrls: new Map([["ffffffffffffffffffffffffffffffff", DATA]]),
+        removedIds: new Set<string>(),
         isLoading: false,
       });
       const { result } = renderHook(() =>
@@ -142,7 +169,8 @@ describe("useResolvedInlineImageHtml", () => {
       expect(result.current.resolvedHtml).toContain('data-unresolved="true"');
       expect(result.current.resolvedHtml).not.toContain("<img");
       // The id is shown (as a UUID) in the "not available" note, not as a src.
-      expect(result.current.resolvedHtml).toContain(`ID: ${UUID}`);
+      expect(result.current.resolvedHtml).toContain("This image is not available.");
+      expect(result.current.resolvedHtml).not.toContain(`ID: ${UUID}`);
     });
 
     it.each([
@@ -155,11 +183,12 @@ describe("useResolvedInlineImageHtml", () => {
     ])("does not fetch or rewrite a %s src", (_name, src) => {
       vi.mocked(useAttachmentPreviews).mockReturnValue({
         dataUrls: new Map([[HEX, DATA]]),
+        removedIds: new Set<string>(),
         isLoading: false,
       });
       const html = `<img src="${src}">`;
       const { result } = renderHook(() => useResolvedInlineImageHtml(html));
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([]);
+      expect(vi.mocked(useAttachmentPreviews).mock.calls.at(-1)?.[0]).toEqual([]);
       expect(result.current.resolvedHtml).toBe(html);
     });
   });
