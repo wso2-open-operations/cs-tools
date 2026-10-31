@@ -75,7 +75,7 @@ func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workI
 		return content, nil
 	}
 	if len(matches) > maxNewInlineImages {
-		return "", &apierror.ValidationError{Msg: fmt.Sprintf("a comment can hold at most %d images", maxNewInlineImages)}
+		return "", &apierror.ValidationError{Msg: fmt.Sprintf("at most %d new images can be added to a comment at a time", maxNewInlineImages)}
 	}
 
 	// Run as the caller: a work item they cannot see is not found.
