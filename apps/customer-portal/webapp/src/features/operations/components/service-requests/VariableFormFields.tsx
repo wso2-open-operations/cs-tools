@@ -43,7 +43,7 @@ import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageSizeExceededMessage,
 } from "@constants/common";
 
 export interface VariableFormFieldsProps {
@@ -398,7 +398,7 @@ export default function VariableFormFields({
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : imageSizeExceededMessage(),
               )
             }
           />

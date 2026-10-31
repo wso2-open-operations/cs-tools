@@ -86,16 +86,33 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     });
   });
 
-  it("allows files over 10 MB up to 100 MB", () => {
+  it("allows a file up to the 10 MB default and refuses one over it", () => {
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 50 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
     pick(big);
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
     const tooBig = new File(["x"], "huge.bin");
-    Object.defineProperty(tooBig, "size", { value: 101 * 1024 * 1024 });
+    Object.defineProperty(tooBig, "size", { value: 11 * 1024 * 1024 });
     pick(tooBig);
-    expect(screen.getByText(/exceeds 100 MB limit/i)).toBeInTheDocument();
+    expect(screen.getByText(/exceeds 10 MB limit/i)).toBeInTheDocument();
+  });
+
+  it("uses the configured file size limit in the check and the message", () => {
+    (window as unknown as { config?: unknown }).config = { CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 };
+    try {
+      const { pick } = renderModal({ caseId: "case-1" });
+      const ok = new File(["x"], "ok.bin");
+      Object.defineProperty(ok, "size", { value: 24 * 1024 * 1024 });
+      pick(ok);
+      expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+      const tooBig = new File(["x"], "big.bin");
+      Object.defineProperty(tooBig, "size", { value: 26 * 1024 * 1024 });
+      pick(tooBig);
+      expect(screen.getByText(/exceeds 25 MB limit/i)).toBeInTheDocument();
+    } finally {
+      (window as unknown as { config?: unknown }).config = undefined;
+    }
   });
 
   it("shows the server's message and retries only the confirm step", async () => {

@@ -14,6 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  entityAttachmentMaxBytes,
+  formatLimitMb,
+  inlineImageMaxBytes,
+} from "@config/attachmentLimitsConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 
 /** Which attachment table a stored attachment lives in. */
@@ -64,16 +69,6 @@ export type AuthFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
-
-/**
- * Largest file the portal offers to upload. Entity-service enforces its own
- * (authoritative) limit and `maxBytes` of the upload response is checked too;
- * this only avoids starting an upload that is certain to be refused.
- */
-export const STORED_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
-
-/** Largest comment image the portal offers to upload (entity-service's default). */
-export const STORED_INLINE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 export const STORED_ATTACHMENT_RATE_LIMIT_MESSAGE =
   "Too many attachment requests. Please wait a minute and try again.";
@@ -324,13 +319,13 @@ export async function uploadStoredAttachment(
   },
 ): Promise<StoredAttachmentConfirmed> {
   const { type, parentId, file, name, onStep } = input;
+  // Only an early refusal: entity-service enforces its own limit, and the
+  // `maxBytes` of the upload response is checked below too.
   const localMaxBytes =
-    type === "comment"
-      ? STORED_INLINE_IMAGE_MAX_BYTES
-      : STORED_ATTACHMENT_MAX_BYTES;
+    type === "comment" ? inlineImageMaxBytes() : entityAttachmentMaxBytes();
   if (file.size > localMaxBytes) {
     throw new Error(
-      `File size exceeds ${Math.floor(localMaxBytes / (1024 * 1024))} MB limit.`,
+      `File size exceeds ${formatLimitMb(localMaxBytes)} MB limit.`,
     );
   }
   onStep?.("preparing");

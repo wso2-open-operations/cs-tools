@@ -248,9 +248,6 @@ export const MAX_COMMENT_BODY_BYTES = 1 * 1024 * 1024;
 // so the FE blocks before the BE rejects with 413.
 export const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 
-// Maximum allowed embedded image size in bytes (10MB for base64 images in rich text).
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-
 // Allowed MIME types for inline image uploads in the rich text editor.
 export const ALLOWED_INLINE_IMAGE_TYPES = [
   "image/png",

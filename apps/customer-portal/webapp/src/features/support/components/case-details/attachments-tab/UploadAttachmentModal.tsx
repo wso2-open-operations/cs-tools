@@ -32,9 +32,12 @@ import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { usePostDeploymentAttachment } from "@features/project-details/api/usePostDeploymentAttachment";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
 import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import {
+  entityAttachmentMaxBytes,
+  formatLimitMb,
+} from "@config/attachmentLimitsConfig";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import {
-  STORED_ATTACHMENT_MAX_BYTES,
   UploadConfirmPendingError,
   type StoredUploadStep,
 } from "@api/storedAttachments";
@@ -98,9 +101,9 @@ export default function UploadAttachmentModal({
   // not offered there.
   const showDescription = isDeploymentMode && !useStored;
   const maxBytes = useStored
-    ? STORED_ATTACHMENT_MAX_BYTES
+    ? entityAttachmentMaxBytes()
     : MAX_ATTACHMENT_SIZE_BYTES;
-  const maxLabel = `${Math.round(maxBytes / (1024 * 1024))} MB`;
+  const maxLabel = `${formatLimitMb(maxBytes)} MB`;
   const isPending =
     storedUpload.isPending ||
     storedConfirm.isPending ||

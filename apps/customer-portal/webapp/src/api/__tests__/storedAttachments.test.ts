@@ -22,13 +22,15 @@ import {
   fetchInlineImageBlob,
   requestAttachmentLink,
   sendFileToUploadLink,
-  STORED_ATTACHMENT_MAX_BYTES,
-  STORED_INLINE_IMAGE_MAX_BYTES,
   toHyphenatedUuid,
   uploadStoredAttachment,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
 import { ApiError } from "@utils/ApiError";
+import {
+  entityAttachmentMaxBytes,
+  inlineImageMaxBytes,
+} from "@config/attachmentLimitsConfig";
 
 const BASE = "https://api.test";
 
@@ -198,7 +200,7 @@ describe("storedAttachments", () => {
       attachmentId: "att-1",
       uploadUrl: "https://files.test/api/v2/shares/up1",
       fieldName: "filenames",
-      maxBytes: STORED_ATTACHMENT_MAX_BYTES,
+      maxBytes: entityAttachmentMaxBytes(),
     };
 
     it("runs start, send and confirm in order and reports the steps", async () => {
@@ -262,7 +264,7 @@ describe("storedAttachments", () => {
     });
 
     it("refuses a file over the limit before anything is sent", async () => {
-      const big = { size: STORED_ATTACHMENT_MAX_BYTES + 1, name: "big.bin", type: "" } as File;
+      const big = { size: entityAttachmentMaxBytes() + 1, name: "big.bin", type: "" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
           type: "work_item",
@@ -270,12 +272,32 @@ describe("storedAttachments", () => {
           file: big,
           name: "big.bin",
         }),
-      ).rejects.toThrow("File size exceeds 100 MB limit.");
+      ).rejects.toThrow("File size exceeds 10 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
-    it("refuses a comment image over 10 MB before anything is sent", async () => {
-      const big = { size: STORED_INLINE_IMAGE_MAX_BYTES + 1, name: "p.png", type: "image/png" } as File;
+    it("uses the configured limits, and says the configured number", async () => {
+      (window as unknown as { config?: unknown }).config = {
+        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: "25",
+        CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 4,
+      };
+      try {
+        const bigFile = { size: 25 * 1024 * 1024 + 1, name: "b.bin", type: "" } as File;
+        await expect(
+          uploadStoredAttachment(authFetch, { type: "work_item", parentId: "case-1", file: bigFile, name: "b.bin" }),
+        ).rejects.toThrow("File size exceeds 25 MB limit.");
+        const bigImage = { size: 4 * 1024 * 1024 + 1, name: "p.png", type: "image/png" } as File;
+        await expect(
+          uploadStoredAttachment(authFetch, { type: "comment", parentId: "case-1", file: bigImage, name: "p.png" }),
+        ).rejects.toThrow("File size exceeds 4 MB limit.");
+        expect(authFetch).not.toHaveBeenCalled();
+      } finally {
+        (window as unknown as { config?: unknown }).config = undefined;
+      }
+    });
+
+    it("refuses a comment image over the 1 MB default before anything is sent", async () => {
+      const big = { size: inlineImageMaxBytes() + 1, name: "p.png", type: "image/png" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
           type: "comment",
@@ -283,12 +305,12 @@ describe("storedAttachments", () => {
           file: big,
           name: "p.png",
         }),
-      ).rejects.toThrow("File size exceeds 10 MB limit.");
+      ).rejects.toThrow("File size exceeds 1 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
-    it("does not apply the 10 MB image limit to a work item file (only the server's limit)", async () => {
-      const mid = { size: STORED_INLINE_IMAGE_MAX_BYTES + 1, name: "a.bin", type: "" } as File;
+    it("does not apply the image limit to a work item file (only the server's limit)", async () => {
+      const mid = { size: inlineImageMaxBytes() * 6, name: "a.bin", type: "" } as File;
       authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
       await expect(
         uploadStoredAttachment(authFetch, {
