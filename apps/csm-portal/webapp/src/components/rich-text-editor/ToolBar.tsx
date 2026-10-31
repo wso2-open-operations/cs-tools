@@ -88,6 +88,7 @@ import {
   INSERT_IMAGE_COMMAND,
   scrollElement,
   sanitizeUrl,
+  type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
 import { $createCodeNode, $isCodeNode } from "@lexical/code";
 import { $patchStyleText, $setBlocksType } from "@lexical/selection";
@@ -108,12 +109,15 @@ const Toolbar = ({
   variant = "full",
   showKeyboardHint = false,
   enterToSubmit = false,
+  imageUploader,
 }: {
   onAttachmentClick?: () => void;
   disabled?: boolean;
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
   enterToSubmit?: boolean;
+  /** Stores a picked image instead of embedding it as base64; see {@link ImageUploadHandler}. */
+  imageUploader?: ImageUploadHandler;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
   const [editor] = useLexicalComposerContext();
@@ -270,6 +274,14 @@ const Toolbar = ({
         showError(
           `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
         );
+        resetInput();
+        return;
+      }
+      if (imageUploader) {
+        const src = imageUploader(file);
+        editor.focus(() => {
+          editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
+        });
         resetInput();
         return;
       }

@@ -48,6 +48,16 @@ import {
   MAX_IMAGE_SIZE_BYTES,
 } from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
+import { useBackendApi } from "@api/backend/client";
+import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
+import {
+  hasBlobSource,
+  inspectInlineImages,
+  releaseInlineImages,
+  resolveInlineImageSources,
+  startInlineImageUpload,
+  useInlineImageStatus,
+} from "@features/csm-cases/api/inlineImageUploads";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
@@ -100,6 +110,13 @@ interface CsmCaseCommentInputProps {
   isResumingWork?: boolean;
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
   autoFocus?: boolean;
+  /**
+   * The case's id. When set (and entity attachments are on), an image pasted or
+   * picked into the comment is uploaded to the case as it is added and the
+   * comment carries only a reference to it, not the image as base64. Leave unset
+   * where the comment's work item is not a case: images are embedded as before.
+   */
+  imageUploadParentId?: string;
   /**
    * Draft state, lifted to the parent so it survives this component
    * unmounting (e.g. the case-detail page hides the Activities tab body on
@@ -201,6 +218,7 @@ export default function CsmCaseCommentInput({
   onResumeWork,
   isResumingWork = false,
   autoFocus = false,
+  imageUploadParentId,
   draftHtml,
   onDraftHtmlChange,
   draftAttachments,
@@ -211,6 +229,16 @@ export default function CsmCaseCommentInput({
   onDraftSourceModeChange,
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useDraftState(draftHtml, onDraftHtmlChange, "");
+  const api = useBackendApi();
+  const onImageUpload = useMemo(
+    () =>
+      imageUploadParentId && isEntityAttachmentsEnabled()
+        ? (file: File) => startInlineImageUpload(api, imageUploadParentId, file)
+        : undefined,
+    [api, imageUploadParentId],
+  );
+  const imageStatus = useInlineImageStatus(html);
+  const uploadingImages = imageStatus.pending > 0;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceMode, setSourceMode] = useDraftState(
@@ -400,10 +428,32 @@ export default function CsmCaseCommentInput({
       );
       return;
     }
+    // Images added to the comment upload as they are added. Send only once each
+    // is stored, with its reference in place of the local preview; a `blob:`
+    // address must never reach the backend.
+    const images = inspectInlineImages(html);
+    if (images.pending > 0) {
+      setError("Wait for the images to finish uploading.");
+      return;
+    }
+    if (images.failedMessage) {
+      setError(`${images.failedMessage} Remove that image and add it again.`);
+      return;
+    }
+    if (images.unknown > 0) {
+      setError("An image in the comment could not be uploaded. Remove it and add it again.");
+      return;
+    }
+    const body = resolveInlineImageSources(html);
+    if (hasBlobSource(body)) {
+      setError("An image in the comment could not be uploaded. Remove it and add it again.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(html, internal, attachments);
+      await onSubmit(body, internal, attachments);
+      releaseInlineImages(html);
       setHtml("");
       setAttachments([]);
       resetTriggerRef.current += 1;
@@ -644,6 +694,7 @@ export default function CsmCaseCommentInput({
             void submit();
           }}
           onPasteError={onPasteError}
+          onImageUpload={onImageUpload}
         />
       )}
 
@@ -674,7 +725,9 @@ export default function CsmCaseCommentInput({
         >
           {sizeError ??
             error ??
-            (showBottomLockReason
+            (uploadingImages
+              ? "Uploading images…"
+              : showBottomLockReason
               ? publicCommentDisabledReason
               : sourceMode
                 ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
@@ -696,6 +749,7 @@ export default function CsmCaseCommentInput({
               disabled={
                 disabled ||
                 submitting ||
+                uploadingImages ||
                 (isEmpty(html) && attachments.length === 0) ||
                 overSizeLimit ||
                 // Safety net: a public reply with text while replies are locked.
