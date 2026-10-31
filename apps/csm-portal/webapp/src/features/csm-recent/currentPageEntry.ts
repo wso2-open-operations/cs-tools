@@ -19,6 +19,7 @@ import {
   navNodeMatchForPath,
   navNodeRoutes,
   navTabForSearch,
+  navViewForSearch,
 } from "@config/csmNavItems";
 import type { RecentView } from "@features/csm-recent/hooks/useRecentViews";
 
@@ -32,15 +33,35 @@ function humanizeSegment(segment: string): string {
 }
 
 /**
- * `search` with the `tab` parameter removed, once it has been resolved to a nav
- * node. It selects the destination rather than filtering it, so counting it as
- * a filter would label the Incidents tab "Operations: 1 filter".
+ * `search` with `names` removed, once they have been resolved to a nav node
+ * (the `tab` parameter) or to a named place inside one (a node's `views`).
+ * Either selects the destination rather than filtering it, so counting it as a
+ * filter would label the Incidents tab "Operations: 1 filter" and Standard
+ * changes "Change requests: 1 filter".
  */
-function searchWithoutTab(search: string): string {
+function searchWithout(search: string, names: readonly string[]): string {
   const params = new URLSearchParams(search);
-  params.delete("tab");
+  names.forEach((name) => params.delete(name));
   const rest = params.toString();
   return rest ? `?${rest}` : "";
+}
+
+/** `search` with every parameter whose name starts with `prefix` removed. */
+function searchWithoutPrefix(search: string, prefix: string): string {
+  const params = new URLSearchParams(search);
+  [...new Set(params.keys())]
+    .filter((name) => name.startsWith(prefix))
+    .forEach((name) => params.delete(name));
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}
+
+/** `href` with each `[param, value]` set on its query, in order. */
+function withParams(href: string, pairs: ReadonlyArray<readonly [string, string]>): string {
+  const [path, query = ""] = href.split("?");
+  const params = new URLSearchParams(query);
+  pairs.forEach(([param, value]) => params.set(param, value));
+  return `${path}?${params.toString()}`;
 }
 
 /** Short, human summary of a filter query string for a "search" label. */
@@ -67,7 +88,6 @@ function summarizeQuery(search: string): string {
  * this. `id` is the full href so distinct filtered views pin separately.
  */
 export function currentPageEntry(pathname: string, search: string): PageEntry {
-  const href = pathname + search;
   // Match the most specific node, so a second-level tab pins under its own name
   // ("Accounts") rather than its section's ("Customers"). The matched prefix is
   // the node's canonical path here — a query-param tab's `href` points at the
@@ -81,13 +101,28 @@ export function currentPageEntry(pathname: string, search: string): PageEntry {
   // separately.
   const tab = onNavRoot ? navTabForSearch(match.node, search) : undefined;
   const node = tab ?? (onNavRoot ? match.node : undefined);
-  const canonicalHref = tab ? tab.href : match?.prefix;
-  const filters = tab ? searchWithoutTab(search) : search;
+  const tabSearch = tab ? searchWithout(search, ["tab"]) : search;
+
+  // Likewise a named place inside the page (a node's `views`: Standard changes
+  // inside Change requests, and its proposals) is the destination, named after
+  // itself, with its own canonical href so each place pins separately. The
+  // parameters such a place keeps for the page's default one (the change
+  // request list's `cr*` filters on Standard changes) are not its filters:
+  // they are left out of its title and of its href alike.
+  const view = node ? navViewForSearch(node, tabSearch) : undefined;
+  const ignored = view?.ignoreParamPrefix;
+  const tabFilters = ignored ? searchWithoutPrefix(tabSearch, ignored) : tabSearch;
+  const href = pathname + (ignored ? searchWithoutPrefix(search, ignored) : search);
+  const nodeHref = tab ? tab.href : match?.prefix;
+  const canonicalHref =
+    view && nodeHref ? withParams(nodeHref, view.params) : nodeHref;
+  const label = view ? view.label : node?.label;
+  const filters = view
+    ? searchWithout(tabFilters, view.params.map(([param]) => param))
+    : tabFilters;
 
   if (filters && filters !== "?") {
-    const base = node
-      ? node.label
-      : humanizeSegment(pathname.split("/")[1] ?? "");
+    const base = label ?? humanizeSegment(pathname.split("/")[1] ?? "");
     return {
       kind: "search",
       id: href,
@@ -96,11 +131,11 @@ export function currentPageEntry(pathname: string, search: string): PageEntry {
     };
   }
 
-  if (node && canonicalHref) {
+  if (label && canonicalHref) {
     return {
       kind: "page",
       id: canonicalHref,
-      title: node.label,
+      title: label,
       href: canonicalHref,
     };
   }

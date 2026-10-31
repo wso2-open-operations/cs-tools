@@ -17,21 +17,49 @@
 import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, Plus } from "@wso2/oxygen-ui-icons-react";
 import { type JSX } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import CsmIssuesView from "@features/csm-cases/components/CsmIssuesView";
-import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
+import ChangeRequestsArea from "@features/csm-operations/components/ChangeRequestsArea";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import ProblemsTab from "@features/csm-operations/components/ProblemsTab";
 import OutagesTab from "@features/csm-operations/components/OutagesTab";
 import RunbooksTab from "@features/csm-operations/components/RunbooksTab";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePathSectionTabs } from "@hooks/useSectionTabs";
+import { changeRequestsView } from "@features/csm-operations/utils/standardChanges";
+
+interface PageHeading {
+  title: string;
+  subtitle: string;
+}
+
+/** The heading of every Operations tab but Standard changes. */
+const OPERATIONS_HEADING: PageHeading = {
+  title: "Operations",
+  subtitle: "Service requests, change requests, incidents, problems, and runbooks across customers.",
+};
+
+/**
+ * The heading of the Standard changes sub-view of Change requests (its
+ * catalogue and its proposals alike). A standard change is a templated change
+ * request, so this is about change requests and nothing else: the
+ * Operations-wide line (service requests, incidents, problems, runbooks) does
+ * not describe it.
+ */
+const STANDARD_CHANGES_HEADING: PageHeading = {
+  title: "Standard changes",
+  subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+};
 
 /**
  * Operations landing — the home for the managed-cloud operational entities,
  * split into Service Requests / Change Requests / Incidents / Problems tabs.
  * Service requests are case-typed, so they list through the shared issues view;
- * the others each have their own search endpoint and listing.
+ * the others each have their own search endpoint and listing. Standard changes
+ * (templated change requests) are a sub-view of Change requests
+ * (`ChangeRequestsArea`), not a tab of their own; there the page heading is
+ * about standard changes (`STANDARD_CHANGES_HEADING`) instead of the
+ * Operations-wide one, which names entities they have nothing to do with.
  *
  * Which tabs exist comes from the navigation tree, so a deployment can restrict
  * one through `CSM_PORTAL_FEATURE_OVERRIDES` without touching this page.
@@ -51,6 +79,9 @@ export default function OperationsPage(): JSX.Element {
   // CsmIssuesView, which reads this same state) — skip here to avoid a
   // duplicate.
   const backState = useLocation().state as { from?: string } | undefined;
+  const [searchParams] = useSearchParams();
+  const changeRequestsSubView = activeTab === "change-requests" ? changeRequestsView(searchParams) : "list";
+  const heading = changeRequestsSubView === "standard" ? STANDARD_CHANGES_HEADING : OPERATIONS_HEADING;
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -67,9 +98,9 @@ export default function OperationsPage(): JSX.Element {
       )}
 
       <Box>
-        <Typography variant="h5">Operations</Typography>
+        <Typography variant="h5">{heading.title}</Typography>
         <Typography variant="body2" color="text.secondary">
-          Service requests, change requests, incidents, problems, and runbooks across customers.
+          {heading.subtitle}
         </Typography>
       </Box>
 
@@ -95,7 +126,7 @@ export default function OperationsPage(): JSX.Element {
         />
       )}
 
-      {activeTab === "change-requests" && <ChangeRequestsTab />}
+      {activeTab === "change-requests" && <ChangeRequestsArea />}
 
       {activeTab === "incidents" && <IncidentsTab />}
 

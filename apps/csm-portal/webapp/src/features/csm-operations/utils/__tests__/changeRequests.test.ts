@@ -24,6 +24,8 @@ import {
   isStaleAnswerError,
   buildChangeRequestSearchFilters,
   buildCloneChangeRequestNavState,
+  changeRequestDraftKey,
+  requestApprovalSchedulesDirectly,
   CHANGE_REQUEST_CREATE_TYPE_OPTIONS,
   changeRequestBlockingReason,
   CHANGE_REQUEST_CATEGORY_OPTIONS,
@@ -1986,5 +1988,76 @@ describe("a time the customer proposed (the previous system's customer_updated_o
         expect(customerApprovedDisplay({ hasCustomerApproved: false, state, confirmCustomerUpdatedDate: "disagree" })).toBe("No");
       }
     });
+  });
+});
+
+describe("standard changes: clone, draft key and the Schedule label", () => {
+  const TEMPLATED: BeChangeRequestDetail = {
+    id: "chg-1",
+    number: "CHG0001234",
+    subject: "Rotate the TLS certificate on gw-1",
+    description: "<p>Rotate.</p>",
+    implementationPlan: "<p>Steps.</p>",
+    rollbackPlan: "<p>Restore.</p>",
+    testPlan: "<p>Check.</p>",
+    impactDescription: "<p>Low.</p>",
+    justification: "<p>Expiring.</p>",
+    implementationDeviation: "<p>Skipped a step.</p>",
+    type: "standard",
+    impact: "low",
+    category: "software",
+    customerApprovalRequired: true,
+    customerReviewRequired: true,
+    project: { id: "proj-a", name: "Acme Project" },
+    assignedEngineer: { id: "u-1", name: "Jane Doe" },
+    standardChange: {
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      versionId: "ver-2",
+      version: 2,
+      parameters: [
+        { key: "host", label: "Host", type: "text", required: true, value: "gw-1" },
+        { key: "notes", label: "Notes", type: "textarea", required: false, value: null },
+        { key: "env", label: "Environment", type: "select", required: true, options: ["a", "b"], value: "b" },
+      ],
+    },
+  };
+
+  it("clones a templated change as the template, its values and what the template does not specify", () => {
+    expect(buildCloneChangeRequestNavState(TEMPLATED)).toEqual({
+      sourceNumber: "CHG0001234",
+      type: "standard",
+      standardChangeTemplateId: "tpl-1",
+      standardChangeTemplateLabel: "STD0000001 — Rotate a TLS certificate",
+      standardChangeParameters: { host: "gw-1", env: "b" },
+      assignedEngineerId: "u-1",
+      assignedEngineerLabel: "Jane Doe",
+      projectId: "proj-a",
+      projectLabel: "Acme Project",
+    });
+  });
+
+  it("clones a change not raised from a template as before", () => {
+    const state = buildCloneChangeRequestNavState({ ...TEMPLATED, standardChange: null });
+    expect(state.subject).toBe("Rotate the TLS certificate on gw-1");
+    expect(state.standardChangeTemplateId).toBeUndefined();
+  });
+
+  it("keeps a draft opened from a template apart from the others", () => {
+    expect(changeRequestDraftKey({ kind: "template", templateId: "tpl-1" })).not.toBe(changeRequestDraftKey({ kind: "new" }));
+    expect(changeRequestDraftKey({ kind: "template", templateId: "tpl-1" })).not.toBe(
+      changeRequestDraftKey({ kind: "template", templateId: "tpl-2" }),
+    );
+  });
+
+  it.each([
+    [{ type: "standard", customerApprovalRequired: false }, true],
+    [{ type: "Standard ", customerApprovalRequired: false }, true],
+    [{ type: "standard", customerApprovalRequired: true }, false],
+    [{ type: "standard", customerApprovalRequired: undefined }, false],
+    [{ type: "normal", customerApprovalRequired: false }, false],
+    [{ type: "emergency", customerApprovalRequired: false }, false],
+  ])("Request Approval schedules %o outright: %s", (cr, expected) => {
+    expect(requestApprovalSchedulesDirectly(cr)).toBe(expected);
   });
 });

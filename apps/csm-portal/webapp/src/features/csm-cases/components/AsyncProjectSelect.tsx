@@ -52,6 +52,13 @@ interface AsyncProjectSelectProps {
    * report/engagement creation flows).
    */
   filterProject?: (project: BeProject) => boolean;
+  /**
+   * Narrows the search to one customer's (account's) projects, server-side
+   * (e.g. a change request raised from a standard change template, which is
+   * used only for its own customer's projects). The current selection always
+   * stays shown.
+   */
+  accountId?: string;
 }
 
 /**
@@ -72,6 +79,7 @@ export default function AsyncProjectSelect({
   disabled,
   disableClearable,
   filterProject,
+  accountId,
 }: AsyncProjectSelectProps): JSX.Element {
   // Search term tracked separately from the displayed input value (which MUI
   // manages and shows the selected project's name) so the type-ahead works.
@@ -89,7 +97,7 @@ export default function AsyncProjectSelect({
     hasNextPage,
     isError,
     fetchNextPage,
-  } = useInfiniteProjectSearch(query, open);
+  } = useInfiniteProjectSearch(query, open, accountId);
 
   // Lazy-load the next page when the listbox is scrolled near its end.
   const handleListboxScroll = (event: React.UIEvent<HTMLElement>): void => {

@@ -61,6 +61,7 @@ function groupByKind(
     change_request: [],
     problem: [],
     outage: [],
+    standard_change: [],
   };
   for (const e of entries) out[e.kind].push(e);
   return out;

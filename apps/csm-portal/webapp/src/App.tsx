@@ -78,6 +78,12 @@ import IncidentTaskDetailPage from "@features/csm-operations/pages/IncidentTaskD
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
+import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
+import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
+import {
+  OperationsIndexRedirect,
+  StandardChangesPathRedirect,
+} from "@features/csm-operations/pages/OperationsLegacyRedirects";
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 import CsmUserManagementLandingPage from "@features/csm-admin/pages/CsmUserManagementLandingPage";
 import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
@@ -514,14 +520,13 @@ export default function App(): JSX.Element {
                       an OLD `?tab=` link (this section's shape before this
                       change): `LegacyQueryTabRedirect` translates it to the
                       new path form, or lands on the first usable tab if
-                      there's no `?tab=` at all. */}
+                      there's no `?tab=` at all. An old link to the
+                      standard changes tab (`?tab=standard_changes`, or the
+                      `/operations/standard-changes` path) lands on
+                      Standard changes inside Change requests
+                      (`OperationsLegacyRedirects`). */}
                   <Route path="operations">
-                    <Route
-                      index
-                      element={
-                        <LegacyQueryTabRedirect sectionId="operations" basePath="/operations" />
-                      }
-                    />
+                    <Route index element={<OperationsIndexRedirect />} />
                     <Route path=":tab" element={<OperationsPage />} />
                     <Route
                       path="service-requests/new"
@@ -578,6 +583,9 @@ export default function App(): JSX.Element {
                       }
                     />
                     <Route path="outages/:id" element={<OutageDetailPage />} />
+                    <Route path="standard-changes" element={<StandardChangesPathRedirect />} />
+                    <Route path="standard-changes/:id" element={<StandardChangeTemplateDetailPage />} />
+                    <Route path="standard-change-proposals/:id" element={<StandardChangeProposalPage />} />
                   </Route>
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />

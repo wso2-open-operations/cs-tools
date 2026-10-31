@@ -83,6 +83,9 @@ func TestCodes_AreStableLowerSnakeCase(t *testing.T) {
 		"CodeChangeRequestDeviationFinal":           "change_request_deviation_final",
 		"CodeChangeRequestDeviationNotYet":          "change_request_deviation_not_yet",
 		"CodeChangeRequestDeviationNotIncorporated": "change_request_deviation_not_incorporated",
+		"CodeChangeRequestStandardTemplateField":    "change_request_standard_template_field",
+		"CodeStandardChangeTemplateUnavailable":     "standard_change_template_unavailable",
+		"CodeStandardChangeTemplateOtherCustomer":   "standard_change_template_other_customer",
 	}
 	got := map[string]string{
 		"CodeChangeRequestOnHold":                   CodeChangeRequestOnHold,
@@ -99,6 +102,9 @@ func TestCodes_AreStableLowerSnakeCase(t *testing.T) {
 		"CodeChangeRequestDeviationFinal":           CodeChangeRequestDeviationFinal,
 		"CodeChangeRequestDeviationNotYet":          CodeChangeRequestDeviationNotYet,
 		"CodeChangeRequestDeviationNotIncorporated": CodeChangeRequestDeviationNotIncorporated,
+		"CodeChangeRequestStandardTemplateField":    CodeChangeRequestStandardTemplateField,
+		"CodeStandardChangeTemplateUnavailable":     CodeStandardChangeTemplateUnavailable,
+		"CodeStandardChangeTemplateOtherCustomer":   CodeStandardChangeTemplateOtherCustomer,
 	}
 	snake := regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 	seen := map[string]string{}

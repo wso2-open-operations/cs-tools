@@ -462,6 +462,25 @@ This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s ow
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
 reached the browser; this is what stops them being sent at all to a caller who shouldn't see them.
 
+## Standard changes (`internal/handler/standard_changes.go`)
+
+Operations > Change requests > Standard changes: the CAB-approved standard change templates and the proposals that
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
+are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
+only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
+proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
+or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
+message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
+one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
+is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
+`POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
+`standardChangeParameters`, forwarded like every other create field. A template is one customer's
+(entity-service migration 0254): templates and proposals carry `customer` {id, name}, the search
+bodies' `accountId` filter and a proposal's `accountId` pass through raw, and raising a change request
+from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
+400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
+(`standard_change_customer_test.go`).
+
 ## Change request tags go through the case tag routes
 
 `GET /change-requests/{id}` is a raw pass-through, so the `tags` array the

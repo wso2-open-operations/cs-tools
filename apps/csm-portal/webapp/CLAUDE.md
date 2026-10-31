@@ -632,6 +632,129 @@ The previous system has no Emergency CAB and acts on an Emergency change **witho
 - **ECAB is history only.** `approvalStageLabel` still reads "ECAB Approval" / "Emergency CAB" (and the stage-to-state map still decides "ECAB Approval" in Authorize), so an Emergency change raised before this keeps displaying its stage and the approvers it asked can still decide it (a decision needs the caller's own REQUESTED row). Nothing in the webapp creates, offers or describes ECAB any more.
 - e2e: the fake API's Emergency Request Approval creates one `CAB Approval` stage (`FAKE_CAB_GROUP`), ignores the stored boxes (`effectiveGates`) and refuses a create / PATCH that turns a box on in the backend's words (`emergencyNoCustomerConsentMessage`); an OLDER Emergency change with a live ECAB stage is `api.startOlderEmergencyAtAuthorize()` (and `startAtState` still settles one for the customer-gate rows), with `FAKE_ECAB` / `FAKE_ECAB_GROUP` kept only for that. Retired: "Emergency with Customer Approval (ECAB -> Customer Approval -> Scheduled)" (vitest and Playwright), which is now "an Emergency change never reaches a customer state". A group may have no members: that is an operations matter (there is no admin UI and no schema change), so a new Emergency change where nobody maintains the CAB Approval group's membership is refused with the backend's readable "no members" message, which names the group.
 
+## Standard changes: templates, proposals, and a change raised from one
+
+A standard change is raised only from a CAB-approved template (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
+thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCode`). Hooks: `api/useStandardChanges.ts` (every
+write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
+declarations, values, `{{key}}` placeholders, completeness, the preview's rendering): `utils/standardChanges.ts`.
+
+- **Inside Operations > Change requests, as one sub-view.** Standard changes are templated change requests, so the
+  Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
+  before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
+  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, "Propose a standard change",
+  `kind: "new"`); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
+  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
+  fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
+  me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
+  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
+  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your CAB decision · N
+    draft(s) of yours", each part a link to the proposals filtered to it (`scope=awaiting`; `scope=mine&state=draft`),
+    built from the current query so the list's `cr*` filters ride along.
+    Counts come from `useCountStandardChangeProposals` (`POST /standard-change-proposals/search` with
+    `{awaitingMyDecision:true}` / `{proposedByMe:true, states:["draft"]}`, limit 1, `total` read, no retry). Nothing is
+    shown until both counts are in, a part with 0 is left out, nothing at all when both are 0, and a failed count is
+    left out silently (no banner).
+  - **The list's filters do not apply to Standard changes, but they are kept.** Entering it keeps the `cr*`
+    parameters in the URL, unread (`standardChangesSearch` copies everything but Standard changes' own parameters),
+    and going back to the list drops only `view`/`show`/`scope`/`state` (`changeRequestListSearch`), so clicking
+    "Change requests" restores the list exactly as it was left. A pin / Recent entry of Standard changes ignores
+    them: the Change requests nav node's `views.ignoreParamPrefix: "cr"` (equal to
+    `CHANGE_REQUEST_LIST_PARAM_PREFIX`, a test checks; every `CR_FILTER_PARAM_KEYS` entry starts with it) makes
+    `currentPageEntry` leave them out of the title and the href, so it reads "Standard changes", not "Standard
+    changes: 2 filters". Because such a pin's href is shorter than the URL, `PinThisPageButton` finds the page's
+    entry by the URL or, failing that, by the href `currentPageEntry` gives it; matching the URL alone showed "Pin"
+    on a page that was pinned, and the next click unpinned it. Switching the strip pushes a history entry; a filter
+    change replaces it.
+  - **Old URLs.** `?view=catalogue` / `?view=proposals` (the two sub-views this replaced) are read
+    (`changeRequestsView`, `standardChangesShow`) and rewritten in place to `?view=standard[&show=proposals]`
+    (`canonicalStandardChangesSearch`, replace, no history entry; the list's `cr*` filters are kept). The older separate tab
+    (`/operations?tab=standard_changes|standard-changes[&view=proposals]`, `/operations/standard-changes[?view=proposals]`)
+    is redirected the same way (`OperationsLegacyRedirects`, `legacyStandardChangesHref`).
+  - **Heading.** On Standard changes the page heading is "Standard changes" with "Pre-authorised change requests,
+    raised from templates the CAB has approved." (`STANDARD_CHANGES_HEADING` in `OperationsPage`), for the catalogue
+    and the proposals alike, never the Operations-wide "Service requests, change requests, incidents, problems, and
+    runbooks" line, which every other Operations tab (the change request list included) keeps.
+  - **Template and proposal pages.** The Change requests nav node owns `/operations/standard-changes` and
+    `/operations/standard-change-proposals`, so it is the one highlighted there; the pages carry "Change requests ›
+    Standard changes › <STD number>" and "Change requests › Standard changes › Proposals › <SCP number>"
+    (`StandardChangeBreadcrumbs`, `show` prop), and Back falls back to Standard changes / all its proposals. Each records a
+    Recent entry (`standardChangeRecentEntry`, kind `standard_change`, "STD0000003 · <name>", grouped as "Standard
+    changes" in Recent), so "Pin this page" there names the record, not "Operations".
+  - **Pins of the tab.** The Change requests nav node declares the places as `views` with a nested `within`
+    (`CsmNavNode.views`, `navViewForSearch`): `view=standard` pins as "Standard changes",
+    `view=standard&show=proposals` as "Standard change proposals" (its `scope`/`state` count as filters, `cr*` never
+    does), and the old
+    `catalogue` / `proposals` values are named the same way.
+- **A standard change is one customer's** (entity-service `CLAUDE.md` has the rules; a customer is an account, and a change
+  request's customer is its project's account). Every template and proposal carries `customer` {id, name} (null only on an
+  older template whose customer could not be told, or a new draft that has not named one); `customerAccountPath` links it.
+  What the webapp does with it:
+  - **Catalogue**: a Customer column (a dash when none) and a Customer filter (`AsyncEntitySelect` over
+    `useSearchStandardChangeCustomersForSelect`, `POST /accounts/search`) sent as the search's `accountId`. The proposals
+    list shows each proposal's customer too; the attention line is unchanged.
+  - **Template page**: "For <customer>: used only for this customer's projects." under the name and a Customer cell
+    beside Owner. A template with `customer: null` shows "No customer recorded" (`STANDARD_CHANGE_ONE_CUSTOMER_RULE`)
+    and Raise a change request is disabled (the backend answers it with 409 `standard_change_template_unavailable`).
+  - **Proposal**: the header says "Customer: <link>" (or "not named yet"). In the editor a **new** proposal that did not
+    start from a change request names it (`standardChangeProposalCustomerEditable`; required, never cleared once
+    named, sent as `accountId` in the PATCH only there); one started from a change request and a modify / retire
+    proposal show it read-only with `standardChangeProposalCustomerFixedReason`. A copy carries `copiedFrom` {id,
+    number} and keeps the copied proposal's customer: read-only with "The customer of the proposal it was copied
+    from (SCP...)"; only a copy of a proposal that had no customer names one, once (the backend accepts naming it
+    while it has none and refuses changing it after). Naming another customer drops the
+    evidence already cited, with an info notice (it was the other customer's; the backend would refuse the PATCH).
+    The evidence picker is disabled until there is a customer and searches only that customer's closed change
+    requests (`useSearchClosedChangeRequestsForSelect(query, enabled, accountId)`: the change request search has no
+    account filter, so it pages the customer's project ids first, `useCustomerProjectIds`, `POST /projects/search`
+    `{accountId}`, and searches with `projectIds`; no projects = no evidence, nothing searched). Submit is held back
+    with "still needs ... a customer" (`standardChangeProposalGaps`, in the backend's order: after name and rationale).
+  - **Create form, Standard**: the customer is the Customer Project's account (`useProjectCustomer`, `GET
+    /projects/{id}`). The template picker is disabled with the reason until a project with a customer is chosen, and
+    then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
+    accountId)`, `searchExtra`; it searches nothing without a customer). The Customer Project is required for
+    Standard. A template chosen before any project (`?standardChangeTemplateId=`, a clone, a draft) narrows the
+    project picker to its customer (`AsyncProjectSelect accountId`, a server-side `accountId` on `/projects/search`,
+    through `ChangeRequestScopeFields projectAccountId`) with a helper, and Create waits with "Select a Customer
+    Project of <customer> to continue."; once a project is chosen the picker is no longer narrowed. Choosing a project
+    of another customer (or one with none) clears the template and its change specifics during render, with an info
+    notice saying whose each is. A template with no customer is refused up front. A 400
+    `standard_change_template_other_customer` (`isStandardChangeTemplateOtherCustomer`) is shown at the template in the
+    backend's words (not the banner) and holds Create back until the template or the project changes.
+  - **Detail / Edit**: the template banner adds "Customer: <name>. The template is used only for this customer's
+    projects."; when the detail's `standardChange.customerMismatch` is true (the project sync moved the project to
+    another account after the change was raised) the banner turns `warning` and says the project is no longer one of
+    the customer's, approval cannot be requested, and to cancel and raise a new one
+    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code; in New the Edit dialog narrows the Customer Project picker to the template's customer
+    (`projectAccountId`) and says so in its template notice. The backend refuses a move to another customer's project
+    in every state with the same code; its words show in `saveError`.
+  - Tests: `utils/__tests__/standardChanges.test.ts` ("a standard change is one customer's"), `useStandardChanges.test.tsx`,
+    `StandardChangesTab.test.tsx`, `StandardChangeTemplateDetailPage.test.tsx` ("its customer"),
+    `StandardChangeProposalPage.test.tsx` ("its customer: ..."), `CreateChangeRequestPage.test.tsx` ("a template is one
+    customer's: the Customer Project's"), `EditChangeRequestDialog.test.tsx`, `CsmChangeRequestDetailPage.test.tsx`,
+    `AsyncProjectSelect.test.tsx` ("narrowed to one customer").
+- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
+  highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
+  change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /
+  retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
+- **Proposal** `/operations/standard-change-proposals/:id` (`StandardChangeProposalPage`): the proposer's editor while `canEdit`
+  (parameters editor, "Insert {{…}}" per text field, live preview with sample values, closed change requests as evidence, Save =
+  one PATCH of the whole draft, Submit saves first); read-only otherwise, with the CAB approvers and Approve / Reject on the
+  viewer's own `canDecide` row (a rejection needs a comment). "Copy into a new proposal" only for a rejected / withdrawn
+  **new** proposal: the API's `copyFromProposalId` starts new templates only.
+- **Create form**: type Standard shows a template picker (active only, of the project's customer), "Change specifics" (one input per parameter type) and a
+  read-only preview of what the template specifies; the payload is `type`, `standardChangeTemplateId`,
+  `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters`, `projectId` (required: a project of the
+  template's customer) and only the fields the template does not specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
+  clone of a templated change carries the template and its values, never the frozen fields (`buildCloneChangeRequestNavState`).
+- **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
+  every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard
+  change with `customerApprovalRequired === false` labels Request Approval "Schedule" (`requestApprovalSchedulesDirectly`; still
+  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`).
+
 ## Change request Approval tab: opening an Assignment group
 
 In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`Link component="button"`, `aria-haspopup="dialog"`, accessible name `View members of <group>`) that opens `ApprovalGroupDialog` (`features/csm-operations/components`): the group's name as the title, **Manager / Group email / Description** when it has them, and a **"Group Members (N)"** list (name, email, a "Lead" chip for `role: "lead"`), with loading, error (`QueryErrorState` + Try again), not-found and empty states. It closes with Esc, a click outside or the Close button, and focus returns to the link.
@@ -648,7 +771,7 @@ In `ChangeRequestApprovals`, each row's **Assignment group** is a link-button (`
 
 - **Statuses**: `done` / `current` / `pending` / `not-taken` / `unrecorded` / `rejected` (the customer rejected the change at that stage: an error-coloured ring with a cross, read as "rejected by the customer"). Rollback and Canceled are *exception* stages: while the change is on the path they are `not-taken` (faint, dashed outline, still labelled and iconed -- never `done`); they turn `current` (error colour, Undo2 / Ban icon, red connector into them) only when the change really is in that state.
 - **Rollback** (`rollback` is only reachable from Review / Customer Review): everything through Review is `done`; Customer Review reads from its approval stage rows: a REJECTED one is `rejected` (the customer's rejection is what rolls the change back), any other row means it was entered (`done`), and with no row it is `not-taken` only when the project has registered customer contacts (`hasCustomerContacts`: the backend would have asked them on entering Customer Review), else `unrecorded` (a rollback from Customer Review in a project with nobody to ask leaves no row either). **Canceled** (reachable from anywhere, no history kept): a stage is `done` only when the evidence proves it was passed -- a stage row proves every state before its own; an APPROVED stage proves its own *except Review's* (approving Review does not move the change on); `hasCustomerApproved` (`customerApproved`) proves Customer Approval -- every other path stage is `unrecorded`, never `pending`, never skipped. The exception is a REJECTED Customer Approval stage: the backend answers it by canceling the change right there, so the stages before are `done`, Customer Approval is `rejected` and everything after is `not-taken`. The page passes the approvals it already fetches for the header note, `hasCustomerApproved` and whether `customerContacts` is non-empty.
-- Customer Approval / Customer Review are left off the line when their checkbox is explicitly `false` and the change is not in that state; an unknown flag keeps them. An **Emergency** change is the exception (see "An Emergency change has one CAB approval and no customer steps"): its boxes are ignored and Assess reads `not-taken`; the e2e `expectStages` letters for it are e.g. `c n p p p p p p n p n` in New and `d n c p p p p p n p n` in Authorize (customer columns dropped by the flags). A state that is none of the eleven keeps the faint line and the "Current state" chip.
+- Customer Approval / Customer Review are left off the line when their checkbox is explicitly `false` and the change is not in that state; an unknown flag keeps them. An **Emergency** change is the exception (see "An Emergency change has one CAB approval and no customer steps"): its boxes are ignored and Assess reads `not-taken`. A **Standard** change reads Assess *and* Authorize `not-taken` (its template is pre-authorised: New goes straight to Scheduled, or to Customer Approval when that is required; `stagesNotTakenByType`), in every state but the skipped stage itself; its customer stages follow its boxes like a Normal change's; the e2e `expectStages` letters for it are e.g. `c n p p p p p p n p n` in New and `d n c p p p p p n p n` in Authorize (customer columns dropped by the flags). A state that is none of the eleven keeps the faint line and the "Current state" chip.
 - Every stage says its status in words as well as colour (visually-hidden ", done" / ", current" / ", not taken" ... after the label) and carries the customer portal's caption as a tooltip and `aria-description` (the tooltip adds "(not taken)" / "(history not recorded)" / "(rejected by the customer)" for the stages whose faint or crossed marker needs it). Light-theme contrast is a design constraint, measured from screenshots: the current / rejected label uses the tone's *dark* shade on the light theme and its *light* shade on the dark theme (`toneText`; the main shade is 3.3:1 on the light page backdrop and about 4:1 for the error red on the dark one), muted labels are only dimmed to 0.85, and an upcoming stage's ring is `text.secondary` at 0.7 (a ring in the divider colour was 1.2:1) so it stays above 3:1 and clearer than a not-taken one (0.45, dashed). Captions are **not** shown inline: at the page's real content width (about 1110px at a 1440px viewport, 11 stages) adjacent two-line captions touch and the row doubles in height.
 - Under 68px per stage the row scrolls **inside its own container** (centred on the current stage), never the page. Test helpers that read a stage's label must drop the hidden status suffix (`stepLabel` in `CsmChangeRequestDetailPage.test.tsx`; the e2e specs match `^<label>, `).
 - e2e: `change-request-lifecycle.spec.ts` asserts the stepper through the page object's `stage(label)` and the spec's `expectStages(detail, columns, flags)`, which takes the eleven columns as one letter each (`d` done, `c` current, `p` upcoming, `n` not taken, `u` history not recorded, `r` rejected by the customer) and compares them with the words the stepper reads (", done", ", current", ", upcoming", ", not taken", ", history not recorded", ", rejected by the customer"), dropping Customer Approval / Customer Review when their checkbox is off. "the stepper and the action bar in every state" (fake API) walks a Normal change through every state with the customer checkboxes on and off, asserting all eleven stages *and* the action bar (primary button, Re-schedule, "Change state" entries in order) at each; the Rollback and Canceled screens (rolled back from Review with and without customer contacts, from the customer's rejection; canceled with no approvals, in Review after Peer / CAB, in Review after the Review stage was approved, at Customer Approval, after the customer's approval (their APPROVED stage and `hasCustomerApproved`), and by the customer's rejection) and the checkbox-off line are separate tests; the seeded-fixture describes assert CHG-FIXED-007 / -008 and the stage statuses after each customer answer.

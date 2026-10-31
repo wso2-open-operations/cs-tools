@@ -11426,6 +11426,678 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/search:
+    post:
+      summary: Search the standard change catalogue.
+      operationId: searchStandardChangeTemplates
+      description: >-
+        The CAB-approved standard change templates, by name. Internal callers only;
+        PostgreSQL data sources only. With no states the list is the active and
+        suspended templates; each carries its current version's content, its usage
+        counts and whether a change raised from it failed (reviewRequired).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchStandardChangeTemplatesRequest'
+      responses:
+        "200":
+          description: A page of templates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchStandardChangeTemplatesResponse'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}:
+    get:
+      summary: Get a standard change template.
+      operationId: getStandardChangeTemplate
+      description: The template, its current version and every version it has had (newest first). Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/versions/{versionId}:
+    get:
+      summary: Get one version of a standard change template.
+      operationId: getStandardChangeTemplateVersion
+      description: A version as the CAB approved it. Versions are never changed. Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: versionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplateVersion'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/suspend:
+    post:
+      summary: Suspend a standard change template.
+      operationId: suspendStandardChangeTemplate
+      description: >-
+        No change request can be raised from a suspended template, and one already
+        raised cannot be sent for approval. The template's owner or a member of the CAB
+        Approval group. 409 when it is not active. The body is optional: an empty body
+        suspends without a reason. The reason, the time and the caller are recorded on
+        the template (suspendedReason, suspendedOn, suspendedBy) until it is resumed or
+        retired.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendStandardChangeTemplateRequest'
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/resume:
+    post:
+      summary: Resume a suspended standard change template.
+      operationId: resumeStandardChangeTemplate
+      description: The template's owner or a member of the CAB Approval group. 409 when it is not suspended.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/clear-review:
+    post:
+      summary: Clear a standard change template's review flag.
+      operationId: clearStandardChangeTemplateReview
+      description: >-
+        A change raised from the template was rolled back or deviated from its plan,
+        and the owner or the CAB has looked at it and decided the template stands.
+        (Approving a modification clears the flag too.) The owner or a CAB member.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals:
+    post:
+      summary: Propose a new standard change, or a change to or the retirement of one.
+      operationId: createStandardChangeProposal
+      description: >-
+        Opens a draft. kind new: optionally from a closed change request
+        (sourceChangeRequestId: its content is copied, and it is the first evidence) or a
+        copy of an earlier proposal (copyFromProposalId, e.g. a rejected one). kind
+        modify / retire: of an active or suspended template (templateId), from its
+        current version; at most one open modification or retirement per template (409).
+        The proposer is the caller. Internal callers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStandardChangeProposalRequest'
+      responses:
+        "201":
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/search:
+    post:
+      summary: Search standard change proposals.
+      operationId: searchStandardChangeProposals
+      description: Newest first. A rejected or withdrawn proposal is kept as the record of it. Internal callers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchStandardChangeProposalsRequest'
+      responses:
+        "200":
+          description: A page of proposals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchStandardChangeProposalsResponse'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}:
+    get:
+      summary: Get a standard change proposal.
+      operationId: getStandardChangeProposal
+      description: >-
+        The proposal with its evidence, its CAB approvers and what the caller may do
+        (canEdit, canSubmit, canWithdraw, and canDecide on their own pending approver
+        row). Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit a draft standard change proposal.
+      operationId: updateStandardChangeProposal
+      description: >-
+        The proposer only, while it is a draft (409 otherwise). Omitted fields are left
+        as they are; parameters and evidenceChangeRequestIds replace the whole list.
+        Evidence must be closed change requests. A retirement takes only its name and
+        rationale. Placeholders are written {{key}} in the text fields.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/submit:
+    post:
+      summary: Send a standard change proposal to the CAB.
+      operationId: submitStandardChangeProposal
+      description: >-
+        The proposer only. The proposal must be complete (name, rationale, subject,
+        implementation / backout / test plans, impact, risk other than high, every
+        placeholder declared: 400 naming what is missing). Opens a CAB Approval stage
+        whose approvers are the active internal members of the CAB Approval group; the
+        proposer is listed cancelled. A modification whose template moved on since it
+        was drafted is a 409.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal, in cab_review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/withdraw:
+    post:
+      summary: Withdraw a standard change proposal.
+      operationId: withdrawStandardChangeProposal
+      description: The proposer only, while it is a draft or in CAB review. Pending approvers are cancelled; the proposal is kept.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal, withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/decision:
+    post:
+      summary: Approve or reject a standard change proposal (CAB).
+      operationId: decideStandardChangeProposal
+      description: >-
+        A CAB member on their own pending approver row; the proposer never decides
+        (403). The first decision settles the proposal and cancels the other
+        approvers. Approved: a new template (version 1), a new version of the template,
+        or the template retired. Rejected: needs a comment; nothing in the catalogue
+        changes and the proposal is kept as the record. 409 when it is not in CAB
+        review, or the approval would clash (a live template of the same name for the
+        customer, the template moved on, or the source change request or a piece of
+        evidence is no longer a closed change request of the proposal's customer).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal, approved or rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /runbooks:
     get:
       summary: List the runbook catalog.
@@ -25012,6 +25684,13 @@ components:
           properties:
             createdBy:
               type: string
+            standardChange:
+              allOf: [{$ref: '#/components/schemas/ChangeRequestStandardChange'}]
+              description: >-
+                The standard change template (and version) the change request was raised from,
+                with the values of its parameters. Staff only; omitted otherwise. While it is
+                set, what the template specifies is read-only (errorCode
+                change_request_standard_template_field).
             justification:
               type: string
               nullable: true
@@ -25796,17 +26475,17 @@ components:
 
     CreateChangeRequestRequest:
       type: object
-      required:
-        - subject
-        - type
       properties:
         subject:
           type: string
+          description: >-
+            Required, except on a change request raised from a standard change template
+            (standardChangeTemplateId), where the template gives it and sending one is a 400.
         type:
           type: string
           enum: [standard, normal, emergency]
           description: >-
-            Required. Decides the approval flow: Standard needs no approval
+            Required, except with standardChangeTemplateId (then it defaults to standard). Decides the approval flow: Standard needs no approval
             (Request Approval goes straight to Scheduled); Normal needs peer
             approval then CAB approval; Emergency needs CAB approval only (one
             stage in the CAB Approval group: the previous system has no Emergency CAB). An
@@ -26053,6 +26732,31 @@ components:
             of closed). Defaults to false. As customerApprovalRequired for Request
             Approval. Cannot be true when type is emergency (the same 400).
             PostgreSQL data source only.
+        standardChangeTemplateId:
+          type: string
+          format: uuid
+          description: >-
+            Raises the change request from a standard change template (PostgreSQL data sources).
+            Required for type standard (400 errorCode change_request_standard_template_field
+            without it); type may then be omitted. The template must be active (409 errorCode
+            standard_change_template_unavailable). Its current version, with the parameters
+            filled in, gives subject, description, justification, the implementation, backout and
+            test plans, riskImpactAnalysis, category, impact, risk, rollbackDurationText,
+            isPlanningVisibleToCustomers and the two customer boxes: sending any of them (or
+            implementationDeviation) is a 400 with errorCode change_request_standard_template_field.
+            A template is one customer's: projectId is required and must be a project of the
+            template's customer (400 errorCode standard_change_template_other_customer otherwise,
+            refused before the previous system is called on dual-write and again in the create
+            transaction); a template with no customer recorded is a 409
+            standard_change_template_unavailable.
+        standardChangeTemplateVersionId:
+          type: string
+          format: uuid
+          description: The version the caller rendered; a template revised since is a 409 (standard_change_template_unavailable).
+        standardChangeParameters:
+          type: object
+          additionalProperties: {type: string}
+          description: The values of the template version's parameters, by key (400 for a missing required value, an undeclared key or a value of the wrong kind).
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -30393,6 +31097,384 @@ components:
                 type: string
                 nullable: true
                 description: The link the removed runbook had.
+    StandardChangeParameter:
+      type: object
+      required: [key, label, type, required]
+      properties:
+        key:
+          type: string
+          description: Lower-case letters, digits and _, starting with a letter; written {{key}} in the template's text.
+        label:
+          type: string
+        type:
+          type: string
+          enum: [text, textarea, number, date, select]
+        required:
+          type: boolean
+        helpText:
+          type: string
+          nullable: true
+        options:
+          type: array
+          items: {type: string}
+          description: The choices of a select (and only of a select).
+    StandardChangeContent:
+      type: object
+      description: What a template fixes on every change request raised from it. On a draft proposal any part may still be missing.
+      properties:
+        subject: {type: string, nullable: true, description: 'Plain text; becomes the change request title.'}
+        description: {type: string, nullable: true}
+        justification: {type: string, nullable: true}
+        implementationPlan: {type: string, nullable: true}
+        riskImpactAnalysis: {type: string, nullable: true}
+        backoutPlan: {type: string, nullable: true}
+        testPlan: {type: string, nullable: true}
+        category: {type: string, nullable: true}
+        impact: {type: string, nullable: true, enum: [high, medium, low]}
+        risk: {type: string, nullable: true, enum: [high, moderate, low], description: 'A draft may hold high; submitting it is refused (a standard change cannot be high risk).'}
+        rollbackDurationText: {type: string, nullable: true}
+        isPlanningVisibleToCustomers: {type: boolean}
+        customerApprovalRequired: {type: boolean}
+        customerReviewRequired: {type: boolean}
+        parameters:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeParameter'}
+    StandardChangeTemplateVersion:
+      allOf:
+        - $ref: '#/components/schemas/StandardChangeContent'
+        - type: object
+          required: [id, templateId, version, approvedOn, approvedBy]
+          properties:
+            id: {type: string, format: uuid}
+            templateId: {type: string, format: uuid}
+            version: {type: integer}
+            proposal:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+            approvedOn: {type: string, format: date-time}
+            approvedBy: {type: string}
+    StandardChangeTemplateVersionSummary:
+      type: object
+      required: [id, version, approvedOn, approvedBy]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer}
+        proposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        approvedOn: {type: string, format: date-time}
+        approvedBy: {type: string}
+    StandardChangeTemplateUsage:
+      type: object
+      properties:
+        total: {type: integer}
+        open: {type: integer}
+        closed: {type: integer}
+        rolledBack: {type: integer}
+        canceled: {type: integer}
+        lastUsedOn: {type: string, format: date-time, nullable: true}
+    StandardChangeTemplate:
+      type: object
+      required: [id, number, name, state, usage, reviewRequired]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: 'STD number.'}
+        name: {type: string}
+        state: {type: string, enum: [active, suspended, retired]}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: >
+            The customer (account) the template belongs to. A change request is raised from
+            it only for one of this customer's projects, and its name is unique among this
+            customer's live templates. Null only on a template written before templates
+            belonged to one customer whose customer could not be told (it cannot be changed
+            or used until its customer is set).
+        owner:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        currentVersion:
+          allOf: [{$ref: '#/components/schemas/StandardChangeTemplateVersion'}]
+          nullable: true
+        reviewRequired:
+          type: boolean
+          description: A change raised from the template was rolled back or deviated from its plan. It does not stop the template being used.
+        reviewRequiredReason: {type: string, nullable: true}
+        reviewRequiredOn: {type: string, format: date-time, nullable: true}
+        reviewRequiredChangeRequest:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        suspendedReason:
+          type: string
+          nullable: true
+          description: Why the template was suspended. Null unless it is suspended, and may be null on a suspended template (the reason is optional).
+        suspendedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the template was suspended. Null unless it is suspended.
+        suspendedBy:
+          type: string
+          nullable: true
+          description: Email of who suspended the template. Null unless it is suspended.
+        openProposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        usage: {$ref: '#/components/schemas/StandardChangeTemplateUsage'}
+        createdOn: {type: string, format: date-time}
+        createdBy: {type: string}
+        updatedOn: {type: string, format: date-time}
+        updatedBy: {type: string}
+        versions:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplateVersionSummary'}
+          description: On GET /standard-change-templates/{id} only, newest first.
+    SuspendStandardChangeTemplateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+          description: Why the template is suspended. Optional; trimmed, and blank means none. At most 1000 characters (400 when longer).
+    SearchStandardChangeTemplatesRequest:
+      type: object
+      properties:
+        states:
+          type: array
+          items: {type: string, enum: [active, suspended, retired]}
+        query: {type: string, nullable: true, description: 'Matches the name or number, ignoring case.'}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to one customer''s templates (400 when not a UUID).'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+    SearchStandardChangeTemplatesResponse:
+      type: object
+      required: [templates, total, limit, offset]
+      properties:
+        templates:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplate'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    StandardChangeEvidence:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        state: {type: string, nullable: true}
+        closedOn: {type: string, format: date-time, nullable: true}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: "The change request's customer now (its project's account); null when it has none."
+    StandardChangeProposalApprover:
+      type: object
+      properties:
+        approver:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        state: {type: string, description: 'REQUESTED, APPROVED, REJECTED or CANCELLED.'}
+        comments: {type: string, nullable: true}
+        updatedOn: {type: string, format: date-time, nullable: true}
+        canDecide: {type: boolean}
+    StandardChangeProposal:
+      allOf:
+        - $ref: '#/components/schemas/StandardChangeContent'
+        - type: object
+          required: [id, number, kind, state, name]
+          properties:
+            id: {type: string, format: uuid}
+            number: {type: string, description: 'SCP number.'}
+            kind: {type: string, enum: [new, modify, retire]}
+            state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+            name: {type: string}
+            customer:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The customer (account) the proposal is for: what a new proposal names, or takes
+                from the change request it starts from or the proposal it copies; the template's
+                for a modification or retirement. Null on a new draft that has not named one yet,
+                which cannot be submitted.
+            rationale: {type: string, nullable: true}
+            template:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+            baseVersion: {type: integer, nullable: true}
+            sourceChangeRequest:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The closed change request a new proposal started from (or that a copy carried
+                over). It must be a closed change request of the proposal's customer, checked at
+                create and again at submit (400, in the evidence refusal's words).
+            copiedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The proposal a new draft was copied from (name: its number); null when it was not
+                copied. A copy is for the copied proposal's customer: only a new draft started from
+                nothing (no source change request, not a copy) may change its customer by PATCH.
+            evidence:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeEvidence'}
+            approvers:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeProposalApprover'}
+            proposedBy:
+              allOf: [{$ref: '#/components/schemas/UserReference'}]
+              nullable: true
+            submittedOn: {type: string, format: date-time, nullable: true}
+            decidedOn: {type: string, format: date-time, nullable: true}
+            decidedBy:
+              allOf: [{$ref: '#/components/schemas/UserReference'}]
+              nullable: true
+            decisionComment: {type: string, nullable: true}
+            resultingVersion: {type: integer, nullable: true}
+            createdOn: {type: string, format: date-time}
+            updatedOn: {type: string, format: date-time}
+            canEdit: {type: boolean}
+            canSubmit: {type: boolean}
+            canWithdraw: {type: boolean}
+    CreateStandardChangeProposalRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [new, modify, retire]}
+        templateId: {type: string, format: uuid, nullable: true, description: 'Required for modify and retire.'}
+        sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
+        copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
+        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The customer (account) a new proposal is for. One started from a change request takes
+            that change request's project's customer (a change request with none cannot be started
+            from), one copied from a proposal takes that proposal's, and a modification or
+            retirement its template's: a different accountId is then a 400. Optional on a new
+            proposal started from nothing (it may be named later), but a new proposal cannot be
+            submitted without one. An id that is not an account is a 400.
+    UpdateStandardChangeProposalRequest:
+      type: object
+      description: >
+        Omitted fields are left as they are; an empty category, impact or risk clears it; parameters
+        and evidenceChangeRequestIds replace the whole list. Evidence must be closed change requests of
+        the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
+      properties:
+        name: {type: string}
+        accountId:
+          type: string
+          format: uuid
+          description: >
+            Names or changes the customer of a new draft that did not start from a change request; the
+            evidence it cites (or keeps) must be that customer's, else a 400 and nothing changes. A draft
+            started from a change request, and a modification or retirement, keep the customer they have:
+            resending it is accepted, another is a 400.
+        rationale: {type: string}
+        subject: {type: string}
+        description: {type: string}
+        justification: {type: string}
+        implementationPlan: {type: string}
+        riskImpactAnalysis: {type: string}
+        backoutPlan: {type: string}
+        testPlan: {type: string}
+        category: {type: string}
+        impact: {type: string, enum: ['', high, medium, low]}
+        risk: {type: string, enum: ['', high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
+        rollbackDurationText: {type: string}
+        isPlanningVisibleToCustomers: {type: boolean}
+        customerApprovalRequired: {type: boolean}
+        customerReviewRequired: {type: boolean}
+        parameters:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeParameter'}
+        evidenceChangeRequestIds:
+          type: array
+          items: {type: string, format: uuid}
+    DecideStandardChangeProposalRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approved, rejected]}
+        comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+    SearchStandardChangeProposalsRequest:
+      type: object
+      properties:
+        states:
+          type: array
+          items: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        kinds:
+          type: array
+          items: {type: string, enum: [new, modify, retire]}
+        templateId: {type: string, format: uuid, nullable: true}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
+        proposedByMe: {type: boolean}
+        awaitingMyDecision: {type: boolean}
+        query: {type: string, nullable: true}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+    StandardChangeProposalSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        kind: {type: string, enum: [new, modify, retire]}
+        state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        name: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        template:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        proposedBy:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        submittedOn: {type: string, format: date-time, nullable: true}
+        decidedOn: {type: string, format: date-time, nullable: true}
+    SearchStandardChangeProposalsResponse:
+      type: object
+      required: [proposals, total, limit, offset]
+      properties:
+        proposals:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeProposalSummary'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    ChangeRequestStandardChange:
+      type: object
+      description: The standard change template a change request was raised from (staff only).
+      required: [template, templateNumber, versionId, version, parameters]
+      properties:
+        template: {$ref: '#/components/schemas/EntityRef'}
+        templateNumber: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The template's customer, which is the account of this change request's project.
+        customerMismatch:
+          type: boolean
+          description: >
+            True when the change request's project is no longer a project of the template's
+            customer (the Salesforce project sync moved the project to another account after the
+            change was raised). Request Approval is then refused with 400
+            `standard_change_template_other_customer`.
+        versionId: {type: string, format: uuid}
+        version: {type: integer}
+        parameters:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/StandardChangeParameter'
+              - type: object
+                properties:
+                  value: {type: string, nullable: true}
+
     ErrorResponse:
       type: object
       description: >-
@@ -30449,9 +31531,19 @@ components:
             would change; nothing written), `change_request_deviation_not_yet` (400: the
             deviation would change before implementation has started -- in new anything but
             clearing one a clone carried over, in assess to scheduled any change; nothing
-            written), and `change_request_deviation_not_incorporated` (400: Request Approval
+            written), `change_request_deviation_not_incorporated` (400: Request Approval
             while the change request still has a deviation from the implementation plan, which
-            has to be folded into the implementation plan and cleared first; nothing written).
+            has to be folded into the implementation plan and cleared first; nothing written),
+            `change_request_standard_template_field` (400: a create or PATCH of a change request
+            raised from a standard change template sets or changes a field the template specifies,
+            a standard change created with no template, or a change of type to or from standard;
+            nothing written), `standard_change_template_unavailable` (409: the template is
+            suspended, retired or was revised since, or has no customer recorded; nothing written), and
+            `standard_change_template_other_customer` (400: a change request raised from a standard change
+            template for no project or for a project of another customer than the template's, or a PATCH
+            that moves such a change request to another customer's project, in any state, or Request
+            Approval of one whose project the Salesforce project sync has since moved to another
+            customer; nothing written).
             The list grows, so this is
             deliberately not a closed enum: a value not listed here is a newer server's.
           example: change_request_on_hold

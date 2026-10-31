@@ -642,8 +642,8 @@ describe("an Emergency change's line: Assess is never taken (New -> Authorize, o
     expect(buildChangeRequestLifecycle({ state: "authorize", type: "normal" })).toHaveLength(11);
   });
 
-  it("only Emergency skips Assess: Normal, Standard and an unknown type still pass through it", () => {
-    for (const type of ["normal", "standard", undefined, null, "model"]) {
+  it("Normal and an unknown type still pass through Assess", () => {
+    for (const type of ["normal", undefined, null, "model"]) {
       expect(byKey({ state: "authorize", type, customerApprovalRequired: false, customerReviewRequired: false }).assess).toBe("done");
     }
     expect(byKey({ state: "new", type: "normal" }).assess).toBe("pending");
@@ -651,6 +651,77 @@ describe("an Emergency change's line: Assess is never taken (New -> Authorize, o
 
   it("reads the type however the backend cases it", () => {
     expect(byKey({ state: "authorize", type: " Emergency " }).assess).toBe("not-taken");
+  });
+});
+
+describe("a Standard change's line: Assess and Authorize are never taken (New -> Scheduled, no approval stage)", () => {
+  // Columns (both customer boxes off): new assess authorize scheduled implement review rollback closed canceled
+  const standard = (input: BuildChangeRequestLifecycleInput): BuildChangeRequestLifecycleInput => ({
+    type: "standard",
+    customerApprovalRequired: false,
+    customerReviewRequired: false,
+    ...input,
+  });
+
+  it.each([
+    ["new", "c n n p p p n p n"],
+    ["scheduled", "d n n c p p n p n"],
+    ["implement", "d n n d c p n p n"],
+    ["review", "d n n d d c n p n"],
+    ["closed", "d n n d d d n c n"],
+    ["rollback", "d n n d d d c n n"],
+    ["canceled", "u n n u u u n n c"],
+  ])("in %s it reads %s", (state, expected) => {
+    expect(statuses(standard({ state }))).toEqual(row(expected));
+  });
+
+  it("shows Assess and Authorize as not taken, never as upcoming, while the change is New", () => {
+    const nodes = buildChangeRequestLifecycle(standard({ state: "new" }));
+    expect(nodes.map((n) => [n.label, n.status])).toEqual([
+      ["New", "current"],
+      ["Assess", "not-taken"],
+      ["Authorize", "not-taken"],
+      ["Scheduled", "pending"],
+      ["Implement", "pending"],
+      ["Review", "pending"],
+      ["Rollback", "not-taken"],
+      ["Closed", "pending"],
+      ["Canceled", "not-taken"],
+    ]);
+  });
+
+  it("goes New -> Customer Approval when the customer's approval is required, still skipping Assess and Authorize", () => {
+    // Columns: new assess authorize customer_approval scheduled implement review rollback closed canceled
+    expect(statuses(standard({ state: "new", customerApprovalRequired: true }))).toEqual(row("c n n p p p p n p n"));
+    expect(statuses(standard({ state: "customer_approval", customerApprovalRequired: true }))).toEqual(
+      row("d n n c p p p n p n"),
+    );
+    expect(statuses(standard({ state: "scheduled", customerApprovalRequired: true }))).toEqual(row("d n n d c p p n p n"));
+  });
+
+  it("keeps its customer stages by its boxes, like a Normal change (only Emergency ignores them)", () => {
+    const keys = buildChangeRequestLifecycle({ state: "new", type: "standard" }).map((n) => n.key);
+    expect(keys).toHaveLength(11);
+    expect(keys).toContain("customer_approval");
+    expect(keys).toContain("customer_review");
+  });
+
+  it("a Standard change that is somehow in Assess or Authorize is shown where it is", () => {
+    expect(statuses(standard({ state: "assess" }))).toEqual(row("d c n p p p n p n"));
+    expect(statuses(standard({ state: "authorize" }))).toEqual(row("d n c p p p n p n"));
+  });
+
+  it("reads the type however the backend cases it", () => {
+    const stages = byKey({ state: "scheduled", type: " Standard " });
+    expect(stages.assess).toBe("not-taken");
+    expect(stages.authorize).toBe("not-taken");
+  });
+
+  it("Normal and Emergency are unchanged: Normal takes both, Emergency skips Assess only", () => {
+    expect(byKey({ state: "scheduled", type: "normal" })).toMatchObject({ assess: "done", authorize: "done" });
+    expect(byKey({ state: "new", type: "normal" })).toMatchObject({ assess: "pending", authorize: "pending" });
+    expect(byKey({ state: "scheduled", type: "emergency" })).toMatchObject({ assess: "not-taken", authorize: "done" });
+    expect(byKey({ state: "new", type: "emergency" })).toMatchObject({ assess: "not-taken", authorize: "pending" });
   });
 });
 

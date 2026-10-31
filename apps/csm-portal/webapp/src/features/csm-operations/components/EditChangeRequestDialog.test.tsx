@@ -58,6 +58,7 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     disabled,
     required,
     helperText,
+    accountId,
     onChange,
   }: {
     label: string;
@@ -67,6 +68,7 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     disabled?: boolean;
     required?: boolean;
     helperText?: string;
+    accountId?: string;
     onChange: (next: string, name?: string) => void;
   }) => (
     <input
@@ -74,6 +76,8 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
       data-known-label={knownLabel ?? ""}
       data-disable-clearable={String(!!disableClearable)}
       data-helper-text={helperText ?? ""}
+      // The customer the real picker narrows its search to (server-side).
+      data-account-id={accountId ?? ""}
       disabled={disabled}
       required={required}
       value={value}
@@ -1285,11 +1289,11 @@ describe("EditChangeRequestDialog — the fields the create form sets", () => {
   });
 
   it("changes the type in New, and sends only that", () => {
-    const { onSave } = renderDialog({ state: "new" });
+    const { onSave } = renderDialog({ state: "new", type: "normal" });
     expect(select("Type")).not.toHaveAttribute("aria-disabled", "true");
-    choose("Type", "Standard");
+    choose("Type", "Emergency");
     fireEvent.click(saveButton());
-    expect(onSave).toHaveBeenCalledWith({ type: "standard" });
+    expect(onSave).toHaveBeenCalledWith({ type: "emergency" });
   });
 
   it("turns both customer boxes off when the type becomes Emergency in New, in the same request", () => {
@@ -1646,5 +1650,127 @@ describe("EditChangeRequestDialog — required-field markers", () => {
     cleanup();
     renderDialog({ state: "new" });
     expect(workNote()).not.toBeRequired();
+  });
+});
+
+describe("EditChangeRequestDialog — Standard is offered only to a change that already is one", () => {
+  const typeOptions = (): string[] => {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  };
+
+  it("lists Normal and Emergency, not Standard, for a Normal change in New", () => {
+    renderDialog({ state: "new", type: "normal" });
+    const options = typeOptions();
+    expect(options).toEqual(expect.arrayContaining(["Normal", "Emergency"]));
+    expect(options).not.toContain("Standard");
+  });
+
+  it("keeps Standard for an older Standard change in New (not raised from a template)", () => {
+    renderDialog({ state: "new", type: "standard" });
+    expect(typeOptions()).toContain("Standard");
+  });
+});
+
+describe("EditChangeRequestDialog — a change raised from a standard change template", () => {
+  const TEMPLATED: Partial<BeChangeRequestDetail> = {
+    state: "new",
+    type: "standard",
+    impact: "low",
+    category: "software",
+    rollbackDurationText: "15 mins",
+    customerApprovalRequired: false,
+    customerReviewRequired: false,
+    description: "<p>Rotate the certificate on gw-1.</p>",
+    implementationPlan: "<p>Steps.</p>",
+    rollbackPlan: "<p>Restore.</p>",
+    testPlan: "<p>Check.</p>",
+    standardChange: {
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      customer: { id: "acct-1", name: "Acme Corp" },
+      versionId: "ver-2",
+      version: 2,
+      parameters: [{ key: "host", label: "Host", type: "text", required: true, value: "gw-1" }],
+    },
+  };
+  const HINT = "Set by the standard change template.";
+
+  it("offers only the template's customer's projects while the project can still be changed (New)", () => {
+    renderDialog(TEMPLATED);
+    const project = screen.getByLabelText("Customer Project");
+    expect(project).toBeEnabled();
+    expect(project).toHaveAttribute("data-account-id", "acct-1");
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      /its customer is acme corp: only acme corp's projects are offered as the customer project/i,
+    );
+  });
+
+  it("says nothing about the customer's projects once the project is fixed (after New)", () => {
+    renderDialog({ ...TEMPLATED, state: "scheduled", legalNextStates: [] });
+    expect(screen.getByLabelText("Customer Project")).toBeDisabled();
+    expect(screen.queryByText(/only acme corp's projects are offered/i)).not.toBeInTheDocument();
+  });
+
+  it("does not narrow the project of a change not raised from a template", () => {
+    renderDialog({ ...TEMPLATED, standardChange: null });
+    expect(screen.getByLabelText("Customer Project")).toHaveAttribute("data-account-id", "");
+  });
+
+  it("says which template the change follows and why its fields are read-only", () => {
+    renderDialog(TEMPLATED);
+    const notice = screen.getByRole("status", { name: "" });
+    expect(notice).toHaveTextContent(/raised from standard change template STD0000001 \(version 2\)/i);
+    expect(notice).toHaveTextContent(/specified by the standard change template: it cannot be changed here/i);
+  });
+
+  it("disables every field the template specifies, each with a short hint", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("textbox", { name: /^subject/i })).toBeDisabled();
+    for (const name of ["Impact", "Category"]) {
+      expect(screen.getByRole("combobox", { name }), name).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(screen.getByRole("checkbox", { name: "Customer Approval" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Customer Review" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /^rollback duration/i })).toBeDisabled();
+    expect(screen.getByLabelText("Implementation Plan visible to customers")).toBeDisabled();
+    for (const plan of [/^description/i, /^justification/i, /^risk and impact/i, /^implementation plan/i, /^rollback plan/i, /^test plan/i]) {
+      expect(planEditor(plan), String(plan)).toBeDisabled();
+    }
+    expect(screen.getAllByText(HINT).length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("keeps the type Standard, with the reason", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("combobox", { name: /^type/i })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/stays a standard change/i)).toBeInTheDocument();
+  });
+
+  it("leaves what the template does not specify editable", () => {
+    renderDialog(TEMPLATED);
+    expect(screen.getByRole("combobox", { name: /^priority/i })).not.toHaveAttribute("aria-disabled");
+    expect(planEditor(/^affected services/i)).toBeEnabled();
+    expect(planEditor(/^affected components/i)).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: /work note/i })).toBeEnabled();
+    expect(screen.getByLabelText("Customer Project")).toBeEnabled();
+  });
+
+  it("never sends a template field, so a save carries only what was edited", () => {
+    const { onSave } = renderDialog(TEMPLATED);
+    fireEvent.change(screen.getByRole("textbox", { name: /work note/i }), { target: { value: "Checked the host." } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ workNote: "Checked the host." });
+  });
+
+  it("does not need a subject from the form (the template gives it)", () => {
+    renderDialog({ ...TEMPLATED, subject: "" });
+    expect(screen.queryByText("A change request needs a subject.")).not.toBeInTheDocument();
+  });
+
+  it("leaves a change not raised from a template as it was", () => {
+    renderDialog({ ...TEMPLATED, standardChange: null });
+    expect(screen.getByRole("textbox", { name: /^subject/i })).toBeEnabled();
+    expect(planEditor(/^implementation plan/i)).toBeEnabled();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
   });
 });

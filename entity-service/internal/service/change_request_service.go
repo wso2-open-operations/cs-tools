@@ -68,6 +68,10 @@ type changeRequestService struct {
 	// that the people a change is assigned to exist in ServiceNow before it is
 	// called -- see resolveServiceNowPeople. Set by WithChangeRequestSNUserLookup.
 	snUsers snUserSearcher
+	// standardChanges is the standard change catalogue, set by
+	// WithStandardChangeTemplates (PostgreSQL data sources): a standard change is
+	// then raised from a template. See prepareStandardChange.
+	standardChanges standardChangeTemplateReader
 }
 
 // NewChangeRequestService constructs a ChangeRequestService backed by
@@ -310,6 +314,9 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	if err := validateChangeRequestScopeLists(derefStrings(req.DeploymentIDs), derefStrings(req.DeploymentProductIDs)); err != nil {
 		return domain.PatchChangeRequestResponse{}, err
 	}
+	if err := s.refuseBecomingStandard(ctx, id, req.Type); err != nil {
+		return domain.PatchChangeRequestResponse{}, err
+	}
 	if req.Comment != nil && strings.TrimSpace(*req.Comment) == "" {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "comment must not be empty"}
 	}
@@ -514,6 +521,13 @@ func (s *changeRequestService) CreateChangeRequest(ctx context.Context, req doma
 	if err := repository.RejectRemovedCreateFields(req); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
+	// A standard change is raised from a standard change template, whose content
+	// is filled in here: before every other check (they then judge the rendered
+	// values) and before ServiceNow is called.
+	req, err := s.prepareStandardChange(ctx, req)
+	if err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if err := validateCreateChangeRequestLevels(req); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -694,6 +708,9 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	// PATCH: the previous system's change request API has no field for it.
 	// PostgreSQL still gets it (req).
 	mirrorReq.ImplementationDeviation = nil
+	// The standard change catalogue is PostgreSQL's: the previous system gets the
+	// rendered content (req's fields), not the template it came from.
+	mirrorReq.StandardChangeTemplateID, mirrorReq.StandardChangeTemplateVersionID, mirrorReq.StandardChangeParameters = nil, nil, nil
 	if mirrorReq.PlannedStartDate != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartDate)
 		mirrorReq.PlannedStartDate = &v
