@@ -1720,7 +1720,7 @@ backends pass it through (browser -> backend -> entity-service); only upload and
 The id is looked up as a `comment_attachment` row first. When there is none it is looked up as a
 `work_item_attachment` row, because the migrator stores a comment's images as the work item's own
 attachments; that row is streamed only when its stored type is an image type (a PDF or other file is 404
-here and is downloaded through a link instead). The audit line's `kind` says which table served it.
+here and is downloaded through a link instead). The audit line's `kind` says which table served it. A `DELETED` image the caller can see is `410` with `errorCode` `attachment_removed` (so a client can say it was removed); a hidden, unknown, `PENDING`/`FAILED` or file-missing image stays `404`.
 
 **Share cleanup.** Each link is a stored record in SFTPGo, and one that expired or was used up is not
 necessarily removed by SFTPGo itself (not confirmed either way). `POST /attachments/shares/cleanup`

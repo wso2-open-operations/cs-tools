@@ -118,3 +118,8 @@ const (
 	// lifecycle still moves. Nothing was written.
 	CodeChangeRequestApprovedReadOnly = "change_request_approved_read_only"
 )
+
+// CodeAttachmentRemoved is the 410 for an attachment (an inline comment image)
+// that was deleted or removed after its work item closed. A client shows
+// "removed" for it and a plain "not available" for a 404.
+const CodeAttachmentRemoved = "attachment_removed"
