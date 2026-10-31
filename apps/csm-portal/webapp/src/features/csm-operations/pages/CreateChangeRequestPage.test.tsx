@@ -2121,7 +2121,7 @@ describe("CreateChangeRequestPage — required-field markers", () => {
 
   it("still creates with a customer step ticked and no Customer Project (Request Approval is the gate)", () => {
     render(<CreateChangeRequestPage />);
-    fillSubject("Standard");
+    fillSubject("Normal");
     fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
     expect(screen.getByLabelText("Customer Project")).toBeRequired();
     const create = screen.getByRole("button", { name: /create change request/i });
