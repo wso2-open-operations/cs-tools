@@ -4313,6 +4313,62 @@ audit count; `CASE_STATS_TEST_DSN`), `autoclosure_integration_test.go` (service 
 service, lifecycle through to the closed row; `ENTITY_TEST_DATABASE_URL`; run as `csm_app` so row-level
 security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.go` (units).
 
+## Incident auto-close (`POST /incidents/autoclose`)
+
+ServiceNow closed RESOLVED incidents on its own; Postgres had no such job, so every resolved incident
+stayed RESOLVED for ever. This ports ServiceNow's behaviour as measured on WSO2's production instance
+(400 recently auto-closed incidents): an hourly job (at :00:01) closes incidents RESOLVED for 14 days,
+measured from `resolved_at` (399/400 closed 336.1-336.8 h after it; no RESOLVED incident older than 14
+days exists), sets `closed_at` = now and `closed_by` = the incident's `resolved_by` (400/400), updates as
+the "system" user, and adds **no comment and no work note**. Postgres only: nothing is mirrored to
+ServiceNow, on any data source. It is driven by `operations/csm-scheduled-tasks`'s `incident_autoclose`
+task (`INCIDENT_AUTOCLOSE_ENABLED`, `INCIDENT_AUTOCLOSE_DAYS`; see that component's CLAUDE.md).
+
+- **Migration 0255** adds `incident.closed_on` (TIMESTAMPTZ) and `incident.closed_by_id` (UUID,
+  `REFERENCES "user"(id) ON DELETE SET NULL`, the same as `resolved_by_id` in 0058), an index on
+  `closed_by_id`, and a partial index `ON incident (resolved_on) WHERE state = 'RESOLVED'` for the sweep.
+  Idempotent; nothing is backfilled (an incident closed before it has both NULL). `GetIncidentByID`
+  selects the two columns, so **apply 0255 before deploying this build** or the incident detail read
+  fails with "column does not exist". The incident table is shared with csm-sync-service: re-check 0255
+  is still free there and on the target branch before merging. 0251–0254 were skipped on purpose:
+  the target stopped at 0250, but open branches already add 0251 (twice), 0252, 0253 and 0254.
+- **A manual close records them too** (`updateIncidentLifecycleTx`): entering CLOSED from another state
+  stamps `closed_on = NOW()` and `closed_by_id` = the acting user (`DefaultResolvedByID`, the caller's
+  `"user"` id; NULL for a caller with no user row). Re-sending CLOSED, or re-opening, leaves both as they
+  were. Read back as `closedOn` / `closedBy` (the closer's name, like `resolvedBy`) on `IncidentView`.
+- **The route** (`internalOnly`; the scheduler's client id must be in `M2M_CLIENT_IDS`) takes
+  `{resolvedForDays (required, 1-3650), limit (0/absent = 200, max 1000), dryRun}` (unknown fields are a
+  400) and answers `{dryRun, closed: [{id, number, resolvedOn}], failed: [{id, number, error}], more}`.
+  `more` is true when `limit` incidents were selected: the caller calls again. Under
+  `DATA_SOURCE=servicenow` (or without a pool) it is a 503 (`NewUnavailableIncidentAutocloseService`; the
+  reason is logged, the body is the generic 503 message).
+- **Due** (`incidentAutocloseDue`, one predicate for the listing and the re-check): state RESOLVED and
+  `COALESCE(resolved_on, work_item.updated_on) <= NOW() - resolvedForDays days`. A synced incident with no
+  `resolved_on` is measured from its last update, so any later write to its work item pushes it back.
+- **Each incident is closed in its own transaction** (`AutocloseIncident`): the row is locked and
+  re-checked in one statement (`FOR UPDATE OF inc` with the due predicate; one re-opened or closed since it
+  was listed is skipped silently), then state CLOSED, `closed_on = NOW()`, `closed_by_id = resolved_by_id`,
+  `work_item.updated_on` / `updated_by` = `incidentSystemActorEmail` (`system-m2m@wso2.com`, the identity
+  `incidentService.resolveActor` uses with no user token), and `cascadeIncidentTaskClosure` closes the
+  open incident tasks exactly as a manual close does (CLOSED_INCOMPLETE plus ServiceNow's work note on
+  each task, attributed to the system actor; the task's `closed_by_id` stays NULL since that email has no
+  user row). It does **not** go through the resolve/close validation (ServiceNow closes without a
+  resolution code or notes). A failure lands in `failed` (a database error's text is only logged) and
+  does not stop the rest; the incident stays RESOLVED and is selected again. After each commit one
+  `work_item_activity` row (state Resolved -> Closed, by the system actor) is written best-effort.
+- **Side effects checked**: `incident_outbox` (0181) records the change (state, closed_on, closed_by_id);
+  `IncidentReportDrainer` acts only on a move to IN_PROGRESS or RESOLVED or a group change, so it
+  acknowledges this as a no-op. No `incident.*` event is published (a manual close publishes none
+  either; `publishIncidentStopSignals` only reacts to leaving NEW or an assignee). The `work_item`
+  triggers fire only on `assigned_to_id` / assignment group changes, which this does not touch.
+- **Dry run** lists what is due as `closed` and changes nothing, so a repeated dry-run call returns the
+  same page: a caller should not page through a dry run on `more`.
+- Tests: `incident_autoclose_integration_test.go` (`INCIDENT_AUTOCLOSE_TEST_DSN`; passes as a superuser
+  and as a non-superuser without BYPASSRLS: due / not due / NULL resolved_on / other states, the task
+  cascade, dry run, limit and `more`, the re-check, no comment rows, the manual close's stamps),
+  `incident_autoclose_service_test.go`, `incident_autoclose_handler_test.go`, and the "auto-close diff"
+  row of `TestIncidentReport_StateTable`.
+
 ## Change requests
 
 Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.

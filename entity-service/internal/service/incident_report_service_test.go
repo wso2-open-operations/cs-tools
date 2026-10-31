@@ -141,6 +141,13 @@ func TestIncidentReport_StateTable(t *testing.T) {
 		{"in progress to resolved writes report", map[string]map[string]any{"state": {"from": "IN_PROGRESS", "to": "RESOLVED"}}, false, true},
 		{"to on hold does nothing", map[string]map[string]any{"state": {"from": "IN_PROGRESS", "to": "ON_HOLD"}}, false, false},
 		{"to closed does nothing", map[string]map[string]any{"state": {"from": "RESOLVED", "to": "CLOSED"}}, false, false},
+		// What the incident auto-close (and, since migration 0255, a manual
+		// close) records: the state plus closed_on / closed_by_id.
+		{"auto-close diff does nothing", map[string]map[string]any{
+			"state":        {"from": "RESOLVED", "to": "CLOSED"},
+			"closed_on":    {"from": nil, "to": "2026-10-29T00:00:01+00:00"},
+			"closed_by_id": {"from": nil, "to": "d1000000-0000-0000-0000-000000000002"},
+		}, false, false},
 		{"no state change does nothing", map[string]map[string]any{"priority": {"from": "LOW", "to": "HIGH"}}, false, false},
 		// The generator's own write changes incident_report only; it must not
 		// be mistaken for a trigger.

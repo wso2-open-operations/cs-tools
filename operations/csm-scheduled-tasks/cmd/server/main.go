@@ -47,6 +47,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
@@ -379,6 +380,37 @@ func main() {
 		}
 	}
 
+	// Incident auto-close: the port of ServiceNow's hourly job that closes an
+	// incident 14 days after it was resolved -- see internal/incidentautoclose's
+	// package doc and CLAUDE.md, "Incident auto-close". ON unless
+	// INCIDENT_AUTOCLOSE_ENABLED=false: the CSM database is the record of
+	// incidents now, and nothing else closes a resolved one. This component's
+	// client id must be in entity-service's M2M_CLIENT_IDS, and entity-service
+	// must run on Postgres (DATA_SOURCE=servicenow answers 503).
+	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", true)
+	var incidentAutocloseClient *incidentautoclose.Client
+	var incidentAutocloseCfg incidentautoclose.Config
+	if incidentAutocloseEnabled {
+		// A malformed value refuses to start rather than falling back: a mistyped
+		// dry run must not become a real one.
+		incidentAutocloseCfg, err = incidentautoclose.ConfigFromEnv(os.Getenv)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		incidentAutocloseClient, err = incidentautoclose.NewClient(incidentautoclose.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service incident auto-close client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -599,6 +631,9 @@ func main() {
 
 	const autoclosureTaskName = "case_autoclosure"
 	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
+
+	const incidentAutocloseTaskName = "incident_autoclose"
+	incidentAutocloseTo, incidentAutocloseCc := recipientsFor(recipientOverrides, incidentAutocloseTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -1020,6 +1055,25 @@ func main() {
 			Handler:  autoclosure.Run(autoclosureClient, autoclosureCfg),
 			To:       autoclosureTo,
 			Cc:       autoclosureCc,
+		})
+	}
+
+	// Hourly, as ServiceNow ran it (at :00:01 there; here at whatever minute the
+	// Choreo trigger fires). A failed run is retried the next tick: closed
+	// incidents are no longer due, so only what is left is attempted.
+	if incidentAutocloseEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so,
+		// as for case_autoclosure, it is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == incidentAutocloseTaskName && !incidentAutocloseCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is incident_autoclose: running as a dry run, nothing will be closed; set INCIDENT_AUTOCLOSE_DRY_RUN=true explicitly to silence this")
+			incidentAutocloseCfg.DryRun = true
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     incidentAutocloseTaskName,
+			Schedule: scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
+			Handler:  incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
+			To:       incidentAutocloseTo,
+			Cc:       incidentAutocloseCc,
 		})
 	}
 

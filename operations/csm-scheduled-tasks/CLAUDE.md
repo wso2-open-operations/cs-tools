@@ -419,6 +419,50 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
 
+## Incident auto-close
+
+`internal/incidentautoclose.Run`, registered as **`incident_autoclose`** (default schedule `0 * * * *`, hourly;
+TZ=UTC caveat as above), closes incidents that have been Resolved for `INCIDENT_AUTOCLOSE_DAYS` (default 14). It
+is the port of ServiceNow's hourly job, as measured on WSO2's instance: it ran at :00:01, closed an incident 14
+days after `resolved_at`, set `closed_by` to the incident's resolver, and added no comment and no work note. Here
+the minute is whenever the Choreo trigger fires. Nothing is sent back to ServiceNow.
+**On unless `INCIDENT_AUTOCLOSE_ENABLED=false`** (a decision of 2026-10-29: the CSM database is the record of
+incidents, and nothing else closes a resolved one). Deploying it therefore starts closing at once: the first run
+closes every incident Resolved for longer than `INCIDENT_AUTOCLOSE_DAYS`, oldest first, a page at a time. Deploy
+entity-service with migration 0255 first; until it has `POST /incidents/autoclose` every run fails (404) and
+alerts. This component's client id must be in entity-service's `M2M_CLIENT_IDS`, and entity-service must run on
+Postgres: under `DATA_SOURCE=servicenow` the endpoint answers 503 and every run fails and alerts, so set the flag
+to `false` there.
+
+This task is a **trigger only**. entity-service's `POST /incidents/autoclose` picks what is due (oldest resolved
+first), closes each incident in its own transaction after re-checking it, closes its open tasks as a manual close
+would, and reports `closed`, `failed` and `more` (the page was full). entity-service's CLAUDE.md has no section on
+it yet; the code is `entity-service/internal/service/incident_autoclose_service.go`.
+
+- **Paging.** Each call asks for 200 new incidents (`PageSize`); the handler asks again while `more` is true, at
+  most 20 pages (`MaxPages`, 4,000 incidents) a run. Reaching the cap with `more` still true logs a WARN and the
+  run succeeds; the next hourly run continues. entity-service lists the oldest due first with no offset, and an
+  incident that fails stays Resolved and due, so it comes back at the head of every later page. The request limit
+  therefore grows with the failures already seen (200 + failures, at most entity-service's 1,000), so failing
+  incidents do not hide the ones behind them. If a full page still holds only incidents that already failed (more
+  than 800 failing), the run stops and its error says that later due incidents were not reached.
+- **Timeout.** A page must finish inside entity-service's `REQUEST_TIMEOUT` (60s by default); the client waits
+  the same 60s. A page cut short comes back as an error with no `closed`/`failed` lists, so the run fails and
+  alerts, but no work is lost: each incident commits on its own, and the rest are still due next run.
+- **Failures fail the run.** A failed call, or any `failed` entry, returns an error naming the incidents (at most
+  10, then a count; each message cut to 200 characters), so the engine alerts and retries on the next tick.
+  Retrying is safe: closed incidents are no longer due. One incident failing does not stop the others on its page
+  or later pages; it is named once per run even when later pages report it again.
+- **A dry run asks once.** Nothing is closed, so a second call would return the same page; the run logs each
+  incident it would close and, when `more` is true, that more are due. A response that says it was not a dry run
+  when one was asked for fails the run.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `INCIDENT_AUTOCLOSE_ENABLED` | `true` | Register the task; `false` turns it off |
+| `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value below 1 or not a whole number refuses to start |
+| `INCIDENT_AUTOCLOSE_DRY_RUN` | `false` | List what is due, close nothing. A malformed value refuses to start rather than falling back to a real run. **A `TRYOUT_TASK=incident_autoclose` is always forced to a dry run**, as for `case_autoclosure` |
+
 ## Usage rollups
 
 Two sub-crons that rebuild the usage summary tables: **`usage_rollup_daily`** (default `30 0 * * *`)
@@ -562,6 +606,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` | No (defaults `true` / `14` / `false`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

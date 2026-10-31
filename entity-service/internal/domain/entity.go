@@ -6980,7 +6980,13 @@ type IncidentView struct {
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
-	IncidentReport  *string `json:"incidentReport"`
+	// ClosedOn / ClosedBy are when the incident entered Closed and who it is
+	// attributed to (the closer's name), read from incident.closed_on /
+	// closed_by_id (migration 0255) on the Postgres data sources. Null for an
+	// incident closed before that migration, and on the ServiceNow data source.
+	ClosedOn       *string `json:"closedOn"`
+	ClosedBy       *string `json:"closedBy"`
+	IncidentReport *string `json:"incidentReport"`
 	// Description is ServiceNow's incident.description field (separate from Subject, which
 	// maps to the shorter short_description), read from work_item.description -- the same
 	// column every other work_item type already uses for its own long-form description.

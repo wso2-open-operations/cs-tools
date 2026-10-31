@@ -379,6 +379,18 @@ type ScheduledTaskRunService interface {
 	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
 }
 
+// IncidentAutocloseService closes incidents that have been RESOLVED for a
+// given number of days, the port of ServiceNow's hourly auto-close. It is
+// driven by operations/csm-scheduled-tasks (incident_autoclose) and decides
+// nothing about scheduling itself.
+type IncidentAutocloseService interface {
+	// Autoclose closes (or, with DryRun, lists) up to Limit due incidents,
+	// oldest first. A ValidationError is returned for a missing or non-positive
+	// resolvedForDays or a limit outside 1..1000; an incident that fails to
+	// close is reported in the response's Failed list, not as an error.
+	Autoclose(ctx context.Context, req domain.IncidentAutocloseRequest) (domain.IncidentAutocloseResponse, error)
+}
+
 // AlertIncidentMappingService defines the operations available on the
 // alert_incident_mapping entity — see domain.AlertIncidentMappingView's doc
 // comment for what it's for.

@@ -13521,6 +13521,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/autoclose:
+    post:
+      summary: >-
+        Close the incidents that have been RESOLVED for at least resolvedForDays
+        days (the port of ServiceNow's hourly auto-close: 14 days after
+        resolved_at). Each due incident, oldest first, up to limit, is closed in
+        its own transaction: state CLOSED, closedOn now, closed by its resolver,
+        its open incident tasks closed as on a manual close, the work item
+        stamped by the system actor. No comment or work note is added and
+        nothing is mirrored to ServiceNow; the resolution code and notes are not
+        required. An incident with no resolvedOn is measured from its last
+        update. Internal callers only. Postgres data sources only. Backs
+        operations/csm-scheduled-tasks (incident_autoclose).
+      operationId: autocloseIncidents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentAutocloseRequest'
+      responses:
+        "200":
+          description: >-
+            What was closed (or, in a dry run, would be) and what failed. A failed
+            incident stays RESOLVED and is selected again by the next call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentAutocloseResponse'
+        "400":
+          description: >-
+            resolvedForDays missing or outside 1-3650, limit outside 1-1000, or an
+            unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not used; declared for consistency with every writable endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            Incident auto-close is not available on this entity-service
+            (DATA_SOURCE=servicenow or no database); the reason is logged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents:
     post:
       summary: Create a new incident.
@@ -31229,6 +31293,20 @@ components:
           type: string
           nullable: true
           description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the incident entered Closed (Postgres data sources, migration
+            0255). Null for an incident closed before that migration and on the
+            ServiceNow data source.
+        closedBy:
+          type: string
+          nullable: true
+          description: >-
+            Name of the user the close is attributed to: the closer on a manual
+            close, the resolver on an auto-close. Null when unknown.
         incidentReport:
           type: string
           nullable: true
@@ -36348,6 +36426,71 @@ components:
     AutoclosureStage:
       type: string
       enum: [release_hold, first_reminder, second_reminder, close]
+    IncidentAutocloseRequest:
+      type: object
+      additionalProperties: false
+      required: [resolvedForDays]
+      properties:
+        resolvedForDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: How many days an incident must have been RESOLVED (ServiceNow used 14).
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 200
+          description: Most incidents one call selects, oldest first. 0 or absent means 200.
+        dryRun:
+          type: boolean
+          default: false
+          description: >-
+            Select and return what is due as "closed" without changing anything.
+            Calling again returns the same page.
+    IncidentAutocloseClosed:
+      type: object
+      required: [id, number, resolvedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: The stored resolvedOn; null when the incident had none and was due by its last update.
+    IncidentAutocloseFailed:
+      type: object
+      required: [id, number, error]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        error:
+          type: string
+          description: Why it was not closed. Database errors are only logged and reported generically.
+    IncidentAutocloseResponse:
+      type: object
+      required: [dryRun, closed, failed, more]
+      properties:
+        dryRun:
+          type: boolean
+        closed:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentAutocloseClosed'
+        failed:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentAutocloseFailed'
+        more:
+          type: boolean
+          description: True when the call selected limit incidents, so more may be due; call again.
     AutoclosureCandidatesRequest:
       type: object
       required: [stage]

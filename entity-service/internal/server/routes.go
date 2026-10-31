@@ -1492,6 +1492,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	autoclosureHandler := handler.NewAutoclosureHandler(autoclosureSvc)
 
+	// Incident auto-close: the port of ServiceNow's hourly close of incidents
+	// left RESOLVED for 14 days (POST /incidents/autoclose, driven by
+	// operations/csm-scheduled-tasks' incident_autoclose task). Postgres only
+	// and never mirrored to ServiceNow. Always registered; without the
+	// Postgres incident tables it answers 503 (the reason is logged), like the
+	// case auto-closure routes above.
+	var incidentAutocloseSvc service.IncidentAutocloseService
+	if db == nil || cfg.DataSource == config.DataSourceServiceNow {
+		incidentAutocloseSvc = service.NewUnavailableIncidentAutocloseService("incident auto-close needs the Postgres incident tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
+	} else {
+		incidentAutocloseSvc = service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(db)))
+	}
+	incidentAutocloseHandler := handler.NewIncidentAutocloseHandler(incidentAutocloseSvc)
+
 	// Case feedback (CSAT submissions): the ServiceNow data source reads it
 	// from the backing system; both Postgres data sources read
 	// work_item_feedback (migration 0102). Dual write deliberately does NOT
@@ -2561,6 +2575,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /incidents/aggregate", internalOnly(accessSvc, incidentHandler.AggregateIncidents))
 	mux.HandleFunc("POST /incidents/{id}/activities/search", internalOnly(accessSvc, incidentHandler.SearchIncidentActivities))
 	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", internalOnly(accessSvc, incidentHandler.HandOffIncidentToSpecialist))
+	mux.HandleFunc("POST /incidents/autoclose", internalOnly(accessSvc, incidentAutocloseHandler.Autoclose))
 	mux.HandleFunc("GET /specialist-handoff-teams", internalOnly(accessSvc, incidentHandler.ListSpecialistHandoffTeams))
 
 	// Postgres-backed, and deliberately separate from outageHandler above:
