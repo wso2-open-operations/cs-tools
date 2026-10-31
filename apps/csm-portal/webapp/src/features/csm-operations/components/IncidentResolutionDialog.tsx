@@ -15,6 +15,7 @@
 // under the License.
 
 import {
+  Alert,
   Button,
   Dialog,
   DialogActions,
@@ -39,6 +40,9 @@ interface IncidentResolutionDialogProps {
   /** The transition this dialog is confirming — always RESOLVED or CLOSED. */
   target: Extract<BeIncidentState, "RESOLVED" | "CLOSED">;
   isSubmitting: boolean;
+  /** Open child incidents (not Resolved, Closed or Cancelled) of this one.
+   * Resolving it resolves them too, so the dialog says so. */
+  openChildCount?: number;
   onClose: () => void;
   onSubmit: (fields: {
     resolutionCode: BeIncidentResolutionCode;
@@ -47,9 +51,8 @@ interface IncidentResolutionDialogProps {
 }
 
 /**
- * Collects the resolution code + notes ServiceNow requires before an
- * incident can move to `RESOLVED`/`CLOSED` — confirmed live: those two state
- * values 500 without them (see `BeUpdateIncidentPayload`'s doc comment).
+ * Collects the resolution code + notes required before an incident can move
+ * to `RESOLVED`/`CLOSED` (see `BeUpdateIncidentPayload`'s doc comment).
  * Doubles as the confirmation step for these two transitions, same role
  * `ResolutionDialog` plays for a case's close/propose-solution — there is no
  * separate plain confirm dialog for them.
@@ -57,6 +60,7 @@ interface IncidentResolutionDialogProps {
 export default function IncidentResolutionDialog({
   target,
   isSubmitting,
+  openChildCount = 0,
   onClose,
   onSubmit,
 }: IncidentResolutionDialogProps): JSX.Element {
@@ -76,6 +80,15 @@ export default function IncidentResolutionDialog({
           A resolution is required to move this incident to{" "}
           {incidentStateLabel(target)}.
         </Typography>
+        {/* Only Resolved cascades: closing or cancelling a parent leaves its
+            children as they are. */}
+        {target === "RESOLVED" && openChildCount > 0 && (
+          <Alert severity="info">
+            This will also resolve {openChildCount} open child{" "}
+            {openChildCount === 1 ? "incident" : "incidents"} (and their own open
+            children). Children without a resolution of their own get this one.
+          </Alert>
+        )}
         <FormControl fullWidth size="small" required error={touched && !hasCode}>
           <InputLabel
             id="incident-resolution-code-label"

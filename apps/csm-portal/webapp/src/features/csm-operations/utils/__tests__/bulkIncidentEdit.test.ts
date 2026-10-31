@@ -79,8 +79,11 @@ describe("bulkIncidentPlan", () => {
   });
 
   it("never makes an incident its own parent, and never edits a closed one", () => {
-    expect(bulkIncidentPlan(open, { patch: { parentId: "inc-1" } })).toEqual({
+    expect(bulkIncidentPlan(open, { patch: { parentIncidentId: "inc-1" } })).toEqual({
       skip: "An incident can't be its own parent incident.",
+    });
+    expect(bulkIncidentPlan(open, { patch: { parentIncidentId: "inc-9" } })).toEqual({
+      patch: { parentIncidentId: "inc-9" },
     });
     expect(bulkIncidentPlan({ id: "inc-2", state: "CLOSED" }, { patch: { subject: "S" } })).toEqual({
       skip: "Closed or cancelled: it can't be edited.",

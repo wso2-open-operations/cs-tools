@@ -8980,7 +8980,9 @@ state transition, work notes / comments, and the record's own fields -- everythi
 (`IncidentRepository.UpdateIncidentLifecycle`) and mirrored to ServiceNow as sent. A change to
 impact or urgency recomputes priority with ServiceNow's lookup; a new category that does not hold
 the current subcategory clears it; `watchList` replaces `work_item_watcher`. A field sent as
-`null` is ignored, as on the ServiceNow path; only `environment` can be cleared.
+`null` is ignored, as on the ServiceNow path; only `parentIncidentId` and `environment` can be
+cleared (`UpdateIncidentRequest.UnmarshalJSON` keeps their explicit `null` apart from an omitted
+field; the ServiceNow mirror sends it as a real `null`).
 
 `IncidentView.WatchList` is read from `work_item_watcher` (`incidentWatchers`), the
 table `UpdateIncidentLifecycle`'s `watchList` replaces. The CSM list's bulk edit adds
@@ -11500,3 +11502,51 @@ rather than failing the change (the insert looks the id up). **Not ported:** the
 the field has no column and no portal input. `MissingSchema` also checks 0188's columns.
 
 Tests: `post_resolution_tasks_test.go` (unit), `post_resolution_tasks_integration_test.go`.
+
+## Child incidents: the parent link, `parentIncidentIds`, and the resolve cascade (migration 0256)
+
+An incident's parent incident is `incident.parent_incident_id` (ServiceNow's `parent_incident`,
+read as `parentIncident`, written as `parentIncidentId`). It is **not** `work_item.parent_id`
+(`parent` / `parentId`), the generic parent record a case or change request uses.
+
+- **Children by search:** `POST /incidents/search` (and `/aggregate`) take
+  `filters.parentIncidentIds` (UUIDs), matched as `inc.parent_incident_id = ANY(...)`; `parentIds`
+  keeps matching `work_item.parent_id`. The ServiceNow data source answers 400 for it (the
+  integration has no `parent_incident` filter). An SLA-filtered search delegated to ServiceNow
+  (`SLA_DATA_SOURCE=servicenow`) therefore refuses it too.
+- **No loops:** `UpdateIncidentLifecycle` refuses (400) a `parentIncidentId` that is the incident
+  itself or any incident below it (`checkParentIncident`: `WITH RECURSIVE ... UNION` up the
+  parent chain, under a transaction advisory lock so two concurrent re-links cannot each pass).
+  Create needs no check: a new incident has no children. `{"parentIncidentId": null}` unlinks the
+  incident (the edit dialog's cleared picker); an unlink needs no check.
+- **Resolve cascade** (`cascadeChildIncidentResolution`, ServiceNow's OOB "Update Child
+  Incidents"): when an incident enters RESOLVED, every child not RESOLVED/CLOSED/CANCELED (NEW and
+  ON_HOLD too) is resolved in the same transaction: the child's own `resolution_code` and
+  `close_notes` if it has them, else the parent's, the parent's stored `resolved_by_id`,
+  `resolved_on = NOW()`, `resolved_with_parent = TRUE`, `work_item.updated_on/updated_by`, and
+  "Resolved based on resolution of Parent Incident." as a COMMENT (no work note). These rules were
+  read off WSO2's production ServiceNow (185 children resolved within 5 seconds of their parent,
+  2026-10-29): the code came from the parent in 175, and the other 10 kept a code they already had
+  (Duplicate, Not Actionable Alert); the resolver was the parent's in all 185; the journal held the
+  comment and no work note. It recurses
+  (ServiceNow's rule fires again on each child), children locked `ORDER BY id`, with a visited set
+  and a 10-level cap (a 400 naming the child). Any failure rolls back the parent's resolve. CLOSED,
+  CANCELED and a re-open do not cascade; there is no incident auto-close yet.
+- **After commit** (`afterChildIncidentsResolved`, best-effort): `state`/`resolution_code`
+  activity rows per child, as the parent's actor, and `incident.acknowledged` for a child that
+  left NEW. No ServiceNow mirror per child: in dual-write ServiceNow's own rule resolves its side.
+  Accepted gap: the link and the resolve are mirrored on different dispatcher keys (the child's,
+  the parent's), so a child linked moments before its parent is resolved can reach ServiceNow after
+  the parent's resolve, and ServiceNow then leaves it open. Postgres follows the order its own
+  commits landed in (a child linked before the resolve committed is resolved with it); only
+  ServiceNow's copy can differ.
+- **`resolved_with_parent`** (0256) is set by the cascade and cleared when an incident is resolved
+  by its own update (a re-open leaves it as it was, like `resolved_on`). `IncidentView`
+  exposes it as `resolvedWithParent`. The incident report drainer still writes a child's report but
+  skips the post-resolution follow-ups (workaround problem, alert tasks) for it, reading the flag
+  from the outbox **snapshot** (the row as that change left it), so they are raised once, for the
+  parent. A snapshot from before 0256 has no flag and counts as a resolve of its own.
+
+Tests: `incident_child_cascade_integration_test.go` (`INCIDENT_TASK_GATE_TEST_DSN`),
+`TestPostResolutionIntegration_ChildResolvedWithParentGetsNoFollowUps`
+(`INCIDENT_REPORT_TEST_DSN`), `incident_child_resolve_test.go` (unit).

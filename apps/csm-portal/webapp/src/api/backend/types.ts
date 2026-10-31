@@ -3764,7 +3764,13 @@ export interface BeIncident {
   priority: BeIncidentPriority | null;
   state: BeIncidentState | null;
   category: BeIncidentCategory | null;
+  /** The generic parent link (`work_item.parent_id`): a case, change request,
+   * problem or incident, with no type on the ref to tell which. */
   parent?: BeEntityRef | null;
+  /** The incident this one is a child of (`incident.parent_incident_id`,
+   * ServiceNow's `parent_incident`); `name` is its number. Resolving the
+   * parent resolves its open children. */
+  parentIncident?: BeEntityRef | null;
   assignmentGroup?: BeEntityRef | null;
   assignedTo?: BeEntityRef | null;
   createdOn?: string;
@@ -3816,6 +3822,19 @@ export interface BeIncidentDetail extends BeIncident {
    * canEscalateToSpecialOps. Absent when the backend does not say
    * (ServiceNow data source), in which case the action stays offered. */
   canHandOffToSpecialist?: boolean;
+  /** Set once the incident is resolved, and kept through Closed and a
+   * re-open. Normally a {@link BeIncidentResolutionCode}; an unmapped stored
+   * value comes through as-is. */
+  resolutionCode?: string | null;
+  /** The close notes. */
+  resolutionNotes?: string | null;
+  /** Display name of whoever resolved it. */
+  resolvedBy?: string | null;
+  resolvedOn?: string | null;
+  /** True when this incident was resolved because its parent incident was
+   * (the cascade copies the parent's resolution code), false once it is
+   * resolved on its own. */
+  resolvedWithParent?: boolean;
 }
 
 /**
@@ -3893,15 +3912,13 @@ export type BeIncidentResolutionCode =
   | "NOT_ACTIONABLE";
 
 /**
- * `PATCH /incidents/{id}` body (ServiceNow data source only,
- * `minProperties: 1`). Covers the in-scope subset the Edit dialog sends —
- * the full `UpdateIncidentPayload` schema also documents `incidentReport` /
- * `resolvedById`, deliberately left out here since there's no read-side
- * model for them yet either (see {@link BeIncidentDetail}). `resolutionCode`
- * / `resolutionNotes` ARE included (write-only, same as `incidentReport` —
- * `IncidentDetail` never echoes them back on read) since ServiceNow requires
- * them to move an incident to `RESOLVED`/`CLOSED` (confirmed live: those two
- * state values 500 without them).
+ * `PATCH /incidents/{id}` body (`minProperties: 1`). Covers the in-scope
+ * subset the Edit dialog sends; the full `UpdateIncidentPayload` schema also
+ * documents `resolvedById`, left out here. `resolutionCode` /
+ * `resolutionNotes` are required to move an incident to `RESOLVED`/`CLOSED`
+ * (those two state values are refused without them), and are read back on
+ * {@link BeIncidentDetail}. Moving an incident to `RESOLVED` also resolves its
+ * open child incidents, in the same update.
  */
 export interface BeUpdateIncidentPayload {
   subject?: string;
@@ -3930,7 +3947,11 @@ export interface BeUpdateIncidentPayload {
   watchList?: string[];
   workNotes?: string | null;
   additionalComments?: string | null;
+  /** The generic parent (`work_item.parent_id`), not the parent incident. */
   parentId?: string | null;
+  /** The parent incident (see {@link BeIncident.parentIncident}). The backend
+   * 400s on the incident itself or one of its own descendants. */
+  parentIncidentId?: string | null;
   changeRequestId?: string | null;
   problemId?: string | null;
   causedById?: string | null;
@@ -3986,7 +4007,11 @@ export interface BeIncidentSearchPayload {
   filters?: {
     searchQuery?: string;
     priorities?: BeIncidentPriority[];
+    /** Matches the generic parent (`work_item.parent_id`). */
     parentIds?: string[];
+    /** Child incidents of these incident ids (`incident.parent_incident_id`).
+     * PostgreSQL only. */
+    parentIncidentIds?: string[];
     /**
      * A single incident number (e.g. "INC0090472"); matches exactly. Routed
      * as a first-class filter rather than through the free-text searchQuery
@@ -4001,8 +4026,8 @@ export interface BeIncidentSearchPayload {
      * flat named keys for any of these (there used to be `slaViolated`/
      * `startCreatedDate`/`endCreatedDate`/`productNames` scalars here, but
      * the backend now rejects them as unknown fields; always route through
-     * this array instead). `searchQuery`/`priorities`/`parentIds`/`number`
-     * above remain flat — only those four.
+     * this array instead). `searchQuery`/`priorities`/`parentIds`/
+     * `parentIncidentIds`/`number` above remain flat — only those five.
      */
     filters?: BeIncidentFieldFilter[];
     /** OR groups (PostgreSQL only): each branch's filters ANDed, branches OR'd. */

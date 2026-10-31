@@ -6640,6 +6640,11 @@ type SearchIncidentsFilters struct {
 	SearchQuery string             `json:"searchQuery"`
 	Priorities  []IncidentPriority `json:"priorities"`
 	ParentIDs   []string           `json:"parentIds"`
+	// ParentIncidentIDs filters to the child incidents of these incidents:
+	// incident.parent_incident_id (ServiceNow's parent_incident), not the
+	// generic work_item.parent_id ParentIDs matches. UUIDs. PostgreSQL only;
+	// the ServiceNow data source rejects it.
+	ParentIncidentIDs []string `json:"parentIncidentIds,omitempty"`
 	// Number filters to the incident whose human-readable number (e.g.
 	// "INC0010001") exactly matches (optional). Exact match against
 	// ServiceNow's `number` column, routed as a first-class filter rather
@@ -6976,37 +6981,41 @@ type CreateIncidentResponse struct {
 // UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
 // but at least one must be provided.
 type UpdateIncidentRequest struct {
-	ID                  string                  `json:"-"`
-	Subject             *string                 `json:"subject,omitempty"`
-	Priority            *IncidentPriority       `json:"priority,omitempty"`
-	State               *IncidentState          `json:"state,omitempty"`
-	Category            *IncidentCategory       `json:"category,omitempty"`
-	Subcategory         *IncidentSubcategory    `json:"subcategory,omitempty"`
-	ContactType         *IncidentContactType    `json:"contactType,omitempty"`
-	Impact              *IncidentImpact         `json:"impact,omitempty"`
-	Urgency             *IncidentUrgency        `json:"urgency,omitempty"`
-	ResolutionCode      *IncidentResolutionCode `json:"resolutionCode,omitempty"`
-	ParentID            *string                 `json:"parentId,omitempty"`
-	ParentIncidentID    *string                 `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string                 `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string                 `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string                 `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string                 `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string                 `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string                 `json:"changeRequestId,omitempty"`
-	ProblemID           *string                 `json:"problemId,omitempty"`
-	CausedByID          *string                 `json:"causedById,omitempty"`
-	ResolvedByID        *string                 `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string                 `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string                 `json:"incidentReport,omitempty"`
-	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
-	WorkNotes           *string                 `json:"workNotes,omitempty"`
-	WatchList           *[]string               `json:"watchList,omitempty"`
+	ID             string                  `json:"-"`
+	Subject        *string                 `json:"subject,omitempty"`
+	Priority       *IncidentPriority       `json:"priority,omitempty"`
+	State          *IncidentState          `json:"state,omitempty"`
+	Category       *IncidentCategory       `json:"category,omitempty"`
+	Subcategory    *IncidentSubcategory    `json:"subcategory,omitempty"`
+	ContactType    *IncidentContactType    `json:"contactType,omitempty"`
+	Impact         *IncidentImpact         `json:"impact,omitempty"`
+	Urgency        *IncidentUrgency        `json:"urgency,omitempty"`
+	ResolutionCode *IncidentResolutionCode `json:"resolutionCode,omitempty"`
+	ParentID       *string                 `json:"parentId,omitempty"`
+	// ParentIncidentID: nil leaves the parent incident as it is, a non-nil
+	// pointer holding nil (an explicit `null`) clears it, as Environment.
+	// See UnmarshalJSON.
+	ParentIncidentID    **string  `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string   `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string   `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string   `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string   `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string   `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string   `json:"changeRequestId,omitempty"`
+	ProblemID           *string   `json:"problemId,omitempty"`
+	CausedByID          *string   `json:"causedById,omitempty"`
+	ResolvedByID        *string   `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string   `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string   `json:"incidentReport,omitempty"`
+	AdditionalComments  *string   `json:"additionalComments,omitempty"`
+	WorkNotes           *string   `json:"workNotes,omitempty"`
+	WatchList           *[]string `json:"watchList,omitempty"`
 	// Environment: see CreateIncidentRequest.Environment doc comment. Double
 	// pointer distinguishes "omitted" (nil) from an explicit `null` clear
 	// (non-nil outer, nil inner) from a new value (non-nil, non-nil) -- a
 	// single *string can't tell omitted apart from explicit null on decode,
-	// same convention as ChangeRequest's CustomerGroupID.
+	// same convention as ChangeRequest's CustomerGroupID. encoding/json alone
+	// decodes a `null` as omitted; UnmarshalJSON is what makes it a clear.
 	Environment **string `json:"environment"`
 }
 
@@ -7063,7 +7072,12 @@ type IncidentView struct {
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
-	IncidentReport  *string `json:"incidentReport"`
+	// ResolvedWithParent is true when the incident was resolved because its
+	// parent incident was (ServiceNow's "Update Child Incidents" rule, ported
+	// to UpdateIncidentLifecycle), and false once it is resolved on its own.
+	// Always false on the ServiceNow data source.
+	ResolvedWithParent bool    `json:"resolvedWithParent"`
+	IncidentReport     *string `json:"incidentReport"`
 	// Description is ServiceNow's incident.description field (separate from Subject, which
 	// maps to the shorter short_description), read from work_item.description -- the same
 	// column every other work_item type already uses for its own long-form description.

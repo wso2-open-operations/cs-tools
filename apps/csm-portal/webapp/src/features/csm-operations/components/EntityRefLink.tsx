@@ -28,13 +28,16 @@ import { useNavTransition } from "@hooks/useNavTransition";
  * a Change Request). When a reference field's target type can't be
  * determined safely (an ambiguous/generic link field), omit `routeBase` and
  * this renders as plain text instead of guessing at a possibly-wrong link.
+ * `from` is passed on as `state.from`, so Back on the target returns here.
  */
 export default function EntityRefLink({
   value,
   routeBase,
+  from,
 }: {
   value?: BeEntityRef | null;
   routeBase?: string;
+  from?: string;
 }): JSX.Element {
   const navigate = useNavTransition();
 
@@ -51,7 +54,11 @@ export default function EntityRefLink({
       clickable
       icon={<LinkIcon size={14} />}
       label={label}
-      onClick={() => navigate(`${routeBase}/${value.id}`)}
+      onClick={() => {
+        const path = `${routeBase}/${value.id}`;
+        if (from) navigate(path, { state: { from } });
+        else navigate(path);
+      }}
     />
   );
 }

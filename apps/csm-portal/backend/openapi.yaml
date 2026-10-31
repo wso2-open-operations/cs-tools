@@ -7894,7 +7894,7 @@ paths:
 
   /incidents/search:
     post:
-      summary: Search incidents (ServiceNow data source only).
+      summary: Search incidents.
       operationId: postIncidentsSearch
       requestBody:
         description: Incident search payload
@@ -8059,7 +8059,7 @@ paths:
 
   /incidents/{id}:
     get:
-      summary: Get an incident by ID (ServiceNow data source only).
+      summary: Get an incident by ID.
       operationId: getIncidentById
       parameters:
         - name: id
@@ -8107,7 +8107,26 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Partially update an incident (ServiceNow data source only).
+      summary: Partially update an incident.
+      description: >-
+        The body is forwarded to the entity service unchanged. On the PostgreSQL
+        data source, moving an incident into RESOLVED also resolves, in the same
+        transaction, every open child incident (parentIncidentId pointing at it,
+        state not RESOLVED, CLOSED or CANCELLED, NEW and ON_HOLD included), and
+        their children in turn, as ServiceNow's "Update Child Incidents" rule
+        does: each child gets the parent's resolvedBy, keeps its own
+        resolutionCode and resolutionNotes (taking the parent's when it has
+        none), has resolvedWithParent set, and gets the note "Resolved based on
+        resolution of Parent Incident." as an additional comment. A
+        failure on any child rolls back the whole update, and a chain of child
+        incidents nested more than 10 levels below the incident being resolved
+        is rejected with 400 (resolve the ones further down first). CLOSED,
+        CANCELLED and re-opening a resolved incident do not cascade to children.
+        The response carries only the patched incident. Also on PostgreSQL only,
+        setting parentIncidentId to the incident itself, or to one of its own
+        descendants, is rejected with 400. On the ServiceNow data source none
+        of this runs here: ServiceNow's own rule resolves the children, and
+        resolvedWithParent is always false.
       operationId: patchIncidentById
       parameters:
         - name: id
@@ -25291,6 +25310,20 @@ components:
               items:
                 type: string
                 format: uuid
+              description: >-
+                Matches the generic parent record (the response's `parent`),
+                not the parent incident link; use parentIncidentIds for that.
+            parentIncidentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: >-
+                Matches the dedicated parent incident link (the response's
+                `parentIncident`, set through parentIncidentId), so
+                `[<incident id>]` lists that incident's direct child incidents.
+                Each entry must be a UUID, otherwise 400. PostgreSQL data source
+                only; the ServiceNow data source answers 400 to a non-empty list.
             number:
               type: string
               description: >-
@@ -25439,10 +25472,14 @@ components:
           enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
         parent:
           nullable: true
+          description: The generic parent record (not the parent incident; see parentIncident).
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         parentIncident:
           nullable: true
+          description: >-
+            The parent incident this incident is a child of (`name` is the
+            parent's number), or null. Set through parentIncidentId.
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
@@ -25534,6 +25571,9 @@ components:
         parentIncidentId:
           type: string
           format: uuid
+          description: >-
+            Creates the incident as a child of the given incident (returned as
+            parentIncident). Not the same link as parentId.
         changeRequestId:
           type: string
           format: uuid
@@ -25611,10 +25651,14 @@ components:
           enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
         parent:
           nullable: true
+          description: The generic parent record (not the parent incident; see parentIncident).
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         parentIncident:
           nullable: true
+          description: >-
+            The parent incident this incident is a child of (`name` is the
+            parent's number), or null. Set through parentIncidentId.
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
@@ -25687,23 +25731,34 @@ components:
         resolutionCode:
           type: string
           nullable: true
-          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Resolution code label. Populated for resolved/closed incidents; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Free-text resolution notes. Populated for resolved/closed incidents; null otherwise.
         resolvedBy:
           type: string
           nullable: true
-          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Email of the user who resolved the incident. Populated for resolved/closed incidents; null otherwise.
         resolvedOn:
           type: string
           nullable: true
-          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Timestamp when the incident was resolved. Populated for resolved/closed incidents; null otherwise.
+        resolvedWithParent:
+          type: boolean
+          readOnly: true
+          description: >-
+            True when the incident was resolved by its parent incident's
+            resolution (see PATCH /incidents/{id}) rather than by its own
+            update; false otherwise, including when it was later resolved on
+            its own. Post-resolution follow-ups (the workaround problem and
+            alert tasks) run for the parent only, not for such a child.
+            PostgreSQL data source only; always false on the ServiceNow data
+            source, where ServiceNow's own rule resolves the children.
         incidentReport:
           type: string
           nullable: true
-          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Root-cause/incident report notes. Populated for resolved/closed incidents; null otherwise.
         linkedServiceRequests:
           type: array
           nullable: true
@@ -25734,6 +25789,11 @@ components:
         state:
           type: string
           enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+          description: >-
+            On the PostgreSQL data source, moving to RESOLVED also resolves
+            this incident's open child incidents, and theirs, with this
+            incident's resolutionCode (see PATCH /incidents/{id}); on the
+            ServiceNow data source, ServiceNow's own rule does that.
         category:
           type: string
           enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
@@ -25770,6 +25830,12 @@ components:
           type: string
           format: uuid
           nullable: true
+          description: >-
+            Makes this incident a child of the given incident (returned as
+            parentIncident). Not the same link as parentId. On the PostgreSQL
+            data source, 400 when it names the incident itself or one of its
+            own descendants. An explicit null unlinks it from its parent;
+            omitting the field leaves the link as it is.
         assignmentGroupId:
           type: string
           format: uuid

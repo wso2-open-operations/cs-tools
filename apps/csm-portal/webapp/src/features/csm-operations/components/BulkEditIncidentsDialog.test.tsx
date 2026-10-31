@@ -32,7 +32,10 @@ vi.mock("@api/useSearchItServices", () => ({
 const { noResults } = vi.hoisted(() => ({ noResults: () => ({ data: [], isFetching: false, isError: false }) }));
 vi.mock("@api/useSearchServiceOfferings", () => ({ useSearchServiceOfferings: noResults }));
 vi.mock("@api/useSearchConfigurationItems", () => ({ useSearchConfigurationItems: noResults }));
-vi.mock("@features/csm-operations/api/useSearchIncidentsForSelect", () => ({ useSearchIncidentsExcludingIds: noResults }));
+const { searchParentIncidents } = vi.hoisted(() => ({ searchParentIncidents: vi.fn() }));
+vi.mock("@features/csm-operations/api/useSearchIncidentsForSelect", () => ({
+  useSearchIncidentsExcludingIds: (...args: unknown[]) => searchParentIncidents(...args),
+}));
 vi.mock("@features/csm-operations/api/useSearchChangeRequestsForSelect", () => ({ useSearchChangeRequestsForSelect: noResults }));
 vi.mock("@features/csm-operations/api/useSearchProblemsForSelect", () => ({ useSearchProblemsForSelect: noResults }));
 
@@ -45,7 +48,10 @@ function pick(dialog: HTMLElement, field: string, option: string): void {
   fireEvent.click(screen.getByRole("option", { name: option }));
 }
 
-beforeEach(() => onApply.mockClear());
+beforeEach(() => {
+  onApply.mockClear();
+  searchParentIncidents.mockImplementation(noResults);
+});
 
 describe("BulkEditIncidentsDialog", () => {
   it("offers only the states every selected incident can move to", () => {
@@ -233,6 +239,31 @@ describe("BulkEditIncidentsDialog", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: /Resolution notes/ }), { target: { value: "Nothing wrong." } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 1 incident" }));
     expect(onApply.mock.calls[0][0].patch).not.toHaveProperty("incidentReport");
+  });
+
+  // The parent incident is what the child incidents list and the resolve
+  // cascade follow; the generic parent is another link altogether.
+  it("sets the parent incident (parentIncidentId), never the generic parentId", () => {
+    searchParentIncidents.mockImplementation(() => ({
+      data: [{ id: "inc-parent", number: "INC0011111", subject: "Gateway outage" }],
+      isFetching: false,
+      isError: false,
+    }));
+    render(
+      <BulkEditIncidentsDialog
+        incidents={[incident("a", "NEW"), incident("b", "IN_PROGRESS")]}
+        isApplying={false}
+        onClose={vi.fn()}
+        onApply={onApply}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Edit 2 incidents" });
+    fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "Parent incident" }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "INC0011111 — Gateway outage" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 incidents" }));
+
+    expect(onApply).toHaveBeenCalledWith({ patch: { parentIncidentId: "inc-parent" } });
+    expect(onApply.mock.calls[0][0].patch).not.toHaveProperty("parentId");
   });
 
   it("opens wide, so its columns never squeeze a field", () => {

@@ -520,10 +520,12 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
     the list sent back replaces the whole one); one whose list cannot be read is skipped, and a list that would not
     change is not sent. On the Postgres data sources the detail reads `work_item_watcher` (entity-service
     `incidentWatchers`; it used to return an empty list there, which made "add" a replace).
-  - Parent incident never offers a selected incident (`useSearchIncidentsExcludingIds`), and the plan refuses one as
-    its own parent. Caused by change is a change request picker (its column references `change_request`).
-  - Not offered: priority (it follows from impact and urgency) and `parentIncidentId` (a second parent column with no
-    label in the portal).
+  - Parent incident sets `parentIncidentId` (the incident's parent incident, the link the child incidents list and
+    the resolve cascade follow), like the single Edit dialog, never the generic `parentId`. It never offers a selected
+    incident (`useSearchIncidentsExcludingIds`), and the plan refuses one as its own parent (entity-service also
+    refuses a loop through the parent chain, in words). Caused by change is a change request picker (its column
+    references `change_request`).
+  - Not offered: priority (it follows from impact and urgency) and the generic `parentId`.
 - **Edit, change requests** (`BulkEditChangeRequestsDialog`): every field `PATCH /change-requests/{id}` takes from the
   edit form, plus on hold and the two journals, in sections (Change request, On hold, Service, Assignment, Schedule,
   Customer, Planning, Notes): short description, state, type, category, impact, priority, originating service request,
@@ -576,8 +578,11 @@ Both lists have a checkbox column (for `canWrite` only), a selection bar (`BulkS
 - **After a run** the dialog is closed with `flushSync` before anything is refreshed (its per-record detail queries would
   otherwise all refetch), then each record is refreshed exactly as a single edit refreshes it:
   `refreshChangeRequestRecord` (detail, approvals, comments when a work note or comment was sent) and
-  `refreshIncidentRecord` (detail, tasks, activity and comments after every update, and again after the In
-  Progress / Resolved flows), both exported from the single-record PATCH hooks so the two paths cannot drift. Only the run's own ids leave the selection (`remove`).
+  `refreshIncidentRecords` (detail, tasks, activity and comments after every update, and again after the In
+  Progress / Resolved flows), both exported from the single-record PATCH hooks so the two paths cannot drift. An
+  incident run passes all its updates in one call: a move to Resolved also resolves child incidents whose ids the page
+  does not know, so it refreshes every incident's detail, activity and comments (and the child lists after the flows),
+  and doing that once per incident would refetch every cached incident page N times. Only the run's own ids leave the selection (`remove`).
 - **Focus and announcements**: the result banner takes focus when it appears (the button that started the run has gone
   with the bar, and focus makes a screen reader read the outcome); Clear selection puts focus on the page's select-all
   box; `BulkSelectionBar` keeps one hidden `role="status"` region mounted even at 0, so the first count is announced.
