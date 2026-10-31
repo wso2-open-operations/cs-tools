@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
@@ -35,6 +37,61 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 )
+
+// fakeDurableDedup is a durableDedup test double backed by a plain map —
+// mirrors a real Redis SETNX/DEL closely enough for Handle's own durable
+// claim logic, with no real Redis needed. setNXErr/delErr simulate a
+// transient Redis failure on the next call only, then clear themselves —
+// enough to test the fail-open path without permanently breaking every
+// later call in the same test.
+type fakeDurableDedup struct {
+	mu       sync.Mutex
+	claimed  map[string]bool
+	setNXErr error
+	delErr   error
+}
+
+func newFakeDurableDedup() *fakeDurableDedup {
+	return &fakeDurableDedup{claimed: map[string]bool{}}
+}
+
+func (f *fakeDurableDedup) SetNX(ctx context.Context, key string, _ any, _ time.Duration) *redis.BoolCmd {
+	cmd := redis.NewBoolCmd(ctx)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.setNXErr != nil {
+		cmd.SetErr(f.setNXErr)
+		f.setNXErr = nil
+		return cmd
+	}
+	if f.claimed[key] {
+		cmd.SetVal(false)
+		return cmd
+	}
+	f.claimed[key] = true
+	cmd.SetVal(true)
+	return cmd
+}
+
+func (f *fakeDurableDedup) Del(ctx context.Context, keys ...string) *redis.IntCmd {
+	cmd := redis.NewIntCmd(ctx)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.delErr != nil {
+		cmd.SetErr(f.delErr)
+		f.delErr = nil
+		return cmd
+	}
+	var n int64
+	for _, k := range keys {
+		if f.claimed[k] {
+			delete(f.claimed, k)
+			n++
+		}
+	}
+	cmd.SetVal(n)
+	return cmd
+}
 
 type sentEmail struct {
 	from        string
@@ -1629,6 +1686,104 @@ func TestDispatcher_Handle_CaseAcknowledged_RetryAfterChatFailureResends(t *test
 	// silently treating the record as already handled.
 	if len(chat.caseAcknowledgedCalls) != 2 {
 		t.Errorf("expected 2 send attempts (1 failed, 1 succeeded), got %d", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_SkipsARedeliveredAlreadySucceededRecord is the
+// regression test for the actual, reported incident: a Kafka
+// consumer-group rebalance/restart redelivering a record this process
+// already handled completely and successfully, resending its Chat card a
+// second time. With WithDurableDedup configured, a THIRD call with the
+// exact same record content, after the first already succeeded, must not
+// reach the handler at all.
+func TestDurableDedup_SkipsARedeliveredAlreadySucceededRecord(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(newFakeDurableDedup())
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("first Handle() error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Fatalf("expected 1 send after the first delivery, got %d", len(chat.caseAcknowledgedCalls))
+	}
+
+	// A later redelivery of the identical record -- same bytes, same
+	// recordBaseKey -- simulating a rebalance/restart replaying from a
+	// stale committed offset.
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("redelivered Handle() error = %v, want nil (skipped, not an error)", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Errorf("chat calls = %d after a redelivery of an already-succeeded record, want still 1 (no duplicate send)", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_DoesNotBlockAGenuineRetryAfterFailure confirms durable
+// dedup does not regress the ordinary, far more common retry case: a
+// record whose handler genuinely failed must still be retried successfully
+// once the failure clears, exactly as it already does with no durable
+// dedup configured (see the sibling test with the same name minus this
+// prefix) -- the claim is released on failure specifically so this keeps
+// working.
+func TestDurableDedup_DoesNotBlockAGenuineRetryAfterFailure(t *testing.T) {
+	chat := &mockGoogleChatSender{err: errors.New("webhook unreachable")}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(newFakeDurableDedup())
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err == nil {
+		t.Fatal("expected the chat error to propagate on the first attempt")
+	}
+	chat.err = nil
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("retry: Handle() error = %v, want nil once the failure clears", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 2 {
+		t.Errorf("expected 2 send attempts (1 failed, 1 succeeded) with durable dedup configured, got %d", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_RedisSetNXErrorFailsOpen confirms a durable-dedup check
+// that itself fails (Redis unreachable) never blocks processing a record —
+// the in-memory done/chatKey guards elsewhere still apply regardless.
+func TestDurableDedup_RedisSetNXErrorFailsOpen(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	dedup := newFakeDurableDedup()
+	dedup.setNXErr = errors.New("redis unavailable")
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(dedup)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v, want nil -- a durable dedup check failure must fail open", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Errorf("chat calls = %d, want 1 -- the record must still be processed despite the Redis error", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_NilRedisDedupIsANoOp confirms a deployment that never
+// calls WithDurableDedup (no Redis configured, the same posture every
+// pre-existing test in this file already exercises) behaves exactly as
+// before this feature existed -- a redelivery of an already-succeeded
+// record is NOT caught, since the durable mechanism simply isn't
+// available, same as every other optional feature in this package.
+func TestDurableDedup_NilRedisDedupIsANoOp(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("first Handle() error = %v, want nil", err)
+	}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("second Handle() error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 2 {
+		t.Errorf("chat calls = %d, want 2 -- with no durable dedup configured, a second delivery is processed again, unaffected by this feature", len(chat.caseAcknowledgedCalls))
 	}
 }
 

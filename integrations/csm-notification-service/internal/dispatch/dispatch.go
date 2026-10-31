@@ -35,6 +35,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
@@ -308,15 +310,31 @@ type Dispatcher struct {
 
 	// doneMu/done track which (record, channel) pairs have already
 	// succeeded — see handleIncidentCreated's doc comment for why this
-	// exists. In-memory only: this is a stopgap for not having a durable
-	// idempotency store yet, not a substitute for one. It's lost on
-	// restart, which is fine — a restart-triggered redelivery duplicating
-	// one already-succeeded channel is the same accepted at-least-once
-	// trade-off documented elsewhere in this package; what this map fixes
-	// is the much more likely case, retries within a single process's
-	// handling of one record.
+	// exists. In-memory only — the much more likely case this map
+	// protects, retries within a single process's handling of one record,
+	// needs nothing durable. The restart-triggered redelivery case this
+	// comment used to accept as an unfixed trade-off is now closed
+	// separately, one level up in Handle — see redisDedup's own doc
+	// comment.
 	doneMu sync.Mutex
 	done   map[string]bool
+
+	// redisDedup is set via WithDurableDedup — nil (REDIS_ADDR/REDIS_URL
+	// unset, same optional-feature posture as slaEngine above) means
+	// Handle's own durable record-level claim is skipped entirely, exactly
+	// the behavior this service always had before it existed. When set, it
+	// closes a real, reported gap the done map above explicitly could not:
+	// a Kafka consumer-group rebalance or process restart can replay a
+	// record from an older committed offset even though this process
+	// already handled it completely and successfully — done being
+	// in-memory, it has no way to remember that past its own process's
+	// lifetime. A confirmed, reproduced incident showed both a
+	// case.acknowledged and a case.severity_changed record getting
+	// reprocessed this way, each resending its already-sent Chat card a
+	// second time, well after the fact. redisDedup is checked once per
+	// record in Handle, before any handler ever runs — see
+	// durablyClaimRecord's own doc comment for exactly how.
+	redisDedup durableDedup
 
 	// recordsMu/records track, per baseKey (recordBaseKey — one entry per
 	// distinct event content, shared by every concurrent Handle call
@@ -420,6 +438,29 @@ func (d *Dispatcher) WithFrustrationDetection(detector escalationDetector) *Disp
 // entirely rather than erroring.
 func (d *Dispatcher) WithSLAEngine(engine slaEngineService) *Dispatcher {
 	d.slaEngine = engine
+	return d
+}
+
+// durableDedup abstracts the two Redis calls Handle's own durable
+// record-level claim needs — SetNX to atomically claim-and-check, Del to
+// release a claim on failure so a genuine retry isn't blocked. The real
+// *redis.Client (cmd/server/main.go's own shared instance, the same one
+// slaengine.NewStore wraps) already implements this exactly; nothing new
+// needs constructing for it.
+type durableDedup interface {
+	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+}
+
+// WithDurableDedup configures Handle's own durable record-level claim (see
+// Dispatcher.redisDedup's own doc comment) and returns d for chaining. Not
+// part of NewDispatcher's parameter list deliberately — same
+// "optional per deployment" reasoning as WithSLAEngine above: a deployment
+// with no Redis configured gets a nil redisDedup, and Handle's own claim
+// check is skipped entirely, exactly this service's behavior before this
+// feature existed.
+func (d *Dispatcher) WithDurableDedup(client durableDedup) *Dispatcher {
+	d.redisDedup = client
 	return d
 }
 
@@ -753,6 +794,69 @@ func (d *Dispatcher) HandleShared(ctx context.Context, record eventbus.Record) e
 	return d.Handle(ctx, record)
 }
 
+// durableDedupTTL bounds how long Handle's own durable record-level claim
+// remembers a fully-processed record — matches slaengine's own clockTTL
+// precedent (internal/slaengine/redis.go) for "how long to remember a
+// one-time send is already done": long enough that no realistic
+// consumer-group rebalance or restart-triggered redelivery window could
+// ever outlast it, short enough not to accumulate forever.
+const durableDedupTTL = 90 * 24 * time.Hour
+
+// durableDedupKeyPrefix namespaces Handle's own claim keys in a Redis
+// instance this service already shares with slaengine's own wake
+// index/clock hashes/tier claims — a distinct prefix keeps the two
+// families of keys from ever colliding.
+const durableDedupKeyPrefix = "dispatch:handled:"
+
+// durablyClaimRecord atomically claims baseKey for this call via Redis
+// SETNX — claimed=true means this is the first time ANY call has reached
+// here for this exact record (by content hash, recordBaseKey) since the
+// key last expired, and Handle should go on to dispatch it; claimed=false
+// means a PAST call already claimed and — by construction, see
+// releaseDurableRecordClaim's own doc comment — fully succeeded at it, so
+// this delivery is a genuine redelivery of an already-handled record, not
+// a new event. A nil redisDedup (Redis not configured for this deployment)
+// always reports claimed=true: this whole mechanism is simply unavailable,
+// the same as before it existed, not a reason to refuse processing. A
+// Redis error also reports claimed=true (fail open, logged) — never refuse
+// to process a real event just because this one durability check
+// couldn't be made; the in-memory done/chatKey guards elsewhere in this
+// file still cover the common same-process-retry case regardless of
+// whether this one succeeds.
+func (d *Dispatcher) durablyClaimRecord(ctx context.Context, baseKey string) (claimed bool) {
+	if d.redisDedup == nil {
+		return true
+	}
+	ok, err := d.redisDedup.SetNX(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupTTL).Result()
+	if err != nil {
+		slog.WarnContext(ctx, "dispatch: durable dedup check failed, processing the record anyway", "err", err)
+		return true
+	}
+	return ok
+}
+
+// releaseDurableRecordClaim gives back a claim durablyClaimRecord made,
+// called ONLY when dispatchByType reports an error for this record — a
+// claim is never released on success, which is the entire point: a record
+// that genuinely succeeded must stay remembered as done for durableDedupTTL,
+// so a later redelivery of it is recognized and skipped rather than
+// resending whatever it already sent. A record that failed, by contrast,
+// has to be releasable, or a real retry (the overwhelmingly more common
+// reason Handle is called twice for the same record) would be silently
+// swallowed as if it were a stale redelivery. A nil redisDedup is a no-op,
+// matching durablyClaimRecord's own posture; a Redis error here is logged
+// and otherwise ignored — the claim simply lingers until durableDedupTTL
+// expires, which only delays a legitimate retry rather than losing it
+// outright.
+func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey string) {
+	if d.redisDedup == nil {
+		return
+	}
+	if err := d.redisDedup.Del(ctx, durableDedupKeyPrefix+baseKey).Err(); err != nil {
+		slog.WarnContext(ctx, "dispatch: failed to release durable dedup claim after a failed record, a retry may be delayed until it expires", "err", err)
+	}
+}
+
 // Handle implements eventbus.Handle. A non-nil return causes the caller
 // (eventbus.Consumer) to retry — see its package doc for the retry policy.
 func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
@@ -771,6 +875,28 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return fmt.Errorf("dispatch: invalid payload: %w", err)
 	}
 
+	// Checked before dispatching to any handler, and independent of every
+	// handler's own fine-grained (and in-memory-only) chatKey/done
+	// tracking below — see redisDedup's own doc comment for the
+	// restart/rebalance gap this closes. A record already fully handled by
+	// a past call is skipped outright, never reaching a single handler.
+	baseKey := recordBaseKey(record)
+	if !d.durablyClaimRecord(ctx, baseKey) {
+		slog.InfoContext(ctx, "dispatch: record already fully processed, skipping a redelivery", "type", string(env.Type))
+		return nil
+	}
+
+	err := d.dispatchByType(ctx, record, env)
+	if err != nil {
+		d.releaseDurableRecordClaim(ctx, baseKey)
+	}
+	return err
+}
+
+// dispatchByType is Handle's own event-type switch, split out so Handle
+// itself can wrap it with the durable record-level claim above without
+// touching any of these cases' own logic.
+func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record, env events.Envelope) error {
 	switch env.Type {
 	case events.TypeCaseCreated:
 		return d.handleCaseCreated(ctx, record, env.Payload)
