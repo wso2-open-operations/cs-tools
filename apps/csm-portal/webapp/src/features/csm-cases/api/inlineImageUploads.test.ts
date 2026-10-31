@@ -120,4 +120,29 @@ describe("releaseInlineImages", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(src);
     expect(inspectInlineImages(img(src)).unknown).toBe(1);
   });
+
+  it("ignores an upload that finishes after its image was released", async () => {
+    let finish: (v: { id: string }) => void = () => {};
+    upload.mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
+    const src = startInlineImageUpload(api, CASE_ID, file);
+
+    releaseInlineImages(img(src));
+    finish({ id: IMAGE_ID });
+    await flush();
+
+    // Still unknown: the late success did not bring the entry back.
+    expect(inspectInlineImages(img(src))).toEqual({ pending: 0, failedMessage: null, unknown: 1 });
+  });
+
+  it("ignores an upload that fails after its image was released", async () => {
+    let fail: (e: Error) => void = () => {};
+    upload.mockReturnValue(new Promise((_, reject) => (fail = reject)) as never);
+    const src = startInlineImageUpload(api, CASE_ID, file);
+
+    releaseInlineImages(img(src));
+    fail(new Error("boom"));
+    await flush();
+
+    expect(inspectInlineImages(img(src))).toEqual({ pending: 0, failedMessage: null, unknown: 1 });
+  });
 });
