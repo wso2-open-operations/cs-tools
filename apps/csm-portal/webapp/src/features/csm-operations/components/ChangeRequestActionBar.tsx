@@ -33,6 +33,7 @@ import {
   isDestructiveChangeRequestTransition,
   pendingCustomerProposal,
   requestApprovalNeedsContactReason,
+  requestApprovalNeedsDeviationClearedReason,
   requestApprovalNeedsProjectReason,
   rollbackPendingReviewReason,
   type PendingCustomerReview,
@@ -157,7 +158,10 @@ interface BlockedReasonContext {
  * (`requestApprovalNeedsContactReason`, only where the page knows the project has
  * none: a requester-only project is the backend's refusal, shown in the error banner).
  * Neither applies to an Emergency change: the backend ignores its customer boxes, so a
- * stored tick there asks nobody and blocks nothing.
+ * stored tick there asks nobody and blocks nothing. And it needs the deviation from the
+ * implementation plan a clone carried over folded into the plan and cleared
+ * (`requestApprovalNeedsDeviationClearedReason`, every type): the backend refuses
+ * Request Approval while one is stored.
  *
  * `rollback` is blocked out of Customer Review only (out of Review it is never
  * blocked): while the customer group's review is pending the backend refuses
@@ -170,7 +174,9 @@ const TARGET_BLOCKED_REASON: Record<
 > = {
   assess: (cr) =>
     cr.assignedTeam
-      ? (requestApprovalNeedsProjectReason(cr) ?? requestApprovalNeedsContactReason(cr))
+      ? (requestApprovalNeedsProjectReason(cr) ??
+        requestApprovalNeedsContactReason(cr) ??
+        requestApprovalNeedsDeviationClearedReason(cr))
       : "Set an assigned team before requesting approval",
   rollback: (cr, { pendingCustomerReview }) =>
     cr.state === "customer_review" ? rollbackPendingReviewReason(pendingCustomerReview) : null,

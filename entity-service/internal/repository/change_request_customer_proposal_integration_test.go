@@ -36,7 +36,8 @@ import (
 
 // The proposal of a whole window (the start plus the end that keeps the length), in each
 // of the date formats the portal can send, for each change type: only customer_updated_on
-// is written, the planned window and the customers' request are untouched, and accepting it
+// (and, in the same write, the record of who proposed it, migration 0249) is written, the
+// planned window and the customers' request are untouched, and accepting it
 // applies the proposal with the length unchanged.
 func TestChangeRequestCustomerProposalIntegration_WholeWindowKeepsTheDuration(t *testing.T) {
 	// What the proposal reads back as: RFC 3339, UTC.

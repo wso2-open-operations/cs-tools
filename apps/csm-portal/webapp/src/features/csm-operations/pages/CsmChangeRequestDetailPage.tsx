@@ -23,6 +23,7 @@ import {
   Skeleton,
   Tab,
   Tabs,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
@@ -78,10 +79,13 @@ import ChangeRequestRescheduleDialog from "@features/csm-operations/components/C
 import ChangeRequestTransitionReasonDialog from "@features/csm-operations/components/ChangeRequestTransitionReasonDialog";
 import EditChangeRequestDialog from "@features/csm-operations/components/EditChangeRequestDialog";
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
+import ImplementationDeviationSection from "@features/csm-operations/components/ImplementationDeviationSection";
+import { PLAN_RICH_TEXT_SX } from "@features/csm-operations/utils/planRichText";
 import {
   buildCloneChangeRequestNavState,
   changeRequestBlockingReason,
   changeRequestCategoryLabel,
+  changeRequestChoiceLabel,
   noCustomerAskedHelper,
   isChangeRequestCreator,
   pendingCustomerReview,
@@ -267,28 +271,7 @@ function PlanSection({ title, html }: { title: string; html?: string | null }): 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
       <Typography variant="subtitle2">{title}</Typography>
-      <Box
-        sx={{
-          color: "text.secondary",
-          fontSize: "0.875rem",
-          lineHeight: 1.5,
-          wordBreak: "break-word",
-          // Newly generated comments no longer carry a per-run
-          // `white-space: pre-wrap` inline style (digiops-cs#2933) — declared
-          // once here instead. Older comments carry their own inline style
-          // and are unaffected either way.
-          whiteSpace: "pre-wrap",
-          "& p": { my: 0.5 },
-          "& p:first-of-type": { mt: 0 },
-          "& p:last-child": { mb: 0 },
-          "& ul, & ol": { my: 0.5, pl: 3 },
-          "& a": { color: "primary.main" },
-          "& img": { maxWidth: "100%", height: "auto" },
-          "& table": { borderCollapse: "collapse", width: "100%" },
-          "& th, & td": { border: 1, borderColor: "divider", px: 1, py: 0.5, textAlign: "left" },
-        }}
-        dangerouslySetInnerHTML={{ __html: safeHtml }}
-      />
+      <Box sx={PLAN_RICH_TEXT_SX} dangerouslySetInnerHTML={{ __html: safeHtml }} />
     </Box>
   );
 }
@@ -554,6 +537,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   }
 
   const cr = data;
+  // A deviation from the implementation plan is flagged on the Plan tab.
+  const hasDeviation = !!cr.implementationDeviation && !isBlankHtml(cr.implementationDeviation);
   // The customer's proposed time while it waits for WSO2's answer (the backend's own verdict).
   const proposal = pendingCustomerProposal(cr);
   // An Emergency change acts without customer consent: its customer part reads "Not applicable" (a record that
@@ -1099,13 +1084,37 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 : t.id === "attachments"
                   ? attachmentList.length
                   : undefined;
+            const text = count ? `${t.label} (${count})` : t.label;
+            // The Plan tab is not the default one, so a deviation from the
+            // implementation plan is flagged on the tab itself.
+            const flagDeviation = t.id === "plan" && hasDeviation;
             return (
               <Tab
                 key={t.id}
                 value={t.id}
                 icon={t.icon}
                 iconPosition="start"
-                label={count ? `${t.label} (${count})` : t.label}
+                // The dot is decorative: the name says it (an explicit name, so it reads the
+                // same in every browser, whatever spacing the flex layout gives the label).
+                aria-label={flagDeviation ? `${text}, has a deviation from the implementation plan` : undefined}
+                label={
+                  flagDeviation ? (
+                    <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                      {text}
+                      {/* Says what it means on hover, for sighted users; the tab's name says it for assistive tech. */}
+                      <Tooltip title="Has a deviation from the implementation plan">
+                        <Box
+                          component="span"
+                          aria-hidden
+                          data-testid="cr-plan-tab-deviation-marker"
+                          sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "warning.main" }}
+                        />
+                      </Tooltip>
+                    </Box>
+                  ) : (
+                    text
+                  )
+                }
                 sx={{ minHeight: 44, textTransform: "none" }}
               />
             );
@@ -1209,6 +1218,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             cr.serviceOutage,
             cr.communicationPlan,
             cr.implementationPlan,
+            cr.implementationDeviation,
             cr.affectedServicesText,
             cr.affectedComponentsText,
           ].some((v) => v && !isBlankHtml(v)) ||
@@ -1223,6 +1233,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               <PlanSection title="Service outage" html={cr.serviceOutage} />
               <PlanSection title="Communication plan" html={cr.communicationPlan} />
               <PlanSection title="Implementation plan" html={cr.implementationPlan} />
+              {/* Right under the plan it departs from, set apart so it is not missed. */}
+              <ImplementationDeviationSection html={cr.implementationDeviation} />
               <PlanSection title="Affected services" html={cr.affectedServicesText} />
               <PlanSection title="Affected components" html={cr.affectedComponentsText} />
               {cr.rollbackDurationText && (
@@ -1258,14 +1270,14 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               }}
             >
               <MetaCell label="Priority">
-                <Typography variant="body2">{cr.priority?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.priority)}</Typography>
               </MetaCell>
               <MetaCell label="Requested by"><RefText value={cr.requestedBy} /></MetaCell>
               <MetaCell label="Change request type">
-                <Typography variant="body2">{cr.changeRequestType?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.changeRequestType)}</Typography>
               </MetaCell>
               <MetaCell label="Likelihood">
-                <Typography variant="body2">{cr.likelihood?.label || "—"}</Typography>
+                <Typography variant="body2">{changeRequestChoiceLabel(cr.likelihood)}</Typography>
               </MetaCell>
               <MetaCell label="Implementation Plan visible to customers">
                 <YesNo value={cr.isPlanningVisibleToCustomers} />

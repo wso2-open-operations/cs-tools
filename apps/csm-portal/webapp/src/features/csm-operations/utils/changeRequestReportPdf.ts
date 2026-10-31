@@ -33,6 +33,7 @@ import { isBlankHtml } from "@utils/sanitizeHtml";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import {
   changeRequestCategoryLabel,
+  changeRequestChoiceLabel,
   changeRequestImpactColor,
   changeRequestImpactLabel,
   changeRequestStateColor,
@@ -89,7 +90,7 @@ export function generateChangeRequestReportPdf(
     { label: "Type", value: cr.type ?? "—" },
   ];
   if (cr.category) rows.push({ label: "Category", value: changeRequestCategoryLabel(cr.category) });
-  if (cr.priority?.label) rows.push({ label: "Priority", value: cr.priority.label });
+  if (cr.priority) rows.push({ label: "Priority", value: changeRequestChoiceLabel(cr.priority) });
   rows.push({ label: "Project", value: cr.project?.name || "—" });
   rows.push({ label: "Linked case", value: cr.case?.name || "—" });
   if (cr.deployment?.name) rows.push({ label: "Deployment", value: cr.deployment.name });
@@ -133,6 +134,7 @@ export function generateChangeRequestReportPdf(
   writePlanSection(cur, "Justification", cr.justification);
   writePlanSection(cur, "Impact description", cr.impactDescription);
   writePlanSection(cur, "Implementation plan", cr.implementationPlan);
+  writePlanSection(cur, "Deviation from the implementation plan", cr.implementationDeviation);
   writePlanSection(cur, "Test plan", cr.testPlan);
   writePlanSection(cur, "Rollback plan", cr.rollbackPlan);
   writePlanSection(cur, "Communication plan", cr.communicationPlan);

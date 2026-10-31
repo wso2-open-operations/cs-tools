@@ -37,6 +37,8 @@ describe("changeRequestApprovedReadOnlyReason", () => {
   it("locks every state reached only through an approval", () => {
     for (const state of [...AFTER_CUSTOMER_APPROVAL.filter((s) => s !== "canceled"), "customer_approval" as const]) {
       expect(changeRequestApprovedReadOnlyReason(state), state).toMatch(/read-only/);
+      // A Standard change is approved by Request Approval, with no CAB stage: the reason never names the CAB.
+      expect(changeRequestApprovedReadOnlyReason(state), state).not.toMatch(/CAB/);
     }
   });
 

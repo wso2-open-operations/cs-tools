@@ -43,14 +43,16 @@ import (
 // change_request_reset_confirmation (0052: a moved proposal clears the standing
 // answer) and change_request_plan_date_comment (0053: a proposal made in Customer
 // Approval writes one customer-visible COMMENT on the change's parent record, as the
-// previous system's flow for it did; nothing here reads that comment). No column,
-// table, type, marker row or migration is added: a migrated change request that
-// carries the pair is a conversation like any other.
+// previous system's flow for it did; nothing here reads that comment). A migrated change
+// request that carries the pair is a conversation like any other. The one thing the
+// previous system's columns cannot say is who proposed the time, so migration 0249 adds
+// the record of it (see WHO PROPOSED below).
 //
 //   - A customer's proposal (proposeCustomerTime) writes the proposed START to
-//     customer_updated_on and nothing else. The change STAYS in Customer Approval,
-//     start_on / end_on stay what WSO2 planned, no stage, approver row or state is
-//     touched: until WSO2 answers there is nothing to apply.
+//     customer_updated_on and, in the same UPDATE, who proposed it
+//     (customer_proposed_by_user_id / _for / _on), and nothing else. The change STAYS in
+//     Customer Approval, start_on / end_on stay what WSO2 planned, no stage, approver row
+//     or state is touched: until WSO2 answers there is nothing to apply.
 //   - Accept proposed time (acceptCustomerProposal) writes AGREE, applies the
 //     proposal to the planned window (the planned LENGTH is kept: a proposal is a
 //     start) and moves the change to Scheduled, in one UPDATE. Nothing goes through
@@ -69,24 +71,41 @@ import (
 // to answer.
 //
 // WHO PROPOSED is what makes a waiting date a customer's PROPOSAL: the predicate only says a
-// date is stored and unanswered. The proposer is the LAST WRITER of the change
-// (work_item.updated_by) and nothing else: no comment, audit, outbox or other row is read to
-// name anybody, because those rows log what the system did and are no reference for a
-// business rule such as whether an Accept is allowed; and nothing is added to record it. A
-// customer's proposal stamps the proposing contact as the last writer, so the time is
-// recorded as theirs for as long as nobody else writes to the change. The writer counts only
-// when they are a registered contact of the change's project (resolveProposer).
+// date is stored and unanswered. The proposal records its proposer on change_request itself
+// (migration 0249): customer_proposed_by_user_id (the contact), customer_proposed_for (the
+// proposed start the record is about) and customer_proposed_on (when), written in the
+// proposal's own UPDATE. A later write to the change by anybody else (a work note, an
+// additional comment, the hold, any other staff PATCH the approved-content lock lets through,
+// another writer's write to the work item) does not touch them, so the proposal stays
+// recorded as the customer's. The record names the proposer only
+// while customer_proposed_for is the stored time itself and the contact is still a registered
+// contact of the change's project (resolveProposer, readProposer); entering Customer Approval
+// voids it (the 0249 trigger), and so does a plain Re-schedule, which asks the customers again
+// without the state moving (patchChangeRequestTx), so a time left over from an earlier round is
+// nobody's proposal. The 0249 trigger also voids it when another writer moves the stored time off
+// the record, so the time moving back later is not read as that contact's proposal again.
+// No comment, audit, outbox or other log row is read by the acts or the read model to name
+// anybody: those rows log what the system did and are no reference for a business rule such as
+// whether an Accept is allowed. (The notice drainer's only input is the outbox row, whose
+// snapshot carries this record itself; see crPlanDateActor in service/cr_notice_service.go.)
+//
+// LEGACY: a row whose customer_proposed_for is NULL holds a time stored with no record: before
+// 0249 (a proposal made then and still waiting, or a date the previous system wrote), or later by
+// another writer on a change that has had no proposal since it entered Customer Approval (the
+// void leaves the column NULL when no time is stored). For it, and only for it, the proposer is
+// still the LAST WRITER of the change (work_item.updated_by, read before the act's own write), the
+// rule that held until 0249: so a migrated date reads "not recorded" exactly as before. A write
+// that replaces that last writer records them first when the rule names them (migration 0250's
+// trigger, temporary: see its header), so a pre-0249 proposal stays acceptable whoever writes to
+// the change after it.
 //
 // A date that someone at WSO2 wrote in the previous system, one left over from an earlier
-// cycle, and a genuine proposal that another write (a staff note, an edit, the hold) has
-// overwritten as last writer since are alike "not recorded". Then no staff answer is about
-// the date: Accept is refused (no staff action stands in for the customer's consent), a
-// Re-schedule is a plain Re-schedule that writes no answer against it, a staff request with no
-// window is refused, and the read model says so
+// cycle, and one whose contact has left the project are alike "not recorded". Then no staff
+// answer is about the date: Accept is refused (no staff action stands in for the customer's
+// consent), a Re-schedule is a plain Re-schedule that writes no answer against it, a staff
+// request with no window is refused, and the read model says so
 // (domain.ChangeRequestCustomerProposal.ProposerRecorded) instead of naming anybody. What
-// remains for a genuine proposal that has been overwritten is "Propose a different time",
-// which the customer then approves: one more approval, by design. A WSO2-written date is
-// migrated history once the previous system is retired, not a daily event.
+// remains is "Propose a different time", which the customer then approves.
 
 // Values of change_request_confirmation_enum, written as plain literals (never bound
 // parameters or casts) so the SQL reads the same on a database whose enum columns have
@@ -350,9 +369,9 @@ func customerProposalAnswer(f customerProposalFacts) string {
 // acceptBlock says whether "Accept proposed time" would be refused right now for a
 // reason the data shows (the same refusals acceptCustomerProposal gives, in the same
 // words and the same order), "" when it would not. Meaningful only while the proposal
-// is pending. who is the proposer (the last writer, when they are a registered contact of the
-// project): no registered contact recorded as having proposed the time is the first refusal,
-// because nothing else is worth fixing about a time no customer proposed.
+// is pending. who is the proposer (resolveProposer / readProposer): no registered contact
+// recorded as having proposed the time is the first refusal, because nothing else is worth
+// fixing about a time no customer proposed.
 func acceptBlock(f customerProposalFacts, who proposer, now time.Time) string {
 	switch {
 	case !who.known:
@@ -377,18 +396,88 @@ func acceptBlock(f customerProposalFacts, who proposer, now time.Time) string {
 type proposer struct {
 	known       bool
 	name, email string
-	// proposedOn is when the last writer wrote the change, which is when the time was proposed
-	// while that writer is the proposer. Set by readProposer only; zero from the acts, which have
-	// stamped themselves on the row by the time they look.
+	// proposedOn is when the time was proposed (customer_proposed_on; for a legacy row, when the
+	// last writer wrote the change). Zero when the data does not say. The read model shows it;
+	// the acts do not need it.
 	proposedOn time.Time
 }
 
-// proposerFromWriter is the whole rule: the last writer of the change is the proposer when
-// they are a REGISTERED PORTAL_USER contact of the change's project (callerIsRegisteredPortalContact,
-// the test of the customer's own answer), and nobody otherwise. A blank writer, a WSO2 user, a
-// contact who has left, a contact of another project and the sync's own stamp all name nobody.
-// Only the writer's email is looked at: nothing else is read to name a proposer (no comment,
-// audit, outbox or other row), and nothing is written to record one.
+// proposalRecordSQL reads the record of who proposed the time stored on the change request
+// (migration 0249) and the recorded contact's own "user" row: whether there is a record at all
+// (customer_proposed_for set; NULL is the legacy shape), whether it is about the stored time
+// itself (the same instant), and the contact's email, name and when they proposed. Nothing but
+// change_request and "user" is read.
+const proposalRecordSQL = `
+	SELECT cr.customer_proposed_for IS NOT NULL,
+	       COALESCE(cr.customer_proposed_for = cr.customer_updated_on, false),
+	       u.email,
+	       COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
+	       cr.customer_proposed_on
+	FROM change_request cr
+	LEFT JOIN "user" u ON u.id = cr.customer_proposed_by_user_id
+	WHERE cr.id = $1`
+
+// proposalRecord is proposalRecordSQL's row.
+type proposalRecord struct {
+	// kept: customer_proposed_for is set. False is the LEGACY shape: a time stored before
+	// migration 0249 (or by a writer that is not the proposal), read by the last-writer rule.
+	kept bool
+	// forStored: the record is about the time stored now (customer_proposed_for =
+	// customer_updated_on). A stored time that moved by any other writer is not the one recorded.
+	forStored bool
+	// email / name of the recorded contact's "user" row (nil: nobody recorded, or the user is gone).
+	email, name *string
+	on          *time.Time
+}
+
+// readProposalRecord reads the record for the change request id. A missing row is a 404.
+func readProposalRecord(ctx context.Context, q crQuerier, id string) (proposalRecord, error) {
+	var rec proposalRecord
+	err := q.QueryRow(ctx, proposalRecordSQL, id).Scan(&rec.kept, &rec.forStored, &rec.email, &rec.name, &rec.on)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return proposalRecord{}, &apierror.NotFoundError{Msg: "change request not found"}
+	}
+	if err != nil {
+		return proposalRecord{}, fmt.Errorf("read who proposed the stored time: %w", err)
+	}
+	return rec, nil
+}
+
+// proposerFromRecord is the rule: the recorded contact is the proposer when the record is
+// about the stored time itself and they are, NOW, a REGISTERED PORTAL_USER contact of the
+// change's project (callerIsRegisteredPortalContact, the test of the customer's own answer);
+// nobody otherwise. A record of another time, no contact (voided on entering Customer
+// Approval or by a plain Re-schedule, or the user deleted), a contact with no email, one who has left the project and one
+// of another project all name nobody. Who wrote the change last does not matter.
+func proposerFromRecord(ctx context.Context, q crQuerier, project *string, rec proposalRecord) (proposer, error) {
+	email := strings.TrimSpace(stringOrEmpty(rec.email))
+	if !rec.kept || !rec.forStored || email == "" {
+		return proposer{}, nil
+	}
+	ok, err := callerIsRegisteredPortalContact(ctx, q, project, email)
+	if err != nil || !ok {
+		return proposer{}, err
+	}
+	p := proposer{known: true, email: email, name: stringOrEmpty(rec.name)}
+	if rec.on != nil {
+		p.proposedOn = rec.on.UTC()
+	}
+	return p, nil
+}
+
+// proposerFromWriter is the LEGACY rule, for a row with no record (customer_proposed_for NULL:
+// a time stored before migration 0249, or by another writer while no record was kept): the last
+// writer of the change is the proposer when they are a REGISTERED PORTAL_USER contact of the
+// change's project, and nobody otherwise. A blank writer, a WSO2 user, a contact who has left, a
+// contact of another project and the sync's own stamp all name nobody. Only the writer's email is
+// looked at.
+//
+// Migration 0250's trigger (work_item_keep_legacy_customer_proposer) applies the same rule, in
+// SQL, in the write that replaces the last writer of a change in Customer Approval whose stored
+// time waits unanswered: when this rule names that writer (and they have a "user" row), it writes
+// the record for them first, so the rule stops reading the row before a later writer could change
+// its answer. Keep the two in step: the contact test is callerIsRegisteredPortalContact's join.
+// The trigger is temporary: the migration's header says when to drop it.
 func proposerFromWriter(ctx context.Context, q crQuerier, project *string, writer string) (proposer, error) {
 	email := strings.TrimSpace(writer)
 	if email == "" {
@@ -403,21 +492,33 @@ func proposerFromWriter(ctx context.Context, q crQuerier, project *string, write
 
 // resolveProposer says who is recorded as having proposed the time stored in
 // change_request.customer_updated_on, for an ACT that answers it (Accept, Propose a different
-// time, a customer's own proposal), from the last writer the act found before its own write.
+// time, a customer's own proposal): the record (proposerFromRecord), or, for a legacy row only,
+// the last writer the act found before its own write (proposerFromWriter). project is the
+// change's project as the act's lock read it.
 //
 // The acts stamp the caller on work_item.updated_by as their first write (lockWorkItemKeepingWriter,
 // lockChangeRequestForPatch), so after it the column only ever names the caller: the act must
-// pass the writer it kept (lockedWorkItem.priorWriter, changeRequestGateSnapshot.priorWriter).
-// A writer that was never read is a bug of the caller, not "nobody", and is refused loudly.
-func resolveProposer(ctx context.Context, q crQuerier, project *string, prior lastWriter) (proposer, error) {
+// pass the writer it kept (lockedWorkItem.priorWriter, changeRequestGateSnapshot.priorWriter),
+// which the legacy rule reads. A writer that was never read is a bug of the caller, not
+// "nobody", and is refused loudly, before any statement, whatever the row turns out to be.
+func resolveProposer(ctx context.Context, q crQuerier, id string, project *string, prior lastWriter) (proposer, error) {
 	if !prior.read {
 		return proposer{}, errors.New("resolve the proposer: the last writer of the change request was not read before this request wrote to it")
 	}
-	return proposerFromWriter(ctx, q, project, prior.email)
+	rec, err := readProposalRecord(ctx, q, id)
+	if err != nil {
+		return proposer{}, err
+	}
+	if !rec.kept {
+		// LEGACY (customer_proposed_for NULL): the pre-0249 last-writer rule.
+		return proposerFromWriter(ctx, q, project, prior.email)
+	}
+	return proposerFromRecord(ctx, q, project, rec)
 }
 
-// readProposer is the proposer for a reader (the detail read): the last writer as the
-// change request shows it now, with the writer's name and when they wrote.
+// readProposer is the proposer for a reader (the detail read), with their name and when they
+// proposed: the record, or, for a legacy row only, the last writer as the change request shows
+// it now and when they wrote.
 func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error) {
 	var project, writer *string
 	var updatedOn time.Time
@@ -427,8 +528,16 @@ func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error)
 		return proposer{}, nil
 	}
 	if err != nil {
-		return proposer{}, fmt.Errorf("read who last wrote the change request: %w", err)
+		return proposer{}, fmt.Errorf("read the change request's project: %w", err)
 	}
+	rec, err := readProposalRecord(ctx, q, id)
+	if err != nil {
+		return proposer{}, err
+	}
+	if rec.kept {
+		return proposerFromRecord(ctx, q, project, rec)
+	}
+	// LEGACY (customer_proposed_for NULL): the pre-0249 last-writer rule.
 	p, err := proposerFromWriter(ctx, q, project, stringOrEmpty(writer))
 	if err != nil || !p.known {
 		return p, err
@@ -438,7 +547,7 @@ func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error)
 	if err := q.QueryRow(ctx, `
 		SELECT COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''))
 		FROM "user" u WHERE LOWER(u.email) = LOWER($1)
-		ORDER BY u.created_on ASC LIMIT 1`, p.email).Scan(&name); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		ORDER BY u.created_on ASC, u.id ASC LIMIT 1`, p.email).Scan(&name); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return p, fmt.Errorf("read the proposer's name: %w", err)
 	}
 	p.name = stringOrEmpty(name)
@@ -456,8 +565,9 @@ func readProposer(ctx context.Context, q crQuerier, id string) (proposer, error)
 // waiting for an answer: staff read it as pending with proposerRecorded false and Accept
 // blocked (the date is there for them to deal with), and a customer reads it as
 // "unanswered", history, so no page tells them WSO2 is deciding on a time they did not
-// propose. That includes a customer whose genuine proposal another write has since replaced
-// as last writer: nothing records it any more, and Propose a different time is the way on.
+// propose. A customer's own proposal stays recorded as theirs whatever is written to the change
+// after it (readProposer). So does a legacy one (made before migration 0249, read by its last
+// writer): a write that replaces that writer records them first (migration 0250's trigger).
 //
 // The predicate reads approver rows of every stage, so it runs under the system
 // identity: the caller was already shown this change request by the visibility-gated
@@ -517,8 +627,10 @@ func (r *changeRequestRepo) fillCustomerProposal(ctx context.Context, cr *domain
 		if who.name != "" {
 			out.ProposedByName = &who.name
 		}
-		on := fmtInstant(who.proposedOn)
-		out.ProposedOn = &on
+		if !who.proposedOn.IsZero() {
+			on := fmtInstant(who.proposedOn)
+			out.ProposedOn = &on
+		}
 	}
 	reason := acceptBlock(f, who, now)
 	can := reason == ""
@@ -536,7 +648,9 @@ func (r *changeRequestRepo) fillCustomerProposal(ctx context.Context, cr *domain
 // proposeCustomerTime is PATCH {plannedStartOn, plannedEndOn?} from an external
 // caller: a registered contact of the change's project who has been asked for the
 // customer's approval proposes a new START for the implementation. Only
-// customer_updated_on is written (and the answer cleared): the change stays in
+// customer_updated_on is written (and the answer cleared), with the record of who proposed
+// it (customer_proposed_by_user_id = the caller's "user" id, customer_proposed_for = the
+// proposed start, customer_proposed_on = now) in the same UPDATE: the change stays in
 // Customer Approval, the planned window is untouched, no stage, approver row or state
 // moves -- the customer's request stays live, so they (and their colleagues) can still
 // approve the CURRENT plan, and the proposer keeps seeing the change request. WSO2
@@ -684,9 +798,9 @@ func proposeCustomerTime(ctx context.Context, tx pgx.Tx, id string, req domain.P
 		}
 		if f.pending {
 			// "Waiting for WSO2's response" is true only of a proposal somebody made. A time that
-			// nobody is recorded as having proposed is stored, not waiting, and writing it again
-			// here could not make this caller its proposer.
-			who, err := resolveProposer(ctx, tx, locked.projectID, locked.priorWriter)
+			// nobody is recorded as having proposed is stored, not waiting, and it is not this
+			// caller's to claim by sending the same value again.
+			who, err := resolveProposer(ctx, tx, id, locked.projectID, locked.priorWriter)
 			if err != nil {
 				return "", err
 			}
@@ -698,10 +812,13 @@ func proposeCustomerTime(ctx context.Context, tx pgx.Tx, id string, req domain.P
 	}
 
 	// The answer is cleared explicitly (the 0052 trigger would too when only the date
-	// moved): a proposal is a new question, whatever was answered before.
+	// moved): a proposal is a new question, whatever was answered before. The record of who
+	// proposed it goes in the same UPDATE, so the two cannot disagree: it names the caller for
+	// exactly this start, and no later write by anybody else replaces it.
 	ct, err := tx.Exec(ctx,
-		`UPDATE change_request SET customer_updated_on = $2::text::timestamptz, customer_updated_date_confirmation = NULL
-		 WHERE id = $1 AND state = 'CUSTOMER_APPROVAL'`, id, fmtInstant(startAt))
+		`UPDATE change_request SET customer_updated_on = $2::text::timestamptz, customer_updated_date_confirmation = NULL,
+		        customer_proposed_by_user_id = $3::uuid, customer_proposed_for = $2::text::timestamptz, customer_proposed_on = now()
+		 WHERE id = $1 AND state = 'CUSTOMER_APPROVAL'`, id, fmtInstant(startAt), userID)
 	if err != nil {
 		return "", fmt.Errorf("propose implementation time: write the proposed start: %w", err)
 	}
@@ -772,9 +889,11 @@ func validateAcceptRequest(req domain.PatchChangeRequestRequest) (proposed, expS
 // work_item UPDATE, the first statement); it is in Customer Approval (409); a proposal
 // waits (409); the proposal is the one the caller saw (409); the planned window is the one
 // the caller saw (409); a registered contact of the project is recorded as the proposer (409,
-// errorCode change_request_proposer_not_recorded: resolveProposer, with the last writer read
-// BEFORE this request's own write replaced it); the change is not on hold (400, the
-// state-change gate's own text); the proposed start has not passed (409); the planned window
+// errorCode change_request_proposer_not_recorded: resolveProposer, from the record -- for a
+// legacy row, the one migration 0250's trigger writes in this request's own first write when
+// the rule names the last writer it replaces, else that last writer, read BEFORE the write); the
+// change is not on hold (400, the state-change gate's own text); the proposed start has not
+// passed (409); the planned window
 // has a length to keep (409); the window the proposal gives is within the range every planned
 // window is held to (409: the column is written by the previous system too).
 func acceptCustomerProposal(ctx context.Context, tx pgx.Tx, id string, req domain.PatchChangeRequestRequest, actorEmail string) (string, error) {
@@ -783,8 +902,9 @@ func acceptCustomerProposal(ctx context.Context, tx pgx.Tx, id string, req domai
 		return "", err
 	}
 	// work_item first, change_request second: the order every other PATCH takes. The lock stamps
-	// the caller on work_item.updated_by, so the last writer it found (the proposer, when a
-	// customer's proposal is what waits) is kept for the check below.
+	// the caller on work_item.updated_by, which fires migration 0250's trigger (it records the
+	// writer it replaces when the rule names them); the last writer it found is kept for the
+	// check below, which the legacy rule reads when nothing was recorded.
 	locked, err := lockWorkItemKeepingWriter(ctx, tx, id, actorEmail)
 	if err != nil {
 		return "", err
@@ -811,9 +931,9 @@ func acceptCustomerProposal(ctx context.Context, tx pgx.Tx, id string, req domai
 	}
 	// No staff action stands in for the customer's answer, so a time is accepted only when a
 	// registered contact of the project is recorded as having proposed it: the proposal is their
-	// own consent. A date nobody is recorded as having written (a WSO2 user's, an earlier cycle's,
-	// or a proposal that a later write has replaced as last writer) is never accepted for them.
-	who, err := resolveProposer(ctx, tx, locked.projectID, locked.priorWriter)
+	// own consent. A date nobody is recorded as having proposed (a WSO2 user's, an earlier
+	// cycle's, one whose contact has left the project) is never accepted for them.
+	who, err := resolveProposer(ctx, tx, id, locked.projectID, locked.priorWriter)
 	if err != nil {
 		return "", err
 	}
@@ -904,11 +1024,13 @@ func planStaffTimeResponse(ctx context.Context, tx pgx.Tx, id string, req domain
 	// predicate holds, but it was written by someone at WSO2 or is left over from an earlier
 	// cycle) is no proposal: it is never answered, so a plain Re-schedule stays a plain
 	// Re-schedule (no answer is written against a time nobody proposed) and a request with no
-	// window is refused instead of declining it. The last writer is the one this PATCH's lock
-	// found (snap.priorWriter): its own write has stamped the caller since.
+	// window is refused instead of declining it. For a legacy row the last writer is the one this
+	// PATCH's lock found (snap.priorWriter): its own write has stamped the caller since, and
+	// migration 0250's trigger recorded that writer first if the rule names them (resolveProposer
+	// then reads the record).
 	waits := false
 	if f.pending {
-		who, err := resolveProposer(ctx, tx, snap.projectID, snap.priorWriter)
+		who, err := resolveProposer(ctx, tx, id, snap.projectID, snap.priorWriter)
 		if err != nil {
 			return timeResponse{}, err
 		}

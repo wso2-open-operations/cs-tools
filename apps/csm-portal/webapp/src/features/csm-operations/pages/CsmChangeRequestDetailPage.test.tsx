@@ -529,6 +529,36 @@ describe("CsmChangeRequestDetailPage — project, deployments, deployment produc
   });
 });
 
+describe("CsmChangeRequestDetailPage — SRE details: priority, change request type, likelihood", () => {
+  const cell = (label: string): HTMLElement => screen.getByText(label).parentElement!;
+  const openPlan = (cr: BeChangeRequestDetail): void => {
+    mockQueryResult({ data: cr });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /plan/i }));
+  };
+
+  it("shows the values the PostgreSQL data source sends, planning on a migrated change request included", () => {
+    openPlan({ ...BASE_CR, priority: "planning", changeRequestType: "infra", likelihood: "medium" });
+    expect(within(cell("Priority")).getByText("Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Infra")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("Medium")).toBeInTheDocument();
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    openPlan({ ...BASE_CR, priority: "5 - Planning", changeRequestType: "Normal", likelihood: "High" });
+    expect(within(cell("Priority")).getByText("5 - Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Normal")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("High")).toBeInTheDocument();
+  });
+
+  it("shows a dash for each when the change request has none", () => {
+    openPlan({ ...BASE_CR, priority: null, changeRequestType: null, likelihood: undefined });
+    for (const label of ["Priority", "Change request type", "Likelihood"]) {
+      expect(within(cell(label)).getByText("—")).toBeInTheDocument();
+    }
+  });
+});
+
 describe("CsmChangeRequestDetailPage — blocking-reason header note", () => {
   it("shows 'Awaiting Peer Approval' when the Assess stage is pending or requested", () => {
     mockQueryResult({ data: { ...BASE_CR, state: "assess" } });
@@ -730,6 +760,82 @@ describe("CsmChangeRequestDetailPage — Clone", () => {
     expect(keys).not.toContain("deployment");
     expect(keys).not.toContain("state");
     expect(keys).not.toContain("hasCustomerApproved");
+  });
+});
+
+describe("CsmChangeRequestDetailPage — deviation from the implementation plan", () => {
+  const WITH_DEVIATION = {
+    ...BASE_CR,
+    state: "implement",
+    implementationPlan: "<p>Upgrade every node together.</p>",
+    implementationDeviation: "<p>Upgraded the nodes one at a time instead.</p>",
+    affectedServicesText: "<p>Gateway</p>",
+  };
+
+  it("flags the Plan tab, and shows the deviation right under the implementation plan", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" });
+    expect(within(tab).getByTestId("cr-plan-tab-deviation-marker")).toBeInTheDocument();
+    fireEvent.click(tab);
+    const section = screen.getByRole("region", { name: "Deviation from the implementation plan" });
+    expect(section).toHaveTextContent("Upgraded the nodes one at a time instead.");
+    const plan = screen.getByText("Implementation plan");
+    const affected = screen.getByText("Affected services");
+    expect(plan.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(affected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the Plan card for a deviation alone", () => {
+    mockQueryResult({ data: { ...BASE_CR, implementationDeviation: "<p>Skipped the dry run.</p>" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /^plan/i }));
+    expect(screen.queryByText("No plan has been recorded for this change request.")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toBeInTheDocument();
+  });
+
+  it("neither flags the tab nor shows a section when there is no deviation", () => {
+    mockQueryResult({ data: { ...WITH_DEVIATION, implementationDeviation: "<p><br></p>" } });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan" });
+    expect(within(tab).queryByTestId("cr-plan-tab-deviation-marker")).not.toBeInTheDocument();
+    fireEvent.click(tab);
+    expect(screen.queryByRole("region", { name: "Deviation from the implementation plan" })).not.toBeInTheDocument();
+  });
+
+  // A clone carries the deviation into New; it has to be folded into the plan and cleared before
+  // Request Approval (the backend refuses it otherwise). The Plan tab shows what is stored, as ever.
+  it("blocks Request Approval on a New change carrying a clone's deviation, and still shows it on the Plan tab", () => {
+    mockQueryResult({
+      data: { ...BASE_CR, legalNextStates: ["assess", "canceled"], implementationDeviation: "<p>Rolled out to one region first.</p>" },
+    });
+    renderPage();
+    const button = screen.getByRole("button", { name: /request approval/i });
+    expect(button).toBeDisabled();
+    expect(button.closest('[tabindex="0"]')).toHaveAttribute(
+      "aria-label",
+      "Request Approval: Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+    fireEvent.click(button);
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" }));
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toHaveTextContent(
+      "Rolled out to one region first.",
+    );
+  });
+
+  it("is carried by Clone", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /clone/i }));
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/operations/change-requests/new",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+        }),
+      }),
+    );
   });
 });
 
@@ -1576,7 +1682,8 @@ interface LcFake {
   /**
    * The previous system's own proposal pair, as the backend holds it (`customer_updated_on` as an RFC 3339 instant, and WSO2's
    * answer): the customer's proposed START and the Agree / Disagree. `proposer` is who the backend could still name
-   * (the change's last writer, a registered contact); null = not recorded.
+   * (the registered contact the proposal recorded; no staff PATCH of the fake clears it but a plain Re-schedule, which
+   * starts a new round, as in the backend); null = not recorded.
    */
   customerUpdatedOn: string | null;
   confirmation: "agree" | "disagree" | null;
@@ -2046,6 +2153,8 @@ function lcRescheduleOrCounter(patch: Record<string, unknown>): void {
     lcAskCustomersAgain();
   }
   if (pending) lc.confirmation = "disagree";
+  // A plain Re-schedule answers nothing and starts a new round: the stored time is nobody's proposal in it.
+  else if (changed) lc.proposer = null;
 }
 
 function lcSeed(

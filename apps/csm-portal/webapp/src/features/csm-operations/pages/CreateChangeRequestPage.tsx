@@ -41,6 +41,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import CarriedOverDeviationField from "@features/csm-operations/components/CarriedOverDeviationField";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import { isBlankHtml } from "@utils/sanitizeHtml";
 import { isPastZonedInput, zonedInputToBackendUtc } from "@utils/dateTime";
@@ -256,6 +257,23 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const [implementationPlan, setImplementationPlan] = useState(
     draft?.implementationPlan ?? cloneState?.implementationPlan ?? "",
   );
+  // A clone copies the source's deviation from the implementation plan. It is
+  // shown only when the form opened with one (a clone of a change request that
+  // has a deviation, or a draft of one), read-only: a deviation is recorded from
+  // Implement on, so all that can be done with a carried-over one is fold it into
+  // the implementation plan and clear it ("Clear deviation"; the new change request
+  // cannot request approval until it is cleared). Left as it is, it is sent.
+  const initialImplementationDeviation = draft?.implementationDeviation ?? cloneState?.implementationDeviation ?? "";
+  const [implementationDeviation, setImplementationDeviation] = useState(initialImplementationDeviation);
+  // The carried-over text, from either source, not the restored value alone: a
+  // draft that kept a cleared deviation must still show it (to keep it after all),
+  // and the clone it came from still has it.
+  const [carriedOverDeviation] = useState(() =>
+    !isBlankHtml(draft?.implementationDeviation ?? "")
+      ? (draft?.implementationDeviation ?? "")
+      : (cloneState?.implementationDeviation ?? ""),
+  );
+  const showImplementationDeviation = !isBlankHtml(carriedOverDeviation);
   const [riskImpactAnalysis, setRiskImpactAnalysis] = useState(
     draft?.riskImpactAnalysis ?? cloneState?.riskImpactAnalysis ?? "",
   );
@@ -423,6 +441,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
       description,
       justification,
       implementationPlan,
+      implementationDeviation,
       riskImpactAnalysis,
       backoutPlan,
       testPlan,
@@ -454,6 +473,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     description,
     justification,
     implementationPlan,
+    implementationDeviation,
     riskImpactAnalysis,
     backoutPlan,
     testPlan,
@@ -516,6 +536,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isBlankHtml(description)) payload.description = description;
     if (!isBlankHtml(justification)) payload.justification = justification;
     if (!isBlankHtml(implementationPlan)) payload.implementationPlan = implementationPlan;
+    if (showImplementationDeviation && !isBlankHtml(implementationDeviation)) {
+      payload.implementationDeviation = implementationDeviation;
+    }
     if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
     if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
     if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
@@ -975,6 +998,16 @@ export default function CreateChangeRequestPage(): JSX.Element {
             "Implementation plan",
             implementationPlan,
             setImplementationPlan,
+          )}
+          {showImplementationDeviation && (
+            <CarriedOverDeviationField
+              id="cr-implementation-deviation"
+              html={carriedOverDeviation}
+              cleared={isBlankHtml(implementationDeviation)}
+              onClearedChange={(cleared) => setImplementationDeviation(cleared ? "" : carriedOverDeviation)}
+              clearedText="Cleared: it is not copied to the new change request."
+              disabled={isSubmitting}
+            />
           )}
           {renderEditorField(
             "cr-risk-impact-analysis",
