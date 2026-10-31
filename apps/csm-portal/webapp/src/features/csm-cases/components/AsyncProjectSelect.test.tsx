@@ -165,3 +165,45 @@ describe("AsyncProjectSelect — knownLabel, picked name, clearing", () => {
     expect(second.container.querySelector(".MuiAutocomplete-clearIndicator")).toBeNull();
   });
 });
+
+describe("AsyncProjectSelect — required and helper text", () => {
+  const idle = {
+    projects: [] as BeProject[],
+    isFetching: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    isError: false,
+    fetchNextPage: vi.fn(),
+  };
+
+  it("marks the field required and shows the helper text under it", () => {
+    mockedUseInfiniteProjectSearch.mockReturnValue(idle);
+    render(
+      <AsyncProjectSelect
+        label="Customer Project"
+        value=""
+        required
+        helperText="Required to request approval."
+        onChange={vi.fn()}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Customer Project" });
+    expect(input).toBeRequired();
+    expect(input).toHaveAccessibleDescription("Required to request approval.");
+  });
+
+  it("is not required by default, and a failed search's message replaces the helper text", () => {
+    mockedUseInfiniteProjectSearch.mockReturnValue({ ...idle, isError: true });
+    render(
+      <AsyncProjectSelect
+        label="Customer Project"
+        value=""
+        helperText="Required to request approval."
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Customer Project" })).not.toBeRequired();
+    expect(screen.getByText("Project search failed.")).toBeInTheDocument();
+    expect(screen.queryByText("Required to request approval.")).not.toBeInTheDocument();
+  });
+});

@@ -39,6 +39,8 @@ interface AsyncProjectSelectProps {
    * a real search result for the same id replaces it. */
   knownLabel?: string;
   required?: boolean;
+  /** Text under the field (e.g. why it is required). A failed search shows its own message instead. */
+  helperText?: React.ReactNode;
   disabled?: boolean;
   /** Hides the clear button, for places where "no project" is not a valid edit. */
   disableClearable?: boolean;
@@ -66,6 +68,7 @@ export default function AsyncProjectSelect({
   onChange,
   knownLabel,
   required,
+  helperText,
   disabled,
   disableClearable,
   filterProject,
@@ -202,7 +205,7 @@ export default function AsyncProjectSelect({
           required={required}
           placeholder={value ? undefined : "Search projects…"}
           error={isError}
-          helperText={isError ? "Project search failed." : undefined}
+          helperText={isError ? "Project search failed." : helperText}
         />
       )}
     />

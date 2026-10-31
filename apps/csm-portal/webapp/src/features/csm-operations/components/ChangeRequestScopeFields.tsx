@@ -16,7 +16,7 @@
 
 import { Autocomplete, Box, Button, Chip, TextField } from "@wso2/oxygen-ui";
 import { Lock } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import type { ScopeOption } from "@features/csm-operations/api/useChangeRequestScopeLookups";
 import type { ChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
@@ -34,6 +34,14 @@ interface ChangeRequestScopeFieldsProps {
   idPrefix: string;
   /** Whether the Customer Project can be cleared once picked (default true). */
   projectClearable?: boolean;
+  /**
+   * Marks the Customer Project required (asterisk + `aria-required`). Display
+   * only: the caller decides when (e.g. a customer step ticked on a change
+   * request that has yet to request approval) and owns any validation.
+   */
+  projectRequired?: boolean;
+  /** Text under the Customer Project picker (e.g. why it is required). */
+  projectHelperText?: ReactNode;
 }
 
 function selectedOptions(
@@ -56,6 +64,8 @@ export default function ChangeRequestScopeFields({
   projectDisabled = false,
   idPrefix,
   projectClearable = true,
+  projectRequired = false,
+  projectHelperText,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
   const hasProject = !!scope.projectId;
 
@@ -72,6 +82,8 @@ export default function ChangeRequestScopeFields({
         onChange={scope.setProject}
         disabled={disabled || projectDisabled}
         disableClearable={!projectClearable}
+        required={projectRequired}
+        helperText={projectHelperText}
       />
 
       <Autocomplete<ScopeOption, true>

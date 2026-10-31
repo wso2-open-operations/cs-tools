@@ -664,6 +664,14 @@ describe("WidgetEditorDialog", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Resource type" }));
     fireEvent.click(screen.getByRole("option", { name: "incident" }));
 
+    // With the groupBy gone the pie is built from manual slices, and the
+    // loader refuses a pie with neither, so Save waits for a labelled slice.
+    expect(screen.getByRole("button", { name: "Save widget" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /add slice/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Slice label" }), {
+      target: { value: "All" },
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "Save widget" }));
     const saved = onSave.mock.calls[0][0] as BeDashboardWidget;
     expect(saved.groupBy).toBeUndefined();
@@ -708,7 +716,7 @@ describe("WidgetEditorDialog", () => {
     // widget — showing it would let an admin edit something that's
     // silently dropped on save.
     expect(screen.queryByRole("button", { name: /add slice/i })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Slice label")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Slice label" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save widget" }));
     const saved = onSave.mock.calls[0][0] as BeDashboardWidget;
@@ -745,5 +753,77 @@ describe("WidgetEditorDialog", () => {
     const saved = onSave.mock.calls[0][0] as BeDashboardWidget;
     expect(saved.listLimit).toBeUndefined();
     expect(Number.isNaN(saved.listLimit)).toBe(false);
+  });
+});
+
+describe("WidgetEditorDialog — required rows", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  const pickShape = (name: string): void => {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Shape" }));
+    fireEvent.click(screen.getByRole("option", { name }));
+  };
+
+  it("requires a column row's path and label, and blocks saving a half-filled row instead of dropping it", () => {
+    const { onSave } = renderDialog();
+    fireEvent.change(screen.getByLabelText("Widget display name"), {
+      target: { value: "Case list" },
+    });
+    pickShape("list");
+    fireEvent.click(screen.getByRole("button", { name: /add column/i }));
+
+    expect(screen.getByLabelText("Column path")).toBeRequired();
+    expect(screen.getByLabelText("Column label")).toBeRequired();
+    const add = screen.getByRole("button", { name: "Add widget" });
+    expect(add).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Column path"), { target: { value: "project.key" } });
+    expect(add).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Column label"), { target: { value: "Project" } });
+    expect(add).toBeEnabled();
+
+    fireEvent.click(add);
+    expect((onSave.mock.calls[0][0] as BeDashboardWidget).columns).toEqual([
+      { path: "project.key", label: "Project", format: undefined },
+    ]);
+  });
+
+  it("marks Slices required for a pie widget, and needs at least one labelled slice to save", () => {
+    const { onSave } = renderDialog();
+    fireEvent.change(screen.getByLabelText("Widget display name"), {
+      target: { value: "By severity" },
+    });
+    pickShape("pie");
+
+    const heading = screen.getByText("Slices", { exact: false, selector: "h6" });
+    expect(heading.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    const add = screen.getByRole("button", { name: "Add widget" });
+    expect(add).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /add slice/i }));
+    const label = screen.getByRole("textbox", { name: "Slice label" });
+    expect(label).toBeRequired();
+    expect(add).toBeDisabled();
+
+    fireEvent.change(label, { target: { value: "S1" } });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    expect((onSave.mock.calls[0][0] as BeDashboardWidget).slices?.map((sl) => sl.label)).toEqual(["S1"]);
+  });
+
+  it("does not ask for slices on a pie widget that groups by a field instead", () => {
+    const existing: BeDashboardWidget = {
+      widgetId: "w1",
+      displayName: "Cases by severity",
+      resourceType: "case",
+      shape: "pie",
+      gridWidth: 4,
+      query: {},
+      groupBy: { field: "severity" },
+    };
+    renderDialog({ widget: existing });
+    expect(screen.getByRole("button", { name: "Save widget" })).toBeEnabled();
   });
 });

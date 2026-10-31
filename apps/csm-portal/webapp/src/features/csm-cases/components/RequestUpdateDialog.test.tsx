@@ -129,6 +129,7 @@ describe("RequestUpdateDialog", () => {
     );
     selectStage(/custom message/i);
     expect(screen.queryByTestId("request-update-preview")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /^custom message$/i })).toBeRequired();
     expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/custom message/i), {

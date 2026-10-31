@@ -170,6 +170,10 @@ export default function TimeCardReviewDialog({
                 ? "Lead's comment (required to reject)"
                 : "Lead's comment (optional)"
             }
+            // Required whenever Reject is offered: outright when opened from
+            // Reject, and for Reject in the two-button review mode (the label
+            // says so; Accept stays possible without it).
+            required={rejectAllowed}
             multiline
             minRows={2}
             value={leadComment}

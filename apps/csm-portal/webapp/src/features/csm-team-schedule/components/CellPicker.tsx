@@ -26,6 +26,7 @@ import {
   useState,
   type JSX,
 } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } from "../types";
 import { escalationGrid } from "../utils/rota";
 import { useTeamName } from "../utils/teamColourContext";
@@ -912,23 +913,31 @@ export default function CellPicker({
                 >
                   <div className="pk-sec">New tag</div>
                   <label>
-                    <span>Short code</span>
+                    <span>
+                      Short code
+                      <RequiredMark />
+                    </span>
                     <input
                       value={tag.shortCode}
                       maxLength={12}
                       placeholder="e.g. Trn"
                       onChange={(e) => setTag({ ...tag, shortCode: e.target.value })}
                       aria-label="Tag short code"
+                      aria-required="true"
                     />
                   </label>
                   <label>
-                    <span>Name</span>
+                    <span>
+                      Name
+                      <RequiredMark />
+                    </span>
                     <input
                       value={tag.label}
                       maxLength={100}
                       placeholder="e.g. External training"
                       onChange={(e) => setTag({ ...tag, label: e.target.value })}
                       aria-label="Tag name"
+                      aria-required="true"
                     />
                   </label>
                   <div className="pk-codes" role="radiogroup" aria-label="Tag type">

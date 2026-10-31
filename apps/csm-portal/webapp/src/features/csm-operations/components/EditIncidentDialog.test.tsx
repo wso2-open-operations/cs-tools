@@ -269,3 +269,125 @@ describe("EditIncidentDialog channel", () => {
     expect(onSave).toHaveBeenCalledWith({ contactType: "CHAT" });
   });
 });
+
+describe("EditIncidentDialog required-field markers", () => {
+  // Every field isValid insists on carries the asterisk (MUI `required`, which
+  // also sets aria-required on the select's combobox), exactly in the cases
+  // isValid insists on it.
+  const IN_PROGRESS: BeIncidentDetail = {
+    ...BASE_INCIDENT,
+    state: "IN_PROGRESS",
+    category: "SECURITY",
+    subcategory: "PHISHING",
+    contactType: "EMAIL",
+    impact: "LOW",
+    urgency: "LOW",
+  };
+  const combobox = (name: RegExp): HTMLElement => screen.getByRole("combobox", { name });
+  const pick = (name: RegExp, option: string): void => {
+    fireEvent.mouseDown(combobox(name));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: option }));
+  };
+
+  it("marks Subject, Category, Channel, Impact, Urgency and a changeable State required on any save, and the optional fields not", () => {
+    render(<EditIncidentDialog incident={IN_PROGRESS} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
+
+    expect(screen.getByRole("textbox", { name: /^subject$/i })).toBeRequired();
+    for (const name of [/^category$/i, /^channel$/i, /^impact$/i, /^urgency$/i, /^state$/i]) {
+      expect(combobox(name)).toBeRequired();
+    }
+    expect(screen.getByRole("textbox", { name: /^environment$/i })).not.toBeRequired();
+    expect(combobox(/^service$/i)).not.toBeRequired();
+    expect(combobox(/^assignment group$/i)).not.toBeRequired();
+  });
+
+  it("marks Subcategory required only once the category changes on an incident that has one", () => {
+    render(<EditIncidentDialog incident={IN_PROGRESS} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
+    expect(combobox(/^subcategory$/i)).not.toBeRequired();
+
+    pick(/^category$/i, "Service Interruption");
+    expect(combobox(/^subcategory$/i)).toBeRequired();
+  });
+
+  it("does not mark Subcategory while Category is cleared, since it is disabled until one is picked", () => {
+    render(<EditIncidentDialog incident={IN_PROGRESS} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
+
+    pick(/^category$/i, "-- Select --");
+    expect(combobox(/^subcategory$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(combobox(/^subcategory$/i)).not.toBeRequired();
+    expect(screen.getByText("Pick a category first.")).toBeInTheDocument();
+    // The blank Category is what holds Save back.
+    expect(combobox(/^category$/i)).toBeRequired();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+
+    pick(/^category$/i, "Service Interruption");
+    expect(combobox(/^subcategory$/i)).toBeRequired();
+  });
+
+  it("does not mark a terminal State, whose select is disabled", () => {
+    render(
+      <EditIncidentDialog
+        incident={{ ...IN_PROGRESS, state: "CLOSED" }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(combobox(/^state$/i)).toHaveAttribute("aria-disabled", "true");
+    expect(combobox(/^state$/i)).not.toBeRequired();
+    expect(combobox(/^category$/i)).toBeRequired();
+  });
+
+  it("leaves Subcategory optional when the category changes on an incident that had none", () => {
+    render(
+      <EditIncidentDialog
+        incident={{ ...IN_PROGRESS, subcategory: null }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    pick(/^category$/i, "Service Interruption");
+    expect(combobox(/^subcategory$/i)).not.toBeRequired();
+  });
+
+  it.each(["Resolved", "Closed"])("marks Resolution code and Resolution notes required when moving to %s", (target) => {
+    const initialState = target === "Closed" ? "RESOLVED" : "IN_PROGRESS";
+    render(
+      <EditIncidentDialog
+        incident={{ ...IN_PROGRESS, state: initialState }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    pick(/^state$/i, target);
+    expect(screen.getByText(`A resolution is required to move this incident to ${target}.`)).toBeInTheDocument();
+    expect(combobox(/^resolution code$/i)).toBeRequired();
+    expect(screen.getByRole("textbox", { name: /^resolution notes$/i })).toBeRequired();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+  });
+
+  it("leaves the resolution fields unmarked on an already-Resolved incident whose State is left alone", () => {
+    // They still show (the State value is Resolved), but nothing requires
+    // them: isTransitioningToResolved is false, so Save accepts other edits.
+    render(
+      <EditIncidentDialog
+        incident={{ ...IN_PROGRESS, state: "RESOLVED" }}
+        isSaving={false}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(combobox(/^resolution code$/i)).not.toBeRequired();
+    expect(screen.getByRole("textbox", { name: /^resolution notes$/i })).not.toBeRequired();
+    // Nor does the caption claim a resolution is needed: this save moves nothing.
+    expect(screen.queryByText(/A resolution is required/)).not.toBeInTheDocument();
+    pick(/^impact$/i, "High");
+    expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
+  });
+});

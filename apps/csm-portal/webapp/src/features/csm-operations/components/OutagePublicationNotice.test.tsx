@@ -71,3 +71,24 @@ describe("OutagePublicationNotice", () => {
     expect(screen.getByRole("checkbox")).toBeChecked();
   });
 });
+
+describe("OutagePublicationNotice required acknowledgement", () => {
+  // Both callers show this notice only while their Save/Begin is blocked on
+  // the acknowledgement, so whenever it shows, the checkbox is required.
+  it("marks the acknowledgement checkbox required, with MUI's asterisk after its label", () => {
+    render(
+      <OutagePublicationNotice
+        hasConfigurationItem
+        monitoredClouds={[]}
+        acknowledged={false}
+        onAcknowledgedChange={() => {}}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: /publicly visible\.$/i });
+    expect(checkbox).toBeRequired();
+    const mark = checkbox.closest("label")!.querySelector(".MuiFormControlLabel-asterisk");
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+  });
+});

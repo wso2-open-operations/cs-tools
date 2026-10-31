@@ -43,6 +43,10 @@ interface AsyncProjectMultiSelectProps {
    * label already-selected projects before any search has run.
    */
   nameSeed?: Map<string, string>;
+  /** Marks the field required (asterisk + `aria-required`). Display only: the
+   * caller still owns validation. */
+  required?: boolean;
+  helperText?: string;
 }
 
 /**
@@ -58,6 +62,8 @@ export default function AsyncProjectMultiSelect({
   values,
   onChange,
   nameSeed,
+  required,
+  helperText,
 }: AsyncProjectMultiSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -239,6 +245,8 @@ export default function AsyncProjectMultiSelect({
           {...params}
           label={label}
           placeholder={values.length ? undefined : "Type a project…"}
+          required={required}
+          helperText={helperText}
         />
       )}
     />

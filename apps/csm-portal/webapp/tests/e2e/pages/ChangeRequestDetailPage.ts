@@ -204,8 +204,9 @@ export class ChangeRequestDetailPage {
     return this.page.getByRole("dialog", { name: "Add tag" });
   }
 
+  /** Marker-tolerant: the Tag field is required, so its label carries an asterisk. */
   addTagSearchField(): Locator {
-    return this.addTagDialog().getByLabel("Tag", { exact: true });
+    return this.addTagDialog().getByRole("combobox", { name: /^Tag\s*\*?$/ });
   }
 
   addTagSubmit(): Locator {

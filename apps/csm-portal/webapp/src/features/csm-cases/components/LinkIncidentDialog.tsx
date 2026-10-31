@@ -80,6 +80,7 @@ export default function LinkIncidentDialog({
           value={incidentId}
           onChange={setIncidentId}
           disabled={isLinking}
+          required
           useSearch={useSearchIncidentsForSelect}
           getId={(i) => i.id!}
           getLabel={incidentSearchLabel}

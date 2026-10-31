@@ -60,6 +60,7 @@ import {
   changeRequestTransitionLabel,
   changeRequestTransitionRequiresReason,
   customerApprovalLockedReason,
+  customerProjectNeededForApproval,
   customerReviewLockedReason,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
   isChangeRequestCreationPhase,
@@ -285,6 +286,36 @@ export default function BulkEditChangeRequestsDialog({
     detailsReady && !emergency && ((value === "yes" && choices.yes) || (value === "no" && choices.no)) ? value : NO_CHANGE;
   const effectiveApproval = offered(customerApproval, approvalChoices);
   const effectiveReview = offered(customerReview, reviewChoices);
+
+  // Request Approval needs an assignment group, and (in New) a Customer Project when a customer step is ticked on
+  // a non-Emergency change. A change request missing one is skipped by the run, so the field is marked required
+  // while any selected one lacks it and the field is still empty: the plan takes a value set here first, so it
+  // counts for all of them (for the project, one is set when it is sent: sendScope).
+  const requestingApproval = state === "assess";
+  const lackingTeamCount =
+    requestingApproval && !assignedTeamId ? open.filter((cr) => !cr.assignedTeam?.id).length : 0;
+  const lackingProjectCount = requestingApproval && !sendScope
+    ? open.filter(
+        (cr) =>
+          isChangeRequestCreationPhase(cr.state) &&
+          !cr.project?.id &&
+          customerProjectNeededForApproval(
+            type || cr.type,
+            effectiveApproval ? effectiveApproval === "yes" : cr.customerApprovalRequired,
+            effectiveReview ? effectiveReview === "yes" : cr.customerReviewRequired,
+          ),
+      ).length
+    : 0;
+  // The Customer Project can be set here only while every selected change request is New ("project"), so only then
+  // is it marked required. Otherwise the picker is disabled, and the ones lacking one are counted in a plain note
+  // under it instead.
+  const projectRequired = scopeMode === "project" && lackingProjectCount > 0;
+  /** "N of the selected change requests have no X": why a field is required to request approval. */
+  const lackingHelper = (n: number, what: string): string =>
+    `Required to request approval: ${n} of the selected change requests ${n === 1 ? "has" : "have"} ${what}, and without one ${n === 1 ? "it is" : "they are"} skipped.`;
+  /** The same count, said plainly where the field can't be set here. */
+  const lackingNote = (n: number, what: string): string =>
+    `${n} of the selected change requests ${n === 1 ? "has" : "have"} ${what}, so ${n === 1 ? "it is" : "they are"} skipped.`;
 
   const startDate = parseDateTimeLocal(plannedStart);
   const endDate = parseDateTimeLocal(plannedEnd);
@@ -612,6 +643,8 @@ export default function BulkEditChangeRequestsDialog({
               value={assignedTeamId}
               onChange={setAssignedTeamId}
               disabled={fieldsDisabled}
+              required={lackingTeamCount > 0}
+              helperText={lackingTeamCount > 0 ? lackingHelper(lackingTeamCount, "no assignment group") : undefined}
               useSearch={useSearchGroups}
               getId={(g) => g.id}
               getLabel={(g) => g.name}
@@ -720,7 +753,18 @@ export default function BulkEditChangeRequestsDialog({
                 projectDisabled={scopeMode !== "project"}
                 idPrefix="bulk-cr"
                 projectClearable={scopeMode === "project"}
+                projectRequired={projectRequired}
+                projectHelperText={
+                  projectRequired
+                    ? lackingHelper(lackingProjectCount, "a customer step ticked and no Customer Project")
+                    : undefined
+                }
               />
+              {lackingProjectCount > 0 && !projectRequired && (
+                <Typography variant="caption" color="text.secondary">
+                  {lackingNote(lackingProjectCount, "a customer step ticked and no Customer Project")}
+                </Typography>
+              )}
               {sendScope && (
                 <Typography variant="caption" color="text.secondary">
                   {scopeMode === "project"

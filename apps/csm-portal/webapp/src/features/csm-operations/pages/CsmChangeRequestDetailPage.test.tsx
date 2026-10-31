@@ -408,7 +408,7 @@ describe("CsmChangeRequestDetailPage — tags (the case page's widget, hooks and
 
     fireEvent.click(within(tagsCard()).getByRole("button", { name: /^tag$/i }));
     const dialog = screen.getByRole("dialog", { name: /add tag/i });
-    fireEvent.change(within(dialog).getByLabelText(/^tag$/i), { target: { value: "maint" } });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: /^tag$/i }), { target: { value: "maint" } });
     fireEvent.click(screen.getByText("maintenance-window"));
     fireEvent.click(within(dialog).getByRole("button", { name: /add tag/i }));
 

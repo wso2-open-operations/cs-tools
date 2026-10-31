@@ -24,7 +24,9 @@ declared maximum length is enforced as you type, and a declared validation
 pattern (e.g. a valid email format) is checked as soon as you leave the
 field, with the backing system's own message shown if it doesn't match. A
 question the catalog item doesn't currently use (inactive or hidden) isn't
-shown at all.
+shown at all. A service request needs at least one answer, so **Create service
+request** stays disabled until a question is answered, and a catalog item with
+no questions can't be raised from this form.
 
 Not every project can raise a service request — the form checks the selected
 project's eligibility and shows an error instead of letting you submit

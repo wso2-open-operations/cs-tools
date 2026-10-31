@@ -93,6 +93,7 @@ import {
   isChangeRequestCreationPhase,
   requestApprovalNeedsContactReason,
   requestApprovalNeedsProjectReason,
+  customerProjectNeededForApproval,
 } from "@features/csm-operations/utils/changeRequests";
 import type { BeChangeRequestApproval, BeChangeRequestDetail } from "@api/backend/types";
 
@@ -912,6 +913,20 @@ describe("the Customer Project is fixed once approval was requested", () => {
       expect(customerProjectLockedReason(state)).toBe("Fixed when approval was requested. Cancel and clone to change it.");
     },
   );
+});
+
+describe("customerProjectNeededForApproval", () => {
+  it("is true when a customer step is ticked on a non-Emergency change", () => {
+    expect(customerProjectNeededForApproval("normal", true, false)).toBe(true);
+    expect(customerProjectNeededForApproval("standard", false, true)).toBe(true);
+    expect(customerProjectNeededForApproval(undefined, true, undefined)).toBe(true);
+  });
+
+  it("is false with no step ticked, and for an Emergency change whatever is ticked", () => {
+    expect(customerProjectNeededForApproval("normal", false, false)).toBe(false);
+    expect(customerProjectNeededForApproval("normal", undefined, null)).toBe(false);
+    expect(customerProjectNeededForApproval(" Emergency ", true, true)).toBe(false);
+  });
 });
 
 describe("requestApprovalNeedsProjectReason", () => {

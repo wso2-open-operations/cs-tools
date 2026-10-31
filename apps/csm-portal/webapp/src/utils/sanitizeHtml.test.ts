@@ -18,6 +18,7 @@ import DOMPurify from "dompurify";
 import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
+  hasVisibleContent,
   isBlankHtml,
   looksLikeHtml,
   sanitizeAnnouncementHtml,
@@ -103,6 +104,26 @@ describe("isBlankHtml", () => {
 
   it("is false for a description with text", () => {
     expect(isBlankHtml("<p>Some description</p>")).toBe(false);
+  });
+});
+
+describe("hasVisibleContent", () => {
+  it("is false for what an empty or cleared editor sends", () => {
+    expect(hasVisibleContent("")).toBe(false);
+    expect(hasVisibleContent("<p></p>")).toBe(false);
+    expect(hasVisibleContent("<p><br></p>")).toBe(false);
+    expect(hasVisibleContent("<p>&nbsp;</p>")).toBe(false);
+  });
+
+  it("is true for text", () => {
+    expect(hasVisibleContent("<p>Some description</p>")).toBe(true);
+  });
+
+  it("counts an image-only body as content, where isBlankHtml does not", () => {
+    const imageOnly = '<p><img src="data:image/png;base64,AAAA" alt=""></p>';
+    expect(isBlankHtml(imageOnly)).toBe(true);
+    expect(hasVisibleContent(imageOnly)).toBe(true);
+    expect(hasVisibleContent('<IMG SRC="/abc123.iix">')).toBe(true);
   });
 });
 
