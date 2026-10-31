@@ -205,6 +205,11 @@ func TestGetInlineImage_ErrorsAndGuards(t *testing.T) {
 	if rec, _ := serveStored(t, f, true, http.MethodGet, "/attachments/inline/"+storedID+"/content", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("not found -> %d", rec.Code)
 	}
+	gone := &fakeStoredEntity{err: apierror.NewUpstreamError(http.StatusGone, []byte(`{"code":410,"message":"internal detail","errorCode":"attachment_removed"}`))}
+	rec, _ := serveStored(t, gone, true, http.MethodGet, "/attachments/inline/"+storedID+"/content", "")
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"errorCode":"attachment_removed"`) || strings.Contains(rec.Body.String(), "internal detail") {
+		t.Errorf("removed -> %d %s", rec.Code, rec.Body.String())
+	}
 	if rec, _ := serveStored(t, &fakeStoredEntity{}, true, http.MethodGet, "/attachments/inline/nope/content", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad id -> %d", rec.Code)
 	}

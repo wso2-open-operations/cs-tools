@@ -39,22 +39,20 @@ function extractIixAttachmentIds(html: string): string[] {
   return ids;
 }
 
-/** Formats a 32-hex sys_id as a hyphenated UUID; anything else is returned as is. */
-function toDisplayUuid(id: string): string {
-  const hex = id.replace(/-/g, "").toLowerCase();
-  return /^[a-f0-9]{32}$/.test(hex)
-    ? `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-    : id;
-}
+/** What a customer reads in place of an image that could not be shown. */
+export const IMAGE_REMOVED_MESSAGE = "This image was removed.";
+export const IMAGE_UNAVAILABLE_MESSAGE = "This image is not available.";
 
 /**
  * Replacement for an inline image that could not be loaded. Never carries the
- * original src (a ServiceNow URL the browser could not use anyway); shows the
- * attachment id instead so the customer can quote it to support.
+ * original src (a ServiceNow URL the browser could not use anyway). The message
+ * says whether the image was removed or just not available; the attachment id is
+ * not shown, only kept in a data attribute for support to read.
  */
-function unavailableImageHtml(refId: string): string {
-  const uuid = toDisplayUuid(refId).replace(/[^a-zA-Z0-9-]/g, "");
-  return `<span data-unresolved="true" style="display:inline-block;padding:4px 8px;border:1px dashed currentColor;border-radius:4px;opacity:0.7;font-size:0.85em">Image not available, failed to load (ID: ${uuid})</span>`;
+function unavailableImageHtml(refId: string, removed: boolean): string {
+  const id = refId.replace(/[^a-zA-Z0-9-]/g, "");
+  const message = removed ? IMAGE_REMOVED_MESSAGE : IMAGE_UNAVAILABLE_MESSAGE;
+  return `<span data-unresolved="true" data-attachment-id="${id}" style="display:inline-block;padding:4px 8px;border:1px dashed currentColor;border-radius:4px;opacity:0.7;font-size:0.85em">${message}</span>`;
 }
 
 /**
@@ -75,7 +73,7 @@ export function useResolvedInlineImageHtml(
 ): { resolvedHtml: string; isLoading: boolean } {
   const idsFromHtml = useMemo(() => extractIixAttachmentIds(html), [html]);
 
-  const { dataUrls, isLoading } = useAttachmentPreviews(idsFromHtml, caseId);
+  const { dataUrls, removedIds, isLoading } = useAttachmentPreviews(idsFromHtml, caseId);
 
   const resolvedHtml = useMemo(() => {
     // Nothing to resolve. Not "no data URLs": when every fetch failed the
@@ -95,11 +93,11 @@ export function useResolvedInlineImageHtml(
             ([id]) => src.includes(id) || id.includes(refId),
           )?.[1];
         const quote = doubleSrc !== undefined ? '"' : singleSrc !== undefined ? "'" : '"';
-        if (!dataUrl) return unavailableImageHtml(refId);
+        if (!dataUrl) return unavailableImageHtml(refId, removedIds?.has(refId) ?? false);
         return `<img${before} src=${quote}${dataUrl}${quote}${after}>`;
       },
     );
-  }, [html, dataUrls, idsFromHtml]);
+  }, [html, dataUrls, removedIds, idsFromHtml]);
 
   const hasInlineImages = idsFromHtml.length > 0;
 
