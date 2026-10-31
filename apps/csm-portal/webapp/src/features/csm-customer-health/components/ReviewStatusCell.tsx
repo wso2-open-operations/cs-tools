@@ -259,6 +259,7 @@ export default function ReviewStatusCell({
             required
             multiline
             rows={4}
+            label="Reason for marking at risk"
             placeholder="Add reason for marking at risk..."
             value={atRiskComment}
             onChange={(e) => setAtRiskComment(e.target.value)}
@@ -276,7 +277,7 @@ export default function ReviewStatusCell({
       <Dialog open={markHealthyOpen} onClose={() => { setMarkHealthyOpen(false); setMarkHealthyComment(""); }} maxWidth="sm" fullWidth>
         <DialogTitle>Mark {project.name} as Healthy</DialogTitle>
         <DialogContent>
-          <TextField fullWidth required multiline rows={4} placeholder="Add reason for marking healthy..." value={markHealthyComment} onChange={(e) => setMarkHealthyComment(e.target.value)} sx={{ mt: 1 }} />
+          <TextField fullWidth required multiline rows={4} label="Reason for marking healthy" placeholder="Add reason for marking healthy..." value={markHealthyComment} onChange={(e) => setMarkHealthyComment(e.target.value)} sx={{ mt: 1 }} />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => { setMarkHealthyOpen(false); setMarkHealthyComment(""); }}>Cancel</Button>
@@ -287,7 +288,7 @@ export default function ReviewStatusCell({
       <Dialog open={closeRiskOpen} onClose={() => setCloseRiskOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Close Risk for {project.name}</DialogTitle>
         <DialogContent>
-          <TextField fullWidth required multiline rows={4} placeholder="Add reason for closing risk..." value={closeRiskComment} onChange={(e) => setCloseRiskComment(e.target.value)} sx={{ mt: 1 }} />
+          <TextField fullWidth required multiline rows={4} label="Reason for closing risk" placeholder="Add reason for closing risk..." value={closeRiskComment} onChange={(e) => setCloseRiskComment(e.target.value)} sx={{ mt: 1 }} />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => { setCloseRiskOpen(false); setCloseRiskComment(""); }}>Cancel</Button>

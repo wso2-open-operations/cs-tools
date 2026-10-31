@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import EditCaseDetailsDialog from "@features/csm-cases/components/EditCaseDetailsDialog";
@@ -91,11 +91,101 @@ describe("EditCaseDetailsDialog — change gating and sequential per-field submi
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^subject$/i), {
+    fireEvent.change(screen.getByRole("textbox", { name: /^subject$/i }), {
       target: { value: "Updated subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(onSubmit).toHaveBeenCalledWith({ subject: "Updated subject" });
+  });
+
+  it("marks Subject required and blocks Save with an error once it is cleared", async () => {
+    setupHooks();
+    const onSubmit = vi.fn().mockResolvedValue([]);
+    render(
+      <EditCaseDetailsDialog
+        projectId="prj-1"
+        currentSubject="Original subject"
+        currentDescriptionHtml="<p>Original</p>"
+        isSaving={false}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    const subjectInput = screen.getByRole("textbox", { name: /^subject$/i });
+    expect(subjectInput).toBeRequired();
+    expect(screen.queryByText("Subject is required.")).not.toBeInTheDocument();
+
+    // Another field changed, but the subject is cleared: Save stays blocked
+    // instead of quietly saving the description and keeping the old subject.
+    fireEvent.change(screen.getByLabelText("description-editor"), {
+      target: { value: "<p>Changed</p>" },
+    });
+    fireEvent.change(subjectInput, { target: { value: "   " } });
+    expect(screen.getByText("Subject is required.")).toBeInTheDocument();
+    expect(subjectInput).toHaveAttribute("aria-invalid", "true");
+    const save = screen.getByRole("button", { name: /save changes/i });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(subjectInput, { target: { value: "New subject" } });
+    expect(screen.queryByText("Subject is required.")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith({
+      subject: "New subject",
+      description: "<p>Changed</p>",
+    });
+  });
+
+  it("still saves other fields on a case that never had a subject, until the subject is touched", async () => {
+    setupHooks();
+    const onSubmit = vi.fn().mockResolvedValue([]);
+    render(
+      <EditCaseDetailsDialog
+        projectId="prj-1"
+        currentSubject=""
+        currentDescriptionHtml="<p>Original</p>"
+        isSaving={false}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("description-editor"), {
+      target: { value: "<p>Changed</p>" },
+    });
+    expect(screen.queryByText("Subject is required.")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith({ description: "<p>Changed</p>" });
+  });
+
+  it("does not mark an untouched blank subject required, only one the user has changed", () => {
+    setupHooks();
+    render(
+      <EditCaseDetailsDialog
+        projectId="prj-1"
+        currentSubject=""
+        currentDescriptionHtml="<p>Original</p>"
+        isSaving={false}
+        onClose={() => {}}
+        onSubmit={vi.fn().mockResolvedValue([])}
+      />,
+    );
+    const subjectInput = screen.getByRole("textbox", { name: /^subject$/i });
+    expect(subjectInput).not.toBeRequired();
+
+    // Typed into, it is held to the same rule as a stored subject.
+    fireEvent.change(subjectInput, { target: { value: "  " } });
+    expect(subjectInput).toBeRequired();
+    expect(screen.getByText("Subject is required.")).toBeInTheDocument();
+
+    // Back to exactly what was stored: untouched again, so neither.
+    fireEvent.change(subjectInput, { target: { value: "" } });
+    expect(subjectInput).not.toBeRequired();
+    expect(screen.queryByText("Subject is required.")).not.toBeInTheDocument();
   });
 
   it("renders a per-field result once the submission settles, including a failure", async () => {
@@ -114,7 +204,7 @@ describe("EditCaseDetailsDialog — change gating and sequential per-field submi
         onSubmit={onSubmit}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^subject$/i), {
+    fireEvent.change(screen.getByRole("textbox", { name: /^subject$/i }), {
       target: { value: "Updated subject" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -139,7 +229,7 @@ describe("EditCaseDetailsDialog — change gating and sequential per-field submi
           onSubmit={vi.fn().mockResolvedValue(results)}
         />,
       );
-      fireEvent.change(screen.getByLabelText(/^subject$/i), {
+      fireEvent.change(screen.getByRole("textbox", { name: /^subject$/i }), {
         target: { value: "Updated subject" },
       });
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));

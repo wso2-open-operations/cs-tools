@@ -98,16 +98,22 @@ vi.mock("@components/AsyncEntitySelect", () => ({
     label,
     value,
     knownLabel,
+    required,
+    helperText,
     onChange,
   }: {
     label: string;
     value: string;
     knownLabel?: string;
+    required?: boolean;
+    helperText?: string;
     onChange: (next: string, item?: { id: string; name: string }) => void;
   }) => (
     <input
       aria-label={label}
       data-known-label={knownLabel ?? ""}
+      data-helper-text={helperText ?? ""}
+      required={required}
       value={value}
       onChange={(e) => onChange(e.target.value, PICKED_ITEMS[e.target.value])}
     />
@@ -121,14 +127,20 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
   default: ({
     label,
     value,
+    required,
+    helperText,
     onChange,
   }: {
     label: string;
     value: string;
+    required?: boolean;
+    helperText?: string;
     onChange: (next: string, name?: string) => void;
   }) => (
     <input
       aria-label={label}
+      data-helper-text={helperText ?? ""}
+      required={required}
       value={value}
       onChange={(e) => onChange(e.target.value, PROJECT_NAMES[e.target.value])}
     />
@@ -1918,5 +1930,72 @@ describe("CreateChangeRequestPage — fields inferred from the originating servi
       target: { value: encodeParentRecordValue("service_request", "sr-1") },
     });
     expect((screen.getByLabelText(/short description|subject/i) as HTMLInputElement).value).toBe(typed);
+  });
+});
+
+describe("CreateChangeRequestPage — required-field markers", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    locationState = undefined;
+    navigateMock.mockReset();
+    postChangeRequestMutateMock.mockReset();
+    patchChangeRequestMutateMock.mockReset();
+    showErrorMock.mockReset();
+  });
+
+  it("marks the change type required: an asterisk on its heading and aria-required on the radio group", () => {
+    render(<CreateChangeRequestPage />);
+    const heading = screen.getByText("What type of change is required?");
+    expect(heading.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    // The asterisk stays out of the group's accessible name.
+    expect(screen.getByRole("group", { name: "What type of change is required?" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("marks the Assignment group required to request approval, without blocking Create", () => {
+    render(<CreateChangeRequestPage />);
+    const group = screen.getByLabelText("Assignment group");
+    expect(group).toBeRequired();
+    expect(group).toHaveAttribute("data-helper-text", "Required to request approval.");
+    fillSubject();
+    expect(group).toHaveValue("");
+    expect(screen.getByRole("button", { name: /create change request/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0]![0]).not.toHaveProperty("groupId");
+  });
+
+  it("marks the Customer Project required only while a customer step is ticked on a non-Emergency change", () => {
+    render(<CreateChangeRequestPage />);
+    fillSubject("Normal");
+    const project = screen.getByLabelText("Customer Project");
+    expect(project).not.toBeRequired();
+    expect(project).toHaveAttribute("data-helper-text", "");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(project).toBeRequired();
+    expect(project).toHaveAttribute("data-helper-text", "Required to request approval.");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(project).not.toBeRequired();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Review" }));
+    expect(project).toBeRequired();
+
+    // Emergency clears both boxes and asks the customer nothing: no project needed.
+    selectType("Emergency");
+    expect(project).not.toBeRequired();
+    expect(project).toHaveAttribute("data-helper-text", "");
+  });
+
+  it("still creates with a customer step ticked and no Customer Project (Request Approval is the gate)", () => {
+    render(<CreateChangeRequestPage />);
+    fillSubject("Standard");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(screen.getByLabelText("Customer Project")).toBeRequired();
+    const create = screen.getByRole("button", { name: /create change request/i });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    const payload = postChangeRequestMutateMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toMatchObject({ customerApprovalRequired: true });
+    expect(payload).not.toHaveProperty("projectId");
   });
 });

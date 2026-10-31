@@ -984,6 +984,29 @@ export function customerRequirementOnceSavedHelper(
 export const REQUEST_APPROVAL_NEEDS_PROJECT_REASON = "Select a Customer Project before requesting approval";
 
 /**
+ * The helper under a field that saving does not need but Request Approval does
+ * (the Assignment group; the Customer Project with a customer step ticked). The
+ * field carries the required asterisk while that step is still ahead (on create,
+ * and while the change request is New); the form itself still saves without it.
+ */
+export const REQUIRED_TO_REQUEST_APPROVAL_HELPER = "Required to request approval.";
+
+/**
+ * Whether a change request of `type` with these customer steps needs a Customer
+ * Project before Request Approval: a step is ticked and it is not an Emergency
+ * change (whose customer steps the backend ignores). The rule of
+ * `requestApprovalNeedsProjectReason`, for a form's own values.
+ */
+export function customerProjectNeededForApproval(
+  type: string | null | undefined,
+  customerApprovalRequired: boolean | null | undefined,
+  customerReviewRequired: boolean | null | undefined,
+): boolean {
+  if (isEmergencyChangeRequestType(type)) return false;
+  return customerApprovalRequired === true || customerReviewRequired === true;
+}
+
+/**
  * Request Approval (New -> Assess) is refused by the backend when the customer's
  * approval and/or review is required but the change request has no Customer
  * Project: it would reach a customer stage with nobody to ask, and the project can
@@ -1000,9 +1023,8 @@ export function requestApprovalNeedsProjectReason(
   // Only the move out of New: a resent {state: "assess"} on a change request that
   // is already past it is the backend's idempotent no-op, not a request.
   if (!isChangeRequestCreationPhase(cr.state)) return null;
-  if (isEmergencyChangeRequestType(cr.type)) return null;
-  const needsCustomer = cr.customerApprovalRequired === true || cr.customerReviewRequired === true;
-  return needsCustomer && !cr.project?.id ? REQUEST_APPROVAL_NEEDS_PROJECT_REASON : null;
+  const needsProject = customerProjectNeededForApproval(cr.type, cr.customerApprovalRequired, cr.customerReviewRequired);
+  return needsProject && !cr.project?.id ? REQUEST_APPROVAL_NEEDS_PROJECT_REASON : null;
 }
 
 /** Why Request Approval is blocked for want of anybody to ask on the Customer Project, or `null`. */

@@ -56,6 +56,8 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     knownLabel,
     disableClearable,
     disabled,
+    required,
+    helperText,
     onChange,
   }: {
     label: string;
@@ -63,13 +65,17 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     knownLabel?: string;
     disableClearable?: boolean;
     disabled?: boolean;
+    required?: boolean;
+    helperText?: string;
     onChange: (next: string, name?: string) => void;
   }) => (
     <input
       aria-label={label}
       data-known-label={knownLabel ?? ""}
       data-disable-clearable={String(!!disableClearable)}
+      data-helper-text={helperText ?? ""}
       disabled={disabled}
+      required={required}
       value={value}
       onChange={(e) => onChange(e.target.value, PROJECT_NAMES[e.target.value])}
     />
@@ -1407,5 +1413,71 @@ describe("EditChangeRequestDialog — inline variant", () => {
         "Fixed when approval was requested. Cancel and clone to change it.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("EditChangeRequestDialog — required-field markers", () => {
+  const ACME = { id: "proj-a", name: "Acme Project" };
+  const assignmentGroup = (): HTMLElement => screen.getByRole("combobox", { name: "Assignment group" });
+  const project = (): HTMLElement => screen.getByLabelText("Customer Project");
+  const workNote = (): HTMLElement => screen.getByRole("textbox", { name: "Work note (internal)" });
+
+  it("marks the Assignment group required while Request Approval is still ahead (New), and not after", () => {
+    renderDialog({ state: "new" });
+    expect(assignmentGroup()).toBeRequired();
+    cleanup();
+    renderDialog({ state: "assess" });
+    expect(assignmentGroup()).not.toBeRequired();
+  });
+
+  it("still saves in New without an Assignment group: Request Approval is the gate, not the save", () => {
+    const { onSave } = renderDialog({ state: "new", assignedTeam: undefined });
+    expect(assignmentGroup()).toBeRequired();
+    expect(assignmentGroup()).toHaveValue("");
+    fireEvent.change(screen.getByRole("textbox", { name: "Subject" }), { target: { value: "Rotate the certificates" } });
+    expect(saveButton()).toBeEnabled();
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ title: "Rotate the certificates" });
+  });
+
+  it("marks the Customer Project required in New only while a customer step is ticked", () => {
+    renderDialog({ state: "new", type: "normal" });
+    expect(project()).not.toBeRequired();
+    expect(project()).toHaveAttribute("data-helper-text", "");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(project()).toBeRequired();
+    expect(project()).toHaveAttribute("data-helper-text", "Required to request approval.");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Approval" }));
+    expect(project()).not.toBeRequired();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Customer Review" }));
+    expect(project()).toBeRequired();
+  });
+
+  it("marks it required for a stored tick too, and still saves without a project", () => {
+    const { onSave } = renderDialog({ state: "new", type: "standard", customerReviewRequired: true });
+    expect(project()).toBeRequired();
+    fireEvent.change(screen.getByRole("textbox", { name: "Subject" }), { target: { value: "Rotate the certificates" } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ title: "Rotate the certificates" });
+  });
+
+  it("does not mark it on an Emergency change, nor once approval was requested", () => {
+    renderDialog({ state: "new", type: "emergency", customerApprovalRequired: true });
+    expect(project()).not.toBeRequired();
+    cleanup();
+    renderDialog({ state: "assess", type: "normal", customerApprovalRequired: true, project: ACME });
+    expect(project()).not.toBeRequired();
+    expect(project()).toHaveAttribute("data-helper-text", "");
+  });
+
+  it("marks the work note required once approved (it is then the only input), and not before", () => {
+    renderDialog({ state: "scheduled", project: ACME });
+    expect(workNote()).toBeRequired();
+    expect(saveButton()).toBeDisabled();
+    fireEvent.change(workNote(), { target: { value: "Deployed to staging." } });
+    expect(saveButton()).toBeEnabled();
+    cleanup();
+    renderDialog({ state: "new" });
+    expect(workNote()).not.toBeRequired();
   });
 });

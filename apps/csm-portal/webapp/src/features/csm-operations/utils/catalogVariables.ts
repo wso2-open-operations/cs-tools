@@ -248,17 +248,29 @@ export function isVariableRequired(variable: BeCatalogItemVariable): boolean {
 }
 
 /**
+ * Whether the user must fill a variable in on the form: {@link isVariableRequired},
+ * except for a `readOnly` variable. Its control is disabled, so the user could
+ * not supply a missing value, and the backend does not enforce `mandatory` on
+ * create (see `CatalogItemVariable.Mandatory` in entity-service). The form's
+ * asterisk and the submit gate both use this, so they always agree.
+ */
+export function isVariableRequiredOnForm(variable: BeCatalogItemVariable): boolean {
+  return isVariableRequired(variable) && variable.readOnly !== true;
+}
+
+/**
  * First empty required field label, or null if all are filled. Required-ness
- * comes from {@link isVariableRequired}; attachment fields are always
- * skipped here regardless of `mandatory` since they're collected by the
- * page's separate attachments section, not this check.
+ * comes from {@link isVariableRequiredOnForm}, so a read-only variable never
+ * blocks; attachment fields are always skipped here regardless of
+ * `mandatory` since they're collected by the page's separate attachments
+ * section, not this check.
  */
 export function getFirstEmptyRequiredField(
   variables: BeCatalogItemVariable[],
   values: Record<string, string>,
 ): string | null {
   for (const v of getUserEditableVariables(variables)) {
-    if (isAttachmentField(v) || !isVariableRequired(v)) continue;
+    if (isAttachmentField(v) || !isVariableRequiredOnForm(v)) continue;
     const raw = (values[v.id] ?? "").trim();
     const textContent = raw.replace(/<[^>]+>/g, "").trim();
     if (!textContent) return variableLabel(v);

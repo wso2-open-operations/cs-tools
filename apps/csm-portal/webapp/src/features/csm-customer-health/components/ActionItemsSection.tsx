@@ -211,7 +211,7 @@ function AddActionItemDialog({ open, onClose, accountId, projectsWithOpenRisks, 
             <TextField fullWidth label="Assigned To (Email)" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} />
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DatePicker
-                label="Due Date *"
+                label="Due Date"
                 value={parseDueDateOnly(dueDate)}
                 onChange={(date) => setDueDate(date ? formatDueDateOnly(date) : "")}
                 slotProps={{
@@ -574,6 +574,7 @@ export default function ActionItemsSection({
         <DialogContent>
           <TextField
             fullWidth required multiline rows={3}
+            label={pendingChange?.newStatus === "resolved" ? "Resolution comment" : "Cancellation reason"}
             placeholder={pendingChange?.newStatus === "resolved" ? "Add resolution comment..." : "Add cancellation reason..."}
             value={statusComment} onChange={(e) => setStatusComment(e.target.value)} sx={{ mt: 1 }}
           />

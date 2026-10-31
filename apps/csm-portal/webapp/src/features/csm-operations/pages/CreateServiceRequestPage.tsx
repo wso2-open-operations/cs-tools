@@ -215,6 +215,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
         : getFirstFieldFailingValidation(allVariables, answers),
     [allVariables, answers, firstEmptyRequired, firstExceedingMaxLength],
   );
+  // Send user-editable, non-attachment variables, encoded by type, omitting
+  // empties. Context/hidden fields are excluded by getUserEditableVariables.
+  const variablePayload = useMemo(
+    () =>
+      getUserEditableVariables(allVariables)
+        .filter((v) => !isAttachmentField(v))
+        .map((v) => ({ id: v.id, value: encodeVariableValue(v, answers[v.id] ?? "") }))
+        .filter((v) => v.value !== ""),
+    [allVariables, answers],
+  );
+  // The backend refuses a service request that carries no answers at all
+  // ("variables are required for service_request"): a catalog item whose
+  // questions are all optional and left blank, or one with no questions.
+  const noVariableAnswered = variables.isSuccess && variablePayload.length === 0;
 
 
   // A deployed product with no catalogs is the common non-ServiceNow case;
@@ -281,6 +295,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired === null &&
       firstExceedingMaxLength === null &&
       firstFailingValidation === null &&
+      !noVariableAnswered &&
       !isIneligibleForSr &&
       !hasNoSrReadAccess &&
       // Fail closed while a selected project's eligibility is still loading
@@ -297,6 +312,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired,
       firstExceedingMaxLength,
       firstFailingValidation,
+      noVariableAnswered,
       isIneligibleForSr,
       hasNoSrReadAccess,
       selectedProject.isLoading,
@@ -307,13 +323,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
-    // Send user-editable, non-attachment variables, encoded by type, omitting
-    // empties. Context/hidden fields are excluded by getUserEditableVariables.
-    const variablePayload = getUserEditableVariables(allVariables)
-      .filter((v) => !isAttachmentField(v))
-      .map((v) => ({ id: v.id, value: encodeVariableValue(v, answers[v.id] ?? "") }))
-      .filter((v) => v.value !== "");
-
     setSubmitting(true);
     try {
       const created = await postCase.mutateAsync({
@@ -622,7 +631,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             mt: 2.5,
           }}
         >
-          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation) && (
+          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation || (!!catalogItemId && noVariableAnswered)) && (
             <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
               {firstEmptyRequired
                 ? `Required field: ${firstEmptyRequired}`
@@ -630,7 +639,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   ? `${firstExceedingMaxLength.label} exceeds ${firstExceedingMaxLength.maxLength} characters`
                   : firstFailingValidation
                     ? `${firstFailingValidation.label}: ${firstFailingValidation.message}`
-                    : null}
+                    : renderableVars.length === 0
+                      ? "A service request needs at least one answer, and this catalog item has no questions to answer."
+                      : "Answer at least one question."}
             </Typography>
           )}
           <Button variant="outlined" onClick={() => navigate(backTarget)}>

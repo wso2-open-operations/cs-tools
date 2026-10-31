@@ -26,6 +26,8 @@ import {
   ON_HOLD_STATE_SKIPPED,
   PLANNED_WINDOW_SKIPPED,
   PROJECT_CHANGED_SKIPPED,
+  REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED,
+  REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED,
   type BulkChangeRequestEdit,
 } from "@features/csm-operations/utils/bulkChangeRequestEdit";
 import {
@@ -339,5 +341,68 @@ describe("assignChangeRequestToMePlan", () => {
     expect(assignChangeRequestToMePlan({ state: "closed" }, "me")).toEqual({
       skip: "Closed, canceled or rolled back: it can't be edited.",
     });
+  });
+});
+
+describe("bulkChangeRequestPlan — Request Approval", () => {
+  const TEAM = { id: "g-1", name: "Platform" };
+  const PROJECT = { id: "proj-1", name: "Acme" };
+
+  it("skips a change request with no assignment group, and sends one with a team stored or set in the edit", () => {
+    expect(bulkChangeRequestPlan({ state: "new" }, { state: "assess" })).toEqual({ skip: REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED });
+    expect(bulkChangeRequestPlan({ state: "new", assignedTeam: TEAM }, { state: "assess" })).toEqual({
+      patch: { state: "assess" },
+    });
+    expect(bulkChangeRequestPlan({ state: "new" }, { state: "assess", assignedTeamId: "g-2" })).toEqual({
+      patch: { state: "assess", assignedTeamId: "g-2" },
+    });
+  });
+
+  it("asks for no team for another state", () => {
+    expect(bulkChangeRequestPlan({ state: "new" }, { state: "canceled", workNote: "why" })).toEqual({
+      patch: { state: "canceled", workNote: "why" },
+    });
+  });
+
+  it("skips one with a customer step ticked and no Customer Project, judged as the edit leaves it", () => {
+    const stored = { state: "new", type: "normal", assignedTeam: TEAM };
+    expect(bulkChangeRequestPlan({ ...stored, customerReviewRequired: true }, { state: "assess" })).toEqual({
+      skip: REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED,
+    });
+    // A step ticked in the same edit counts; one turned off in it does too.
+    expect(bulkChangeRequestPlan(stored, { state: "assess", customerApprovalRequired: true })).toEqual({
+      skip: REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED,
+    });
+    expect(
+      bulkChangeRequestPlan({ ...stored, customerApprovalRequired: true }, { state: "assess", customerApprovalRequired: false }),
+    ).toEqual({ patch: { state: "assess", customerApprovalRequired: false } });
+    // A project stored, or set in the same edit, satisfies it.
+    expect(bulkChangeRequestPlan({ ...stored, customerApprovalRequired: true, project: PROJECT }, { state: "assess" })).toEqual({
+      patch: { state: "assess" },
+    });
+    expect(
+      bulkChangeRequestPlan(
+        { ...stored, customerApprovalRequired: true },
+        { state: "assess", projectId: "proj-1", deploymentIds: [] },
+      ),
+    ).toEqual({ patch: { state: "assess", projectId: "proj-1", deploymentIds: [] } });
+  });
+
+  it("words that skip so it holds for a mixed selection, whose project the same edit can't set", () => {
+    expect(REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED).toBe(
+      "A customer step is ticked and there is no Customer Project, so approval can't be requested until it has one.",
+    );
+  });
+
+  it("asks no project of an Emergency change, stored or re-typed in the edit", () => {
+    expect(
+      bulkChangeRequestPlan({ state: "new", type: "emergency", assignedTeam: TEAM, customerApprovalRequired: true }, { state: "assess" }),
+    ).toEqual({ patch: { state: "assess" } });
+    expect(
+      bulkChangeRequestPlan(
+        { state: "new", type: "normal", assignedTeam: TEAM, customerApprovalRequired: true },
+        { state: "assess", type: "emergency" },
+      ),
+    ).toEqual({ patch: { state: "assess", type: "emergency", customerApprovalRequired: false } });
   });
 });

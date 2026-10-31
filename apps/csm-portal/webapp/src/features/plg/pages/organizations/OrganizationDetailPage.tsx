@@ -69,11 +69,15 @@ function OwnerEditor({
 }) {
   const [draft, setDraft] = useState(current);
   const changed = draft !== current;
+  // The owner cannot be cleared (the service refuses an empty ownerId), so a
+  // cleared picker holds the Save back rather than sending one.
+  const missing = draft === "";
 
   return (
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "flex-start" }}>
       <CSUserSelect
         label="PLG CS owner"
+        required
         value={draft}
         onChange={setDraft}
         selected={currentUser}
@@ -84,7 +88,7 @@ function OwnerEditor({
         variant="contained"
         size="small"
         sx={AXIS_BUTTON_SX}
-        disabled={!changed || pending}
+        disabled={!changed || missing || pending}
         onClick={() => onSave(draft)}
       >
         {pending ? "Saving…" : "Save owner"}

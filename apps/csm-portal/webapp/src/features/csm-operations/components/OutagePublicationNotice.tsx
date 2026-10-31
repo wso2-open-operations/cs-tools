@@ -63,7 +63,13 @@ export default function OutagePublicationNotice({
         , its communications — including any external update you post — will
         be visible on the public status page.
       </Typography>
+      {/* Required whenever it shows: both callers render this notice only
+          while their own Save/Begin is blocked on the acknowledgement
+          (CreateOutagePage: a configuration item is set; EditOutageDialog:
+          the configuration item changed to a value, or affected items were
+          added). */}
       <FormControlLabel
+        required
         control={
           <Checkbox
             checked={acknowledged}

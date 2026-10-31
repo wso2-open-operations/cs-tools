@@ -36,6 +36,7 @@ describe("IncidentResolutionDialog", () => {
         onSubmit={() => {}}
       />,
     );
+    expect(screen.getByText("A resolution is required to move this incident to Resolved.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /move to resolved/i })).toBeDisabled();
 
     chooseOption("incident-resolution-code-label", /^solved \(work around\)$/i);

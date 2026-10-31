@@ -53,6 +53,7 @@ import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useSearchParentRecordsForSelect } from "@features/csm-operations/api/useSearchParentRecordsForSelect";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import RequiredMark from "@components/RequiredMark";
 import ChangeRequestScopeFields, {
   ChangeRequestCustomerGroupField,
 } from "@features/csm-operations/components/ChangeRequestScopeFields";
@@ -64,6 +65,7 @@ import {
   changeRequestDraftKey,
   clearChangeRequestDraft,
   CLONE_SOURCE_GAP_MESSAGE,
+  customerProjectNeededForApproval,
   DEFAULT_CHANGE_REQUEST_CATEGORY,
   decodeParentRecordValue,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
@@ -73,6 +75,7 @@ import {
   isEmergencyChangeRequestType,
   loadChangeRequestDraft,
   parentRecordLabel,
+  REQUIRED_TO_REQUEST_APPROVAL_HELPER,
   saveChangeRequestDraft,
   type ChangeRequestDraftContext,
   type CloneChangeRequestNavState,
@@ -279,6 +282,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
     !initialIsEmergency && (draft?.customerReviewRequired ?? cloneState?.customerReviewRequired ?? false),
   );
   const isEmergency = isEmergencyChangeRequestType(type);
+  // Not needed to create, but Request Approval (the next step for every new change
+  // request) is refused without a Customer Project when a customer step is ticked on
+  // a non-Emergency change: marked required, without blocking the create.
+  const projectNeededForApproval = customerProjectNeededForApproval(
+    type,
+    customerApprovalRequired,
+    customerReviewRequired,
+  );
   // Customer Project / Deployments / Deployment products (and the read-only
   // Customer Group, the project's registered contacts). The hook owns the
   // cascade (project -> deployments + derived products and contacts); a
@@ -709,12 +720,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
           <Box role="group" aria-labelledby="cr-type-heading">
             <Typography id="cr-type-heading" variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
               What type of change is required?
+              <RequiredMark />
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Required. The type decides which approvals this change goes through.
             </Typography>
             <RadioGroup
               name="cr-type"
+              aria-required
               value={type}
               onChange={(e) => {
                 setType(e.target.value);
@@ -864,7 +877,13 @@ export default function CreateChangeRequestPage(): JSX.Element {
             <Typography id="cr-scope-heading" variant="subtitle2" sx={{ mb: 1 }}>
               Customer project and deployments
             </Typography>
-            <ChangeRequestScopeFields scope={scope} disabled={isSubmitting} idPrefix="cr" />
+            <ChangeRequestScopeFields
+              scope={scope}
+              disabled={isSubmitting}
+              idPrefix="cr"
+              projectRequired={projectNeededForApproval}
+              projectHelperText={projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined}
+            />
           </Box>
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
@@ -1099,6 +1118,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
                 value={groupId}
                 onChange={setGroupId}
                 disabled={isSubmitting}
+                // Not needed to create, but Request Approval is refused without one.
+                required
+                helperText={REQUIRED_TO_REQUEST_APPROVAL_HELPER}
                 useSearch={useSearchGroups}
                 getId={(g) => g.id}
                 getLabel={(g) => g.name}

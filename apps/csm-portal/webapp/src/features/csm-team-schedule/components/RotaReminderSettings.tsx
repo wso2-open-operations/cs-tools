@@ -16,6 +16,7 @@
  * under the License.
  */
 import { useId, useState, type FormEvent, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import { useRotaReminderSettings, useSaveRotaReminderSettings } from "../api/useRotaReminderSettings";
 import type { ReminderWindow, RotaFamily, RotaReminderSettings, SaveRotaReminderSettings } from "../types";
 import RotaReminderSendNow from "./RotaReminderSendNow";
@@ -346,10 +347,14 @@ export default function RotaReminderSettings(): JSX.Element {
               <div>
                 <div className="rrs-grid">
                   <div className="rrs-field">
-                    <label htmlFor={id("lk")}>People needed on LK Weekend each day</label>
+                    <label htmlFor={id("lk")}>
+                      People needed on LK Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("lk")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -360,10 +365,14 @@ export default function RotaReminderSettings(): JSX.Element {
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("americas")}>People needed on Americas Weekend each day</label>
+                    <label htmlFor={id("americas")}>
+                      People needed on Americas Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("americas")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -384,27 +393,39 @@ export default function RotaReminderSettings(): JSX.Element {
                 <legend>Americas Weekend and LK On-call hours</legend>
                 <div className="rrs-times">
                   <div className="rrs-field">
-                    <label htmlFor={id("start")}>Start</label>
+                    <label htmlFor={id("start")}>
+                      Start
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("start")}
                       type="time"
+                      required
                       value={form.start}
                       onChange={(e) => edit({ start: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("end")}>End</label>
+                    <label htmlFor={id("end")}>
+                      End
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("end")}
                       type="time"
+                      required
                       value={form.end}
                       onChange={(e) => edit({ end: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("zone")}>Time zone</label>
+                    <label htmlFor={id("zone")}>
+                      Time zone
+                      <RequiredMark />
+                    </label>
                     <select
                       id={id("zone")}
+                      required
                       value={form.timeZone}
                       onChange={(e) => edit({ timeZone: e.target.value })}
                     >

@@ -82,11 +82,13 @@ import {
   customerApprovalLockedReason,
   customerProjectLockedReason,
   customerRequirementOnceSavedHelper,
+  customerProjectNeededForApproval,
   customerReviewLockedReason,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
   isChangeRequestCreationPhase,
   isEmergencyChangeRequestType,
   parentRecordLabel,
+  REQUIRED_TO_REQUEST_APPROVAL_HELPER,
 } from "@features/csm-operations/utils/changeRequests";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
@@ -346,6 +348,11 @@ export default function EditChangeRequestDialog({
   // anything else, so the controls are disabled up front with the reason.
   const projectLocked = customerProjectLockedReason(cr.state);
   const scopeLocked = changeRequestScopeLockedReason(cr.state);
+  // Request Approval (New -> Assess) is still ahead: it needs an Assignment group,
+  // and a Customer Project when a customer step is ticked on a non-Emergency change.
+  // Both are marked required while it is, though saving needs neither (the action
+  // bar's Request Approval is the gate). After New neither can be cleared.
+  const approvalAhead = isChangeRequestCreationPhase(cr.state);
   const scope = useChangeRequestScope({
     projectId: cr.project?.id,
     projectLabel: cr.project?.name,
@@ -364,6 +371,9 @@ export default function EditChangeRequestDialog({
   const [customerReviewRequired, setCustomerReviewRequired] = useState(
     !emergencyClearsCustomerSteps && initialCustomerReviewRequired,
   );
+  const projectNeededForApproval =
+    approvalAhead &&
+    customerProjectNeededForApproval(type || cr.type, customerApprovalRequired, customerReviewRequired);
   const rollbackPlan = useRichTextPlanField(cr.rollbackPlan);
   const testPlan = useRichTextPlanField(cr.testPlan);
   const implementationPlan = useRichTextPlanField(cr.implementationPlan);
@@ -597,11 +607,13 @@ export default function EditChangeRequestDialog({
   };
 
   // Internal only: a work note is journaled with the save and never shown to the
-  // customer. The one input left once the change has been approved.
+  // customer. The one input left once the change has been approved, so then it is
+  // required: "Add work note" stays disabled until it has text.
   const workNoteField = (
     <TextField
       id="cr-edit-work-note"
       label="Work note (internal)"
+      required={!!approvedLock}
       value={workNote}
       onChange={(e) => setWorkNote(e.target.value)}
       fullWidth
@@ -805,6 +817,7 @@ export default function EditChangeRequestDialog({
             getId={(g) => g.id}
             getLabel={(g) => g.name}
             knownLabel={cr.assignedTeam?.name}
+            required={approvalAhead}
             helperText="Required before moving to Assess — its members become the Assess-stage approvers."
           />
           <AsyncEntitySelect<BeUser>
@@ -874,6 +887,8 @@ export default function EditChangeRequestDialog({
               // A saved project can be swapped for another but not removed —
               // the patch has no way to express "no project".
               projectClearable={!initialProjectId}
+              projectRequired={projectNeededForApproval}
+              projectHelperText={projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined}
             />
             <ChangeRequestCustomerGroupField scope={scope} idPrefix="cr-edit" />
           </Box>

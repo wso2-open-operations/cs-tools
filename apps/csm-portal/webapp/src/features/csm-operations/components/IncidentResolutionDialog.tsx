@@ -73,7 +73,7 @@ export default function IncidentResolutionDialog({
       <DialogTitle>Move to {incidentStateLabel(target)}</DialogTitle>
       <DialogContent dividers sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="body2" color="text.secondary">
-          ServiceNow requires a resolution to move this incident to{" "}
+          A resolution is required to move this incident to{" "}
           {incidentStateLabel(target)}.
         </Typography>
         <FormControl fullWidth size="small" required error={touched && !hasCode}>
