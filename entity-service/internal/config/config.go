@@ -864,8 +864,8 @@ type Config struct {
 	// in clear text over http, and an http public URL puts share ids on the wire.
 	SFTPGoAllowInsecureHTTP bool
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
-	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
-	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
+	// (ATTACHMENT_MAX_BYTES, default 10 MiB) and one inline comment image
+	// (INLINE_IMAGE_MAX_BYTES, default 1 MiB). The declared size is checked
 	// when an upload starts and the real size when it is confirmed. Provisional
 	// defaults, to be set from the real size distribution.
 	AttachmentMaxBytes  int64
@@ -1124,8 +1124,8 @@ func Load() *Config {
 	cfg.SFTPGoUser = strings.TrimSpace(os.Getenv("SFTPGO_USER"))
 	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
 	cfg.SFTPGoAllowInsecureHTTP = os.Getenv("SFTPGO_ALLOW_INSECURE_HTTP") == "true"
-	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
-	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
+	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 10<<20)
+	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 1<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
 	cfg.applySREEventHubTopic()

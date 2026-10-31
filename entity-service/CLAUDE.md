@@ -69,7 +69,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SFTPGO_USER` / `SFTPGO_PASSWORD` | no* | — | The SFTPGo service user. Held only here; never sent to a browser, never echoed in an error |
 | `SFTPGO_PUBLIC_URL` | no | `SFTPGO_URL` | Address a **browser** reaches SFTPGo at, used in the links returned to it. Differs from `SFTPGO_URL` once SFTPGo is behind a public proxy |
 | `SFTPGO_ALLOW_INSECURE_HTTP` | no | `false` | `Validate` requires `SFTPGO_URL` and `SFTPGO_PUBLIC_URL` to be https (the service password and every share id would otherwise cross the wire in clear text, and an http public URL is blocked as mixed content on an https portal). `true` allows http, for local development only |
-| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
+| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 10 MiB / 1 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
 | `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `1m` / `15m` | How long a download / upload link stays valid |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
@@ -1910,7 +1910,7 @@ attachment number (`wia0000042_report.pdf`), and a share link has no option to c
 does not navigate to a download link: it `fetch`es the link and saves the bytes under the attachment's own
 `name` from the response (an `<a download>` is ignored on another origin). That needs CORS on SFTPGo's public
 `GET /api/v2/shares/*` (the upload route needs it already) and holds the whole file in the browser, which is
-fine at `ATTACHMENT_MAX_BYTES` (100 MiB). Entity-service keeps the migrator's key layout unchanged.
+fine at the default `ATTACHMENT_MAX_BYTES` (10 MiB). Entity-service keeps the migrator's key layout unchanged.
 
 **Who made each link is logged here, not in SFTPGo.** SFTPGo sees only the one service user for
 every browser transfer, so each share created writes an `attachment link created` line
