@@ -480,6 +480,17 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         icon: Megaphone,
         requires: "isAdmin",
       },
+      // Admin only, same reasoning as Banners above: recalculating SLA
+      // tracking is a real backend action (POST /sla-engine/recalculate,
+      // PermAdmin on both this backend and entity-service — see
+      // apps/csm-portal/backend's own CLAUDE.md), not a display-only page.
+      {
+        id: "admin.sla-engine",
+        label: "SLA Engine",
+        href: "/admin/sla-engine",
+        icon: RefreshCw,
+        requires: "isAdmin",
+      },
     ],
   },
   {

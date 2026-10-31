@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -17551,6 +17551,96 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "503":
           description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sla-status/manage:
+    get:
+      summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
+      description: >
+        A CSM admin. Same limit/offset/source query params as entity-service's own
+        GET /sla-status; responses are Cache-Control no-store. Typically polled right
+        after POST /sla-engine/recalculate to show which clocks are currently running.
+      operationId: searchActiveSLAStatusesManage
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: source
+          in: query
+          description: Optional. "csm" or "servicenow"; omitted returns both.
+          schema:
+            type: string
+            enum: [csm, servicenow]
+      responses:
+        "200":
+          description: Every currently-active SLA clock, paginated.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can view this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sla-engine/recalculate:
+    post:
+      summary: Recalculate SLA — the CSM admin action.
+      description: >
+        A CSM admin. Publishes a request for integrations/csm-notification-service to
+        rebuild its own Redis-held SLA tracking from entity-service's durable record —
+        for recovering from a Redis state that no longer agrees with reality. No request
+        body. Responses are Cache-Control no-store.
+      operationId: requestSLARecalculation
+      responses:
+        "204":
+          description: >
+            The request was published. The actual rebuild happens asynchronously — this
+            means "requested", not "done". Poll GET /sla-status/manage for progress.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: SLA recalculation is not available in this deployment.
           content:
             application/json:
               schema:

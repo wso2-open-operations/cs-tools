@@ -34,6 +34,20 @@ type fakeStore struct {
 	failClaim   bool
 	failAdd     bool
 	failAdvance bool
+	failWipe    bool
+	// failWipeAttempts, when > 0, fails exactly that many WipeAll calls
+	// before letting one through -- simulates a transient Redis blip that
+	// withRedisRetry's own retry clears, distinct from failWipe's "always
+	// fails" (retries exhausted).
+	failWipeAttempts int
+	wipeCalls        int
+	// failAddAttempts, when > 0, fails exactly that many AddWake calls
+	// (counted across the whole fakeStore, in call order) before letting
+	// one through -- mirrors failWipeAttempts, for simulating a clock that
+	// fails RecalculateFromEntity's first pass and succeeds on its repair
+	// pass retry.
+	failAddAttempts int
+	addWakeCalls    int
 }
 
 func newFakeStore() *fakeStore {
@@ -45,7 +59,8 @@ func newFakeStore() *fakeStore {
 }
 
 func (s *fakeStore) AddWake(_ context.Context, member string, at time.Time) error {
-	if s.failAdd {
+	s.addWakeCalls++
+	if s.failAdd || s.addWakeCalls <= s.failAddAttempts {
 		return errors.New("add wake failed")
 	}
 	s.wake[member] = at
@@ -181,6 +196,17 @@ func (s *fakeStore) ClaimTier(_ context.Context, caseID, clockType string, tier 
 
 func (s *fakeStore) ReleaseTier(_ context.Context, caseID, clockType string, tier int, startedAt time.Time) error {
 	delete(s.claims, tierClaimKey(caseID, clockType, tier, startedAt))
+	return nil
+}
+
+func (s *fakeStore) WipeAll(_ context.Context) error {
+	s.wipeCalls++
+	if s.failWipe || s.wipeCalls <= s.failWipeAttempts {
+		return errors.New("redis: wipe failed")
+	}
+	s.wake = map[string]time.Time{}
+	s.clocks = map[string]ClockMeta{}
+	s.claims = map[string]bool{}
 	return nil
 }
 
@@ -1377,12 +1403,43 @@ func TestParseWakeMember(t *testing.T) {
 
 // fakeActiveClocksClient is an entityActiveClocksClient test double.
 type fakeActiveClocksClient struct {
-	clocks []activeSLAClock
-	err    error
+	clocks        []activeSLAClock
+	err           error
+	clockStateErr error
 }
 
 func (f *fakeActiveClocksClient) GetActiveCSMSLAClocks(context.Context) ([]activeSLAClock, error) {
 	return f.clocks, f.err
+}
+
+// GetClockState lets fakeActiveClocksClient also serve as Engine.entity
+// (declared as entityClockStatusClient) in RecalculateFromEntity's/
+// ReviseClocks' own tests, which need a value satisfying both interfaces
+// the way the real *entity.CustomerEntityClient does. Derives its answer
+// from f.clocks (matched by caseID/clockType) rather than a separate,
+// parallel fixture: refreshAndReconcileClock re-fetches this per clock
+// before rebuilding it (the repair pass's/ReviseClocks' own "ask
+// entity-service again, don't trust a stale snapshot" behavior), so a test
+// that sets up f.clocks for one case/type also gets a matching
+// GetClockState answer for free.
+func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+	if f.clockStateErr != nil {
+		return clockState{}, f.clockStateErr
+	}
+	for _, c := range f.clocks {
+		if c.CaseID == caseID && c.ClockType == clockType {
+			return clockState{
+				Found:                true,
+				StartedOn:            c.StartedOn,
+				PausedOn:             c.PausedOn,
+				PauseDurationSeconds: c.PauseDurationSeconds,
+				IsPaused:             c.IsPaused,
+				DurationSeconds:      c.DurationSeconds,
+				Schedule:             c.Schedule,
+			}, nil
+		}
+	}
+	return clockState{Found: false}, nil
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
@@ -1647,6 +1704,319 @@ func TestEngine_Reconcile_ClientErrorPropagates(t *testing.T) {
 
 	if err := e.Reconcile(context.Background(), client); err == nil {
 		t.Fatal("Reconcile() error = nil, want the client's error propagated")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_WipesThenRebuilds confirms the admin
+// recalculation action both clears whatever Redis had and rebuilds it fresh
+// from the client's own current list -- a clock Redis held for a case the
+// client no longer reports (case-stale here) must not survive, while every
+// clock the client still reports must come back.
+func TestEngine_RecalculateFromEntity_WipesThenRebuilds(t *testing.T) {
+	st := newFakeStore()
+	// Pre-existing Redis state for a clock the client will NOT report as
+	// active any more -- simulates the exact scenario this action exists
+	// for (entity-service's own data changed out from under Redis).
+	if err := st.SetClock(context.Background(), "case-stale", ClockResponse, ClockMeta{CaseNumber: "CS0000"}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-fresh", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v", err)
+	}
+
+	if _, found, _ := st.GetClock(context.Background(), "case-stale", ClockResponse); found {
+		t.Error("case-stale's clock hash survived RecalculateFromEntity, want it wiped")
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-fresh", ClockResponse); !found {
+		t.Error("case-fresh's clock was not rebuilt by RecalculateFromEntity")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_NoEntityClientConfigured_ReturnsError
+// confirms a misconfigured Engine (entity unset, or set to something that
+// doesn't also satisfy entityActiveClocksClient) fails loudly rather than
+// silently doing nothing.
+func TestEngine_RecalculateFromEntity_NoEntityClientConfigured_ReturnsError(t *testing.T) {
+	e := newTestEngine(newFakeStore(), &fakeChat{}, &fakePublisher{})
+	if err := e.RecalculateFromEntity(context.Background()); err == nil {
+		t.Fatal("RecalculateFromEntity() error = nil, want an error for a nil entity client")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_FetchFailure_NeverWipesRedis is the
+// regression test for a CodeRabbit-caught ordering bug: an earlier version
+// wiped Redis BEFORE fetching the active-clock list, so a fetch failure
+// left the engine with nothing to rebuild from -- breach alerting for every
+// clock stayed broken until a later successful recalculation or a restart.
+// The fetch must happen first, and a failure there must leave Redis
+// completely untouched.
+func TestEngine_RecalculateFromEntity_FetchFailure_NeverWipesRedis(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-untouched", ClockResponse, ClockMeta{CaseNumber: "CS0000"}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = &fakeActiveClocksClient{err: errors.New("entity-service unreachable")}
+
+	if err := e.RecalculateFromEntity(context.Background()); err == nil {
+		t.Fatal("RecalculateFromEntity() error = nil, want the fetch failure propagated")
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-untouched", ClockResponse); !found {
+		t.Error("RecalculateFromEntity wiped Redis despite the active-clock fetch failing")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_WipeFailure_StillRebuildsFromFetchedList
+// confirms a WipeAll failure (once the fetch has already succeeded) does
+// not abort the rebuild -- the fetched list is already in hand, and
+// reconcileClock computes every tier from entity-service's own data
+// regardless of Redis's prior state, so aborting here would throw away a
+// successful fetch for no benefit.
+func TestEngine_RecalculateFromEntity_WipeFailure_StillRebuildsFromFetchedList(t *testing.T) {
+	st := newFakeStore()
+	st.failWipe = true // every attempt fails -- withRedisRetry's own retries are exhausted too
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-fresh", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v, want nil (a wipe failure is logged, not fatal)", err)
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-fresh", ClockResponse); !found {
+		t.Error("case-fresh's clock was not rebuilt despite the wipe failure")
+	}
+	if st.wipeCalls != redisRetryAttempts {
+		t.Errorf("WipeAll was called %d times, want %d (withRedisRetry's own attempt count)", st.wipeCalls, redisRetryAttempts)
+	}
+}
+
+// TestEngine_RecalculateFromEntity_WipeTransientFailure_RetrySucceeds
+// confirms a transient WipeAll failure (fewer than redisRetryAttempts in a
+// row) is cleared by withRedisRetry before falling through to the
+// log-and-continue path -- a stale clock from before the recalculation must
+// not survive when a retry would have cleaned it up.
+func TestEngine_RecalculateFromEntity_WipeTransientFailure_RetrySucceeds(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-stale", ClockResponse, ClockMeta{CaseNumber: "CS0000"}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	st.failWipeAttempts = redisRetryAttempts - 1 // fails every attempt but the last
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-fresh", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v", err)
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-stale", ClockResponse); found {
+		t.Error("case-stale's clock survived a wipe that should have succeeded on retry")
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-fresh", ClockResponse); !found {
+		t.Error("case-fresh's clock was not rebuilt")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_FailedClockRepairsOnFreshContext is the
+// regression test for a CodeRabbit-caught gap: a clock that fails to
+// rebuild on the main pass (for any reason, context exhaustion included --
+// see RecalculateFromEntity's own doc comment) must get a real second
+// chance on a FRESH context, not be left half-rebuilt (a clock hash with no
+// wake entry, in this case) until the next recalculation or a restart.
+func TestEngine_RecalculateFromEntity_FailedClockRepairsOnFreshContext(t *testing.T) {
+	st := newFakeStore()
+	st.failAddAttempts = 1 // the only AddWake call in the main pass fails; the repair pass's own succeeds
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v", err)
+	}
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("case-1's clock hash was not written at all")
+	}
+	if _, wakeFound := st.wake[wakeMember("case-1", ClockResponse, 50)]; !wakeFound {
+		t.Errorf("case-1's wake entry is still missing after the repair pass; clock = %+v", meta)
+	}
+}
+
+// TestEngine_RecalculateFromEntity_SkipsWhenAlreadyRunning confirms the
+// recalculating guard rejects a second call while one is already marked
+// in-flight, rather than racing a second wipe against it.
+func TestEngine_RecalculateFromEntity_SkipsWhenAlreadyRunning(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-untouched", ClockResponse, ClockMeta{CaseNumber: "CS0000"}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = &fakeActiveClocksClient{}
+	e.recalculating.Store(true)
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v, want nil (skip, not fail)", err)
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-untouched", ClockResponse); !found {
+		t.Error("RecalculateFromEntity wiped Redis despite recalculating already being true")
+	}
+}
+
+// TestRefreshAndReconcileClock_UsesFreshStateNotTheGivenDisplaySnapshot is
+// the regression test for an offline-review-caught gap in
+// RecalculateFromEntity's own repair pass: between the main pass's one-time
+// fetch and the repair pass running (up to slaRecalculationTimeout later),
+// a live case update can genuinely pause or resume the same clock.
+// Reapplying the stale snapshot's own IsPaused as-is would silently
+// clobber that newer, real state. refreshAndReconcileClock must always ask
+// entity-service again rather than trust whatever pause state its own
+// display argument happens to carry.
+func TestRefreshAndReconcileClock_UsesFreshStateNotTheGivenDisplaySnapshot(t *testing.T) {
+	st := newFakeStore()
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		// entity-service's own CURRENT, real answer: resumed.
+		{CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds()), IsPaused: false},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	// A stale snapshot claiming the clock is still paused -- exactly what
+	// the repair pass's own "failed" slice would hold if this clock paused,
+	// was fetched, and then resumed again before the repair pass ran.
+	stale := activeSLAClock{CaseID: "case-1", ClockType: ClockResponse, IsPaused: true}
+	found, ok := e.refreshAndReconcileClock(context.Background(), stale, time.Now())
+	if !found || !ok {
+		t.Fatalf("refreshAndReconcileClock() = (%v, %v), want (true, true)", found, ok)
+	}
+	meta, clockFound, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !clockFound {
+		t.Fatal("clock was not written")
+	}
+	if meta.Paused {
+		t.Error("refreshAndReconcileClock wrote Paused=true, want the fresh (resumed) value -- it trusted the stale display snapshot instead of re-fetching")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_StillFailedAfterRepair_ReturnsError is
+// the regression test for an offline-review-caught gap: a recalculation
+// whose repair pass STILL leaves clocks broken must report that as an
+// error, not log "recalculation complete" as if it fully succeeded.
+func TestEngine_RecalculateFromEntity_StillFailedAfterRepair_ReturnsError(t *testing.T) {
+	st := newFakeStore()
+	st.failAdd = true // every AddWake call fails, main pass and repair pass alike
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	err := e.RecalculateFromEntity(context.Background())
+	if err == nil {
+		t.Fatal("RecalculateFromEntity() error = nil, want an error -- the clock is still broken after the repair pass")
+	}
+}
+
+// TestEngine_ReviseClocks_RebuildsFromNewSeverity confirms a priority
+// change that leaves this clock type still covered by some policy gets
+// rebuilt from entity-service's own current (new-severity) state --
+// closing a real, reported gap: before ReviseClocks existed, nothing here
+// ever reacted to case.severity_changed at all, so Redis kept ticking down
+// the OLD severity's clock, under its OLD duration, indefinitely.
+func TestEngine_ReviseClocks_RebuildsFromNewSeverity(t *testing.T) {
+	st := newFakeStore()
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("case-1's response clock was not rebuilt")
+	}
+	if meta.Priority != "HIGH" || meta.CaseNumber != "CS0001" {
+		t.Errorf("meta = %+v, want the new severity and the event's own display fields", meta)
+	}
+}
+
+// TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered
+// confirms a clock type the NEW severity's policy set has no policy for at
+// all (unlike RecalculateFromEntity's own repair pass, there is no
+// preceding wipe here to already clear this) gets its stale wake entries
+// actively removed, not left ticking down toward an alert for a clock that
+// no longer exists under any policy.
+func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered(t *testing.T) {
+	st := newFakeStore()
+	startedAt := time.Now().Add(-time.Hour)
+	if err := st.SetClock(context.Background(), "case-1", ClockWorkaround, ClockMeta{CaseNumber: "CS0001", StartedAt: startedAt}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	if err := st.AddWake(context.Background(), wakeMember("case-1", ClockWorkaround, 50), time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("AddWake() error = %v", err)
+	}
+	// The new severity's client has NO entry for case-1/workaround at all --
+	// entity-service's own GetClockState reports not-found for it.
+	client := &fakeActiveClocksClient{}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+
+	if _, stillThere := st.wake[wakeMember("case-1", ClockWorkaround, 50)]; stillThere {
+		t.Error("stale workaround wake entry survived ReviseClocks despite the new severity having no policy for it")
+	}
+}
+
+// TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta
+// confirms CaseType/State -- carried by neither the severity-changed event
+// nor GetClockState -- are read back from whatever this clock's own Redis
+// hash already held from before the revision, so a rebuilt clock's Chat
+// card still shows them correctly rather than going blank.
+func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "CASE", State: "Work In Progress", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "CASE" || meta.State != "Work In Progress" {
+		t.Errorf("meta = %+v, want CaseType/State carried forward from the pre-revision hash", meta)
 	}
 }
 

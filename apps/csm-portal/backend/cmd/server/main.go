@@ -819,6 +819,10 @@ func main() {
 	route("GET /portal-banners/manage", handler.PermAdmin, bannerHandler.ListManagedBanners)
 	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
 	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
+
+	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
+	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
+	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)

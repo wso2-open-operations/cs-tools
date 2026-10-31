@@ -115,6 +115,12 @@ type slaEngineService interface {
 	// record so eventbus.Consumer retries it instead of silently
 	// acknowledging a clock that was never actually completed.
 	CompleteWorkaroundClock(ctx context.Context, caseID string) error
+	// RecalculateFromEntity is called from handleSLARecalculationRequested,
+	// in its own detached goroutine — see that handler's own doc comment.
+	RecalculateFromEntity(ctx context.Context) error
+	// ReviseClocks is called from handleSeverityChanged — see that method's
+	// own doc comment.
+	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -826,6 +832,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		// required here: erroring would burn this consumer's retries for an
 		// event that was never broken.
 		return nil
+	case events.TypeSLARecalculationRequested:
+		return d.handleSLARecalculationRequested(ctx, env.Payload)
 	default:
 		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
 	}
@@ -1468,6 +1476,60 @@ func (d *Dispatcher) handleWorkaroundProvided(ctx context.Context, raw json.RawM
 	return nil
 }
 
+// slaRecalculationTimeout bounds one RecalculateFromEntity run — generous
+// relative to Reconcile's own 60s startup budget (cmd/server/main.go) since
+// this is explicitly for recovering from a bulk entity-service data change,
+// which can mean reconciling a larger active-clock set than a normal
+// startup ever sees. Runs in its own goroutine, so a long run here never
+// delays this consumer's own event processing.
+const slaRecalculationTimeout = 10 * time.Minute
+
+// handleSLARecalculationRequested reacts to the CSM portal's "Recalculate
+// SLA" admin action (TypeSLARecalculationRequested, published once per
+// click by entity-service). Unlike every other handler in this file, the
+// actual work (Engine.RecalculateFromEntity: wipe this engine's Redis state
+// and rebuild it from entity-service's own durable record — see that
+// method's own doc comment) is kicked off in its own detached goroutine
+// rather than awaited here: a full reconciliation pages through every
+// currently-active clock and must not hold up this consumer's own event
+// processing or risk the record exhausting its retry budget before that
+// pass finishes. The goroutine runs on its own context.Background(), not
+// ctx, since ctx is cancelled the moment Handle returns and the record's
+// offset is committed — well before the recalculation itself can finish.
+//
+// Idempotent under a redelivered record for the same reason
+// RecalculateFromEntity is safe to call more than once in a row at all
+// (Engine.recalculating + every write Reconcile makes being idempotent) —
+// so, like CompleteResponseClock/ApplyStateEffects above and unlike
+// CompleteWorkaroundClock, this is best-effort: a nil slaEngine (no Redis
+// configured) and a decode failure both log and return nil rather than
+// failing the record, since there is no reason to burn this consumer's
+// retry budget over an admin action that can simply be clicked again.
+func (d *Dispatcher) handleSLARecalculationRequested(ctx context.Context, raw json.RawMessage) error {
+	var p events.SLARecalculationRequestedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		slog.ErrorContext(ctx, "dispatch: decode sla.recalculation_requested payload failed", "err", err)
+		return nil
+	}
+	// p.RequestedByEmail is deliberately never logged -- this service's own
+	// logging convention is ids and sanitised summaries only, never PII
+	// like an email address. It's carried in the event payload itself for
+	// any downstream consumer that genuinely needs it for audit.
+	if d.slaEngine == nil {
+		slog.WarnContext(ctx, "sla recalculation requested but the SLA engine is not configured, ignoring")
+		return nil
+	}
+	slog.InfoContext(ctx, "sla recalculation requested, starting in the background", "requestedAt", p.RequestedAt)
+	go func() { // #nosec G118 -- context.Background() below is intentionally detached from this request-scoped ctx, which is cancelled the moment Handle returns, well before this goroutine's own reconciliation pass can finish
+		recalcCtx, cancel := context.WithTimeout(context.Background(), slaRecalculationTimeout)
+		defer cancel()
+		if err := d.slaEngine.RecalculateFromEntity(recalcCtx); err != nil {
+			slog.ErrorContext(recalcCtx, "sla recalculation failed", "err", err)
+		}
+	}()
+	return nil
+}
+
 // handleSeverityChanged has two independent reactions, like handleCaseCreated
 // above: the severity-changed email (per resolved recipient link,
 // RenderSeverityChangedEmail) and a Google Chat alert, always to the fixed
@@ -1482,6 +1544,18 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	var p events.SeverityChangedPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("dispatch: decode case.severity_changed payload: %w", err)
+	}
+
+	// Independent of, and does not block, every reaction below -- see
+	// slaEngineService's own doc comment. A severity change on
+	// entity-service's own side cancels this case's old-severity clock(s)
+	// and registers fresh ones for the new severity, but nothing before
+	// this call ever told this engine's own Redis-held tracking: it kept
+	// ticking down the old severity's clock, under its old duration,
+	// indefinitely. ReviseClocks re-syncs all three clock types with
+	// entity-service's current, post-revision state.
+	if d.slaEngine != nil {
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
 	}
 
 	// Registered before anything is claimed (see handleCaseCreated).

@@ -18,6 +18,7 @@ package slaengine
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -512,6 +513,58 @@ func (s *Store) ClaimTier(ctx context.Context, caseID, clockType string, tier in
 // call used, or this deletes nothing (a different key).
 func (s *Store) ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error {
 	return s.rdb.Del(ctx, tierClaimKey(caseID, clockType, tier, startedAt)).Err()
+}
+
+// wipeScanCount is the COUNT hint passed to every SCAN call WipeAll makes —
+// a rough batch size, not an exact one (Redis's SCAN contract only promises
+// "around" this many keys per call). Small enough that one call never
+// blocks this Redis instance for long, large enough that wiping a realistic
+// keyspace doesn't take an excessive number of round trips.
+const wipeScanCount = 500
+
+// WipeAll deletes every key this engine owns in Redis: the whole wake
+// index, every clock hash, and every tier claim. Used only by
+// Engine.RecalculateFromEntity to force a clean rebuild from entity-service
+// — see that method's own doc comment for why a full wipe, not just a
+// repeat Reconcile, is what it needs.
+//
+// Walks clockKeyPrefix/tierClaimKeyPrefix with SCAN, never KEYS: KEYS
+// blocks this Redis instance for the whole scan, and this same instance
+// also serves Tick/RegisterClocks/etc. concurrently with this call — SCAN
+// instead walks the keyspace in small, cursor-bounded batches, so a large
+// keyspace never turns into a multi-second stall for every other caller.
+func (s *Store) WipeAll(ctx context.Context) error {
+	if err := s.rdb.Del(ctx, wakeKey).Err(); err != nil {
+		return fmt.Errorf("slaengine: wipe: delete %s: %w", wakeKey, err)
+	}
+	for _, pattern := range []string{clockKeyPrefix + "*", tierClaimKeyPrefix + "*"} {
+		if err := s.deleteByScan(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteByScan deletes every key matching pattern, walking the keyspace
+// with SCAN in wipeScanCount-sized batches rather than loading it all into
+// memory with KEYS.
+func (s *Store) deleteByScan(ctx context.Context, pattern string) error {
+	var cursor uint64
+	for {
+		keys, next, err := s.rdb.Scan(ctx, cursor, pattern, wipeScanCount).Result()
+		if err != nil {
+			return fmt.Errorf("slaengine: wipe: scan %s: %w", pattern, err)
+		}
+		if len(keys) > 0 {
+			if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("slaengine: wipe: delete %d keys matching %s: %w", len(keys), pattern, err)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
 }
 
 func boolString(b bool) string {

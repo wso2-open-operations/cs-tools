@@ -308,7 +308,16 @@ type SLAStatusService interface {
 	// Redis-recovery reconciliation pass sends, so it only ever scans this
 	// engine's own (much smaller) row set rather than the full
 	// ServiceNow-synced table.
-	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string) (domain.SearchSLAStatusResponse, error)
+	//
+	// admin, when true, additionally requires the caller to hold one of
+	// AUTH_ADMIN_ROLES (a ForbiddenError otherwise) -- this is what lets the
+	// CSM portal's "Recalculate SLA" admin page show which clocks are
+	// currently running (normally right after RequestRecalculation) without
+	// opening the bulk list to every internal caller. It only ever narrows:
+	// every existing admin=false caller (csm-notification-service's own
+	// startup reconciliation included) is completely unaffected by this
+	// parameter's existence.
+	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string, admin bool) (domain.SearchSLAStatusResponse, error)
 
 	// GetClockState returns the full, current state of one (work item,
 	// clock target) "sla" row, regardless of whether it's currently
@@ -320,6 +329,16 @@ type SLAStatusService interface {
 	// unrecognized sourceFilter (same accepted values as
 	// SearchActiveSLAStatuses's own).
 	GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error)
+
+	// RequestRecalculation publishes TypeSLARecalculationRequested so
+	// csm-notification-service rebuilds its Redis-held SLA tracking from
+	// this service's own durable `sla`/`sla_policy` tables -- see that
+	// event's own doc comment for when this is needed. Admin-gated the same
+	// way SearchActiveSLAStatuses' own admin=true request is. A
+	// ServiceUnavailableError is returned when Event Hub publishing isn't
+	// configured for this deployment at all, since silently doing nothing
+	// would defeat the only reason this method exists.
+	RequestRecalculation(ctx context.Context) error
 }
 
 // SLADurationPolicyService backs GET /sla-duration-policy — see

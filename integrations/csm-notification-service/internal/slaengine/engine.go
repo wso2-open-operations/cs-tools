@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/businessdays"
@@ -104,6 +105,7 @@ type store interface {
 	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int, incarnation time.Time) (applied bool, err error)
 	ClaimTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) (claimed bool, err error)
 	ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error
+	WipeAll(ctx context.Context) error
 }
 
 // eventPublisher abstracts eventbus.Producer for testability.
@@ -264,6 +266,10 @@ type Engine struct {
 	// the time of day the Americas/weekend audiences depend on. nil means
 	// time.Now; see clock.
 	now func() time.Time
+	// recalculating guards RecalculateFromEntity against a second request
+	// arriving while one is still running -- see that method's own doc
+	// comment.
+	recalculating atomic.Bool
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -582,10 +588,16 @@ func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string
 // durable row's own IsPaused flag), but it computes and bakes a correct,
 // pause-aware wake schedule itself from scratch — routing its own call
 // through resumeShift too would apply the pause offset a second time.
-func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool) {
+// setPaused returns whether the write succeeded -- checked only by
+// reconcileClock (to decide whether this clock needs a repair pass); every
+// other call site already ignored it before this return value existed and
+// is unaffected.
+func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool) bool {
 	if err := e.store.SetPaused(ctx, caseID, clockType, paused); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to update clock paused state", "caseId", caseID, "clockType", clockType, "paused", paused, "err", err)
+		return false
 	}
+	return true
 }
 
 // resumeShift is the other half of setPaused(..., false): once a clock
@@ -1093,6 +1105,266 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 	return nil
 }
 
+// slaRecalculationRepairTimeout bounds RecalculateFromEntity's own repair
+// pass -- a second, independent context from whatever budget the caller
+// gave the main pass (see that method's own doc comment on why a shared,
+// possibly-already-exhausted context is the exact failure mode the repair
+// pass exists to avoid retrying under). Short relative to the main pass's
+// own budget: by the time a repair pass runs, the clock list it's working
+// from is already just the handful that failed the first time, not the
+// full active-clock set.
+const slaRecalculationRepairTimeout = 2 * time.Minute
+
+// RecalculateFromEntity is the CSM portal's "Recalculate SLA" admin action
+// (TypeSLARecalculationRequested) -- called from
+// Dispatcher.handleSLARecalculationRequested, in its own detached goroutine,
+// never on that handler's own consumer goroutine (a full reconciliation
+// pages through every currently-active clock and must not hold up ordinary
+// event processing).
+//
+// Unlike a bare Reconcile call, this wipes this engine's entire Redis-held
+// state (Store.WipeAll: the wake index, every clock hash, every tier claim)
+// before rebuilding it. Reconcile alone is already safe to re-run at any
+// time -- every write it makes is idempotent (see its own doc comment) --
+// but it only ever touches clocks entity-service's GetActiveCSMSLAClocks
+// still reports active; it has no way to know about, and so never removes,
+// a clock Redis still holds that is no longer active (e.g. after a bulk
+// resync of entity-service's own data changes which "sla" rows exist at
+// all). Those orphaned entries are mostly harmless on their own --
+// processDueMember already drops a due wake entry for an unregistered clock
+// without alerting -- but this action exists specifically to make Redis
+// agree with entity-service again after exactly that kind of external data
+// change, so leaving stale entries behind would defeat the point.
+//
+// Fetches the active-clock list BEFORE wiping anything, not after (a
+// CodeRabbit-caught ordering bug in an earlier version wiped first): if
+// GetActiveCSMSLAClocks fails, nothing here is touched at all and the
+// engine keeps whatever Redis state it already had, rather than being left
+// with nothing to rebuild from until a later successful recalculation or a
+// restart's own Reconcile. A WipeAll failure, once the fetch has already
+// succeeded, is logged but not fatal: reconcileClock computes every tier's
+// due time from entity-service's own StartedOn/duration/pause data, never
+// from whatever Redis previously held, so the rebuild below still lands the
+// correct state for every clock entity-service reports regardless of
+// whether the wipe fully completed -- aborting instead would throw away a
+// fetch that already succeeded, over a wipe whose only purpose was cleaning
+// up orphaned entries that are themselves already harmless (see above).
+// WipeAll itself is tried through withRedisRetry first (the same bounded
+// retry Tick/processDueMember already apply to their own Redis calls) --
+// WipeAll deletes wakeKey before its later SCAN-based deletes can fail, so
+// a bare, un-retried failure could leave stale wake members or clock
+// hashes behind over a merely transient blip that a second attempt would
+// have cleared.
+//
+// Guarded by recalculating (atomic.Bool) so two requests in flight at once
+// -- a double click, or a redelivered Kafka record -- can't race a second
+// wipe against the first pass's own in-flight rebuild: the second is
+// logged and skipped, not queued or merged.
+func (e *Engine) RecalculateFromEntity(ctx context.Context) error {
+	client, ok := e.entity.(entityActiveClocksClient)
+	if !ok || client == nil {
+		return fmt.Errorf("slaengine: recalculate: no entity-service client configured")
+	}
+	if !e.recalculating.CompareAndSwap(false, true) {
+		slog.WarnContext(ctx, "slaengine: recalculation already in progress, skipping this request")
+		return nil
+	}
+	defer e.recalculating.Store(false)
+
+	clocks, err := client.GetActiveCSMSLAClocks(ctx)
+	if err != nil {
+		return fmt.Errorf("slaengine: recalculate: fetch active clocks: %w", err)
+	}
+
+	// withRedisRetry (the same bounded retry Tick/processDueMember already
+	// lean on for their own Redis calls) gives a transient blip a real
+	// chance to clear before this falls through to the "rebuild anyway"
+	// path below -- WipeAll deletes wakeKey before its later SCAN-based
+	// deletes can fail, so a failure here can leave stale wake members or
+	// clock hashes behind, not just an empty-handed retry.
+	if err := withRedisRetry(ctx, func() error { return e.store.WipeAll(ctx) }); err != nil {
+		slog.ErrorContext(ctx, "slaengine: recalculate: wipe redis state failed after retries, rebuilding anyway from the already-fetched list", "err", err)
+	}
+
+	now := time.Now()
+	var failed []activeSLAClock
+	for _, c := range clocks {
+		if !e.reconcileClock(ctx, c, now) {
+			failed = append(failed, c)
+		}
+	}
+
+	// A repair pass, on a FRESH context, for whatever didn't make it the
+	// first time -- a CodeRabbit-caught gap: ctx is the one, shared,
+	// slaRecalculationTimeout-bounded context for this whole call, so a
+	// clock that failed because ctx was already running out when its own
+	// turn came (large active-clock set, a slow patch of Redis calls ahead
+	// of it in the loop) would otherwise be retried, if at all, against a
+	// context that's already dead or seconds from dying -- not a real
+	// second chance. Every write RecalculateFromEntity makes is already
+	// wipe-then-rebuild, so re-running reconcileClock for exactly the
+	// clocks that failed is safe to repeat regardless of why the first
+	// attempt failed (a transient Redis error, not just ctx exhaustion).
+	if len(failed) > 0 {
+		slog.WarnContext(ctx, "slaengine: recalculate: retrying clocks that failed to rebuild, on a fresh context", "count", len(failed))
+		repairCtx, cancel := context.WithTimeout(context.Background(), slaRecalculationRepairTimeout)
+		defer cancel()
+		repairNow := time.Now()
+		var stillFailed []activeSLAClock
+		for _, c := range failed {
+			// refreshAndReconcileClock, not a bare reconcileClock(repairCtx, c,
+			// repairNow) -- a second CodeRabbit-caught gap in the repair pass
+			// specifically: c is the snapshot fetched once, back at the start
+			// of the main pass, which by repair time can be stale by up to
+			// slaRecalculationTimeout -- long enough for a live case update to
+			// have already paused or resumed this exact clock for real reasons
+			// unrelated to this recalculation. Reapplying c's own stale
+			// IsPaused/PausedOn as-is would silently clobber that genuine,
+			// newer state. Re-fetching this one clock's CURRENT state right
+			// before writing narrows that window to the repair pass's own
+			// single round trip -- it does not fully close it (a live write
+			// landing in between the re-fetch and this write is still
+			// possible; closing that needs real coordination between this
+			// path and ApplyStateEffects, out of scope here), but it's a real
+			// reduction from "stale by up to ten minutes" to "stale by at
+			// most one round trip."
+			if _, ok := e.refreshAndReconcileClock(repairCtx, c, repairNow); !ok {
+				stillFailed = append(stillFailed, c)
+			}
+		}
+		if len(stillFailed) > 0 {
+			slog.ErrorContext(ctx, "slaengine: recalculate: some clocks could not be rebuilt even after a repair pass -- breach alerting for them stays broken until the next recalculation or a restart", "count", len(stillFailed))
+			return fmt.Errorf("slaengine: recalculate: %d clock(s) could not be rebuilt even after a repair pass", len(stillFailed))
+		}
+	}
+
+	slog.InfoContext(ctx, "slaengine: recalculation complete", "count", len(clocks), "failedFirstAttempt", len(failed))
+	return nil
+}
+
+// refreshAndReconcileClock re-fetches one (caseID, clockType) clock's
+// CURRENT state directly from entity-service and rebuilds it from that
+// fresh read, rather than from display's own (possibly stale) IsPaused/
+// StartedOn/pause fields -- display still supplies every field
+// GetClockState doesn't carry (CaseNumber/CaseTitle/Product/Team/Priority/
+// CaseType/State), just not the condition-sensitive ones. Used by
+// RecalculateFromEntity's own repair pass (see its own doc comment on the
+// staleness this narrows) and by ReviseClocks (a severity change always
+// needs this clock's real, current per-policy state, which only
+// entity-service has -- there is no "reuse the old snapshot" option at
+// all here, unlike the repair pass). e.entity nil, a lookup failure, or
+// entity-service reporting no open clock at all for this (work item,
+// target) are all treated as "nothing to rebuild" rather than an error --
+// a genuinely-gone clock means Redis should hold nothing for it either,
+// which it already does after a wipe (RecalculateFromEntity) or never did
+// in the first place for a clock type this severity's policy doesn't
+// apply to (ReviseClocks).
+// found reports whether entity-service currently has an open clock at all
+// for this (work item, target); ok reports whether the rebuild (when found)
+// succeeded. A caller that needs to know the difference between "genuinely
+// nothing to rebuild" and "rebuilt successfully" uses found; one that
+// doesn't (RecalculateFromEntity's own repair pass, where a wipe already
+// cleared everything either way) can ignore it.
+func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLAClock, now time.Time) (found, ok bool) {
+	if e.entity == nil {
+		return false, true
+	}
+	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType)
+	if err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to refresh clock state before rebuilding", "caseId", display.CaseID, "clockType", display.ClockType, "err", err)
+		return false, false
+	}
+	if !state.Found {
+		return false, true
+	}
+	c := display
+	c.IsPaused = state.IsPaused
+	c.StartedOn = state.StartedOn
+	c.PausedOn = state.PausedOn
+	c.PauseDurationSeconds = state.PauseDurationSeconds
+	c.DurationSeconds = state.DurationSeconds
+	c.Schedule = state.Schedule
+	return true, e.reconcileClock(ctx, c, now)
+}
+
+// ReviseClocks re-syncs one case's own three clocks with entity-service's
+// real, current per-policy state after its priority genuinely changes --
+// called from dispatch.handleSeverityChanged. A priority change on
+// entity-service's own side cancels whichever clock(s) the case's PREVIOUS
+// severity resolved a policy for and registers fresh ones for its new
+// severity (a different policy, a different duration, possibly a different
+// set of clock types entirely) -- but nothing about that write alone told
+// this engine's own Redis-held tracking anything: unlike RegisterClocks
+// (case.created) and ApplyStateEffects (case.status_changed), nothing here
+// reacted to a severity change at all before this method existed, so
+// Redis kept ticking down the OLD severity's clock, under its OLD
+// duration, indefinitely -- confirmed, not hypothetical: a stale wake
+// entry from before the change can even still fire a breach alert, since
+// sendBreachAlert's own incarnation check (isSameClockIncarnation) can't
+// tell "genuinely resolved" apart from "entity-service is now tracking a
+// completely different clock" and fails open toward sending rather than
+// risk losing a real alert.
+//
+// For a clock type the new severity's policy set still covers,
+// refreshAndReconcileClock rebuilds it from entity-service's current state
+// -- the same incarnation-aware SetClock Lua script that already protects
+// against ApplyStateEffects' own stale-replay risk (see setClockScript's
+// own doc comment in redis.go) is what makes writing the NEW clock's own
+// StartedOn here safely supersede the OLD incarnation, with no separate
+// "delete the old one first" step needed. For a clock type the new
+// severity has NO policy for at all, refreshAndReconcileClock's usual
+// "not found -- nothing to rebuild" posture is wrong here (unlike its
+// other caller, there is no preceding wipe that already cleared the old
+// entries): this actively removes that clock's own wake entries instead,
+// so the old severity's tier reminders don't go on ticking for a clock
+// that no longer exists under any policy at all.
+//
+// priority/caseNumber/wso2CaseID/caseTitle/product/team are exactly what
+// events.SeverityChangedPayload carries (priority = NewSeverity) -- plain
+// strings, not the unexported activeSLAClock type itself, since
+// dispatch.slaEngineService (a different package) is this method's one real
+// caller. CaseType/State (which that payload doesn't carry, and
+// GetClockState doesn't either -- they're purely display fields, not
+// condition-sensitive) are instead read back per clock type from whatever
+// Redis already holds from before the revision, so a rebuilt clock's Chat
+// card still shows them correctly.
+func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+	if e.entity == nil {
+		return
+	}
+	display := activeSLAClock{
+		CaseID:     caseID,
+		CaseNumber: caseNumber,
+		WSO2CaseID: wso2CaseID,
+		CaseTitle:  caseTitle,
+		Product:    product,
+		Team:       team,
+		Priority:   priority,
+	}
+	now := time.Now()
+	for _, clockType := range clockTypesInOrder {
+		c := display
+		c.ClockType = clockType
+		if oldMeta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+			c.CaseType = oldMeta.CaseType
+			c.State = oldMeta.State
+		}
+
+		found, ok := e.refreshAndReconcileClock(ctx, c, now)
+		if found {
+			continue
+		}
+		if !ok {
+			continue
+		}
+		for _, tier := range tierSequence {
+			if err := e.store.RemoveWake(ctx, wakeMember(caseID, clockType, tier)); err != nil {
+				slog.ErrorContext(ctx, "slaengine: revise clocks: failed to remove stale wake entry for a clock type the new severity no longer covers", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
+			}
+		}
+	}
+}
+
 // reconcileClock rebuilds one (caseID, clockType) clock's Redis state from
 // its durable entity-service row — the same due-date arithmetic
 // RegisterClocks uses (tierTime/avoidWeekend), just anchored on that row's
@@ -1110,7 +1382,17 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 // "breach" alerts for history that's probably already been alerted on
 // before whatever wiped Redis. Only a tier still in the future gets a real
 // wake entry, so normal ticking resumes seamlessly from here.
-func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) {
+//
+// Returns false if any Redis write for this clock failed -- used by
+// RecalculateFromEntity to find which clocks need a repair pass (see its
+// own doc comment on why, after a destructive WipeAll, a clock left
+// half-rebuilt is a real "this clock never alerts again" risk, not just a
+// logged warning). Reconcile's own startup pass ignores the return value
+// entirely, exactly as it always did: every failure here is still logged
+// internally regardless of whether the caller checks it, and a skip (no
+// duration recorded / no start time) is reported as success -- it's a
+// legitimate "nothing to track" outcome, not a failure to repair.
+func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) bool {
 	if c.DurationSeconds <= 0 {
 		// entity-service itself has no resolved duration recorded for this
 		// row -- same "no fallback duration" posture RegisterClocks has for
@@ -1118,12 +1400,12 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		// (a row GetActiveCSMSLAClocks returned was, by definition, already
 		// registered against some real policy), but defended regardless.
 		slog.WarnContext(ctx, "slaengine: reconcile: no duration recorded for this clock, skipping", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
-		return
+		return true
 	}
 	duration := time.Duration(c.DurationSeconds) * time.Second
 	if c.StartedOn == nil {
 		slog.WarnContext(ctx, "slaengine: reconcile: no start time, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType)
-		return
+		return true
 	}
 	startedAt := *c.StartedOn
 
@@ -1161,15 +1443,17 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
-		return
+		return false
 	}
 
+	ok := true
 	highestPastTier := 0
 	for _, tier := range tierSequence {
 		at := tierTime(startedAt, tierDuration, tier, c.Schedule).Add(pauseOffset)
 		if at.After(now) {
 			if err := e.store.AddWake(ctx, wakeMember(c.CaseID, c.ClockType, tier), at); err != nil {
 				slog.ErrorContext(ctx, "slaengine: reconcile: failed to schedule sla wake entry", "caseId", c.CaseID, "clockType", c.ClockType, "tier", tier, "err", err)
+				ok = false
 			}
 			continue
 		}
@@ -1183,6 +1467,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		// of race AdvanceAlertedTier's own doc comment describes for Tick.
 		if _, err := e.store.AdvanceAlertedTier(ctx, c.CaseID, c.ClockType, highestPastTier, startedAt); err != nil {
 			slog.ErrorContext(ctx, "slaengine: reconcile: failed to pre-claim already-past tiers", "caseId", c.CaseID, "clockType", c.ClockType, "tier", highestPastTier, "err", err)
+			ok = false
 		}
 	}
 	// The shifted-pause baseline must equal exactly what this pass already
@@ -1211,6 +1496,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 	if err := e.store.SetShiftedPauseSeconds(ctx, c.CaseID, c.ClockType, baselineSeconds); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to record the shifted-pause baseline", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
+		ok = false
 	}
 	// Always applied, not just when true: the durable row is the source of
 	// truth for this flag during reconciliation, and Redis may currently
@@ -1219,7 +1505,10 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	// true here would leave a stale paused=true in Redis forever, which
 	// Tick's own "drop if paused" check (processDueMember) would then
 	// silently swallow every future tier crossing for, never alerting.
-	e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused)
+	if !e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused) {
+		ok = false
+	}
+	return ok
 }
 
 // RunTicker calls Tick every interval until ctx is done. Run from its own

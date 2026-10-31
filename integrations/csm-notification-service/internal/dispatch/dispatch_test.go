@@ -896,6 +896,9 @@ type mockSLAEngine struct {
 	// after still recording the call — simulates a Redis outage so a test
 	// can confirm the error actually propagates out of Handle.
 	completeWorkaroundErr error
+	recalculateCalls      int
+	recalculateErr        error
+	reviseCalls           []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
@@ -921,6 +924,19 @@ func (m *mockSLAEngine) CompleteWorkaroundClock(_ context.Context, caseID string
 	defer m.mu.Unlock()
 	m.completeWorkaroundCalls = append(m.completeWorkaroundCalls, caseID)
 	return m.completeWorkaroundErr
+}
+
+func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recalculateCalls++
+	return m.recalculateErr
+}
+
+func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team})
 }
 
 // TestDispatcher_Handle_CaseCreated_RegistersSLAClocksWhenConfigured verifies
@@ -1065,6 +1081,46 @@ func TestDispatcher_Handle_WorkaroundProvided_StoreFailure_ReturnsErrorForRetry(
 	}
 	if len(sla.completeWorkaroundCalls) != 1 || sla.completeWorkaroundCalls[0] != "CASE-1" {
 		t.Errorf("unexpected CompleteWorkaroundClock calls: %v", sla.completeWorkaroundCalls)
+	}
+}
+
+// TestDispatcher_Handle_SLARecalculationRequested_RunsInBackground verifies
+// handleSLARecalculationRequested returns immediately (never blocking this
+// consumer's own Handle call on the recalculation itself) and still calls
+// slaEngine.RecalculateFromEntity exactly once, from its own goroutine.
+func TestDispatcher_Handle_SLARecalculationRequested_RunsInBackground(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"sla.recalculation_requested","entityId":"sla-engine","payload":{"requestedByEmail":"admin@example.com","requestedAt":"2026-01-05T10:00:00Z"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		sla.mu.Lock()
+		calls := sla.recalculateCalls
+		sla.mu.Unlock()
+		if calls == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("RecalculateFromEntity was not called within the timeout")
+}
+
+// TestDispatcher_Handle_SLARecalculationRequested_NoEngineConfigured_NoError
+// verifies an unconfigured slaEngine is a silent no-op, same posture as
+// every other slaEngine call site in this file.
+func TestDispatcher_Handle_SLARecalculationRequested_NoEngineConfigured_NoError(t *testing.T) {
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"sla.recalculation_requested","entityId":"sla-engine","payload":{"requestedByEmail":"admin@example.com","requestedAt":"2026-01-05T10:00:00Z"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
 	}
 }
 
@@ -1607,6 +1663,44 @@ func TestDispatcher_Handle_SeverityChanged(t *testing.T) {
 	}
 	if gotChat.productName != "api-manager" {
 		t.Errorf("SendSeverityChangedAlert productName = %q, want the payload's product %q", gotChat.productName, "api-manager")
+	}
+}
+
+// TestDispatcher_Handle_SeverityChanged_RevisesSLAClocks confirms
+// handleSeverityChanged calls slaEngine.ReviseClocks with the payload's own
+// new severity and display fields -- the fix for a real, reported gap:
+// before this, nothing here ever reacted to case.severity_changed at all,
+// so a case's Redis-held SLA tracking kept ticking down its OLD severity's
+// clock, under its OLD duration, indefinitely.
+func TestDispatcher_Handle_SeverityChanged_RevisesSLAClocks(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","oldSeverity":"LOW","newSeverity":"HIGH","product":"api-manager","team":"Phoenix","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	if len(sla.reviseCalls) != 1 {
+		t.Fatalf("expected 1 ReviseClocks call, got %d", len(sla.reviseCalls))
+	}
+	got := sla.reviseCalls[0]
+	if got.caseID != "CASE-1" || got.priority != "HIGH" || got.caseNumber != "CS0001001" || got.wso2CaseID != "WSO2-1000" || got.caseTitle != "Something broke" || got.product != "api-manager" || got.team != "Phoenix" {
+		t.Errorf("unexpected ReviseClocks args: %+v", got)
+	}
+}
+
+// TestDispatcher_Handle_SeverityChanged_NoEngineConfigured_NoError verifies
+// an unconfigured slaEngine is a silent no-op, same posture as every other
+// slaEngine call site in this file.
+func TestDispatcher_Handle_SeverityChanged_NoEngineConfigured_NoError(t *testing.T) {
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"LOW","newSeverity":"HIGH","product":"api-manager","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
 	}
 }
 
