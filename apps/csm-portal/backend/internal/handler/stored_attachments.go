@@ -65,6 +65,13 @@ var storedInlineImageTypes = map[string]bool{
 // ("This case is closed, so attachments can't be added", "Only the person who
 // uploaded an attachment can delete it", "too many attachment links requested"),
 // so 400, 403, 409 and 429 carry its message; anything internal is generic.
+// errCodeAttachmentRemoved is the errorCode entity-service gives a 410 for an
+// attachment that was deleted or removed, passed on unchanged.
+const errCodeAttachmentRemoved = "attachment_removed"
+
+// ErrMsgAttachmentRemoved is the message sent with that 410.
+const ErrMsgAttachmentRemoved = "This image was removed."
+
 func mapStoredAttachmentError(w http.ResponseWriter, err error, fallback string) {
 	var apiErr *apierror.Error
 	if !errors.As(err, &apiErr) {
@@ -76,6 +83,10 @@ func mapStoredAttachmentError(w http.ResponseWriter, err error, fallback string)
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 	case http.StatusNotFound:
 		writeError(w, http.StatusNotFound, ErrMsgNotFound)
+	case http.StatusGone:
+		// An attachment (an inline comment image) that was removed on purpose.
+		// The webapp tells it apart from a 404 by this code, never by the words.
+		writeErrorCode(w, http.StatusGone, ErrMsgAttachmentRemoved, errCodeAttachmentRemoved)
 	case http.StatusBadRequest, http.StatusForbidden, http.StatusConflict, http.StatusTooManyRequests:
 		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallback))
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
