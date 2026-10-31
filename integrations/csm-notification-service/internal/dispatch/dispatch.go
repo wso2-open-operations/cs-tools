@@ -795,12 +795,14 @@ func (d *Dispatcher) HandleShared(ctx context.Context, record eventbus.Record) e
 }
 
 // durableDedupTTL bounds how long Handle's own durable record-level claim
-// remembers a fully-processed record — matches slaengine's own clockTTL
-// precedent (internal/slaengine/redis.go) for "how long to remember a
-// one-time send is already done": long enough that no realistic
-// consumer-group rebalance or restart-triggered redelivery window could
-// ever outlast it, short enough not to accumulate forever.
-const durableDedupTTL = 90 * 24 * time.Hour
+// remembers a fully-processed record. Unlike slaengine's own clockTTL (90
+// days — a clock's own display data genuinely needs to outlive the clock
+// itself), this claim exists purely to survive the one real trigger for a
+// stale redelivery: a consumer-group rebalance or a process restart
+// (deploy, crash, OOM). That window is realistically minutes, not months —
+// 3 days is already generous slack on top of it, and keeps this from
+// accumulating one key per record ever handled for anywhere near as long.
+const durableDedupTTL = 3 * 24 * time.Hour
 
 // durableDedupKeyPrefix namespaces Handle's own claim keys in a Redis
 // instance this service already shares with slaengine's own wake
