@@ -15,8 +15,8 @@
 // under the License.
 
 import { useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 // The real client reads runtime config at module load, which isn't present
@@ -24,10 +24,25 @@ import "@testing-library/jest-dom/vitest";
 // transitively via CsmUploadAttachmentModal -> useCsmCaseAttachments, just
 // for its MAX_ATTACHMENT_SIZE_BYTES constant — the mock only exists to keep
 // that import chain from throwing on missing runtime config.
-vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ post: vi.fn() }),
+vi.mock("@api/backend/client", () => {
+  const api = { post: vi.fn() };
+  return { useBackendApi: () => api };
+});
+
+// Also on the import chain (CsmUploadAttachmentModal -> useCsmCaseAttachments),
+// and it reaches the runtime-config module the same way.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: null }),
 }));
 
+// Replaced whole, like the client above: the real module pulls in runtime config.
+vi.mock("@features/csm-cases/api/entityAttachments", () => ({
+  uploadEntityAttachment: vi.fn(),
+  entityAttachmentErrorMessage: (err: unknown, fallback: string) =>
+    err instanceof Error ? err.message : fallback,
+}));
+
+import { uploadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -41,12 +56,25 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     value,
     onChange,
     attachments,
+    onImageUpload,
   }: {
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
+    onImageUpload?: (file: File) => string;
   }) => (
     <div data-testid="editor-stub">
+      {onImageUpload && (
+        <button
+          type="button"
+          onClick={() => {
+            const src = onImageUpload(new File([new Uint8Array(4)], "shot.png", { type: "image/png" }));
+            onChange(`${value}<img src="${src}" alt="Pasted Image">`);
+          }}
+        >
+          paste-image
+        </button>
+      )}
       <textarea
         aria-label="comment-editor"
         value={value}
@@ -343,5 +371,91 @@ describe("CsmCaseCommentInput — lifted draft state survives unmount/remount", 
 
     await screen.findByText("Ctrl/Cmd + Enter to send.");
     expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+  });
+});
+
+describe("CsmCaseCommentInput — images added to the comment", () => {
+  const CASE_ID = "22222222-2222-4222-8222-222222222222";
+  const IMAGE_ID = "AAAAAAAA-1111-4111-8111-111111111111";
+  const upload = vi.mocked(uploadEntityAttachment);
+  let blobCount = 0;
+
+  beforeEach(() => {
+    blobCount = 0;
+    upload.mockReset();
+    URL.createObjectURL = vi.fn(() => `blob:https://csm.example.com/${(blobCount += 1)}`);
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it("gives the editor no image uploader without a case id, so images are embedded as before", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "paste-image" })).not.toBeInTheDocument();
+  });
+
+  it("gives the editor no image uploader when entity attachments are off", () => {
+    const original = window.config;
+    window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as typeof window.config;
+    try {
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
+      expect(screen.queryByRole("button", { name: "paste-image" })).not.toBeInTheDocument();
+    } finally {
+      window.config = original;
+    }
+  });
+
+  it("holds the send button while an image uploads, then sends its id instead of the preview URL", async () => {
+    let finish: (value: { id: string }) => void = () => {};
+    upload.mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+
+    expect(upload).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "comment", parentId: CASE_ID, name: "shot.png" }),
+    );
+    expect(screen.getByText("Uploading images…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeDisabled();
+
+    await act(async () => finish({ id: IMAGE_ID }));
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [html] = onSubmit.mock.calls[0];
+    expect(html).toBe(`see <img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
+    expect(html).not.toContain("blob:");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:https://csm.example.com/1");
+  });
+
+  it("does not send a comment whose image failed to upload, and says why", async () => {
+    upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    await screen.findByRole("button", { name: /Send to customer/ });
+    await waitFor(() => expect(screen.queryByText("Uploading images…")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/Could not upload shot\.png.*Remove that image/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("never sends a blob: image this page did not upload", async () => {
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: 'x<img src="blob:https://csm.example.com/elsewhere">' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/could not be uploaded/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

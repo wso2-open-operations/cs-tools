@@ -2817,6 +2817,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 canResumeToUnlockPublicReply={canWrite && canResumeToUnlockPublicReply}

@@ -41,6 +41,7 @@ import {
   stripWhitespaceStyleFromHtml,
   stripLexicalTableStylingFromHtml,
   htmlToPlainText,
+  type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
@@ -222,21 +223,27 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
 
 /**
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
- * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
+ * Inserts it via INSERT_IMAGE_COMMAND: with `onImageUpload` the image is handed to
+ * that (it is stored, and a local preview is shown); without one it is read as a
+ * data URL and embedded.
  */
 const ClipboardImagePlugin = ({
   onPasteError,
+  onImageUpload,
 }: {
   onPasteError?: (reason: "size" | "type") => void;
+  onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
 
   // Keep the latest callback in a ref so the paste listener (registered once
   // per editor) always calls the current onPasteError without re-registering.
   const onPasteErrorRef = useRef(onPasteError);
+  const onImageUploadRef = useRef(onImageUpload);
   useEffect(() => {
     onPasteErrorRef.current = onPasteError;
-  }, [onPasteError]);
+    onImageUploadRef.current = onImageUpload;
+  }, [onPasteError, onImageUpload]);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
@@ -262,6 +269,15 @@ const ClipboardImagePlugin = ({
 
           if (file.size > MAX_PASTE_IMAGE_SIZE) {
             onPasteErrorRef.current?.("size");
+            break;
+          }
+
+          const upload = onImageUploadRef.current;
+          if (upload) {
+            editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
+              src: upload(file),
+              altText: "Pasted Image",
+            });
             break;
           }
 
@@ -510,6 +526,7 @@ const Editor = ({
   onBlur,
   overlayElement,
   onPasteError,
+  onImageUpload,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -535,6 +552,11 @@ const Editor = ({
   overlayElement?: ReactNode;
   /** Called when a pasted image is rejected — `"type"` for an unsupported format (e.g. SVG), `"size"` for exceeding the max paste size. */
   onPasteError?: (reason: "size" | "type") => void;
+  /**
+   * Stores a pasted or picked image instead of embedding it as base64; see
+   * {@link ImageUploadHandler}. Leave unset to keep embedding.
+   */
+  onImageUpload?: ImageUploadHandler;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -620,6 +642,7 @@ const Editor = ({
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
               enterToSubmit={enterToSubmit}
+              imageUploader={onImageUpload}
             />
             <Divider sx={{ my: 1 }} />
           </>
@@ -763,7 +786,7 @@ const Editor = ({
           <ListPlugin />
           <TablePlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin onPasteError={onPasteError} />
+          <ClipboardImagePlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
           <PasteNormalizationPlugin />
           <LinkPlugin />
           <ClickableLinkPlugin />
