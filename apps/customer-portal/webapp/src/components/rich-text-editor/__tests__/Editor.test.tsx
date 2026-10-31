@@ -14,7 +14,7 @@
 // permissions and limitations under the License.
 
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import Editor from "@components/rich-text-editor/Editor";
 
@@ -84,6 +84,98 @@ describe("Editor", () => {
       expect(screen.getByTestId("case-description-editor")).toHaveTextContent(
         "AI Generated Content",
       );
+    });
+  });
+
+  describe("pasting an image with onImageUpload", () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "image.png", {
+      type: "image/png",
+    });
+    const PREVIEW = "blob:http://localhost/preview-1";
+
+    function paste(target: HTMLElement, f: File = file, type = "image/png") {
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", {
+        value: { items: [{ type, getAsFile: () => f }] },
+      });
+      target.dispatchEvent(event);
+      return event;
+    }
+
+    beforeEach(() => {
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => PREVIEW),
+        revokeObjectURL: vi.fn(),
+      });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("shows the image from a blob: URL and hands the file to the handler instead of reading base64", async () => {
+      const onImageUpload = vi.fn(() => new Promise<void>(() => {}));
+      const readAsDataURL = vi.spyOn(FileReader.prototype, "readAsDataURL");
+      renderEditor({ onImageUpload });
+      const input = screen.getByTestId("case-description-editor");
+
+      const event = paste(input);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onImageUpload).toHaveBeenCalledWith(file, PREVIEW);
+      expect(readAsDataURL).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(input.querySelector("img")?.getAttribute("src")).toBe(PREVIEW);
+      });
+    });
+
+    it("takes the image out again when the upload fails", async () => {
+      let reject: (e: Error) => void = () => {};
+      const onImageUpload = vi.fn(
+        () => new Promise<void>((_, r) => (reject = r)),
+      );
+      renderEditor({ onImageUpload });
+      const input = screen.getByTestId("case-description-editor");
+      paste(input);
+      await waitFor(() => expect(input.querySelector("img")).not.toBeNull());
+
+      reject(new Error("boom"));
+
+      await waitFor(() => expect(input.querySelector("img")).toBeNull());
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(PREVIEW);
+    });
+
+    it("keeps an image that uploaded", async () => {
+      const onImageUpload = vi.fn(() => Promise.resolve());
+      renderEditor({ onImageUpload });
+      const input = screen.getByTestId("case-description-editor");
+      paste(input);
+      await waitFor(() => expect(input.querySelector("img")).not.toBeNull());
+      await Promise.resolve();
+      expect(input.querySelector("img")?.getAttribute("src")).toBe(PREVIEW);
+    });
+
+    it("does not upload an unsupported type and reports it", () => {
+      const onImageUpload = vi.fn();
+      const onPasteError = vi.fn();
+      renderEditor({ onImageUpload, onPasteError });
+      paste(
+        screen.getByTestId("case-description-editor"),
+        new File(["x"], "a.gif", { type: "image/gif" }),
+        "image/gif",
+      );
+      expect(onImageUpload).not.toHaveBeenCalled();
+      expect(onPasteError).toHaveBeenCalledWith("type");
+    });
+
+    it("does not upload an image over 10 MB and reports it", () => {
+      const onImageUpload = vi.fn();
+      const onPasteError = vi.fn();
+      renderEditor({ onImageUpload, onPasteError });
+      const big = new File(["x"], "big.png", { type: "image/png" });
+      Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
+      paste(screen.getByTestId("case-description-editor"), big);
+      expect(onImageUpload).not.toHaveBeenCalled();
+      expect(onPasteError).toHaveBeenCalledWith("size");
     });
   });
 });
