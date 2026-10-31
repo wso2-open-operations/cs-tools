@@ -462,6 +462,25 @@ This is the server-side half of a two-part fix — `apps/csm-portal/webapp`'s ow
 mitigation (added first, still in place) only ever hid the image *after* the bytes had already
 reached the browser; this is what stops them being sent at all to a caller who shouldn't see them.
 
+## Standard changes (`internal/handler/standard_changes.go`)
+
+Operations > Change requests > Standard changes: the CAB-approved standard change templates and the proposals that
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
+are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
+only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
+proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
+or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
+message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
+one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
+is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
+`POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
+`standardChangeParameters`, forwarded like every other create field. A template is one customer's
+(entity-service migration 0254): templates and proposals carry `customer` {id, name}, the search
+bodies' `accountId` filter and a proposal's `accountId` pass through raw, and raising a change request
+from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
+400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
+(`standard_change_customer_test.go`).
+
 ## Change request tags go through the case tag routes
 
 `GET /change-requests/{id}` is a raw pass-through, so the `tags` array the
@@ -619,7 +638,9 @@ for the 409 above, `change_request_not_asked` / `change_request_forbidden` for i
 `change_request_on_hold`, `change_request_schedule_changed`, `change_request_not_proposable`,
 `change_request_proposal_not_now`, `change_request_no_planned_window`, and for staff
 `change_request_proposer_not_recorded` (Accept proposed time on a stored time nobody is recorded as having
-proposed); the table is in its CLAUDE.md, "Error types"). The BFF passes it through, beside the message, with the status it
+proposed), and the 400s of the deviation from the implementation plan (`implementationDeviation`, forwarded
+untouched on PATCH and on create): `change_request_deviation_not_yet`, `change_request_deviation_final` and
+`change_request_deviation_not_incorporated`; the table is in its CLAUDE.md, "Error types"). The BFF passes it through, beside the message, with the status it
 gives it: `mapUpstreamError` (the PATCH handlers) on the 400, 403, 409 and 422, and
 `mapApprovalDecisionError` on the decision route's 403 and 409 (`errorBody.ErrorCode`, `writeErrorCode`,
 `upstreamErrorCode`). The code is read from the upstream envelope (`apierror.Error.Body` holds it whole,

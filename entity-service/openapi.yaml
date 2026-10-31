@@ -7469,8 +7469,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: >-
+            The caller is not an internal caller: creating a change request is for WSO2 staff
+            and internal clients only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: >-
+            "change request not found": on the PostgreSQL data sources, the row-level policy on
+            change_request refused the insert (only an internal caller may insert one, and the
+            route admits internal callers only). On the data source that talks to the previous
+            system directly, that system's 404 is passed through: it does not know a record the
+            request refers to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: >-
+            On the create that writes the previous system first: that system refused the create
+            as a conflict, or answered with an id or number a change request in PostgreSQL
+            already has. Nothing was written to PostgreSQL. On the data source that talks to the
+            previous system directly, that system's 409 is passed through.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            The caller's identity could not be resolved to a scope (for example no verified
+            identity on the request); on the create that writes the previous system first, that
+            system is unavailable (nothing was written to PostgreSQL); or, on the data source that
+            talks to the previous system directly, that system is unavailable or could not be
+            reached.
           content:
             application/json:
               schema:
@@ -7504,8 +7544,9 @@ paths:
         what the change request is waiting for and which moves are open (`state
         "implement" cannot be set manually from assess: it is waiting for its peer
         approval, which moves it on by itself; the moves open to staff from assess are:
-        only canceled`). The requested state is trimmed and read without regard to case;
-        a value that is not a change request state is a 400. A refused PATCH writes
+        only canceled`). The requested state must be one of the lower-case values exactly:
+        anything else (a padded or upper-case spelling included) is a 400 (`state contains
+        invalid value: X`) before the change request is read. A refused PATCH writes
         nothing. (scheduled, authorize outside a Re-schedule, customer_approval and
         rollback outside review keep the refusals of their own described below, also when
         the change request is already in that state.)
@@ -7522,7 +7563,9 @@ paths:
 
         A customer's proposed time (see the customerProposal read model). A customer proposes a
         START in the Customer Portal: it is written to customer_updated_on (a column the
-        previous system also fills) and nothing else; the change request stays in customer_approval with its planned
+        previous system also fills) with, in the same write, the record of who proposed it
+        (customer_proposed_by_user_id / customer_proposed_for / customer_proposed_on, migration
+        0249), and nothing else; the change request stays in customer_approval with its planned
         window and the customers' request untouched, and waits for WSO2. WSO2 answers with this
         PATCH, naming the proposal (expectedCustomerUpdatedOn) and, for Accept, the planned window
         the page showed (expectedPlannedStartOn / expectedPlannedEndOn): ACCEPT PROPOSED TIME is
@@ -7607,7 +7650,9 @@ paths:
         A proposed window, from a registered contact the customer's approval has been
         asked of (the same test as customerCanAnswer: a REQUESTED approval on the live
         Customer Approval stage) while the change request is in customer_approval, is the
-        a PROPOSAL: it writes the proposed START to customer_updated_on and nothing else (the
+        a PROPOSAL: it writes the proposed START to customer_updated_on and, in the same write, the
+        record of who proposed it (customer_proposed_by_user_id / customer_proposed_for /
+        customer_proposed_on, migration 0249), and nothing else (the
         change request stays in customer_approval, its planned window and the customers' request
         untouched) and waits for WSO2's answer. The planned LENGTH is kept: the portal sends the
         start plus the end that keeps it, and any other end is a 400 ("a proposed time moves the start
@@ -7641,7 +7686,8 @@ paths:
         request that has a project with somebody who can be asked); {state: "new"} is a
         400; Request Approval ({state: "assess"}) is a 400 when a box is set and there is
         no project, and a 400 when a box is set and the project has nobody who can be
-        asked. "Somebody who can be asked" is the test the customer stage's provisioning
+        asked (and, after those, a 400 while a deviation from the implementation plan is in
+        effect: see PatchChangeRequestRequest). "Somebody who can be asked" is the test the customer stage's provisioning
         applies: a REGISTERED portal-user contact of the project whose user is active,
         other than the requester (never an invited or deactivated contact). Only Request
         Approval and the turning-on of a box are judged: a change request that is beyond
@@ -7679,8 +7725,12 @@ paths:
                 $ref: '#/components/schemas/PatchChangeRequestResponse'
         "400":
           description: >-
-            Bad request: a malformed or out-of-range planned window, or a refusal of the
-            customer requirements lock, each with a readable message --
+            Bad request: a malformed or out-of-range planned window, a priority this API does
+            not set (on the PostgreSQL data sources "priority must be one of critical, high,
+            moderate or low"), a field the data source cannot store, named in the message (for
+            example onHold on the data source that talks to the previous system directly, or
+            durationInput on the PostgreSQL data sources), or a refusal of the customer
+            requirements lock, each with a readable message --
             "projectId can no longer be changed: the Customer Project is fixed once
             approval has been requested (current state: X). Cancel this change request and
             clone it to use another project.";
@@ -7708,7 +7758,18 @@ paths:
             requester): register a contact for the project first" (Request Approval, or a
             box turned on after it, on a project nobody can be asked on; "customer review is
             required but ..." for the review box and "customer approval and customer review
-            are required but ..." for both); from an internal caller, the
+            are required but ..." for both); "approval cannot be requested until the deviation
+            from the implementation plan carried over from the cloned change request has been
+            folded into the implementation plan and cleared" (Request Approval while a deviation
+            is in effect, errorCode change_request_deviation_not_incorporated);
+            "implementationDeviation cannot be changed yet: the deviation from the
+            implementation plan can be recorded once implementation has started (current state:
+            X)" and "implementationDeviation can only be cleared before implementation: fold the
+            deviation from the implementation plan carried over from the cloned change request
+            into the implementation plan, then clear it" (errorCode
+            change_request_deviation_not_yet); "implementationDeviation can no longer be changed:
+            the change request is closed|canceled|rolled back, so its record is final" (errorCode
+            change_request_deviation_final); from an internal caller, the
             customer's own answer: "state \"scheduled\" cannot be set manually from
             customer_approval: the customer's approval can only be given by the customer in
             the Customer Portal; cancel the change or re-schedule it instead" (likewise
@@ -7777,6 +7838,14 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            On the data source that talks to the previous system directly, that system is
+            unavailable.
           content:
             application/json:
               schema:
@@ -11353,6 +11422,678 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/search:
+    post:
+      summary: Search the standard change catalogue.
+      operationId: searchStandardChangeTemplates
+      description: >-
+        The CAB-approved standard change templates, by name. Internal callers only;
+        PostgreSQL data sources only. With no states the list is the active and
+        suspended templates; each carries its current version's content, its usage
+        counts and whether a change raised from it failed (reviewRequired).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchStandardChangeTemplatesRequest'
+      responses:
+        "200":
+          description: A page of templates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchStandardChangeTemplatesResponse'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}:
+    get:
+      summary: Get a standard change template.
+      operationId: getStandardChangeTemplate
+      description: The template, its current version and every version it has had (newest first). Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/versions/{versionId}:
+    get:
+      summary: Get one version of a standard change template.
+      operationId: getStandardChangeTemplateVersion
+      description: A version as the CAB approved it. Versions are never changed. Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: versionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplateVersion'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/suspend:
+    post:
+      summary: Suspend a standard change template.
+      operationId: suspendStandardChangeTemplate
+      description: >-
+        No change request can be raised from a suspended template, and one already
+        raised cannot be sent for approval. The template's owner or a member of the CAB
+        Approval group. 409 when it is not active. The body is optional: an empty body
+        suspends without a reason. The reason, the time and the caller are recorded on
+        the template (suspendedReason, suspendedOn, suspendedBy) until it is resumed or
+        retired.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspendStandardChangeTemplateRequest'
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/resume:
+    post:
+      summary: Resume a suspended standard change template.
+      operationId: resumeStandardChangeTemplate
+      description: The template's owner or a member of the CAB Approval group. 409 when it is not suspended.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-templates/{id}/clear-review:
+    post:
+      summary: Clear a standard change template's review flag.
+      operationId: clearStandardChangeTemplateReview
+      description: >-
+        A change raised from the template was rolled back or deviated from its plan,
+        and the owner or the CAB has looked at it and decided the template stands.
+        (Approving a modification clears the flag too.) The owner or a CAB member.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeTemplate'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals:
+    post:
+      summary: Propose a new standard change, or a change to or the retirement of one.
+      operationId: createStandardChangeProposal
+      description: >-
+        Opens a draft. kind new: optionally from a closed change request
+        (sourceChangeRequestId: its content is copied, and it is the first evidence) or a
+        copy of an earlier proposal (copyFromProposalId, e.g. a rejected one). kind
+        modify / retire: of an active or suspended template (templateId), from its
+        current version; at most one open modification or retirement per template (409).
+        The proposer is the caller. Internal callers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStandardChangeProposalRequest'
+      responses:
+        "201":
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/search:
+    post:
+      summary: Search standard change proposals.
+      operationId: searchStandardChangeProposals
+      description: Newest first. A rejected or withdrawn proposal is kept as the record of it. Internal callers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchStandardChangeProposalsRequest'
+      responses:
+        "200":
+          description: A page of proposals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchStandardChangeProposalsResponse'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}:
+    get:
+      summary: Get a standard change proposal.
+      operationId: getStandardChangeProposal
+      description: >-
+        The proposal with its evidence, its CAB approvers and what the caller may do
+        (canEdit, canSubmit, canWithdraw, and canDecide on their own pending approver
+        row). Internal callers only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit a draft standard change proposal.
+      operationId: updateStandardChangeProposal
+      description: >-
+        The proposer only, while it is a draft (409 otherwise). Omitted fields are left
+        as they are; parameters and evidenceChangeRequestIds replace the whole list.
+        Evidence must be closed change requests. A retirement takes only its name and
+        rationale. Placeholders are written {{key}} in the text fields.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/submit:
+    post:
+      summary: Send a standard change proposal to the CAB.
+      operationId: submitStandardChangeProposal
+      description: >-
+        The proposer only. The proposal must be complete (name, rationale, subject,
+        implementation / backout / test plans, impact, risk other than high, every
+        placeholder declared: 400 naming what is missing). Opens a CAB Approval stage
+        whose approvers are the active internal members of the CAB Approval group; the
+        proposer is listed cancelled. A modification whose template moved on since it
+        was drafted is a 409.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal, in cab_review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/withdraw:
+    post:
+      summary: Withdraw a standard change proposal.
+      operationId: withdrawStandardChangeProposal
+      description: The proposer only, while it is a draft or in CAB review. Pending approvers are cancelled; the proposal is kept.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The proposal, withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/decision:
+    post:
+      summary: Approve or reject a standard change proposal (CAB).
+      operationId: decideStandardChangeProposal
+      description: >-
+        A CAB member on their own pending approver row; the proposer never decides
+        (403). The first decision settles the proposal and cancels the other
+        approvers. Approved: a new template (version 1), a new version of the template,
+        or the template retired. Rejected: needs a comment; nothing in the catalogue
+        changes and the proposal is kept as the record. 409 when it is not in CAB
+        review, or the approval would clash (a live template of the same name for the
+        customer, the template moved on, or the source change request or a piece of
+        evidence is no longer a closed change request of the proposal's customer).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal, approved or rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
           content:
             application/json:
               schema:
@@ -24735,7 +25476,16 @@ components:
           type: string
           nullable: true
         project:
-          $ref: '#/components/schemas/EntityRef'
+          type: object
+          description: >-
+            The change request's Customer Project. Never null: a change request with no
+            project carries an empty id and name.
+          properties:
+            id:
+              type: string
+              description: The project's id (a UUID), or an empty string when there is no project.
+            name:
+              type: string
         case:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -24748,6 +25498,22 @@ components:
         product:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
+        service:
+          nullable: true
+          description: >-
+            The service the change request is for, set by serviceId on create or PATCH. Null
+            when none is set, and always null when change requests are read from the previous
+            system directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        serviceOffering:
+          nullable: true
+          description: >-
+            The service offering, set by serviceOfferingId on create or PATCH. Null when none
+            is set, and always null when change requests are read from the previous system
+            directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -24761,6 +25527,8 @@ components:
             The planned start, RFC 3339 in UTC. Printed with the fractional seconds the stored value
             has (and none when it holds whole seconds, as every migrated row does), so that what is
             read goes back unchanged as expectedPlannedStartOn: those compare the instants exactly.
+            When change requests are read from the previous system directly, the value is passed
+            through as that system sends it.
         plannedEndOn:
           type: string
           nullable: true
@@ -24780,6 +25548,25 @@ components:
           type: string
           nullable: true
           description: Type label (e.g. "standard", "normal").
+        onHold:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the change request is on hold, set by PATCH onHold. While it is true, a PATCH
+            that sets state (unless the same PATCH sends onHold false) and WSO2's acceptance of a
+            customer's proposed time (confirmCustomerUpdatedDate) are refused (400), and a
+            customer's proposed implementation time is refused (409, errorCode
+            change_request_on_hold); the customer's answer is not refused. Null when no value is
+            stored, and always null when change requests are read from the previous system
+            directly.
+        onHoldReason:
+          type: string
+          nullable: true
+          description: >-
+            Why the change request is on hold; display only. PATCH onHold true writes the
+            onHoldReason sent with it, or clears it when none is sent; onHold false clears it;
+            onHoldReason sent alone replaces it. Always null when change requests are read from
+            the previous system directly.
         createdOn:
           type: string
         updatedOn:
@@ -24811,8 +25598,9 @@ components:
       description: >-
         What the change request says about a time the customer proposed for it, derived on every
         read from two columns of the change request (customer_updated_on: the customer's proposed plan START;
-        customer_updated_date_confirmation: WSO2's answer, AGREE / DISAGREE) and the approver rows;
-        nothing extra is stored. Present on the PostgreSQL data source when customer_updated_on is
+        customer_updated_date_confirmation: WSO2's answer, AGREE / DISAGREE), the approver rows and
+        the record of who proposed the time (customer_proposed_by_user_id / customer_proposed_for /
+        customer_proposed_on, migration 0249). Present on the PostgreSQL data source when customer_updated_on is
         set. While `answer` is "pending" the planned window (plannedStartOn / plannedEndOn) is still
         the one WSO2 planned: a proposal changes nothing until WSO2 answers.
       properties:
@@ -24837,12 +25625,21 @@ components:
         proposerRecorded:
           type: boolean
           description: >-
-            While pending: true when the last writer of the change request (work_item.updated_by) is
-            a registered contact of the change request's project, who is then recorded as having
-            proposed the time. Nothing else names a proposer: no comment, audit or other log is read,
-            and nothing is added to record one. False when nobody is recorded -- a date a WSO2 user
-            wrote in the previous system, one left from an older cycle, or a genuine proposal that a
-            later write to the change request replaced as last writer -- and the page must say the
+            While pending: true when the customer's proposal recorded its proposer (the proposal writes
+            who proposed it, for which start and when, with the start itself), the record is about the
+            stored time, and that person is still a registered contact of the change request's project.
+            A later write by anybody else (a work note, an additional comment, the hold, a whole-form
+            resend, another writer's write to the work item) does not change it;
+            only a new round does: entering customer_approval, or a plain re-schedule, voids it. A
+            change request with no record (a time stored before the record existed, migration 0249,
+            or one written later by another writer on a change request that has had no proposal
+            since it entered customer_approval) is read by the rule that held before the record
+            existed: the change request's last writer (work_item.updated_by) when that is a
+            registered contact of the project; a write that replaces that writer records them as
+            the proposer first when they have a user record (migration 0250), so such a proposal
+            stays recorded whoever writes after it. No comment, audit or other log is read. False
+            when nobody is recorded -- a date a WSO2 user wrote in the previous system, one left from
+            an older cycle, one whose contact has left the project -- and the page must say the
             proposer is not recorded. Then canAccept is false: Accept proposed time is refused (409
             change_request_proposer_not_recorded) and proposing a different time is a plain
             re-schedule that writes no answer, which the customers then approve. Present only for a
@@ -24877,6 +25674,13 @@ components:
           properties:
             createdBy:
               type: string
+            standardChange:
+              allOf: [{$ref: '#/components/schemas/ChangeRequestStandardChange'}]
+              description: >-
+                The standard change template (and version) the change request was raised from,
+                with the values of its parameters. Staff only; omitted otherwise. While it is
+                set, what the template specifies is read-only (errorCode
+                change_request_standard_template_field).
             justification:
               type: string
               nullable: true
@@ -24966,6 +25770,7 @@ components:
               nullable: true
             legalNextStates:
               type: array
+              nullable: true
               items:
                 type: string
               description: >-
@@ -24982,8 +25787,7 @@ components:
                 Standard -- customer_approval instead when
                 customerApprovalRequired, which an Emergency change never has in effect).
                 assess: [canceled] (the peer approval moves the change on by
-                itself, to authorize -- Assess -> Authorize was listed here
-                before although no PATCH ever took it); authorize: [canceled]
+                itself, to authorize); authorize: [canceled]
                 (CAB approval moves the change on by itself: to scheduled,
                 or to customer_approval when customerApprovalRequired -- never for an
                 Emergency change, whose CAB approval always schedules it).
@@ -25010,21 +25814,37 @@ components:
                 failed review is then the customer's to give too).
                 "rollback" (the failed-review off-ramp) is accepted only from
                 review and customer_review; it is terminal. closed, canceled and
-                rollback offer nothing. These are exactly the states a staff PATCH
-                is accepted for (see PATCH /change-requests/{id}, "Transition
-                graph"); a change request with no state offers nothing.
-                Terminal states: none.
-                "scheduled" is offered from no state, and "closed" is not offered
-                from customer_review, on the ServiceNow data source either.
+                rollback offer nothing, and neither does a change request with no
+                state: on the PostgreSQL data source the field is null in both cases,
+                not an empty array. These are exactly the states a staff PATCH is accepted
+                for (see PATCH /change-requests/{id}, "Transition graph").
+                On the data source that talks to the previous system directly the
+                list is what that system returns, without "scheduled" (from any
+                state) and without "closed" from customer_review; null when that
+                system sends no list.
             implementationPlan:
               type: string
               nullable: true
+            implementationDeviation:
+              type: string
+              nullable: true
+              description: >-
+                "Deviation from the implementation plan": what the implementation or the
+                review actually did differently from the implementation plan (rich text).
+                Unlike the plan it is written after the approval: it is recorded in implement,
+                review and customer_review, and is final once the change request is closed,
+                canceled or rolled back. A clone copies it; the clone must fold it into its
+                implementation plan and clear it before Request Approval. Internal: null for a
+                customer caller, and null when the backing data source has no such field.
             priority:
               type: string
               nullable: true
               description: >-
-                Normally one of critical/high/moderate/low. An unmapped upstream
-                choice is passed through as its raw label.
+                On the PostgreSQL data source the stored value in lower case: critical,
+                high, moderate, low or planning (planning only on rows migrated from the
+                previous system: a create or a PATCH refuses it). On the data source that
+                talks to the previous system directly, critical, high, moderate or low, or
+                the raw label of any other choice.
             category:
               type: string
               nullable: true
@@ -25046,36 +25866,59 @@ components:
               description: Raw, unvalidated free text (e.g. "10 mins").
             deploymentProducts:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
               description: >-
                 Read-only, derived from `deployments`: the deployed products of
-                the chosen deployments, named "<product> <version>".
+                the chosen deployments, named "<product> <version>". Always an array
+                on the PostgreSQL data source (empty when none); null on the data
+                source that talks to the previous system directly when it reports none.
             customerContacts:
               type: array
+              nullable: true
               description: >-
                 The change request's Customer Group, READ-ONLY and derived live
                 (never stored): the REGISTERED portal-user contacts (a
                 project_contact in state REGISTERED holding the PORTAL_USER
-                project role, whose user is active) of the change request's
-                Customer Project, name order. Always an array: empty without a
-                project or without such contacts. They are the customer's
+                project role, whose user, when it has one, is not deactivated) of
+                the change request's Customer Project, name order. Always an array
+                on the PostgreSQL data source: empty without a project or without
+                such contacts. Null on the data source that talks to the previous
+                system directly, which does not derive it. They are the customer's
                 approvers at Customer Approval / Customer Review.
               items:
                 $ref: '#/components/schemas/ChangeRequestCustomerContact'
             changeRequestType:
               type: string
               nullable: true
-              description: Read-through only; no write path is exposed for this field.
+              description: >-
+                Read-through only; no write path is exposed for this field. A separate
+                classification from `type`. On the PostgreSQL data source infra or
+                general; on the data source that talks to the previous system directly,
+                the raw label.
             likelihood:
               type: string
               nullable: true
-              description: Read-through only; no write path is exposed for this field.
+              description: >-
+                Read-through only; no write path is exposed for this field. On the
+                PostgreSQL data source low, medium or high; on the data source that talks
+                to the previous system directly, the raw label.
             isPlanningVisibleToCustomers:
               type: boolean
+              description: >-
+                The "Implementation Plan visible to customers" setting as stored. False
+                when it was never set.
             confirmCustomerUpdatedDate:
               type: string
               nullable: true
+              description: >-
+                WSO2's answer to the proposed start in customerUpdatedOn. On the PostgreSQL
+                data source "agree" (written by Accept proposed time: PATCH
+                confirmCustomerUpdatedDate "agree") or "disagree" (written by Propose a
+                different time, or a decline, while a proposal waits: PATCH state
+                "authorize"); null while nothing has been answered, and cleared when a new
+                time is proposed.
             customerUpdatedOn:
               type: string
               nullable: true
@@ -25085,8 +25928,13 @@ components:
                 workEnd are printed the same way.
             labels:
               type: array
+              nullable: true
               items:
                 type: string
+              description: >-
+                Read-only. Null on the PostgreSQL data source, which has no column for
+                labels; the data source that talks to the previous system directly
+                passes its labels through.
             tags:
               type: array
               nullable: true
@@ -25103,11 +25951,14 @@ components:
                 A tag added to a change request is never mirrored to the previous system.
             deployments:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
               description: >-
                 The project's deployments the change touches (the project is
-                `project`). Always an array on the PostgreSQL data source.
+                `project`). Always an array on the PostgreSQL data source (empty when
+                none); null on the data source that talks to the previous system
+                directly when it reports none.
             workStart:
               type: string
               nullable: true
@@ -25614,17 +26465,17 @@ components:
 
     CreateChangeRequestRequest:
       type: object
-      required:
-        - subject
-        - type
       properties:
         subject:
           type: string
+          description: >-
+            Required, except on a change request raised from a standard change template
+            (standardChangeTemplateId), where the template gives it and sending one is a 400.
         type:
           type: string
           enum: [standard, normal, emergency]
           description: >-
-            Required. Decides the approval flow: Standard needs no approval
+            Required, except with standardChangeTemplateId (then it defaults to standard). Decides the approval flow: Standard needs no approval
             (Request Approval goes straight to Scheduled); Normal needs peer
             approval then CAB approval; Emergency needs CAB approval only (one
             stage in the CAB Approval group: the previous system has no Emergency CAB). An
@@ -25656,6 +26507,10 @@ components:
         configurationItemId:
           type: string
           format: uuid
+          description: >-
+            Not stored by the PostgreSQL data source. Forwarded only by the data source
+            that talks to the previous system directly and by the create that writes the
+            previous system first, where a value that is not a UUID is a 400.
         priority:
           type: string
           enum:
@@ -25663,26 +26518,31 @@ components:
             - high
             - moderate
             - low
+          description: >-
+            Any other value is a 400, planning included (a change request migrated from the
+            previous system can read back planning, but it is not a value this API sets): on the
+            PostgreSQL data sources "priority must be one of critical, high, moderate or low", as
+            on PATCH, before anything is written and, on the create that writes the previous
+            system first, before that system is called.
         impact:
           type: string
           enum:
             - high
             - medium
             - low
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources "impact must be one of high,
+            medium or low"), checked like priority.
         state:
           type: string
           enum:
             - new
-            - assess
-            - authorize
-            - customer_approval
-            - scheduled
-            - implement
-            - review
-            - customer_review
-            - rollback
-            - closed
-            - canceled
+          description: >-
+            Optional. A change request is always created in new. Any other value is a
+            400 ("a change request can only be created in the New state, not ...") on
+            the data source that talks to the previous system directly and on the create
+            that writes the previous system first, before that system is called. When the
+            change request is created in PostgreSQL only, the field is ignored.
         groupId:
           type: string
           format: uuid
@@ -25706,6 +26566,9 @@ components:
             - high
             - moderate
             - low
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources "risk must be one of high,
+            moderate or low"), checked like priority.
         requestedById:
           type: string
           format: uuid
@@ -25715,6 +26578,18 @@ components:
           type: string
         implementationPlan:
           type: string
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan, for a clone of a change request that
+            has one; a blank value (no text once its markup is removed, such as an emptied
+            editor's "<p><br></p>", "<p>&nbsp;</p>" or markup that is only images, judged as on
+            PATCH) is not stored. Accepted on every create; staff only, like the route itself (a customer's
+            create is a 403). The new change request then has to fold it into its
+            implementation plan and clear it before
+            Request Approval (PATCH: 400 change_request_deviation_not_incorporated until it is
+            cleared). Refused with a 400 by a data source that cannot store it (a non-blank
+            one only); never mirrored to the previous system.
         riskImpactAnalysis:
           type: string
         backoutPlan:
@@ -25757,11 +26632,12 @@ components:
           format: uuid
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED. Any value is a 400 `customerGroupId is no longer
+            NO LONGER ACCEPTED. Any value but null is a 400 `customerGroupId is no longer
             accepted: the customer group is derived from the customer project's
-            registered contacts`. The Customer Group is read-only: the REGISTERED
-            portal-user contacts of `projectId`, exposed as `customerContacts` on
-            the change request and by POST /change-requests/link-options.
+            registered contacts`; an explicit null is read as omitted. The Customer
+            Group is read-only: the REGISTERED portal-user contacts of `projectId`,
+            exposed as `customerContacts` on the change request and by POST
+            /change-requests/link-options.
         projectId:
           type: string
           format: uuid
@@ -25794,9 +26670,9 @@ components:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value is a 400 `environmentIds is no longer
-            supported: deployments carry the environment` (a deployment's type is
-            its environment role).
+            NO LONGER SUPPORTED. Any value but null (an empty array included) is a 400
+            `environmentIds is no longer supported: deployments carry the environment` (a
+            deployment's type is its environment role); an explicit null is read as omitted.
         deploymentProductIds:
           type: array
           maxItems: 100
@@ -25811,15 +26687,21 @@ components:
             source only.
         durationInput:
           type: integer
+          minimum: 0
           description: >-
-            Calendar duration in whole seconds. Accepted only when it exactly
-            matches the effective planned window (plannedStartDate to
-            plannedEndDate in this same request).
+            Calendar duration in whole seconds. Not stored by the PostgreSQL data source,
+            and ignored when the change request is created in PostgreSQL only. On the data
+            source that talks to the previous system directly, and on the create that
+            writes the previous system first, it is forwarded to that system and must
+            exactly match the planned window: plannedStartDate and plannedEndDate are both
+            required with it and it must equal the seconds between them, else a 400; a
+            negative value is a 400 too.
         isPlanningVisibleToCustomers:
           type: boolean
           description: >-
-            Whether the Implementation Plan is visible to customers on the
-            customer-facing portal.
+            The "Implementation Plan visible to customers" checkbox. Stored and returned as sent
+            (forwarded to the previous system when the change request is written there); this
+            service does not otherwise act on it.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -25840,6 +26722,31 @@ components:
             of closed). Defaults to false. As customerApprovalRequired for Request
             Approval. Cannot be true when type is emergency (the same 400).
             PostgreSQL data source only.
+        standardChangeTemplateId:
+          type: string
+          format: uuid
+          description: >-
+            Raises the change request from a standard change template (PostgreSQL data sources).
+            Required for type standard (400 errorCode change_request_standard_template_field
+            without it); type may then be omitted. The template must be active (409 errorCode
+            standard_change_template_unavailable). Its current version, with the parameters
+            filled in, gives subject, description, justification, the implementation, backout and
+            test plans, riskImpactAnalysis, category, impact, risk, rollbackDurationText,
+            isPlanningVisibleToCustomers and the two customer boxes: sending any of them (or
+            implementationDeviation) is a 400 with errorCode change_request_standard_template_field.
+            A template is one customer's: projectId is required and must be a project of the
+            template's customer (400 errorCode standard_change_template_other_customer otherwise,
+            refused before the previous system is called on dual-write and again in the create
+            transaction); a template with no customer recorded is a 409
+            standard_change_template_unavailable.
+        standardChangeTemplateVersionId:
+          type: string
+          format: uuid
+          description: The version the caller rendered; a template revised since is a 409 (standard_change_template_unavailable).
+        standardChangeParameters:
+          type: object
+          additionalProperties: {type: string}
+          description: The values of the template version's parameters, by key (400 for a missing required value, an undeclared key or a value of the wrong kind).
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -25945,6 +26852,19 @@ components:
       description: >
         Any combination of fields may be supplied; at least one is required.
         Omitted fields are left unchanged.
+        AN EXPLICIT NULL clears implementationPlan, priority, category, requestedById,
+        affectedServicesText, affectedComponentsText and rollbackDurationText, and counts as a
+        field on its own (`{"implementationPlan": null}` alone is a valid request); the data
+        source that talks to the previous system directly forwards it to that system as a
+        null. A null durationInput is forwarded the same way by that data source and refused
+        by the PostgreSQL data sources, like any durationInput. customerGroupId and
+        environmentIds refuse a null like any other value. On every other field a null is
+        read as omitted: it changes nothing and does not count as a field. Of those fields
+        only deploymentProductIds is declared nullable; on the others send a value or leave
+        the field out. The keys are matched without regard to case, as the struct is decoded;
+        a body that names one of the ten fields whose null clears or is refused (the eight
+        above, customerGroupId and environmentIds) twice, with different capitalisation, is a
+        400.
         APPROVED CHANGE REQUESTS ARE READ-ONLY (PostgreSQL data source): once a change
         request has been approved -- it is in customer_approval, scheduled, implement,
         review, customer_review, closed or rollback, which it reaches only through its CAB
@@ -25952,9 +26872,28 @@ components:
         that changes any of its fields is a 400 naming them, with errorCode
         change_request_approved_read_only, and nothing is written. A field resent with the
         value it already holds is accepted. Still accepted: state, onHold / onHoldReason,
-        requestApproval, workNote and comment, a Re-schedule (state authorize with a new
-        planned window, out of customer_approval) and WSO2's answer to a time the customer
-        proposed.
+        requestApproval, workNote and comment, implementationDeviation (in implement, review
+        and customer_review), a Re-schedule (state authorize with a new planned window, out of
+        customer_approval) and WSO2's answer to a time the customer proposed. The refusal's
+        message ends "only work notes and the deviation from the implementation plan can be
+        added" in implement, review and customer_review, and "only work notes can be added"
+        in customer_approval, scheduled, closed and rollback.
+        THE DEVIATION FROM THE IMPLEMENTATION PLAN (implementationDeviation) is recorded from
+        implement on, judged on the stored state (before the PATCH is applied): in implement,
+        review and customer_review it is editable; in new (or no state) the only change
+        accepted is clearing one (a clone carried it over); in assess, authorize,
+        customer_approval and scheduled no change is accepted, clearing included -- each a 400
+        with errorCode change_request_deviation_not_yet; once the change request is closed,
+        canceled or rolled back a change is a 400 with errorCode change_request_deviation_final.
+        Resending the stored value is accepted in every state, and a blank value (no text once
+        the markup is removed) is a change only when one is stored. A refused PATCH writes
+        nothing. So the PATCH that closes the
+        change from review may record it, and the one that moves it from scheduled to
+        implement may not. Request Approval ({state: "assess"} on a change request in new) is
+        a 400 with errorCode change_request_deviation_not_incorporated while the deviation in
+        effect (the request's own value when it carries the field, else the stored one) is not
+        blank: fold it into the implementation plan and clear it first, in the same PATCH or
+        before.
       properties:
         title:
           type: string
@@ -25982,6 +26921,26 @@ components:
           type: string
           format: uuid
           description: Held to the same project and window as deploymentId.
+        serviceId:
+          type: string
+          format: uuid
+          description: >-
+            The IT service (an id from POST /services/search). An id that refers to no service is
+            a 400 ("serviceId does not refer to an existing record"). It cannot be cleared: an
+            explicit null is read as omitted. It is a field on its own: a request that carries
+            only serviceId is a valid request. PostgreSQL data sources only: it is not mirrored
+            to the previous system (a request that carries nothing else the previous system
+            takes is not sent to it at all). The data source that talks to the previous system
+            directly cannot send it: a request that carries it is a 400 naming it, whatever
+            else the request carries.
+        serviceOfferingId:
+          type: string
+          format: uuid
+          description: >-
+            The service offering (an id from POST /service-offerings/search). It is not checked
+            against serviceId. An id that refers to no offering is a 400 ("serviceOfferingId does
+            not refer to an existing record"). Otherwise as serviceId: it cannot be cleared, it is
+            a field on its own, and it is PostgreSQL data sources only.
         assignedEngineerId:
           type: string
           format: uuid
@@ -26048,16 +27007,23 @@ components:
         state:
           type: string
           description: >-
-            Accepted only along the transition graph (see the operation description): the
-            state the change request is in (a no-op) or one of the moves legalNextStates
-            offers from it; trimmed and case-insensitive. closed, canceled and rollback
-            are final (400 for any other state). "new" is accepted only for a change
-            request that is still in new (a no-op); once it has left New it cannot return
-            (400). "scheduled" is never accepted from an internal caller (it is reached by
-            the approval flow, or by the customer's own approval out of customer_approval);
-            out of customer_approval / customer_review only canceled, authorize
-            (Re-schedule / Propose a different time, customer_approval: the state does not
-            move) and rollback (customer_review) are accepted.
+            Accepted only along the transition graph (see the operation description): one of the
+            moves legalNextStates offers from the state the change request is in, or that state
+            again (a no-op), with the exceptions below. The value must be one of the lower-case
+            values below exactly; any other spelling, case or padding is a 400. closed, canceled
+            and rollback are final (400 for any other state). "new" is accepted only for a change
+            request that is still in new (a no-op); once it has left New it cannot return (400).
+            "assess" out of new is Request Approval (where it lands depends on the type, see the
+            operation description). "scheduled" and "customer_approval" are never accepted, also
+            when the change request is already in them: they are reached through the approval
+            flow, and scheduled also by the customer's own approval out of customer_approval.
+            "authorize" is accepted only out of customer_approval (Re-schedule / Propose a
+            different time: the state does not move), and "rollback" only from review, or from
+            customer_review while nobody is being asked. Out of customer_approval /
+            customer_review only canceled, authorize (customer_approval) and rollback
+            (customer_review) are accepted. While the change request is on hold, a request that
+            carries state, the state it is already in included, is a 400 unless the same request
+            sends onHold false.
           enum:
             - new
             - assess
@@ -26073,11 +27039,19 @@ components:
         type:
           type: string
           description: >-
-            The change type. Frozen once approval has been requested. Changing a change
-            INTO emergency while customerApprovalRequired or customerReviewRequired would
-            stay true is a 400 ("Emergency changes proceed without customer consent, so
-            customer approval and customer review cannot be required: turn off ... before
-            changing the type to emergency"); send the boxes as false in the same request.
+            The change type. Which values are accepted depends on the data source: the PostgreSQL
+            data sources accept standard, normal, emergency, azure, change_registration,
+            cloud_infrastructure, infra and unauthorized_change, and refuse model and
+            site_reliability_ops (400 'type "model" is not supported on the PostgreSQL data
+            source'); the data source that talks to the previous system directly accepts
+            standard, normal, emergency, model, site_reliability_ops and azure. On the PostgreSQL
+            data sources the type can be changed only while the change request is new (or has no
+            state): afterwards a different type is a 400 ("type can no longer be changed: ...")
+            and the stored type resent is accepted. Changing a change INTO emergency while
+            customerApprovalRequired or customerReviewRequired would stay true is a 400
+            ("Emergency changes proceed without customer consent, so customer approval and
+            customer review cannot be required: turn off ... before changing the type to
+            emergency"); send the boxes as false in the same request.
           enum:
             - standard
             - normal
@@ -26085,6 +27059,10 @@ components:
             - model
             - site_reliability_ops
             - azure
+            - change_registration
+            - cloud_infrastructure
+            - infra
+            - unauthorized_change
         justification:
           type: string
         impactDescription:
@@ -26116,11 +27094,43 @@ components:
             on the customer's behalf ...`) that writes nothing.
         requestApproval:
           type: boolean
+          description: >-
+            true records that approval has been requested (the change request's approval is set
+            to requested); false leaves it as it is. It does not move the state: Request Approval
+            is state "assess". Still accepted once the change request has been approved. On the
+            data source that talks to the previous system directly it is forwarded as sent, and
+            at most one of isCustomerApproved, isCustomerReviewed and requestApproval may be set
+            (400 otherwise).
+        onHold:
+          type: boolean
+          description: >-
+            Puts the change request on hold (true) or takes it off hold (false). true sets the
+            hold reason to onHoldReason from the same request, or clears it when onHoldReason is
+            not sent; false always clears the reason. While the change request is on hold (as
+            stored, before this request), a request that carries state, the state it is already
+            in included, is a 400 ("change request is on hold; take it off hold (onHold: false)
+            before changing its state") unless it also sends onHold false. confirmCustomerUpdatedDate
+            is refused with the same 400, and a customer's proposed implementation time with a 409
+            (errorCode change_request_on_hold); other requests are not affected. Not under the
+            approved-content lock. PostgreSQL data sources only: it is not mirrored to the
+            previous system (a request that carries nothing else the previous system takes, such
+            as onHold with onHoldReason, is not sent to it at all, so no write-back failure is
+            recorded). The data source that talks to the previous system directly cannot send
+            it: a request that carries onHold, onHoldReason, serviceId or serviceOfferingId is a
+            400 naming every one of them it carries, whatever else it carries.
+        onHoldReason:
+          type: string
+          description: >-
+            Why the change request is on hold (free text). With onHold true it becomes the hold
+            reason; with onHold false it is ignored and the reason is cleared. Sent without onHold
+            it replaces the stored reason, whether or not the change request is on hold.
+            PostgreSQL data sources only, as onHold.
         isPlanningVisibleToCustomers:
           type: boolean
           description: >-
-            Whether the Implementation Plan is visible to customers on the
-            customer-facing portal.
+            The "Implementation Plan visible to customers" checkbox. Stored and returned as sent
+            (forwarded on the data source that talks to the previous system directly); this
+            service does not otherwise act on it.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -26140,60 +27150,94 @@ components:
         customerReviewRequired:
           type: boolean
           description: >-
-            The "Customer Review" checkbox. Free while the change request is new. From
-            Request Approval on it is ADD-ONLY: true to false is a 400 in every state
-            ("customerReviewRequired can no longer be turned off ..."); false to true is
-            accepted up to and including review (from customer_review onwards "can no
-            longer be changed ...: the change request has already left the review stage")
-            and only when the change request has a Customer Project with somebody who can
-            be asked ("customer review is required but nobody on this project can be asked
-            ..."). Cannot be turned ON for an Emergency change, in any state (the same 400
-            as customerApprovalRequired). PostgreSQL data source only.
+            The "Customer Review" checkbox. Free while the change request is new. From Request
+            Approval on it is ADD-ONLY: true to false is a 400 in every state
+            ("customerReviewRequired can no longer be turned off ..."). Turning it on needs a
+            Customer Project ("cannot be turned on: this change request has no Customer Project
+            ...") and is accepted only while the state is assess or authorize, and only when
+            somebody on the project can be asked ("customer review is required but nobody on this
+            project can be asked ..."). In customer_approval, scheduled, implement and review the
+            change request has been approved and its fields are read-only (400 errorCode
+            change_request_approved_read_only); in customer_review, rollback, closed and canceled
+            a change is a 400 ("can no longer be changed ...: the change request has already left
+            the review stage"). Resending the stored value is always accepted. Cannot be turned ON
+            for an Emergency change, in any state (the same 400 as customerApprovalRequired).
+            PostgreSQL data source only.
         implementationPlan:
           type: string
           nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            The implementation plan (rich text, stored as sent). An empty string empties it; an
+            explicit null clears it (the detail then reads null).
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan (rich text). A blank value clears it:
+            blank is no text once the markup is removed, so "<p><br></p>", "<p>&nbsp;</p>" and
+            markup that is only images are blank too, and a stored value that is blank counts as
+            none. Blank is judged as the CSM webapp judges it, on the markup as DOMPurify would
+            sanitise it (an element holding only text and at least one comment is dropped with
+            them when that text looks like markup); send well-formed HTML. Not under the approved-content lock: recorded in implement, review and
+            customer_review, judged on the stored state. In new (or no state) only clearing it
+            is accepted, in assess, authorize, customer_approval and scheduled no change is (400
+            change_request_deviation_not_yet), and in closed, canceled and rollback none is (400
+            change_request_deviation_final); resending the stored value is always accepted.
+            Request Approval is refused while one is stored unless the same request clears it
+            (400 change_request_deviation_not_incorporated). Staff only: a customer's PATCH
+            carrying it is a 403. Refused with a 400 by a data source that cannot store it; never
+            mirrored to the previous system.
         priority:
           type: string
           nullable: true
-          enum: [critical, high, moderate, low]
-          description: Explicit null clears the field.
+          enum: [critical, high, moderate, low, null]
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources "priority must be one of
+            critical, high, moderate or low", as on create), planning included: a change request
+            migrated from the previous system can read back planning (its priority 5), but it is
+            not a value this API sets, so it is refused even when it is the stored value. An
+            explicit null clears the priority.
         category:
           type: string
-          nullable: true
           enum: [hardware, software, service, system_software, applications_software,
                  network, telecom, documentation, other, regular_release_cloud,
-                 hotfix_release_cloud, devops, cloud_computing]
-          description: Explicit null clears the field.
+                 hotfix_release_cloud, devops, cloud_computing, null]
+          nullable: true
+          description: >-
+            An explicit null clears the category.
         requestedById:
           type: string
           format: uuid
           nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            The requester (a user id). An explicit null clears it. Once the change request has
+            left new, a
+            different requester is a 400 when a customer approval or review still ahead would
+            then have nobody on the project to ask (the requester never approves their own
+            change).
         affectedServicesText:
           type: string
           nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            Free text. An empty string empties it; an explicit null clears it.
         affectedComponentsText:
           type: string
           nullable: true
-          description: Explicit null clears the field.
+          description: >-
+            Free text. An empty string empties it; an explicit null clears it.
         rollbackDurationText:
           type: string
           nullable: true
-          description: Raw, unvalidated free text. Explicit null clears the field.
+          description: >-
+            Raw, unvalidated free text. An empty string empties it; an explicit null clears it.
         customerGroupId:
           type: string
           format: uuid
-          nullable: true
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED (any value, null included, is a 400 `customerGroupId
-            is no longer accepted: the customer group is derived from the customer
-            project's registered contacts`). The Customer Group is read-only and
-            follows `projectId`: changing the project re-derives it, and a live
-            Customer Approval / Customer Review stage is replaced by one for the new
-            project's contacts.
+            NO LONGER ACCEPTED: any value, null included, is a 400 (`customerGroupId is no longer
+            accepted: the customer group is derived from the customer project's registered
+            contacts`). The Customer Group is read-only:
+            it is derived from the registered contacts of the change request's project.
         deploymentIds:
           type: array
           maxItems: 100
@@ -26216,14 +27260,13 @@ components:
             resending the stored value is accepted. PostgreSQL data source only.
         environmentIds:
           type: array
-          nullable: true
           deprecated: true
           items:
             type: string
             format: uuid
           description: >-
-            NO LONGER SUPPORTED. Any value is a 400 `environmentIds is no longer
-            supported: deployments carry the environment`.
+            NO LONGER SUPPORTED. Any value, null and an empty array included, is a 400
+            `environmentIds is no longer supported: deployments carry the environment`.
         deploymentProductIds:
           type: array
           nullable: true
@@ -26234,7 +27277,8 @@ components:
           description: >-
             READ-ONLY, derived from the deployments. Accepted only when it is
             exactly the derived set (otherwise 400); the stored list is always
-            the derived one.
+            the derived one. An explicit null is read as omitted: it changes
+            nothing and does not count as a field.
         comment:
           type: string
           description: >-
@@ -26248,9 +27292,12 @@ components:
         durationInput:
           type: integer
           nullable: true
+          minimum: 0
           description: >-
-            Calendar duration in whole seconds. Accepted only when it exactly
-            matches the effective planned window. Explicit null clears the field.
+            Calendar duration in whole seconds. The PostgreSQL data sources refuse any value (400
+            "durationInput is not supported on this data source"), null included. The data source
+            that talks to the previous system directly forwards it as sent, without checking it
+            against the planned window, and forwards a null as a null; a negative value is a 400.
 
     PatchChangeRequestResponse:
       type: object
@@ -30040,6 +31087,384 @@ components:
                 type: string
                 nullable: true
                 description: The link the removed runbook had.
+    StandardChangeParameter:
+      type: object
+      required: [key, label, type, required]
+      properties:
+        key:
+          type: string
+          description: Lower-case letters, digits and _, starting with a letter; written {{key}} in the template's text.
+        label:
+          type: string
+        type:
+          type: string
+          enum: [text, textarea, number, date, select]
+        required:
+          type: boolean
+        helpText:
+          type: string
+          nullable: true
+        options:
+          type: array
+          items: {type: string}
+          description: The choices of a select (and only of a select).
+    StandardChangeContent:
+      type: object
+      description: What a template fixes on every change request raised from it. On a draft proposal any part may still be missing.
+      properties:
+        subject: {type: string, nullable: true, description: 'Plain text; becomes the change request title.'}
+        description: {type: string, nullable: true}
+        justification: {type: string, nullable: true}
+        implementationPlan: {type: string, nullable: true}
+        riskImpactAnalysis: {type: string, nullable: true}
+        backoutPlan: {type: string, nullable: true}
+        testPlan: {type: string, nullable: true}
+        category: {type: string, nullable: true}
+        impact: {type: string, nullable: true, enum: [high, medium, low]}
+        risk: {type: string, nullable: true, enum: [high, moderate, low], description: 'A draft may hold high; submitting it is refused (a standard change cannot be high risk).'}
+        rollbackDurationText: {type: string, nullable: true}
+        isPlanningVisibleToCustomers: {type: boolean}
+        customerApprovalRequired: {type: boolean}
+        customerReviewRequired: {type: boolean}
+        parameters:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeParameter'}
+    StandardChangeTemplateVersion:
+      allOf:
+        - $ref: '#/components/schemas/StandardChangeContent'
+        - type: object
+          required: [id, templateId, version, approvedOn, approvedBy]
+          properties:
+            id: {type: string, format: uuid}
+            templateId: {type: string, format: uuid}
+            version: {type: integer}
+            proposal:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+            approvedOn: {type: string, format: date-time}
+            approvedBy: {type: string}
+    StandardChangeTemplateVersionSummary:
+      type: object
+      required: [id, version, approvedOn, approvedBy]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer}
+        proposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        approvedOn: {type: string, format: date-time}
+        approvedBy: {type: string}
+    StandardChangeTemplateUsage:
+      type: object
+      properties:
+        total: {type: integer}
+        open: {type: integer}
+        closed: {type: integer}
+        rolledBack: {type: integer}
+        canceled: {type: integer}
+        lastUsedOn: {type: string, format: date-time, nullable: true}
+    StandardChangeTemplate:
+      type: object
+      required: [id, number, name, state, usage, reviewRequired]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: 'STD number.'}
+        name: {type: string}
+        state: {type: string, enum: [active, suspended, retired]}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: >
+            The customer (account) the template belongs to. A change request is raised from
+            it only for one of this customer's projects, and its name is unique among this
+            customer's live templates. Null only on a template written before templates
+            belonged to one customer whose customer could not be told (it cannot be changed
+            or used until its customer is set).
+        owner:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        currentVersion:
+          allOf: [{$ref: '#/components/schemas/StandardChangeTemplateVersion'}]
+          nullable: true
+        reviewRequired:
+          type: boolean
+          description: A change raised from the template was rolled back or deviated from its plan. It does not stop the template being used.
+        reviewRequiredReason: {type: string, nullable: true}
+        reviewRequiredOn: {type: string, format: date-time, nullable: true}
+        reviewRequiredChangeRequest:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        suspendedReason:
+          type: string
+          nullable: true
+          description: Why the template was suspended. Null unless it is suspended, and may be null on a suspended template (the reason is optional).
+        suspendedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the template was suspended. Null unless it is suspended.
+        suspendedBy:
+          type: string
+          nullable: true
+          description: Email of who suspended the template. Null unless it is suspended.
+        openProposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        usage: {$ref: '#/components/schemas/StandardChangeTemplateUsage'}
+        createdOn: {type: string, format: date-time}
+        createdBy: {type: string}
+        updatedOn: {type: string, format: date-time}
+        updatedBy: {type: string}
+        versions:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplateVersionSummary'}
+          description: On GET /standard-change-templates/{id} only, newest first.
+    SuspendStandardChangeTemplateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+          description: Why the template is suspended. Optional; trimmed, and blank means none. At most 1000 characters (400 when longer).
+    SearchStandardChangeTemplatesRequest:
+      type: object
+      properties:
+        states:
+          type: array
+          items: {type: string, enum: [active, suspended, retired]}
+        query: {type: string, nullable: true, description: 'Matches the name or number, ignoring case.'}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to one customer''s templates (400 when not a UUID).'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+    SearchStandardChangeTemplatesResponse:
+      type: object
+      required: [templates, total, limit, offset]
+      properties:
+        templates:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplate'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    StandardChangeEvidence:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        subject: {type: string}
+        state: {type: string, nullable: true}
+        closedOn: {type: string, format: date-time, nullable: true}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: "The change request's customer now (its project's account); null when it has none."
+    StandardChangeProposalApprover:
+      type: object
+      properties:
+        approver:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        state: {type: string, description: 'REQUESTED, APPROVED, REJECTED or CANCELLED.'}
+        comments: {type: string, nullable: true}
+        updatedOn: {type: string, format: date-time, nullable: true}
+        canDecide: {type: boolean}
+    StandardChangeProposal:
+      allOf:
+        - $ref: '#/components/schemas/StandardChangeContent'
+        - type: object
+          required: [id, number, kind, state, name]
+          properties:
+            id: {type: string, format: uuid}
+            number: {type: string, description: 'SCP number.'}
+            kind: {type: string, enum: [new, modify, retire]}
+            state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+            name: {type: string}
+            customer:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The customer (account) the proposal is for: what a new proposal names, or takes
+                from the change request it starts from or the proposal it copies; the template's
+                for a modification or retirement. Null on a new draft that has not named one yet,
+                which cannot be submitted.
+            rationale: {type: string, nullable: true}
+            template:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+            baseVersion: {type: integer, nullable: true}
+            sourceChangeRequest:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The closed change request a new proposal started from (or that a copy carried
+                over). It must be a closed change request of the proposal's customer, checked at
+                create and again at submit (400, in the evidence refusal's words).
+            copiedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              nullable: true
+              description: >
+                The proposal a new draft was copied from (name: its number); null when it was not
+                copied. A copy is for the copied proposal's customer: only a new draft started from
+                nothing (no source change request, not a copy) may change its customer by PATCH.
+            evidence:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeEvidence'}
+            approvers:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeProposalApprover'}
+            proposedBy:
+              allOf: [{$ref: '#/components/schemas/UserReference'}]
+              nullable: true
+            submittedOn: {type: string, format: date-time, nullable: true}
+            decidedOn: {type: string, format: date-time, nullable: true}
+            decidedBy:
+              allOf: [{$ref: '#/components/schemas/UserReference'}]
+              nullable: true
+            decisionComment: {type: string, nullable: true}
+            resultingVersion: {type: integer, nullable: true}
+            createdOn: {type: string, format: date-time}
+            updatedOn: {type: string, format: date-time}
+            canEdit: {type: boolean}
+            canSubmit: {type: boolean}
+            canWithdraw: {type: boolean}
+    CreateStandardChangeProposalRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [new, modify, retire]}
+        templateId: {type: string, format: uuid, nullable: true, description: 'Required for modify and retire.'}
+        sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
+        copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
+        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The customer (account) a new proposal is for. One started from a change request takes
+            that change request's project's customer (a change request with none cannot be started
+            from), one copied from a proposal takes that proposal's, and a modification or
+            retirement its template's: a different accountId is then a 400. Optional on a new
+            proposal started from nothing (it may be named later), but a new proposal cannot be
+            submitted without one. An id that is not an account is a 400.
+    UpdateStandardChangeProposalRequest:
+      type: object
+      description: >
+        Omitted fields are left as they are; an empty category, impact or risk clears it; parameters
+        and evidenceChangeRequestIds replace the whole list. Evidence must be closed change requests of
+        the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
+      properties:
+        name: {type: string}
+        accountId:
+          type: string
+          format: uuid
+          description: >
+            Names or changes the customer of a new draft that did not start from a change request; the
+            evidence it cites (or keeps) must be that customer's, else a 400 and nothing changes. A draft
+            started from a change request, and a modification or retirement, keep the customer they have:
+            resending it is accepted, another is a 400.
+        rationale: {type: string}
+        subject: {type: string}
+        description: {type: string}
+        justification: {type: string}
+        implementationPlan: {type: string}
+        riskImpactAnalysis: {type: string}
+        backoutPlan: {type: string}
+        testPlan: {type: string}
+        category: {type: string}
+        impact: {type: string, enum: ['', high, medium, low]}
+        risk: {type: string, enum: ['', high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
+        rollbackDurationText: {type: string}
+        isPlanningVisibleToCustomers: {type: boolean}
+        customerApprovalRequired: {type: boolean}
+        customerReviewRequired: {type: boolean}
+        parameters:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeParameter'}
+        evidenceChangeRequestIds:
+          type: array
+          items: {type: string, format: uuid}
+    DecideStandardChangeProposalRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approved, rejected]}
+        comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+    SearchStandardChangeProposalsRequest:
+      type: object
+      properties:
+        states:
+          type: array
+          items: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        kinds:
+          type: array
+          items: {type: string, enum: [new, modify, retire]}
+        templateId: {type: string, format: uuid, nullable: true}
+        accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
+        proposedByMe: {type: boolean}
+        awaitingMyDecision: {type: boolean}
+        query: {type: string, nullable: true}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+    StandardChangeProposalSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        kind: {type: string, enum: [new, modify, retire]}
+        state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        name: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        template:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+        proposedBy:
+          allOf: [{$ref: '#/components/schemas/UserReference'}]
+          nullable: true
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        submittedOn: {type: string, format: date-time, nullable: true}
+        decidedOn: {type: string, format: date-time, nullable: true}
+    SearchStandardChangeProposalsResponse:
+      type: object
+      required: [proposals, total, limit, offset]
+      properties:
+        proposals:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeProposalSummary'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    ChangeRequestStandardChange:
+      type: object
+      description: The standard change template a change request was raised from (staff only).
+      required: [template, templateNumber, versionId, version, parameters]
+      properties:
+        template: {$ref: '#/components/schemas/EntityRef'}
+        templateNumber: {type: string}
+        customer:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The template's customer, which is the account of this change request's project.
+        customerMismatch:
+          type: boolean
+          description: >
+            True when the change request's project is no longer a project of the template's
+            customer (the Salesforce project sync moved the project to another account after the
+            change was raised). Request Approval is then refused with 400
+            `standard_change_template_other_customer`.
+        versionId: {type: string, format: uuid}
+        version: {type: integer}
+        parameters:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/StandardChangeParameter'
+              - type: object
+                properties:
+                  value: {type: string, nullable: true}
+
     ErrorResponse:
       type: object
       description: >-
@@ -30091,7 +31516,25 @@ components:
             `change_request_approved_read_only` (400: a field of a change request that has
             been approved -- CAB approval received, or a Standard change once scheduled --
             would change; its fields are read-only, work notes can still be added; nothing
-            written). The list grows, so this is
+            written), `change_request_deviation_final` (400: the deviation from the
+            implementation plan of a change request that is closed, canceled or rolled back
+            would change; nothing written), `change_request_deviation_not_yet` (400: the
+            deviation would change before implementation has started -- in new anything but
+            clearing one a clone carried over, in assess to scheduled any change; nothing
+            written), `change_request_deviation_not_incorporated` (400: Request Approval
+            while the change request still has a deviation from the implementation plan, which
+            has to be folded into the implementation plan and cleared first; nothing written),
+            `change_request_standard_template_field` (400: a create or PATCH of a change request
+            raised from a standard change template sets or changes a field the template specifies,
+            a standard change created with no template, or a change of type to or from standard;
+            nothing written), `standard_change_template_unavailable` (409: the template is
+            suspended, retired or was revised since, or has no customer recorded; nothing written), and
+            `standard_change_template_other_customer` (400: a change request raised from a standard change
+            template for no project or for a project of another customer than the template's, or a PATCH
+            that moves such a change request to another customer's project, in any state, or Request
+            Approval of one whose project the Salesforce project sync has since moved to another
+            customer; nothing written).
+            The list grows, so this is
             deliberately not a closed enum: a value not listed here is a newer server's.
           example: change_request_on_hold
 

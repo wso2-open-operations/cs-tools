@@ -51,6 +51,13 @@ type CRNoticeDetails struct {
 	ActorIsWSO2      bool
 }
 
+// CRNoticeActor is a user as a notice names them: ActorName and ActorIsWSO2
+// of CRNoticeDetails, for an actor named by id rather than by the last writer.
+type CRNoticeActor struct {
+	Name   string
+	IsWSO2 bool
+}
+
 // CRNoticeRepository reads what the change-request notices need: the outbox
 // rows that trigger them, and the audiences they are addressed to.
 //
@@ -59,6 +66,9 @@ type CRNoticeDetails struct {
 type CRNoticeRepository interface {
 	ClaimChanges(ctx context.Context, entityTypes []string, limit int) ([]OutboxChange, error)
 	Details(ctx context.Context, id string) (CRNoticeDetails, error)
+	// UserActor names the "user" userID by the rule Details names the last
+	// writer by: for an actor the outbox row itself records.
+	UserActor(ctx context.Context, userID string) (CRNoticeActor, error)
 	GroupMemberEmails(ctx context.Context, teamName string) ([]string, error)
 	ProjectContactEmails(ctx context.Context, projectID string) ([]string, error)
 	// CustomerNoticeEmails is the customer audience of one change request's
@@ -176,16 +186,8 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 		       COALESCE(p.name, ''),
 		       COALESCE(wi.subject, ''),
 		       COALESCE(wi.description, ''),
-		       -- Last name first: the ServiceNow templates interpolate the two
-		       -- name pills in that order, and a port that quietly reorders
-		       -- them is a port that reads differently from the mail it
-		       -- replaces.
-		       COALESCE(
-		           NULLIF(TRIM(COALESCE(a.last_name, '') || ' ' || COALESCE(a.first_name, '')), ''),
-		           NULLIF(TRIM(COALESCE(a.name, '')), ''),
-		           ''
-		       ),
-		       lower(COALESCE(a.email, wi.updated_by, '')) LIKE '%@wso2.com'
+		       ` + crNoticeActorNameSQL + `,
+		       lower(COALESCE(a.email, wi.updated_by, ''))` + crNoticeWSO2AddressSQL + `
 		FROM change_request cr
 		JOIN work_item wi   ON wi.id = cr.id
 		-- requested_by_user_id, not work_item.opened_by_user_id: the change
@@ -213,6 +215,58 @@ func (r *crNoticeRepository) Details(ctx context.Context, id string) (CRNoticeDe
 		return CRNoticeDetails{}, fmt.Errorf("crnotice: read change request %s: %w", id, err)
 	}
 	return d, nil
+}
+
+// crNoticeActorNameSQL is the name a notice gives its actor, the "user" row
+// aliased a. Last name first: the previous system's templates interpolate the
+// two name pills in that order, and a port that quietly reorders them is a port
+// that reads differently from the mail it replaces.
+const crNoticeActorNameSQL = `COALESCE(
+		           NULLIF(TRIM(COALESCE(a.last_name, '') || ' ' || COALESCE(a.first_name, '')), ''),
+		           NULLIF(TRIM(COALESCE(a.name, '')), ''),
+		           ''
+		       )`
+
+// crNoticeWSO2AddressSQL completes "lower(<the actor's address>)" into the test
+// of a WSO2 actor: an address at wso2.com, the test the previous system's trigger
+// applied to the last writer.
+const crNoticeWSO2AddressSQL = ` LIKE '%@wso2.com'`
+
+// UserActor names the user userID the way Details names the last writer
+// (ActorName, ActorIsWSO2): crNoticeActorNameSQL, and WSO2 when the address
+// that names them -- their email, else their user name, which is what
+// work_item.updated_by holds for a user with no email -- is a wso2.com one.
+//
+// It is for an actor the outbox row records itself: the contact who proposed a
+// customer's time (change_request.customer_proposed_by_user_id, migration 0249,
+// written in the same UPDATE as the date), whom no later write replaces, unlike
+// the work_item.updated_by Details reads at drain time.
+//
+// A user that does not exist (deleted since the row was written: the FK is ON
+// DELETE SET NULL, but the outbox snapshot keeps the id) yields a zero value and
+// no error: unnamed, as Details' actor is when the last writer matches no user,
+// and not WSO2, since no address is left to test. Details differs there: it
+// tests work_item.updated_by itself, so an unmatched wso2.com writer is WSO2.
+//
+// crvis: background notice drainer under the system identity; reads one "user" row, not a change request
+func (r *crNoticeRepository) UserActor(ctx context.Context, userID string) (CRNoticeActor, error) {
+	// WithSystemIdentity: same reasoning as Details' own stamp above.
+	ctx = WithSystemIdentity(ctx)
+	const query = `
+		SELECT ` + crNoticeActorNameSQL + `,
+		       lower(COALESCE(a.email, a.user_name, ''))` + crNoticeWSO2AddressSQL + `
+		FROM "user" a
+		WHERE a.id = $1::uuid`
+
+	var actor CRNoticeActor
+	err := r.db.QueryRow(ctx, query, userID).Scan(&actor.Name, &actor.IsWSO2)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CRNoticeActor{}, nil
+	}
+	if err != nil {
+		return CRNoticeActor{}, fmt.Errorf("crnotice: read user %s: %w", userID, err)
+	}
+	return actor, nil
 }
 
 // GroupMemberEmails returns the addresses of everyone in a named team — the

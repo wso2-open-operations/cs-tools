@@ -566,6 +566,10 @@ func (s *snChangeRequestService) AggregateChangeRequests(ctx context.Context, re
 	return resp, nil
 }
 
+// implementationDeviationNotOnServiceNowMsg refuses the deviation from the
+// implementation plan on the ServiceNow data source, which has no field for it.
+const implementationDeviationNotOnServiceNowMsg = "implementationDeviation is not supported on the ServiceNow data source"
+
 // snCreateChangeRequestPayload is the Choreo POST /change-requests request
 // body. Deliberately has no stateKey field: the org's own Change Management
 // process flow confirms every change request begins at New unconditionally
@@ -800,6 +804,12 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	if err := repository.RejectRemovedCreateFields(req); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
+	// The standard change catalogue lives in PostgreSQL; this data source has no
+	// template to raise the change from. (The dual-write service strips these
+	// before it mirrors.)
+	if req.StandardChangeTemplateID != nil || req.StandardChangeTemplateVersionID != nil || len(req.StandardChangeParameters) > 0 {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "standard change templates are only supported on the PostgreSQL data source"}
+	}
 	if req.Subject == "" {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "subject is required"}
 	}
@@ -809,6 +819,12 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	// sole data source.)
 	if req.ProjectID != nil || len(req.DeploymentIDs) > 0 {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "projectId and deploymentIds are not supported on the ServiceNow data source"}
+	}
+	// ServiceNow has no field for the deviation from the implementation plan
+	// either (the dual-write service strips it before it mirrors). Blank is the
+	// PostgreSQL data source's rule (markup with no text is none).
+	if req.ImplementationDeviation != nil && !repository.IsBlankRichText(*req.ImplementationDeviation) {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
 	}
 	if req.Category != nil {
 		if _, ok := snCRCategoryIDMap[*req.Category]; !ok {
@@ -1061,6 +1077,28 @@ type snPatchChangeRequestPayload struct {
 	WorkNote *string `json:"workNote,omitempty"`
 }
 
+// snUnforwardedChangeRequestPatchFields names the fields of req that
+// snPatchChangeRequestPayload has no field for (serviceId, serviceOfferingId,
+// onHold, onHoldReason), in that order. PatchChangeRequest refuses a request
+// that carries any of them, whatever else it carries, rather than leave them
+// unwritten.
+func snUnforwardedChangeRequestPatchFields(req domain.PatchChangeRequestRequest) []string {
+	var names []string
+	if req.ServiceID != nil {
+		names = append(names, "serviceId")
+	}
+	if req.ServiceOfferingID != nil {
+		names = append(names, "serviceOfferingId")
+	}
+	if req.OnHold != nil {
+		names = append(names, "onHold")
+	}
+	if req.OnHoldReason != nil {
+		names = append(names, "onHoldReason")
+	}
+	return names
+}
+
 // rawJSONOrNull marshals v (or emits the JSON literal null when v is nil) into
 // a json.RawMessage, for building a tri-state PATCH payload field from a
 // **T domain pointer-to-pointer.
@@ -1092,6 +1130,18 @@ func (s *snChangeRequestService) PatchChangeRequest(ctx context.Context, id stri
 	}
 	if req.DeploymentIDs != nil {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "deploymentIds is not supported on the ServiceNow data source"}
+	}
+	if req.ImplementationDeviation != nil {
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: implementationDeviationNotOnServiceNowMsg}
+	}
+	// The service and the hold have no field in this data source's PATCH
+	// payload either: refused, never dropped.
+	if unforwarded := snUnforwardedChangeRequestPatchFields(req); len(unforwarded) > 0 {
+		verb := "is"
+		if len(unforwarded) > 1 {
+			verb = "are"
+		}
+		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: strings.Join(unforwarded, ", ") + " " + verb + " not supported on the ServiceNow data source"}
 	}
 	// WSO2's answer to a time the customer proposed lives in PostgreSQL (customer_updated_on /
 	// customer_updated_date_confirmation): ServiceNow is the authority on this data source, and

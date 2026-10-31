@@ -129,6 +129,7 @@ type fakeChangeRequestDetailRow struct {
 	customerUpdatedOn, workStart, workEnd                              *time.Time
 	gitReference                                                       *string
 	customerApprovalRequired, customerReviewRequired                   bool
+	implementationDeviation                                            *string
 }
 
 func (f fakeChangeRequestDetailRow) Scan(dest ...any) error {
@@ -155,6 +156,7 @@ func (f fakeChangeRequestDetailRow) Scan(dest ...any) error {
 		f.confirmCustomerUpdatedDate, f.customerUpdatedOn,
 		f.workStart, f.workEnd, f.gitReference,
 		f.customerApprovalRequired, f.customerReviewRequired,
+		f.implementationDeviation,
 	}
 	if len(dest) != len(vals) {
 		panic("fakeChangeRequestDetailRow: dest/vals length mismatch -- update this fake to match scanChangeRequestViewAndDetail's Scan call")
@@ -205,7 +207,8 @@ func TestScanChangeRequestViewAndDetail_FieldParityAdditions(t *testing.T) {
 			isPlanningVisibleToCustomers: boolPtrCR(true),
 			confirmCustomerUpdatedDate:   strPtrCR("AGREE"),
 			customerUpdatedOn:            &now, workStart: &now, workEnd: &now,
-			gitReference: strPtrCR("main@abc123"),
+			gitReference:            strPtrCR("main@abc123"),
+			implementationDeviation: strPtrCR("<p>did it another way</p>"),
 		}
 		var cr domain.ChangeRequest
 		if err := scanChangeRequestViewAndDetail(row, &cr); err != nil {
@@ -213,6 +216,9 @@ func TestScanChangeRequestViewAndDetail_FieldParityAdditions(t *testing.T) {
 		}
 		if cr.ImplementationPlan == nil || *cr.ImplementationPlan != "do the thing" {
 			t.Errorf("ImplementationPlan = %v, want \"do the thing\"", cr.ImplementationPlan)
+		}
+		if cr.ImplementationDeviation == nil || *cr.ImplementationDeviation != "<p>did it another way</p>" {
+			t.Errorf("ImplementationDeviation = %v, want the stored deviation", cr.ImplementationDeviation)
 		}
 		if cr.Priority == nil || *cr.Priority != "high" {
 			t.Errorf("Priority = %v, want \"high\" (lower-cased)", cr.Priority)

@@ -57,6 +57,7 @@ import ChangeRequestScopeFields, {
   ChangeRequestCustomerGroupField,
 } from "@features/csm-operations/components/ChangeRequestScopeFields";
 import { useChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
+import CarriedOverDeviationField from "@features/csm-operations/components/CarriedOverDeviationField";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import {
   backendUtcToZonedInput,
@@ -74,6 +75,7 @@ import {
   CHANGE_REQUEST_IMPACT_OPTIONS,
   CHANGE_REQUEST_PRIORITY_OPTIONS,
   CHANGE_REQUEST_TYPE_FROZEN_REASON,
+  changeRequestApprovedNotice,
   changeRequestApprovedReadOnlyReason,
   changeRequestCategoryValue,
   changeRequestImpactValue,
@@ -84,9 +86,14 @@ import {
   customerRequirementOnceSavedHelper,
   customerReviewLockedReason,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
+  implementationDeviationClearable,
+  implementationDeviationLockedReason,
+  implementationDeviationOffered,
   isChangeRequestCreationPhase,
   isEmergencyChangeRequestType,
   parentRecordLabel,
+  STANDARD_TEMPLATE_FIELD_LOCKED_REASON,
+  STANDARD_TEMPLATE_TYPE_LOCKED_REASON,
 } from "@features/csm-operations/utils/changeRequests";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
@@ -116,6 +123,9 @@ interface EditChangeRequestDialogProps {
    */
   variant?: "dialog" | "inline";
 }
+
+/** The short hint under each field a standard change template specifies (the full reason is in the notice above them). */
+const TEMPLATE_FIELD_HINT = "Set by the standard change template.";
 
 /** The create form's subject cap. */
 const SUBJECT_MAX = 500;
@@ -244,9 +254,18 @@ function useRichTextPlanField(storedHtml?: string | null): RichTextPlanField {
  * ONCE THE CHANGE REQUEST HAS BEEN APPROVED (CAB approval received; a Standard
  * change once Request Approval scheduled it) every field is read-only
  * (`changeRequestApprovedReadOnlyReason`): the form shows them disabled under
- * the reason and offers only a work note, which is all the backend accepts
- * then (400 `change_request_approved_read_only` otherwise). A work note can be
- * added with any save, before the approval too.
+ * the reason and offers a work note and the DEVIATION FROM THE IMPLEMENTATION
+ * PLAN from Implement on, which is all the backend accepts then (400
+ * `change_request_approved_read_only` otherwise). The deviation has a lock of
+ * its own (`implementationDeviationLockedReason`, judged on the stored state):
+ * editable in implement, review and customer_review; before that read-only (400
+ * `change_request_deviation_not_yet`) and final once the change is closed,
+ * canceled or rolled back (400 `change_request_deviation_final`), shown only
+ * when one is stored. In New a stored one can only have been carried over by a
+ * clone: it is shown read-only under the plan with a "Clear deviation" action
+ * (`implementationDeviationClearable`), sent as `implementationDeviation: ""`
+ * with the save, because Request Approval is refused while it is there.
+ * A work note can be added with any save, before the approval too.
  *
  * Deliberately NOT here, even though the backend's write contract accepts
  * them: the customer-visible `comment` (the Comments tab covers it), and
@@ -288,9 +307,27 @@ export default function EditChangeRequestDialog({
   const initialIsPlanningVisibleToCustomers = cr.isPlanningVisibleToCustomers ?? false;
   const initialCustomerApprovalRequired = cr.customerApprovalRequired ?? false;
   const initialCustomerReviewRequired = cr.customerReviewRequired ?? false;
-  // Once approved, every field is read-only: only a work note can be added.
+  // Once approved, every field is read-only: only a work note can be added, and,
+  // from Implement until the change is closed, canceled or rolled back, the
+  // deviation from the plan.
   const approvedLock = changeRequestApprovedReadOnlyReason(cr.state);
+  const approvedNotice = changeRequestApprovedNotice(cr.state);
   const fieldsDisabled = isSaving || !!approvedLock;
+  // Raised from a standard change template: what the template specifies (the
+  // subject, the plans, impact, category, rollback duration, planning visibility
+  // and the two customer boxes) is frozen in every state; the backend refuses a
+  // change to any of them (400 `change_request_standard_template_field`). The
+  // parameters' values cannot be edited either. Everything else stays editable.
+  const templateLock = cr.standardChange ? STANDARD_TEMPLATE_FIELD_LOCKED_REASON : null;
+  const templateDisabled = fieldsDisabled || !!templateLock;
+  // The deviation is not under that lock: it is recorded in implement, review
+  // and customer_review, and elsewhere shown read-only when one is stored. In New
+  // a stored one (a clone carried it) can be cleared, and has to be before
+  // Request Approval.
+  const deviationLocked = implementationDeviationLockedReason(cr.state, cr.implementationDeviation);
+  const showDeviation = implementationDeviationOffered(cr.state, cr.implementationDeviation);
+  const deviationClearable = implementationDeviationClearable(cr.state, cr.implementationDeviation);
+  const [deviationCleared, setDeviationCleared] = useState(false);
   const initialTitle = cr.subject ?? "";
   const [title, setTitle] = useState(initialTitle);
   const initialImpact = changeRequestImpactValue(cr.impact);
@@ -300,7 +337,11 @@ export default function EditChangeRequestDialog({
   // The type decides the approval flow: editable in New only (the backend's rule).
   const initialType = creatableTypeValue(cr.type);
   const [type, setType] = useState<BeChangeRequestType | "">(initialType);
-  const typeLocked = isChangeRequestCreationPhase(cr.state) ? null : CHANGE_REQUEST_TYPE_FROZEN_REASON;
+  const typeLocked = cr.standardChange
+    ? STANDARD_TEMPLATE_TYPE_LOCKED_REASON
+    : isChangeRequestCreationPhase(cr.state)
+      ? null
+      : CHANGE_REQUEST_TYPE_FROZEN_REASON;
   const [workNote, setWorkNote] = useState("");
   // Emergency: no customer steps (see the doc comment above). In New the form seeds
   // them OFF, so a leftover tick from before the rule is cleared by saving. The
@@ -318,15 +359,17 @@ export default function EditChangeRequestDialog({
   // An Emergency change's unticked box is off for the Emergency rule (the line under
   // the boxes), not for one of these reasons; a box a change of that type still has
   // ticked from before the rule keeps its add-only one.
-  const customerApprovalLocked =
-    storedIsEmergency && !initialCustomerApprovalRequired
+  const customerApprovalLocked = templateLock
+    ? TEMPLATE_FIELD_HINT
+    : storedIsEmergency && !initialCustomerApprovalRequired
       ? null
       : customerApprovalLockedReason(cr.state, {
           stored: initialCustomerApprovalRequired,
           hasProject: hasStoredProject,
         });
-  const customerReviewLocked =
-    storedIsEmergency && !initialCustomerReviewRequired
+  const customerReviewLocked = templateLock
+    ? TEMPLATE_FIELD_HINT
+    : storedIsEmergency && !initialCustomerReviewRequired
       ? null
       : customerReviewLockedReason(cr.state, {
           stored: initialCustomerReviewRequired,
@@ -345,6 +388,9 @@ export default function EditChangeRequestDialog({
   // stay editable (within that project) until Implement. The backend refuses
   // anything else, so the controls are disabled up front with the reason.
   const projectLocked = customerProjectLockedReason(cr.state);
+  // A templated change belongs to the template's customer: in New its project can
+  // only be swapped for another project of that customer.
+  const templateCustomer = cr.standardChange?.customer ?? null;
   const scopeLocked = changeRequestScopeLockedReason(cr.state);
   const scope = useChangeRequestScope({
     projectId: cr.project?.id,
@@ -367,6 +413,9 @@ export default function EditChangeRequestDialog({
   const rollbackPlan = useRichTextPlanField(cr.rollbackPlan);
   const testPlan = useRichTextPlanField(cr.testPlan);
   const implementationPlan = useRichTextPlanField(cr.implementationPlan);
+  const implementationDeviation = useRichTextPlanField(cr.implementationDeviation);
+  // Only an edit the backend can take is sent (or changes the button's label).
+  const deviationEdited = implementationDeviation.isDirty && !deviationLocked;
   const affectedServicesText = useRichTextPlanField(cr.affectedServicesText);
   const affectedComponentsText = useRichTextPlanField(cr.affectedComponentsText);
   const description = useRichTextPlanField(cr.description);
@@ -382,15 +431,18 @@ export default function EditChangeRequestDialog({
   const plannedEndBeforeStart =
     !!startDate && !!endDate && endDate.getTime() <= startDate.getTime();
 
-  const titleMissing = !title.trim();
+  const titleMissing = !title.trim() && !templateLock;
 
   const patch = useMemo<BePatchChangeRequestPayload>(() => {
     const next: BePatchChangeRequestPayload = {};
-    if (title.trim() && title.trim() !== initialTitle.trim()) next.title = title.trim();
-    if (description.isDirty) next.description = description.outgoing;
-    if (justification.isDirty) next.justification = justification.outgoing;
-    if (impactDescription.isDirty) next.impactDescription = impactDescription.outgoing;
-    if (impact && impact !== initialImpact) next.impact = impact;
+    // The template's fields are never sent (their controls are disabled; an
+    // editor's own normalisation must not look like an edit either).
+    const editable = !templateLock;
+    if (editable && title.trim() && title.trim() !== initialTitle.trim()) next.title = title.trim();
+    if (editable && description.isDirty) next.description = description.outgoing;
+    if (editable && justification.isDirty) next.justification = justification.outgoing;
+    if (editable && impactDescription.isDirty) next.impactDescription = impactDescription.outgoing;
+    if (editable && impact && impact !== initialImpact) next.impact = impact;
     if (priority && priority !== initialPriority) next.priority = priority;
     if (!typeLocked && type && type !== initialType) next.type = type;
     if (workNote.trim()) next.workNote = workNote.trim();
@@ -414,15 +466,20 @@ export default function EditChangeRequestDialog({
     // can accept, so "" is sent rather than skipped. Both plans are rich text
     // on both sides now — see `useRichTextPlanField` for why "changed" is not
     // a comparison against the stored string.
-    if (rollbackPlan.isDirty) next.rollbackPlan = rollbackPlan.outgoing;
-    if (testPlan.isDirty) next.testPlan = testPlan.outgoing;
-    if (implementationPlan.isDirty) next.implementationPlan = implementationPlan.outgoing;
+    if (editable && rollbackPlan.isDirty) next.rollbackPlan = rollbackPlan.outgoing;
+    if (editable && testPlan.isDirty) next.testPlan = testPlan.outgoing;
+    if (editable && implementationPlan.isDirty) next.implementationPlan = implementationPlan.outgoing;
+    if (deviationEdited) {
+      next.implementationDeviation = implementationDeviation.outgoing;
+    } else if (deviationClearable && deviationCleared) {
+      next.implementationDeviation = "";
+    }
     if (affectedServicesText.isDirty) next.affectedServicesText = affectedServicesText.outgoing;
     if (affectedComponentsText.isDirty) next.affectedComponentsText = affectedComponentsText.outgoing;
-    if (rollbackDurationText !== initialRollbackDurationText) {
+    if (editable && rollbackDurationText !== initialRollbackDurationText) {
       next.rollbackDurationText = rollbackDurationText;
     }
-    if (category !== initialCategory && category) {
+    if (editable && category !== initialCategory && category) {
       next.category = category as BeChangeRequestCategory;
     }
     // The scope fields are validated by the backend as a unit, so when any of
@@ -447,7 +504,7 @@ export default function EditChangeRequestDialog({
     if (caseId !== initialCaseId && caseId) {
       next.caseId = caseId;
     }
-    if (isPlanningVisibleToCustomers !== initialIsPlanningVisibleToCustomers) {
+    if (editable && isPlanningVisibleToCustomers !== initialIsPlanningVisibleToCustomers) {
       next.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
     }
     if (!customerApprovalLocked && customerApprovalRequired !== initialCustomerApprovalRequired) {
@@ -458,6 +515,7 @@ export default function EditChangeRequestDialog({
     }
     return next;
   }, [
+    templateLock,
     title,
     initialTitle,
     description.isDirty,
@@ -488,6 +546,10 @@ export default function EditChangeRequestDialog({
     testPlan.outgoing,
     implementationPlan.isDirty,
     implementationPlan.outgoing,
+    deviationEdited,
+    implementationDeviation.outgoing,
+    deviationClearable,
+    deviationCleared,
     affectedServicesText.isDirty,
     affectedServicesText.outgoing,
     affectedComponentsText.isDirty,
@@ -532,6 +594,7 @@ export default function EditChangeRequestDialog({
     label: string,
     field: RichTextPlanField,
     helperText: string,
+    fromTemplate = false,
   ): JSX.Element => (
     // Resizable, and Expand opens it full screen (ExpandableRichTextField); the
     // editor is seeded with the frozen `initialHtml` so dirty tracking holds.
@@ -541,8 +604,8 @@ export default function EditChangeRequestDialog({
       value={field.html}
       seedHtml={field.initialHtml}
       onChange={field.onChange}
-      disabled={fieldsDisabled}
-      helperText={helperText}
+      disabled={fromTemplate ? templateDisabled : fieldsDisabled}
+      helperText={fromTemplate && templateLock ? TEMPLATE_FIELD_HINT : helperText}
       sx={FULL_ROW}
     />
   );
@@ -596,6 +659,37 @@ export default function EditChangeRequestDialog({
     );
   };
 
+  // The deviation from the implementation plan: its own lock (recorded from
+  // Implement on, final once the change is over), never the approved one. Once
+  // approved it sits at the top with the work note, as the inputs left; before
+  // that, under the plan -- in New, where a clone carried it over, read-only with
+  // the action that clears it.
+  const deviationField = !showDeviation ? null : deviationClearable ? (
+    <CarriedOverDeviationField
+      id="cr-edit-implementation-deviation"
+      html={cr.implementationDeviation ?? ""}
+      cleared={deviationCleared}
+      onClearedChange={setDeviationCleared}
+      clearedText="It is cleared when you save."
+      disabled={isSaving}
+      sx={FULL_ROW}
+    />
+  ) : (
+    <ExpandableRichTextField
+      id="cr-edit-implementation-deviation"
+      label="Deviation from the implementation plan"
+      value={implementationDeviation.html}
+      seedHtml={implementationDeviation.initialHtml}
+      onChange={implementationDeviation.onChange}
+      disabled={isSaving || !!deviationLocked}
+      helperText={
+        deviationLocked ??
+        "What the implementation or the review did differently from the implementation plan. Internal: never shown to the customer."
+      }
+      sx={FULL_ROW}
+    />
+  );
+
   // Internal only: a work note is journaled with the save and never shown to the
   // customer. The one input left once the change has been approved.
   const workNoteField = (
@@ -634,12 +728,20 @@ export default function EditChangeRequestDialog({
               {saveError}
             </Alert>
           )}
-          {approvedLock && (
+          {approvedNotice && (
             // An explanation, not an error: a status, so a save error stays the form's one alert.
             <Alert severity="info" role="status" sx={FULL_ROW}>
-              {approvedLock}
+              {approvedNotice}
             </Alert>
           )}
+          {templateLock && cr.standardChange && (
+            <Alert severity="info" role="status" sx={FULL_ROW}>
+              {`Raised from standard change template ${cr.standardChange.templateNumber} (version ${cr.standardChange.version}). `}
+              {templateLock}
+              {templateCustomer && !projectLocked && ` Its customer is ${templateCustomer.name}: only ${templateCustomer.name}'s projects are offered as the Customer Project.`}
+            </Alert>
+          )}
+          {approvedLock && deviationField}
           {approvedLock && workNoteField}
           <TextField
             id="cr-edit-subject"
@@ -649,9 +751,15 @@ export default function EditChangeRequestDialog({
             onChange={(e) => setTitle(e.target.value)}
             fullWidth
             size="small"
-            disabled={fieldsDisabled}
+            disabled={templateDisabled}
             error={titleMissing && !approvedLock}
-            helperText={titleMissing && !approvedLock ? "A change request needs a subject." : undefined}
+            helperText={
+              titleMissing && !approvedLock
+                ? "A change request needs a subject."
+                : templateLock
+                  ? TEMPLATE_FIELD_HINT
+                  : undefined
+            }
             slotProps={{ htmlInput: { maxLength: SUBJECT_MAX } }}
             sx={FULL_ROW}
           />
@@ -683,7 +791,9 @@ export default function EditChangeRequestDialog({
                   </Typography>
                 </MenuItem>
               )}
-              {CHANGE_REQUEST_CREATE_TYPE_OPTIONS.map((o) => (
+              {/* Standard only for a change that already is one: a change becomes a standard
+                  change by being raised from a template, never by an edit (the server refuses it). */}
+              {CHANGE_REQUEST_CREATE_TYPE_OPTIONS.filter((o) => o.value !== "standard" || initialType === "standard").map((o) => (
                 <MenuItem key={o.value} value={o.value}>
                   {o.label}
                 </MenuItem>
@@ -691,7 +801,7 @@ export default function EditChangeRequestDialog({
             </Select>
             {typeLocked && !approvedLock && <FormHelperText id="cr-edit-type-help">{typeLocked}</FormHelperText>}
           </FormControl>
-          <FormControl fullWidth size="small" disabled={fieldsDisabled}>
+          <FormControl fullWidth size="small" disabled={templateDisabled}>
             <InputLabel id="cr-edit-impact-label" shrink>
               Impact
             </InputLabel>
@@ -715,6 +825,7 @@ export default function EditChangeRequestDialog({
                 </MenuItem>
               ))}
             </Select>
+            {templateLock && <FormHelperText>{TEMPLATE_FIELD_HINT}</FormHelperText>}
           </FormControl>
           <FormControl fullWidth size="small" disabled={fieldsDisabled}>
             <InputLabel id="cr-edit-priority-label" shrink>
@@ -870,6 +981,9 @@ export default function EditChangeRequestDialog({
               scope={scope}
               disabled={fieldsDisabled || !!scopeLocked}
               projectDisabled={!!projectLocked}
+              // Raised from a template: a project of the template's customer only
+              // (the backend refuses another customer's, in every state).
+              projectAccountId={templateCustomer?.id}
               idPrefix="cr-edit"
               // A saved project can be swapped for another but not removed —
               // the patch has no way to express "no project".
@@ -877,7 +991,7 @@ export default function EditChangeRequestDialog({
             />
             <ChangeRequestCustomerGroupField scope={scope} idPrefix="cr-edit" />
           </Box>
-          <FormControl fullWidth size="small" disabled={fieldsDisabled}>
+          <FormControl fullWidth size="small" disabled={templateDisabled}>
             <InputLabel id="cr-edit-category-label" shrink>
               Category
             </InputLabel>
@@ -899,6 +1013,7 @@ export default function EditChangeRequestDialog({
                 </MenuItem>
               ))}
             </Select>
+            {templateLock && <FormHelperText>{TEMPLATE_FIELD_HINT}</FormHelperText>}
           </FormControl>
           {renderCustomerStepCheckbox(
             "cr-edit-customer-approval",
@@ -929,9 +1044,9 @@ export default function EditChangeRequestDialog({
             onChange={(e) => setRollbackDurationText(e.target.value.slice(0, CHANGE_REQUEST_ROLLBACK_DURATION_MAX))}
             fullWidth
             size="small"
-            disabled={fieldsDisabled}
+            disabled={templateDisabled}
             placeholder="e.g. 30 mins"
-            helperText="Free text — ServiceNow does not parse this into a structured duration."
+            helperText={templateLock ? TEMPLATE_FIELD_HINT : "Free text — ServiceNow does not parse this into a structured duration."}
           />
           <FormControlLabel
             sx={{ ml: 0, justifyContent: "space-between", width: "100%", ...FULL_ROW }}
@@ -941,7 +1056,7 @@ export default function EditChangeRequestDialog({
                 size="small"
                 checked={isPlanningVisibleToCustomers}
                 onChange={(e) => setIsPlanningVisibleToCustomers(e.target.checked)}
-                disabled={fieldsDisabled}
+                disabled={templateDisabled}
                 inputProps={{ "aria-label": "Implementation Plan visible to customers" }}
               />
             }
@@ -951,36 +1066,42 @@ export default function EditChangeRequestDialog({
               </Typography>
             }
           />
-          {renderPlanField("cr-edit-description", "Description", description, "What is changing?")}
+          {renderPlanField("cr-edit-description", "Description", description, "What is changing?", true)}
           {renderPlanField(
             "cr-edit-justification",
             "Justification",
             justification,
             "Why this change is needed.",
+            true,
           )}
           {renderPlanField(
             "cr-edit-risk-impact",
             "Risk and impact analysis",
             impactDescription,
             "What could go wrong, and what is affected if it does.",
+            true,
           )}
           {renderPlanField(
             "cr-edit-implementation-plan",
             "Implementation plan",
             implementationPlan,
             "How this change is carried out.",
+            true,
           )}
+          {!approvedLock && deviationField}
           {renderPlanField(
             "cr-edit-rollback-plan",
             "Rollback plan",
             rollbackPlan,
             "How this change is backed out if it goes wrong.",
+            true,
           )}
           {renderPlanField(
             "cr-edit-test-plan",
             "Test plan",
             testPlan,
             "How the change is verified once implemented.",
+            true,
           )}
           {renderPlanField(
             "cr-edit-affected-services",
@@ -1008,7 +1129,7 @@ export default function EditChangeRequestDialog({
         onClick={() => onSave(patch)}
         disabled={isSaving || !hasChanges || plannedEndBeforeStart || (titleMissing && !approvedLock)}
       >
-        {isSaving ? "Saving…" : approvedLock ? "Add work note" : "Save"}
+        {isSaving ? "Saving…" : approvedLock && !deviationEdited ? "Add work note" : "Save"}
       </Button>
     </>
   );

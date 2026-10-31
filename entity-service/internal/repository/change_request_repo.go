@@ -970,8 +970,8 @@ func (r *changeRequestRepo) AggregateChangeRequests(ctx context.Context, req dom
 // falling back to risk_impact_analysis / backout_plan: the create form's "Risk and
 // impact analysis" and "Backout plan" were written only to the latter pair, so a
 // change request created before both creates wrote the pair the read uses showed
-// neither field. Plain COALESCE (not NULLIF ''), so a field cleared by a PATCH
-// stays cleared.
+// neither field. Plain COALESCE (no NULLIF on the empty string), so a field
+// cleared by a PATCH stays cleared.
 const changeRequestDetailColumns = `
 	wi.created_by, cr.justification, COALESCE(cr.impact_description, cr.risk_impact_analysis), cr.service_outage_downtime,
 	cr.communication_plan, COALESCE(cr.rollback_process, cr.backout_plan), cr.test_plan,
@@ -983,7 +983,8 @@ const changeRequestDetailColumns = `
 	cr.customer_updated_date_confirmation::TEXT,
 	CASE WHEN isfinite(cr.customer_updated_on) THEN cr.customer_updated_on END,
 	CASE WHEN isfinite(cr.work_start_on) THEN cr.work_start_on END, CASE WHEN isfinite(cr.work_end_on) THEN cr.work_end_on END, cr.git_reference,
-	cr.customer_approval_required, cr.customer_review_required`
+	cr.customer_approval_required, cr.customer_review_required,
+	cr.implementation_deviation`
 
 // changeRequestDetailJoins adds the two FK joins changeRequestDetailColumns
 // needs beyond changeRequestFromJoins -- kept separate from (not folded
@@ -1032,7 +1033,12 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 	// caller's read leaves them null, the same line the visibility rule draws.
 	// Best-effort like the case read: a lookup failure is logged and leaves
 	// Tags null rather than failing the detail.
-	if restricted, _ := crViewer(ctx); !restricted {
+	// The deviation from the implementation plan is internal too, on the same
+	// line: a restricted caller never reads it.
+	restricted, _ := crViewer(ctx)
+	if restricted {
+		cr.ImplementationDeviation = nil
+	} else {
 		tags, err := fetchCaseTags(ctx, r.db, id)
 		switch {
 		case err != nil:
@@ -1041,6 +1047,13 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 			cr.Tags = []domain.Tag{}
 		default:
 			cr.Tags = tags
+		}
+		// The standard change template it was raised from: staff only, best-effort
+		// like the tags.
+		if sc, err := readChangeRequestStandardChange(ctx, r.db, id); err != nil {
+			slog.WarnContext(ctx, "get change request: standard change lookup failed", "changeRequestId", id, "error", err)
+		} else {
+			cr.StandardChange = sc
 		}
 	}
 
@@ -1103,6 +1116,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 		customerUpdatedOn, workStart, workEnd                              *time.Time
 		gitReference                                                       *string
 		customerApprovalRequired, customerReviewRequired                   bool
+		implementationDeviation                                            *string
 	)
 	err := row.Scan(
 		&v.ID, &v.Number, &v.Subject, &v.Description,
@@ -1127,6 +1141,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 		&confirmCustomerUpdatedDate, &customerUpdatedOn,
 		&workStart, &workEnd, &gitReference,
 		&customerApprovalRequired, &customerReviewRequired,
+		&implementationDeviation,
 	)
 	if err != nil {
 		return err
@@ -1201,6 +1216,7 @@ func scanChangeRequestViewAndDetail(row pgx.Row, cr *domain.ChangeRequest) error
 	cr.HasCustomerReviewed = isCustomerReviewed != nil && *isCustomerReviewed
 
 	cr.ImplementationPlan = implementationPlan
+	cr.ImplementationDeviation = implementationDeviation
 	if priority != nil {
 		lower := strings.ToLower(*priority)
 		cr.Priority = &lower
@@ -1411,12 +1427,32 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	// reused by everything below that needs the gates (it stays valid: the
 	// change_request row is locked from here to the end of the transaction).
 	var gates changeRequestGateSnapshot
+	// deviationChanged: this PATCH records a deviation different from the stored
+	// one (a resend is not), which flags a standard change template for review.
+	var deviationChanged bool
 	if changeRequestPatchNeedsGate(req) {
 		var err error
 		if gates, err = lockChangeRequestForPatch(ctx, tx, id); err != nil {
 			return "", err
 		}
+		// A change request raised from a standard change template stays with the
+		// template's customer, in every state (change_request_standard_change.go).
+		// Before the creation-phase rules, so a move to another customer's
+		// project is refused with the same words and code in New and after.
+		if err := checkStandardChangeProjectCustomer(ctx, tx, gates, req.ProjectID); err != nil {
+			return "", err
+		}
 		if err := validateCreationPhaseEdits(gates, req); err != nil {
+			return "", err
+		}
+		// A change request raised from a standard change template keeps what the
+		// template specifies, in every state, and stays standard; no other change
+		// request becomes standard by a PATCH (change_request_standard_change.go).
+		// Before the approved-content lock, whose words would be less specific.
+		if err := checkStandardChangeTypeEdit(gates, req.Type); err != nil {
+			return "", err
+		}
+		if err := checkStandardChangeTemplateFields(ctx, tx, id, gates, req); err != nil {
 			return "", err
 		}
 		// Once the change has been approved its fields are read-only (only work
@@ -1427,6 +1463,20 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		// possible, so their words would mislead.
 		if err := checkApprovedContentLock(ctx, tx, id, gates, req, staffTimeResponse); err != nil {
 			return "", err
+		}
+		// The deviation from the implementation plan is not under that lock: it is
+		// recorded from Implement on (in New only a clone's carried-over one can be
+		// cleared) and is final once the change is closed, canceled or rolled back
+		// (change_request_deviation.go).
+		if err := checkDeviationEditable(ctx, tx, id, gates, req.ImplementationDeviation); err != nil {
+			return "", err
+		}
+		if req.ImplementationDeviation != nil && gates.templateVersionID != nil {
+			stored, err := readStoredImplementationDeviation(ctx, tx, id)
+			if err != nil {
+				return "", fmt.Errorf("patch change request: read deviation: %w", err)
+			}
+			deviationChanged = !sameImplementationDeviation(stored, normalizeImplementationDeviation(req.ImplementationDeviation))
 		}
 		// A box turned on after Request Approval needs somebody who can be asked
 		// (rule 4b, after the rules that need no query).
@@ -1734,6 +1784,25 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 			if err := checkRequestApprovalCanAsk(ctx, tx, id, gates.state, approvalRequired, reviewRequired, effectiveProject, req.RequestedByID); err != nil {
 				return "", err
 			}
+			// ... and the plan that goes for approval must already say what a
+			// clone's carried-over deviation said: Request Approval is refused while
+			// the deviation in effect (the request's, else the stored one) is not
+			// blank (change_request_deviation.go).
+			if err := checkRequestApprovalDeviationCleared(ctx, tx, id, gates.state, req.ImplementationDeviation); err != nil {
+				return "", err
+			}
+			// ... and a change raised from a standard change template is
+			// pre-authorised only while that template is active and still at the
+			// version it was raised from.
+			if err := checkStandardChangeTemplateUsable(ctx, tx, gates); err != nil {
+				return "", err
+			}
+			// ... and for a project of the template's customer at this moment: the
+			// Salesforce project sync may have moved the project to another account
+			// since the change was raised.
+			if err := checkStandardChangeCustomerAtApproval(ctx, tx, gates, effectiveProject); err != nil {
+				return "", err
+			}
 			effectiveState = &dest
 			requestApprovalFlow = &flow
 		}
@@ -1843,6 +1912,16 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	if timeResp.disagree {
 		crSets = append(crSets, "customer_updated_date_confirmation = 'DISAGREE'")
 	}
+	// A plain Re-schedule (the customers asked again about a new window, nothing answered) starts a
+	// new round, so whatever time is stored is left over from the round before: the record of who
+	// proposed it (migration 0249) is voided the way the 0249 trigger voids it on entering Customer
+	// Approval -- who and when cleared, customer_proposed_for kept at the stored time so the legacy
+	// last-writer rule does not read it either. The state does not move here, so the trigger does not
+	// fire. A counter or a decline keeps the record: DISAGREE makes it history.
+	if timeResp.asksAgain && !timeResp.disagree {
+		crSets = append(crSets, "customer_proposed_by_user_id = NULL", "customer_proposed_on = NULL",
+			"customer_proposed_for = customer_updated_on")
+	}
 	if req.CustomerReviewRequired != nil {
 		addCR("customer_review_required = $%d", *req.CustomerReviewRequired)
 	}
@@ -1877,6 +1956,14 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		addCR(col+" = $%d", **v)
 	}
 	addNullableText("implementation_plan", req.ImplementationPlan)
+	// The deviation is a plain *string: nil leaves it, a blank value clears it.
+	if req.ImplementationDeviation != nil {
+		if d := normalizeImplementationDeviation(req.ImplementationDeviation); d != nil {
+			addCR("implementation_deviation = $%d", *d)
+		} else {
+			crSets = append(crSets, "implementation_deviation = NULL")
+		}
+	}
 	addNullableText("affected_services", req.AffectedServicesText)
 	addNullableText("affected_component", req.AffectedComponentsText)
 	addNullableText("rollback_duration", req.RollbackDurationText)
@@ -2106,6 +2193,13 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		}
 	}
 
+	// A change raised from a standard change template that was rolled back, or
+	// deviated from its plan, flags the template for review. Last: it escalates
+	// the transaction's identity.
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, effectiveState != nil, deviationChanged); err != nil {
+		return "", err
+	}
+
 	return wiID, nil
 }
 
@@ -2123,6 +2217,8 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 //
 // The same "registered contact with role X on project Y" join chain
 // CaseRepository.ProjectContactEmailsByRole and customerContactsSQL use.
+// Migration 0250's temporary trigger (trg_work_item_keep_legacy_customer_proposer)
+// holds a copy of this test in SQL: change the two together until it is dropped.
 func callerIsRegisteredPortalContact(ctx context.Context, tx crQuerier, projectID *string, actorEmail string) (bool, error) {
 	if projectID == nil || *projectID == "" || actorEmail == "" {
 		return false, nil
@@ -2352,7 +2448,7 @@ const createChangeRequestPortalQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process
+			impact_description, rollback_process, implementation_deviation
 		)
 		SELECT id, 'NEW'::change_request_state_enum, $5::uuid, $6::uuid, $7::change_request_impact_enum, $8::change_request_risk_enum,
 		       $9::change_request_priority_enum, $10::change_request_change_model_enum,
@@ -2360,7 +2456,7 @@ const createChangeRequestPortalQuery = `
 		       $16::text::timestamptz, $17::text::timestamptz, $18::uuid, $19::uuid,
 		       $20, $21, $22, $23, COALESCE($25::boolean, false), COALESCE($26::boolean, false),
 		       $30::change_request_category_enum,
-		       $13, $14
+		       $13, $14, $31
 		FROM inserted_work_item
 		RETURNING id
 	)
@@ -2451,6 +2547,14 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 				return createdChangeRequestRow{}, err
 			}
 		}
+		// Raised from a standard change template: the service rendered the
+		// template into req; record which version and the values, refused (409)
+		// when the template stopped being usable since (change_request_standard_change.go).
+		if req.StandardChangeTemplateVersionID != nil {
+			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, projectID, req.StandardChangeParameters); err != nil {
+				return createdChangeRequestRow{}, err
+			}
+		}
 		return row, nil
 	})
 }
@@ -2475,6 +2579,11 @@ func changeRequestEnumArgs(req domain.CreateChangeRequestRequest) (impact, risk,
 //
 // crvis: internal callers only: POST /change-requests is wrapped by internalOnly (server/routes.go), so no customer identity reaches it
 func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.CreateChangeRequestRequest, createdBy string) (domain.CreateChangeRequestResponse, error) {
+	// A customer may not set the deviation from the implementation plan (a
+	// second line behind the route's internalOnly; change_request_deviation.go).
+	if err := RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if err := ValidateCreateChangeRequestType(req.Type); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -2500,12 +2609,14 @@ func (r *changeRequestRepo) CreateChangeRequest(ctx context.Context, req domain.
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
+			normalizeImplementationDeviation(req.ImplementationDeviation),
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})
 	if err != nil {
 		var ve *apierror.ValidationError
-		if errors.As(err, &ve) {
+		var ce *apierror.ConflictError
+		if errors.As(err, &ve) || errors.As(err, &ce) {
 			return domain.CreateChangeRequestResponse{}, err
 		}
 		// change_request_write_internal_only (migration 0145) permits only an
@@ -2573,7 +2684,7 @@ const createChangeRequestFromServiceNowQuery = `
 			start_on, end_on, requested_by_user_id, customer_group_id,
 			is_planning_visible_to_customers, affected_services, affected_component, rollback_duration,
 			customer_approval_required, customer_review_required, category,
-			impact_description, rollback_process
+			impact_description, rollback_process, implementation_deviation
 		)
 		VALUES (
 			$1, 'NEW'::change_request_state_enum, $7::uuid, $8::uuid, $9::change_request_impact_enum, $10::change_request_risk_enum,
@@ -2582,7 +2693,7 @@ const createChangeRequestFromServiceNowQuery = `
 			$18::text::timestamptz, $19::text::timestamptz, $20::uuid, $21::uuid,
 			$22, $23, $24, $25, COALESCE($27::boolean, false), COALESCE($28::boolean, false),
 			$32::change_request_category_enum,
-			$15, $16
+			$15, $16, $33
 		)
 		RETURNING id
 	)
@@ -2594,6 +2705,11 @@ const createChangeRequestFromServiceNowQuery = `
 //
 // crvis: internal callers only: the ServiceNow-first create runs behind POST /change-requests, wrapped by internalOnly (server/routes.go)
 func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Context, req domain.CreateChangeRequestRequest, id, number, createdBy string) (domain.CreateChangeRequestResponse, error) {
+	// Judged on the caller's own identity, before WithSystemIdentity below
+	// replaces it (change_request_deviation.go).
+	if err := RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if err := ValidateCreateChangeRequestType(req.Type); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -2631,12 +2747,14 @@ func (r *changeRequestRepo) CreateChangeRequestFromServiceNow(ctx context.Contex
 			req.IsPlanningVisibleToCustomers, req.AffectedServicesText, req.AffectedComponentsText, req.RollbackDurationText,
 			req.GroupID, req.CustomerApprovalRequired, req.CustomerReviewRequired,
 			projectID, deploymentID, deployedProductID, category,
+			normalizeImplementationDeviation(req.ImplementationDeviation),
 		).Scan(&out.id, &out.number, &out.subject, &out.createdOn, &out.updatedOn, &out.createdBy)
 		return out, err
 	})
 	if err != nil {
 		var ve *apierror.ValidationError
-		if errors.As(err, &ve) {
+		var ce *apierror.ConflictError
+		if errors.As(err, &ve) || errors.As(err, &ce) {
 			return domain.CreateChangeRequestResponse{}, err
 		}
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
@@ -2789,6 +2907,9 @@ func (r *changeRequestRepo) GetChangeRequestApprovals(ctx context.Context, id st
 	// 404, not the empty 200 a stage-less change request answers (that answer
 	// would confirm the change request exists).
 	if err := r.vis.requireVisibleChangeRequest(ctx, r.db, id); err != nil {
+		return domain.ChangeRequestApprovals{}, err
+	}
+	if err := refuseOtherWorkItemType(ctx, r.db, id); err != nil {
 		return domain.ChangeRequestApprovals{}, err
 	}
 	stageRows, err := r.db.Query(ctx, changeRequestApprovalStagesQuery, id)
@@ -3267,6 +3388,12 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 // uses (answerCustomerStageViaPatch), so both mechanisms record the same stage
 // rows, move the state the same way and stamp the same flags.
 func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail string) (string, error) {
+	// The approval tables also hold the CAB stage of a standard change proposal
+	// (another work item type, decided only through its own route, which records
+	// the outcome on the proposal): never decided here.
+	if err := refuseOtherWorkItemType(ctx, tx, id); err != nil {
+		return "", err
+	}
 	var lockedID string
 	var lockedState *string
 	if err := tx.QueryRow(ctx, `SELECT id, state::text FROM change_request WHERE id = $1 FOR UPDATE`, id).Scan(&lockedID, &lockedState); err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -3431,6 +3558,12 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 	// Scheduled / Customer Approval, a customer outcome -> Scheduled /
 	// Closed / Canceled / Rollback): cancel what that left actionable.
 	if err := reconcileStaleApprovers(ctx, tx, id, actorEmail); err != nil {
+		return "", err
+	}
+	// A customer's failed review rolls the change back: a change raised from a
+	// standard change template then flags it for review. Last: it escalates the
+	// transaction's identity.
+	if err := flagStandardTemplateOnFailure(ctx, tx, id, actorEmail, true, false); err != nil {
 		return "", err
 	}
 

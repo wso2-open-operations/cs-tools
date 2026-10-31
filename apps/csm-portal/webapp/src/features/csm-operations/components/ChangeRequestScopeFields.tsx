@@ -34,6 +34,16 @@ interface ChangeRequestScopeFieldsProps {
   idPrefix: string;
   /** Whether the Customer Project can be cleared once picked (default true). */
   projectClearable?: boolean;
+  /**
+   * Offers only this customer's (account's) projects in the Customer Project
+   * picker: a change request raised from a standard change template is for a
+   * project of the template's customer only.
+   */
+  projectAccountId?: string;
+  /** Shown under the Customer Project picker (e.g. why its choice is narrowed). */
+  projectHelperText?: string;
+  /** Marks the Customer Project required (a standard change needs one). */
+  projectRequired?: boolean;
 }
 
 function selectedOptions(
@@ -56,6 +66,9 @@ export default function ChangeRequestScopeFields({
   projectDisabled = false,
   idPrefix,
   projectClearable = true,
+  projectAccountId,
+  projectHelperText,
+  projectRequired,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
   const hasProject = !!scope.projectId;
 
@@ -72,6 +85,9 @@ export default function ChangeRequestScopeFields({
         onChange={scope.setProject}
         disabled={disabled || projectDisabled}
         disableClearable={!projectClearable}
+        accountId={projectAccountId}
+        helperText={projectHelperText}
+        required={projectRequired}
       />
 
       <Autocomplete<ScopeOption, true>

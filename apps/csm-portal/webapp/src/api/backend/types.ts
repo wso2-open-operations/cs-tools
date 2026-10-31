@@ -1926,7 +1926,7 @@ export interface BeProject {
 export interface BeProjectSearchPayload {
   pagination?: BePagination;
   searchQuery?: string;
-  /** Filter to projects belonging to this account (ServiceNow data source only). */
+  /** Filter to projects belonging to this account (both data sources). */
   accountId?: string;
   /** Excludes projects whose closure state is any of the given values, e.g.
    *  ["Restricted", "Suspended"] (ServiceNow data source only). */
@@ -2848,7 +2848,21 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Rich-text implementation plan. Also present (write-only) on
    * {@link BeCreateChangeRequestPayload}; this is the read-back. */
   implementationPlan?: string | null;
-  priority?: { id: number; label: string } | null;
+  /** Rich-text "Deviation from the implementation plan": what the implementation or
+   * the review actually did differently from `implementationPlan`. Unlike the plan it
+   * is written after the approval: in implement, review and customer_review, final
+   * once the change request is closed, canceled or rolled back. A clone copies it,
+   * and the clone must fold it into its plan and clear it before Request Approval.
+   * Internal (the backend never returns it to a customer); absent or null when the
+   * backing data source has no such field. */
+  implementationDeviation?: string | null;
+  /** On the PostgreSQL data source the stored value in lower case: critical, high,
+   * moderate or low, or planning on a change request migrated from the previous system
+   * (no create or PATCH sets it). The data source that talks to the previous system
+   * directly sends critical, high, moderate or low, or that system's own label for any
+   * other choice. Shown through `changeRequestChoiceLabel`; the edit form reads it
+   * through `changeRequestPriorityValue`. */
+  priority?: string | null;
   /** The `category` enum value (`other`, `devops`, ...) as the Postgres data
    * source returns it, or an `{ id, label }` ref as the ServiceNow-backed
    * response did — read both through `changeRequestCategoryValue` /
@@ -2879,9 +2893,14 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * this group (see `CHANGES-cr-field-parity.md`'s "group C2"). Do not add
    * editable controls for these without first adding the write support at
    * every lower layer.
+   *
+   * On the PostgreSQL data source the stored value in lower case
+   * (`changeRequestType`: infra or general; `likelihood`: low, medium or high);
+   * the data source that talks to the previous system directly sends that
+   * system's own label. Shown through `changeRequestChoiceLabel`.
    */
-  changeRequestType?: { id: number; label: string } | null;
-  likelihood?: { id: number; label: string } | null;
+  changeRequestType?: string | null;
+  likelihood?: string | null;
   /**
    * "Implementation Plan visible to customers" in this portal's UI. Writable
    * on both {@link BeCreateChangeRequestPayload} and
@@ -2928,6 +2947,11 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   workStart?: string | null;
   workEnd?: string | null;
   gitReference?: string | null;
+  /** The standard change template this change request was raised from (staff
+   * only; absent on one not raised from a template, and on another data source).
+   * What the template specifies cannot be edited (400
+   * `change_request_standard_template_field`). */
+  standardChange?: BeChangeRequestStandardChange | null;
 }
 
 /**
@@ -2955,11 +2979,16 @@ export interface BeChangeRequestCustomerProposal {
   answer: BeCustomerProposalAnswer | string;
   /**
    * Whether the backend can name the proposer (present only while `answer` is `pending`): `true` while
-   * the change request's last writer is still a registered contact of its project (then that writer is
-   * the proposer); `false` when it is not knowable -- a date a WSO2 user wrote in the previous system, one left
-   * over from an older cycle, a proposal edited over since, or a sync rewrite. The page must then say
-   * the proposer is not recorded rather than guess. Absent on a backend that predates it: the page
-   * falls back to whether a name or an email came with it.
+   * the customer's proposal recorded its proposer, the record is about the stored time and that person is
+   * still a registered contact of the project (a later staff edit does not change it; a plain Re-schedule or
+   * re-entering Customer Approval starts a new round and voids it; a time stored with no record -- before the
+   * record existed, or written later by another writer on a change request that has had no proposal since it
+   * entered Customer Approval -- is judged by the change request's last writer when that is a registered
+   * contact, and since entity-service migration 0250 a later write by anyone else records that contact as its
+   * proposer first when they have a user record); `false` when it is not knowable -- a date a WSO2 user wrote
+   * in the previous system, one left over from an older cycle, one whose contact has left the project, or a
+   * sync rewrite. The page must then say the proposer is not recorded rather than guess. Absent on a backend
+   * that predates it: the page falls back to whether a name or an email came with it.
    */
   proposerRecorded?: boolean | null;
   /** Who proposed it and when: only while `pending` and `proposerRecorded` is true (never an empty guess). */
@@ -3116,7 +3145,10 @@ export interface BeChangeRequestApprovalDecisionResponse {
  * backend answers a client that still sends either with a 400.
  */
 export interface BeCreateChangeRequestPayload {
-  subject: string;
+  /** Required, except for a change raised from a standard change template
+   * ({@link standardChangeTemplateId}), whose subject the template gives: it is
+   * then never sent. */
+  subject?: string;
   priority?: BeChangeRequestPriority;
   impact?: BeChangeRequestImpact;
   /** Required: one of "normal" | "standard" | "emergency" (the create form
@@ -3130,6 +3162,10 @@ export interface BeCreateChangeRequestPayload {
   description?: string;
   justification?: string;
   implementationPlan?: string;
+  /** The deviation from the implementation plan, sent only by a clone of a change
+   * request that has one. The new change request then has to fold it into its
+   * implementation plan and clear it before Request Approval. */
+  implementationDeviation?: string;
   riskImpactAnalysis?: string;
   backoutPlan?: string;
   testPlan?: string;
@@ -3157,6 +3193,19 @@ export interface BeCreateChangeRequestPayload {
    * before closing. The create form always sends it (`false` for an Emergency
    * change, which proceeds without customer consent). */
   customerReviewRequired?: boolean;
+  /**
+   * Raises the change request from a standard change template (type
+   * `standard`). The template's current version gives the subject, the plans,
+   * the risk and impact analysis, category, impact, risk, rollback duration,
+   * planning visibility and the two customer boxes: none of them may be sent
+   * with it (400 `change_request_standard_template_field`). A template that is
+   * not active is a 409 `standard_change_template_unavailable`.
+   */
+  standardChangeTemplateId?: string;
+  /** The template version the form showed; a template revised since is the same 409. */
+  standardChangeTemplateVersionId?: string;
+  /** The values of the version's parameters, by key. */
+  standardChangeParameters?: Record<string, string>;
 }
 
 /**
@@ -3438,9 +3487,10 @@ export interface BePatchChangeRequestPayload {
    */
   type?: BeChangeRequestType;
   /**
-   * An internal work note, appended to the journal (never blank). The one thing
-   * that can still be added once the change request has been approved: every
-   * field is read-only then (400 `change_request_approved_read_only`).
+   * An internal work note, appended to the journal (never blank). It can still
+   * be added once the change request has been approved, when every other field
+   * is read-only (400 `change_request_approved_read_only`) except
+   * `implementationDeviation` (from implement on).
    */
   workNote?: string;
   plannedStartOn?: string;
@@ -3491,6 +3541,14 @@ export interface BePatchChangeRequestPayload {
   //     shipped half-right.
   /** Rich-text implementation plan; `""` clears it. */
   implementationPlan?: string;
+  /** Rich-text deviation from the implementation plan; `""` clears it. Recorded in
+   * implement, review and customer_review (judged on the stored state). Before that a
+   * change is a 400 `change_request_deviation_not_yet`, except clearing one a clone
+   * carried over while the change request is new; once it is closed, canceled or
+   * rolled back a 400 `change_request_deviation_final`. Request Approval is a 400
+   * `change_request_deviation_not_incorporated` while one is stored, unless the same
+   * request clears it. */
+  implementationDeviation?: string;
   affectedServicesText?: string;
   affectedComponentsText?: string;
   rollbackDurationText?: string;
@@ -5435,3 +5493,317 @@ export interface BeSpecialistHandoffSummary {
   githubIssueExpected?: boolean;
 }
 
+
+// ---------------------------------------------------------------------------
+// Standard changes: the CAB-approved template catalogue and its proposals
+// (`/standard-change-templates/...`, `/standard-change-proposals/...`; entity
+// service `domain/standard_change.go`)
+// ---------------------------------------------------------------------------
+
+export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
+export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
+export type BeStandardChangeProposalState = "draft" | "cab_review" | "approved" | "rejected" | "withdrawn";
+export type BeStandardChangeParameterType = "text" | "textarea" | "number" | "date" | "select";
+/** A change request's risk (`change_request_risk_enum`). A standard change is never `high`. */
+export type BeChangeRequestRisk = "high" | "moderate" | "low";
+
+/** One value a template leaves open; the template's text refers to it as `{{key}}`. */
+export interface BeStandardChangeParameter {
+  /** Lower-case letters, digits and underscores, starting with a letter (at most 50). */
+  key: string;
+  label: string;
+  type: BeStandardChangeParameterType;
+  required: boolean;
+  helpText?: string | null;
+  /** The choices of a select parameter, in the order shown. */
+  options?: string[] | null;
+}
+
+/** What a template fixes on every change request raised from it. On a draft proposal any part may be missing. */
+export interface BeStandardChangeContent {
+  /** Plain text: the change request's subject. */
+  subject: string | null;
+  description: string | null;
+  justification: string | null;
+  implementationPlan: string | null;
+  riskImpactAnalysis: string | null;
+  backoutPlan: string | null;
+  testPlan: string | null;
+  category: BeChangeRequestCategory | null;
+  impact: BeChangeRequestImpact | null;
+  risk: BeChangeRequestRisk | null;
+  rollbackDurationText: string | null;
+  isPlanningVisibleToCustomers: boolean;
+  customerApprovalRequired: boolean;
+  customerReviewRequired: boolean;
+  parameters: BeStandardChangeParameter[] | null;
+}
+
+export interface BeStandardChangeTemplateUsage {
+  total: number;
+  /** Not yet closed, canceled or rolled back. */
+  open: number;
+  closed: number;
+  rolledBack: number;
+  canceled: number;
+  lastUsedOn: string | null;
+}
+
+/** One CAB-approved version of a template; never changed once written. */
+export interface BeStandardChangeTemplateVersion extends BeStandardChangeContent {
+  id: string;
+  templateId: string;
+  version: number;
+  /** The proposal it was approved from. */
+  proposal: BeEntityRef | null;
+  approvedOn: string;
+  approvedBy: string;
+}
+
+export interface BeStandardChangeTemplateVersionSummary {
+  id: string;
+  version: number;
+  proposal: BeEntityRef | null;
+  approvedOn: string;
+  approvedBy: string;
+}
+
+export interface BeStandardChangeTemplate {
+  id: string;
+  /** STD number. */
+  number: string;
+  name: string;
+  state: BeStandardChangeTemplateState;
+  /**
+   * The customer (account) the template belongs to: a change request is raised
+   * from it only for one of this customer's projects, and its name is unique
+   * among this customer's live templates. Null only on an older template whose
+   * customer could not be told (it cannot be changed or used until one is set).
+   */
+  customer?: BeEntityRef | null;
+  owner: BeUserReference | null;
+  /** The version a new change request follows. */
+  currentVersion: BeStandardChangeTemplateVersion | null;
+  /** Raised when a change raised from it was rolled back or deviated from its plan. */
+  reviewRequired: boolean;
+  reviewRequiredReason: string | null;
+  reviewRequiredOn: string | null;
+  reviewRequiredChangeRequest: BeEntityRef | null;
+  /**
+   * Why, when and by whom (an email) the template was suspended; all null unless
+   * it is suspended. The reason is optional, so it may be null on a suspended one.
+   */
+  suspendedReason: string | null;
+  suspendedOn: string | null;
+  suspendedBy: string | null;
+  /** The modification or retirement now in draft or CAB review, if any. */
+  openProposal: BeEntityRef | null;
+  usage: BeStandardChangeTemplateUsage;
+  createdOn: string;
+  createdBy: string;
+  updatedOn: string;
+  updatedBy: string;
+  /** On `GET /standard-change-templates/{id}` only, newest first. */
+  versions?: BeStandardChangeTemplateVersionSummary[];
+}
+
+/** Body of `POST /standard-change-templates/{id}/suspend` (optional). */
+export interface BeSuspendStandardChangeTemplatePayload {
+  /** Why it is suspended: optional, at most 1000 characters. */
+  reason?: string;
+}
+
+export interface BeSearchStandardChangeTemplatesPayload {
+  /** Empty means active and suspended. */
+  states?: BeStandardChangeTemplateState[];
+  /** Matches the name or number, ignoring case. */
+  query?: string;
+  /** Narrows the list to one customer's (account's) templates. */
+  accountId?: string;
+  pagination: BePagination;
+}
+
+export interface BeSearchStandardChangeTemplatesResponse {
+  templates: BeStandardChangeTemplate[] | null;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** A closed change request a proposal cites as evidence. */
+export interface BeStandardChangeEvidence {
+  id: string;
+  number: string;
+  subject: string;
+  state: string | null;
+  closedOn: string | null;
+  /** The change request's customer now (its project's account); null when it has none. */
+  customer?: BeEntityRef | null;
+}
+
+/** One CAB member asked to decide a proposal. */
+export interface BeStandardChangeProposalApprover {
+  id: string;
+  approver: BeUserReference | null;
+  /** REQUESTED, APPROVED, REJECTED or CANCELLED. */
+  state: string;
+  comments: string | null;
+  updatedOn: string;
+  /** The caller's own REQUESTED row while the proposal is in CAB review. */
+  canDecide: boolean;
+}
+
+export interface BeStandardChangeProposal extends BeStandardChangeContent {
+  id: string;
+  /** SCP number. */
+  number: string;
+  kind: BeStandardChangeProposalKind;
+  state: BeStandardChangeProposalState;
+  /** The template's name. */
+  name: string;
+  /**
+   * The customer (account) the proposal is for: what a new proposal names, or
+   * takes from the change request it starts from or the proposal it copies; the
+   * template's for a modification or retirement. Null on a new draft that has
+   * not named one yet (it cannot be submitted).
+   */
+  customer?: BeEntityRef | null;
+  rationale: string | null;
+  /** The template acted on (modify, retire), or the one an approved new proposal created. */
+  template: BeEntityRef | null;
+  /** The version a modification was started from. */
+  baseVersion: number | null;
+  /**
+   * The closed change request a new proposal started from (or that a copy carried
+   * over); it must be a closed change request of the proposal's customer.
+   */
+  sourceChangeRequest: BeEntityRef | null;
+  /**
+   * The proposal a new draft was copied from (`name` is its number); null or
+   * absent when it was not copied. A copy keeps the copied proposal's customer.
+   */
+  copiedFrom?: BeEntityRef | null;
+  evidence: BeStandardChangeEvidence[] | null;
+  approvers: BeStandardChangeProposalApprover[] | null;
+  proposedBy: BeUserReference | null;
+  createdOn: string;
+  updatedOn: string;
+  submittedOn: string | null;
+  decidedOn: string | null;
+  decidedBy: BeUserReference | null;
+  decisionComment: string | null;
+  /** The version an approved new or modify proposal wrote. */
+  resultingVersion: number | null;
+  /** What the caller may do now (advisory: every action re-checks). */
+  canEdit: boolean;
+  canSubmit: boolean;
+  canWithdraw: boolean;
+}
+
+/** `POST /standard-change-proposals`. */
+export interface BeCreateStandardChangeProposalPayload {
+  kind: BeStandardChangeProposalKind;
+  /** modify / retire: the template. */
+  templateId?: string;
+  /** new: a closed change request to start from (it becomes the first evidence). */
+  sourceChangeRequestId?: string;
+  /** new: another proposal whose content the draft starts from. */
+  copyFromProposalId?: string;
+  name?: string;
+  /**
+   * new: the customer (account) it is for. One started from a change request
+   * takes that change request's customer, a copy the copied proposal's, and a
+   * modify / retire its template's: a different one is a 400.
+   */
+  accountId?: string;
+}
+
+/** `PATCH /standard-change-proposals/{id}`: absent fields are left as they are; the two lists replace the whole list. */
+export interface BeUpdateStandardChangeProposalPayload {
+  name?: string;
+  /**
+   * Names or changes the customer of a new draft that did not start from a
+   * change request; its evidence must then be that customer's (else a 400).
+   */
+  accountId?: string;
+  rationale?: string;
+  subject?: string;
+  description?: string;
+  justification?: string;
+  implementationPlan?: string;
+  riskImpactAnalysis?: string;
+  backoutPlan?: string;
+  testPlan?: string;
+  /** An empty string clears it (the editor's "-- Select --"). */
+  category?: BeChangeRequestCategory | "";
+  impact?: BeChangeRequestImpact | "";
+  risk?: BeChangeRequestRisk | "";
+  rollbackDurationText?: string;
+  isPlanningVisibleToCustomers?: boolean;
+  customerApprovalRequired?: boolean;
+  customerReviewRequired?: boolean;
+  parameters?: BeStandardChangeParameter[];
+  evidenceChangeRequestIds?: string[];
+}
+
+export interface BeDecideStandardChangeProposalPayload {
+  decision: "approved" | "rejected";
+  /** Required for a rejection. */
+  comment?: string;
+}
+
+export interface BeSearchStandardChangeProposalsPayload {
+  states?: BeStandardChangeProposalState[];
+  kinds?: BeStandardChangeProposalKind[];
+  templateId?: string;
+  /** Narrows the list to the proposals for one customer (account). */
+  accountId?: string;
+  proposedByMe?: boolean;
+  /** In CAB review, with a pending approval of the caller's. */
+  awaitingMyDecision?: boolean;
+  query?: string;
+  pagination: BePagination;
+}
+
+export interface BeStandardChangeProposalSummary {
+  id: string;
+  number: string;
+  kind: BeStandardChangeProposalKind;
+  state: BeStandardChangeProposalState;
+  name: string;
+  /** Null on a new draft that has not named its customer yet. */
+  customer?: BeEntityRef | null;
+  template: BeEntityRef | null;
+  proposedBy: BeUserReference | null;
+  createdOn: string;
+  updatedOn: string;
+  submittedOn: string | null;
+  decidedOn: string | null;
+}
+
+export interface BeSearchStandardChangeProposalsResponse {
+  proposals: BeStandardChangeProposalSummary[] | null;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** What a change request raised from a template carries about it. */
+export interface BeChangeRequestStandardChange {
+  template: BeEntityRef;
+  /** The template's STD number. */
+  templateNumber: string;
+  /** The template's customer, which is the account of this change request's project. */
+  customer?: BeEntityRef | null;
+  /**
+   * True when the change request's project is no longer a project of the
+   * template's customer (the project sync moved it to another account after the
+   * change was raised). Request Approval is then refused (400
+   * `standard_change_template_other_customer`).
+   */
+  customerMismatch?: boolean;
+  versionId: string;
+  version: number;
+  /** The version's parameters with the values the change request was raised with. */
+  parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
+}

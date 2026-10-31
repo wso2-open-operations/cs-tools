@@ -165,3 +165,35 @@ describe("AsyncProjectSelect — knownLabel, picked name, clearing", () => {
     expect(second.container.querySelector(".MuiAutocomplete-clearIndicator")).toBeNull();
   });
 });
+
+describe("AsyncProjectSelect — narrowed to one customer", () => {
+  const idle = {
+    projects: [],
+    isFetching: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    isError: false,
+    fetchNextPage: vi.fn(),
+  };
+
+  it("passes the customer (account) to the server-side search, and says why under the field", () => {
+    mockedUseInfiniteProjectSearch.mockReturnValue(idle);
+    render(
+      <AsyncProjectSelect
+        value=""
+        onChange={vi.fn()}
+        accountId="acct-1"
+        helperText="Projects of Acme Corp only."
+      />,
+    );
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    expect(mockedUseInfiniteProjectSearch).toHaveBeenLastCalledWith("", true, "acct-1");
+    expect(screen.getByText("Projects of Acme Corp only.")).toBeInTheDocument();
+  });
+
+  it("searches every project when no customer is given", () => {
+    mockedUseInfiniteProjectSearch.mockReturnValue(idle);
+    render(<AsyncProjectSelect value="" onChange={vi.fn()} />);
+    expect(mockedUseInfiniteProjectSearch).toHaveBeenLastCalledWith("", false, undefined);
+  });
+});
