@@ -22,14 +22,27 @@ import type { PagingChainCode, RotaFamily, ScheduleTeam } from "../types";
  *  PaaS SRE, which has no rota (and so no chain) yet. */
 export type CaseAlertChain = PagingChainCode | "PAAS";
 
+/** Each SRE rota's chain. U2 and B-Central's rotas keep the SME_ codes
+ *  entity-service migration 0217 gave them; 0242 moved them to the SRE family. */
+const SRE_ROTA_CHAINS: Readonly<Record<string, PagingChainCode>> = {
+  SRE_SAAS: "SRE_SAAS",
+  SRE_IAAS: "SRE_IAAS",
+  SME_U2: "SRE_U2",
+  SME_B_CENTRAL: "SRE_B_CENTRAL",
+};
+
+/** The SRE chain of a rota, or undefined for a rota with no chain of its own. */
+export function sreChainOfRota(rotaCode: string | undefined): PagingChainCode | undefined {
+  return rotaCode ? SRE_ROTA_CHAINS[rotaCode] : undefined;
+}
+
 /** The chain a team's alerts go through: CRE's, SME's, or its own SRE rota's
- *  -- SaaS or IaaS -- with PaaS for an SRE team that has no rota yet. */
+ *  -- SaaS, IaaS, U2-SRE or B-Central-SRE -- with PaaS for an SRE team that
+ *  has no rota yet. */
 export function chainOfTeam(team: Pick<ScheduleTeam, "family" | "rotaCode">): CaseAlertChain {
   if (team.family === "CRE") return "CRE";
   if (team.family === "SME") return "SME";
-  if (team.rotaCode === "SRE_IAAS") return "SRE_IAAS";
-  if (team.rotaCode === "SRE_SAAS") return "SRE_SAAS";
-  return "PAAS";
+  return sreChainOfRota(team.rotaCode) ?? "PAAS";
 }
 
 /**
@@ -79,14 +92,14 @@ export function caseAlertChainsFor(reader: {
   }
   const mineOf: Record<string, CaseAlertChain[]> = {
     CRE: ["CRE"],
-    SRE: ["SRE_SAAS", "SRE_IAAS"],
+    SRE: ["SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL"],
     SME: ["SME"],
   };
   if (reader.creRights) mine.add("CRE");
   for (const ladder of reader.settingsLadders ?? []) {
     for (const c of mineOf[ladder] ?? []) mine.add(c);
   }
-  const order: CaseAlertChain[] = ["CRE", "SRE_SAAS", "SRE_IAAS", "PAAS", "SME"];
+  const order: CaseAlertChain[] = ["CRE", "SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL", "PAAS", "SME"];
   return order.filter((c) => mine.has(c));
 }
 

@@ -213,6 +213,42 @@ describe("CasePagingTab", () => {
     expect(onOpenRota).toHaveBeenLastCalledWith({ family: "SME", rotaCode: undefined });
   });
 
+  it("shows the U2-SRE and B-Central-SRE chains only once their teams are SRE teams", () => {
+    const visible = ["SRE_SAAS", "SRE_U2", "SRE_B_CENTRAL"] as const;
+    // Before entity-service migration 0242 both are SME teams: no chain of their own.
+    const { unmount } = render(
+      <CasePagingTab
+        onOpenRota={vi.fn()}
+        visibleChains={visible}
+        teams={[
+          { key: "u2", name: "U2", family: "SME" },
+          { key: "b-central", name: "B-Central", family: "SME" },
+        ]}
+      />,
+    );
+    expect(chainHeadings()).toEqual(["SaaS SRE alert chain"]);
+    unmount();
+
+    const onOpenRota = vi.fn();
+    render(
+      <CasePagingTab
+        onOpenRota={onOpenRota}
+        visibleChains={visible}
+        teams={[
+          { key: "u2", name: "U2", family: "SRE" },
+          { key: "b-central", name: "B-Central", family: "SRE" },
+        ]}
+      />,
+    );
+    expect(chainHeadings()).toEqual([
+      "SaaS SRE alert chain",
+      "U2-SRE alert chain",
+      "B-Central-SRE alert chain",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Open the U2-SRE rota" }));
+    expect(onOpenRota).toHaveBeenLastCalledWith({ family: "SRE", rotaCode: "SME_U2" });
+  });
+
   it("keeps a reader to their own chains", () => {
     render(<CasePagingTab onOpenRota={vi.fn()} visibleChains={["SRE_SAAS", "SRE_IAAS"]} />);
     expect(chainHeadings()).toEqual(["SaaS SRE alert chain", "IaaS SRE alert chain"]);
