@@ -440,13 +440,17 @@ func TestOpenInlineImage(t *testing.T) {
 
 	var nf *apierror.NotFoundError
 	for name, s := range map[string]*storedAttachmentService{
-		"deleted":  svc("DELETED", &png, &key, newFakeStore()),
 		"pending":  svc("PENDING", &png, nil, newFakeStore()),
 		"no store": svc("COMPLETE", &png, nil, newFakeStore()),
 	} {
 		if _, err := s.OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {
 			t.Errorf("%s: err = %v, want NotFoundError", name, err)
 		}
+	}
+	// A removed image is Gone, with a code a client can tell apart from a 404.
+	var gone *apierror.GoneError
+	if _, err := svc("DELETED", &png, &key, newFakeStore()).OpenInlineImage(ctx, saAttID); !errors.As(err, &gone) || gone.Code != apierror.CodeAttachmentRemoved {
+		t.Errorf("deleted: err = %v, want GoneError %q", err, apierror.CodeAttachmentRemoved)
 	}
 	// A row the caller cannot see is absent from the query, so not found.
 	if _, err := newStoredSvc(newFakeStoredRepo(), newFakeStore()).OpenInlineImage(ctx, saAttID); !errors.As(err, &nf) {

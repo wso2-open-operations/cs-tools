@@ -561,6 +561,10 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 		return domain.StoredAttachmentContent{}, notFound
 	}
 	row := rows[0]
+	if row.Status == "DELETED" {
+		// The caller could see this row, so saying it was removed reveals nothing.
+		return domain.StoredAttachmentContent{}, &apierror.GoneError{Msg: "this image was removed", Code: apierror.CodeAttachmentRemoved}
+	}
 	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
 		return domain.StoredAttachmentContent{}, notFound
 	}

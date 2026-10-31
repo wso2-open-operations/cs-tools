@@ -415,8 +415,8 @@ paths:
         Stream a comment's inline image. Entity-service reads the file from
         SFTPGo and sends it, so the browser never talks to SFTPGo and no link
         exists that could be forwarded; access is checked on every request. An
-        image the caller cannot see, that is not stored or that was deleted is
-        404. The id is a comment image, or an image-typed work item attachment
+        image the caller cannot see or that is not stored is 404; one the caller
+        can see that was deleted is 410 (errorCode attachment_removed). The id is a comment image, or an image-typed work item attachment
         (how comment images migrated from the previous system are stored); a
         work item file that is not an image is 404 here. Not registered (404)
         unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
@@ -449,7 +449,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: Not found, not visible to the caller, deleted, or SFTPGo is not configured.
+          description: Not found, not visible to the caller, not stored, or SFTPGo is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
           content:
             application/json:
               schema:
