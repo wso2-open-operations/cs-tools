@@ -83,10 +83,13 @@ export function startInlineImageUpload(
     name: file.name || "image",
   }).then(
     (confirmed) => {
+      // The draft was cleared while this ran: do not bring the entry back.
+      if (!uploads.has(previewUrl)) return;
       uploads.set(previewUrl, { status: "done", id: confirmed.id.toLowerCase() });
       publish();
     },
     (err: unknown) => {
+      if (!uploads.has(previewUrl)) return;
       uploads.set(previewUrl, {
         status: "failed",
         message: entityAttachmentErrorMessage(err, "An image could not be uploaded."),
@@ -135,7 +138,11 @@ export function hasBlobSource(html: string): boolean {
   return blobSources(html).length > 0;
 }
 
-/** Frees the preview URLs of the images in `html` once the comment is sent. */
+/**
+ * Frees the preview URLs of the images in `html` once the comment is sent or its
+ * draft is discarded. An upload still running for one of them is forgotten: its
+ * result is ignored when it arrives.
+ */
 export function releaseInlineImages(html: string): void {
   for (const src of blobSources(html)) {
     URL.revokeObjectURL(src);
