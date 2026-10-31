@@ -13324,6 +13324,16 @@ paths:
         to CLOSED_SKIPPED, each with ServiceNow's work note ("Incident Task is Closed
         Incomplete based on closure of INC..."), in the same transaction -- a port of
         ServiceNow's "Cascade closure of Incident Tasks".
+        On the Postgres data sources, moving the incident into RESOLVED also resolves, in the
+        same transaction, every child incident (parentIncidentId = this incident) that is not
+        RESOLVED, CLOSED or CANCELLED -- NEW and ON_HOLD included -- and, the same way, their
+        children: the child's own resolution code and resolution notes or else the parent's,
+        the parent's resolver, resolvedWithParent true, and the note "Resolved based on
+        resolution of Parent Incident." as an additional comment -- a
+        port of ServiceNow's "Update Child Incidents". CLOSED, CANCELLED and a re-open do not
+        cascade. Only this incident's update is mirrored to ServiceNow, whose own rule resolves
+        its children. A parentIncidentId that is the incident itself, or one of its child
+        incidents at any depth, is a 400.
       operationId: updateIncident
       parameters:
         - name: id
@@ -30678,6 +30688,20 @@ components:
               items:
                 type: string
                 format: uuid
+              description: >-
+                Matches the generic parent record (work_item.parent_id), not the
+                parent incident; see parentIncidentIds.
+            parentIncidentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: >-
+                The child incidents of these incidents: matches the incident's
+                parent incident (ServiceNow's parent_incident, exposed as
+                parentIncident), not the generic parent record parentIds
+                matches. PostgreSQL data sources only; the ServiceNow data
+                source answers 400.
             number:
               type: string
               description: >-
@@ -30747,6 +30771,20 @@ components:
               items:
                 type: string
                 format: uuid
+              description: >-
+                Matches the generic parent record (work_item.parent_id), not the
+                parent incident; see parentIncidentIds.
+            parentIncidentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: >-
+                The child incidents of these incidents: matches the incident's
+                parent incident (ServiceNow's parent_incident, exposed as
+                parentIncident), not the generic parent record parentIds
+                matches. PostgreSQL data sources only; the ServiceNow data
+                source answers 400.
             number:
               type: string
               description: >-
@@ -31229,6 +31267,16 @@ components:
           type: string
           nullable: true
           description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        resolvedWithParent:
+          type: boolean
+          readOnly: true
+          description: >-
+            True when the incident was resolved because its parent incident was
+            (ServiceNow's "Update Child Incidents": resolving an incident
+            resolves its open child incidents, recursively, with its own
+            resolution code and close notes or else the parent's, and the
+            parent's resolver). False once the incident is resolved by an
+            update of its own, and always false on the ServiceNow data source.
         incidentReport:
           type: string
           nullable: true
@@ -31475,6 +31523,9 @@ components:
           type: string
           format: uuid
           nullable: true
+          description: >-
+            Makes this incident a child of the given incident. An explicit null
+            unlinks it from its parent; omitting the field leaves the link as it is.
         assignmentGroupId:
           type: string
           format: uuid

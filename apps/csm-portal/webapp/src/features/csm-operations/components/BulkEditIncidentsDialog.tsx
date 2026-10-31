@@ -128,7 +128,9 @@ function problemLinkLabel(p: BeProblemSearchView): string {
  *   which would overwrite what was typed seconds later.
  * - The watch list can have people added or removed (from each incident's own
  *   list) or be replaced.
- * - Parent incident never offers a selected incident.
+ * - Parent incident never offers a selected incident. It sets the parent
+ *   incident (`parentIncidentId`), as the single Edit dialog does, not the
+ *   generic `parentId`.
  *
  * Priority is not offered: it follows from impact and urgency, as on a single
  * incident. The backend stays the authority: what it refuses for one incident
@@ -153,7 +155,7 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
   const [watchers, setWatchers] = useState<string[]>([]);
   const [workNotes, setWorkNotes] = useState("");
   const [additionalComments, setAdditionalComments] = useState("");
-  const [parentId, setParentId] = useState("");
+  const [parentIncidentId, setParentIncidentId] = useState("");
   const [changeRequestId, setChangeRequestId] = useState("");
   const [problemId, setProblemId] = useState("");
   const [causedById, setCausedById] = useState("");
@@ -199,7 +201,7 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
     if (assignedEngineerId) patch.assignedEngineerId = assignedEngineerId;
     if (workNotes.trim()) patch.workNotes = workNotes.trim();
     if (additionalComments.trim()) patch.additionalComments = additionalComments.trim();
-    if (parentId) patch.parentId = parentId;
+    if (parentIncidentId) patch.parentIncidentId = parentIncidentId;
     if (changeRequestId) patch.changeRequestId = changeRequestId;
     if (problemId) patch.problemId = problemId;
     if (causedById) patch.causedById = causedById;
@@ -211,7 +213,7 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
     return watchList ? { patch, watchList } : { patch };
   }, [
     subject, state, channel, impact, urgency, category, subcategory, environment, serviceId, serviceOfferingId,
-    configurationItemId, assignmentGroupId, assignedEngineerId, workNotes, additionalComments, parentId,
+    configurationItemId, assignmentGroupId, assignedEngineerId, workNotes, additionalComments, parentIncidentId,
     changeRequestId, problemId, causedById, resolutionCode, resolutionNotes, incidentReport, reportGenerated, watchers,
     watchListMode,
   ]);
@@ -506,8 +508,8 @@ export default function BulkEditIncidentsDialog({ incidents, isApplying, onClose
               label="Parent incident"
               placeholder="No change"
               shrinkLabel
-              value={parentId}
-              onChange={setParentId}
+              value={parentIncidentId}
+              onChange={setParentIncidentId}
               disabled={isApplying}
               useSearch={useSearchIncidentsExcludingIds}
               searchExtra={excludedParents}

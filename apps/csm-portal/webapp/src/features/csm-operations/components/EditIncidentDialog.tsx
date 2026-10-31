@@ -115,9 +115,8 @@ interface EditState {
   impact: BeIncidentImpact | "";
   urgency: BeIncidentUrgency | "";
   state: BeIncidentState | "";
-  /** Write-only (see `BeUpdateIncidentPayload`) — `IncidentDetail` never
-   * echoes these back, so they always start blank, unlike every other field
-   * here. Required by ServiceNow to move `state` to `RESOLVED`/`CLOSED`. */
+  /** Always start blank, unlike every other field here, and are sent
+   * whenever filled in. Required to move `state` to `RESOLVED`/`CLOSED`. */
   resolutionCode: BeIncidentResolutionCode | "";
   resolutionNotes: string;
   serviceId: string;
@@ -125,7 +124,8 @@ interface EditState {
   configurationItemId: string;
   assignmentGroupId: string;
   assignedEngineerId: string;
-  parentId: string;
+  /** The parent incident (`parentIncidentId`), not the generic `parentId`. */
+  parentIncidentId: string;
   changeRequestId: string;
   problemId: string;
   causedById: string;
@@ -148,7 +148,7 @@ function toEditState(incident: BeIncidentDetail): EditState {
     configurationItemId: incident.configurationItem?.id ?? "",
     assignmentGroupId: incident.assignmentGroup?.id ?? "",
     assignedEngineerId: incident.assignedTo?.id ?? "",
-    parentId: incident.parent?.id ?? "",
+    parentIncidentId: incident.parentIncident?.id ?? "",
     changeRequestId: incident.changeRequest?.id ?? "",
     problemId: incident.problem?.id ?? "",
     causedById: incident.causedBy?.id ?? "",
@@ -163,9 +163,9 @@ function toEditState(incident: BeIncidentDetail): EditState {
  * {@link BeUpdateIncidentPayload}); the fixed-enum fields (category, impact,
  * etc.) never clear to null, only to a different value.
  *
- * `resolutionCode`/`resolutionNotes` don't fit that diff pattern — they're
- * write-only (no `initial` value exists to diff against), so they're sent
- * whenever filled in, regardless of whether anything else changed.
+ * `resolutionCode`/`resolutionNotes` don't fit that diff pattern — they
+ * start blank (no `initial` value to diff against), so they're sent whenever
+ * filled in, regardless of whether anything else changed.
  */
 function buildPatch(initial: EditState, next: EditState): BeUpdateIncidentPayload {
   const patch: BeUpdateIncidentPayload = {};
@@ -185,7 +185,8 @@ function buildPatch(initial: EditState, next: EditState): BeUpdateIncidentPayloa
   if (next.assignmentGroupId !== initial.assignmentGroupId) patch.assignmentGroupId = next.assignmentGroupId || null;
   if (next.assignedEngineerId !== initial.assignedEngineerId)
     patch.assignedEngineerId = next.assignedEngineerId || null;
-  if (next.parentId.trim() !== initial.parentId) patch.parentId = next.parentId.trim() || null;
+  if (next.parentIncidentId.trim() !== initial.parentIncidentId)
+    patch.parentIncidentId = next.parentIncidentId.trim() || null;
   if (next.changeRequestId.trim() !== initial.changeRequestId)
     patch.changeRequestId = next.changeRequestId.trim() || null;
   if (next.problemId.trim() !== initial.problemId) patch.problemId = next.problemId.trim() || null;
@@ -546,14 +547,14 @@ export default function EditIncidentDialog({
                 id="edit-incident-parent"
                 label="Parent incident"
                 placeholder="Search incidents…"
-                value={state.parentId}
-                onChange={(v) => set("parentId", v)}
+                value={state.parentIncidentId}
+                onChange={(v) => set("parentIncidentId", v)}
                 disabled={isSaving}
                 useSearch={useSearchIncidentsExcludingSelf}
                 searchExtra={incident.id ?? undefined}
                 getId={(i) => i.id!}
                 getLabel={incidentLinkLabel}
-                knownLabel={incident.parent?.name}
+                knownLabel={incident.parentIncident?.name}
               />
             </Box>
             <Box sx={{ flex: "1 1 220px" }}>

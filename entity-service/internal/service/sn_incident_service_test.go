@@ -212,6 +212,45 @@ func TestSNIncidentService_UpdateIncident_ResolutionCodePassedThrough(t *testing
 	}
 }
 
+// TestSNIncidentService_UpdateIncident_ParentIncidentClearSendsNull verifies an
+// explicit clear reaches ServiceNow as a real null, and a set value as its sysid.
+func TestSNIncidentService_UpdateIncident_ParentIncidentClearSendsNull(t *testing.T) {
+	var gotBody map[string]json.RawMessage
+	mux := http.NewServeMux()
+	mux.HandleFunc("/incidents/"+testIncidentSysid, func(w http.ResponseWriter, r *http.Request) {
+		gotBody = nil
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Incident updated successfully.",
+			"incident": {"id": "` + testIncidentSysid + `", "number": "INC0001", "createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com"}
+		}`))
+	})
+	svc := NewServiceNowIncidentService(newTestSNClient(t, mux), nil)
+
+	if _, err := svc.UpdateIncident(contextWithUserIDToken("token"), domain.UpdateIncidentRequest{
+		ID: testIncidentUUID, ParentIncidentID: new(*string),
+	}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if raw, ok := gotBody["parentIncidentId"]; !ok || string(raw) != "null" {
+		t.Fatalf("clear sent parentIncidentId = %q (present %v), want null", raw, ok)
+	}
+
+	parent := testIncidentUUID
+	set := &parent
+	if _, err := svc.UpdateIncident(contextWithUserIDToken("token"), domain.UpdateIncidentRequest{
+		ID: testIncidentUUID, ParentIncidentID: &set,
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if raw := string(gotBody["parentIncidentId"]); raw != `"`+testIncidentSysid+`"` {
+		t.Fatalf("set sent parentIncidentId = %s, want %q", raw, testIncidentSysid)
+	}
+}
+
 // TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid verifies a resolution code
 // outside the closed enum is rejected with a clean validation error before any SN call.
 func TestSNIncidentService_UpdateIncident_ResolutionCode_Invalid(t *testing.T) {

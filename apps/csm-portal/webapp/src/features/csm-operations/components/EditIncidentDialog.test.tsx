@@ -180,6 +180,64 @@ describe("EditIncidentDialog advanced-linking pickers", () => {
   });
 });
 
+describe("EditIncidentDialog parent incident", () => {
+  // The picker edits the parent incident (`parentIncident` /
+  // `parentIncidentId`), never the generic `parent`, which can be a case,
+  // change request or problem.
+  const CHILD: BeIncidentDetail = {
+    ...BASE_INCIDENT,
+    state: "IN_PROGRESS",
+    category: "SECURITY",
+    contactType: "EMAIL",
+    impact: "LOW",
+    urgency: "LOW",
+    parentIncident: { id: "inc-parent", name: "INC0011111" },
+    parent: { id: "cs-1", name: "CS0007777" },
+  };
+  const parentPicker = (): HTMLElement => screen.getByRole("combobox", { name: /parent incident/i });
+  const save = (): void => {
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+  };
+
+  it("shows the parent incident, not the generic parent", () => {
+    render(<EditIncidentDialog incident={CHILD} isSaving={false} onClose={vi.fn()} onSave={vi.fn()} />);
+    expect(parentPicker()).toHaveValue("INC0011111");
+  });
+
+  it("sends a picked parent as parentIncidentId, and nothing about the generic parent", () => {
+    useSearchIncidentsExcludingSelfMock.mockImplementation(() => ({
+      data: [{ id: "inc-other", number: "INC0033333", subject: "Another outage" }] as never[],
+      isFetching: false,
+      isError: false,
+    }));
+    try {
+      const onSave = vi.fn();
+      render(<EditIncidentDialog incident={CHILD} isSaving={false} onClose={vi.fn()} onSave={onSave} />);
+
+      fireEvent.mouseDown(parentPicker());
+      fireEvent.click(
+        within(screen.getByRole("listbox")).getByRole("option", { name: "INC0033333 — Another outage" }),
+      );
+      save();
+
+      expect(onSave).toHaveBeenCalledWith({ parentIncidentId: "inc-other" });
+    } finally {
+      useSearchIncidentsExcludingSelfMock.mockImplementation(() => ({ data: [], isFetching: false, isError: false }));
+    }
+  });
+
+  it("sends parentIncidentId null when the parent incident is cleared", () => {
+    const onSave = vi.fn();
+    render(<EditIncidentDialog incident={CHILD} isSaving={false} onClose={vi.fn()} onSave={onSave} />);
+
+    const root = parentPicker().closest(".MuiAutocomplete-root") as HTMLElement;
+    fireEvent.click(within(root).getByLabelText(/clear/i));
+    save();
+
+    expect(onSave).toHaveBeenCalledWith({ parentIncidentId: null });
+  });
+});
+
 describe("EditIncidentDialog optional subcategory", () => {
   const CLASSIFIED: BeIncidentDetail = {
     ...BASE_INCIDENT,

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 // "[WSO2 Cloud Ops] Post resolution tasks" end to end against a real database
@@ -223,5 +224,61 @@ func TestPostResolutionIntegration_WorkaroundOnAnotherService(t *testing.T) {
 	}
 	if group != groupWSO2SRETeam || service != otherService || linked == "" {
 		t.Errorf("group/service/linked = %s / %s / %q, want the incident's group and service, linked", group, service, linked)
+	}
+}
+
+const prChildIncidentID = "47777777-0000-0000-0000-0000000000a2"
+
+// A child incident resolved by its parent's cascade (migration 0256's
+// resolved_with_parent) gets its incident report but no follow-ups: the
+// parent alone gets the workaround problem.
+func TestPostResolutionIntegration_ChildResolvedWithParentGetsNoFollowUps(t *testing.T) {
+	pool := incidentReportTestPool(t)
+	d := irDrainer(pool)
+	prSeed(t, pool, d)
+	ctx := context.Background()
+	cleanupChild := func() {
+		irExec(t, pool, `DELETE FROM work_item WHERE id IN (SELECT id FROM problem WHERE incident_id = $1)`, prChildIncidentID)
+		irExec(t, pool, `DELETE FROM work_item WHERE id IN (SELECT id FROM incident_task WHERE incident_id = $1)`, prChildIncidentID)
+		irExec(t, pool, `DELETE FROM work_item WHERE id = $1`, prChildIncidentID)
+		irExec(t, pool, `DELETE FROM event_outbox WHERE entity_type = 'incident' AND entity_id = $1`, prChildIncidentID)
+	}
+	cleanupChild()
+	t.Cleanup(cleanupChild)
+	irExec(t, pool, `
+		INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type)
+		VALUES ($1, NOW(), NOW(), 't', 't', 'INC-PR-0002', 'Choreo gateway 502s, again', 'INCIDENT')`, prChildIncidentID)
+	irExec(t, pool, `
+		INSERT INTO incident (id, state, priority, impact, urgency, service_id, parent_incident_id)
+		VALUES ($1, 'IN_PROGRESS', 'HIGH', 'HIGH', 'MEDIUM', $2, $3)`, prChildIncidentID, postResolutionServiceChoreo, prIncidentID)
+
+	state, code, notes := "RESOLVED", "SOLVED_WORK_AROUND", "restarted the gateway"
+	children, err := repository.NewIncidentRepository(repository.NewScoped(pool)).UpdateIncidentLifecycle(
+		repository.WithSystemIdentity(ctx), prIncidentID,
+		repository.IncidentLifecycleUpdate{State: &state, ResolutionCode: &code, ResolutionNotes: &notes}, "pr-test@test.local")
+	if err != nil || len(children) != 1 || children[0].ID != prChildIncidentID {
+		t.Fatalf("resolve parent: children %+v, err %v; want the one child", children, err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := d.drainOnce(ctx); err != nil {
+			t.Fatalf("drainOnce: %v", err)
+		}
+	}
+
+	var parentProblems, childProblems, childTasks int
+	var childReport *string
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT COUNT(*) FROM problem WHERE incident_id = $1),
+		       (SELECT COUNT(*) FROM problem WHERE incident_id = $2),
+		       (SELECT COUNT(*) FROM incident_task WHERE incident_id = $2),
+		       (SELECT incident_report FROM incident WHERE id = $2)`, prIncidentID, prChildIncidentID).
+		Scan(&parentProblems, &childProblems, &childTasks, &childReport); err != nil {
+		t.Fatalf("read follow-ups: %v", err)
+	}
+	if parentProblems != 1 || childProblems != 0 || childTasks != 0 {
+		t.Errorf("problems parent/child = %d/%d, child tasks = %d; want 1/0 and 0", parentProblems, childProblems, childTasks)
+	}
+	if childReport == nil || !strings.Contains(*childReport, "INC-PR-0002") {
+		t.Errorf("child incident report = %v, want one written for INC-PR-0002", childReport)
 	}
 }
