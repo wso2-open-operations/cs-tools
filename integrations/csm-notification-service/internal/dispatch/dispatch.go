@@ -441,14 +441,18 @@ func (d *Dispatcher) WithSLAEngine(engine slaEngineService) *Dispatcher {
 	return d
 }
 
-// durableDedup abstracts the two Redis calls Handle's own durable
-// record-level claim needs — SetNX to atomically claim-and-check, Del to
+// durableDedup abstracts the three Redis calls Handle's own durable
+// record-level claim needs — SetNX to atomically claim-and-check (with a
+// short TTL, so a crash mid-dispatch self-heals quickly instead of
+// stranding the record — see durablyClaimRecord's own doc comment), Set to
+// upgrade a successful claim to its full, long-lived TTL, and Del to
 // release a claim on failure so a genuine retry isn't blocked. The real
 // *redis.Client (cmd/server/main.go's own shared instance, the same one
 // slaengine.NewStore wraps) already implements this exactly; nothing new
 // needs constructing for it.
 type durableDedup interface {
 	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd
+	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 	Del(ctx context.Context, keys ...string) *redis.IntCmd
 }
 
@@ -795,14 +799,34 @@ func (d *Dispatcher) HandleShared(ctx context.Context, record eventbus.Record) e
 }
 
 // durableDedupTTL bounds how long Handle's own durable record-level claim
-// remembers a fully-processed record. Unlike slaengine's own clockTTL (90
-// days — a clock's own display data genuinely needs to outlive the clock
-// itself), this claim exists purely to survive the one real trigger for a
-// stale redelivery: a consumer-group rebalance or a process restart
-// (deploy, crash, OOM). That window is realistically minutes, not months —
-// 3 days is already generous slack on top of it, and keeps this from
+// remembers a record as fully, successfully DONE, once dispatchByType has
+// actually returned nil for it. Unlike slaengine's own clockTTL (90 days —
+// a clock's own display data genuinely needs to outlive the clock itself),
+// this claim exists purely to survive the one real trigger for a stale
+// redelivery: a consumer-group rebalance or a process restart (deploy,
+// crash, OOM). That window is realistically minutes, not months — 3 days
+// is already generous slack on top of it, and keeps this from
 // accumulating one key per record ever handled for anywhere near as long.
 const durableDedupTTL = 3 * 24 * time.Hour
+
+// durableDedupInProgressTTL bounds how long a claim lives BEFORE
+// dispatchByType has returned anything — see durablyClaimRecord's own doc
+// comment for why this must be short and separate from durableDedupTTL. A
+// CodeRabbit review on an earlier version of this claim caught a real gap
+// it had: claiming at the full 3-day TTL *before* dispatch meant a process
+// killed mid-handler (OOM, a deploy, a crash) left the record claimed —
+// indistinguishable from "succeeded" — for up to 3 days, even though it was
+// never actually sent; Kafka always redelivers an unclaimed-offset record
+// after such a crash (eventbus.Consumer commits only once Handle returns —
+// see Consumer.Run's own doc comment), and that redelivery would have been
+// wrongly skipped as a stale repeat of a record that, in truth, had never
+// completed at all — turning a crash into a silently dropped notification,
+// a worse failure than the duplicate-send bug this whole feature exists to
+// fix. 10 minutes is comfortably above this service's own real per-record
+// processing time (outbound HTTP calls included, normally well under a
+// second) while still being "minutes," not "days," so a crash self-heals
+// quickly rather than stranding the record.
+const durableDedupInProgressTTL = 10 * time.Minute
 
 // durableDedupKeyPrefix namespaces Handle's own claim keys in a Redis
 // instance this service already shares with slaengine's own wake
@@ -811,25 +835,31 @@ const durableDedupTTL = 3 * 24 * time.Hour
 const durableDedupKeyPrefix = "dispatch:handled:"
 
 // durablyClaimRecord atomically claims baseKey for this call via Redis
-// SETNX — claimed=true means this is the first time ANY call has reached
-// here for this exact record (by content hash, recordBaseKey) since the
-// key last expired, and Handle should go on to dispatch it; claimed=false
-// means a PAST call already claimed and — by construction, see
-// releaseDurableRecordClaim's own doc comment — fully succeeded at it, so
-// this delivery is a genuine redelivery of an already-handled record, not
-// a new event. A nil redisDedup (Redis not configured for this deployment)
-// always reports claimed=true: this whole mechanism is simply unavailable,
-// the same as before it existed, not a reason to refuse processing. A
-// Redis error also reports claimed=true (fail open, logged) — never refuse
-// to process a real event just because this one durability check
-// couldn't be made; the in-memory done/chatKey guards elsewhere in this
-// file still cover the common same-process-retry case regardless of
-// whether this one succeeds.
+// SETNX, at durableDedupInProgressTTL (NOT the full durableDedupTTL — see
+// that constant's own doc comment for the crash-safety reason) —
+// claimed=true means this call should go on to dispatch the record;
+// claimed=false means the key already exists, which means EITHER a past
+// call already fully succeeded at it (markRecordDone upgraded the key to
+// durableDedupTTL) OR some call — possibly this very record's own earlier,
+// now-crashed attempt — is or recently was actively working on it. Both
+// are correctly treated the same way, as "don't dispatch again right now":
+// the first because it is genuinely done, the second because a duplicate
+// concurrent attempt must not run alongside one that may still be
+// in-flight. The only case this can get wrong is a crashed attempt's own
+// stale claim — bounded to durableDedupInProgressTTL, after which it
+// expires and the next redelivery proceeds normally. A nil redisDedup
+// (Redis not configured for this deployment) always reports claimed=true:
+// this whole mechanism is simply unavailable, the same as before it
+// existed, not a reason to refuse processing. A Redis error also reports
+// claimed=true (fail open, logged) — never refuse to process a real event
+// just because this one durability check couldn't be made; the in-memory
+// done/chatKey guards elsewhere in this file still cover the common
+// same-process-retry case regardless of whether this one succeeds.
 func (d *Dispatcher) durablyClaimRecord(ctx context.Context, baseKey string) (claimed bool) {
 	if d.redisDedup == nil {
 		return true
 	}
-	ok, err := d.redisDedup.SetNX(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupTTL).Result()
+	ok, err := d.redisDedup.SetNX(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupInProgressTTL).Result()
 	if err != nil {
 		slog.WarnContext(ctx, "dispatch: durable dedup check failed, processing the record anyway", "err", err)
 		return true
@@ -837,19 +867,42 @@ func (d *Dispatcher) durablyClaimRecord(ctx context.Context, baseKey string) (cl
 	return ok
 }
 
+// markRecordDone upgrades a claim durablyClaimRecord made to the full
+// durableDedupTTL, called ONLY once dispatchByType has actually returned
+// nil for this record — this is the one moment a redelivery of this exact
+// content should be remembered and skipped for days, not minutes. Using a
+// plain Set (not SetNX) deliberately overwrites durablyClaimRecord's own
+// short-lived marker unconditionally; there is nothing to race against
+// here since this call owns the claim it is extending. A nil redisDedup is
+// a no-op, matching durablyClaimRecord's own posture; a Redis error here is
+// logged and otherwise ignored — the record did genuinely succeed either
+// way, and the only consequence of this failing is that the short
+// in-progress TTL (not the long done one) governs how soon a later
+// redelivery would be let back through, which only reopens the original
+// duplicate-send risk for a narrow window rather than losing anything.
+func (d *Dispatcher) markRecordDone(ctx context.Context, baseKey string) {
+	if d.redisDedup == nil {
+		return
+	}
+	if err := d.redisDedup.Set(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupTTL).Err(); err != nil {
+		slog.WarnContext(ctx, "dispatch: failed to extend durable dedup claim to its full TTL after a successful record", "err", err)
+	}
+}
+
 // releaseDurableRecordClaim gives back a claim durablyClaimRecord made,
 // called ONLY when dispatchByType reports an error for this record — a
-// claim is never released on success, which is the entire point: a record
-// that genuinely succeeded must stay remembered as done for durableDedupTTL,
-// so a later redelivery of it is recognized and skipped rather than
-// resending whatever it already sent. A record that failed, by contrast,
-// has to be releasable, or a real retry (the overwhelmingly more common
-// reason Handle is called twice for the same record) would be silently
-// swallowed as if it were a stale redelivery. A nil redisDedup is a no-op,
-// matching durablyClaimRecord's own posture; a Redis error here is logged
-// and otherwise ignored — the claim simply lingers until durableDedupTTL
-// expires, which only delays a legitimate retry rather than losing it
-// outright.
+// claim is never released on success (markRecordDone extends it instead).
+// A record that failed has to be releasable, or a real retry (the
+// overwhelmingly more common reason Handle is called twice for the same
+// record) would be silently swallowed as if it were a stale redelivery.
+// Takes a context already detached from the caller's own (via
+// context.WithoutCancel, see Handle's own call site) specifically so a
+// shutdown that cancels ctx mid-handler — which is exactly one of the
+// failure paths this whole claim exists to be safe against — doesn't also
+// prevent the release itself from running; with durablyClaimRecord's own
+// short durableDedupInProgressTTL, a release that still fails for some
+// other reason now only delays a retry by minutes, not days. A nil
+// redisDedup is a no-op, matching durablyClaimRecord's own posture.
 func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey string) {
 	if d.redisDedup == nil {
 		return
@@ -858,6 +911,12 @@ func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey stri
 		slog.WarnContext(ctx, "dispatch: failed to release durable dedup claim after a failed record, a retry may be delayed until it expires", "err", err)
 	}
 }
+
+// durableDedupReleaseTimeout bounds releaseDurableRecordClaim's/
+// markRecordDone's own detached context (see Handle's own call sites) —
+// generous for a single Redis round trip, short enough to never meaningfully
+// delay Handle's own return.
+const durableDedupReleaseTimeout = 5 * time.Second
 
 // Handle implements eventbus.Handle. A non-nil return causes the caller
 // (eventbus.Consumer) to retry — see its package doc for the retry policy.
@@ -880,17 +939,27 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// Checked before dispatching to any handler, and independent of every
 	// handler's own fine-grained (and in-memory-only) chatKey/done
 	// tracking below — see redisDedup's own doc comment for the
-	// restart/rebalance gap this closes. A record already fully handled by
-	// a past call is skipped outright, never reaching a single handler.
+	// restart/rebalance gap this closes. A record already in progress or
+	// already fully handled is skipped outright, never reaching a single
+	// handler.
 	baseKey := recordBaseKey(record)
 	if !d.durablyClaimRecord(ctx, baseKey) {
-		slog.InfoContext(ctx, "dispatch: record already fully processed, skipping a redelivery", "type", string(env.Type))
+		slog.InfoContext(ctx, "dispatch: record already in progress or already processed, skipping", "type", string(env.Type))
 		return nil
 	}
 
 	err := d.dispatchByType(ctx, record, env)
+	// A detached, short-lived context for the release/extend call below —
+	// ctx itself may already be cancelled (e.g. a shutdown interrupted
+	// dispatchByType, which is exactly one of the crash-like scenarios this
+	// claim exists to be safe against), and a cancelled context would make
+	// either Redis call fail immediately, defeating the point.
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), durableDedupReleaseTimeout)
+	defer cancel()
 	if err != nil {
-		d.releaseDurableRecordClaim(ctx, baseKey)
+		d.releaseDurableRecordClaim(releaseCtx, baseKey)
+	} else {
+		d.markRecordDone(releaseCtx, baseKey)
 	}
 	return err
 }
