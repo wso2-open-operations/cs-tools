@@ -41,6 +41,12 @@ import {
  */
 const INLINE_IMAGE_SHARE_STALE_TIME_MS = 3 * 60_000;
 
+/**
+ * What an image's query resolves to when entity-service answers 410 (the image
+ * was deleted or removed). Not a URL, so it can never be used as an `<img>` src.
+ */
+const INLINE_IMAGE_REMOVED = "\u0000removed";
+
 const SAFE_IMAGE_SUBTYPES = /^(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/i;
 
 /** Returns the normalized image MIME type, or `null` if `raw` isn't an allowed image subtype. */
@@ -134,6 +140,10 @@ export function useResolvedInlineImageHtml(html: string): {
             const entityBlob = await fetchEntityInlineImage(api, sysidToUuid(id));
             if (toSafeMimeType(entityBlob.type)) return blobToDataUrl(entityBlob);
           } catch (err) {
+            // 410: removed on purpose; nothing else holds it, so stop here.
+            if (err instanceof BackendApiError && err.status === 410) {
+              return INLINE_IMAGE_REMOVED;
+            }
             if (!(err instanceof BackendApiError && (err.status === 404 || err.status === 400))) {
               throw err;
             }
@@ -174,13 +184,15 @@ export function useResolvedInlineImageHtml(html: string): {
 
   const dataUrls = new Map<string, string>();
   const deniedIds = new Set<string>();
+  const removedIds = new Set<string>();
   attachmentIds.forEach((id, i) => {
     if (!canDownloadAttachment) {
       deniedIds.add(id);
       return;
     }
     const result = queries[i]?.data;
-    if (result) dataUrls.set(id, result);
+    if (result === INLINE_IMAGE_REMOVED) removedIds.add(id);
+    else if (result) dataUrls.set(id, result);
   });
 
   // A fixed-length key derived from the resolved data URLs: useMemo's
@@ -188,10 +200,10 @@ export function useResolvedInlineImageHtml(html: string): {
   // `queries.map((q) => q.data)` cannot guarantee as attachmentIds changes.
   const dataUrlsKey = Array.from(dataUrls.entries())
     .map(([id, url]) => `${id}:${url}`)
-    .join(",");
+    .join(",") + `|${Array.from(removedIds).join(",")}`;
 
   const resolvedHtml = useMemo(
-    () => replaceInlineImageSrcs(html, dataUrls, deniedIds, !canDownloadAttachment),
+    () => replaceInlineImageSrcs(html, dataUrls, deniedIds, !canDownloadAttachment, removedIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [html, dataUrlsKey, canDownloadAttachment],
   );

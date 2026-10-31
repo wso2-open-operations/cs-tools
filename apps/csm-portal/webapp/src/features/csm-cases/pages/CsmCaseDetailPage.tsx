@@ -51,6 +51,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { releaseInlineImages } from "@features/csm-cases/api/inlineImageUploads";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
@@ -788,7 +789,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
   >([]);
   const [draftInternal, setDraftInternal] = useState(false);
   const [draftSourceMode, setDraftSourceMode] = useState(false);
+  // Read by clearComposerDraft, which must not depend on the draft itself.
+  const draftHtmlRef = useRef(draftHtml);
+  useEffect(() => {
+    draftHtmlRef.current = draftHtml;
+  }, [draftHtml]);
   const clearComposerDraft = useCallback(() => {
+    // Free the draft's image previews and forget their running uploads, so a
+    // late result cannot come back for a draft that no longer exists.
+    releaseInlineImages(draftHtmlRef.current);
     setDraftHtml("");
     setDraftAttachments([]);
     setDraftInternal(false);
@@ -2800,6 +2809,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 canResumeToUnlockPublicReply={canWrite && canResumeToUnlockPublicReply}

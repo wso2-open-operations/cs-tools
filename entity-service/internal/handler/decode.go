@@ -117,6 +117,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		ue  *apierror.UnauthorizedError
 		fe  *apierror.ForbiddenError
 		ce  *apierror.ConflictError
+		ge  *apierror.GoneError
 		tme *apierror.TooManyRequestsError
 		de  *apierror.DownstreamError
 	)
@@ -143,6 +144,11 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		// 404 – resource not found; message is safe to return.
 		log.Printf("Not found: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(nfe.Msg)) // #nosec G706 -- path and message sanitized
 		apierror.WriteJSON(w, http.StatusNotFound, nfe.Msg)
+
+	case errors.As(err, &ge):
+		// 410 – the resource was removed on purpose; message is safe to return.
+		log.Printf("Gone: %s %s: %s", r.Method, sanitizeLog(r.URL.Path), sanitizeLog(ge.Msg)) // #nosec G706 -- path and message sanitized
+		apierror.WriteJSONWithCode(w, http.StatusGone, ge.Msg, ge.Code)
 
 	case errors.As(err, &ce):
 		// 409 – request conflicts with the current state of the resource; message is safe to return.

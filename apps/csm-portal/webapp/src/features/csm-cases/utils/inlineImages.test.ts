@@ -50,7 +50,16 @@ describe("replaceInlineImageSrcs", () => {
     const out = replaceInlineImageSrcs(html, new Map(), new Set());
     expect(out).not.toContain("<img");
     expect(out).toContain('data-unresolved-reason="error"');
-    expect(out).toContain("Image unavailable");
+    expect(out).toContain("This image is not available.");
+  });
+
+  it("shows a removed placeholder for a reference in removedIds, without the id", () => {
+    const html = `<img src="${SYSID}.iix">`;
+    const out = replaceInlineImageSrcs(html, new Map(), undefined, false, new Set([SYSID]));
+    expect(out).not.toContain("<img");
+    expect(out).toContain('data-unresolved-reason="removed"');
+    expect(out).toContain("This image was removed.");
+    expect(out).not.toContain(SYSID);
   });
 
   it("defaults to the generic placeholder when deniedIds is omitted entirely", () => {
@@ -249,6 +258,6 @@ describe("bare attachment-id srcs (migrated content)", () => {
     const out = replaceInlineImageSrcs(`<img src="/${UUID}">`, new Map());
     expect(out).not.toContain("<img");
     expect(out).toContain('data-unresolved-reason="error"');
-    expect(out).toContain("Image unavailable");
+    expect(out).toContain("This image is not available.");
   });
 });

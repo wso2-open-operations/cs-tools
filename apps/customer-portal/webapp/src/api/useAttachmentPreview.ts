@@ -26,6 +26,18 @@ function getBackendBaseUrl(): string {
   return baseUrl.replace(/\/$/, "");
 }
 
+/**
+ * Thrown by an image fetch when the image was removed on purpose (deleted, or
+ * expired with its closed case), so a renderer can say "removed" rather than
+ * "not available". Any other failure resolves to null as before.
+ */
+export class ImageRemovedError extends Error {
+  constructor() {
+    super("This image was removed.");
+    this.name = "ImageRemovedError";
+  }
+}
+
 const SAFE_IMAGE_SUBTYPES = /^(png|jpeg|jpg|gif|webp|svg\+xml|bmp|avif)$/i;
 
 function toSafeMimeType(raw: string): string {
@@ -56,6 +68,7 @@ async function fetchAttachmentDataUrl(
       if (!mimeType.startsWith("image/")) return null;
       return blobToDataUrl(inline.blob);
     }
+    if (inline.status === "removed") throw new ImageRemovedError();
     if (inline.status === "error") return null;
   }
   const baseUrl = getBackendBaseUrl();
@@ -116,7 +129,8 @@ export function useAttachmentPreview(
     queryFn: () => fetchAttachmentDataUrl(authFetch, attachmentId!, caseId),
     enabled: !!attachmentId,
     staleTime: 0,
-    retry: 1,
+    retry: (count: number, error: unknown) =>
+      !(error instanceof ImageRemovedError) && count < 1,
   });
 }
 
@@ -126,7 +140,8 @@ export function useAttachmentPreview(
  * @param attachmentIds - List of attachment ids to fetch.
  * @param caseId - Optional case-id hint, forwarded to every fetch (see
  * fetchAttachmentDataUrl's own doc comment).
- * @returns `{ dataUrls: Map<string, string>, isLoading: boolean }`
+ * @returns `{ dataUrls, removedIds, isLoading }`: `removedIds` holds the ids
+ * whose image was removed (deleted), as opposed to merely failing to load.
  */
 export function useAttachmentPreviews(
   attachmentIds: string[],
@@ -145,10 +160,12 @@ export function useAttachmentPreviews(
 
   const isLoading = queries.some((q) => q.isLoading);
   const dataUrls = new Map<string, string>();
+  const removedIds = new Set<string>();
   attachmentIds.forEach((id, i) => {
     const result = queries[i]?.data;
     if (result) dataUrls.set(id, result);
+    else if (queries[i]?.error instanceof ImageRemovedError) removedIds.add(id);
   });
 
-  return { dataUrls, isLoading };
+  return { dataUrls, removedIds, isLoading };
 }

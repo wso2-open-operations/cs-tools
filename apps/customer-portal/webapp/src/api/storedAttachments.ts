@@ -72,6 +72,9 @@ export type AuthFetch = (
  */
 export const STORED_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
 
+/** Largest comment image the portal offers to upload (entity-service's default). */
+export const STORED_INLINE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
 export const STORED_ATTACHMENT_RATE_LIMIT_MESSAGE =
   "Too many attachment requests. Please wait a minute and try again.";
 
@@ -321,8 +324,14 @@ export async function uploadStoredAttachment(
   },
 ): Promise<StoredAttachmentConfirmed> {
   const { type, parentId, file, name, onStep } = input;
-  if (file.size > STORED_ATTACHMENT_MAX_BYTES) {
-    throw new Error("File size exceeds 100 MB limit.");
+  const localMaxBytes =
+    type === "comment"
+      ? STORED_INLINE_IMAGE_MAX_BYTES
+      : STORED_ATTACHMENT_MAX_BYTES;
+  if (file.size > localMaxBytes) {
+    throw new Error(
+      `File size exceeds ${Math.floor(localMaxBytes / (1024 * 1024))} MB limit.`,
+    );
   }
   onStep?.("preparing");
   const start = await startStoredUpload(authFetch, {
@@ -365,26 +374,41 @@ export async function deleteStoredAttachment(
   });
 }
 
+/**
+ * Entity-service and the backend accept only the hyphenated form of an id, while
+ * the comment renderer normalises a bare `/<uuid>` reference to 32 hex
+ * characters. Any other value is returned unchanged.
+ */
+export function toHyphenatedUuid(id: string): string {
+  const hex = id.trim().toLowerCase();
+  return /^[a-f0-9]{32}$/.test(hex)
+    ? `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+    : id;
+}
+
 /** Outcome of loading a comment's inline image through entity-service. */
 export type InlineImageResult =
   | { status: "ok"; blob: Blob }
   | { status: "not-found" }
+  | { status: "removed" }
   | { status: "error" };
 
 /**
  * Fetches a comment's inline image through entity-service (which checks access and
  * streams it). "not-found" (a 404) lets a caller fall back to the older flow;
- * any other failure is "error".
+ * "removed" (a 410, the image was deleted) does not, since there is nothing
+ * older to try; any other failure is "error".
  */
 export async function fetchInlineImageBlob(
   authFetch: AuthFetch,
   id: string,
 ): Promise<InlineImageResult> {
   const response = await authFetch(
-    `${getBackendBaseUrl()}/attachments/inline/${encodeURIComponent(id)}/content`,
+    `${getBackendBaseUrl()}/attachments/inline/${encodeURIComponent(toHyphenatedUuid(id))}/content`,
     { method: "GET" },
   );
   if (response.status === 404) return { status: "not-found" };
+  if (response.status === 410) return { status: "removed" };
   if (!response.ok) return { status: "error" };
   return { status: "ok", blob: await response.blob() };
 }

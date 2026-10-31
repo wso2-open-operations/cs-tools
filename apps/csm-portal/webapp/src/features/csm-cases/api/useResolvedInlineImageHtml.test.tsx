@@ -31,6 +31,13 @@ const { postMock, getBlobMock, sftpgoFlag, userRoles } = vi.hoisted(() => ({
 
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock, getBlob: getBlobMock }),
+  BackendApiError: class BackendApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("@context/current-user/CurrentUserContext", () => ({
@@ -44,6 +51,7 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
   }),
 }));
 
+import { BackendApiError } from "@api/backend/client";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -239,5 +247,36 @@ describe("useResolvedInlineImageHtml", () => {
     );
 
     expect(result.current.resolvedHtml).toBe(RAW_BASE64_HTML);
+  });
+});
+
+describe("useResolvedInlineImageHtml: entity-service images that are gone", () => {
+  const UUID = "0f15cbcc-c36b-8310-af2f-404599013196";
+  const BARE_HTML = `<p><img src="/${UUID}"></p>`;
+
+  beforeEach(() => {
+    getBlobMock.mockReset();
+    postMock.mockReset();
+    sftpgoFlag.enabled = false;
+    userRoles.value = ["cs_engineer"];
+    window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true } as unknown as typeof window.config;
+  });
+
+  it("a 410 shows the removed message and tries nothing else", async () => {
+    getBlobMock.mockRejectedValue(new BackendApiError(410, "This image was removed."));
+    const { result } = renderHook(() => useResolvedInlineImageHtml(BARE_HTML), { wrapper });
+    await waitFor(() => expect(result.current.resolvedHtml).toContain("This image was removed."));
+    expect(result.current.resolvedHtml).toContain('data-unresolved-reason="removed"');
+    expect(result.current.resolvedHtml).not.toContain(UUID);
+    expect(getBlobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 500 shows the not-available message", async () => {
+    getBlobMock.mockRejectedValue(new BackendApiError(500, "boom"));
+    const { result } = renderHook(() => useResolvedInlineImageHtml(BARE_HTML), { wrapper });
+    // The query retries once (about a second) before it gives up.
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 5000 });
+    expect(result.current.resolvedHtml).toContain("This image is not available.");
+    expect(result.current.resolvedHtml).not.toContain("was removed");
   });
 });

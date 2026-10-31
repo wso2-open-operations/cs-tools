@@ -23,6 +23,8 @@ import {
   requestAttachmentLink,
   sendFileToUploadLink,
   STORED_ATTACHMENT_MAX_BYTES,
+  STORED_INLINE_IMAGE_MAX_BYTES,
+  toHyphenatedUuid,
   uploadStoredAttachment,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
@@ -272,6 +274,33 @@ describe("storedAttachments", () => {
       expect(authFetch).not.toHaveBeenCalled();
     });
 
+    it("refuses a comment image over 10 MB before anything is sent", async () => {
+      const big = { size: STORED_INLINE_IMAGE_MAX_BYTES + 1, name: "p.png", type: "image/png" } as File;
+      await expect(
+        uploadStoredAttachment(authFetch, {
+          type: "comment",
+          parentId: "case-1",
+          file: big,
+          name: "p.png",
+        }),
+      ).rejects.toThrow("File size exceeds 10 MB limit.");
+      expect(authFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not apply the 10 MB image limit to a work item file (only the server's limit)", async () => {
+      const mid = { size: STORED_INLINE_IMAGE_MAX_BYTES + 1, name: "a.bin", type: "" } as File;
+      authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
+      await expect(
+        uploadStoredAttachment(authFetch, {
+          type: "work_item",
+          parentId: "case-1",
+          file: mid,
+          name: "a.bin",
+        }),
+      ).rejects.toThrow(/exceeds the 5 MB limit/);
+      expect(authFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("refuses a file over the server's maxBytes before sending it", async () => {
       authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 3 }, 201));
       await expect(
@@ -337,7 +366,27 @@ describe("storedAttachments", () => {
     expect(authFetch.mock.calls[0][0]).toBe(`${BASE}/attachments/inline/i-1/content`);
     authFetch.mockResolvedValueOnce(new Response("", { status: 404 }));
     expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "not-found" });
+    authFetch.mockResolvedValueOnce(new Response("", { status: 410 }));
+    expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "removed" });
     authFetch.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect(await fetchInlineImageBlob(authFetch, "i-1")).toEqual({ status: "error" });
+  });
+
+  it("fetchInlineImageBlob asks for the hyphenated id even when given 32 hex characters", async () => {
+    authFetch.mockResolvedValue(new Response("IMG", { status: 200 }));
+    await fetchInlineImageBlob(authFetch, "0f15cbccc36b8310af2f404599013196");
+    expect(authFetch.mock.calls[0][0]).toBe(
+      `${BASE}/attachments/inline/0f15cbcc-c36b-8310-af2f-404599013196/content`,
+    );
+  });
+
+  it("toHyphenatedUuid only reshapes a bare 32 hex id", () => {
+    expect(toHyphenatedUuid("0F15CBCCC36B8310AF2F404599013196")).toBe(
+      "0f15cbcc-c36b-8310-af2f-404599013196",
+    );
+    expect(toHyphenatedUuid("0f15cbcc-c36b-8310-af2f-404599013196")).toBe(
+      "0f15cbcc-c36b-8310-af2f-404599013196",
+    );
+    expect(toHyphenatedUuid("i-1")).toBe("i-1");
   });
 });

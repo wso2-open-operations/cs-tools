@@ -171,4 +171,24 @@ describe("useAttachmentPreview with entity-service attachments on", () => {
     expect(result.current.data).toBeNull();
     expect(authFetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("reports a removed image (410) without falling back or retrying", async () => {
+    authFetchMock.mockResolvedValue(new Response("", { status: 410 }));
+    const { result } = renderHook(
+      () => useAttachmentPreviews(["att-4"], "case-1"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.removedIds.has("att-4")).toBe(true));
+    expect(result.current.dataUrls.size).toBe(0);
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a failed image as removed", async () => {
+    authFetchMock.mockResolvedValue(new Response("", { status: 503 }));
+    const { result } = renderHook(() => useAttachmentPreviews(["att-5"]), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.removedIds.size).toBe(0);
+  });
 });

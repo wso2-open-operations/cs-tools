@@ -116,12 +116,14 @@ export function isRawBase64ImageSrc(src: string): boolean {
  */
 function createUnresolvedImagePlaceholder(
   doc: Document,
-  reason: "permission" | "error",
+  reason: "permission" | "removed" | "error",
 ): HTMLSpanElement {
   const label =
     reason === "permission"
       ? "You don't have permission to view this image"
-      : "Image unavailable";
+      : reason === "removed"
+        ? "This image was removed."
+        : "This image is not available.";
   const span = doc.createElement("span");
   span.setAttribute("data-unresolved-reason", reason);
   span.title = label;
@@ -181,7 +183,8 @@ export function extractIixAttachmentIds(html: string): string[] {
 /**
  * Replaces every `.iix` or bare-id (migrated content) `<img>` src in `html` with its resolved data URL from
  * `dataUrls`. A `.iix` reference in `deniedIds` is replaced with a
- * "no permission" placeholder; any other unresolved reference (not yet
+ * "no permission" placeholder, one in `removedIds` (entity-service answered
+ * 410: the image was deleted or removed) with a "removed" one; any other unresolved reference (not yet
  * loaded, unsupported type, a non-permission failure) gets a generic
  * "unavailable" placeholder — never left pointing at an auth-gated URL the
  * browser cannot fetch, and never silently blank.
@@ -204,6 +207,7 @@ export function replaceInlineImageSrcs(
   dataUrls: Map<string, string>,
   deniedIds?: Set<string>,
   denyRawBase64?: boolean,
+  removedIds?: Set<string>,
 ): string {
   const { doc, imgs } = parseImgElements(html);
   for (const img of imgs) {
@@ -217,7 +221,11 @@ export function replaceInlineImageSrcs(
         img.replaceWith(
           createUnresolvedImagePlaceholder(
             doc,
-            deniedIds?.has(refId) ? "permission" : "error",
+            deniedIds?.has(refId)
+              ? "permission"
+              : removedIds?.has(refId)
+                ? "removed"
+                : "error",
           ),
         );
       }
