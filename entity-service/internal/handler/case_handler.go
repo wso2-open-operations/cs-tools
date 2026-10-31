@@ -140,12 +140,50 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 // PatchCase handles PATCH /cases/{id}.
 // Accepts stateKey, severityKey, workStateKey (both data sources), or watchList, assigneeEmail (ServiceNow only).
 // Exactly one field must be provided per request.
+//
+// ActorEmail follows the same M2M trust gate as CreateCaseComment/AddCaseTag's
+// own ActorEmail (see that doc comment): honored only when the caller's own
+// x-jwt-assertion names a client id in h.m2mClientIDs, and rejected outright
+// if it arrives alongside a real x-user-id-token. CaseService.UpdateCase
+// itself rejects it on every branch except MarkFixIssued. Unlike those two,
+// this one's value is only trimmed, never lowercased -- see its own
+// normalization block below for why.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	var req domain.UpdateCaseRequest
 	if !decodeRequest(w, r, &req) {
 		return
 	}
 	req.ID = r.PathValue("id")
+
+	if req.ActorEmail != nil {
+		if middleware.UserIDTokenFromContext(r.Context()) != "" {
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "actorEmail must not be supplied alongside an x-user-id-token",
+			})
+			return
+		}
+		if clientID := auth.IdentityFromContext(r.Context()).ClientID; clientID == "" || !h.m2mClientIDs[clientID] {
+			writeServiceError(w, r, &apierror.ForbiddenError{
+				Msg: "caller is not an authorized M2M client",
+			})
+			return
+		}
+		// Trimmed, not lowercased -- unlike CreateCaseComment/AddCaseTag's own
+		// ActorEmail, this value is stored verbatim as work_item_activity's
+		// created_by/user_email (CaseService.updateCaseMarkFixIssued) and is
+		// not necessarily even an email address in practice (a configured
+		// display label like "WSO2 Updates" is a real, intended case) -- so
+		// case must be preserved exactly as the trusted caller sent it.
+		actorEmail := strings.TrimSpace(*req.ActorEmail)
+		if actorEmail == "" {
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "actorEmail must not be blank",
+			})
+			return
+		}
+		req.ActorEmail = &actorEmail
+	}
+
 	resp, err := h.svc.UpdateCase(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)

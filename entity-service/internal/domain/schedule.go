@@ -155,6 +155,10 @@ type ScheduleTeam struct {
 	// grid built from entries the moment it was cleared, taking with them the
 	// row a lead marks their leave on.
 	Members []ScheduleTeamMember `json:"members"`
+	// Heads are the team's americas_team_lead holders. They head the team
+	// from above, so Members leaves them out (they hold no rota); this names
+	// them for a page that shows who leads the team. Absent when it has none.
+	Heads []ScheduleTeamMember `json:"heads,omitempty"`
 	// DefaultShiftCode is the standing window a member's ordinary weekday is:
 	// Americas cover for the Americas team. Absent means Regular hours.
 	DefaultShiftCode *string `json:"defaultShiftCode,omitempty"`

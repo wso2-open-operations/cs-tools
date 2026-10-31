@@ -39,11 +39,11 @@ type stubCaseAttachmentSNMirror struct {
 	updateAttachment         func(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
 }
 
-func (m *stubCaseAttachmentSNMirror) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
+func (m *stubCaseAttachmentSNMirror) CreateBareCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
 	if m.createCaseAttachment != nil {
 		return m.createCaseAttachment(ctx, req)
 	}
-	panic("stubCaseAttachmentSNMirror: CreateCaseAttachment not stubbed")
+	panic("stubCaseAttachmentSNMirror: CreateBareCaseAttachment not stubbed")
 }
 func (m *stubCaseAttachmentSNMirror) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
 	if m.getCaseAttachmentContent != nil {
@@ -204,7 +204,7 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServ
 			}
 		}`))
 	})
-	mirror := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil, "", nil)
+	mirror := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil, nil, nil, "", nil).(*snCaseService)
 
 	var (
 		mu    sync.Mutex
@@ -233,9 +233,9 @@ func TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServ
 
 	// Guard the premise: the value the service layer receives from ServiceNow
 	// really is the misread one, so the assertions below prove something.
-	snResp, err := mirror.CreateCaseAttachment(ctx, validDualWriteCreateAttachmentRequest())
+	snResp, err := mirror.CreateBareCaseAttachment(ctx, validDualWriteCreateAttachmentRequest())
 	if err != nil {
-		t.Fatalf("mirror CreateCaseAttachment returned error: %v", err)
+		t.Fatalf("mirror CreateBareCaseAttachment returned error: %v", err)
 	}
 	if !snResp.Attachment.CreatedOn.Equal(misreadAsUTC) {
 		t.Fatalf("premise: ServiceNow createdOn parsed to %v, want %v (zone-less text read as UTC)", snResp.Attachment.CreatedOn, misreadAsUTC)

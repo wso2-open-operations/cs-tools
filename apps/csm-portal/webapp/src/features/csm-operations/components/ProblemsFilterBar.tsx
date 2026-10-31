@@ -51,8 +51,8 @@ interface ProblemsFilterBarProps {
 
 /**
  * Search + State + SRE Team filter bar for the Problem management tab. Kept
- * simple by design — see the caveat on `BeProblemSearchFilters.states`
- * before adding more filter fields.
+ * simple by design: the backend only accepts the fields in
+ * `BeProblemFieldFilterField`, so check it before adding more filter fields.
  */
 export default function ProblemsFilterBar({
   filters,

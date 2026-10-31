@@ -108,7 +108,7 @@ func TestSLAEngineIntegration_ReviseClocksDoesNotResurrectTerminalClock(t *testi
 	// test.
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	respPolicy, err := repo.FindPolicyByName(ctx, "P0 - Response (Managed Services)", "RESPONSE")
 	if err != nil {
@@ -129,7 +129,7 @@ func TestSLAEngineIntegration_ReviseClocksDoesNotResurrectTerminalClock(t *testi
 	// RESOLUTION -> CANCELLED directly (simulating an earlier revision that
 	// already retired it).
 	for _, p := range []repository.SLAPolicyRef{respPolicy, workaroundPolicy, resolutionPolicy} {
-		if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, p); err != nil {
+		if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, p, time.Time{}); err != nil {
 			t.Fatalf("RegisterClock(%s) setup: %v", p.Target, err)
 		}
 	}
@@ -208,14 +208,14 @@ func TestSLAEngineIntegration_ReviseClocksReplacesBreachedClock(t *testing.T) {
 	// WithSystemIdentity + Scoped: work_item is RLS-protected (see seedSLAEngineWorkItem).
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	workaroundPolicy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(workaround): %v", err)
 	}
 
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, workaroundPolicy); err != nil {
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, workaroundPolicy, time.Time{}); err != nil {
 		t.Fatalf("RegisterClock(workaround) setup: %v", err)
 	}
 	if _, err := scoped.Exec(ctx,
@@ -258,6 +258,59 @@ func TestSLAEngineIntegration_ReviseClocksReplacesBreachedClock(t *testing.T) {
 	}
 }
 
+// TestSLAEngineIntegration_ReviseClocksCancelComputesHasBreachedLive is the
+// regression test for a PR review finding: since RecomputeActive was
+// removed, nothing periodically recomputes a live clock's stored `stage`
+// into BREACHED any more, so a clock that has genuinely run out the wall
+// clock can still be stored as IN_PROGRESS right up until something acts on
+// it. ReviseClocks' cancellation must compute has_breached from REAL,
+// live elapsed time at the moment of cancellation -- not trust the row's
+// stale, pre-cancellation stage -- or the breach fact is silently lost. This
+// pushes start_on back past the policy's own duration WITHOUT forcing stage
+// to BREACHED first (unlike the sibling test above), so the only way
+// has_breached ends up TRUE is if ReviseClocks computed it itself.
+func TestSLAEngineIntegration_ReviseClocksCancelComputesHasBreachedLive(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLAEngineWorkItem(t, pool)
+	// WithSystemIdentity + Scoped: work_item is RLS-protected (see seedSLAEngineWorkItem).
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewSLAEngineRepository(scoped, "")
+
+	workaroundPolicy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
+	if err != nil {
+		t.Fatalf("FindPolicyByName(workaround): %v", err)
+	}
+
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, workaroundPolicy, time.Time{}); err != nil {
+		t.Fatalf("RegisterClock(workaround) setup: %v", err)
+	}
+	// Push start_on back past the policy's own duration -- the clock is now
+	// genuinely over time, but its stored stage is still whatever
+	// RegisterClock left it at (IN_PROGRESS), exactly as it would be in
+	// production with no periodic sweep to catch it first.
+	if _, err := scoped.Exec(ctx,
+		`UPDATE sla SET start_on = NOW() - $2::interval WHERE work_item_id = $1::uuid AND sla_policy_id = $3::uuid`,
+		slaEngineIntegrationWorkItemID, intervalLiteral(workaroundPolicy.Duration+10*time.Minute), workaroundPolicy.ID); err != nil {
+		t.Fatalf("push start_on back setup: %v", err)
+	}
+
+	if _, err := repo.ReviseClocks(ctx, slaEngineIntegrationWorkItemID, []repository.SLAPolicyRef{workaroundPolicy}); err != nil {
+		t.Fatalf("ReviseClocks: %v", err)
+	}
+
+	var stage string
+	var hasBreached bool
+	if err := scoped.QueryRow(ctx, `SELECT stage::TEXT, has_breached FROM sla s JOIN sla_policy sp ON sp.id = s.sla_policy_id
+		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = 'WORKAROUND' AND s.stage::TEXT = 'CANCELLED'`,
+		slaEngineIntegrationWorkItemID).Scan(&stage, &hasBreached); err != nil {
+		t.Fatalf("scan cancelled row: %v", err)
+	}
+	if !hasBreached {
+		t.Error("has_breached = false on the cancelled row, want true -- ReviseClocks must compute it from real elapsed time, not trust the row's stale pre-cancellation stage")
+	}
+}
+
 // TestSLAEngineIntegration_ReviseClocksPreservesBreachedResponseClock is the
 // RESPONSE-specific counterpart to the test above: per explicit product
 // direction, "did a support engineer reply at all" is a fact about the past
@@ -272,14 +325,14 @@ func TestSLAEngineIntegration_ReviseClocksPreservesBreachedResponseClock(t *test
 	// WithSystemIdentity + Scoped: work_item is RLS-protected (see seedSLAEngineWorkItem).
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	responsePolicy, err := repo.FindPolicyByName(ctx, "P0 - Response (Managed Services)", "RESPONSE")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(response): %v", err)
 	}
 
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, responsePolicy); err != nil {
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, responsePolicy, time.Time{}); err != nil {
 		t.Fatalf("RegisterClock(response) setup: %v", err)
 	}
 	if _, err := scoped.Exec(ctx,
@@ -308,85 +361,6 @@ func TestSLAEngineIntegration_ReviseClocksPreservesBreachedResponseClock(t *test
 	}
 }
 
-// TestSLAEngineIntegration_RecomputeActiveKeepsMovingAfterBreach is the
-// regression test for a real, live-observed bug: once RecomputeActive first
-// flipped a clock to BREACHED, its own WHERE clause (stage = 'IN_PROGRESS'
-// only) excluded that row from every future call, freezing
-// business_elapsed_percentage/business_duration forever at whatever value
-// the breaching tick happened to compute -- e.g. a response SLA observed
-// stuck at "59m" elapsed long after real time had moved well past that.
-// RecomputeActive must keep recomputing a BREACHED clock exactly like an
-// IN_PROGRESS one, with no 100% ceiling, until its own genuine completing
-// event (CompleteClock) finally finalizes it.
-func TestSLAEngineIntegration_RecomputeActiveKeepsMovingAfterBreach(t *testing.T) {
-	pool := caseStatsPool(t)
-	seedSLAEngineWorkItem(t, pool)
-	// WithSystemIdentity + scoped for every statement, not just the
-	// repository construction below -- see seedSLAEngineWorkItem's own
-	// comment: sla's RLS policies (migration 0142) require an identity on
-	// every statement, and a raw pool.Exec/QueryRow carries none at all.
-	ctx := repository.WithSystemIdentity(context.Background())
-	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
-
-	policy, err := repo.FindPolicyByName(ctx, "P0 - Response (Managed Services)", "RESPONSE")
-	if err != nil {
-		t.Fatalf("FindPolicyByName(response): %v", err)
-	}
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy); err != nil {
-		t.Fatalf("RegisterClock setup: %v", err)
-	}
-	// Push start_on back far enough that the clock is already well past its
-	// own duration -- simulating a response that has sat unanswered for a
-	// while, not one that just crossed over this instant.
-	if _, err := scoped.Exec(ctx,
-		`UPDATE sla SET start_on = NOW() - $2::interval WHERE work_item_id = $1::uuid`,
-		slaEngineIntegrationWorkItemID, intervalLiteral(policy.Duration+10*time.Minute)); err != nil {
-		t.Fatalf("push start_on back: %v", err)
-	}
-
-	if _, err := repo.RecomputeActive(ctx); err != nil {
-		t.Fatalf("RecomputeActive (first): %v", err)
-	}
-
-	var stage string
-	var firstPercent, firstDurationSeconds float64
-	if err := scoped.QueryRow(ctx, `SELECT stage::TEXT, business_elapsed_percentage, EXTRACT(EPOCH FROM business_duration)
-		FROM sla WHERE work_item_id = $1::uuid`, slaEngineIntegrationWorkItemID).
-		Scan(&stage, &firstPercent, &firstDurationSeconds); err != nil {
-		t.Fatalf("scan after first RecomputeActive: %v", err)
-	}
-	if stage != "BREACHED" {
-		t.Fatalf("stage = %q, want BREACHED", stage)
-	}
-	if firstPercent <= 100 {
-		t.Errorf("business_elapsed_percentage = %v, want > 100 -- no longer capped, and this clock was already well overrun", firstPercent)
-	}
-
-	// More real time passes while the clock remains BREACHED and unanswered.
-	if _, err := scoped.Exec(ctx,
-		`UPDATE sla SET start_on = start_on - INTERVAL '10 minutes' WHERE work_item_id = $1::uuid`,
-		slaEngineIntegrationWorkItemID); err != nil {
-		t.Fatalf("push start_on back further: %v", err)
-	}
-	if _, err := repo.RecomputeActive(ctx); err != nil {
-		t.Fatalf("RecomputeActive (second): %v", err)
-	}
-
-	var secondPercent, secondDurationSeconds float64
-	if err := scoped.QueryRow(ctx, `SELECT business_elapsed_percentage, EXTRACT(EPOCH FROM business_duration)
-		FROM sla WHERE work_item_id = $1::uuid`, slaEngineIntegrationWorkItemID).
-		Scan(&secondPercent, &secondDurationSeconds); err != nil {
-		t.Fatalf("scan after second RecomputeActive: %v", err)
-	}
-	if secondPercent <= firstPercent {
-		t.Errorf("business_elapsed_percentage after second RecomputeActive = %v, want greater than first (%v) -- a BREACHED clock must keep accumulating, not freeze", secondPercent, firstPercent)
-	}
-	if secondDurationSeconds <= firstDurationSeconds {
-		t.Errorf("business_duration after second RecomputeActive = %vs, want greater than first (%vs) -- a frozen business_duration is the exact live-observed bug this regresses", secondDurationSeconds, firstDurationSeconds)
-	}
-}
-
 // TestSLAEngineIntegration_CompleteClockFinalizesBreachedClock verifies a
 // BREACHED clock is still completable by its own real finishing event (a
 // qualifying comment, for RESPONSE), with its TRUE, uncapped overrun
@@ -398,13 +372,13 @@ func TestSLAEngineIntegration_CompleteClockFinalizesBreachedClock(t *testing.T) 
 	seedSLAEngineWorkItem(t, pool)
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	policy, err := repo.FindPolicyByName(ctx, "P0 - Response (Managed Services)", "RESPONSE")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(response): %v", err)
 	}
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy); err != nil {
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
 		t.Fatalf("RegisterClock setup: %v", err)
 	}
 	if _, err := scoped.Exec(ctx,
@@ -447,21 +421,21 @@ func TestSLAEngineIntegration_CompleteClockFinalizesBreachedClock(t *testing.T) 
 // TestSLAEngineIntegration_SetPausedPausesBreachedClock verifies a BREACHED
 // clock can still be paused -- e.g. a workaround/resolution clock that ran
 // out the wall clock while the case was still open, which then moves to
-// AWAITING_INFO -- so RecomputeActive actually stops moving it while the
-// case waits on the customer, instead of silently continuing to climb its
-// elapsed time because SetPaused's own filter excluded BREACHED rows.
+// AWAITING_INFO -- so sla_live stops reporting a climbing elapsed time once
+// paused, instead of silently continuing to climb because SetPaused's own
+// filter excluded BREACHED rows.
 func TestSLAEngineIntegration_SetPausedPausesBreachedClock(t *testing.T) {
 	pool := caseStatsPool(t)
 	seedSLAEngineWorkItem(t, pool)
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	policy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(workaround): %v", err)
 	}
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy); err != nil {
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
 		t.Fatalf("RegisterClock setup: %v", err)
 	}
 	if _, err := scoped.Exec(ctx,
@@ -504,13 +478,13 @@ func TestSLAEngineIntegration_SetPausedFreezesElapsedTime(t *testing.T) {
 	seedSLAEngineWorkItem(t, pool)
 	ctx := repository.WithSystemIdentity(context.Background())
 	scoped := repository.NewScoped(pool)
-	repo := repository.NewSLAEngineRepository(scoped)
+	repo := repository.NewSLAEngineRepository(scoped, "")
 
 	policy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
 	if err != nil {
 		t.Fatalf("FindPolicyByName(workaround): %v", err)
 	}
-	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy); err != nil {
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
 		t.Fatalf("RegisterClock setup: %v", err)
 	}
 	elapsedBeforePause := 20 * time.Minute
@@ -577,5 +551,155 @@ func TestSLAEngineIntegration_SetPausedFreezesElapsedTime(t *testing.T) {
 	}
 	if diff := percentAfterDuplicate - percent; diff < -0.2 || diff > 0.2 {
 		t.Errorf("business_elapsed_percentage after a duplicate pause call = %v, want it unchanged at ~%v", percentAfterDuplicate, percent)
+	}
+}
+
+// TestSLAEngineIntegration_CompleteClockSubtractsPauseDuration is the
+// regression test for a real, reported bug: CompleteClock used a bare
+// "NOW() - start_on" with no account at all for s.pause_duration, so a
+// clock paused for a real stretch of time and then resumed and completed
+// had its final business_duration/business_elapsed_percentage count that
+// entire pause as elapsed working time. A clock paused for roughly an hour
+// mid-way through, then resumed and immediately completed, must show the
+// SAME elapsed time it had right before the pause (the pause contributed
+// nothing), not elapsed-before-pause plus the pause length.
+func TestSLAEngineIntegration_CompleteClockSubtractsPauseDuration(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLAEngineWorkItem(t, pool)
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewSLAEngineRepository(scoped, "")
+
+	policy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
+	if err != nil {
+		t.Fatalf("FindPolicyByName(workaround): %v", err)
+	}
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
+		t.Fatalf("RegisterClock setup: %v", err)
+	}
+	elapsedBeforePause := 10 * time.Minute
+	if _, err := scoped.Exec(ctx,
+		`UPDATE sla SET start_on = NOW() - $2::interval WHERE work_item_id = $1::uuid`,
+		slaEngineIntegrationWorkItemID, intervalLiteral(elapsedBeforePause)); err != nil {
+		t.Fatalf("push start_on back: %v", err)
+	}
+
+	if _, err := repo.SetPaused(ctx, slaEngineIntegrationWorkItemID, "WORKAROUND", true); err != nil {
+		t.Fatalf("SetPaused(true): %v", err)
+	}
+	// Simulate the pause having lasted roughly an hour, without a real
+	// sleep: push BOTH start_on and paused_on back by that much, together --
+	// pushing paused_on back alone (an earlier version of this test, caught
+	// failing against a real database) makes the resume below accumulate a
+	// full hour of pause_duration while the clock's total real lifespan
+	// (NOW() - start_on) is still only ~10 minutes, an internally
+	// inconsistent timeline no real clock could ever have (the formula then
+	// correctly reports a negative elapsed time for an impossible clock --
+	// that's the formula working, not a bug). Shifting start_on by the same
+	// amount keeps paused_on - start_on fixed at elapsedBeforePause (the
+	// real invariant this test cares about) while making the clock's total
+	// lifespan long enough to have genuinely contained an hour-long pause.
+	pauseLength := time.Hour
+	if _, err := scoped.Exec(ctx,
+		`UPDATE sla SET start_on = start_on - $2::interval, paused_on = paused_on - $2::interval
+		  WHERE work_item_id = $1::uuid`,
+		slaEngineIntegrationWorkItemID, intervalLiteral(pauseLength)); err != nil {
+		t.Fatalf("push start_on/paused_on back: %v", err)
+	}
+	if _, err := repo.SetPaused(ctx, slaEngineIntegrationWorkItemID, "WORKAROUND", false); err != nil {
+		t.Fatalf("SetPaused(false) (resume): %v", err)
+	}
+
+	completed, err := repo.CompleteClock(ctx, slaEngineIntegrationWorkItemID, "WORKAROUND")
+	if err != nil {
+		t.Fatalf("CompleteClock: %v", err)
+	}
+	if !completed {
+		t.Fatal("CompleteClock reported no row updated")
+	}
+
+	var percent, elapsedSeconds, pauseDurationSeconds float64
+	if err := scoped.QueryRow(ctx, `SELECT business_elapsed_percentage,
+		EXTRACT(EPOCH FROM business_duration), EXTRACT(EPOCH FROM pause_duration)
+		FROM sla WHERE work_item_id = $1::uuid`, slaEngineIntegrationWorkItemID).
+		Scan(&percent, &elapsedSeconds, &pauseDurationSeconds); err != nil {
+		t.Fatalf("scan after complete: %v", err)
+	}
+
+	if diff := pauseDurationSeconds - pauseLength.Seconds(); diff < -2 || diff > 2 {
+		t.Fatalf("pause_duration = %vs, want ~%vs -- the resume above should have accumulated it", pauseDurationSeconds, pauseLength.Seconds())
+	}
+
+	wantElapsed := elapsedBeforePause.Seconds()
+	const tolerance = 2.0
+	if diff := elapsedSeconds - wantElapsed; diff < -tolerance || diff > tolerance {
+		t.Errorf("business_duration at completion = %vs, want ~%vs (elapsed-before-pause only -- the hour spent paused must not count)", elapsedSeconds, wantElapsed)
+	}
+	wantPercent := wantElapsed / policy.Duration.Seconds() * 100
+	if diff := percent - wantPercent; diff < -0.5 || diff > 0.5 {
+		t.Errorf("business_elapsed_percentage at completion = %v, want ~%v", percent, wantPercent)
+	}
+}
+
+// TestSLAEngineIntegration_CompleteClockFinalizesAnOpenPause is the
+// regression test for completing a clock that is still marked paused
+// (paused_on IS NOT NULL) -- the real path is ApplyStateEffects' CLOSED
+// branch always resuming a clock before completing it, but a resume that
+// fails is logged and ignored, so CompleteClock must tolerate reaching a
+// still-paused row directly. Before this fix, business_duration/percentage
+// were computed correctly (the completedElapsedExpr already excludes an
+// open pause segment) but paused_on was left set and the open segment was
+// never folded into pause_duration -- GetClockState would then report a
+// finished (ACHIEVED) clock as still paused, with an incomplete total.
+func TestSLAEngineIntegration_CompleteClockFinalizesAnOpenPause(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLAEngineWorkItem(t, pool)
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewSLAEngineRepository(scoped, "")
+
+	policy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
+	if err != nil {
+		t.Fatalf("FindPolicyByName(workaround): %v", err)
+	}
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
+		t.Fatalf("RegisterClock setup: %v", err)
+	}
+
+	if _, err := repo.SetPaused(ctx, slaEngineIntegrationWorkItemID, "WORKAROUND", true); err != nil {
+		t.Fatalf("SetPaused(true): %v", err)
+	}
+	openPause := 15 * time.Minute
+	if _, err := scoped.Exec(ctx,
+		`UPDATE sla SET paused_on = paused_on - $2::interval WHERE work_item_id = $1::uuid`,
+		slaEngineIntegrationWorkItemID, intervalLiteral(openPause)); err != nil {
+		t.Fatalf("push paused_on back: %v", err)
+	}
+
+	// No resume here -- CompleteClock must be called directly on a row
+	// that is still paused.
+	completed, err := repo.CompleteClock(ctx, slaEngineIntegrationWorkItemID, "WORKAROUND")
+	if err != nil {
+		t.Fatalf("CompleteClock: %v", err)
+	}
+	if !completed {
+		t.Fatal("CompleteClock reported no row updated")
+	}
+
+	var pausedOn *time.Time
+	var pauseDurationSeconds float64
+	if err := scoped.QueryRow(ctx,
+		`SELECT paused_on, EXTRACT(EPOCH FROM COALESCE(pause_duration, INTERVAL '0'))
+		 FROM sla WHERE work_item_id = $1::uuid`,
+		slaEngineIntegrationWorkItemID).
+		Scan(&pausedOn, &pauseDurationSeconds); err != nil {
+		t.Fatalf("scan after complete: %v", err)
+	}
+
+	if pausedOn != nil {
+		t.Errorf("paused_on = %v, want nil -- completing a paused clock must clear it", pausedOn)
+	}
+	if diff := pauseDurationSeconds - openPause.Seconds(); diff < -2 || diff > 2 {
+		t.Errorf("pause_duration = %vs, want ~%vs -- the still-open segment must be folded in", pauseDurationSeconds, openPause.Seconds())
 	}
 }

@@ -357,6 +357,128 @@ func TestPatchDeployment(t *testing.T) {
 	})
 }
 
+func TestSetDeploymentAirGapped(t *testing.T) {
+	const validID = "11111111-1111-1111-1111-111111111111"
+
+	newRequest := func(id, body string) *http.Request {
+		r := httptest.NewRequest(http.MethodPut, "/deployments/"+id+"/air-gapped", strings.NewReader(body))
+		r.SetPathValue("id", id)
+		return r
+	}
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		w := httptest.NewRecorder()
+		h.SetDeploymentAirGapped(w, newRequest(validID, `{"airGapped":true}`))
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+	})
+
+	t.Run("rejects non-UUID deployment id", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		w := httptest.NewRecorder()
+		h.SetDeploymentAirGapped(w, withUser(newRequest("not-a-uuid", `{"airGapped":true}`)))
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{})
+		w := httptest.NewRecorder()
+		h.SetDeploymentAirGapped(w, withUser(newRequest(validID, strings.Repeat("x", maxRequestBodyBytes+1))))
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"invalid JSON", `not-json`},
+		{"missing airGapped", `{}`},
+		{"null airGapped", `{"airGapped":null}`},
+		{"non-boolean airGapped", `{"airGapped":"yes"}`},
+		{"JSON array", `[true]`},
+	} {
+		t.Run("rejects "+tc.name+" without calling upstream", func(t *testing.T) {
+			called := false
+			h := NewDeploymentHandler(&mockEntityDeploymentClient{
+				setDeploymentAirGappedFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+					called = true
+					return []byte(`{}`), nil
+				},
+			})
+			w := httptest.NewRecorder()
+			h.SetDeploymentAirGapped(w, withUser(newRequest(validID, tc.body)))
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, ErrMsgBadRequest)
+			if called {
+				t.Error("upstream was called for an invalid body")
+			}
+		})
+	}
+
+	t.Run("forwards only airGapped and returns 200", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{
+			setDeploymentAirGappedFn: func(_ context.Context, deploymentID string, body []byte) ([]byte, error) {
+				capturedID = deploymentID
+				capturedBody = body
+				return []byte(`{"id":"` + validID + `","number":"DEP0001","airGapped":true,"updatedOn":"2026-10-27T00:00:00Z","updatedBy":"user@wso2.com"}`), nil
+			},
+		})
+		w := httptest.NewRecorder()
+		h.SetDeploymentAirGapped(w, withUser(newRequest(validID, `{"airGapped":true,"name":"ignored"}`)))
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != validID {
+			t.Errorf("upstream received id %q, want %q", capturedID, validID)
+		}
+		if string(capturedBody) != `{"airGapped":true}` {
+			t.Errorf("upstream received body %s, want {\"airGapped\":true}", capturedBody)
+		}
+		if resp := decodeJSON[map[string]any](t, w); resp["airGapped"] != true {
+			t.Errorf("airGapped = %v, want true", resp["airGapped"])
+		}
+	})
+
+	t.Run("forwards false to clear the mark", func(t *testing.T) {
+		var capturedBody []byte
+		h := NewDeploymentHandler(&mockEntityDeploymentClient{
+			setDeploymentAirGappedFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{}`), nil
+			},
+		})
+		w := httptest.NewRecorder()
+		h.SetDeploymentAirGapped(w, withUser(newRequest(validID, `{"airGapped":false}`)))
+		assertStatus(t, w, http.StatusOK)
+		if string(capturedBody) != `{"airGapped":false}` {
+			t.Errorf("upstream received body %s, want {\"airGapped\":false}", capturedBody)
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrors("Failed to update the deployment's air-gapped setting.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				h := NewDeploymentHandler(&mockEntityDeploymentClient{
+					setDeploymentAirGappedFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				})
+				w := httptest.NewRecorder()
+				h.SetDeploymentAirGapped(w, withUser(newRequest(validID, `{"airGapped":true}`)))
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestSearchDeployedProducts(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewDeploymentHandler(&mockEntityDeploymentClient{})

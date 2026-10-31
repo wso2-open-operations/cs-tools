@@ -26,9 +26,13 @@ import (
 )
 
 // withSettings is cfg with the family's saved reminder settings applied, and
-// whether this kind of reminder (weekday, or weekend) is on. Nothing saved
-// keeps cfg as configured. A failure to read them fails the run, so it is
-// retried rather than sent with settings somebody turned off.
+// whether this kind of reminder (weekday, or weekend) is on. The switches on
+// the Rota Access tab are the only way to turn the automatic reminders on:
+// with nothing saved for the family, none is sent. "Send now" (cfg.Manual) is
+// asked for by hand and is sent whatever the switches say, with the
+// configured values where nothing is saved. A failure to read the settings
+// fails the run, so it is retried rather than sent with settings somebody
+// turned off.
 func withSettings(ctx context.Context, cfg Config, weekend bool) (Config, bool, error) {
 	if cfg.Settings == nil {
 		return cfg, true, nil
@@ -38,6 +42,10 @@ func withSettings(ctx context.Context, cfg Config, weekend bool) (Config, bool, 
 		return cfg, false, fmt.Errorf("rotareminder: read the %s reminder settings: %w", cfg.Family, err)
 	}
 	if s == nil {
+		if !cfg.Manual {
+			slog.InfoContext(ctx, "rota reminder: not turned on on the Rota Access tab; nothing sent", "task", cfg.Task, "family", cfg.Family)
+			return cfg, false, nil
+		}
 		return cfg, true, nil
 	}
 	on := s.WeekdayEnabled

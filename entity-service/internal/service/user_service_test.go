@@ -534,6 +534,59 @@ func TestUserService_GetUser(t *testing.T) {
 		}
 	})
 
+	t.Run("system user (customer-side shared account) also gets project access", func(t *testing.T) {
+		system := domain.UserDetail{ID: userDetailTestID, Name: "Shared Account", Email: "shared@customer.example", UserType: domain.UserTypeSystem, Active: true}
+		var lookedUp string
+		repo := stubUserRepo{
+			getUserDetail: func(context.Context, string) (domain.UserDetail, error) { return system, nil },
+			getUserProjectAccess: func(_ context.Context, email string) ([]domain.UserContactAccess, error) {
+				lookedUp = email
+				return access, nil
+			},
+		}
+		got, err := NewUserService(repo, nil).GetUser(context.Background(), userDetailTestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lookedUp != "shared@customer.example" || len(got.ProjectAccess) != 1 || got.ProjectAccess[0].ProjectID != "p1" {
+			t.Errorf("lookedUp=%q got=%+v", lookedUp, got.ProjectAccess)
+		}
+	})
+
+	t.Run("user with no type set is treated as non-staff and gets project access", func(t *testing.T) {
+		untyped := domain.UserDetail{ID: userDetailTestID, Name: "Un Typed", Email: "untyped@customer.example", Active: true}
+		called := false
+		repo := stubUserRepo{
+			getUserDetail: func(context.Context, string) (domain.UserDetail, error) { return untyped, nil },
+			getUserProjectAccess: func(context.Context, string) ([]domain.UserContactAccess, error) {
+				called = true
+				return access, nil
+			},
+		}
+		got, err := NewUserService(repo, nil).GetUser(context.Background(), userDetailTestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !called || len(got.ProjectAccess) != 1 {
+			t.Errorf("called=%v got=%+v", called, got.ProjectAccess)
+		}
+	})
+
+	t.Run("non-staff user without an email skips the project access lookup", func(t *testing.T) {
+		noEmail := domain.UserDetail{ID: userDetailTestID, Name: "Shared Account", UserType: domain.UserTypeSystem, Active: true}
+		repo := stubUserRepo{
+			getUserDetail: func(context.Context, string) (domain.UserDetail, error) { return noEmail, nil },
+			// getUserProjectAccess left nil: calling it panics, proving it is skipped.
+		}
+		got, err := NewUserService(repo, nil).GetUser(context.Background(), userDetailTestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ProjectAccess != nil {
+			t.Errorf("got %+v", got.ProjectAccess)
+		}
+	})
+
 	t.Run("malformed id is a validation error and never reaches the repository", func(t *testing.T) {
 		_, err := NewUserService(stubUserRepo{}, nil).GetUser(context.Background(), "not-a-uuid")
 		var ve *apierror.ValidationError

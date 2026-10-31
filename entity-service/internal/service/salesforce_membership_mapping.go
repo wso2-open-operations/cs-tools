@@ -202,7 +202,8 @@ type contactRoleMapping struct {
 	// ManagedGlobal is managedOrgRoles when the account classification is
 	// known, nil when it is not (nothing is then revoked).
 	ManagedGlobal []string
-	// ManagedAdmin is managedAdminRoles, nil for an integration user.
+	// ManagedAdmin is always managedAdminRoles, so a stale admin role is
+	// revoked for an integration user too.
 	ManagedAdmin []string
 	// AdminRole is which admin role this contact would hold -- never whether
 	// they hold it. That is decided by the repository, after the write, from
@@ -228,11 +229,11 @@ type contactRoleMapping struct {
 // before, but ManagedGlobal is nil so a partner role the user already holds
 // is not revoked on missing evidence.
 //
-// An integration user gets no global roles at all (it never signs in), and
-// none are revoked either.
+// An integration user gets no global roles at all (it never signs in), but a
+// managed admin role it still holds is revoked.
 func mapGlobalRoles(account *salesentity.ContactAccount, isIntegrationUser bool) contactRoleMapping {
 	if isIntegrationUser {
-		return contactRoleMapping{}
+		return contactRoleMapping{ManagedAdmin: managedAdminRoles}
 	}
 	m := contactRoleMapping{Grant: []string{globalRoleExternal}, ManagedAdmin: managedAdminRoles}
 	if account != nil && strings.TrimSpace(derefString(account.Classification)) != "" {

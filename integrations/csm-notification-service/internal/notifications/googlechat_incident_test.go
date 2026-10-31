@@ -248,3 +248,107 @@ func TestBuildSMEIncidentEscalatedCard_FirstRostered(t *testing.T) {
 		}
 	}
 }
+
+// An S0 case on the SRE ladder gets the same card in its case form, threaded
+// by the case id so the SRE ladder's rung cards reply under it.
+func TestSendIncidentCreatedAlert_CaseForm(t *testing.T) {
+	c, got := captureIncidentCard(t)
+	err := c.SendIncidentCreatedAlert(context.Background(), IncidentAudience("artemis sre group"), IncidentCreatedAlert{
+		IncidentID: "case-1", Number: "CS0451895", Team: "Artemis SRE Group", Priority: "CATASTROPHIC",
+		ShortDescription: "test S0", Service: "WSO2 API Manager Analytics", Category: "case",
+		IncidentLink: "https://csm.example/cases/case-1", Case: true,
+	})
+	if err != nil {
+		t.Fatalf("SendIncidentCreatedAlert: %v", err)
+	}
+	msg, _, _ := got()
+	card := msg.CardsV2[0].Card
+	if card.Header.Title != "ARTEMIS SRE GROUP | Catastrophic Priority Case Reported" {
+		t.Errorf("title = %q", card.Header.Title)
+	}
+	if b := card.Sections[0].Widgets[1].ButtonList.Buttons[0]; b.Text != "View Case" || b.OnClick.OpenLink.URL != "https://csm.example/cases/case-1" {
+		t.Errorf("button = %+v", b)
+	}
+	if card.Sections[1].Header != "Case Details" || !strings.Contains(sectionText(card.Sections[1]), "S0 - Catastrophic") {
+		t.Errorf("details section = %+v", card.Sections[1])
+	}
+	if msg.Thread == nil || msg.Thread.ThreadKey != "incident-case-1" {
+		t.Errorf("thread = %+v", msg.Thread)
+	}
+}
+
+func TestTeamlessAudiences(t *testing.T) {
+	has := func(a string) bool { return a != IncidentAudience("iaas") && a != IncidentFallbackAudience }
+	routes := &IncidentRoutes{}
+	routes.SetTeamless([]string{"apollo", "iaas", "artemis"})
+	got := TeamlessAudiences(routes, has)
+	if want := []string{IncidentAudience("apollo"), IncidentAudience("artemis")}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("TeamlessAudiences = %v; want %v (a room with no space left out)", got, want)
+	}
+	withShared := func(a string) bool { return a == IncidentFallbackAudience }
+	if got := TeamlessAudiences(&IncidentRoutes{}, withShared); strings.Join(got, ",") != IncidentFallbackAudience {
+		t.Errorf("no teamless room: %v; want the shared SRE room", got)
+	}
+	if got := TeamlessAudiences(nil, func(string) bool { return false }); len(got) != 0 {
+		t.Errorf("nothing configured: %v; want none", got)
+	}
+}
+
+func TestCaseSREAudiences(t *testing.T) {
+	has := func(a string) bool { return a != IncidentFallbackAudience }
+	routes := &IncidentRoutes{}
+	routes.SetTeamless([]string{"apollo", "artemis"})
+	routes.SetKnownSRETeam(func(g string) bool { return g == "Known Group" })
+	teamless := IncidentAudience("apollo") + "," + IncidentAudience("artemis")
+	for group, want := range map[string]string{
+		"Known Group":   IncidentAudience("Known Group"),
+		"Unknown Group": teamless,
+		"":              teamless,
+	} {
+		if got := strings.Join(CaseSREAudiences(routes, nil, group, has), ","); got != want {
+			t.Errorf("CaseSREAudiences(%q) = %q; want %q", group, got, want)
+		}
+	}
+}
+
+// A case card shows its project in place of the State a case never has.
+func TestSendIncidentCreatedAlert_CaseFormShowsProjectNotState(t *testing.T) {
+	c, got := captureIncidentCard(t)
+	if err := c.SendIncidentCreatedAlert(context.Background(), IncidentAudience("artemis sre group"), IncidentCreatedAlert{
+		IncidentID: "case-1", Number: "WSO2-1", Priority: "CATASTROPHIC", Category: "case", Project: "Customer 3 Project", Case: true,
+	}); err != nil {
+		t.Fatalf("SendIncidentCreatedAlert: %v", err)
+	}
+	msg, _, _ := got()
+	text := sectionText(msg.CardsV2[0].Card.Sections[1])
+	if !strings.Contains(text, "<b>Project:</b> Customer 3 Project") || strings.Contains(text, "State") {
+		t.Errorf("details = %q; want the project and no State", text)
+	}
+}
+
+func TestCaseS0ThreadKey(t *testing.T) {
+	a, b := []byte(`{"type":"case.created"}`), []byte(`{"type":"case.severity_changed"}`)
+	first, again := CaseS0ThreadKey("c1", a), CaseS0ThreadKey("c1", a)
+	if first != again {
+		t.Error("the same record must give the same thread")
+	}
+	if first == CaseS0ThreadKey("c1", b) {
+		t.Error("two records must give two threads")
+	}
+	if !strings.HasPrefix(first, IncidentThreadKey("c1")+"-") {
+		t.Errorf("thread %q; want it under the case's incident thread key", first)
+	}
+}
+
+// A card with a ThreadKey posts into that thread; without one, the incident's.
+func TestSendIncidentCreatedAlert_ThreadKey(t *testing.T) {
+	c, got := captureIncidentCard(t)
+	if err := c.SendIncidentCreatedAlert(context.Background(), IncidentAudience("artemis sre group"), IncidentCreatedAlert{
+		IncidentID: "case-1", Priority: "CATASTROPHIC", Case: true, ThreadKey: "incident-case-1-0a1b2c3d4e5f",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if msg, _, _ := got(); msg.Thread == nil || msg.Thread.ThreadKey != "incident-case-1-0a1b2c3d4e5f" {
+		t.Errorf("thread = %+v; want the card's ThreadKey", msg.Thread)
+	}
+}

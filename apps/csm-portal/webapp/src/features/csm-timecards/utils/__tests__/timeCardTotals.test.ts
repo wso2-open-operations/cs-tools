@@ -22,7 +22,7 @@ import {
   totalMinutes,
 } from "@features/csm-timecards/utils/timeCardTotals";
 import {
-  MAX_MINUTES_PER_TICKET_PER_DAY,
+  MAX_MINUTES_PER_TIME_CARD,
   WORK_LOG_MAX,
 } from "@features/csm-timecards/constants/timeCardConstants";
 
@@ -126,7 +126,9 @@ describe("timeCardTotals", () => {
           providingSolution: 40,
         },
       });
-      expect(errors.minutes).toBeDefined();
+      expect(errors.minutes).toBe(
+        "Total logged time cannot exceed 8 hours (480 minutes) per time card.",
+      );
     });
 
     it("accepts a total at exactly the 8-hour cap", () => {
@@ -134,7 +136,7 @@ describe("timeCardTotals", () => {
         ...valid,
         breakdown: {
           ...emptyBreakdown(),
-          analysisDebugging: MAX_MINUTES_PER_TICKET_PER_DAY,
+          analysisDebugging: MAX_MINUTES_PER_TIME_CARD,
         },
       });
       expect(errors.minutes).toBeUndefined();

@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -160,5 +162,44 @@ func TestKBArticleFakeRow_RejectsNullIntoPlainDestination(t *testing.T) {
 	var p *string
 	if err := (kbArticleFakeRow{vals: []any{nil}}).Scan(&p); err != nil || p != nil {
 		t.Fatalf("Scan(NULL into **string) = %v, p = %v, want nil error and nil pointer", err, p)
+	}
+}
+
+// TestMapKBLookupError pins the by-id error contract: a missing row is a
+// NotFoundError (404), a non-UUID id (Postgres 22P02) is a ValidationError
+// (400), and anything else stays a wrapped, unmapped error (500).
+func TestMapKBLookupError(t *testing.T) {
+	var nfe *apierror.NotFoundError
+	if err := mapKBLookupError("get kb article", fmt.Errorf("scan: %w", pgx.ErrNoRows), "article not found"); !errors.As(err, &nfe) || nfe.Msg != "article not found" {
+		t.Errorf("ErrNoRows -> %#v, want NotFoundError \"article not found\"", err)
+	}
+
+	var ve *apierror.ValidationError
+	bad := &pgconn.PgError{Code: "22P02", Message: "invalid input syntax for type uuid"}
+	if err := mapKBLookupError("get kb article", bad, "article not found"); !errors.As(err, &ve) {
+		t.Errorf("22P02 -> %#v, want ValidationError", err)
+	}
+
+	other := errors.New("connection reset")
+	err := mapKBLookupError("get kb article", other, "article not found")
+	if errors.As(err, &nfe) || errors.As(err, &ve) || !errors.Is(err, other) {
+		t.Errorf("other error -> %#v, want it wrapped and unmapped", err)
+	}
+}
+
+func TestMapKnowledgeBaseByIDError(t *testing.T) {
+	var nfe *apierror.NotFoundError
+	if err := mapKnowledgeBaseByIDError("set knowledge base active", pgx.ErrNoRows); !errors.As(err, &nfe) || nfe.Msg != "knowledge base not found" {
+		t.Errorf("ErrNoRows -> %#v, want NotFoundError \"knowledge base not found\"", err)
+	}
+
+	var ve *apierror.ValidationError
+	if err := mapKnowledgeBaseByIDError("set knowledge base active", &pgconn.PgError{Code: "22P02"}); !errors.As(err, &ve) {
+		t.Errorf("22P02 -> %#v, want ValidationError", err)
+	}
+
+	other := errors.New("connection reset")
+	if err := mapKnowledgeBaseByIDError("set knowledge base active", other); !errors.Is(err, other) {
+		t.Errorf("other error -> %#v, want it wrapped", err)
 	}
 }

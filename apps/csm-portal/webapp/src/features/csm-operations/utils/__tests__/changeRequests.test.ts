@@ -29,9 +29,21 @@ import {
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   changeRequestCategoryLabel,
   changeRequestCategoryValue,
+  changeRequestChoiceLabel,
   changeRequestScopeLockedReason,
   changeRequestApprovedReadOnlyReason,
   CHANGE_REQUEST_APPROVED_READ_ONLY_REASON,
+  CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON,
+  changeRequestApprovedNotice,
+  hasImplementationDeviation,
+  IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON,
+  IMPLEMENTATION_DEVIATION_NOT_YET_REASON,
+  implementationDeviationClearable,
+  implementationDeviationLockedReason,
+  implementationDeviationOffered,
+  implementationDeviationRecordable,
+  REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON,
+  requestApprovalNeedsDeviationClearedReason,
   changeRequestPriorityValue,
   changeRequestImpactValue,
   changeRequestTransitionLabel,
@@ -144,6 +156,17 @@ describe("buildCloneChangeRequestNavState", () => {
     expect(state.backoutPlan).toContain("Revert to the previous image.");
   });
 
+  it("carries the deviation from the implementation plan, and leaves a blank one out", () => {
+    const withOne = buildCloneChangeRequestNavState({
+      ...FULL_CR,
+      implementationDeviation: "<p>Rolled out to one region first.</p><script>alert(1)</script>",
+    });
+    expect(withOne.implementationDeviation).toContain("Rolled out to one region first.");
+    expect(withOne.implementationDeviation).not.toContain("<script");
+    expect(buildCloneChangeRequestNavState({ ...FULL_CR, implementationDeviation: "<p><br></p>" }).implementationDeviation).toBeUndefined();
+    expect(buildCloneChangeRequestNavState({ ...FULL_CR, implementationDeviation: null }).implementationDeviation).toBeUndefined();
+  });
+
   it("leaves a blank plan field out rather than seeding an empty editor", () => {
     const state = buildCloneChangeRequestNavState({
       ...FULL_CR,
@@ -166,7 +189,7 @@ describe("buildCloneChangeRequestNavState", () => {
     expect(keys).not.toContain("serviceOutage");
     expect(keys).not.toContain("communicationPlan");
     expect(keys).not.toContain("rollbackPlan");
-    // priority/risk have no clone source.
+    // priority is not carried; risk has no clone source.
     expect(keys).not.toContain("priority");
     expect(keys).not.toContain("risk");
   });
@@ -1287,6 +1310,115 @@ describe("changeRequestApprovedReadOnlyReason (every field read-only once approv
   });
 });
 
+// The entity service's checkDeviationEditable (change_request_deviation.go), judged on the
+// stored state: the deviation from the implementation plan is recorded in implement, review
+// and customer_review; before that it cannot be recorded (in New a clone's carried-over one
+// can only be cleared), and it is final once the change request is closed, canceled or
+// rolled back. One row per state; the row ids are the backend's (<STATE>, NULL for none).
+// The two outcome columns are the "set (none stored)" and "change (one stored)" columns of
+// TestDeviationEditRefusal_PerState, with its codes: `ok`, `carried-over` (in New only
+// clearing it is accepted), `not-yet` and `final`.
+describe("the deviation from the implementation plan", () => {
+  const STORED = "<p>Used the standby.</p>";
+  const FINAL_REASON = {
+    closed: "The change request is closed, so its deviation from the implementation plan is final.",
+    canceled: "The change request is canceled, so its deviation from the implementation plan is final.",
+    rollback: "The change request is rolled back, so its deviation from the implementation plan is final.",
+  } as const;
+  it.each([
+    // id, state, with none stored, with one stored, approved notice
+    ["NULL", undefined, "not-yet", "carried-over", null],
+    ["NEW", "new", "not-yet", "carried-over", null],
+    ["ASSESS", "assess", "not-yet", "not-yet", null],
+    ["AUTHORIZE", "authorize", "not-yet", "not-yet", null],
+    ["CUSTOMER_APPROVAL", "customer_approval", "not-yet", "not-yet", "read-only"],
+    ["SCHEDULED", "scheduled", "not-yet", "not-yet", "read-only"],
+    ["IMPLEMENT", "implement", "ok", "ok", "deviation-open"],
+    ["REVIEW", "review", "ok", "ok", "deviation-open"],
+    ["CUSTOMER_REVIEW", "customer_review", "ok", "ok", "deviation-open"],
+    ["CLOSED", "closed", "final", "final", "read-only"],
+    ["CANCELED", "canceled", "final", "final", null],
+    ["ROLLBACK", "rollback", "final", "final", "read-only"],
+  ] as const)("%s: none stored %s, one stored %s, approved notice %s", (_id, state, empty, stored, notice) => {
+    const reasonFor = (outcome: string): string | null => {
+      switch (outcome) {
+        case "ok":
+          return null;
+        case "carried-over":
+          return IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON;
+        case "not-yet":
+          return IMPLEMENTATION_DEVIATION_NOT_YET_REASON;
+        default:
+          return FINAL_REASON[state as keyof typeof FINAL_REASON];
+      }
+    };
+    expect(implementationDeviationRecordable(state)).toBe(empty === "ok");
+    expect(implementationDeviationLockedReason(state, null)).toBe(reasonFor(empty));
+    expect(implementationDeviationLockedReason(state, STORED)).toBe(reasonFor(stored));
+
+    // Offered: the editable field where it can be recorded; elsewhere only when one is
+    // stored, so it can be seen (and in New cleared).
+    expect(implementationDeviationOffered(state, null)).toBe(empty === "ok");
+    // Empty markup is no deviation, on both sides (the backend stores it as NULL): it is
+    // offered only where a deviation can be recorded.
+    expect(implementationDeviationOffered(state, "<p><br></p>")).toBe(empty === "ok");
+    expect(implementationDeviationOffered(state, STORED)).toBe(true);
+    expect(implementationDeviationClearable(state, STORED)).toBe(stored === "carried-over");
+    expect(implementationDeviationClearable(state, null)).toBe(false);
+
+    expect(changeRequestApprovedNotice(state)).toBe(
+      notice === null
+        ? null
+        : notice === "read-only"
+          ? CHANGE_REQUEST_APPROVED_READ_ONLY_REASON
+          : CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON,
+    );
+
+    // Request Approval is the move out of New only; there a stored one blocks it.
+    expect(requestApprovalNeedsDeviationClearedReason({ state, implementationDeviation: STORED })).toBe(
+      stored === "carried-over" ? REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON : null,
+    );
+    expect(requestApprovalNeedsDeviationClearedReason({ state, implementationDeviation: null })).toBeNull();
+  });
+
+  it("judges a stored deviation the way the backend does: no text once the markup is removed is none", () => {
+    expect(hasImplementationDeviation(undefined)).toBe(false);
+    expect(hasImplementationDeviation(null)).toBe(false);
+    expect(hasImplementationDeviation("")).toBe(false);
+    expect(hasImplementationDeviation(" \n\t")).toBe(false);
+    expect(hasImplementationDeviation(STORED)).toBe(true);
+    expect(hasImplementationDeviation("<p><br></p><p>Used the standby.</p>")).toBe(true);
+    // The entity service mirrors isBlankHtml (IsBlankRichText): empty markup, a lone
+    // &nbsp; and an image alone are no deviation there either, so there is nothing to
+    // clear and nothing holds up Request Approval.
+    for (const blank of ["<p><br></p>", "<p>&nbsp;</p>", '<p><img src="https://example.com/a.png"></p>']) {
+      expect(hasImplementationDeviation(blank), blank).toBe(false);
+      expect(implementationDeviationClearable("new", blank), blank).toBe(false);
+      expect(requestApprovalNeedsDeviationClearedReason({ state: "new", implementationDeviation: blank }), blank).toBeNull();
+    }
+  });
+
+  it("says what to do", () => {
+    expect(IMPLEMENTATION_DEVIATION_CARRIED_OVER_REASON).toBe(
+      "Carried over from the cloned change request. Fold it into the implementation plan, then clear it before requesting approval.",
+    );
+    expect(IMPLEMENTATION_DEVIATION_NOT_YET_REASON).toBe(
+      "A deviation from the implementation plan can be recorded once implementation has started.",
+    );
+    expect(REQUEST_APPROVAL_NEEDS_DEVIATION_CLEARED_REASON).toBe(
+      "Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+  });
+
+  it("tells an approved change request's editor what is still possible, without naming the CAB", () => {
+    // A Standard change is approved by Request Approval, with no CAB stage: neither notice names the CAB.
+    for (const notice of [CHANGE_REQUEST_APPROVED_READ_ONLY_REASON, CHANGE_REQUEST_APPROVED_DEVIATION_OPEN_REASON]) {
+      expect(notice).not.toMatch(/CAB/);
+      expect(notice).toMatch(/^This change request has been approved, so its fields are read-only\./);
+    }
+  });
+});
+
 describe("changeRequestPriorityValue / changeRequestImpactValue", () => {
   it("reads the value the Postgres data source returns", () => {
     expect(changeRequestPriorityValue("moderate")).toBe("moderate");
@@ -1304,6 +1436,32 @@ describe("changeRequestPriorityValue / changeRequestImpactValue", () => {
     expect(changeRequestPriorityValue("planning")).toBe("");
     expect(changeRequestImpactValue(undefined)).toBe("");
     expect(changeRequestImpactValue("extreme")).toBe("");
+  });
+});
+
+describe("changeRequestChoiceLabel (priority, change request type, likelihood)", () => {
+  it.each([
+    ["critical", "Critical"],
+    ["high", "High"],
+    ["moderate", "Moderate"],
+    ["low", "Low"],
+    ["planning", "Planning"],
+    ["infra", "Infra"],
+    ["general", "General"],
+    ["medium", "Medium"],
+  ])("shows the PostgreSQL data source's %s as %s", (value, label) => {
+    expect(changeRequestChoiceLabel(value)).toBe(label);
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    expect(changeRequestChoiceLabel("5 - Planning")).toBe("5 - Planning");
+    expect(changeRequestChoiceLabel("Normal")).toBe("Normal");
+  });
+
+  it("is a dash when there is none", () => {
+    expect(changeRequestChoiceLabel(null)).toBe("—");
+    expect(changeRequestChoiceLabel(undefined)).toBe("—");
+    expect(changeRequestChoiceLabel("  ")).toBe("—");
   });
 });
 
@@ -1555,8 +1713,12 @@ describe("a time the customer proposed (the previous system's customer_updated_o
       expect(PROPOSER_NOT_RECORDED_ACCEPT_REASON).toMatch(/so it cannot be accepted/);
       expect(PROPOSER_NOT_RECORDED_ACCEPT_REASON).toMatch(/Propose a different time/);
       expect(STORED_TIME_ADVICE).toMatch(/no proposal to accept/);
-      // The last writer is all that is on record, so a customer's own time followed by a staff edit reads the same way: the page says so.
-      expect(STORED_TIME_ADVICE).toMatch(/edited after \(only the last edit is on record\)/);
+      // A customer's own proposal stays recorded through later staff edits, so a later edit is a reason only for a time
+      // proposed before proposers were recorded (still judged by the last writer); a contact who has left the project is one.
+      expect(STORED_TIME_ADVICE).not.toMatch(/last edit/);
+      expect(STORED_TIME_ADVICE.match(/edited after/g)).toHaveLength(1);
+      expect(STORED_TIME_ADVICE).toMatch(/a customer's time from before proposers were recorded that this change request was edited after/);
+      expect(STORED_TIME_ADVICE).toMatch(/no longer a registered contact of the project/);
       expect(STORED_TIME_ADVICE).toMatch(/still being asked to approve the planned time/);
       // Nothing there invites the engineer to check and accept it anyway.
       for (const text of [PROPOSER_NOT_RECORDED_ACCEPT_REASON, STORED_TIME_ADVICE]) expect(text).not.toMatch(/check that|before you accept|confirm/i);

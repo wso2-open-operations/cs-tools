@@ -62,14 +62,17 @@ func renderRegressionRows(groups []regressionreport.Group, caseLinkBase string) 
 	if len(groups) == 0 {
 		return fmt.Sprintf(`<tr><td colspan="%d" style="padding:16px 10px; text-align:center; color:#8a8f98;">No regression cases this month.</td></tr>`, regressionRowColumns)
 	}
-	const cell = `<td style="padding:8px 10px; border-bottom:1px solid #e8eaed; vertical-align:top;">%s</td>`
+	const cell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; word-wrap:break-word;">%s</td>`
+	// The case id is a single token; breaking it across two lines doubles
+	// the row height and helps nobody.
+	const idCell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; white-space:nowrap;">%s</td>`
 	var b strings.Builder
 	for _, g := range groups {
 		fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">WSO2 Product: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
 			regressionRowColumns, escapeHTML(g.Product), len(g.Cases))
 		for _, row := range g.Cases {
 			b.WriteString("<tr>")
-			fmt.Fprintf(&b, cell, regressionCaseLink(caseLinkBase, row))
+			fmt.Fprintf(&b, idCell, regressionCaseLink(caseLinkBase, row))
 			fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Subject)))
 			fmt.Fprintf(&b, cell, orDash(escapeHTML(row.DeployedProduct)))
 			b.WriteString("</tr>")

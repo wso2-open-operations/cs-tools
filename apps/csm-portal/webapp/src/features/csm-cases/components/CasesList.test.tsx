@@ -726,3 +726,25 @@ describe("CasesList background fetch", () => {
     expect(screen.getByRole("progressbar", { name: "Updating the list" })).toBeInTheDocument();
   });
 });
+
+describe("CasesList — spare width on a wide screen", () => {
+  // Regression: the last (Updated) column used to be the one `1fr` track, so on
+  // a wide screen it soaked up all the spare width and left a large empty band
+  // at the right of the table. Every track is capped now and the grid spreads
+  // the spare width between its columns instead.
+  it("spreads spare width between columns instead of growing the Updated track", () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/cases" element={<CasesList cases={[CASE]} isLoading={false} />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const grid = screen.getByText("Updated").closest("[class*='MuiBox-root']")?.parentElement;
+    expect(grid).not.toBeNull();
+    const style = getComputedStyle(grid!);
+    expect(style.justifyContent).toBe("space-between");
+    expect(style.gridTemplateColumns).not.toContain("fr");
+    expect(style.gridTemplateColumns.endsWith("minmax(90px, max-content)")).toBe(true);
+  });
+});

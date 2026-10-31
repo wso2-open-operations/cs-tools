@@ -120,6 +120,41 @@ describe("RotaAccessTab", () => {
     expect(within(panel).getByRole("rowheader", { name: "Apollo" })).toBeInTheDocument();
   });
 
+  it("names a team's head as its Lead and lists its other leads with the Rota Managers", () => {
+    const head = { ...member(LEO, "Leo", true), role: "americas_team_lead" };
+    const teams: ScheduleTeam[] = [
+      { key: "westwind", name: "Westwind", family: "CRE", sortOrder: 1, heads: [head], members: [member(ANA, "Ana", true), member(BEN, "Ben")] },
+      { key: "lyra", name: "Lyra", family: "CRE", sortOrder: 2, members: [member(ME, "Me", true), member(BEN, "Ben")] },
+    ];
+    render(<RotaAccessTab teams={teams} />);
+    const row = screen.getByRole("rowheader", { name: "Westwind" }).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Leo")).toHaveClass("ra-leads");
+    const managers = within(row).getByRole("list", { name: "Westwind Rota Managers" });
+    expect(within(managers).getByText("Ana")).toBeInTheDocument();
+    // A lead cannot be taken off here, and is not offered again.
+    expect(within(row).queryByRole("button", { name: /Remove Ana/ })).not.toBeInTheDocument();
+    const offered = within(within(row).getByRole("combobox")).getAllByRole("option").map((o) => o.textContent);
+    expect(offered).toEqual(["+ Add Rota Manager", "Ben"]);
+    // A team with no head keeps all its leads in the Lead column.
+    const lyra = screen.getByRole("rowheader", { name: "Lyra" }).closest("tr") as HTMLElement;
+    expect(within(lyra).getByText("Me")).toHaveClass("ra-leads");
+  });
+
+  it("shows a team synced as an identifier by its display name", () => {
+    const teams: ScheduleTeam[] = [
+      { key: "northwind_cre_team", name: "northwind_cre_team", family: "CRE", sortOrder: 1, members: [member(ME, "Me", true)] },
+      { key: "onboarding_team", name: "onboarding_team", family: "CRE", sortOrder: 2, members: [member(ANA, "Ana")] },
+      { key: "orion", name: "orion", family: "CRE", sortOrder: 3, members: [member(BEN, "Ben")] },
+    ];
+    render(<RotaAccessTab teams={teams} />);
+    const markers = screen.getByRole("tabpanel", { name: "CRE" });
+    for (const name of ["Northwind", "Onboarding", "Orion"]) {
+      expect(within(markers).getByRole("rowheader", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByText("northwind_cre_team")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Onboarding/ })).toBeInTheDocument();
+  });
+
   it("shows a rota admin only their own group's markers, and no rota admin section", () => {
     access.data = { ...access.data!, canManage: { rotaAdmins: false, markerFamilies: ["SRE"] } };
     render(<RotaAccessTab teams={TEAMS} />);
@@ -129,6 +164,33 @@ describe("RotaAccessTab", () => {
     expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(screen.getByRole("rowheader", { name: "Apollo" })).toBeInTheDocument();
     expect(screen.queryByRole("rowheader", { name: "Lyra" })).not.toBeInTheDocument();
+  });
+
+  it("shows a team's lead only the teams they lead, and lets them name a Rota Manager", () => {
+    access.data = {
+      canManage: { rotaAdmins: false, markerFamilies: [], markerTeams: ["APOLLO"] },
+      rotaAdmins: [],
+      markers: [{ teamKey: "apollo", family: "SRE", userId: ANA, name: "Ana", email: "ana@example.test", ...granted }],
+    };
+    render(<RotaAccessTab teams={TEAMS} />);
+    expect(screen.queryByRole("heading", { name: "Rota admins" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Group" })).not.toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "Apollo" })).toBeInTheDocument();
+    expect(screen.queryByRole("rowheader", { name: "Lyra" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Add Rota Manager for Apollo" }), { target: { value: BEN } });
+    expect(lastChange()).toEqual({ kind: "marker", teamKey: "apollo", userId: BEN, grant: true });
+    expect(screen.queryByText("reminder settings card")).not.toBeInTheDocument();
+  });
+
+  it("adds the groups of the teams a rota admin also leads", () => {
+    access.data = {
+      canManage: { rotaAdmins: false, markerFamilies: ["CRE"], markerTeams: ["apollo"] },
+      rotaAdmins: [],
+      markers: [],
+    };
+    render(<RotaAccessTab teams={TEAMS} />);
+    const tabs = within(screen.getByRole("tablist", { name: "Group" })).getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["CRE", "SRE"]);
   });
 
   it("shows the CRE rota reminder settings to a CSM admin", () => {

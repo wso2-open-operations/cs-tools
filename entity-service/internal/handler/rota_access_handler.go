@@ -17,8 +17,12 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -73,6 +77,59 @@ func (h *RotaAccessHandler) AddTeamMember(w http.ResponseWriter, r *http.Request
 // RemoveTeamMember handles DELETE /team-schedule/teams/{teamKey}/members/{userId}.
 func (h *RotaAccessHandler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	h.done(w, r, h.svc.RemoveTeamMember(r.Context(), r.PathValue("teamKey"), r.PathValue("userId")))
+}
+
+// updateTeamMemberRequest is the body of PATCH .../members/{userId}.
+// alertTier is a raw message so that an absent field (leave the tier) and an
+// explicit null (clear it) can be told apart.
+type updateTeamMemberRequest struct {
+	Role      *string         `json:"role"`
+	AlertTier json.RawMessage `json:"alertTier"`
+}
+
+// UpdateTeamMember handles PATCH /team-schedule/teams/{teamKey}/members/{userId}.
+func (h *RotaAccessHandler) UpdateTeamMember(w http.ResponseWriter, r *http.Request) {
+	var req updateTeamMemberRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	patch := domain.TeamMemberPatch{Role: req.Role}
+	if req.AlertTier != nil {
+		patch.AlertTierSet = true
+		if !bytes.Equal(bytes.TrimSpace(req.AlertTier), []byte("null")) {
+			var tier string
+			if err := json.Unmarshal(req.AlertTier, &tier); err != nil {
+				writeServiceError(w, r, &apierror.ValidationError{Msg: "alertTier must be T1, T2, T3 or null"})
+				return
+			}
+			patch.AlertTier = &tier
+		}
+	}
+	m, err := h.svc.UpdateTeamMember(r.Context(), r.PathValue("teamKey"), r.PathValue("userId"), patch)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeScheduleJSON(w, http.StatusOK, m)
+}
+
+// moveTeamMemberRequest is the body of POST .../members/{userId}/move.
+type moveTeamMemberRequest struct {
+	ToTeamKey string `json:"toTeamKey"`
+}
+
+// MoveTeamMember handles POST /team-schedule/teams/{teamKey}/members/{userId}/move.
+func (h *RotaAccessHandler) MoveTeamMember(w http.ResponseWriter, r *http.Request) {
+	var req moveTeamMemberRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	m, err := h.svc.MoveTeamMember(r.Context(), r.PathValue("teamKey"), r.PathValue("userId"), req.ToTeamKey)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeScheduleJSON(w, http.StatusOK, m)
 }
 
 // done answers a grant or removal: 204, or the service's refusal.

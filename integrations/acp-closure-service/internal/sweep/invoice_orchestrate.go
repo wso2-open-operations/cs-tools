@@ -49,13 +49,25 @@ import (
 // isPartner alone before hasPrimaryPartner was ever fetched, which silently
 // disabled that isPartner=true/hasPrimaryPartner=true combination entirely
 // — a real behavioral gap versus legacy, not a documented simplification.
-func buildInvoiceCascade(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, now time.Time) (*cascadeDecision, error) {
+//
+// renewed reports that the invoice track's saved state should go back to
+// "open" (see resetToOpen): nothing is left to chase on this track, either no
+// due invoice (paid), an account the track doesn't apply to, or a suspend
+// date more than 90 days away.
+func buildInvoiceCascade(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, now time.Time) (cascade *cascadeDecision, renewed bool, err error) {
 	dueInvoices, err := resolveDueInvoices(ctx, reader, proj)
 	if err != nil {
-		return nil, fmt.Errorf("resolve due invoice for project %s: %w", proj.ID, err)
+		return nil, false, fmt.Errorf("resolve due invoice for project %s: %w", proj.ID, err)
 	}
+
+	lastWindow, err := suspensionstate.LastNoticeWindowForInvoices(proj.SuspensionProcessState)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse suspensionProcessState for project %s: %w", proj.ID, err)
+	}
+	canReset := lastWindow != nil && dimensionOpen(proj.InvoiceDueDateClosureState)
+
 	if len(dueInvoices) == 0 {
-		return nil, nil
+		return nil, canReset, nil
 	}
 	// The earliest due invoice drives the timing, as in legacy; the internal
 	// notice lists all of them (resolvedForNotice.Listed).
@@ -63,22 +75,17 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 
 	hasPrimaryPartner, err := resolveHasPrimaryPartner(ctx, reader, proj.accountID())
 	if err != nil {
-		return nil, fmt.Errorf("resolve hasPrimaryPartner for project %s: %w", proj.ID, err)
+		return nil, false, fmt.Errorf("resolve hasPrimaryPartner for project %s: %w", proj.ID, err)
 	}
 
 	isPartner := proj.Account != nil && proj.Account.IsPartner != nil && *proj.Account.IsPartner
 	if isPartner && !hasPrimaryPartner {
-		return nil, nil
-	}
-
-	lastWindow, err := suspensionstate.LastNoticeWindowForInvoices(proj.SuspensionProcessState)
-	if err != nil {
-		return nil, fmt.Errorf("parse suspensionProcessState for project %s: %w", proj.ID, err)
+		return nil, canReset, nil
 	}
 
 	decision := closure.DecideInvoice(now, invoice.InvoiceDate, invoice.DueDate, invoice.EULAVersionDecimal, hasPrimaryPartner, lastWindow)
 	if !decision.Fires {
-		return nil, nil
+		return nil, canReset && newTerm(decision.DaysRemaining), nil
 	}
 
 	resolvedForNotice := dueInvoice{
@@ -95,7 +102,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 		act: func(ctx context.Context, alreadyClosed bool, history *json.RawMessage) error {
 			return actInvoice(ctx, reader, updater, ntf, proj, decision, resolvedForNotice, alreadyClosed, history)
 		},
-	}, nil
+	}, false, nil
 }
 
 // actInvoice carries out the invoice-based closure cascade's actions for a

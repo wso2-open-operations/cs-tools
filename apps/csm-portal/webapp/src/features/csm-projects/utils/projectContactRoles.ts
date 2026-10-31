@@ -40,6 +40,8 @@ const BUSINESS_CHIP: ProjectContactRoleChip = {
   chipColor: "default",
 };
 
+const GLOBAL_ADMIN_ACCOUNT_ROLES = ["customer_admin", "partner_admin"];
+
 /** Same outlined-chip spacing the customer portal uses, with Admin in purple. */
 export function projectContactRoleChipSx(chipColor: ProjectContactRoleChip["chipColor"]): object {
   const base = {
@@ -61,8 +63,9 @@ export function projectContactRoleChipSx(chipColor: ProjectContactRoleChip["chip
  * Chip labels for one project-contact row, matching the customer portal's
  * `getRoleBadges` for the flags that search can supply.
  *
- * Admin is only the project role ADMIN. customer_admin and partner_admin
- * are not chips, matching the customer portal contact list.
+ * Admin shows when the project roles include ADMIN or the account roles
+ * include customer_admin or partner_admin; either signal makes a project
+ * admin, matching the customer portal contact list.
  * A person who is not a system user and has neither PORTAL_USER nor
  * SECURITY_CONTACT still gets Portal User. BUSINESS_CONTACT is shown as
  * Business Contact. The customer portal omits that role; CSM keeps it.
@@ -78,6 +81,9 @@ export function projectContactRoleChips(
   const projectRoles = (contact.roles ?? []).map((role) => role.trim()).filter(Boolean);
   const hasProjectRole = (code: string) =>
     projectRoles.some((role) => role.toUpperCase() === code);
+  const isGlobalAdmin = (contact.accountRoles ?? []).some((role) =>
+    GLOBAL_ADMIN_ACCOUNT_ROLES.includes(role.trim().toLowerCase()),
+  );
   const isPortalUser = hasProjectRole("PORTAL_USER");
   const isSecurityContact = hasProjectRole("SECURITY_CONTACT");
   // A row the API confirms has no linked user, and no project roles, is not a
@@ -85,7 +91,7 @@ export function projectContactRoleChips(
   const confirmedUnlinked = contact.customerContactPresent === false && projectRoles.length === 0;
 
   const chips: ProjectContactRoleChip[] = [];
-  if (hasProjectRole("ADMIN")) chips.push(ADMIN_CHIP);
+  if (hasProjectRole("ADMIN") || isGlobalAdmin) chips.push(ADMIN_CHIP);
   if (hasProjectRole("LEAD_USER")) chips.push(LEAD_CHIP);
   if (contact.isCsIntegrationUser) {
     chips.push(SYSTEM_CHIP);

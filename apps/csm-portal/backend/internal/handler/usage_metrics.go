@@ -48,7 +48,7 @@ type usageMetricsClient interface {
 // UsageMetricsHandler handles HTTP requests for the usage-metrics domain
 // (/usage-metrics/*), delegating to entity-service.
 // Every endpoint in this domain requires PermUsageMetricsViewer directly —
-// unlike this domain's former siblings User Scan and the time-log project
+// unlike this domain's former sibling, the time-log project
 // report, it is NOT layered on top of the narrower PermViewerAccess
 // (Viewer-only) gate (and Customer Health has its own, PermViewCustomerHealth);
 // see PermUsageMetricsViewer's own doc comment for why.

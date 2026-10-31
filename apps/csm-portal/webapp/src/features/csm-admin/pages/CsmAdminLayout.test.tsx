@@ -71,6 +71,7 @@ function renderLayout(
           <Route path="user-management/teams" element={<div>Teams content</div>} />
           <Route path="user-management/permissions" element={<div>Permissions content</div>} />
           <Route path="dashboards" element={<div>Dashboards content</div>} />
+          <Route path="banners" element={<div>Banners content</div>} />
         </Route>
         <Route path="/dashboard" element={<LocationProbe />} />
       </Routes>
@@ -79,11 +80,12 @@ function renderLayout(
 }
 
 describe("CsmAdminLayout — top-level tabs", () => {
-  it("shows only User management and Dashboards at the top level, for an admin user", () => {
+  it("shows User management, Dashboards, and Banners at the top level, for an admin user", () => {
     mockRoles = ["admin"];
     renderLayout("/admin/dashboards");
     expect(screen.getByRole("tab", { name: "User management" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Dashboards" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Banners" })).toBeInTheDocument();
     // The five directory pages are only reachable as tiles on the User
     // management landing page, never as top-level tabs.
     expect(screen.queryByRole("tab", { name: "Users" })).not.toBeInTheDocument();
@@ -93,6 +95,7 @@ describe("CsmAdminLayout — top-level tabs", () => {
     mockRoles = ["agent"];
     renderLayout("/admin/user-management/users");
     expect(screen.queryByRole("tab", { name: "Dashboards" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Banners" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "User management" })).toBeInTheDocument();
   });
 });

@@ -38,7 +38,7 @@ type SLAStatusRepository interface {
 	// csm-notification-service's own Redis-recovery reconciliation pass
 	// (source=CSM), which only ever needs this engine's own rows and would
 	// otherwise pay the cost of scanning the full, much larger
-	// ServiceNow-synced row set for nothing. Empty means no filter, the
+	// previous-system-synced row set for nothing. Empty means no filter, the
 	// original, unscoped behavior.
 	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, sourceFilter string) ([]domain.SLAStatus, int, error)
 
@@ -81,12 +81,28 @@ func NewSLAStatusRepository(db *Scoped) SLAStatusRepository {
 // whose policy has no target set at all -- nothing this endpoint could label
 // as a clock type.
 //
+// Also carries schedule/business_pause_duration so the data query's own
+// scanSLAStatus can apply the same business-day correction GetClockState
+// already applies to a single clock -- see scanSLAStatus's own comment.
+//
 // sourceArgIndex, when > 0, adds "AND s.source = $<sourceArgIndex>" -- the
 // placeholder's position differs between the count query (which otherwise
 // binds nothing) and the data query (which already binds limit/offset/the
 // evaluation-subscription project type name), so the caller passes whichever
 // index is next free in its own query rather than this function assuming one.
 // 0 means no source filter at all, the original unscoped behavior.
+// Known, deliberate limitation (see entity-service/CLAUDE.md's own note):
+// `DISTINCT ON (s.work_item_id, sp.target)` picks exactly one row per
+// target, but the per-policy registration guard allows two policies to both
+// have a genuinely open (is_active = TRUE) clock on the same target at
+// once -- `s.is_active` already excludes every terminal row (CANCELLED/
+// ACHIEVED/COMPLETED all set it FALSE), so the remaining ambiguity is
+// narrower than GetClockState's own (which has none of that filter, by
+// design -- see that method's own doc comment): only between two
+// simultaneously-open rows, where `ORDER BY ... start_on DESC NULLS LAST,
+// updated_on DESC` below picks the more recently started/updated one.
+// Keying this read by clock id or policy instead of target would be the
+// real fix, deliberately out of scope here.
 func activeSLAStatusCTE(sourceArgIndex int) string {
 	sourceFilter := ""
 	if sourceArgIndex > 0 {
@@ -97,7 +113,8 @@ func activeSLAStatusCTE(sourceArgIndex int) string {
 		SELECT DISTINCT ON (s.work_item_id, sp.target)
 			s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
 			s.live_has_breached AS has_breached, s.live_stage AS stage, s.start_on,
-			s.paused_on, s.pause_duration
+			s.paused_on, s.pause_duration, s.duration,
+			COALESCE(sp.schedule, '') AS schedule, s.business_pause_duration
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.is_active AND sp.target IS NOT NULL` + sourceFilter + `
@@ -157,17 +174,35 @@ func nullIfEmpty(s string) *string {
 	return &s
 }
 
+// scanSLAStatus reads one row of SearchActiveSLAStatuses' data query.
+//
+// BusinessElapsedPercent is corrected the same way GetClockState's own doc
+// comment explains: als.business_elapsed_percentage (sla_live's view column)
+// is a flat wall-clock figure with no business-day calendar of its own, so
+// for a still-running (IN_PROGRESS/BREACHED) clock bound to a 'WSO2 Business
+// days' policy it is wrong -- a Friday-started clock 's "live" percentage
+// drifts over the weekend when nothing should be accumulating at all. Before
+// this fix, GetClockState (the single-clock detail view) silently
+// overwrote that same wrong figure while this bulk path (the CSM Portal
+// table view) did not, so the same clock showed two different percentages
+// in the two views. Recomputed here via businessDayElapsedSnapshot -- the
+// exact same formula GetClockState/CompleteClock/SetPaused/RecomputeActive
+// all share -- rather than duplicated. A PAUSED or terminal row's stored
+// figure was already frozen correctly, business-day-aware, at the moment it
+// was written, so only the live stages are recomputed.
 func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error) {
 	var s domain.SLAStatus
 	var target, severity, caseType string
 	var caseNumber, wso2CaseID, caseTitle, productName, state, teamName, onboardingStatus *string
 	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
-	var stage string
+	var stage, schedule string
 	var isEvaluation bool
 	var pauseDurationSeconds *int64
+	var durationSeconds int64
+	var businessPauseSeconds float64
 	err := row.Scan(
 		&s.CaseID, &target, &s.BusinessElapsedPercent, &s.HasBreached, &stage, &s.StartedOn,
-		&s.PausedOn, &pauseDurationSeconds,
+		&s.PausedOn, &pauseDurationSeconds, &durationSeconds, &schedule, &businessPauseSeconds,
 		&caseNumber, &wso2CaseID, &caseTitle, &caseType,
 		&productName, &severity, &state, &teamName, &onboardingStatus, &isEvaluation,
 		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
@@ -179,6 +214,21 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	s.IsPaused = stage == "PAUSED"
 	if pauseDurationSeconds != nil {
 		s.PauseDurationSeconds = *pauseDurationSeconds
+	}
+	s.DurationSeconds = durationSeconds
+	s.Schedule = schedule
+	if _, breached, pct, ok := businessDayCorrectedLiveState(schedule, stage, s.StartedOn, businessPauseSeconds, float64(durationSeconds)); ok {
+		// Both BusinessElapsedPercent AND HasBreached are corrected together
+		// here -- an earlier version of this method corrected only the
+		// percentage, leaving HasBreached (and, in GetClockState's own
+		// equivalent correction, Stage) to still come from sla_live's own
+		// flat-time computation. That let a business-day clock report
+		// HasBreached=true right next to a corrected percentage well under
+		// 100 -- one response disagreeing with itself. See
+		// businessDayCorrectedLiveState's own doc comment for the confirmed
+		// example.
+		s.BusinessElapsedPercent = pct
+		s.HasBreached = breached
 	}
 	s.CaseNumber = stringOrEmpty(caseNumber)
 	s.WSO2CaseID = stringOrEmpty(wso2CaseID)
@@ -227,6 +277,8 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 	dataQuery := activeSLAStatusCTE(dataSourceArg) + `
 		SELECT als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
+		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
+		       als.schedule, COALESCE(EXTRACT(EPOCH FROM als.business_pause_duration), 0),
 		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
@@ -297,6 +349,19 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // all -- unlike SearchActiveSLAStatuses, this never needs to resolve any
 // case-like display data, so there's nothing here that depends on
 // row-level security (confirmed: the "sla" table itself carries none).
+//
+// BusinessElapsedPercent is NOT simply read off sla_live's own
+// live_elapsed_percentage for every row: that view has no business-day
+// calendar of its own (it only knows the flat wall-clock formula --
+// see migration 0204/0245's own doc comments), so for a still-running
+// (IN_PROGRESS/BREACHED) clock bound to a 'WSO2 Business days' policy, this
+// method instead computes the live figure itself, through
+// businessDayElapsedSnapshot (sla_engine_repo.go -- the exact same formula
+// CompleteClock/SetPaused/RecomputeActive use, reused rather than
+// duplicated here). Every other case -- 24x7, or PAUSED/terminal regardless
+// of schedule -- reads the view's own value directly, which is already
+// correct for those (a PAUSED/terminal row's figure was already frozen
+// correctly, business-day-aware, at the moment it was written).
 func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error) {
 	args := []any{workItemID, target}
 	sourceFilterSQL := ""
@@ -305,9 +370,29 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		args = append(args, sourceFilter)
 	}
 
+	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
+	// on this): the per-policy registration guard lets two policies
+	// register clocks against the same (work_item, target) at once, and
+	// this read still returns only one row, picked by ORDER BY/LIMIT 1
+	// below. Deliberately NOT given a stage filter to resolve that: this
+	// method's whole reason for existing (see its own doc comment) is
+	// returning the most recently-started row REGARDLESS of stage/
+	// is_active, so a caller can distinguish "cleanly resolved" from
+	// "never registered" from "superseded by a later incarnation" -- a
+	// CodeRabbit review already caught and fixed the bug an active-only
+	// filter causes here once. Excluding terminal stages now would
+	// reintroduce exactly that bug for the sake of a narrower, much rarer
+	// problem (two policies simultaneously open on one target); keying the
+	// read -- and csm-notification-service's own Redis clock -- by clock id
+	// or policy instead of target is the real fix, deliberately out of
+	// scope here.
 	query := `
 		SELECT s.is_active, s.live_stage::TEXT, s.live_has_breached, s.start_on,
-		       s.paused_on, EXTRACT(EPOCH FROM s.pause_duration)::BIGINT
+		       s.paused_on, EXTRACT(EPOCH FROM s.pause_duration)::BIGINT,
+		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
+		       COALESCE(EXTRACT(EPOCH FROM s.duration), 0),
+		       COALESCE(s.live_elapsed_percentage, 0),
+		       COALESCE(sp.schedule, '')
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2` + sourceFilterSQL + `
@@ -324,9 +409,12 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 
 	var state domain.SLAClockState
 	var pauseDurationSeconds *int64
+	var businessPauseSeconds, durationSeconds, viewPercent float64
+	var schedule string
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
+		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -338,5 +426,24 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		state.PauseDurationSeconds = *pauseDurationSeconds
 	}
 	state.Found = true
+	state.IsPaused = state.Stage == "PAUSED"
+	state.DurationSeconds = int64(durationSeconds)
+	state.BusinessElapsedPercent = viewPercent
+	state.Schedule = schedule
+	state.BusinessPauseDurationSeconds = int64(businessPauseSeconds)
+
+	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
+		// Stage AND HasBreached are now corrected together with the
+		// percentage -- see businessDayCorrectedLiveState's own doc comment
+		// for the confirmed, live-observed example this fixes (a clock
+		// reporting BREACHED while its own corrected percentage read 58%).
+		// csm-notification-service reads this exact response before sending
+		// a breach alert, so an uncorrected Stage/HasBreached here could
+		// previously trigger a false alert for a business-day clock that
+		// was, in reality, nowhere near its deadline.
+		state.Stage = correctedStage
+		state.HasBreached = breached
+		state.BusinessElapsedPercent = pct
+	}
 	return state, nil
 }

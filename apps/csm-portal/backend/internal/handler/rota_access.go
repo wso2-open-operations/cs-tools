@@ -38,6 +38,8 @@ type entityRotaAccessClient interface {
 	DeleteRotaMarker(ctx context.Context, teamKey, userID string) ([]byte, error)
 	PutTeamMember(ctx context.Context, teamKey, userID string) ([]byte, error)
 	DeleteTeamMember(ctx context.Context, teamKey, userID string) ([]byte, error)
+	PatchTeamMember(ctx context.Context, teamKey, userID string, body []byte) ([]byte, error)
+	MoveTeamMember(ctx context.Context, teamKey, userID string, body []byte) ([]byte, error)
 }
 
 // RotaAccessHandler proxies the Rota access tab: who holds a rota admin role
@@ -129,16 +131,65 @@ func (h *RotaAccessHandler) change(w http.ResponseWriter, r *http.Request, scope
 	}
 	if _, err := call(r.Context(), scope, target); err != nil {
 		slog.ErrorContext(r.Context(), "entity "+op+" failed", "userID", user.UserID, "err", err)
-		var apiErr *apierror.Error
-		if errors.As(err, &apiErr) {
-			switch apiErr.StatusCode {
-			case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict:
-				writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
-				return
-			}
-		}
-		mapUpstreamErrorGeneric(w, err, fallbackMsg)
+		writeMemberChangeError(w, err, fallbackMsg)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeMemberChangeError answers a refused team member change with
+// entity-service's own reason for a 400, 403, 404 or 409; anything else
+// stays generic.
+func writeMemberChangeError(w http.ResponseWriter, err error, fallbackMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict:
+			writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
+			return
+		}
+	}
+	mapUpstreamErrorGeneric(w, err, fallbackMsg)
+}
+
+// PatchTeamMember handles PATCH /team-schedule/teams/{teamKey}/members/{userId}:
+// a member's role (engineer or sub lead) and Case Alerts tier. The body is
+// forwarded as is; entity-service validates it, decides who may (a CSM admin)
+// and says why when it refuses, and the reason is passed on.
+func (h *RotaAccessHandler) PatchTeamMember(w http.ResponseWriter, r *http.Request) {
+	h.changeWithBody(w, r, "PatchTeamMember", "Failed to change the team member.", h.entity.PatchTeamMember)
+}
+
+// MoveTeamMember handles POST /team-schedule/teams/{teamKey}/members/{userId}/move:
+// {teamKey} is the team they leave, the body names the team they join.
+// entity-service refuses it, writing nothing, while the person has upcoming
+// turns or an alert tier on the source team; the reason is passed on.
+func (h *RotaAccessHandler) MoveTeamMember(w http.ResponseWriter, r *http.Request) {
+	h.changeWithBody(w, r, "MoveTeamMember", "Failed to move the team member.", h.entity.MoveTeamMember)
+}
+
+// changeWithBody checks one team member change's path and that its body is
+// JSON, forwards both, and answers entity-service's 200 body.
+func (h *RotaAccessHandler) changeWithBody(w http.ResponseWriter, r *http.Request, op, fallbackMsg string,
+	call func(ctx context.Context, teamKey, userID string, body []byte) ([]byte, error)) {
+	if middleware.UserInfoFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	teamKey, target := r.PathValue("teamKey"), r.PathValue("userId")
+	if !rotaTeamKeyRe.MatchString(teamKey) || !uuidRe.MatchString(target) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+	result, err := call(r.Context(), teamKey, target, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity "+op+" failed", "userID", userID, "err", err)
+		writeMemberChangeError(w, err, fallbackMsg)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

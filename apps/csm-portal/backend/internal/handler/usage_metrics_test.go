@@ -133,7 +133,7 @@ func TestUsageMetricsHandler_GetProjects_CsEngineerWithoutViewerCanReach(t *test
 // A plain viewer (no cs_engineer/admin/usage_metrics_viewer) must NOT reach
 // this domain at all -- confirmed live, correcting an earlier pass that
 // mistakenly granted Viewer this permission. Unlike its ex-SPL siblings
-// (Customer Health, User Scan), Usage Metrics is not part of what a
+// (Customer Health), Usage Metrics is not part of what a
 // Viewer-only account gets.
 func TestUsageMetricsHandler_GetProjects_PlainViewerIsDenied(t *testing.T) {
 	h := NewUsageMetricsHandler(&mockUsageMetricsClient{}, viewerAccessGuard)

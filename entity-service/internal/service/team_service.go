@@ -45,7 +45,8 @@ type TeamService interface {
 	// a webhook URL is itself a bearer credential (see RequireInternalCaller
 	// below). Reference data for a backend service (csm-notification-service,
 	// fetched periodically), not something any portal caller has a
-	// legitimate use for -- same reasoning as SLADurationPolicyService.
+	// legitimate use for -- same reasoning as NewSLAStatusService's own doc
+	// comment.
 	ListChatWebhooks(ctx context.Context) (domain.ListTeamChatWebhooksResponse, error)
 	// GetTeam returns one team's own id/name/type plus its configured Chat
 	// webhook URL (nil when unset) -- internal-caller-only, same reasoning

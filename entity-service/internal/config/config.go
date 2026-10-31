@@ -231,6 +231,50 @@ type Config struct {
 	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
 	// own doc comment.
 	AttachmentDataSource AttachmentDataSource
+	// CSMSLAEngineEnabled gates this service's own in-process SLA clock
+	// engine (internal/service/sla_engine_service.go, source='CSM' "sla"
+	// rows -- see repository.SLAEngineRepository's own doc comment for why
+	// this engine's clocks must never carry the 'SERVICENOW' tag instead, a
+	// real external sync job's own ownership tag) -- independently of
+	// DataSource/SLADataSource, and
+	// independently of whether an external SLA engine is also tracking the
+	// same case. Defaults to true: this engine is meant to run on every
+	// deployment regardless of data source, not just the ones that already
+	// involve the external system, which is how it used to be gated in
+	// practice (routes.go only ever wired its one real trigger --
+	// registering a new case's clocks -- into the external-system-backed
+	// CreateCase path; the plain-Postgres CreateCase never called it at
+	// all, so a case created under a plain-Postgres data source got no SLA
+	// tracking from creation onward unless its severity happened to change
+	// later). Was previously an implicit "db != nil" check with no name of
+	// its own; now an explicit, independently-documented toggle an operator
+	// can use to turn this engine off on purpose
+	// (CSM_SLA_ENGINE_ENABLED=false) -- e.g. a deployment that wants the
+	// external system's own synced rows as the only SLA truth, with this
+	// engine never writing a row of its own at all.
+	//
+	// This engine's own clocks (source='CSM') and the external sync job's
+	// own rows (source='SERVICENOW', confirmed real and continuously
+	// running -- the external sync job that populates sla_policy/sla maps
+	// the previous system's task SLA records straight into this database's
+	// "sla" table) are kept apart by that tag precisely so the two can
+	// never collide on the same (work_item_id, target) pair -- a
+	// dual-write-mode case can genuinely have both.
+	//
+	// Known limitation: flipping this to false only stops NEW writes --
+	// any row this engine already registered and left IN_PROGRESS/BREACHED
+	// at that moment is left exactly as it was (still is_active, still
+	// returned by every unscoped read: sla_live, GetClockState,
+	// SearchActiveSLAStatuses), since nothing retires or excludes it. It
+	// will simply never be updated again. This is intentional scope:
+	// deciding whether such a clock should be force-completed, cancelled,
+	// or left visible as a frozen record is a product decision, not
+	// something this flag's on/off switch should make unilaterally. An
+	// operator disabling this engine should do so only once they've
+	// confirmed they're fine with whatever in-flight clocks this engine
+	// registered going stale, or has a separate plan (e.g. a one-off
+	// migration) for them.
+	CSMSLAEngineEnabled bool
 	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
 	// Required when DataSource is "servicenow" (or SLADataSource is "servicenow" -- see Validate).
 	ServiceNowIntegrationServiceBaseURL string
@@ -560,6 +604,47 @@ type Config struct {
 	// stop that without turning the ingest off. An invalid or negative value
 	// disables it too (with a warning) rather than falling back to 5m.
 	SalesforceIngestRetryInterval time.Duration
+	// SalesforceDeferredWritesEnabled turns on the deferred Salesforce
+	// membership write: when sales/sales-entity-service is unavailable
+	// during a portal invitation, the CSM rows are committed with NULL
+	// sf_id columns, a salesforce_write_request row is recorded, and
+	// salesforce.membership_write.requested is published to
+	// SalesforceWriteEventHubTopic for sales-entity-service to carry out;
+	// its result comes back on SalesforceWriteResultsTopic. From SALESFORCE_DEFERRED_WRITES_ENABLED, exactly "true"; off by
+	// default. Needs HasPortalMembershipWrites and a configured, enabled
+	// Event Hub publisher; without either it stays off (logged at startup).
+	SalesforceDeferredWritesEnabled bool
+	// SalesforceWriteEventHubTopic carries the deferred-write commands to
+	// sales-entity-service (SALESFORCE_WRITE_EVENT_HUB_TOPIC, default
+	// "salesforce-writes"). Its own topic on purpose: a backlog here must
+	// not delay a case or project event.
+	SalesforceWriteEventHubTopic string
+	// SalesforceWriteResultsTopic / SalesforceWriteResultsDLQTopic carry
+	// sales-entity-service's answers (salesforce.membership_write.completed /
+	// .failed; SALESFORCE_WRITE_RESULTS_TOPIC, default
+	// "salesforce-write-results"; SALESFORCE_WRITE_RESULTS_DLQ_TOPIC, default
+	// "salesforce-write-results-dlq"). This service consumes them to stamp
+	// the ids and settle the request.
+	SalesforceWriteResultsTopic    string
+	SalesforceWriteResultsDLQTopic string
+	// SalesforceWriteResultsConsumerGroup / ...DLQConsumerGroup are this
+	// service's groups on those topics (SALESFORCE_WRITE_RESULTS_CONSUMER_GROUP,
+	// default "entity-service-salesforce-write-results"; ..._DLQ_CONSUMER_GROUP,
+	// default "entity-service-salesforce-write-results-dlq").
+	SalesforceWriteResultsConsumerGroup    string
+	SalesforceWriteResultsDLQConsumerGroup string
+	// SalesforceWriteResultsRetry* are the results consumer's policies
+	// (SALESFORCE_WRITE_RESULTS_RETRY_ATTEMPTS, default 3; ..._RETRY_DELAY,
+	// default 2s fixed; ..._DLQ_RETRY_ATTEMPTS, default 10; ..._DLQ_RETRY_DELAY,
+	// default 30s doubling; ..._DLQ_RETRY_MAX_DELAY, default 15m). What a
+	// result's handling waits on is Sales Entity's REST API (to read the
+	// records back) and this database, so these cover an outage of either.
+	// The Salesforce retry policy itself lives in sales-entity-service.
+	SalesforceWriteResultsRetryAttempts    int
+	SalesforceWriteResultsRetryDelay       time.Duration
+	SalesforceWriteResultsDLQRetryAttempts int
+	SalesforceWriteResultsDLQRetryDelay    time.Duration
+	SalesforceWriteResultsDLQRetryMaxDelay time.Duration
 	// Auth* configure token validation (internal/auth), always on -- there is
 	// no config flag to disable it. AuthIssuer/AuthJWKSURL/
 	// AuthUserTokenAudiences are required (Validate rejects startup without
@@ -647,6 +732,13 @@ type Config struct {
 	// Alerts tab shows (e.g. "staging", "production") so an admin knows which
 	// environment's rooms they are changing. Optional.
 	CaseAlertsEnvironment string
+	// AutoclosureSystemUserEmail is AUTOCLOSURE_SYSTEM_USER_EMAIL: optionally, the
+	// "user" row (type SYSTEM) the auto-closure workflow comments and closes
+	// tickets as (the reminder comments' author, and closed_by on a ticket it
+	// closes). Empty is fine and the normal case: the workflow then acts as the
+	// system itself, shown as "System user", with no user row and no closed_by.
+	// What switches the feature on is the scheduler's AUTOCLOSURE_ENABLED.
+	AutoclosureSystemUserEmail string
 	// M2MClientIDsRaw is the M2M_CLIENT_IDS value, a comma-separated list of
 	// Asgardeo application client ids for pure machine-to-machine callers --
 	// no human in the loop at all (the GitHub webhook delivery/service-
@@ -847,9 +939,9 @@ func Load() *Config {
 		HealthPort:                                    getEnvOrDefault("HEALTH_PORT", "8081"),
 		DataSource:                                    DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
 		SLADataSource:                                 SLADataSource(getEnvOrDefault("SLA_DATA_SOURCE", string(SLADataSourcePostgres))),
-		UsageRollupEnabled:                            os.Getenv("USAGE_ROLLUP_ENABLED") == "true",
 		UsageReadMode:                                 UsageReadMode(getEnvOrDefault("PRODUCT_CONSUMPTION_DATA_READ_MODE", string(UsageReadModePostgres))),
 		AttachmentDataSource:                          AttachmentDataSource(getEnvOrDefault("ATTACHMENT_DATA_SOURCE", string(AttachmentDataSourcePostgres))),
+		CSMSLAEngineEnabled:                           envFlagOn("CSM_SLA_ENGINE_ENABLED"),
 		ServiceNowIntegrationServiceBaseURL:           os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
 		ServiceNowIntegrationServiceClientID:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
@@ -859,6 +951,7 @@ func Load() *Config {
 		EventHubConnectionString:                      os.Getenv("EVENT_HUB_CONNECTION_STRING"),
 		EventHubTopic:                                 os.Getenv("EVENT_HUB_TOPIC"),
 		EventPublishingEnabled:                        os.Getenv("EVENT_PUBLISHING_ENABLED") == "true",
+		UsageRollupEnabled:                            os.Getenv("USAGE_ROLLUP_ENABLED") == "true",
 		GithubIntegrationEnabled:                      os.Getenv("GITHUB_INTEGRATION_ENABLED") == "true",
 		GithubBaseURL:                                 getEnvOrDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
 		GithubToken:                                   os.Getenv("GITHUB_TOKEN"),
@@ -904,6 +997,7 @@ func Load() *Config {
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
 		CaseAlertsEnvironment:                         strings.TrimSpace(os.Getenv("CASE_ALERTS_ENVIRONMENT")),
+		AutoclosureSystemUserEmail:                    strings.TrimSpace(os.Getenv("AUTOCLOSURE_SYSTEM_USER_EMAIL")),
 		M2MClientIDsRaw:                               os.Getenv("M2M_CLIENT_IDS"),
 		CSMPortalBackendClientID:                      os.Getenv("CSM_PORTAL_BACKEND_CLIENT_ID"),
 		CSMPortalUserDomain:                           strings.TrimPrefix(os.Getenv("CSM_PORTAL_USER_DOMAIN"), "@"),
@@ -915,6 +1009,17 @@ func Load() *Config {
 		CloudStatusPollInterval:                       envDuration("CLOUD_STATUS_POLL_INTERVAL", 10*time.Second),
 		IncidentReportPollInterval:                    envDuration("INCIDENT_REPORT_POLL_INTERVAL", 5*time.Second),
 		SalesforceIngestRetryInterval:                 envDurationOrOff("SALESFORCE_INGEST_RETRY_INTERVAL", 5*time.Minute),
+		SalesforceDeferredWritesEnabled:               os.Getenv("SALESFORCE_DEFERRED_WRITES_ENABLED") == "true",
+		SalesforceWriteEventHubTopic:                  getEnvOrDefault("SALESFORCE_WRITE_EVENT_HUB_TOPIC", "salesforce-writes"),
+		SalesforceWriteResultsTopic:                   getEnvOrDefault("SALESFORCE_WRITE_RESULTS_TOPIC", "salesforce-write-results"),
+		SalesforceWriteResultsDLQTopic:                getEnvOrDefault("SALESFORCE_WRITE_RESULTS_DLQ_TOPIC", "salesforce-write-results-dlq"),
+		SalesforceWriteResultsConsumerGroup:           getEnvOrDefault("SALESFORCE_WRITE_RESULTS_CONSUMER_GROUP", "entity-service-salesforce-write-results"),
+		SalesforceWriteResultsDLQConsumerGroup:        getEnvOrDefault("SALESFORCE_WRITE_RESULTS_DLQ_CONSUMER_GROUP", "entity-service-salesforce-write-results-dlq"),
+		SalesforceWriteResultsRetryAttempts:           envPositiveInt("SALESFORCE_WRITE_RESULTS_RETRY_ATTEMPTS", 3),
+		SalesforceWriteResultsRetryDelay:              envDuration("SALESFORCE_WRITE_RESULTS_RETRY_DELAY", 2*time.Second),
+		SalesforceWriteResultsDLQRetryAttempts:        envPositiveInt("SALESFORCE_WRITE_RESULTS_DLQ_RETRY_ATTEMPTS", 10),
+		SalesforceWriteResultsDLQRetryDelay:           envDuration("SALESFORCE_WRITE_RESULTS_DLQ_RETRY_DELAY", 30*time.Second),
+		SalesforceWriteResultsDLQRetryMaxDelay:        envDuration("SALESFORCE_WRITE_RESULTS_DLQ_RETRY_MAX_DELAY", 15*time.Minute),
 		SalesEntityBaseURL:                            os.Getenv("SALES_ENTITY_BASE_URL"),
 		SalesEntityTokenURL:                           os.Getenv("SALES_ENTITY_TOKEN_URL"),
 		SalesEntityClientID:                           os.Getenv("SALES_ENTITY_CLIENT_ID"),
@@ -1428,6 +1533,18 @@ func (c *Config) HasPortalMembershipWrites() bool {
 		c.SalesEntityConfigured()
 }
 
+// HasSalesforceDeferredWrites reports whether the deferred Salesforce
+// membership write runs: the flag, the portal writes it belongs to, and an
+// enabled Event Hub publisher to carry the command. Without the publisher
+// there is no consumer to hand the write to, so an invitation during a
+// Salesforce outage fails fast as before.
+func (c *Config) HasSalesforceDeferredWrites() bool {
+	return c.SalesforceDeferredWritesEnabled &&
+		c.HasPortalMembershipWrites() &&
+		c.EventHubBroker != "" &&
+		c.EventPublishingEnabled
+}
+
 // HasCustomerEngagementIngest reports whether POST /customer-engagements/allocation-events
 // may be registered: the flag is on and PostgreSQL is authoritative.
 func (c *Config) HasCustomerEngagementIngest() bool {
@@ -1537,6 +1654,21 @@ func (c *Config) hasRepoTokens() bool {
 // envFlagOn is true unless the value is "false" (case-insensitive).
 func envFlagOn(key string) bool {
 	return !strings.EqualFold(strings.TrimSpace(os.Getenv(key)), "false")
+}
+
+// envPositiveInt reads a positive integer, falling back to def when unset,
+// unparseable or not positive -- the same "a typo costs the override, not the
+// start" rule as envDuration.
+func envPositiveInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 // envDuration reads a Go duration string (e.g. "5s", "500ms"), falling back to

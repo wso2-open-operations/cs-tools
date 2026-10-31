@@ -52,8 +52,9 @@ describe("top-level nav order", () => {
     expect(ids.indexOf(lower)).toBe(ids.indexOf(upper) + 1);
   };
 
-  it("puts Announcements directly below Engagements", () => {
-    below("engagements", "announcements");
+  it("puts Allocations directly below Engagements, and Announcements directly below Allocations", () => {
+    below("engagements", "allocations");
+    below("allocations", "announcements");
   });
 
   it("puts Customers directly below Security Center, and Knowledge directly below Customers", () => {
@@ -65,12 +66,17 @@ describe("top-level nav order", () => {
     below("time-cards", "team-schedule");
   });
 
+  it("puts Skills directly below Team Schedule", () => {
+    below("team-schedule", "skills");
+  });
+
   it("keeps the remaining sections in their existing relative order", () => {
     expect(ids).toEqual([
       "dashboard",
       "support",
       "operations",
       "engagements",
+      "allocations",
       "announcements",
       "security-center",
       "customers",
@@ -79,9 +85,9 @@ describe("top-level nav order", () => {
       "updates",
       "time-cards",
       "team-schedule",
+      "skills",
       "customer-health",
       "usage-metrics",
-      "user-scan",
       "admin",
       "help",
     ]);

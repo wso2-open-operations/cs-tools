@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
@@ -57,6 +58,37 @@ func tierLabel(tier int) string {
 	return strconv.Itoa(tier)
 }
 
+// redisRetryAttempts/redisRetryDelay bound the retry this engine applies to
+// its own Redis calls on the hot tick/check path — a short, transient blip
+// (a brief network hiccup, a Redis failover) should not immediately fall
+// back to the entity-service degraded path (processDueMemberFallback),
+// which can only ever reconstruct a best-effort, metadata-poor alert.
+const (
+	redisRetryAttempts = 3
+	redisRetryDelay    = 150 * time.Millisecond
+)
+
+// withRedisRetry runs fn up to redisRetryAttempts times, pausing
+// redisRetryDelay between attempts, and returns the last error if every
+// attempt fails. ctx cancellation aborts immediately between attempts.
+func withRedisRetry(ctx context.Context, fn func() error) error {
+	var err error
+	for attempt := 1; attempt <= redisRetryAttempts; attempt++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		if attempt == redisRetryAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(redisRetryDelay):
+		}
+	}
+	return err
+}
+
 // store abstracts Store for testability.
 type store interface {
 	AddWake(ctx context.Context, member string, at time.Time) error
@@ -66,6 +98,7 @@ type store interface {
 	GetClock(ctx context.Context, caseID, clockType string) (ClockMeta, bool, error)
 	SetPaused(ctx context.Context, caseID, clockType string, paused bool) error
 	ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, newBaselineSeconds int64) error
+	SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error
 	SetShiftedPauseSeconds(ctx context.Context, caseID, clockType string, seconds int64) error
 	SetState(ctx context.Context, caseID, clockType, state string) error
 	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int, incarnation time.Time) (applied bool, err error)
@@ -102,6 +135,57 @@ type linkResolver interface {
 // up.
 type entityClockStatusClient interface {
 	GetClockState(ctx context.Context, caseID, clockType string) (clockState, error)
+}
+
+// entityClockStateRetryAttempts/entityClockStateRetryDelay bound a short
+// retry around entity-service's own GetClockState when it reports a clock as
+// not yet found — entity-service's SLA engine registers/applies a case's
+// real clocks synchronously, inside the same request that publishes
+// case.created/case.status_changed, but it does that AFTER publishing, not
+// before (an ordering this package doesn't control and can't safely
+// reorder — see entity-service's own sn_case_service.go, CreateCase/
+// UpdateCase). A Kafka consumer reacting to that same event can therefore
+// race ahead of entity-service's own registration/pause-application and see
+// "not found" on its very first read, even though entity-service is a
+// moment away from writing the row this read is asking about. This retries
+// a couple of times, briefly, rather than accepting that first "not found"
+// as final — both RegisterClocks (right after case.created) and
+// entityPauseStatus (right after case.status_changed) call
+// getClockStateWithRetry for exactly this reason. Kept short on purpose:
+// "not found" is also the ordinary, permanent answer for a clock type a
+// case's policy genuinely never registers (e.g. a LOW/S4 case with no
+// workaround/resolution policy at all), which is the overwhelmingly more
+// common case on every status change after the first — a long or
+// many-attempt retry would pay that cost needlessly on every single one.
+const (
+	entityClockStateRetryAttempts = 2
+	entityClockStateRetryDelay    = 300 * time.Millisecond
+)
+
+// getClockStateWithRetry calls entity.GetClockState, retrying briefly when
+// the lookup itself succeeds but reports the clock as not yet found — see
+// entityClockStateRetryAttempts's own doc comment for why. A transport/
+// lookup error is returned immediately, unretried here: that's each
+// caller's own existing, separate concern (already logged and handled by
+// treating the clock as absent/not-paused).
+func getClockStateWithRetry(ctx context.Context, entity entityClockStatusClient, caseID, clockType string) (clockState, error) {
+	var state clockState
+	var err error
+	for attempt := 1; attempt <= entityClockStateRetryAttempts; attempt++ {
+		state, err = entity.GetClockState(ctx, caseID, clockType)
+		if err != nil || state.Found {
+			return state, err
+		}
+		if attempt == entityClockStateRetryAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return clockState{}, ctx.Err()
+		case <-time.After(entityClockStateRetryDelay):
+		}
+	}
+	return state, err
 }
 
 // clockIncarnationTolerance is how far apart entity-service's own
@@ -157,16 +241,14 @@ type Engine struct {
 	pub   eventPublisher
 	chat  chatSender
 	links linkResolver
-	// durations is severity -> clockType -> duration, fetched once at
-	// startup via EntityClient.GetDurationPolicy and never refreshed again
-	// for the lifetime of this process — this data changes on the order of
-	// "WSO2 updates its published support policy," not at runtime; a rare
-	// change needs a restart to pick up, same as any other static
-	// at-startup config in this service.
-	durations map[string]map[string]time.Duration
-	// entity is used by sendBreachAlert only, as a last pre-send check
-	// against entity-service's own durable record — see
-	// entityClockStatusClient's own doc comment.
+	// entity is this engine's one live link to entity-service's own durable
+	// record — RegisterClocks/reconcileClock read a clock's real, resolved
+	// policy duration from it (entity-service's own GET /sla-duration-policy
+	// and this engine's static severity-keyed duration table are both gone
+	// — see RegisterClocks' own doc comment), ApplyStateEffects reads a
+	// clock's real pause status from it, and sendBreachAlert/
+	// processDueMemberFallback use it as a last, authoritative check/
+	// fallback — see each one's own doc comment.
 	entity entityClockStatusClient
 	// slaEmailSendingEnabled is the SLA notification killswitch
 	// (SLA_EMAIL_SENDING_ENABLED, default true; disabled only by the literal
@@ -193,12 +275,12 @@ func (e *Engine) clock() time.Time {
 }
 
 // NewEngine constructs an Engine. entity is the same *EntityClient the
-// caller already constructs for GetDurationPolicy/Reconcile — see
-// entityClockStatusClient's own doc comment for what it's used for here.
-// slaEmailSendingEnabled gates all SLA-triggered messages (Chat card and
-// email) — see that field's own doc comment.
-func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, durations map[string]map[string]time.Duration, entity entityClockStatusClient, slaEmailSendingEnabled bool) *Engine {
-	return &Engine{store: store, pub: pub, chat: chat, links: links, durations: durations, entity: entity, slaEmailSendingEnabled: slaEmailSendingEnabled}
+// caller already constructs for Reconcile — see entityClockStatusClient's
+// own doc comment for what it's used for here. slaEmailSendingEnabled gates
+// all SLA-triggered messages (Chat card and email) — see that field's own
+// doc comment.
+func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, entity entityClockStatusClient, slaEmailSendingEnabled bool) *Engine {
+	return &Engine{store: store, pub: pub, chat: chat, links: links, entity: entity, slaEmailSendingEnabled: slaEmailSendingEnabled}
 }
 
 // avoidWeekend rolls due forward to the next Monday, same time-of-day, if
@@ -216,18 +298,90 @@ func avoidWeekend(due time.Time) time.Time {
 	}
 }
 
-// tierTime returns the instant tier is reached, given a clock that started
-// at startedAt and runs for duration d. Ported from the pre-poll design's
-// own helper.
-func tierTime(startedAt time.Time, d time.Duration, tier int) time.Time {
+// slaScheduleWSO2BusinessDays mirrors entity-service's own
+// repository.slaScheduleWSO2BusinessDays (unexported there, kept as a
+// separate literal here, same as sla_policy_resolver.go's own
+// slaScheduleWSO2BusinessDaysLabel does in that repo) — the one schedule
+// value this engine treats as business-day-aware; every other value
+// (including "", "24 x 7", or an unsupported one like "8-5 weekdays") is
+// plain flat wall-clock time, matching entity-service's own posture.
+const slaScheduleWSO2BusinessDays = "WSO2 Business days"
+
+// dueInstant returns the instant reached by adding duration d to startedAt,
+// using business-day-aware math (businessdays.AddBusinessDuration) when
+// schedule is 'WSO2 Business days', flat wall-clock Add(d) for every other
+// schedule — the same choice entity-service's own SLA engine makes when
+// computing a live clock's remaining-time/percentage figures
+// (internal/repository/sla_engine_repo.go's businessDayElapsedSnapshot),
+// now mirrored on this side of the wire too. Before this, RegisterClocks/
+// reconcileClock always used flat Add(duration) regardless of schedule — a
+// real bug found in code review: a 240h business-day RESOLUTION clock
+// starting on a Friday was woken at Friday+240h calendar time (ten
+// calendar days later) instead of the real business-day-adjusted instant
+// (which skips two weekends along the way), firing premature breach
+// alerts well before the clock was actually due by entity-service's own
+// reckoning.
+func dueInstant(startedAt time.Time, d time.Duration, schedule string) time.Time {
+	if schedule == slaScheduleWSO2BusinessDays {
+		return businessdays.AddBusinessDuration(startedAt, d)
+	}
+	return startedAt.Add(d)
+}
+
+// tierFraction returns tier's share of d (50% -> d/2, 75% -> d*3/4, 100% ->
+// d) — split out from tierTime so Engine.resumeShift's business-day branch
+// can compute the same fraction without going through dueInstant, which
+// anchors at a start instant this call site doesn't have (it adds the
+// fraction to the clock's already-known duration-plus-pause total instead).
+func tierFraction(d time.Duration, tier int) time.Duration {
 	switch tier {
 	case 50:
-		return startedAt.Add(d / 2)
+		return d / 2
 	case 75:
-		return startedAt.Add(d * 3 / 4)
+		return d * 3 / 4
 	default: // 100
-		return startedAt.Add(d)
+		return d
 	}
+}
+
+// tierTime returns the instant tier is reached, given a clock that started
+// at startedAt and runs for duration d under the given schedule — ported
+// from the pre-poll design's own helper, now schedule-aware via dueInstant.
+func tierTime(startedAt time.Time, d time.Duration, tier int, schedule string) time.Time {
+	return dueInstant(startedAt, tierFraction(d, tier), schedule)
+}
+
+// dueAtAndTierDuration computes a clock's overall due instant and the
+// duration tierTime should treat each 50/75/100% checkpoint as a fraction
+// of — shared by RegisterClocks and reconcileClock so the business-day fix
+// lives in exactly one place.
+//
+// For a flat (non-business-day) schedule this reproduces the pre-existing
+// behavior byte for byte: dueAt is startedAt.Add(duration), optionally
+// rolled by avoidWeekend when resolutionAvoidWeekend is set (MEDIUM/S3
+// resolution's "1 Business Week" approximation), and tierDuration is the
+// resulting, possibly-rolled span — so a MEDIUM resolution clock's 50%/75%
+// checkpoints shift along with the rolled due date, exactly as the old,
+// single-path tierTime(startedAt, actualDuration, tier) call always did.
+//
+// For a 'WSO2 Business days' schedule, tierDuration is the real, pure
+// policy duration instead: dueInstant's own business-day math already skips
+// weekends correctly for each fractional checkpoint on its own (a 50%
+// checkpoint computed as half the real duration, business-day-adjusted, is
+// not the same instant as half of a wall-clock span that itself already had
+// two weekends baked into it by Sub) — and avoidWeekend is a guaranteed
+// no-op here regardless, since businessdays.AddBusinessDuration never
+// returns a weekend instant in the first place (see that function's own
+// doc comment).
+func dueAtAndTierDuration(startedAt time.Time, duration time.Duration, schedule string, resolutionAvoidWeekend bool) (dueAt time.Time, tierDuration time.Duration) {
+	dueAt = dueInstant(startedAt, duration, schedule)
+	if resolutionAvoidWeekend {
+		dueAt = avoidWeekend(dueAt)
+	}
+	if schedule == slaScheduleWSO2BusinessDays {
+		return dueAt, duration
+	}
+	return dueAt, dueAt.Sub(startedAt)
 }
 
 func wakeMember(caseID, clockType string, tier int) string {
@@ -248,13 +402,30 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 
 // RegisterClocks computes and schedules every clock dispatch.handleCaseCreated's
 // own case.created payload implies — called once, from that handler,
-// alongside its existing email/Chat reactions. priority must be one of the
-// uppercase words GetDurationPolicy's own map is keyed by ("CATASTROPHIC"
-// through "LOW"); an unrecognized or empty value is logged and skipped
-// entirely — there's nothing to compute a due date from. A clock type the
-// policy has no entry for this severity (e.g. LOW has no workaround/
-// resolution row at all) is simply not registered — not an error, see
-// migration 0192's own seed data.
+// alongside its existing email/Chat reactions.
+//
+// Duration comes from entity-service's own real, resolved sla_policy —
+// fetched live, per clock type, via GetClockState — not a static,
+// severity-keyed table any more (GET /sla-duration-policy and this engine's
+// own in-memory durations map are both gone: entity-service's condition-
+// driven SLA engine resolves and registers the case's real clocks
+// synchronously, as part of the same request that creates the case). A
+// clock type entity-service has no applicable policy for (e.g. LOW/S4
+// "case" has no workaround/resolution policy at all in the real table
+// today) comes back Found=false and is simply not registered here either —
+// not an error, same "no fallback duration" posture the old static table
+// had for an absent entry. A lookup failure (entity-service unreachable) is
+// logged and that one clock type is skipped; the other two are still
+// attempted independently.
+//
+// entity-service PUBLISHES case.created BEFORE it registers the clock, not
+// after — a pre-existing ordering in that service's own sn_case_service.go
+// (CreateCase) this package doesn't control and can't safely reorder
+// (confirmed: unmodified by this engine's own SLA work). So this handler
+// can genuinely race ahead of entity-service's own registration and see
+// "not found" on its very first GetClockState read — see
+// getClockStateWithRetry's own doc comment for the short, bounded retry
+// that closes that race, rather than this method giving up on the first try.
 //
 // KNOWN GAP: there is no backfill. A case that already existed before this
 // engine's first deployment never gets a RegisterClocks call — this only
@@ -262,22 +433,28 @@ func parseWakeMember(member string) (caseID, clockType string, tier int, ok bool
 // one-off script reading existing cases and calling this per case would
 // close that, not built here.
 func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string) {
-	durations, ok := e.durations[strings.ToUpper(strings.TrimSpace(priority))]
-	if !ok || len(durations) == 0 {
-		slog.WarnContext(ctx, "slaengine: no duration policy for this severity, sla clocks not registered", "caseId", caseID, "priority", priority)
+	if e.entity == nil {
+		slog.WarnContext(ctx, "slaengine: no entity-service client configured, sla clocks not registered", "caseId", caseID)
 		return
 	}
 
 	for _, clockType := range clockTypesInOrder {
-		duration, ok := durations[clockType]
-		if !ok {
+		state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+		if err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to read clock state from entity-service, not registering this clock type", "caseId", caseID, "clockType", clockType, "err", err)
 			continue
 		}
-		dueAt := createdAt.Add(duration)
-		if clockType == ClockResolution && strings.EqualFold(priority, "MEDIUM") {
-			dueAt = avoidWeekend(dueAt)
+		if !state.Found || state.DurationSeconds <= 0 {
+			continue
 		}
-		actualDuration := dueAt.Sub(createdAt)
+
+		startedAt := createdAt
+		if state.StartedOn != nil {
+			startedAt = *state.StartedOn
+		}
+		duration := time.Duration(state.DurationSeconds) * time.Second
+		resolutionAvoidWeekend := clockType == ClockResolution && strings.EqualFold(priority, "MEDIUM")
+		dueAt, tierDuration := dueAtAndTierDuration(startedAt, duration, state.Schedule, resolutionAvoidWeekend)
 
 		meta := ClockMeta{
 			CaseNumber: caseNumber,
@@ -287,44 +464,20 @@ func (e *Engine) RegisterClocks(ctx context.Context, caseID, priority string, cr
 			Product:    product,
 			Team:       team,
 			Priority:   priority,
-			StartedAt:  createdAt,
+			StartedAt:  startedAt,
+			Schedule:   state.Schedule,
 		}
 		if err := e.store.SetClock(ctx, caseID, clockType, meta); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to register sla clock", "caseId", caseID, "clockType", clockType, "err", err)
 			continue
 		}
 		for _, tier := range tierSequence {
-			at := tierTime(createdAt, actualDuration, tier)
+			at := tierTime(startedAt, tierDuration, tier, state.Schedule)
 			if err := e.store.AddWake(ctx, wakeMember(caseID, clockType, tier), at); err != nil {
 				slog.ErrorContext(ctx, "slaengine: failed to schedule sla wake entry", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
 			}
 		}
-		slog.InfoContext(ctx, "slaengine: registered sla clock", "caseId", caseID, "clockType", clockType, "dueAt", dueAt.Format(time.RFC3339))
-	}
-}
-
-// caseStatusEffect is what ApplyStateEffects does to the workaround/
-// resolution clocks for one case.status_changed NewStatus value — matched
-// case-insensitively against entity-service's own caseStateDisplayLabel
-// vocabulary ("Work In Progress", "Awaiting Info", "Solution Proposed",
-// "Closed", ...), the human label every case.* publisher sends on this
-// field (see entity-service's own CLAUDE.md, "Fixing case enum-casing").
-type caseStatusEffect int
-
-const (
-	effectResume caseStatusEffect = iota
-	effectPause
-	effectClose
-)
-
-func statusEffectFor(newStatus string) caseStatusEffect {
-	switch strings.ToLower(strings.TrimSpace(newStatus)) {
-	case "awaiting info", "solution proposed":
-		return effectPause
-	case "closed":
-		return effectClose
-	default:
-		return effectResume
+		slog.InfoContext(ctx, "slaengine: registered sla clock", "caseId", caseID, "clockType", clockType, "dueAt", dueAt.Format(time.RFC3339), "schedule", state.Schedule)
 	}
 }
 
@@ -333,23 +486,34 @@ func statusEffectFor(newStatus string) caseStatusEffect {
 // its existing email reaction, unconditionally (every case.status_changed,
 // not just a genuine transition — entity-service's own publishers already
 // gate on a real change, and every effect here is idempotent, so a resent
-// status change just harmlessly re-applies the same effect):
+// status change just harmlessly re-applies the same effect).
 //
-//   - "Awaiting Info" / "Solution Proposed": WSO2 is waiting on the
-//     customer, so neither clock should keep accumulating — pause both.
-//   - "Closed": resolution and response are genuinely done — force-complete
-//     both (AdvanceAlertedTier to 100, same as an early completion).
-//     workaround is only paused, not completed, here — a real "workaround
-//     provided" signal now exists (case.workaround_provided, see
-//     events.WorkaroundProvidedPayload's own doc comment), but it's
-//     consumed by its own handler (dispatch.handleWorkaroundProvided →
-//     CompleteWorkaroundClock), independently of a status change, not by
-//     this function. A case closed without ever having workaroundProvided
-//     set true simply never completes this clock — functionally safe
-//     regardless, since processDueMember drops a paused clock's due wake
-//     entry without alerting, same as a completed one would.
-//   - anything else (Open, Work In Progress, Waiting on WSO2, Reopened):
-//     resume both — the case is active again.
+// "Closed" is still matched directly against entity-service's own human
+// display label — that is a genuine lifecycle terminus, not a guess about
+// whether a particular status happens to pause a particular policy, so it
+// stays a plain string check: resolution and response are genuinely done
+// — force-complete both (AdvanceAlertedTier to 100, same as an early
+// completion). workaround is only paused, not completed, here — a real
+// "workaround provided" signal now exists (case.workaround_provided, see
+// events.WorkaroundProvidedPayload's own doc comment), but it's consumed by
+// its own handler (dispatch.handleWorkaroundProvided →
+// CompleteWorkaroundClock), independently of a status change, not by this
+// function. A case closed without ever having workaroundProvided set true
+// simply never completes this clock — functionally safe regardless, since
+// processDueMember drops a paused clock's due wake entry without alerting,
+// same as a completed one would.
+//
+// For every OTHER status, whether workaround/resolution should be paused or
+// resumed is no longer guessed from a hardcoded list of case states
+// ("Awaiting Info"/"Solution Proposed" used to always mean pause, anything
+// else always meant resume) — that list disagreed with the real,
+// per-policy pause_condition/resume_condition the condition-driven SLA
+// engine (entity-service's internal/slacondition) now evaluates: not every
+// policy pauses on the identical set of states (a workaround policy's own
+// pause_condition can differ from its resolution sibling's, and some
+// targets have no pause_condition at all). entityPauseStatus asks
+// entity-service's own authoritative record instead, per clock type, and
+// this just applies whatever it answers.
 //
 // Closing is the one place besides a qualifying comment that force-completes
 // the response clock (reusing CompleteResponseClock itself, so there's only
@@ -371,22 +535,45 @@ func (e *Engine) ApplyStateEffects(ctx context.Context, caseID, newStatus string
 		slog.ErrorContext(ctx, "slaengine: failed to update clock state", "caseId", caseID, "clockType", ClockResolution, "err", err)
 	}
 
-	switch statusEffectFor(newStatus) {
-	case effectPause:
-		e.setPaused(ctx, caseID, ClockWorkaround, true)
-		e.setPaused(ctx, caseID, ClockResolution, true)
-	case effectClose:
+	if strings.EqualFold(strings.TrimSpace(newStatus), "closed") {
 		e.CompleteResponseClock(ctx, caseID)
 		if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockResolution, 100, time.Time{}); err != nil {
 			slog.ErrorContext(ctx, "slaengine: failed to complete resolution clock on case close", "caseId", caseID, "err", err)
 		}
 		e.setPaused(ctx, caseID, ClockWorkaround, true)
-	default:
-		e.setPaused(ctx, caseID, ClockWorkaround, false)
-		e.setPaused(ctx, caseID, ClockResolution, false)
-		e.resumeShift(ctx, caseID, ClockWorkaround)
-		e.resumeShift(ctx, caseID, ClockResolution)
+		return
 	}
+
+	for _, clockType := range []string{ClockWorkaround, ClockResolution} {
+		paused := e.entityPauseStatus(ctx, caseID, clockType)
+		e.setPaused(ctx, caseID, clockType, paused)
+		if !paused {
+			e.resumeShift(ctx, caseID, clockType)
+		}
+	}
+}
+
+// entityPauseStatus asks entity-service's own authoritative record whether
+// this clock is currently paused — see ApplyStateEffects' own doc comment
+// for why this replaced a hardcoded match against case-state labels. e.entity
+// nil (every pre-existing test's own bare Engine{}) or a lookup failure both
+// default to "not paused" — the same fail-open-toward-sending posture
+// sendBreachAlert's own entity-service check already uses: wrongly leaving a
+// clock paused forever would silently suppress a real breach alert, which is
+// worse than the occasional premature one from wrongly resuming it.
+func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string) bool {
+	if e.entity == nil {
+		return false
+	}
+	state, err := getClockStateWithRetry(ctx, e.entity, caseID, clockType)
+	if err != nil {
+		slog.WarnContext(ctx, "slaengine: failed to read pause status from entity-service, treating clock as not paused", "caseId", caseID, "clockType", clockType, "err", err)
+		return false
+	}
+	if !state.Found {
+		return false
+	}
+	return state.IsPaused
 }
 
 // setPaused is the plain Redis flag write only — see resumeShift for the
@@ -450,6 +637,10 @@ func (e *Engine) resumeShift(ctx context.Context, caseID, clockType string) {
 	if !state.Found {
 		return
 	}
+	if meta.Schedule == slaScheduleWSO2BusinessDays {
+		e.resumeShiftBusinessDays(ctx, caseID, clockType, meta, state)
+		return
+	}
 	delta := state.PauseDurationSeconds - meta.ShiftedPauseSeconds
 	if delta <= 0 {
 		return
@@ -459,6 +650,47 @@ func (e *Engine) resumeShift(ctx context.Context, caseID, clockType string) {
 	// Store.ShiftWake's own doc comment for the double-shift this prevents.
 	if err := e.store.ShiftWake(ctx, caseID, clockType, delta, state.PauseDurationSeconds); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to shift wake entries after resume", "caseId", caseID, "clockType", clockType, "deltaSeconds", delta, "err", err)
+	}
+}
+
+// resumeShiftBusinessDays is resumeShift's 'WSO2 Business days' branch. A
+// flat ZINCRBY shift (the 24x7 path above) is wrong for a business-day
+// clock: entity-service computes a business-day clock's real due instant as
+// AddBusinessDuration(start, duration + businessPause), so incrementing an
+// already-computed wake score by a flat wall-clock pause delta can land it
+// anywhere from days early to days late depending on how much of the pause
+// segment fell on a weekend — a real gap a PR review caught (a confirmed
+// example: a 116h business-day resolution clock's 100% wake landed a full
+// two days before entity-service's own real due instant after one overnight
+// pause). Instead, every tier not yet alerted (meta.AlertedTier) is
+// recomputed from scratch — businessdays.AddBusinessDuration(startedAt,
+// tierFraction(duration, tier) + businessPause) — the exact formula
+// entity-service's own businessDayElapsedSnapshot inverts for breach
+// detection, so this engine's wake schedule and entity-service's own
+// verdict agree. SetWakeAbsolute only touches a tier whose wake entry still
+// exists, so an already-alerted-and-removed tier is never resurrected.
+func (e *Engine) resumeShiftBusinessDays(ctx context.Context, caseID, clockType string, meta ClockMeta, state clockState) {
+	if state.DurationSeconds <= 0 {
+		return
+	}
+	duration := time.Duration(state.DurationSeconds) * time.Second
+	businessPause := time.Duration(state.BusinessPauseDurationSeconds) * time.Second
+
+	wakes := make(map[int]time.Time, len(tierSequence))
+	for _, tier := range tierSequence {
+		if tier <= meta.AlertedTier {
+			continue
+		}
+		wakes[tier] = businessdays.AddBusinessDuration(meta.StartedAt, tierFraction(duration, tier)+businessPause)
+	}
+	if len(wakes) == 0 {
+		return
+	}
+	// One atomic call, same reasoning as ShiftWake's own doc comment: the
+	// wake entries and the new baseline must not be allowed to land only
+	// one at a time.
+	if err := e.store.SetWakeAbsolute(ctx, caseID, clockType, wakes, state.BusinessPauseDurationSeconds); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to recompute business-day wake entries after resume", "caseId", caseID, "clockType", clockType, "err", err)
 	}
 }
 
@@ -508,9 +740,18 @@ func (e *Engine) CompleteWorkaroundClock(ctx context.Context, caseID string) err
 // Tick scans the Redis wake-index for every member due at or before now and
 // processes each — a failed member doesn't stop the others; every error is
 // joined and returned so RunTicker can log the whole batch's outcome in one
-// line.
+// line. The scan itself is retried (withRedisRetry) before giving up for
+// this tick entirely — a full scan failure has no narrower fallback than
+// "try again next tick" (there's no member list to fall back to a case-by-
+// case entity-service check for), unlike a single member's own Redis calls
+// inside processDueMember, which do have one.
 func (e *Engine) Tick(ctx context.Context, now time.Time) error {
-	members, err := e.store.DueMembers(ctx, now)
+	var members []string
+	err := withRedisRetry(ctx, func() error {
+		var err error
+		members, err = e.store.DueMembers(ctx, now)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("slaengine: scan due members: %w", err)
 	}
@@ -559,9 +800,18 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return e.store.RemoveWake(ctx, member)
 	}
 
-	meta, found, err := e.store.GetClock(ctx, caseID, clockType)
+	var meta ClockMeta
+	var found bool
+	err := withRedisRetry(ctx, func() error {
+		var err error
+		meta, found, err = e.store.GetClock(ctx, caseID, clockType)
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("get clock %s/%s: %w", caseID, clockType, err)
+		// Redis is unreachable for this member even after retrying -- see
+		// processDueMemberFallback's own doc comment for why this no longer
+		// attempts a degraded send.
+		return e.processDueMemberFallback(ctx, caseID, clockType, member)
 	}
 	if !found {
 		return e.store.RemoveWake(ctx, member)
@@ -573,7 +823,12 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return nil
 	}
 
-	claimed, err := e.store.ClaimTier(ctx, caseID, clockType, tier, meta.StartedAt)
+	var claimed bool
+	err = withRedisRetry(ctx, func() error {
+		var err error
+		claimed, err = e.store.ClaimTier(ctx, caseID, clockType, tier, meta.StartedAt)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("claim tier %d for %s/%s: %w", tier, caseID, clockType, err)
 	}
@@ -616,6 +871,35 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 		return fmt.Errorf("remove wake entry after alerting tier %d for %s/%s: %w", tier, caseID, clockType, err)
 	}
 	slog.InfoContext(ctx, "slaengine: sla tier reached", "caseId", caseID, "clockType", clockType, "tier", tier)
+	return nil
+}
+
+// processDueMemberFallback handles one due wake-index member when this
+// engine's own Redis-held clock metadata is unreachable even after
+// withRedisRetry's bounded retries.
+//
+// This no longer sends a degraded alert of its own. An earlier version asked
+// entity-service directly for the clock's live state and sent from that --
+// but recording that a degraded send happened (AdvanceAlertedTier,
+// RemoveWake) needs exactly the same Redis commands that just failed and
+// triggered this fallback in the first place, so a Redis outage spanning
+// more than one tick could send the same degraded alert again on every tick
+// it stayed down, and a recovered normal Tick could then claim the tier
+// fresh and send yet again -- two real, code-review-found duplicate-alert
+// shapes from one design. Comparing a live percentage against a single wake
+// member's own tier (an earlier fix attempt) only closed one of the two: it
+// could still silently drop a tier that was due by schedule but not yet
+// reflected in entity-service's own live percentage, and the underlying
+// double-send risk from an outage spanning several ticks remained.
+//
+// Instead: log the degraded state and leave the member in the wake index
+// untouched. The next tick re-examines it through the normal,
+// Redis-backed processDueMember path (ClaimTier's own idempotency), which
+// sends exactly once, as soon as Redis recovers. A Redis outage therefore
+// delays a breach alert rather than ever risking a duplicate or a lost
+// one -- the safer failure mode for a notification.
+func (e *Engine) processDueMemberFallback(ctx context.Context, caseID, clockType, member string) error {
+	slog.WarnContext(ctx, "slaengine: redis unavailable for a due wake member, deferring to the next tick once it recovers", "caseId", caseID, "clockType", clockType, "member", member)
 	return nil
 }
 
@@ -827,27 +1111,24 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 // before whatever wiped Redis. Only a tier still in the future gets a real
 // wake entry, so normal ticking resumes seamlessly from here.
 func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) {
-	durations, ok := e.durations[strings.ToUpper(strings.TrimSpace(c.Priority))]
-	if !ok {
-		slog.WarnContext(ctx, "slaengine: reconcile: no duration policy for this severity, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
+	if c.DurationSeconds <= 0 {
+		// entity-service itself has no resolved duration recorded for this
+		// row -- same "no fallback duration" posture RegisterClocks has for
+		// a clock type with no applicable policy. Not expected in practice
+		// (a row GetActiveCSMSLAClocks returned was, by definition, already
+		// registered against some real policy), but defended regardless.
+		slog.WarnContext(ctx, "slaengine: reconcile: no duration recorded for this clock, skipping", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
 		return
 	}
-	duration, ok := durations[c.ClockType]
-	if !ok {
-		slog.WarnContext(ctx, "slaengine: reconcile: no duration policy for this clock type, skipping", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
-		return
-	}
+	duration := time.Duration(c.DurationSeconds) * time.Second
 	if c.StartedOn == nil {
 		slog.WarnContext(ctx, "slaengine: reconcile: no start time, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType)
 		return
 	}
 	startedAt := *c.StartedOn
 
-	dueAt := startedAt.Add(duration)
-	if c.ClockType == ClockResolution && strings.EqualFold(c.Priority, "MEDIUM") {
-		dueAt = avoidWeekend(dueAt)
-	}
-	actualDuration := dueAt.Sub(startedAt)
+	resolutionAvoidWeekend := c.ClockType == ClockResolution && strings.EqualFold(c.Priority, "MEDIUM")
+	_, tierDuration := dueAtAndTierDuration(startedAt, duration, c.Schedule, resolutionAvoidWeekend)
 
 	// pauseOffset is every bit of time this clock has spent paused, start to
 	// now -- both already-completed segments (c.PauseDurationSeconds,
@@ -876,6 +1157,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		Priority:   c.Priority,
 		State:      c.State,
 		StartedAt:  startedAt,
+		Schedule:   c.Schedule,
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
@@ -884,7 +1166,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 
 	highestPastTier := 0
 	for _, tier := range tierSequence {
-		at := tierTime(startedAt, actualDuration, tier).Add(pauseOffset)
+		at := tierTime(startedAt, tierDuration, tier, c.Schedule).Add(pauseOffset)
 		if at.After(now) {
 			if err := e.store.AddWake(ctx, wakeMember(c.CaseID, c.ClockType, tier), at); err != nil {
 				slog.ErrorContext(ctx, "slaengine: reconcile: failed to schedule sla wake entry", "caseId", c.CaseID, "clockType", c.ClockType, "tier", tier, "err", err)

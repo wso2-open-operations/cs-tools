@@ -284,6 +284,29 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 
 // An absence with a NULL ends_on is open-ended and overlaps anything that
 // starts on or after it.
+//
+// WHICH ALLOCATION KINDS REMOVE SOMEBODY FROM THE REPORT.
+//
+// ALLO_INT and ALLO_EXT are a pair -- "Allocated — internal" and
+// "Allocated — external" (migration 0154) -- and ENG is the customer
+// engagement added by 0215. Someone allocated is not available for
+// support either way, so all three count. Listing EXT without INT was an
+// oversight: it inflated every team's member count and its average's
+// divisor, which is what the CS leads reported against the 27 Oct mail.
+//
+// The other active ALLOCATION kinds are deliberately NOT here:
+//
+//	MIGRATION  -- the CS Migrations Team's own work. The delivered mail
+//	              lists those people with real approved hours, so
+//	              excluding them would empty the team that logged the
+//	              most time.
+//	RND        -- SRE-scoped, and the reports cover CRE teams.
+//	ALLO_BR    -- Brazil rotation, a working rotation rather than an
+//	              absence from support.
+//
+// Add one only with evidence from a delivered mail that it should be
+// absent; the cost of guessing wrong is a person silently vanishing from
+// their team's figures.
 const worklogLeaveQuery = `
 SELECT a.user_id::text,
        k.short_code,
@@ -294,7 +317,7 @@ SELECT a.user_id::text,
   FROM team_schedule_absence a
   JOIN team_schedule_absence_kind k ON k.id = a.kind_id
  WHERE (k.bucket IN ('LEAVE', 'EXCLUDED')
-        OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT')))
+        OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT', 'ALLO_INT')))
    AND a.starts_on <= $2
    AND (a.ends_on IS NULL OR a.ends_on >= $1)
  ORDER BY a.user_id, a.starts_on`

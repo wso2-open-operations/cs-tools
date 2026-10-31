@@ -15,8 +15,12 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ErrorLayout from "@layouts/ErrorLayout";
+
+vi.mock("@components/portal-banners/PortalBanners", () => ({
+  default: () => null,
+}));
 
 describe("ErrorLayout", () => {
   it("renders children inside layout shell", () => {

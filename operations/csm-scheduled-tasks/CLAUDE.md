@@ -173,8 +173,12 @@ emails" below.
 `internal/rotareminder`, registered as **`rota_weekday_reminder`**, **`rota_weekend_notice`**,
 **`rota_weekend_reminder`** and **`rota_manual_reminder`** (the Rota Access card's "Send now" and
 "Send a test to me"), emails the people rostered on a rotation shift in the Team Schedule, with a
-calendar invitation for their window. **Registered only when `ROTA_REMINDERS_ENABLED=true`**
-(default false): they email real staff from the real rota.
+calendar invitation for their window. **Turned on and off only on the Rota Access tab** (the
+"CRE rota reminders" card): nothing in this component's configuration switches them on. The tasks
+are registered whenever `EMAIL_BASE_URL` is set, so Send now and "Send a test to me" work without
+a redeploy; a family that has never saved the card gets no scheduled reminder
+(`rotareminder.withSettings`), and the card's weekday and weekend switches apply from the next run.
+`ROTA_REMINDERS_ENABLED` is no longer read.
 
 | Task | Default schedule | Announces |
 |---|---|---|
@@ -219,8 +223,10 @@ schedules assume `TZ=UTC` like every other here.
   `windows` override `ROTA_REMINDER_WEEKEND_REQUIRED` / `ROTA_REMINDER_WINDOWS` code by code
   (a code the saved settings do not name keeps the configured value; the card saves a code
   only once somebody changes it there), and `copyTo` is copied on top of the configured copy
-  list. So saving one field never replaces a deployment setting nobody changed. Nothing saved (a 404, also from an entity-service without the
-  route) keeps the environment's values. A failed read fails the run, so it is retried
+  list. So saving one field never replaces a deployment setting nobody changed. **Nothing
+  saved (a 404, also from an entity-service without the route) sends no scheduled reminder**:
+  only the card's switches turn them on. Send now still goes out, with the environment's values.
+  A failed read fails the run, so it is retried
   rather than sent with settings somebody turned off. Not on the card, on purpose: the
   send times, `ROTA_REMINDER_REDIRECT_TO`, the family, the shift codes and names, and the
   email service settings.
@@ -272,9 +278,12 @@ schedules assume `TZ=UTC` like every other here.
   Nothing from the rota or the configuration can add a line to an invitation: names and notes
   are escaped and stripped of control characters, an attendee whose address is not a plain
   address is left out (`ValidInviteAddress`), and the event's URL is written only when it is
-  http(s) (`ValidScheduleURL`). At startup an `EMAIL_FROM_ADDRESS` that is not a plain address
-  turns invitations off, and a `ROTA_REMINDER_SCHEDULE_URL` that is not http(s) is dropped from
-  every email, both with a warning.
+  http(s) (`ValidScheduleURL`). The organizer is `EMAIL_FROM_ADDRESS`'s address
+  (`InviteOrganizer`): a plain `no-reply@example.com` as it is, or the address inside
+  `Customer Service <no-reply@example.com>`, whose display name the emails keep. At startup an
+  `EMAIL_FROM_ADDRESS` that is unset or holds no address turns invitations off, and a
+  `ROTA_REMINDER_SCHEDULE_URL` that is not http(s) is dropped from every email, both with a
+  warning.
 - **The task's `SUB_CRON_RECIPIENTS` are not copied** unless
   `ROTA_REMINDER_COPY_TASK_RECIPIENTS=true`; they still get its failure alerts, as everywhere
   here. Nobody is ever both a recipient and copied, or copied twice (case-insensitive).
@@ -285,7 +294,8 @@ schedules assume `TZ=UTC` like every other here.
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
   (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
   Definitions table, the zone note and the handover paragraphs. Rotation names come from config
-  (`CODE=Name`). Names are escaped.
+  (`CODE=Name`). Names are escaped. Every subject starts `[<family> Operations]`
+  (`[CRE Operations] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
   tick until the next period, which for `rota_weekend_notice` is days later. So the rota days are
   counted from the run's period key (`Config.Anchor`, from `schedule.PeriodKey`), not the clock:
@@ -304,7 +314,8 @@ schedules assume `TZ=UTC` like every other here.
 - **`ROTA_REMINDER_REDIRECT_TO`** sends every reminder to a test inbox instead, naming the intended
   recipients in its first line. Use it in any environment that holds the real rota but must not mail
   people. `ALERTS_ENABLED=false` silences these like every other email here.
-- Turning the tasks on with `EMAIL_BASE_URL` unset refuses to start.
+- With `EMAIL_BASE_URL` unset the rota tasks are not registered (logged at startup): nothing
+  could be sent.
 - **Not built**: a "your shift changed" email when a lead edits the rota after the reminder went
   out (Friday's reminder is the only re-send; it needs entity-service to announce rota changes,
   see "Future: events"), SRE and SME rotas (set
@@ -373,6 +384,40 @@ subject's rows.
 Timeout is five minutes, not the sixty seconds the neighbouring sweeps use.
 Volume is the normal case here, and cutting a healthy run off partway leaves
 some subjects updated and the rest stale.
+
+## Case auto-closure
+
+`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `0 8 * * *`, TZ=UTC
+caveat as above), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
+**Off unless `AUTOCLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
+accident. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. entity-service's `AUTOCLOSURE_SYSTEM_USER_EMAIL` is optional: empty acts as "System user" (no user row, no `closed_by`).
+
+This task is a **trigger only**. Everything that decides anything (eligibility, whether a ticket is still due,
+the comment text, how it is closed, the daily limit) is in entity-service; see its CLAUDE.md, "Case
+auto-closure". Each run works through four stages in order -- `release_hold`, `close`, `second_reminder`,
+`first_reminder` -- asking `POST /autoclosure/candidates` for what is due and `POST
+/autoclosure/cases/{id}/advance` for each ticket. A ticket moves at most one stage per run.
+
+- A failure on one ticket never stops the others; a failed listing does not stop the other stages.
+- The run **returns an error if anything failed**, so the engine alerts and retries on the next tick. That is
+  safe: tickets already advanced are no longer due, and entity-service takes what today has already done off the
+  daily limit, so the limit holds across retries.
+- The alert lists at most 10 failures and counts the rest.
+- **Paging.** A listing returns at most one page, so each stage asks again until nothing new comes back (at most 20 passes of 500 new tickets, but entity-service never returns more than 5,000 in one listing, so at most 5,000 tickets are attempted per stage per run; the request limit grows with the tickets already attempted so ones that stay due -- skipped or failed -- do not hide those behind them). One known edge: entity-service also clamps a listing to the day's remaining budget, so when the budget is almost spent and the tickets at the front of the list are skipped or failed, the loop can stop early with later due tickets left; harmless because the budget is nearly gone. A ticket is attempted once per run. With a non-zero daily limit that limit bounds a day's work; with `AUTOCLOSURE_DAILY_LIMIT=0` (no cap) only the 20-pass page cap per stage and the schedule do, so a large backlog is then worked through at that pace.
+- The summary log line carries evaluated / reminded / closed / holdsReleased / wouldAdvance / skipped / failed / **quarantined**. Quarantined is how many due tickets entity-service left out because they failed the stage 3 times in 7 days; when it is above zero the run also logs a WARN saying nobody will be reminded or closed for them until someone looks (`case_autoclosure_event`, outcome `FAILED`). It deliberately does **not** fail the run: a failed run alerts, and is retried and alerted again every tick, so a permanent quarantine would become the permanent alert noise the cap exists to remove. Getting this in front of a person by email needs the per-task report email that does not exist yet (see "Future: per-task report emails"); until then watch the log or alert on the WARN.
+- **A dry run is not sign-off on closures.** It claims nothing, so it can only preview what is due *now*: first reminders for tickets still at `DEFAULT`, plus whatever second reminders and closes already-advanced tickets (for example from the old flow's steps) are due for. Tickets reach the second reminder and the close only after a real first reminder has moved them, so a clean dry run on a fresh backlog says nothing about the close stage. Validate the close rules on a small real batch first (`AUTOCLOSURE_STATES=solution_proposed`, a low `AUTOCLOSURE_DAILY_LIMIT`).
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `AUTOCLOSURE_ENABLED` | `false` | Register the task |
+| `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
+| `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
+| `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
+| `AUTOCLOSURE_STATES` | both | Comma list of `awaiting_info`, `solution_proposed`. Run `solution_proposed` alone first, add `awaiting_info` after watching it; an unknown value refuses to start |
+| `AUTOCLOSURE_TEMPLATES` | built-in | JSON `{"<state>.<kind>": "text"}` overriding comment wording; kinds `first_reminder`, `second_reminder`, `closure`; a malformed value refuses to start (it would otherwise silently post the built-in wording) |
+
+First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
+days. Set a hold on tickets that customers asked to keep open **before** enabling.
 
 ## Usage rollups
 
@@ -508,11 +553,10 @@ report emails" below for why that's not a generic engine feature.
 | `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
 | `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...], "debug": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for a report-style task, its report's actual recipients (see "Alerting" above for which tasks work which way). `debug` on a report task is debug mail mode for that report alone (`notify.ForReport`): it goes to that list only, `[Test copy]`-prefixed, with the intended To/Cc named in the body; startup warns naming every such task. A task not mentioned gets no per-task recipients |
-| `ROTA_REMINDERS_ENABLED` | No (default `false`) | Registers the two rota reminder tasks — see "Rota reminders" above |
 | `ROTA_REMINDER_REDIRECT_TO` | No | Comma-separated test inbox(es) that receive every rota reminder instead of the people on the shift |
 | `ROTA_REMINDER_SCHEDULE_URL` | No | Link to the CSM portal's Team Schedule page, shown in every reminder |
 | `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
-| `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset |
+| `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |

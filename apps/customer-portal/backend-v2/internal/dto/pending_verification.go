@@ -123,6 +123,7 @@ type PendingVerificationView struct {
 	ID             string     `json:"id"`
 	WorkItemID     string     `json:"workItemId"`
 	CaseID         string     `json:"caseId"`
+	InternalID     *string    `json:"internalId,omitempty"`
 	CaseTitle      string     `json:"caseTitle"`
 	Severity       *string    `json:"severity,omitempty"`
 	RecordType     string     `json:"recordType"`
@@ -142,6 +143,7 @@ func MapPendingVerification(pv entity.PendingVerification) PendingVerificationVi
 		ID:          pv.ID,
 		WorkItemID:  pv.WorkItemID,
 		CaseID:      pv.RecordNumber,
+		InternalID:  pv.InternalID,
 		CaseTitle:   pv.RecordTitle,
 		Severity:    pv.Severity,
 		RecordType:  mapOrPassthrough(pv.RecordType, pendingVerificationRecordTypeToPortal),

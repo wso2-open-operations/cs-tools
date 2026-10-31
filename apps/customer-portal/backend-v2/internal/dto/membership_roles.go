@@ -164,8 +164,29 @@ const (
 	projectRolePortalUser      = "PORTAL_USER"
 	projectRoleSecurityContact = "SECURITY_CONTACT"
 	projectRoleLead            = "LEAD_USER"
-	projectRoleAdmin           = "ADMIN"
+	// ProjectRoleAdmin is exported because the contact write gate in the
+	// handler package checks the same role.
+	ProjectRoleAdmin = "ADMIN"
 )
+
+// AccountAdminRoles are the account-level roles, as entity-service returns
+// them, that make a person an admin of the projects they belong to.
+// customer_admin covers the caller's own account's projects and
+// partner_admin the customer projects a partner works on.
+var AccountAdminRoles = []string{"customer_admin", "partner_admin"}
+
+// HasAccountAdminRole reports whether roles include one of AccountAdminRoles,
+// case-insensitively and ignoring surrounding whitespace.
+func HasAccountAdminRole(roles []string) bool {
+	for _, r := range roles {
+		for _, admin := range AccountAdminRoles {
+			if strings.EqualFold(strings.TrimSpace(r), admin) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // flagsFromProjectRoles is flagsFromRoles for the database's vocabulary.
 // Roles with no checkbox (BUSINESS_CONTACT) are ignored.
@@ -179,7 +200,7 @@ func flagsFromProjectRoles(roles []string) membershipRoleFlags {
 			f.IsSecurityContact = true
 		case projectRoleLead:
 			f.IsLead = true
-		case projectRoleAdmin:
+		case ProjectRoleAdmin:
 			f.IsCsAdmin = true
 		}
 	}
@@ -195,6 +216,10 @@ func flagsFromProjectRoles(roles []string) membershipRoleFlags {
 //     first space. A one-word name lands in LastName, which the page shows.
 //   - There is no account block, so the partner badge is not shown.
 //
+// IsCsAdmin is the project-level ADMIN role only, because the webapp edits it
+// and sends it back. The account-level admin role is the separate read-only
+// IsAccountAdmin; the UI composes the admin badge from both.
+//
 // ID is the user id when a user is linked, otherwise the email, since the
 // page keys its rows on it.
 func MapEntityProjectContact(c entity.ProjectContact) Contact {
@@ -203,6 +228,7 @@ func MapEntityProjectContact(c entity.ProjectContact) Contact {
 		ID:                c.Email,
 		Email:             c.Email,
 		IsCsAdmin:         f.IsCsAdmin,
+		IsAccountAdmin:    HasAccountAdminRole(c.AccountRoles),
 		IsLead:            f.IsLead,
 		IsPortalUser:      f.IsPortalUser,
 		IsSecurityContact: f.IsSecurityContact,

@@ -309,6 +309,80 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     });
   });
 
+  // A deviation is recorded from Implement on, so the one a clone carries over is
+  // read-only here: fold it into the plan and clear it (the new change request cannot
+  // request approval until it is cleared), or leave it, and it is sent.
+  it("seeds the deviation from the implementation plan right after the plan, read-only, and sends it on create when left", () => {
+    locationState = {
+      sourceNumber: "CHG0009988",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationPlan: "<p>Implementation text.</p>",
+      implementationDeviation: "<p>Deviation text.</p>",
+      riskImpactAnalysis: "<p>Risk text.</p>",
+    };
+    render(<CreateChangeRequestPage />);
+    const values = screen.getAllByLabelText("editor").map((e) => (e as HTMLTextAreaElement).value);
+    expect(values.indexOf("<p>Deviation text.</p>")).toBe(values.indexOf("<p>Implementation text.</p>") + 1);
+    expect(values.indexOf("<p>Risk text.</p>")).toBe(values.indexOf("<p>Deviation text.</p>") + 1);
+    expect(
+      screen.getByText(/^Carried over from the cloned change request\. Fold it into the implementation plan, then clear it before requesting approval\./),
+    ).toBeInTheDocument();
+    // Read-only: an edit of the text does not reach the request.
+    const editor = screen
+      .getAllByLabelText("editor")
+      .find((e) => (e as HTMLTextAreaElement).value === "<p>Deviation text.</p>") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "<p>Edited.</p>" } });
+    expect(screen.getByRole("button", { name: "Clear deviation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({
+      implementationPlan: "<p>Implementation text.</p>",
+      implementationDeviation: "<p>Deviation text.</p>",
+    });
+  });
+
+  it("does not send a deviation that was cleared, and offers none when the source had none", () => {
+    locationState = {
+      sourceNumber: "CHG0009988",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationDeviation: "<p>Deviation text.</p>",
+    };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Clear deviation" }));
+    // Still on screen, to fold into the plan.
+    expect(screen.getAllByLabelText("editor").map((e) => (e as HTMLTextAreaElement).value)).toContain("<p>Deviation text.</p>");
+    expect(screen.getByText(/^Cleared: it is not copied to the new change request\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).not.toHaveProperty("implementationDeviation");
+    unmount();
+    sessionStorage.clear();
+
+    locationState = { sourceNumber: "CHG0009989", subject: "Another change", type: "normal" };
+    render(<CreateChangeRequestPage />);
+    expect(screen.queryByText(/Deviation from the implementation plan/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear deviation" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a cleared deviation cleared after a remount (the draft keeps the blank), and Keep deviation brings it back", () => {
+    locationState = {
+      sourceNumber: "CHG0009990",
+      subject: "Upgrade the gateway cluster",
+      type: "normal",
+      implementationDeviation: "<p>Deviation text.</p>",
+    };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Clear deviation" }));
+    unmount();
+    // Same clone again (the draft for it is restored, with the cleared deviation).
+    render(<CreateChangeRequestPage />);
+    expect(screen.getByText(/^Cleared: it is not copied to the new change request\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep deviation" }));
+    expect(screen.getByRole("button", { name: "Clear deviation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({ implementationDeviation: "<p>Deviation text.</p>" });
+  });
+
   it("shows a generic banner when the source number is unavailable", () => {
     locationState = { subject: "Upgrade the gateway cluster" };
     render(<CreateChangeRequestPage />);

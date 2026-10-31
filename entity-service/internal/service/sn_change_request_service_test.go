@@ -1413,3 +1413,58 @@ func TestSNChangeRequestService_CreateChangeRequest_PlannedWindowLayouts(t *test
 		}
 	})
 }
+
+// On the data source that talks to the previous system directly, a PATCH that
+// names the service or the hold is refused, alone or beside a field that data
+// source sends, in words that name them, and the previous system is not called.
+func TestSNChangeRequestService_PatchChangeRequest_RefusesFieldsItCannotSend(t *testing.T) {
+	onHold := true
+	reason := "r"
+	title := "t"
+	svcID := "66666666-7777-8888-9999-000000000000"
+	for name, tc := range map[string]struct {
+		req  domain.PatchChangeRequestRequest
+		want string
+	}{
+		"service":             {domain.PatchChangeRequestRequest{ServiceID: &svcID}, "serviceId is not supported on the ServiceNow data source"},
+		"offering":            {domain.PatchChangeRequestRequest{ServiceOfferingID: &svcID}, "serviceOfferingId is not supported on the ServiceNow data source"},
+		"hold with reason":    {domain.PatchChangeRequestRequest{OnHold: &onHold, OnHoldReason: &reason}, "onHold, onHoldReason are not supported on the ServiceNow data source"},
+		"hold beside a title": {domain.PatchChangeRequestRequest{Title: &title, OnHold: &onHold}, "onHold is not supported on the ServiceNow data source"},
+		"service beside a title": {domain.PatchChangeRequestRequest{Title: &title, ServiceID: &svcID, ServiceOfferingID: &svcID},
+			"serviceId, serviceOfferingId are not supported on the ServiceNow data source"},
+		"nothing at all": {domain.PatchChangeRequestRequest{}, "at least one field must be provided"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, server := newPreviousSystemCRMirror(t)
+			_, err := svc.PatchChangeRequest(contextWithUserIDToken("token"), testUUID, tc.req)
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) || ve.Msg != tc.want {
+				t.Fatalf("error = %v, want a ValidationError saying %q", err, tc.want)
+			}
+			if got := server.received(); len(got) != 0 {
+				t.Errorf("the previous system was called with %v", got)
+			}
+		})
+	}
+}
+
+// The data source that talks to the previous system directly has no field for
+// the deviation, so it refuses it rather than drop it: before anything is sent.
+func TestSNChangeRequestService_RefusesTheDeviation(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+	deviation := "<p>Something else was done.</p>"
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	create := validCreateChangeRequestRequest()
+	create.ImplementationDeviation = &deviation
+	_, err := svc.CreateChangeRequest(ctx, create)
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
+		t.Errorf("create with a deviation: err = %v, want that data source's refusal", err)
+	}
+
+	_, err = svc.PatchChangeRequest(ctx, testUUID, domain.PatchChangeRequestRequest{ImplementationDeviation: &deviation})
+	if !errors.As(err, &ve) || ve.Msg != implementationDeviationNotOnServiceNowMsg {
+		t.Errorf("PATCH with a deviation: err = %v, want that data source's refusal", err)
+	}
+}

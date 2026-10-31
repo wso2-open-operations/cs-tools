@@ -2683,7 +2683,7 @@
 .csm-ts .pk-scrim .picker {
   position: relative;
   inset: auto;
-  width: min(780px, 100%);
+  width: min(860px, 100%);
   max-width: 100%;
   max-height: min(88vh, 820px);
   border-radius: 14px;
@@ -2757,11 +2757,32 @@
   line-height: 1;
 }
 
+/* Two rows: the rota, then leave and allocations. Each row splits into two
+   columns of its own (.pk-cols) -- rotations | standing hours, and
+   leave | moves and allocations. */
 .csm-ts .pk-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   min-height: 0;
   overflow-y: auto;
+}
+.csm-ts .pk-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
+}
+.csm-ts .pk-cols > .pk-grid + .pk-grid {
+  border-left: 1px solid var(--line);
+}
+.csm-ts .pk-col .pk-cols > .pk-grid > .pk-sec:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.csm-ts .pk-movenote {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 0 2px;
 }
 .csm-ts .pk-col {
   display: flex;
@@ -2770,7 +2791,7 @@
   padding: 12px 0 4px;
 }
 .csm-ts .pk-col + .pk-col {
-  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
 }
 .csm-ts .pk-coltitle {
   display: flex;
@@ -2812,10 +2833,7 @@
 }
 
 @media (max-width: 720px) {
-  .csm-ts .pk-body {
-    grid-template-columns: 1fr;
-  }
-  .csm-ts .pk-col + .pk-col {
+  .csm-ts .pk-cols > .pk-grid + .pk-grid {
     border-left: 0;
     border-top: 1px solid var(--line);
   }

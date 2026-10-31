@@ -16,7 +16,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useEffect, type JSX } from "react";
+import { useEffect, useRef, type JSX } from "react";
 import {
   MemoryRouter,
   Route,
@@ -508,27 +508,50 @@ vi.mock("@features/csm-cases/components/LinkIncidentDialog", () => ({
 vi.mock("@features/csm-cases/components/LinkCaseDialog", () => ({
   default: () => null,
 }));
-// Probe, not `null`: the digiops-cs#3111 regression test below needs to save
-// from the dialog the way a user would and then assert the page unmounts it.
-// The dialog's own form/validation is covered in SetFixEtaDialog.test.tsx.
-vi.mock("@features/csm-cases/components/SetFixEtaDialog", () => ({
-  default: ({ onSave }: { onSave: (patch: Record<string, unknown>) => void }) => (
+// Probe, not `null`: the regression tests below need to save from the dialog
+// the way the real one does -- its onSaveDates, then (when sharing) its
+// onPostComment, then onClose -- and assert what the page does with each. The
+// dialog's own form/validation is covered in SetFixEtaDialog.test.tsx.
+function FixEtaDialogProbe({
+  onSaveDates,
+  onPostComment,
+  onClose,
+}: {
+  onSaveDates: (patch: Record<string, unknown>) => Promise<void>;
+  onPostComment: (text: string) => Promise<void>;
+  onClose: () => void;
+}): JSX.Element {
+  // Like the real dialog, never calls onClose after it was unmounted (the
+  // page closed it because the engineer moved to another case), so a late
+  // response can't close a different case's freshly opened dialog.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const run = (text: string | null): void => {
+    void onSaveDates({ bestCaseFixEta: "2099-06-16" })
+      .then(() => (text === null ? undefined : onPostComment(text)))
+      .then(
+        () => {
+          if (mounted.current) onClose();
+        },
+        () => undefined,
+      );
+  };
+  return (
     <div data-testid="set-fix-eta-dialog-probe">
-      <button
-        type="button"
-        onClick={() => onSave({ bestCaseFixEta: "2099-06-16" })}
-      >
+      <button type="button" onClick={() => run(null)}>
         stub save fix eta
       </button>
       <button
         type="button"
         onClick={() =>
-          onSave({
-            bestCaseFixEta: "2099-06-16",
-            addPublicComment: true,
-            product: "WSO2 API Manager",
-            publicTicket: "https://github.com/example/example/issues/1",
-          })
+          run(
+            "ETA information for the report analysis will be as follows.\n\nProduct: WSO2 API Manager\nPublic git issue: https://github.com/example/example/issues/1\nBest Case Estimate: 2099-06-16",
+          )
         }
       >
         stub save fix eta with share
@@ -536,18 +559,16 @@ vi.mock("@features/csm-cases/components/SetFixEtaDialog", () => ({
       <button
         type="button"
         onClick={() =>
-          onSave({
-            bestCaseFixEta: "2099-06-16",
-            addPublicComment: true,
-            product: '<img src=x onerror=alert(1)>',
-            publicTicket: "Tom & Jerry's <ticket>",
-          })
+          run("Tom & Jerry's <img src=x onerror=alert(1)>\n\nsecond paragraph")
         }
       >
         stub save fix eta with share (html input)
       </button>
     </div>
-  ),
+  );
+}
+vi.mock("@features/csm-cases/components/SetFixEtaDialog", () => ({
+  default: FixEtaDialogProbe,
 }));
 vi.mock("@features/csm-cases/components/CreateTaskDialog", () => ({
   default: () => null,
@@ -2433,7 +2454,7 @@ describe("CsmCaseDetailPage — set fix ETA dialog closes on successful save", (
     patchCaseMutateMock.mockClear();
   });
 
-  it("closes the dialog after a save with share-with-customer off", () => {
+  it("closes the dialog after a save with share-with-customer off", async () => {
     renderPage();
 
     fireEvent.click(
@@ -2452,8 +2473,9 @@ describe("CsmCaseDetailPage — set fix ETA dialog closes on successful save", (
     expect(payload.addPublicComment).toBeUndefined();
 
     // The backend accepted the PATCH — ETA set, SLA stopped.
-    act(() => {
+    await act(async () => {
       mutateOptions.onSuccess();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(
@@ -2462,20 +2484,25 @@ describe("CsmCaseDetailPage — set fix ETA dialog closes on successful save", (
   });
 });
 
-// Reported live (digiops-cs#3319): "Share fix ETA with customer" is
-// ServiceNow-only, and the backend rejects the *entire* PATCH when
-// addPublicComment is present on a deployment that isn't — bundled into one
-// call, that silently blocked saving the ETA dates too, which is what "the
-// ETA is not added to the ticket" actually was. Fixed by sending the ETA and
-// the share as two separate PATCHes, so the ETA always saves on its own.
-describe("CsmCaseDetailPage — fix ETA save and share-with-customer are independent", () => {
+// "Share fix ETA with customer" posts the engineer's own (editable) text as a
+// real public comment, after the estimates are saved by a separate PATCH. The
+// PATCH never carries addPublicComment/product/publicTicket, so the estimates
+// save on any data source regardless of whether the share can happen.
+describe("CsmCaseDetailPage — fix ETA save then share-with-customer comment", () => {
+  const flush = async (): Promise<void> => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+
   beforeEach(() => {
     patchCaseMutateMock.mockClear();
     postCommentMutateAsyncMock.mockClear();
     postCommentMutateAsyncMock.mockResolvedValue(undefined);
+    showErrorMock.mockClear();
   });
 
-  it("saves the ETA via PATCH, then shares it as a real customer-visible comment", async () => {
+  it("saves the ETA via PATCH, then posts the edited text as a customer-visible comment, then closes", async () => {
     renderPage();
 
     fireEvent.click(
@@ -2485,8 +2512,7 @@ describe("CsmCaseDetailPage — fix ETA save and share-with-customer are indepen
       screen.getByRole("button", { name: /^stub save fix eta with share$/i }),
     );
 
-    // The only PATCH is the ETA alone, no addPublicComment -- this is the
-    // call that must succeed even when sharing can't.
+    // Only the dates go in the PATCH.
     expect(patchCaseMutateMock).toHaveBeenCalledTimes(1);
     const [etaPayload, etaOptions] = patchCaseMutateMock.mock.calls[0] as [
       Record<string, unknown>,
@@ -2494,33 +2520,61 @@ describe("CsmCaseDetailPage — fix ETA save and share-with-customer are indepen
     ];
     expect(etaPayload).toEqual({ bestCaseFixEta: "2099-06-16" });
 
-    await act(async () => {
+    // Sequential: nothing is posted until the PATCH succeeds, and the dialog
+    // stays open meanwhile.
+    await flush();
+    expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("set-fix-eta-dialog-probe")).toBeInTheDocument();
+
+    act(() => {
       etaOptions.onSuccess();
-      await Promise.resolve();
     });
+    await flush();
 
-    // The dialog closes on the ETA save alone -- it must not wait on the
-    // share, which is a separate, independent request.
-    expect(
-      screen.queryByTestId("set-fix-eta-dialog-probe"),
-    ).not.toBeInTheDocument();
-
-    // The share goes out as a real comment (POST /cases/{id}/comments via
-    // usePostCsmCaseComment), not a second, doomed PATCH.
     expect(patchCaseMutateMock).toHaveBeenCalledTimes(1);
     expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
     const [commentInput] = postCommentMutateAsyncMock.mock.calls[0] as [
       { bodyHtml: string; internal: boolean },
     ];
     expect(commentInput.internal).toBe(false);
-    expect(commentInput.bodyHtml).toContain("Product: WSO2 API Manager");
-    expect(commentInput.bodyHtml).toContain(
-      "Public git issue: https://github.com/example/example/issues/1",
+    // The engineer's text, converted to the comment body format.
+    expect(commentInput.bodyHtml).toBe(
+      "<p>ETA information for the report analysis will be as follows.</p>" +
+        "<p>Product: WSO2 API Manager<br>" +
+        "Public git issue: https://github.com/example/example/issues/1<br>" +
+        "Best Case Estimate: 2099-06-16</p>",
     );
-    expect(commentInput.bodyHtml).toContain("Best Case Estimate: 2099-06-16");
+    // Closed only after the comment succeeded.
+    expect(
+      screen.queryByTestId("set-fix-eta-dialog-probe"),
+    ).not.toBeInTheDocument();
   });
 
-  it("keeps the ETA saved even when the share comment post is rejected", async () => {
+  it("does not post anything when the ETA PATCH fails, and keeps the dialog open", async () => {
+    renderPage();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /stub open set fix eta/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /^stub save fix eta with share$/i }),
+    );
+    const [, etaOptions] = patchCaseMutateMock.mock.calls[0] as [
+      unknown,
+      { onError: (err: unknown) => void },
+    ];
+    const patchError = new Error("rejected");
+    act(() => {
+      etaOptions.onError(patchError);
+    });
+    await flush();
+
+    expect(showErrorMock).toHaveBeenCalledWith("Could not set the fix ETA.", patchError);
+    expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("set-fix-eta-dialog-probe")).toBeInTheDocument();
+  });
+
+  it("reports a rejected comment post on its own and keeps the dialog open for a retry", async () => {
     const shareError = new Error("network error");
     postCommentMutateAsyncMock.mockRejectedValueOnce(shareError);
     renderPage();
@@ -2531,60 +2585,47 @@ describe("CsmCaseDetailPage — fix ETA save and share-with-customer are indepen
     fireEvent.click(
       screen.getByRole("button", { name: /^stub save fix eta with share$/i }),
     );
-
     const [, etaOptions] = patchCaseMutateMock.mock.calls[0] as [
       unknown,
       { onSuccess: () => void },
     ];
-
-    // The ETA's own success toast already fired; the dialog is already
-    // closed. The share comment post failing next must surface its own
-    // error, not reopen the dialog or undo the ETA save.
-    await act(async () => {
+    act(() => {
       etaOptions.onSuccess();
-      await Promise.resolve();
-      await Promise.resolve();
     });
+    await flush();
 
-    expect(
-      screen.queryByTestId("set-fix-eta-dialog-probe"),
-    ).not.toBeInTheDocument();
-    // The share failure must be reported on its own, distinct from the
-    // already-succeeded ETA save — a future change that silently swallows it
-    // would leave the engineer with no idea the customer was never told.
+    // The ETA's own success toast already fired. The share failure is reported
+    // distinctly (a swallowed failure would leave the engineer believing the
+    // customer was told) and the dialog stays open so the text isn't lost.
     expect(showErrorMock).toHaveBeenCalledWith(
       "Fix ETA saved, but could not share it with the customer.",
       shareError,
     );
+    expect(screen.getByTestId("set-fix-eta-dialog-probe")).toBeInTheDocument();
   });
 
-  it("never posts a share comment when share-with-customer is off", async () => {
+  it("never posts a comment when share-with-customer is off", async () => {
     renderPage();
 
     fireEvent.click(
       screen.getByRole("button", { name: /stub open set fix eta/i }),
     );
     fireEvent.click(screen.getByRole("button", { name: /^stub save fix eta$/i }));
-
-    // Only the plain ETA call -- no share comment follows a save that never
-    // asked to share.
-    expect(patchCaseMutateMock).toHaveBeenCalledTimes(1);
     const [, etaOptions] = patchCaseMutateMock.mock.calls[0] as [
       unknown,
       { onSuccess: () => void },
     ];
-    await act(async () => {
+    act(() => {
       etaOptions.onSuccess();
-      await Promise.resolve();
     });
+    await flush();
     expect(patchCaseMutateMock).toHaveBeenCalledTimes(1);
     expect(postCommentMutateAsyncMock).not.toHaveBeenCalled();
   });
 
-  // CodeRabbit catch: product/publicTicket are free-text form input that
-  // ends up in a customer-visible comment -- unescaped, a value containing
-  // HTML would be stored as live markup rather than literal text.
-  it("escapes HTML-significant characters in product/publicTicket before posting the share comment", async () => {
+  // The comment text is free-form and customer-visible: unescaped, a value
+  // containing HTML would be stored as live markup rather than literal text.
+  it("escapes HTML-significant characters in the posted comment text", async () => {
     renderPage();
 
     fireEvent.click(
@@ -2595,29 +2636,21 @@ describe("CsmCaseDetailPage — fix ETA save and share-with-customer are indepen
         name: /stub save fix eta with share \(html input\)/i,
       }),
     );
-
     const [, etaOptions] = patchCaseMutateMock.mock.calls[0] as [
       unknown,
       { onSuccess: () => void },
     ];
-    await act(async () => {
+    act(() => {
       etaOptions.onSuccess();
-      await Promise.resolve();
     });
+    await flush();
 
-    expect(postCommentMutateAsyncMock).toHaveBeenCalledTimes(1);
     const [commentInput] = postCommentMutateAsyncMock.mock.calls[0] as [
       { bodyHtml: string },
     ];
-    // Neither raw input survives as live markup...
-    expect(commentInput.bodyHtml).not.toContain("<img src=x onerror=alert(1)>");
-    expect(commentInput.bodyHtml).not.toContain("Tom & Jerry's <ticket>");
-    // ...it's escaped instead.
-    expect(commentInput.bodyHtml).toContain(
-      "Product: &lt;img src=x onerror=alert(1)&gt;",
-    );
-    expect(commentInput.bodyHtml).toContain(
-      "Public git issue: Tom &amp; Jerry&#039;s &lt;ticket&gt;",
+    expect(commentInput.bodyHtml).not.toContain("<img");
+    expect(commentInput.bodyHtml).toBe(
+      "<p>Tom &amp; Jerry&#039;s &lt;img src=x onerror=alert(1)&gt;</p><p>second paragraph</p>",
     );
   });
 });
@@ -2628,7 +2661,7 @@ describe("CsmCaseDetailPage — fix ETA save and share-with-customer are indepen
 // guard, that stale success closes case B's freshly opened dialog and discards
 // whatever was typed into it.
 describe("CsmCaseDetailPage — fix-ETA stale-callback guard", () => {
-  it("leaves a newly opened dialog alone when an earlier case's save resolves", () => {
+  it("leaves a newly opened dialog alone when an earlier case's save resolves", async () => {
     patchCaseMutateMock.mockClear();
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -2667,8 +2700,9 @@ describe("CsmCaseDetailPage — fix-ETA stale-callback guard", () => {
     expect(screen.getByTestId("set-fix-eta-dialog-probe")).toBeInTheDocument();
 
     // Case-1's response arrives now, with case-2 on screen.
-    act(() => {
+    await act(async () => {
       case1Options.onSuccess();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     // Case-2's dialog belongs to a different view of the page — the stale

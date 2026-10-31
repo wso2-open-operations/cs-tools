@@ -97,6 +97,12 @@ interface MonthRosterProps {
   /** Each team's leads, by team key. A lead is seated at the top of their
    *  team even on a month they hold no window, which is most months. */
   teamMembers?: Readonly<Record<string, readonly ScheduleTeamMember[]>>;
+  /** The teams each person is a member of, by user id, across every team --
+   *  not only the ones on screen. Leave or an allocation filed under a team
+   *  the person does not belong to (marked on a row they no longer have, or
+   *  before they changed team) is drawn on their own team's row instead of
+   *  seating them on a second team the same day. */
+  ownTeams?: ReadonlyMap<string, readonly string[]>;
   /** Each team's ordinary-weekday window, by team key, where it is not
    *  Regular hours -- Americas cover for the Americas team. */
   teamDefaultShift?: Readonly<Record<string, string>>;
@@ -186,6 +192,10 @@ interface Cell {
   absence?: CellAbsence;
   /** Drawn, not stored: what an unmarked weekday means for the row's team. */
   isDefault?: boolean;
+  /** A turn filed under a team the person is no longer on, drawn on their own
+   *  team's row: the team it is really filed under, so changing or clearing
+   *  the day acts on that turn rather than on the row's team. */
+  filedUnder?: string;
   /** An on-call window. Two windows can share a short code ("6-9am" and
    *  "6-9am on-call"), so the chip is drawn dashed -- the grid's mark for
    *  on-call, as on L3 -- rather than relying on a tooltip to tell them apart. */
@@ -244,6 +254,7 @@ export default function MonthRoster({
   onTeamKeyChange,
   teams,
   teamMembers,
+  ownTeams,
   teamDefaultShift,
   teamsWithoutDefault,
   families,
@@ -446,9 +457,33 @@ export default function MonthRoster({
       return row;
     };
 
+    // One person, one team at a time. An entry filed under a team the person
+    // is not a member of -- nor moved to or from -- goes on their own team's
+    // row: leave marked on a row they no longer have, or turns left on a team
+    // they have since left. With that row not in view it is not drawn here.
+    // Somebody on no team at all (a leaver) keeps the team it names.
+    const inView = new Set((teamKey ? [teamKey] : teams).map((k) => k.toLowerCase()));
+    const ownRowFor = (userId: string, filed: string): { team: string; foreign?: string } | null => {
+      const mine = ownTeams?.get(userId);
+      if (!mine || mine.length === 0) return { team: filed };
+      const from = filed.toLowerCase();
+      const move = movedTo.get(userId);
+      if (
+        mine.some((k) => k.toLowerCase() === from) ||
+        (move !== undefined && (move.target.toLowerCase() === from || move.home.toLowerCase() === from))
+      ) {
+        return { team: filed };
+      }
+      const own = mine.find((k) => inView.has(k.toLowerCase()));
+      return own ? { team: own, foreign: filed } : null;
+    };
+
     for (const a of assignments) {
       const shift = shifts.get(a.shiftCode);
-      const row = seat(a.engineer.userId, a.engineer.name, a.engineer.email, a.teamKey, a.engineer.isLead);
+      const placed = ownRowFor(a.engineer.userId, a.teamKey);
+      if (!placed) continue;
+      // Lead of the team it is filed under, not of the row it is drawn on.
+      const row = seat(a.engineer.userId, a.engineer.name, a.engineer.email, placed.team, !placed.foreign && a.engineer.isLead);
       const existing = row.days.get(a.rotaDate);
       // A tier beats the plain window it sits in: "L1" says more than "TZ1".
       const code = a.tier ?? shift?.shortCode ?? a.shiftCode;
@@ -460,7 +495,10 @@ export default function MonthRoster({
       const made: Cell = {
         code,
         token,
-        title: shift?.label ?? a.shiftCode,
+        title: placed.foreign
+          ? `${shift?.label ?? a.shiftCode} · filed under ${teamNameOf(placed.foreign)}`
+          : (shift?.label ?? a.shiftCode),
+        filedUnder: placed.foreign,
         isRotation,
         shiftCode: a.shiftCode,
         tier: a.tier,
@@ -476,6 +514,13 @@ export default function MonthRoster({
         const held = row.zoned.get(key);
         if (!held) {
           row.zoned.set(key, made);
+        } else if (Boolean(made.filedUnder) !== Boolean(held.filedUnder) && made.isRotation === held.isRotation) {
+          // One of the two is filed under a team the person has left: neither
+          // may hide the other. The stale one is the cell, so it can be found
+          // and cleared; the person's own sits under it.
+          const stale = made.filedUnder ? made : held;
+          row.zoned.set(key, stale);
+          row.zonedBase.set(key, stale === made ? held : made);
         } else if (made.isRotation && !held.isRotation) {
           // A turn arriving over the zone's regular hours: the turn is the
           // cell, the regular hours sit under it.
@@ -486,6 +531,15 @@ export default function MonthRoster({
         } else if (a.tier) {
           row.zoned.set(key, made);
         }
+        continue;
+      }
+      if (existing && Boolean(made.filedUnder) !== Boolean(existing.filedUnder)) {
+        // A whole day holding both the person's own entry and a turn filed
+        // under a team they have left: the stale turn is the cell, so it can
+        // be found and cleared, and their own entry is kept beside it.
+        const stale = made.filedUnder ? made : existing;
+        row.days.set(a.rotaDate, stale);
+        if (!row.allocs.has(a.rotaDate)) row.allocs.set(a.rotaDate, stale === made ? existing : made);
         continue;
       }
       if (!existing || a.tier) row.days.set(a.rotaDate, made);
@@ -525,17 +579,28 @@ export default function MonthRoster({
       ) {
         continue;
       }
-      const row = seat(ab.engineer.userId, ab.engineer.name, ab.engineer.email, ab.teamKey, ab.engineer.isLead);
+      // Leave and allocations belong to the person, not to the row they were
+      // marked on (see ownRowFor). A move names its own teams and is left as
+      // it is. An "excluded from rota" span is about the team it names: once
+      // the person is on another team, it no longer puts them on this one.
+      let filedUnder = ab.teamKey;
+      let foreign = false;
+      if (!kind?.movesToTeamKey) {
+        const placed = ownRowFor(ab.engineer.userId, ab.teamKey);
+        if (!placed || (placed.foreign && kind?.bucket === "EXCLUDED")) continue;
+        filedUnder = placed.team;
+        foreign = Boolean(placed.foreign);
+      }
+      const row = seat(ab.engineer.userId, ab.engineer.name, ab.engineer.email, filedUnder, !foreign && ab.engineer.isLead);
       if (ab.homeTeamKey) row.homeTeams.add(ab.homeTeamKey.toLowerCase());
       const end = ab.endsOn ?? toIsoDate(days[days.length - 1]);
       for (const d of days) {
         const iso = toIsoDate(d);
-        // Leave covers the whole span, the weekend inside it included: it is
-        // stored that way, the picker marks it that way, and somebody away
-        // Friday to Monday is not back for two days in the middle. Leaving the
-        // Saturday blank read as "working", and hid a weekend turn the person
-        // could not do. (Leave still cannot *start* on a weekend -- the picker
-        // says so.)
+        // Leave is not taken on a weekend, so it is not drawn on one (the week
+        // views already leave it off): a Friday-to-Monday span reads as two
+        // days of leave, not four. The span is still stored whole and still
+        // keeps them off the rota those days -- a weekend turn inside it stays
+        // flagged as the clash it is, so nothing the lead must cover is hidden.
         const weekendDay = d.getDay() === 0 || d.getDay() === 6;
         // Days on the team this row is: only a row under the team the span
         // moved them to has moved days; on their own team's row they are the
@@ -605,6 +670,12 @@ export default function MonthRoster({
             });
             continue;
           }
+          if (kind?.bucket === "LEAVE" && weekendDay && !holdsTurn(row, iso)) continue;
+          // An allocation (Allo-INT, Allo-EXT, ...) is working-day time given
+          // to someone else, so it is not drawn on a weekend either; a weekend
+          // turn that day shows on its own. Moves to another team are not
+          // allocations here and keep their own rule above.
+          if (kind?.bucket === "ALLOCATION" && !kind.movesToTeamKey && weekendDay) continue;
           const target =
             kind?.bucket === "ALLOCATION" && holdsTurn(row, iso) ? row.allocs : row.days;
           if (kind?.bucket === "LEAVE" && iso >= ab.startsOn && !row.clash.has(iso)) {
@@ -674,7 +745,7 @@ export default function MonthRoster({
           Number(b.isLead) - Number(a.isLead) ||
           a.name.localeCompare(b.name),
       );
-  }, [absences, assignments, days, kindByCode, shifts, teams, teamKey, teamMembers]);
+  }, [absences, assignments, days, kindByCode, shifts, teams, teamKey, teamMembers, ownTeams, teamNameOf]);
 
   const q = query.trim().toLowerCase();
   // The SaaS Night cover is a team like any other -- people a lead moved
@@ -893,9 +964,10 @@ export default function MonthRoster({
       // On a row a span moved somebody to, a day the span does not cover is
       // still their own team's: edit it there, where they are a member.
       teamKey:
-        row.homeTeam && row.movedDays && !row.movedDays.has(iso)
+        cell?.filedUnder ??
+        (row.homeTeam && row.movedDays && !row.movedDays.has(iso)
           ? row.homeTeam
-          : row.teamKey,
+          : row.teamKey),
       rotaDate: iso,
       shiftCode: cell?.shiftCode,
       tier: cell?.tier,

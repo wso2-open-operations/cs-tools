@@ -295,9 +295,10 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 
 // callerIsCaseTeamLead reports whether the caller is one of the case's ABT
 // team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it.
-// Escalating is open to any internal engineer (PermEscalate); only
-// de-escalation is gated this way.
+// account's CRE team) -- the only people authorized to de-escalate it. Being
+// the lead is sufficient: no escalation-capable portal role is needed, and
+// holding one (PermEscalate) does not substitute for it. Escalating is the
+// reverse: it needs PermEscalate and ignores team leadership.
 //
 // Fails closed (returns false) on any lookup/parse error or when the case's
 // team has no lead. Matches by the caller's platform user id first (GET
@@ -1579,10 +1580,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var currentCase struct {
-			State            string `json:"state"`
-			AssignedEngineer *struct {
-				ID *string `json:"id"`
-			} `json:"assignedEngineer"`
+			State string `json:"state"`
 		}
 		if err := json.Unmarshal(current, &currentCase); err != nil {
 			slog.ErrorContext(r.Context(), "failed to parse current case state", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -1597,23 +1595,9 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, ErrMsgWorkStateNotAllowed)
 			return
 		}
-		// Ownership check: closing a case is restricted to its own assigned
-		// engineer, unless the caller is admin (an operational override).
-		// Scoped to only the transition that sets state to closed — not every
-		// PATCH — since the issue this guards against is specifically about
-		// closing a ticket that isn't yours. Mirrors CreateCaseComment's own
-		// ownership guard above.
-		if patch.State != nil && *patch.State == caseStateClosed && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
-			currentUserID := resolveCurrentUserID(r.Context(), h.entity, user)
-			if currentUserID == "" {
-				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-				return
-			}
-			if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
-				writeError(w, http.StatusForbidden, ErrMsgCaseCloseNotOwnCase)
-				return
-			}
-		}
+		// No ownership check on closing: any caller that reached this handler
+		// holds PermWrite (route-level; cs_engineer or admin), and every such
+		// caller may close any case, assigned to them or not.
 	}
 
 	result, err := h.entity.PatchCase(r.Context(), caseID, body)
@@ -1869,15 +1853,24 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
+	// The route only requires PermView; the rule that depends on the body's
+	// action is enforced here. ESCALATE needs PermEscalate (a nil guard
+	// denies). DEESCALATE needs the caller to be one of the case's team
+	// leads and nothing else: a lead with no escalation role passes, a
+	// non-lead holding PermEscalate does not.
+	if action == "DEESCALATE" {
+		if !h.callerIsCaseTeamLead(r, caseID, user) {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+	} else if h.access == nil || !h.access.Permits(PermEscalate, user.Roles) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
-	// This route's permission (PermEscalate) is also held by roles that
-	// never write anything else here (escalator), so a caller reaching this
-	// point may have no "user" row yet. See ensureUserProvisioned's own doc
-	// comment.
+	// A caller reaching this point may have no "user" row yet: a team lead
+	// needs no portal role beyond view, and escalator-only callers never
+	// write anything else here. See ensureUserProvisioned's own doc comment.
 	ensureUserProvisioned(r.Context(), h.entity, user)
 
 	result, err := h.entity.CreateCaseEscalation(r.Context(), caseID, body)

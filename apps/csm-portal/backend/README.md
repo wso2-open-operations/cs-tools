@@ -169,7 +169,7 @@ Shutdown is graceful (15 s) on `SIGINT`/`SIGTERM`.
   choosing one.
 - **Record-level authorization** is resolved from platform data, not from the token: for example,
   posting a public case comment requires being the case's assigned engineer, and de-escalating
-  requires being one of the case's team leads. Handlers read the record from the entity-service for
+  requires being one of the case's team leads (and nothing more than a portal role). Handlers read the record from the entity-service for
   these checks. A caller whose token grants a limited role but has no platform user record is
   provisioned one on first use from their own token.
 - `GET /users/me` reports the caller's portal roles from the same guard that enforces the routes, so
@@ -417,7 +417,7 @@ unset one (except the three marked optional).
 
 | Variable | Warns if unset | Grants |
 |---|---|---|
-| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, scan-user, `/user-info`, ...) |
+| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, `/user-info`, ...) |
 | `AUTH_ESCALATOR_ROLES` | Yes | `view`, `escalate` |
 | `AUTH_ATTACHMENT_DOWNLOADER_ROLES` | Yes | `view`, `download_attachment` |
 | `AUTH_SUPPORT_ENGINEER_ROLES` | Yes | The `cs_engineer` portal role: `view`, `view_operations`, `time_cards_and_updates`, `download_attachment`, `write`, `security_center`, `escalate`, work notes, comment edit/delete, PLG use. (The variable keeps its old name; the role is `cs_engineer`.) Not `approve_time_card`, `admin` or `create_announcement` |
@@ -444,10 +444,10 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `view_operations` | Operations reads: incidents, change requests, problems, incident tasks, outages, alerts. `cs_engineer`, `admin`, `security_team` |
 | `time_cards_and_updates` | Time-card routes and update-level lookups. `cs_engineer`, `admin`, time-card approver |
 | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state`; checked inside the handler. Time-card approver and `admin` |
-| `escalate` | `POST /cases/{id}/escalations`; de-escalating also requires being one of the case's team leads |
+| `escalate` | Escalating via `POST /cases/{id}/escalations` (the route itself only needs `view`; the handler checks this for `ESCALATE`). De-escalating does not use it: it requires being one of the case's team leads, whatever the caller's other roles, and holding `escalate` does not substitute |
 | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` |
 | `write` | Every other `POST`/`PATCH`/`DELETE` |
-| `admin` | Admin-only routes such as `POST /users`, `GET /roles/grantable`, knowledge-base administration |
+| `admin` | Admin-only routes such as `POST /users`, `POST /users/{id}/roles`, `GET /roles/grantable`, knowledge-base administration |
 | `security_center` | `/products/vulnerabilities` routes. Security-report cases are gated inside the case handler |
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
@@ -475,7 +475,6 @@ differ.
 | `CSM_NOTIFICATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `notify.read` |
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | No | unset | Integration service, used only by `GET /health/dependencies` today. `https` base URL | `https://integration.example.com` |
 | `CSM_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `integration.read` |
-| `SALES_ENTITY_BASE_URL` | No | unset | Sales entity GraphQL service backing `POST /scan-user`; unset makes only those lookups fail at call time. `https` base URL. Not listed in `.env.example` as active | `https://sales-entity.example.com` |
 | `GOOGLE_DRIVE_CLIENT_ID` | No | unset | OAuth2 client id for the Drive folder-browsing routes (`/files`) | `your-drive-client-id` |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | No | unset | Matching client secret | `your-drive-client-secret` |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | No | unset | Refresh token for the OAuth2 refresh-token grant | `your-refresh-token` |
@@ -516,7 +515,7 @@ Both are parsed at startup and a malformed value is fatal.
 |---|---|---|---|---|
 | `CSM_TEAM_REGISTRY` | No | none (empty registry, startup warns) | Team catalogue: rows separated by `,`, fields by `\|`: `teamKey\|Display Name[\|FAMILY[\|creGroupId[\|sreGroupId]]]`. `FAMILY` is one of `CRE-ABT`, `CRE`, `SRE-ABT`, `SRE`, `SME` (case-insensitive) or empty; group ids are 32 hex characters. Duplicate keys or names fail startup naming the row | `alpha\|Alpha Team\|CRE-ABT,beta\|Beta Team\|SRE-ABT` |
 | `CSM_USER_ROLES` | No | `agent,admin,commenter,customer,customer_admin,partner,partner_admin,internal,external,timecard_approver` | Assignable-role allow-list, comma list; validates the `roleIds` user filter and is served by `POST /roles/search`. Duplicates are fatal | `agent,admin,internal,external` |
-| `ASGARDEO_ROLE_IDS` | No | none | JSON object mapping a real role name (exactly as listed in `AUTH_<ROLE>_ROLES`) to its identity-provider role id. Enables SCIM-backed features: `GET /users/time-card-approvers`, granting roles through `POST /users` (`grantRoles`, `GET /roles/grantable`) and `csmPlatformRoles` on `GET /users/{id}`. A name without an entry just has those features off. The variable name is historical | `{"example-approver-role":"00000000-0000-0000-0000-000000000000"}` |
+| `ASGARDEO_ROLE_IDS` | No | none | JSON object mapping a real role name (exactly as listed in `AUTH_<ROLE>_ROLES`) to its identity-provider role id. Enables SCIM-backed features: `GET /users/time-card-approvers`, granting roles through `POST /users` (`grantRoles`) and `POST /users/{id}/roles` (`GET /roles/grantable` reports the same resolved set both read), and `csmPlatformRoles` on `GET /users/{id}`. A name without an entry just has those features off. The variable name is historical | `{"example-approver-role":"00000000-0000-0000-0000-000000000000"}` |
 | `ASGARDEO_ROLE_GROUP_NAMES` | No | none | JSON object mapping a **portal role key** (not a real Asgardeo role name -- see `ASGARDEO_ROLE_IDS` above) to a list of Asgardeo **group display names** (not ids -- matched case-sensitively against the name shown in the Asgardeo console). A second, independent way `csmPlatformRoles` on `GET /users/{id}` can grant a portal role: by Asgardeo group membership, instead of (or alongside) a role assignment. A portal role key without an entry simply has no group that grants it, and leaving this variable unset entirely changes nothing -- group matching is purely additive on top of `ASGARDEO_ROLE_IDS` | `{"cs_engineer":["CSM Engineers"]}` |
 | `CSM_ANNOUNCEMENT_EXCLUDED_PROJECT_KEYS` | No | none | Comma list of project keys that an "all customer projects" announcement audience search always excludes (the caller cannot opt out). Requires `CUSTOMER_ENTITY_DATA_SOURCE` not to be `postgres` | `PROJA,PROJB` |
 
@@ -629,12 +628,12 @@ main service plus the `/plg/*` routes). Main areas:
 | Accounts, projects, products, deployments | `/accounts/*`, `/projects/*` (contacts, metadata), `/products/*`, `/deployments/*` and deployed products |
 | Operations | `/incidents`, `/change-requests` (including approvals), `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` |
 | Time cards and updates | `/time-cards/*`, `/updates/product-update-levels`, `/updates/levels/search` |
-| Users and roles | `/users/me`, `/users/search`, `/users/{id}`, `POST /users`, `/roles/search`, `/roles/grantable`, `/teams/search` |
+| Users and roles | `/users/me`, `/users/search`, `/users/{id}`, `POST /users`, `POST /users/{id}/roles`, `/roles/search`, `/roles/grantable`, `/teams/search` |
 | Team schedule | `/team-schedule/*` (assignments, absences, rotas, paging chain) |
 | Knowledge base | `/kb-articles/*`, `/knowledge-bases/*`, `/kb-manager-*` |
 | Announcements | `/announcements/*`, `/announcement-requests/*` |
 | Dashboards | `/dashboards`, `/dashboards/{id}`, `/dashboards/filter-presets`, `/dashboards/sections` |
-| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/scan-user`, `/user-info` |
+| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/user-info` |
 
 Many routes forward to entity-service operations that only exist for one data source; when the
 paired entity-service does not support an operation for its data source it returns an error that

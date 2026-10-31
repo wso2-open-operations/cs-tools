@@ -1806,6 +1806,20 @@ export interface BeGrantableRolesResponse {
   roles: BeGrantableRole[];
 }
 
+/** `POST /users/{id}/roles` request body — grant one or more portal role keys
+ * (see `GET /roles/grantable`) to an already-existing user via SCIM. */
+export interface BeGrantUserRolesPayload {
+  roles: string[];
+}
+
+/** `POST /users/{id}/roles` response. `granted` is always present (an empty
+ * array, never `null`, on total failure); `failed` is omitted entirely on
+ * full success rather than sent as an empty array. */
+export interface BeGrantUserRolesResponse {
+  granted: string[];
+  failed?: string[];
+}
+
 export interface BeUserSearchFilters {
   /** Case-insensitive match against username and email. */
   searchQuery?: string;
@@ -2110,6 +2124,26 @@ export interface BeDeployment {
   createdBy?: string;
   createdOn?: string;
   updatedOn?: string;
+  /**
+   * Whether the deployment's products cannot reach WSO2, so its licences tell
+   * them not to publish usage online. `null` when the entity service runs on
+   * ServiceNow, which has no such field (and no way to set it).
+   */
+  airGapped?: boolean | null;
+}
+
+/** Body of `PUT /deployments/{id}/air-gapped`. */
+export interface BeDeploymentAirGappedPayload {
+  airGapped: boolean;
+}
+
+/** Response of `PUT /deployments/{id}/air-gapped`. */
+export interface BeDeploymentAirGappedResponse {
+  id: string;
+  number?: string | null;
+  airGapped: boolean;
+  updatedOn: string;
+  updatedBy: string;
 }
 
 /**
@@ -2797,7 +2831,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * renders an entry it has no curated config for via a generic fallback, so a
    * transition added on the backend needs no frontend change to appear.
    */
-  legalNextStates?: string[];
+  legalNextStates?: string[] | null;
 
   // --- CR field parity (2026-08-20) -----------------------------------
   // 20 keys the ServiceNow layer newly exposes on `GET /change-requests/{id}`
@@ -2814,7 +2848,21 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Rich-text implementation plan. Also present (write-only) on
    * {@link BeCreateChangeRequestPayload}; this is the read-back. */
   implementationPlan?: string | null;
-  priority?: { id: number; label: string } | null;
+  /** Rich-text "Deviation from the implementation plan": what the implementation or
+   * the review actually did differently from `implementationPlan`. Unlike the plan it
+   * is written after the approval: in implement, review and customer_review, final
+   * once the change request is closed, canceled or rolled back. A clone copies it,
+   * and the clone must fold it into its plan and clear it before Request Approval.
+   * Internal (the backend never returns it to a customer); absent or null when the
+   * backing data source has no such field. */
+  implementationDeviation?: string | null;
+  /** On the PostgreSQL data source the stored value in lower case: critical, high,
+   * moderate or low, or planning on a change request migrated from the previous system
+   * (no create or PATCH sets it). The data source that talks to the previous system
+   * directly sends critical, high, moderate or low, or that system's own label for any
+   * other choice. Shown through `changeRequestChoiceLabel`; the edit form reads it
+   * through `changeRequestPriorityValue`. */
+  priority?: string | null;
   /** The `category` enum value (`other`, `devops`, ...) as the Postgres data
    * source returns it, or an `{ id, label }` ref as the ServiceNow-backed
    * response did — read both through `changeRequestCategoryValue` /
@@ -2830,7 +2878,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Free-form; e.g. `"10 mins"`. Parsing into a structured duration, if
    * ever needed, is CSM policy, not something ServiceNow enforces. */
   rollbackDurationText?: string | null;
-  deploymentProducts?: BeEntityRef[];
+  deploymentProducts?: BeEntityRef[] | null;
   /**
    * The change request's "Customer Group": the REGISTERED portal-user contacts
    * of its Customer Project, derived live by the backend and READ-ONLY (never
@@ -2838,16 +2886,21 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * without a project or without registered contacts); absent on other data
    * sources. They are the customer's approvers at Customer Approval / Review.
    */
-  customerContacts?: BeCustomerContact[];
+  customerContacts?: BeCustomerContact[] | null;
 
   /**
    * Read-through only — no write path is exposed anywhere in the stack for
    * this group (see `CHANGES-cr-field-parity.md`'s "group C2"). Do not add
    * editable controls for these without first adding the write support at
    * every lower layer.
+   *
+   * On the PostgreSQL data source the stored value in lower case
+   * (`changeRequestType`: infra or general; `likelihood`: low, medium or high);
+   * the data source that talks to the previous system directly sends that
+   * system's own label. Shown through `changeRequestChoiceLabel`.
    */
-  changeRequestType?: { id: number; label: string } | null;
-  likelihood?: { id: number; label: string } | null;
+  changeRequestType?: string | null;
+  likelihood?: string | null;
   /**
    * "Implementation Plan visible to customers" in this portal's UI. Writable
    * on both {@link BeCreateChangeRequestPayload} and
@@ -2878,7 +2931,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
   /** Why it is on hold; `null` while it is not. */
   onHoldReason?: string | null;
   /** `read_only` in the ServiceNow dictionary — inherently read-only. */
-  labels?: string[];
+  labels?: string[] | null;
   /**
    * The tags attached to the change request — the same shape as a case's
    * {@link BeCaseView.tags}, and managed through the same case tag routes
@@ -2888,7 +2941,7 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * null/absent when the backend did not load them (another data source).
    */
   tags?: BeTag[] | null;
-  deployments?: BeEntityRef[];
+  deployments?: BeEntityRef[] | null;
 
   /** System-maintained, `read_only` in the ServiceNow dictionary. */
   workStart?: string | null;
@@ -2921,11 +2974,16 @@ export interface BeChangeRequestCustomerProposal {
   answer: BeCustomerProposalAnswer | string;
   /**
    * Whether the backend can name the proposer (present only while `answer` is `pending`): `true` while
-   * the change request's last writer is still a registered contact of its project (then that writer is
-   * the proposer); `false` when it is not knowable -- a date a WSO2 user wrote in the previous system, one left
-   * over from an older cycle, a proposal edited over since, or a sync rewrite. The page must then say
-   * the proposer is not recorded rather than guess. Absent on a backend that predates it: the page
-   * falls back to whether a name or an email came with it.
+   * the customer's proposal recorded its proposer, the record is about the stored time and that person is
+   * still a registered contact of the project (a later staff edit does not change it; a plain Re-schedule or
+   * re-entering Customer Approval starts a new round and voids it; a time stored with no record -- before the
+   * record existed, or written later by another writer on a change request that has had no proposal since it
+   * entered Customer Approval -- is judged by the change request's last writer when that is a registered
+   * contact, and since entity-service migration 0250 a later write by anyone else records that contact as its
+   * proposer first when they have a user record); `false` when it is not knowable -- a date a WSO2 user wrote
+   * in the previous system, one left over from an older cycle, one whose contact has left the project, or a
+   * sync rewrite. The page must then say the proposer is not recorded rather than guess. Absent on a backend
+   * that predates it: the page falls back to whether a name or an email came with it.
    */
   proposerRecorded?: boolean | null;
   /** Who proposed it and when: only while `pending` and `proposerRecorded` is true (never an empty guess). */
@@ -3096,6 +3154,10 @@ export interface BeCreateChangeRequestPayload {
   description?: string;
   justification?: string;
   implementationPlan?: string;
+  /** The deviation from the implementation plan, sent only by a clone of a change
+   * request that has one. The new change request then has to fold it into its
+   * implementation plan and clear it before Request Approval. */
+  implementationDeviation?: string;
   riskImpactAnalysis?: string;
   backoutPlan?: string;
   testPlan?: string;
@@ -3404,9 +3466,10 @@ export interface BePatchChangeRequestPayload {
    */
   type?: BeChangeRequestType;
   /**
-   * An internal work note, appended to the journal (never blank). The one thing
-   * that can still be added once the change request has been approved: every
-   * field is read-only then (400 `change_request_approved_read_only`).
+   * An internal work note, appended to the journal (never blank). It can still
+   * be added once the change request has been approved, when every other field
+   * is read-only (400 `change_request_approved_read_only`) except
+   * `implementationDeviation` (from implement on).
    */
   workNote?: string;
   plannedStartOn?: string;
@@ -3457,6 +3520,14 @@ export interface BePatchChangeRequestPayload {
   //     shipped half-right.
   /** Rich-text implementation plan; `""` clears it. */
   implementationPlan?: string;
+  /** Rich-text deviation from the implementation plan; `""` clears it. Recorded in
+   * implement, review and customer_review (judged on the stored state). Before that a
+   * change is a 400 `change_request_deviation_not_yet`, except clearing one a clone
+   * carried over while the change request is new; once it is closed, canceled or
+   * rolled back a 400 `change_request_deviation_final`. Request Approval is a 400
+   * `change_request_deviation_not_incorporated` while one is stored, unless the same
+   * request clears it. */
+  implementationDeviation?: string;
   affectedServicesText?: string;
   affectedComponentsText?: string;
   rollbackDurationText?: string;
@@ -4022,21 +4093,15 @@ export interface BeProblemFieldFilter {
 export interface BeProblemSearchFilters {
   searchQuery?: string;
   /**
-   * Filter by state. Not confirmed live against the backend at the time this
-   * was written, so if the backend rejects or silently ignores this filter,
-   * drop it here and from `ProblemsTab`'s payload, and remove the state
-   * control from `ProblemsFilterBar`.
-   */
-  states?: BeProblemState[];
-  /**
    * A single problem number (e.g. "PRB0040192"); matches exactly. Routed as
    * a first-class filter rather than through the free-text searchQuery scan.
    */
   number?: string;
   /**
-   * The generic field/op/values filter array (see {@link BeProblemFieldFilter}) —
-   * additive alongside `states` above. Only the SRE Team control
-   * (`assignmentGroupId`/`"in"`) populates this today.
+   * The generic field/op/values filter array (see {@link BeProblemFieldFilter}).
+   * The only way to filter by state (`state`/`"in"`) or SRE team
+   * (`assignmentGroupId`/`"in"`); the search body has no named `states`
+   * field and the backend rejects unknown fields.
    */
   filters?: BeProblemFieldFilter[];
 }

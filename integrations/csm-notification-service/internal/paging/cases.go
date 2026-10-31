@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 )
 
 // Case Paging from customer cases. The rules are the agreed ones
@@ -69,7 +70,7 @@ const (
 )
 
 // handleCase reacts to one customer case event. Validate has already run.
-func (e *Engine) handleCase(ctx context.Context, env events.Envelope) error {
+func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []byte) error {
 	caseID := env.EntityID
 	switch env.Type {
 	case events.TypeCaseCreated:
@@ -82,7 +83,9 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope) error {
 		if !strings.EqualFold(strings.TrimSpace(p.CaseType), "case") {
 			return nil
 		}
-		return e.start(ctx, triggerFromCaseCreated(caseID, p), false)
+		t := triggerFromCaseCreated(caseID, p)
+		t.CardThread = notifications.CaseS0ThreadKey(caseID, record)
+		return e.start(ctx, t, false)
 
 	case events.TypeSeverityChanged:
 		var p events.SeverityChangedPayload
@@ -90,6 +93,7 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope) error {
 			return fmt.Errorf("escalation: decode case.severity_changed payload: %w", err)
 		}
 		t := triggerFromSeverityChanged(caseID, p, e.now())
+		t.CardThread = notifications.CaseS0ThreadKey(caseID, record)
 		if e.admit(ctx, &t) {
 			// A new chain for the new severity, replacing whatever runs.
 			return e.schedule(ctx, t, true)

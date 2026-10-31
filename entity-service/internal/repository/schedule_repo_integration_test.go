@@ -663,6 +663,18 @@ func TestScheduleIntegration_ManagementIsNotOnTheRota(t *testing.T) {
 				t.Error("a management role is served as a team member")
 			}
 		}
+		// The head is named apart from the members, on their own team only.
+		for _, h := range team.Heads {
+			if h.Role != "americas_team_lead" || !h.IsLead {
+				t.Errorf("team %s head %s: role %q isLead %v", team.Key, h.UserID, h.Role, h.IsLead)
+			}
+			if h.UserID == schedMemberID && team.Key != schedOtherTeam {
+				t.Errorf("the head of %s is served as a head of %s", schedOtherTeam, team.Key)
+			}
+		}
+		if team.Key == schedOtherTeam && (len(team.Heads) != 1 || team.Heads[0].UserID != schedMemberID) {
+			t.Errorf("%s heads = %+v, want the one americas_team_lead", schedOtherTeam, team.Heads)
+		}
 	}
 
 	byTeam, err := repo.SearchAssignments(ctx, domain.SearchScheduleAssignmentsRequest{
@@ -1206,8 +1218,10 @@ func TestScheduleIntegration_CreateAbsenceKindJoinsTheEndOfItsBucket(t *testing.
 	}, nil, schedLeadEmail); !errors.As(err, &conflict) {
 		t.Fatalf("the same label again: want ConflictError, got %v", err)
 	}
+	// Annual/Casual leave reads AL/CL since migration 0249; the clash is
+	// case-insensitive, so the lower-case spelling must still be refused.
 	if _, err := repo.CreateAbsenceKind(ctx, "SOMETHING_ELSE", domain.CreateScheduleAbsenceKindRequest{
-		ShortCode: "al", Label: "Something else", Bucket: "LEAVE", ColourToken: "AL",
+		ShortCode: "al/cl", Label: "Something else", Bucket: "LEAVE", ColourToken: "AL",
 	}, nil, schedLeadEmail); !errors.As(err, &conflict) {
 		t.Fatalf("annual leave's short code: want ConflictError, got %v", err)
 	}

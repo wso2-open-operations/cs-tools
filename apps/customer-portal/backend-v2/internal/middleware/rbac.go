@@ -541,6 +541,21 @@ func RequirePermissionOneOf(resolver RoleResolver, module Module, actions ...Act
 // which also guards reads and so only applies the gate for a non-read
 // action.
 func RequireRoles(resolver RoleResolver, allowedRoles ...CanonicalRole) func(http.Handler) http.Handler {
+	return requireRoles(resolver, false, allowedRoles)
+}
+
+// RequireRolesOrDefer is RequireRoles for a route whose handler makes the real
+// authorization decision itself. A caller holding one of allowedRoles is
+// treated exactly as RequireRoles treats them. A caller holding none is not
+// refused for that: the internal-write-role gate still applies to them, and
+// the request then goes on to the handler, which must refuse anyone it does
+// not accept. Use it only when the handler's own check is unconditional on
+// that path; otherwise this lets every authenticated caller through.
+func RequireRolesOrDefer(resolver RoleResolver, allowedRoles ...CanonicalRole) func(http.Handler) http.Handler {
+	return requireRoles(resolver, true, allowedRoles)
+}
+
+func requireRoles(resolver RoleResolver, deferToHandler bool, allowedRoles []CanonicalRole) func(http.Handler) http.Handler {
 	allowed := make(map[CanonicalRole]struct{}, len(allowedRoles))
 	for _, role := range allowedRoles {
 		allowed[role] = struct{}{}
@@ -562,7 +577,7 @@ func RequireRoles(resolver RoleResolver, allowedRoles ...CanonicalRole) func(htt
 					break
 				}
 			}
-			if !allowedRole {
+			if !allowedRole && !deferToHandler {
 				writeForbiddenError(w, "You do not have permission to perform this action.")
 				return
 			}

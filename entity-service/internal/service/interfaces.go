@@ -130,6 +130,17 @@ type SavedFilterViewService interface {
 	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
+// PortalBannerService is the HTML banners both portals show. Customer and CSM
+// reads each return only published rows for that portal. Writes require a
+// CSM admin (AUTH_ADMIN_ROLES).
+type PortalBannerService interface {
+	ListCustomer(ctx context.Context) (domain.PortalBannerViewList, error)
+	ListCSM(ctx context.Context) (domain.PortalBannerViewList, error)
+	ListAdmin(ctx context.Context) (domain.PortalBannerList, error)
+	Create(ctx context.Context, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
+	Update(ctx context.Context, id string, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
+}
+
 // RunbookService manages the runbook catalog (Operations > Runbooks): numbered, named runbook links and their alert names.
 type RunbookService interface {
 	List(ctx context.Context) (domain.RunbookList, error)
@@ -278,8 +289,8 @@ type SLAStatusService interface {
 // SLADurationPolicyService backs GET /sla-duration-policy — see
 // domain.SLADurationPolicyItem's own doc comment for what it's for.
 type SLADurationPolicyService interface {
-	// ListSLADurationPolicy returns every row of sla_duration_policy,
-	// unpaginated.
+	// ListSLADurationPolicy returns the computed (severity, clockType)
+	// duration list, unpaginated.
 	ListSLADurationPolicy(ctx context.Context) (domain.SLADurationPolicyResponse, error)
 }
 

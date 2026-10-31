@@ -65,6 +65,16 @@ func (f *fakeRotaAccessClient) DeleteTeamMember(_ context.Context, team, user st
 	return f.record("delete-member", team, user)
 }
 
+func (f *fakeRotaAccessClient) PatchTeamMember(_ context.Context, team, user string, body []byte) ([]byte, error) {
+	f.got = "patch-member " + team + " " + user + " " + string(body)
+	return []byte(`{"teamKey":"` + team + `","userId":"` + user + `","role":"sub_lead","alertTier":"T1"}`), f.err
+}
+
+func (f *fakeRotaAccessClient) MoveTeamMember(_ context.Context, team, user string, body []byte) ([]byte, error) {
+	f.got = "move-member " + team + " " + user + " " + string(body)
+	return []byte(`{"teamKey":"apollo","userId":"` + user + `","role":"engineer","alertTier":null}`), f.err
+}
+
 const rotaAccessUser = "33333333-3333-3333-3333-333333333333"
 
 func rotaAccessRequest(method, scopeName, scope, user string) *http.Request {
@@ -166,6 +176,91 @@ func TestRotaAccess_TeamMemberRemovalKeepsTheRefusalReason(t *testing.T) {
 		NewRotaAccessHandler(fake).DeleteTeamMember(w, withUser(rotaAccessRequest(http.MethodDelete, "teamKey", "iaas", rotaAccessUser)))
 		if w.Code != c.status || !strings.Contains(w.Body.String(), c.want) {
 			t.Fatalf("%d: got %d %s", c.status, w.Code, w.Body.String())
+		}
+	}
+}
+
+func memberBodyRequest(method, path, teamKey, user, body string) *http.Request {
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.SetPathValue("teamKey", teamKey)
+	r.SetPathValue("userId", user)
+	return r
+}
+
+func TestRotaAccess_TeamMemberChangeForwardsPathAndBody(t *testing.T) {
+	fake := &fakeRotaAccessClient{}
+	h := NewRotaAccessHandler(fake)
+	for _, c := range []struct {
+		name string
+		call func(http.ResponseWriter, *http.Request)
+		body string
+		want string
+	}{
+		{"patch", h.PatchTeamMember, `{"role":"sub_lead","alertTier":null}`, `patch-member iaas ` + rotaAccessUser + ` {"role":"sub_lead","alertTier":null}`},
+		{"move", h.MoveTeamMember, `{"toTeamKey":"apollo"}`, `move-member iaas ` + rotaAccessUser + ` {"toTeamKey":"apollo"}`},
+	} {
+		w := httptest.NewRecorder()
+		c.call(w, withUser(memberBodyRequest(http.MethodPost, "/team-schedule/teams/iaas/members/x", "iaas", rotaAccessUser, c.body)))
+		if w.Code != http.StatusOK || fake.got != c.want || !strings.Contains(w.Body.String(), rotaAccessUser) {
+			t.Fatalf("%s: status %d, forwarded %q, body %s", c.name, w.Code, fake.got, w.Body.String())
+		}
+	}
+}
+
+func TestRotaAccess_TeamMemberChangeRefusesABadRequestWithoutCallingOut(t *testing.T) {
+	for _, c := range []struct {
+		name, teamKey, user, body string
+		authed                    bool
+		want                      int
+	}{
+		{"bad team key", "../x", rotaAccessUser, `{"role":"engineer"}`, true, http.StatusBadRequest},
+		{"not a uuid", "iaas", "someone", `{"role":"engineer"}`, true, http.StatusBadRequest},
+		{"malformed JSON", "iaas", rotaAccessUser, `{`, true, http.StatusBadRequest},
+		{"no user", "iaas", rotaAccessUser, `{"role":"engineer"}`, false, http.StatusUnauthorized},
+	} {
+		for op, call := range map[string]func(*RotaAccessHandler) func(http.ResponseWriter, *http.Request){
+			"patch": func(h *RotaAccessHandler) func(http.ResponseWriter, *http.Request) { return h.PatchTeamMember },
+			"move":  func(h *RotaAccessHandler) func(http.ResponseWriter, *http.Request) { return h.MoveTeamMember },
+		} {
+			fake := &fakeRotaAccessClient{}
+			r := memberBodyRequest(http.MethodPatch, "/team-schedule/teams/x/members/y", c.teamKey, c.user, c.body)
+			if c.authed {
+				r = withUser(r)
+			}
+			w := httptest.NewRecorder()
+			call(NewRotaAccessHandler(fake))(w, r)
+			if w.Code != c.want || fake.got != "" {
+				t.Fatalf("%s %s: status %d, forwarded %q", op, c.name, w.Code, fake.got)
+			}
+		}
+	}
+}
+
+// Every refusal entity-service gives reaches the caller with its reason; a
+// server fault does not.
+func TestRotaAccess_TeamMemberChangeKeepsTheRefusalReason(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		msg    string
+		want   string
+	}{
+		{http.StatusBadRequest, "alertTier must be T1, T2 or T3", "alertTier must be"},
+		{http.StatusForbidden, "only a CSM admin can change a team member", "only a CSM admin"},
+		{http.StatusNotFound, "that person is not on iaas", "not on iaas"},
+		{http.StatusConflict, "this person has 2 upcoming turns on iaas", "2 upcoming turns"},
+		{http.StatusUnauthorized, "token expired", ErrMsgUnauthorized},
+		{http.StatusInternalServerError, "pq: relation does not exist", "Failed to "},
+	} {
+		for op, call := range map[string]func(*RotaAccessHandler) func(http.ResponseWriter, *http.Request){
+			"patch": func(h *RotaAccessHandler) func(http.ResponseWriter, *http.Request) { return h.PatchTeamMember },
+			"move":  func(h *RotaAccessHandler) func(http.ResponseWriter, *http.Request) { return h.MoveTeamMember },
+		} {
+			fake := &fakeRotaAccessClient{err: &apierror.Error{StatusCode: c.status, Body: `{"code":1,"message":"` + c.msg + `"}`}}
+			w := httptest.NewRecorder()
+			call(NewRotaAccessHandler(fake))(w, withUser(memberBodyRequest(http.MethodPost, "/x", "iaas", rotaAccessUser, `{"toTeamKey":"apollo"}`)))
+			if w.Code != c.status || !strings.Contains(w.Body.String(), c.want) || strings.Contains(w.Body.String(), "pq:") {
+				t.Fatalf("%s %d: got %d %s", op, c.status, w.Code, w.Body.String())
+			}
 		}
 	}
 }

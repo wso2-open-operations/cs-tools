@@ -35,7 +35,10 @@ import (
 // CaseService implementer (including a test double) to also satisfy methods
 // it never calls.
 type caseAttachmentSNMirror interface {
-	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
+	// CreateBareCaseAttachment, not CreateCaseAttachment: the latter also moves
+	// the case on a customer upload against ServiceNow, but in this mode
+	// Postgres owns that decision (see below), exactly as for comments.
+	CreateBareCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
 	GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error)
 	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
 	UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
@@ -95,7 +98,7 @@ type caseAttachmentDualWriteService struct {
 // embedding; see the type's own doc comment. mirror is snCaseMirrorSvc,
 // already constructed there for the other three dual-write mirror purposes.
 // dispatcher is the single shared SNWritebackDispatcher.
-func NewCaseAttachmentDualWriteService(base CaseService, mirror caseAttachmentSNMirror, dispatcher *SNWritebackDispatcher) CaseService {
+func NewCaseAttachmentDualWriteService(base CaseService, mirrorSvc any, dispatcher *SNWritebackDispatcher) CaseService {
 	plain, ok := base.(*caseService)
 	if !ok {
 		// Cannot happen with the real constructor -- routes.go always passes
@@ -104,6 +107,12 @@ func NewCaseAttachmentDualWriteService(base CaseService, mirror caseAttachmentSN
 		// A panic here is a startup-time wiring bug, not a runtime condition
 		// a request could trigger.
 		panic(fmt.Sprintf("service.NewCaseAttachmentDualWriteService: base is a %T, not *caseService", base))
+	}
+	mirror, ok := mirrorSvc.(caseAttachmentSNMirror)
+	if !ok {
+		// Same startup-time wiring guard as above: routes.go always passes the
+		// *snCaseService it builds as snCaseMirrorSvc.
+		panic(fmt.Sprintf("service.NewCaseAttachmentDualWriteService: mirror is a %T, which does not implement caseAttachmentSNMirror", mirrorSvc))
 	}
 	return &caseAttachmentDualWriteService{caseService: plain, snMirror: mirror, snWriteback: dispatcher}
 }
@@ -162,7 +171,7 @@ func isMirrorOnlyAttachmentRef(rt domain.ReferenceType) bool {
 // ServiceNow response is returned directly.
 func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
 	if isMirrorOnlyAttachmentRef(req.ReferenceType) {
-		return s.snMirror.CreateCaseAttachment(ctx, req)
+		return s.snMirror.CreateBareCaseAttachment(ctx, req)
 	}
 
 	user, err := s.resolveActor(ctx)
@@ -170,7 +179,7 @@ func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Contex
 		return domain.CreateAttachmentResponse{}, err
 	}
 
-	snResp, err := s.snMirror.CreateCaseAttachment(ctx, req)
+	snResp, err := s.snMirror.CreateBareCaseAttachment(ctx, req)
 	if err == nil && req.ReferenceType == domain.ReferenceTypeChangeRequest {
 		return s.recordChangeRequestAttachment(ctx, req, snResp, user)
 	}
@@ -198,6 +207,11 @@ func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Contex
 			"attachmentId", snResp.Attachment.ID, "caseId", req.ReferenceID, "error", err)
 		return domain.CreateAttachmentResponse{}, err
 	}
+
+	// Postgres owns the customer-upload state move here (the mirror above is
+	// the bare variant, so it is never decided twice); the UpdateCase it goes
+	// through mirrors that one state write to ServiceNow on its own.
+	s.applyCustomerAttachmentStateTransition(ctx, req.ReferenceType, req.ReferenceID)
 
 	return domain.CreateAttachmentResponse{
 		Message: snResp.Message,

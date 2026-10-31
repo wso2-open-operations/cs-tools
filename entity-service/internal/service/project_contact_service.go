@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -27,11 +28,53 @@ import (
 type projectContactService struct {
 	repo   repository.ProjectContactRepository
 	access AccessService
+	// writes is the deferred Salesforce write ledger; nil leaves
+	// SalesforceSync empty (see WithProjectContactSalesforceSync).
+	writes repository.SalesforceWriteRequestRepository
 }
 
 // NewProjectContactService constructs a ProjectContactService backed by Postgres.
 func NewProjectContactService(repo repository.ProjectContactRepository, access AccessService) ProjectContactService {
 	return &projectContactService{repo: repo, access: access}
+}
+
+// WithProjectContactSalesforceSync makes the contact reads report
+// domain.ProjectContact.SalesforceSync from the deferred Salesforce write
+// ledger (see project_membership_deferred_write.go). Optional: without it,
+// or when svc is not this package's implementation, the field stays empty.
+func WithProjectContactSalesforceSync(svc ProjectContactService, writes repository.SalesforceWriteRequestRepository) ProjectContactService {
+	if impl, ok := svc.(*projectContactService); ok && writes != nil {
+		impl.writes = writes
+	}
+	return svc
+}
+
+// attachSalesforceSync fills SalesforceSync for the contacts that have a
+// deferred write recorded: PENDING for a request Sales Entity is working on,
+// FAILED for one that gave up or was never handed over (the same reading the
+// writes use). Best-effort: a ledger read failure is logged and the list is
+// served without the field rather than not at all.
+func (s *projectContactService) attachSalesforceSync(ctx context.Context, rows []repository.ProjectContactRow, contacts []domain.ProjectContact) {
+	if s.writes == nil || len(rows) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.ProjectContactID != "" {
+			ids = append(ids, row.ProjectContactID)
+		}
+	}
+	statuses, err := s.writes.SyncStatusForProjectContacts(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "project contacts: could not read the Salesforce sync status", "err", err)
+		return
+	}
+	for i, row := range rows {
+		if status, ok := statuses[row.ProjectContactID]; ok && i < len(contacts) {
+			st := status
+			contacts[i].SalesforceSync = &st
+		}
+	}
 }
 
 // registeredProjectContactState is the state the access check requires.
@@ -110,6 +153,7 @@ func (s *projectContactService) SearchProjectContacts(ctx context.Context, proje
 	for _, row := range rows {
 		contacts = append(contacts, projectContactRowToDomain(row))
 	}
+	s.attachSalesforceSync(ctx, rows, contacts)
 
 	return domain.SearchProjectContactsResponse{
 		Contacts: contacts,
@@ -138,5 +182,7 @@ func (s *projectContactService) GetProjectContact(ctx context.Context, projectID
 		return domain.ProjectContact{}, err
 	}
 
-	return projectContactRowToDomain(row), nil
+	contacts := []domain.ProjectContact{projectContactRowToDomain(row)}
+	s.attachSalesforceSync(ctx, []repository.ProjectContactRow{row}, contacts)
+	return contacts[0], nil
 }

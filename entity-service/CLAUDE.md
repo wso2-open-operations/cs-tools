@@ -74,6 +74,12 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED` | no | `false` | Must be `"true"` for the partner-link refresh (`account_relationship` "Is Partner Of" / "Is Customer Of") to run after Account events and partner-contact membership events, and for `POST /salesforce/accounts/{sfId}/refresh-partners` to be registered (see "Salesforce partner relationships" below). Keep it off while csm-sync-service still copies `account_relationship` from ServiceNow |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
+| `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
+| `SALESFORCE_WRITE_EVENT_HUB_TOPIC` | no | `salesforce-writes` | Topic the deferred-write **commands** are published to, consumed by sales-entity-service (digiops-sales, `membershipwrite`). The Event Hub must exist or every deferred invitation's publish fails (recorded in `event_publish_failures`, the request stays unpublished) |
+| `SALESFORCE_WRITE_RESULTS_TOPIC` / `SALESFORCE_WRITE_RESULTS_DLQ_TOPIC` | no | `salesforce-write-results` / `…-dlq` | Topics sales-entity-service **answers** on (`salesforce.membership_write.completed` / `.failed`) and this service's dead-letter copy of them. Both must exist |
+| `SALESFORCE_WRITE_RESULTS_CONSUMER_GROUP` / `…_DLQ_CONSUMER_GROUP` | no | `entity-service-salesforce-write-results` / `…-dlq` | This service's consumer groups on the two results topics. Never shared with another component |
+| `SALESFORCE_WRITE_RESULTS_RETRY_ATTEMPTS` / `…_RETRY_DELAY` | no | `3` / `2s` | Main results tier: attempts and fixed pause, then dead-letter. A result's handling waits on Sales Entity's REST reads and this database only; the **Salesforce** retry policy lives in sales-entity-service |
+| `SALESFORCE_WRITE_RESULTS_DLQ_RETRY_ATTEMPTS` / `…_DLQ_RETRY_DELAY` / `…_DLQ_RETRY_MAX_DELAY` | no | `10` / `30s` / `15m` | Dead-letter results tier: exponential, capped. On its last attempt the request is marked FAILED naming the Salesforce ids it could not stamp (the Salesforce echo still stamps them) |
 | `CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED` | no | `false` | Registers `POST /customer-engagements/allocation-events` (Postgres-authoritative only); see "Allocation events" below |
 | `CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID` | no | — | ServiceNow sys_id written as `engagement_type_id` on firefighting engagements created by allocation events. Unset skips creating them |
 | `REDIS_URL` | no | — | `rediss://:<key>@<host>:<port>` (TLS, Azure Managed Redis); wins over `REDIS_ADDR`. Turns on the user cache (see "User cache (Redis)" below). `Validate` requires a `redis`/`rediss` scheme and a host, and never echoes the URL |
@@ -1893,6 +1899,91 @@ sent. A label Salesforce would reject is a **400 naming it**, not an
 record Salesforce already holds (refusing would strip a real membership over a
 vocabulary gap), and wrong to tolerate one a caller is asking us to write.
 
+### Deferred Salesforce writes (`project_membership_deferred_write.go`)
+
+The ordering above makes every invitation fail with 503 while
+sales/sales-entity-service (or Salesforce behind it) is down, and a customer
+admin can do nothing about that. With `SALESFORCE_DEFERRED_WRITES_ENABLED=true`
+a **first invitation** survives the outage; everything else keeps failing fast.
+The Salesforce half then runs in **sales-entity-service** (digiops-sales,
+`membershipwrite` package), the service that owns the Salesforce connection;
+this service keeps the decision, the ledger and both CSM transactions.
+
+1. `Invite` tries Salesforce synchronously as always. Only when the validator
+   or the write fails with `ServiceUnavailableError` (connection error,
+   timeout, 5xx, an answer with no id) **and** the project has no membership
+   for the address yet does it fall through. A validation refusal, a conflict,
+   or a re-invitation of a DEACTIVATED row (which already has Salesforce ids
+   and would be an UPDATE there) is never deferred.
+2. The rows commit with NULL `sf_id` columns (`"user"`, `account_contact`,
+   `project_contact`; the repository never matches or stamps a blank id, and
+   records **no** DATABASE onboarding step, because the ledger is keyed by
+   the membership id) plus a `salesforce_write_request` row (migration 0249:
+   the admin's request as JSON `intent`, status PENDING) in the same
+   transaction. Then `salesforce.membership_write.requested` is published to
+   `SALESFORCE_WRITE_EVENT_HUB_TOPIC`, keyed by the request id, **carrying the
+   whole intent and the project's and account's Salesforce ids** (Sales Entity
+   cannot read this database), and `published_on` is stamped. The caller gets
+   **201** with `salesforceSync: "PENDING"` and empty ids.
+3. sales-entity-service consumes the command on two tiers (its own
+   `SALESFORCE_WRITES_*RETRY*` policies: short fixed, then a dead-letter topic
+   with exponential backoff), performs the write **search-first** (contact by
+   address, membership by project and contact; create on a miss, PATCH state
+   and roles otherwise) so a redelivery adopts rather than duplicates, and
+   publishes `salesforce.membership_write.completed` (both ids, the stored
+   state and roles) or `.failed` (`terminal: true` for a Salesforce refusal,
+   `false` when its retries ran out) to `SALESFORCE_WRITE_RESULTS_TOPIC`.
+   Before writing it runs the invitation checks the validator could not run
+   during the outage, from the command's `allowedAccountSfIds` (the project's
+   account and its partners, read here at deferral time) and `inviterEmail`:
+   at most one contact per address, the inviter on an allowed account, no
+   take-over of another account's live membership, the address's domain in
+   the base account's or a partner's domain list, and adoption of an existing
+   contact only from an allowed account. A refusal is a terminal `.failed`.
+4. `startSalesforceWriteResultConsumers` (`internal/server/salesforce_write_consumer.go`)
+   consumes the results. `CompleteDeferredSalesforceWrite` re-reads the
+   request (settled → acknowledge; this is what makes a duplicate result
+   harmless), reads the records back through Sales Entity's REST API
+   (`GetProjectContact`, `GetContact`) and maps them with the ingest's
+   `buildMembershipUpsert`, then in **one transaction** upserts the rows with
+   the ids, records the DATABASE step and marks the request SUCCEEDED, and
+   only then publishes `project_contact.invited`. The invitation email and the
+   identity provisioning therefore wait for the Salesforce id; nothing else
+   publishes that event for a deferred row (the Salesforce echo stays silent
+   because the row is already INVITED). `FailDeferredSalesforceWrite` marks
+   the request **FAILED** with Sales Entity's reason.
+5. A result whose handling cannot finish (Sales Entity REST or the database
+   unavailable) is retried per the results policies; on the dead-letter
+   tier's last call the request is marked FAILED naming the Salesforce ids it
+   could not stamp, so it never sits PENDING with nothing behind it. A
+   terminal problem (the row is gone, the records do not add up) is FAILED at
+   once.
+6. While a request is PENDING, `UpdateRoles`, `Deactivate` and
+   `ResendInvitation` answer **409** with code `salesforce_sync_pending`
+   ("still being synced to Salesforce"). Once it is FAILED, or was never
+   published, `UpdateRoles` and `ResendInvitation` answer **409**
+   `salesforce_sync_failed` and `Deactivate` runs **locally** (no Salesforce
+   half to undo), closing the request as CANCELLED so nothing picks it up. A
+   row with no id and no request keeps the generic missing-id refusal.
+   `salesforce_write_request.retryable` tells a FAILED row's two causes apart
+   (retries exhausted vs. refused). A PENDING request that was never
+   published (the command publish failed) reads as FAILED everywhere -- the
+   contact lists, the refusals and the local removal -- since nothing will
+   consume it without a re-publish. The contact reads
+   (`POST /projects/{id}/contacts/search`, `GET …/{contactId}`) carry
+   `salesforceSync: PENDING | FAILED` from the latest request row, read
+   best-effort through `WithProjectContactSalesforceSync`.
+
+What the event path does **not** cover: a command or result that is never
+delivered (the row stays PENDING, `published_on` says whether the command
+left at all), and an outage that outlives Sales Entity's retries (the row
+says FAILED). Both need a re-publish — a sweep or a manual retry — which is
+deliberately not part of this change. `membership_registration_service.go`
+already skips rows with a blank `sf_id`, so a person who signs in before the
+sync lands is registered on a later login. The local stack exercises the
+whole loop with `scripts/csm-compose/sf-deferred-e2e.sh` and a mock
+sales-entity-service that plays the consumer.
+
 ### The Sales Entity write client (`internal/salesentity/membership_writes.go`)
 
 `SearchContactByEmail` (`POST /contacts/search {email}`), `CreateContact`
@@ -2200,29 +2291,64 @@ above: a work item with no assignee/group simply reports empty strings. A
 dedicated team table may replace the `"group"` lookup for `TeamEmail`/
 `TeamLeadName` later — noted, not yet needed.
 
-### `GET /sla-duration-policy` — a separate, static duration table for `csm-notification-service`'s own native SLA tracking
+### `GET /sla-duration-policy` — now computed from `sla_policy`, not a static table
 
-`sla_duration_policy` (migration `0192`) is a small, static reference table —
-13 rows, WSO2's own published [Enterprise Support
-Policy](https://wso2.com/licenses/support-policy/6.0) durations, seeded
-directly in the migration, never touched by any sync — deliberately
-independent of both `sla`/`sla_policy` above (ServiceNow-shaped, no plain
-severity column, empty for a case that never went through that sync) and
-the CSM-native SLA clock engine's own `sla_policy_resolver.go` (reads the
-real, synced `sla_policy` table). `ReferenceDataRepository.
-ListSLADurationPolicy`/`GET /sla-duration-policy` (internal-caller-only,
-same `requireInternalCaller` gate as `GET /sla-status`) exposes it —
-`severity` already translated from the raw `case_severity_enum` label
-("S0") to the same uppercase English word a `case.*` event's own `Priority`
-field carries ("CATASTROPHIC"), via this package's own
-`caseSeverityFromEnum` — so a consumer can match this response directly
-against a `case.created` payload's `Priority` with no translation of its
-own. `integrations/csm-notification-service` fetches the full set once at
-startup to compute each case's own SLA due dates itself (see that repo's
-own `CLAUDE.md`, "SLA breach-alerting engine") — entity-service's role here
-is purely to trigger (publish the facts it already publishes, below) and
-to hand over this one piece of static policy data; that service owns all
-the actual duration bookkeeping, due-date arithmetic and alerting.
+**The static `sla_duration_policy` reference table (migration `0192`) is
+dropped** (`migrations/0261_drop_sla_duration_policy.sql`, written but not
+yet applied to any database — it WILL run automatically the next time
+`make migrate` runs, per this repo's own "Database migrations" convention
+above; see that migration's own doc comment, corrected after a code review
+caught it wrongly claiming the opposite) — it was a hand-seeded,
+severity→duration reduction of WSO2's published [Enterprise Support
+Policy](https://wso2.com/licenses/support-policy/6.0), independent of the
+real `sla`/`sla_policy` tables and with no case-type/product/project-type/
+account awareness at all. **The endpoint itself is still live** —
+`integrations/csm-notification-service`'s `internal/paging` rung-escalation
+email fetches it once at startup to display a case's own "response SLA
+remaining time," a real, live consumer this was mistakenly assumed to be
+dead for briefly before being restored. The wire shape (`domain.
+SLADurationPolicyItem`/`SLADurationPolicyResponse`, severity as the same
+uppercase English word a `case.*` event's `Priority` carries) is unchanged.
+
+`service.SLADurationPolicyService`/`slaDurationPolicyService.
+ListSLADurationPolicy` (`internal-caller-only`, same `RequireInternalCaller`
+gate as `GET /sla-status`) now computes its response live, via
+`repository.SLAEngineRepository.ListCandidatePolicies` — the same method
+`slaPolicyResolver.resolve` uses — rather than reading the dropped table.
+For each of the 5 severities × 3 clock targets, `resolveDurationPolicy`
+evaluates every active `source='SERVICENOW'` case policy's `start_condition`
+(`internal/slacondition`, same `isCasePolicy` classification
+`sla_policy_resolver.go` uses), **routed through `slaPolicyConditionText`
+first** — the same translation the engine's own resolver applies; this path
+used to call `slacondition.Parse` directly on the still-raw, vendor-encoded
+text, which never matched on real data at all (a confirmed, reported bug:
+this endpoint returned nothing) — against a **synthetic** `CaseFacts`
+describing a plain, brand-new case at that severity: `case_type=case`,
+`state=OPEN`, `project_type=Subscription` (WSO2's own most common type —
+picked so a project-type-gated policy like `"P1 - Workaround (Open
+Source)"` can still resolve), `created_on=now` (every real `opened_at`/
+`sys_created_on` condition in the table is a `>=` check, so the synthetic
+case must be newer than the threshold, not older), and no
+account/product/workaround/fix-ETA. This synthetic fact set, combined with
+the translator's own Incident/Query severity swap and Hosting-discard
+behavior (above), is what excludes every Hosting-family and
+product/project-type-mismatched policy, with no separate exclusion list
+needed.
+
+**Tie-break when more than one policy matches** (real in the live data —
+e.g. a severity-specific resolution policy and a Query-style resolution
+policy with no priority condition at all, matching every non-Incident
+severity, can both match S4/RESOLUTION): the policy whose **translated**
+`start_condition` names the severity explicitly (`"priority=S<n>"`) wins
+over one that applies generically — more specific beats more general; the
+specificity needle itself is matched against the translated text too (the
+raw text never contains this spelling at all — it stores a numeric code).
+Still ambiguous after that (none currently are in the real table): lowest
+`sla_policy.id` wins deterministically, logged — the same fallback
+`slaPolicyResolver.resolve` itself uses. A severity/clock-type pair with no
+matching policy at all is simply omitted from the response (no fallback
+value), same "no fallback duration" posture the old static table's absent
+entry had.
 
 **`events.CommentAddedPayload.IsSupportEngineerResponse`** is the other
 half of enabling that: true when a comment is a public comment
@@ -2240,21 +2366,395 @@ owns the role data. `case.created`/`case.status_changed` already carry
 everything else that service's own tracking needs (`Priority`/`CreatedAt`,
 `NewStatus`), so neither payload needed any change for this.
 
-## CSM-native SLA clock engine
+## Real, condition-driven SLA clock engine
+
+`internal/service/sla_engine_service.go`/`sla_policy_resolver.go` were
+rewritten to evaluate the real, decoded `sla_policy` conditions directly
+(migrations `0250`-`0258`) instead of the deterministic, severity-keyed
+`source='CSM'` policies described in "CSM-native SLA clock engine" below
+(migration `0203`, now deleted — migration `0259` removed all 16 of those
+rows). That whole subsection is **historical**: kept because the low-level
+repository mechanics it documents (`CompleteClock`'s real elapsed-time math,
+`SetPaused`'s accumulated pause duration, the `is_active`/`BREACHED`-is-not-
+terminal fixes, the dual-write FK-ordering fix) are still true of the new
+engine, which builds directly on that same `sla_engine_repo.go` — only the
+*resolution* mechanism (how a policy is chosen) and `ApplyCaseStateEffects`
+(how state changes are applied) actually changed. Read this section first;
+treat every mention of "severity-keyed", "deterministically named `(CSM)`
+row" or a hardcoded pause/resume/complete switch in the section below as
+superseded.
+
+**Why**: the name-keyed lookup this replaces was confirmed to silently
+resolve nothing for most of the real table's 42 policies written by the
+external sync job, which are gated on far more than severity (case type,
+product, project type, account presence, creation date, whether a CS
+engineer has already replied) and in several cases (`ServiceRequest SLA`,
+the Query/SecReport Analysis family) on no severity at all.
+
+- **`internal/slacondition`** parses one condition column
+  (`start_condition`/`stop_condition`/`pause_condition`/`resume_condition`/
+  `cancel_condition`) into an AST — `^NQ` splits OR'd `AndGroup`s, `^` ANDs
+  terms within a group, `^OR` ORs a run of clauses into one term — and
+  evaluates it against a `slacondition.Facts` implementation
+  (`service.caseConditionFacts`, wrapping `repository.CaseFacts`). Unknown
+  fields (the incident/escalation-only `business_service`/`category`/
+  `active_escalation.*`/`escalation_severity`/`source_table`) and the
+  space-containing `NOT IN` operator are parsed defensively — never panic,
+  an unknown clause just always evaluates false.
+- **`repository.SLAEngineRepository.GetCaseFacts`** reads a case's current
+  `state`/`priority`/`case_type`/`project_type`/`product`/
+  `cs_engineer_response_comment`/workaround-provided/fix-ETA-shared/
+  has-account/created-on fresh from Postgres (`work_item`/`"case"`/
+  `project`/`project_type`/`deployed_product`/`product`, reusing
+  `case_repo.go`'s own `caseLikeRowTypeColumn`/`caseLikeStateColumn`/
+  `caseLikeJoins`). `cs_engineer_response_comment` has no dedicated column
+  anywhere in this schema — it's a live `EXISTS` over `comment` joined to
+  `"user"` (by email) and from there to `user_role`/`role`, true when a
+  public (`type = 'COMMENT'`, never `WORK_NOTE`) comment was authored by a
+  user holding the `CS_ENGINEER_ROLE` role (`slaEngineRepo.csEngineerRole`)
+  — the same role `caseService.isSupportEngineerAuthor` checks before ever
+  completing the RESPONSE clock, so the two agree: a case never reads as
+  "already responded" from a commenter who could never actually complete
+  that clock. `CS_ENGINEER_ROLE` unset makes this always false. Previous
+  revisions derived this from the RESPONSE clock reaching `ACHIEVED`, then
+  from any `user_type = 'INTERNAL'` commenter — both were confirmed wrong
+  (a cancelled-but-never-achieved clock undercounted; any internal
+  commenter overcounted against the narrower completion check) and are no
+  longer how this works. `RegisterCaseClocks`/`ReviseCaseClocks` override
+  `CaseFacts.Severity` from their own `severity *domain.CaseSeverity`
+  parameter (a caller's in-flight value may be more current than a fresh
+  read, e.g. on the ServiceNow dual-write path); `ApplyCaseStateEffects`
+  overrides `CaseFacts.State` from its own `state` parameter the same way.
+  **`case_type` can only ever be
+  `case`/`engagement`/`service_request`/`security_report_analysis`/
+  `announcement` on this data source** — `hosting`/`hosting_query`/
+  `hosting_task` are real values in the sync job's own decoded vocabulary
+  but `work_item_type_enum` has no matching label at all, so no Postgres
+  `work_item` row can ever carry one; a policy conditioned on one of those
+  three simply never matches. By explicit product decision these three are
+  discarded outright, not a gap to close — Hosting-specific policies are no
+  longer maintained upstream. Incident vs. Query is a related but distinct
+  gap that IS closed, not structural: both decode to the identical
+  `work_item.type`, but the translator (`sn_sla_condition_translate.go`)
+  recovers the distinction from severity instead (Incident = S0-S3, Query =
+  S4, confirmed against the real policy data) — see that file's own doc
+  comment on `translateIncidentQueryCaseType`.
+- **`slaPolicyResolver.resolve(ctx, target, facts)`** (target =
+  `RESPONSE`/`WORKAROUND`/`RESOLUTION`) replaces the old severity-keyed
+  `resolve`: it lists every active candidate for that target written by the
+  external sync job (`ListCandidatePolicies`), classifies each as a genuine
+  case policy via `isCasePolicy` (an explicit `case_type` token, or any
+  other field that exists ONLY in this engine's own `CaseFacts` vocabulary —
+  `account`, `product`, `project_type`, `cs_engineer_response_comment`,
+  `u_workaround_provided`, `fix_eta_shared`, `opened_at`, `sys_created_on`
+  — as long as none of the incident/escalation-only skip markers are
+  present). **Deliberately excludes `priority`/`state`** — an earlier
+  version included them, but a code review caught that both are generic
+  field names real non-case rows also use with no skip marker present (an
+  onboarding-task `stage=1^state=4` row, a bare-priority `"IR"` incident
+  row — both in migration `0250`'s own data): either used to be
+  misclassified as a case policy purely for containing the literal
+  substring `"priority"`/`"state"`, risking a spurious match via
+  `slacondition`'s not-equal-on-absent-field semantics. `isCasePolicy` is a
+  strict inclusion check now — a policy must name a field this engine
+  knows is case-exclusive, never "priority"/"state" alone — evaluates each
+  survivor's `start_condition` against `facts`, and returns **every**
+  match, not just one: `RegisterClock`/`ReviseClocks` register one clock
+  per matching policy (see `ActiveClockPolicies`' own doc comment), since
+  the real data has cases where two distinct policies legitimately both
+  apply to the same target at once (a Hosting case's open-source-track and
+  managed-services-track resolution clocks both ran historically). An
+  earlier revision picked only the lowest-id match and silently dropped the
+  rest — found, during review, to also silently double-register two
+  functionally-identical RESPONSE policies for a security-report case
+  (`"SecReport Analysis response (1 hour)"` and `"P1 - Response (Open
+  Source)"`'s own SRA branch, confirmed against real staging data: same
+  target, same duration, same trigger) once every-match registration
+  shipped — not yet resolved; needs a decision on which of the two,
+  if either, should be retired or narrowed. Zero matches is logged and
+  treated as "no clock registered", exactly like the old design's absent
+  map entry.
+- **`RegisterCaseClocks`/`ReviseCaseClocks`** iterate all three targets
+  (`slaTargetOrder`) and resolve each independently — a clock target is
+  registered only when some real policy's `start_condition` actually
+  matches the case right now, not because a fixed severity→clock-types map
+  said it should. This is a genuine behavior change for a LOW/S4 "case"
+  (not one of the four specific WSO2-product-gated "[Cloud] P4" rows): the
+  real table has no plain RESPONSE policy for `case_type=case^priority=S4`
+  today, so such a case can register **no** clocks at all, where the old
+  design always registered at least a RESPONSE clock from its own
+  CSM-seeded fallback. This reflects the real, current policy table, not a
+  regression to patch over here.
+- **`ApplyCaseStateEffects`** no longer hardcodes a per-state
+  pause/resume/complete switch. For each of the case's three targets with a
+  currently open clock, it reads that clock's own bound policy
+  (`ActiveClockPolicy` — the policy it was actually registered against,
+  never a fresh re-resolution, so a clock never silently switches policies
+  mid-flight) and evaluates, in order: `stop_condition` (→ `CompleteClock`),
+  `cancel_condition` (→ the new `CancelClock`), `pause_condition` (→
+  `SetPaused(true)`), `resume_condition` (→ `SetPaused(false)`); neither
+  matching leaves the clock untouched. Closing a case completes every
+  still-open clock whose own `stop_condition`/`cancel_condition` evaluation
+  didn't already settle it — most real policies' `stop_condition` already
+  includes `stateINCLOSED`/`state=CLOSED` so this safety net is usually a
+  no-op in practice, but it is an explicit, unconditional CLOSED-transition
+  completion (added back after a code review flagged its absence as a real
+  risk: a clock must never be left running forever just because its
+  specific policy's `stop_condition` text didn't happen to include a
+  CLOSED-matching clause), not an inference from the condition data alone.
+  `CompleteClock`/`CancelClock` are themselves idempotent against an
+  already-settled clock, so this costs nothing extra when the
+  condition-based path already handled it. RESPONSE is still never paused,
+  same as before — not a special case here either, simply because no real
+  RESPONSE policy has a `pause_condition` at all.
+- **`internal/businessdays.Elapsed(start, end)`** is the new, from-scratch
+  business-day calendar: Monday-Friday counts in full (not an 8-5 window),
+  Saturday/Sunday never counts, day boundaries decided in `America/
+  New_York` (blank-imports `time/tzdata` so this works with no system
+  tzdata installed). Used wherever a clock's bound policy has
+  `schedule = 'WSO2 Business days'` — `sla_engine_repo.go`'s
+  `CompleteClock`/`SetPaused`/`RecomputeActive` each split into a `*Flat`
+  path (unchanged flat-SQL wall-clock math, scoped away from business-day
+  rows) and a `*BusinessDays` path (reads raw `start_on`/`paused_on`/
+  `pause_duration`/`business_pause_duration` under a row lock, computes in
+  Go, writes the result back) — deliberately in Go, not hand-rolled as a
+  second SQL formula, per explicit instruction. Each pause/resume cycle's
+  real business-day seconds are accumulated into `business_pause_duration`
+  (an existing, previously-unused `sla` column) at the moment it closes, so
+  multiple pause cycles are each measured against their own real calendar
+  span rather than approximated from a single cumulative total. **Remaining
+  display-only gap**: `sla_live` (migration `0204`/`0245`) itself still
+  computes its own `live_*` columns with flat wall-clock SQL for any
+  `IN_PROGRESS`/`BREACHED` row, business-day schedule or not — it has no
+  calendar of its own and fixing it there would mean either hand-rolling
+  this same calendar in SQL, or moving `GET /sla-status`/
+  `POST /task-slas/search`'s read path into Go. A business-day clock's raw
+  `sla_live.live_elapsed_percentage` can therefore drift briefly between
+  whatever last wrote the base `sla` row (registration, pause, resume,
+  completion) and the next one of those events — self-correcting at the
+  next write, never persisted wrong. **What IS fixed (a code review caught
+  this as a real, user-visible bug, not just a display nuance)**: both
+  readers of that raw figure now correct it in Go before it ever reaches a
+  caller, for a still-live (`IN_PROGRESS`/`BREACHED`) row bound to a
+  `'WSO2 Business days'` policy — `SLAStatusRepository.GetClockState`
+  (single-clock detail) did this from the start; `SearchActiveSLAStatuses`
+  (bulk `GET /sla-status`, the CSM Portal table view) did not, so the exact
+  same clock showed two different percentages in the two views. Both now
+  call the same shared `businessDayElapsedSnapshot` helper
+  (`sla_engine_repo.go`) for a live business-day row and leave every other
+  row (24x7, or `PAUSED`/terminal regardless of schedule) reading
+  `sla_live`'s own value unchanged, since those are already correct.
+- **This engine's own clocks are tagged `source='CSM'`** (migration `0134`'s
+  enum) — this is migration `0134`'s own original intent, unchanged:
+  `'CSM'` rows are exclusively owned by this in-process engine, `'SERVICENOW'`
+  rows are exclusively owned by the external sync job that populates
+  `sla_policy`/`sla` (a separate, continuously-running process sharing this
+  database — not this repo), and the two never share a row. `'SERVICENOW'`
+  must never be used for an engine-managed clock: doing so would let this
+  engine's writes collide with that sync job's rows for the same
+  `(work_item_id, target)` pair on a dual-write-mode case, each silently
+  overwriting state the other owns. See `repository.SLAEngineRepository`'s
+  own doc comment for the full reasoning. Every `GetClockState`/
+  `SearchActiveSLAStatuses` caller that wants only this engine's own clocks
+  (not just the bulk listing — `GetClockState`'s own single-clock lookup
+  matters just as much, since `csm-notification-service`'s pre-alert check
+  reads through it) must pass `source=csm` explicitly. `sla_engine_repo.go`
+  is the only code path in this repo that writes to the `sla` table, under
+  every `DATA_SOURCE` mode — the external sync job is the only other writer,
+  and it is outside this repo entirely.
+- **Raw, vendor-encoded condition text is translated at evaluation time, not
+  pre-decoded by a migration.** `sla_policy` is written by the external sync
+  job on a recurring schedule, mapping its own `start`/`stop`/`pause`/
+  `resume`/`cancel_condition` text verbatim on every delta sync and full
+  backfill — a one-time data migration that rewrites the stored text into
+  readable form would be silently reverted the next time that job runs.
+  `service.translateSLACondition` (`sn_sla_condition_translate.go`, the one
+  adapter file in this package that names the previous system) instead
+  converts a policy's raw condition text — sys_ids, `u_`-prefixed field
+  names, numeric state/priority codes, the trailing `EQ` terminator — into
+  `internal/slacondition`'s own neutral predicate vocabulary on every read,
+  gated on `SLAPolicyRef.Source == "SERVICENOW"` (any other source is
+  assumed already-neutral and parsed as-is, so a future admin-authored
+  policy per the SLA admin-configuration work is never translated). The
+  case_type/product/project_type sys_id maps are hand-maintained Go tables,
+  same convention as `sn_case_service.go`'s own `snCaseTypeSysidMap` — a
+  value added upstream with no entry here fails closed (never matches), not
+  silently. `slacondition.Condition.UnknownClauses()` is logged as a WARN
+  whenever a translated condition still contains an unrecognized clause, so
+  a translation gap is visible rather than a silent, permanent "never
+  matches."
+- **A target can resolve to more than one applicable policy at once, and
+  every one gets its own, independent clock** —
+  `slaPolicyResolver.resolve` returns every match, not just one;
+  `RegisterClock`'s own uniqueness guard is scoped to `(work_item, target,
+  sla_policy_id)`, not just `(work_item, target)`, so two distinct policies
+  of the same target never block each other's registration.
+  `ActiveClockPolicies` (plural) returns every currently open clock's bound
+  policy for a target, and `ApplyCaseStateEffects` evaluates each one
+  independently against its own condition columns via
+  `CompleteClockByPolicy`/`CancelClockByPolicy`/`SetPausedByPolicy` — a
+  per-policy-scoped sibling of `CompleteClock`/`CancelClock`/`SetPaused`,
+  which stay as bulk, policy-agnostic operations for the callers that
+  genuinely mean "every open clock of this type" (a qualifying comment, a
+  workaround provided, a fix ETA shared). `CompleteClock`/`SetPaused`'s bulk
+  form runs both the flat and business-day branches and combines their
+  results (not "first branch to report a hit wins") for exactly this
+  reason: two simultaneously-open policies of the same target can be on
+  different schedules.
+  `ApplyCaseStateEffects`'s own re-registration pass (below) skips a policy
+  whose `cancel_condition` or `stop_condition` already holds against the
+  case's current facts — registering a clock only to have the very next
+  pass cancel or complete it at ~0% elapsed produced junk terminal rows
+  with no real tracking value.
+- **Known, accepted limitation: a read of one target returns only one row,
+  even when two policies are simultaneously open on it.**
+  `GetClockState`/`SearchActiveSLAStatuses`/the Redis clock
+  `csm-notification-service` keeps are all keyed by `(work_item, target)`,
+  not by clock id or policy — `GetClockState` deliberately has no stage
+  filter at all (it must surface a terminal row to let a caller distinguish
+  "cleanly resolved" from "never registered", a CodeRabbit-caught bug from
+  an earlier round — do not add one), so the two reads pick different rows
+  by different rules (`SearchActiveSLAStatuses` already excludes terminal
+  rows via `is_active`; `GetClockState` does not). The real fix is keying
+  the read and the Redis clock by policy, not target; deliberately out of
+  scope while this is rare in practice.
+- **`retroactive`/`when_to_cancel`/`when_to_resume` are read from
+  `sla_policy` and change registration/cancellation/resume behavior**,
+  not just display (`task_sla_repo.go` already read them for display only).
+  `SLAPolicyRef.Retroactive`: a newly registered clock starts backdated to
+  the case's own creation instant instead of `NOW()` — real policies set
+  this on every P1-P3 response definition. `WhenToCancel`:
+  `"START_CONDITIONS_ARE_NOT_MET"` (used by every policy whose own
+  `cancel_condition` is empty) cancels once the policy's own
+  `start_condition` stops matching, instead of never cancelling at all;
+  `"NEVER"` never cancels via this mechanism; the default,
+  `"CANCEL_CONDITIONS_ARE_MET"`, is the original condition-only behavior.
+  `WhenToResume`: `"PAUSE_CONDITIONS_ARE_NOT_MET"` resumes a paused clock
+  once its own `pause_condition` stops matching, for policies that carry no
+  separate `resume_condition` at all; the default,
+  `"RESUME_CONDITIONS_ARE_MET"`, is the original behavior. `ApplyCaseStateEffects`
+  also re-resolves and attempts registration of every policy newly
+  applicable to the case's current facts on every call, not just at case
+  creation and severity change — `RegisterClock`'s own per-policy
+  uniqueness guard makes this a no-op for a policy already registered, so a
+  `start_condition` that only becomes true later in a case's lifecycle is
+  now picked up on the next state-changing update.
+  **Known, accepted simplification: `Retroactive` always backdates to case
+  CREATION, regardless of which call site registers the clock** — correct
+  for a policy registered at creation (every real P1/managed-services
+  retroactive definition), an approximation for one that only becomes
+  applicable LATER (e.g. a severity change into P2/P3 via this same
+  re-registration pass), which upstream anchors to the triggering update
+  instead — `sla_policy` has no column distinguishing the two anchors. See
+  `registerCaseSLAClockStartOn`'s own doc comment.
+- **"Already responded" is derived live from whether an INTERNAL-type user
+  authored a public comment on the case, not from the response clock's own
+  stage.** The response clock can be `CANCELLED` by a severity revision
+  without ever reaching `ACHIEVED`, or never exist at all (an S0/S4 case has
+  no response policy) — deriving "already responded" from the clock's own
+  history meant a case genuinely already answered could still read as
+  unanswered, letting a later severity change start a brand-new response
+  clock on a case an engineer had already replied to. `GetCaseFacts`'s
+  `CSEngineerResponseComment` is an `EXISTS` over `comment` joined to
+  `"user"` by email (`cm.type = 'COMMENT'`, never `WORK_NOTE`, AND
+  `u.user_type = 'INTERNAL'` — the real, role-membership-derived column this
+  schema already keeps for this distinction), computed fresh on every read:
+  no stored column, no backfill needed, and it already reflects every reply
+  ever made, including ones posted before this engine existed.
+- **Business-day `stage`/`has_breached` are corrected consistently with the
+  already-corrected elapsed percentage, in every read path** —
+  `businessDayCorrectedLiveState` (`sla_engine_repo.go`) is the one shared
+  helper `GetClockState`, `SearchActiveSLAStatuses`, and
+  `TaskSlaRepository`'s both read paths (`SearchTaskSlas`/`GetTaskSla`, the
+  `POST /task-slas/search` case-detail SLA tab — previously missed
+  entirely) all call for a live (`IN_PROGRESS`/`BREACHED`), 'WSO2 Business
+  days'-scheduled row. Before this, only the elapsed *percentage* was
+  corrected in some of these paths; `stage`/`has_breached` still came from
+  `sla_live`'s own flat-wall-clock computation, so a clock could report
+  `BREACHED` with a corrected percentage well under 100 in the same
+  response.
+- **`RecomputeActive` was removed, not wired to a periodic worker** — see
+  "CSM-native SLA clock engine" below for why a background recompute worker
+  was already removed once before. `sla_live` (migration `0204`/`0245`)
+  already computes `stage`/`has_breached`/the elapsed figures live, at read
+  time, purely from the stored row's own instants — a periodic Go-side
+  recompute of the same formula had no observable effect reads didn't
+  already get from the view, and its own flat-wall-clock math ignored
+  `pause_duration` entirely (a real bug: a paused clock would be marked
+  breached early). Correctness for every LIVE read now goes through
+  `sla_live` plus `businessDayCorrectedLiveState` above — there is no
+  separate persisted "recomputed" state to keep in sync for a row that's
+  still running. `has_breached` on a row that STOPS running (completion,
+  cancellation) is a different concern and IS still written explicitly, at
+  the moment it happens: `completeClockFlat`/`completeClockBusinessDays` set
+  it from the same pause-aware elapsed-vs-duration comparison they already
+  use for the percentage, and `ReviseClocks`' cancellation does the same
+  (split flat/business-day the same way completion is, since a bulk SQL
+  statement can't express a business-day calendar) — without this, a clock
+  that ran out the wall clock without a periodic sweep ever marking it
+  `BREACHED` first would complete or cancel with `has_breached` silently
+  left at its stale prior value.
+- **Incident vs. Query is resolved by severity, not by case_type — the two
+  underlying case_type sys_ids both map to the identical `work_item.type`
+  ('CASE'), and Postgres carries nothing else that could ever tell them
+  apart.** Confirmed directly: Incident is case severity S0-S3, Query is S4
+  (`case_severity_enum` has exactly five values — "not S4" and "S4" are
+  complete, non-overlapping characterizations of the two).
+  `translateIncidentQueryCaseType` (`sn_sla_condition_translate.go`) swaps a
+  `case_type=<Incident/Query sys_id>` clause's FIELD to `priority`
+  (`!=S4`/`=S4` respectively) rather than translating its value the way
+  every other `case_type` sys_id does — case_type alone has no value that
+  could carry this distinction. Not applied inside an `IN`/`NOT IN` list
+  (confirmed absent from every real, active case-policy row).
+- **Hosting/Hosting Query/Hosting Task are discarded by explicit product
+  decision — won't be maintained.** Their sys_ids are deliberately NOT in
+  `slaCaseTypeSysIDs`, so a clause naming one falls through to the generic
+  "no translation known" path and stays raw, untranslated text: a real,
+  decoded `CaseType` value can never equal a raw sys_id, so every policy
+  gated on one of these three types is permanently inert (a positive clause
+  always false, a negated one vacuously true) — achieved with no
+  special-case code, not a bug to fix. The Admin Task sys_id
+  (`slaAdminTaskCaseTypeSysID`) is the same: never covered by
+  `snCaseTypeSysidMap` from the start, and confirmed with the team that
+  Admin Task cases are no longer created at all, so it stays unmapped too.
+- **A second, known, accepted limitation: the business-day schedule is
+  matched on `sla_policy.schedule`'s literal display name** (`"WSO2 Business
+  days"`), not a schedule id or a separate calendar table — confirmed, no
+  such column exists in the live schema. A schedule renamed upstream, or a
+  second business-day calendar ever introduced, silently falls back to flat
+  24x7 time (the resolver logs a WARN for an unrecognized schedule name).
+  Revisit once the SLA admin-configuration work gives calendars a real,
+  stable identifier to key on instead.
+- **Clock registration/revision runs BEFORE the matching `case.*` event
+  publish, in every call site that does both — this order is load-bearing.**
+  `csm-notification-service`'s own `RegisterClocks`/`ApplyStateEffects`
+  handlers react to `case.created`/`case.status_changed`/
+  `case.severity_changed` by reading the clock straight back from
+  entity-service (`GetClockState`), with only a short, bounded retry for
+  "not found yet" — publishing first can let that read race ahead of this
+  service's own write, and the retry doesn't cover "found, but reflecting
+  the pre-transition state" at all. `sn_case_service.go`'s `CreateCase`/
+  `UpdateCase` and `case_service.go`'s `createCasePostgres`/
+  `createCaseSNFirst`/`UpdateCase` (the severity-changed branch) all register
+  or revise clocks (and, for a state change, apply SLA effects) before
+  calling their own `publishCaseCreated`/`publishStatusChanged`/
+  `publishSeverityChanged`.
+
+### CSM-native SLA clock engine (historical — the resolution mechanism below no longer exists)
 
 `internal/service/sla_engine_service.go` (`SLAEngineService`) is what actually
 keeps the `sla` table populated for a case-like work item this deployment
-creates itself — real, durable `source='CSM'` rows, not a value ServiceNow's
+creates itself — real, durable rows, not a value ServiceNow's
 own sync computes. This exists specifically for the dual-write pilot (and,
 in principle, any future pure-Postgres mode): a case created there has no
 ServiceNow-synced `sla` row of its own to read `GET /sla-status` from, so
 without this engine it would simply never get SLA tracking at all,
 regardless of severity.
 
-- **Durations come from deterministic, severity-keyed `sla_policy` rows this
-  engine seeds itself** (`internal/service/sla_policy_resolver.go`,
-  migration `0203_csm_sla_policy_by_severity.sql`) — not the real,
-  ServiceNow-synced `sla_policy` rows, and not a hardcoded map (the
+- **(Historical.) Durations used to come from deterministic, severity-keyed
+  `sla_policy` rows this engine seeded itself** (migration
+  `0203_csm_sla_policy_by_severity.sql`, deleted by migration `0259`) — not
+  the real, ServiceNow-synced `sla_policy` rows, and not a hardcoded map (the
   now-deleted `sla_clocks` design's old approach — see "SLA status" above for
   that history). An earlier version of this resolver looked up the real
   synced rows by a guessed exact name (`"<P0-P3|Query> - <Response|
@@ -2269,18 +2769,29 @@ regardless of severity.
   this is why a real SLA breach alert (fired correctly by
   `csm-notification-service`'s own Redis engine) never showed up in the CSM
   Portal UI (`GET /sla-status` reads this table) for a LOW/S4 case. Migration
-  0203 seeds one `source='CSM'` row per `(severity, clock_type)` pair
+  0203 seeded one `source='CSM'` row per `(severity, clock_type)` pair
   `sla_duration_policy` (migration 0192) already defines, named
   deterministically (`"<severity> - <target> (CSM)"`, e.g.
   `"S4 - RESPONSE (CSM)"`) and with durations copied straight from that same
-  table — `resolve` now does a single exact-name lookup keyed on severity
-  alone, which can never miss, and the two SLA engines (this one, and
-  `csm-notification-service`'s own Redis-based tracker, which has always read
-  `sla_duration_policy` directly) can never disagree on a duration. This
-  supersedes migration `0136_csm_p0_sla_policies.sql`'s narrower precedent
-  (CSM rows for P0/Catastrophic only, under the old naming convention) —
-  0136's own rows are left in place (harmless, unreferenced) rather than
-  dropped.
+  table — `resolve` did a single exact-name lookup keyed on severity
+  alone. This superseded migration `0136_csm_p0_sla_policies.sql`'s narrower
+  precedent (CSM rows for P0/Catastrophic only, under the old naming
+  convention) — 0136's own rows are left in place (harmless, unreferenced)
+  rather than dropped, same as 0203's.
+- **`recomputeActiveBusinessDays`'s per-row `UPDATE` is stage-guarded,
+  matching its flat-path sibling.** It reads candidate rows via a `SELECT`,
+  computes each one's new figures in Go (the business-day math can't be
+  inlined into the single `UPDATE ... FROM` the flat path uses), then
+  writes each one back — two separate statements, unlike the flat path's
+  one atomic `UPDATE`. A code review caught that the `UPDATE`'s own `WHERE`
+  only matched the row's `id`, with no re-check of `stage`: a
+  `CompleteClock`/`SetPaused`/`CancelClock` landing in the window between
+  this method's `SELECT` and its own later `UPDATE` would get silently
+  reverted back to `IN_PROGRESS`/`BREACHED` by this method's stale,
+  pre-computed values. Fixed by adding `AND stage IN ('IN_PROGRESS',
+  'BREACHED')` to the `UPDATE`'s own `WHERE` — the same two values the
+  `SELECT` already scoped to — so a concurrent terminal write in that
+  window is never clobbered; the update simply matches zero rows instead.
 - **`internal/repository/sla_engine_repo.go`'s `RecomputeActive`** computes
   the same flat wall-clock formula it always has (`(NOW() - start_on) /
   duration * 100`, no business-hours calendar, same crudeness the old
@@ -2298,10 +2809,12 @@ regardless of severity.
   of `sla`'s own stored ones for an `IN_PROGRESS`/`BREACHED` row; a
   `PAUSED`/`COMPLETED`/`ACHIEVED`/`CANCELLED` row is already frozen at
   whatever `SetPaused`/`CompleteClock` last wrote and the view simply passes
-  those columns through unchanged. `RecomputeActive` itself is untouched and
-  still exported on `SLAEngineRepository` — currently unreferenced by any
-  production code path, kept rather than deleted in case a future admin
-  "force recompute" tool ever wants it.
+  those columns through unchanged. `RecomputeActive` itself was later removed
+  from `SLAEngineRepository` entirely (see "Real, condition-driven SLA clock
+  engine" above) — it was never referenced by any production code path, and
+  `sla_live` plus the business-day correction helper already give every
+  reader the correct, live figures with no separate recomputed state to
+  keep in sync.
 - **A BREACHED clock is not terminal — it keeps being recomputed, and stays
   completable, until its own genuine finishing event.** A real, reported bug
   had `RecomputeActive` stop touching a row the instant it first flipped to
@@ -2811,11 +3324,12 @@ already use — no route path, request, or response shape changed.
   Every comment type counts, work notes included, as in ServiceNow.
   Limits, each on purpose:
   - **Case-like work items only** (`caseLikeWorkItemTypes`; for `CreateComment`
-    the reference must be `case`). A change request's `updated_by` is the record
-    of who proposed a time (see "A customer's proposed time" below), so a comment
-    must never replace it; a conversation's `updated_on` is what its "resolved in
-    the last 30 days" count reads; an incident's `updated_by` is the last updater
-    its events report. Comments on those keep exactly the behaviour they had.
+    the reference must be `case`). A change request's `updated_by` names who
+    proposed a time stored before migration 0249 (the legacy rule, see "A customer's
+    proposed time" below; since migration 0250 a write that replaces it records that
+    proposer first); a conversation's `updated_on` is what its "resolved in the last
+    30 days" count reads; an incident's `updated_by` is the last updater its events
+    report. Comments on those keep exactly the behaviour they had.
   - **A live comment only.** A comment carrying its own past `createdOn` is
     ServiceNow history being mirrored in at dual-write case creation
     (`mirrorInitialSNComments`), not something happening now, so it does not move
@@ -3655,6 +4169,151 @@ has neither column, so a hold on one is a 400, never a silent no-op.
   it receives: the case's sysid, only `autocloseHoldUntil` as a date, the caller's
   token forwarded.
 
+## Case auto-closure (reminders and automatic closure)
+
+Tickets that sit in **Awaiting Info** or **Solution Proposed** with no activity are reminded twice and
+then closed. This is native to this service (Postgres only): nothing in it reads or writes ServiceNow,
+and it replaces ServiceNow's "Auto Close Resolved Cases" flow rather than mirroring it. It is switched on by the scheduler (`AUTOCLOSURE_ENABLED`); `AUTOCLOSURE_SYSTEM_USER_EMAIL` is **optional**. It needs a Postgres data source (`postgres` or `postgres-servicenow-dual-write`, where the case writes are mirrored to ServiceNow like any other). The two routes are always registered; where the feature cannot run (`DATA_SOURCE=servicenow`) they answer an explicit `503` naming the reason, so an enabled scheduler fails with that sentence in its alert instead of a bare 404. See "Dual-write rollout" below. It is driven
+by `operations/csm-scheduled-tasks`'s `case_autoclosure` task (see that component's CLAUDE.md).
+
+| Env var | Meaning |
+|---|---|
+| `AUTOCLOSURE_SYSTEM_USER_EMAIL` | Optional. The `"user"` row (type `SYSTEM`) the reminder and closure comments are written as and `closed_by` is stamped with. **Empty (the normal case): the workflow acts as the system itself, shown as "System user"**: comments are authored "System user", the activity entry and the Pending Verification card's "Added by" say "System user", and `closed_by_user_id` stays empty (no user row exists to point at) |
+
+**Who is eligible** (one SQL predicate, `autoclosureBaseCTE` + `autoclosureNoOpenChild` in
+`autoclosure_repo.go`, used by both the listing and the per-ticket re-check): a `"case"` (Query and
+Incident are both a `"case"`) or a `security_report_analysis` in `AWAITING_INFO` / `SOLUTION_PROPOSED`,
+with `autoclose_enabled` (migration 0249, default true), **no parent** (a child never has a workflow of
+its own), and **no open child** (case-like children not closed; change-request children not
+closed/canceled/rolled back). Who created the ticket does not matter, only its state. Engagements,
+service requests and announcements take no part.
+
+**The workflow position** is the existing `autoclosure_step` / `autoclosure_state_on` columns
+(migrations 0023/0024; the sync used to fill them, so existing `FIRST_COMMENT` / `SECOND_COMMENT` /
+`ON_HOLD` values simply continue). Stages, each one ticket and one step per run:
+
+| Stage | Due when | Does |
+|---|---|---|
+| `release_hold` | step `ON_HOLD` and the held day is over | step `DEFAULT`, clock = now. Nothing posted |
+| `first_reminder` | step none/`DEFAULT`, interval elapsed since the reference time | comment, step `FIRST_COMMENT`, clock = now |
+| `second_reminder` | step `FIRST_COMMENT`, interval since the clock | comment, step `SECOND_COMMENT`, clock = now |
+| `close` | step `SECOND_COMMENT`, interval since the clock | close, then closure comment |
+
+The interval is **7 calendar days** for each stage (`intervalDays`; the support desk runs 24/7/365, so
+business days are deliberately not modelled).
+
+**First-reminder reference time.** Solution Proposed: the later of `resolved_on` and the activity entry
+for entering the state. Awaiting Info: the later of the last **customer-visible comment by an INTERNAL user**
+(never a work note, never the system user's own reminders, never a customer) and entering the state. A
+ticket whose step is `DEFAULT` also waits the interval from the reset, so a ticket coming back from a hold
+or from the customer gets a fresh clock rather than an instant reminder. Fallback: `work_item.updated_on`.
+
+**Hold** keeps the existing contract (`PATCH autocloseHoldUntil`, "Auto-closure hold" above): step `ON_HOLD`
+with the last protected UTC day in `autoclosure_state_on`. A hold suspends **everything** (no reminders,
+no closure): `ON_HOLD` matches no stage. It ends when that day is over (`state_on + 1 day <= now`); the
+ticket then restarts at `DEFAULT` with a fresh clock, so a ticket that was overdue during the hold is
+**not** reminded the moment the hold ends.
+
+**Reset trigger** (`autoclosure_reset`, migration 0249, `BEFORE UPDATE OF state` on `"case"` and
+`security_report_analysis`): on **any** change of state, a parent ticket restarts the workflow (step `DEFAULT`,
+clock = now) when the new state is `WAITING_ON_WSO2` or `REOPENED`, or is `AWAITING_INFO` / `SOLUTION_PROPOSED`
+(entering a waiting state from anywhere, Work in Progress included, is a new request to the customer and must not
+inherit an old clock). **One exception: a ticket on hold keeps its hold when it enters Awaiting Info or Solution
+Proposed** (the customer asked for it not to be closed; swapping between the two waiting states does not cancel
+that); Waiting on WSO2 and Reopened, which a customer reply causes, still end a hold. A trigger so every writer
+(portal, API, sync) restarts the workflow identically. A customer reply moves a waiting ticket to Waiting on WSO2
+through the existing customer-reply rule, which fires it.
+
+**Routes** (internal callers only, `internalOnly`): `POST /autoclosure/candidates` lists what is due, oldest
+reference time first, optionally capped by `dailyLimit`; `POST /autoclosure/cases/{id}/advance` performs one
+stage on one ticket.
+
+**`Advance` is idempotent and race-safe**: it re-runs the listing predicate for that one ticket (a stale
+list is harmless), then **claims** the step with a compare-and-set on `(step, state_on, state)`
+(`ClaimStep`); a run that loses the claim posts nothing. Only then does it act. If the action fails the
+claim is restored (`RestoreStep`) so the next run retries, rather than leaving a ticket marked reminded that
+never was. Every outcome writes a `case_autoclosure_event` audit row.
+
+**Closing.** The close goes through the ordinary `caseService.UpdateCase`, as the system user, so events,
+SLA effects, the activity entry and `closed_by_user_id`/`closed_on` are exactly those of a manual close.
+Awaiting Info tickets get resolution code `ABRUPTLY_CLOSED_DUE_TO_NON_RESPONSIVENESS_THROUGH_AUTO_CLOSURE` (which
+keeps them out of the KB process); Solution Proposed tickets keep the resolution they were proposed with and
+never get that code. `close_notes` is the closure comment. The closure comment is written **after** the
+close (a comment first and a refused close would leave "this case is closed" on a case that is not); a
+failure of just the comment is logged and does not undo the close. A refused close (for example an open
+child appeared since the listing) is rolled back and retried next run.
+
+**Pending Verification.** A case the workflow closes is queued for the customer's own verification (the
+Pending Verification feature: `pending_verification`, reason `AUTO_CLOSED`, `previous_status` = the state it was
+closed from), so a case closed for inactivity does not silently disappear from their view. `queueForVerification`
+runs after the close and never fails it. It follows the rules `pendingVerificationService.CreatePendingVerification`
+enforces, but writes through `PendingVerificationRepository` as the system user, because that service needs an
+end-user token for "added by" and the workflow has none (this closes the "no machine-to-machine path" gap noted
+for that feature):
+- **Cases only**: a security report analysis is closed but never queued.
+- The project must have `verification_enabled` on; otherwise nothing is queued, quietly.
+- One unverified entry per case: an existing entry (`ConflictError`) counts as done.
+- Wired in `routes.go` with `WithPendingVerificationQueue`; without it (no feature) the close is unchanged.
+- The audit row's `detail` says "queued for customer verification" (or why not, when something failed).
+- **"Added by" is the system user's display name** (the `user.name`, e.g. "Support Team (auto-closure)"), not its email: the customer portal prints the stored value as it is. It falls back to the email if the name cannot be read.
+- **A short `note`** explains the close on the customer's card ("Automatically closed: no response to our request for information after two reminders." / "...to the proposed solution after two reminders.").
+
+**The one transition exemption.** No staff table lists Awaiting Info -> Closed (staff go through Waiting on
+WSO2). `UpdateCase` allows it only when the context carries `withAutoclosureActor` (`autoclosure_context.go`),
+which is unexported and set only by the workflow, and only for a close out of those two waiting states; it also
+attributes the close to the system user. No HTTP request can ask for it.
+
+**Daily limit.** `dailyLimit` is per UTC day across `first_reminder`, `second_reminder` and `close` (hold
+releases send nothing and are exempt). What the audit table says today's `ADVANCED` events already are is
+subtracted, so the three stages share one budget and a run the engine retries the same day cannot exceed it.
+Oldest-first ordering means a backlog never starves the longest-waiting ticket. The limit is applied when
+listing **and again in `Advance`, right before the claim** (`AutoclosureAdvanceRequest.DailyLimit`), so two
+overlapping runs cannot both spend the same remaining budget. Residual: a ticket already in flight in each
+concurrent run when the budget runs out can still complete, so the overshoot is at most one ticket per concurrent run.
+
+**Dry run.** `AutoclosureAdvanceRequest.DryRun` runs the whole decision (still due? within the limit?), records a
+`DRY_RUN` audit row and answers outcome `dry_run`; it posts nothing, claims nothing, closes nothing and queues
+nothing. `DRY_RUN` rows are not counted by the daily limit. The scheduled task sets it from `AUTOCLOSURE_DRY_RUN`
+and forces it for a `TRYOUT_TASK` of this task. A dry run claims nothing, so it can only preview what is due *now* (first reminders for tickets at `DEFAULT`, and later stages only for tickets already carrying a step); a clean dry run on a fresh backlog is therefore **not** sign-off on the close stage.
+
+**A ticket that keeps failing is left out for a while.** A ticket with 3 `FAILED` events for the same stage in the
+last 7 days (`autoclosureMaxFailures`, `autoclosureFailureWindowDays`) is dropped from the listing and the
+per-ticket re-check, so one permanently bad ticket (a refused close, for example) does not raise the same alert on
+every run. `FAILED` is the default: an error nobody has classified (a constraint violation, a wrapped internal error) repeats every run and must end up quarantined. Only errors that say nothing about the ticket are `FAILED_TRANSIENT`, which the cap ignores (a cancelled request or deadline, an unavailable dependency, a network or dropped-connection error, a database connection / resource / shutdown error), so a short outage cannot hide healthy tickets for a week. The listing returns the count it left out as `quarantined` (the scheduled task reports it in its run summary) and logs it. The rows age out of the window by themselves.
+
+**Failure and crash handling.** A step is claimed before the action. If the action fails, or the request is
+cancelled or times out, the claim is restored and the audit row written on a **detached context with its own 15 s
+bound** (`cleanupContext`), so a client that gave up cannot leave the ticket marked reminded with no comment. The one
+window this cannot close is a hard process kill between the claim and the comment: the ticket is then marked
+reminded without having been. It is rare, visible in the audit table (no `ADVANCED` row for the new step), and a
+sweep that re-opens such tickets is the follow-up if it is ever seen.
+
+**Data source and the ServiceNow mirror.** The workflow acts through the deployment's normal case service (`activeCaseSvc`), so its comments, state change and close follow the data source like every other case write: Postgres only on `DATA_SOURCE=postgres`; on `postgres-servicenow-dual-write`, Postgres first with the asynchronous, best-effort ServiceNow mirror (a failed mirror is recorded in `sn_writeback_failures` for replay and never fails or repeats a stage). Its own position (`autoclosure_step` / `autoclosure_state_on`) and the audit table are Postgres-only: ServiceNow has no field that mirror accepts for them. Verified by `TestAutoclosureIntegration_DualWrite*` (dual-write case service wired in):
+- A close carries `resolutionCode`, `cause` (Unknown when the ticket has none) and `closeNotes`, which the dual-write validation requires of an internal caller; a Solution Proposed ticket with no stored resolution code is refused by it (`FAILED`, quarantined after 3).
+- The mirrored close and comments reach ServiceNow as the integration's own M2M user (the scheduled task has no user token), not as the system user; the Postgres rows carry the system user.
+- A failing mirror neither fails the stage nor lets it repeat: the retry is `skipped`.
+- Dry run never reaches the case service, so it is honoured in this mode.
+Needs a decision from the team before enabling under dual-write (not verifiable from this repository): how ServiceNow's own auto-close flow is switched off per state, so both do not act on one ticket (suggest Solution Proposed first); whether ServiceNow accepts the mirrored Awaiting Info -> Closed move (a refusal lands in `sn_writeback_failures`, Postgres stays closed); and whether csm-sync-service writes `u_autoclosure_step` / `u_autoclosure_state_time` back over a claimed step.
+
+**Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
+`first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
+scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+
+**Decisions worth knowing.**
+- A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
+  for the next stage until a full interval has passed.
+- Child tickets are never reminded or closed by the workflow, even one carrying a stale step.
+- A non-closed child blocks every stage, re-checked on every advance and again by `UpdateCase` itself.
+- `autoclose_enabled` has no UI yet; set it in SQL to exclude a ticket.
+- Migration 0249 is idempotent (re-runnable). Upstream numbering moves fast: re-check it is still the next free number against the target branch before merging.
+
+Run the two database test packages one at a time (`go test -p 1 ./internal/repository/ ./internal/service/ -run Autoclosure`): the daily-limit audit count is database-wide and the service tests write audit rows too.
+
+Tests: `autoclosure_repo_integration_test.go` (repository: selection matrix, claim exclusivity, reset trigger,
+audit count; `CASE_STATS_TEST_DSN`), `autoclosure_integration_test.go` (service end to end over the real case
+service, lifecycle through to the closed row; `ENTITY_TEST_DATABASE_URL`; run as `csm_app` so row-level
+security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.go` (units).
+
 ## Change requests
 
 Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.
@@ -3718,6 +4377,57 @@ change-request-specific was added beyond the field on the read model:
   filters `table=sn_customerservice_case`, so change request labels of the
   previous system are not migrated today; widening that filter (and the
   `work_item_id` resolution) to `change_request` is what it would take.
+
+### PATCH: what a null does, a service-only request, priority, and what is mirrored
+
+- **An explicit null clears** `implementationPlan`, `priority`, `category`,
+  `requestedById`, `affectedServicesText`, `affectedComponentsText` and
+  `rollbackDurationText`, and counts as a field on its own
+  (`{"implementationPlan": null}` alone is a PATCH).
+  `PatchChangeRequestRequest.UnmarshalJSON` (`domain/change_request_patch_json.go`,
+  the approach `PatchOutageRequest` takes) turns such a null into a non-nil outer
+  pointer holding nil, which the repository writes as NULL and the data source
+  that talks to the previous system directly forwards as null (`encoding/json`
+  alone reads a null as an omitted field). A null `durationInput` takes the same
+  shape: that data source forwards it, and the PostgreSQL data sources refuse it
+  like any `durationInput`. `customerGroupId: null` and `environmentIds: null` are
+  refused like any other value of those fields. On every other field a null is
+  read as omitted: it changes nothing and does not count as a field (a list is
+  cleared with an empty array, `deploymentIds: []`). The decoder keeps
+  `DisallowUnknownFields` itself (a custom `UnmarshalJSON` does not inherit the
+  outer decoder's setting) and refuses a body that names one of the ten fields
+  above twice with different capitalisation. The tags carry `omitempty`, so the
+  marshalled request in a write-back failure record leaves omitted fields out and
+  keeps an explicit null as null.
+- **`serviceId` / `serviceOfferingId` count as fields**: a PATCH that only sets
+  the service is a PATCH.
+- **`priority`** must be critical, high, moderate or low, on PATCH and on create
+  (`validateChangeRequestPriority` in `change_request_service.go`, before the
+  repository is called): anything else is a 400 "priority must be one of
+  critical, high, moderate or low". `planning` is refused too, although
+  `change_request_priority_enum` holds it (migration 0100) and a migrated change
+  request reads it back as "planning". Create checks `impact` and `risk` the same
+  way (`validateCreateChangeRequestLevels`: "impact must be one of high, medium or
+  low", "risk must be one of high, moderate or low"), on both create paths, before
+  anything is written and before the previous system is called.
+- **Not mirrored**: `onHold`, `onHoldReason`, `serviceId`, `serviceOfferingId`.
+  The previous system's PATCH has no field for them, so the dual-write service
+  strips them from the mirror, as it strips `implementationDeviation`, and a PATCH
+  that carries nothing else is not dispatched (no write-back failure is
+  recorded). The data source that talks to the previous system directly
+  (`DATA_SOURCE=servicenow`) refuses a PATCH that carries any of them with a 400
+  naming them, whatever else it carries (`snUnforwardedChangeRequestPatchFields`).
+- Tests: `domain/change_request_patch_json_test.go`;
+  `handler/change_request_patch_decode_test.go` and
+  `handler/change_request_create_decode_test.go` (real JSON through the handler
+  and the service, both create paths); `handler/change_request_patch_integration_test.go`
+  (`CHANGE_REQUEST_TEST_DSN`: PATCH and both creates against PostgreSQL);
+  `service/change_request_service_mirror_test.go` (the real previous-system
+  adapter as the mirror); `service/sn_change_request_service_test.go` (the
+  refusal of the data source that talks to the previous system directly). A test
+  that a PATCH is not mirrored sends a mirrored sentinel PATCH after it and waits
+  for that: the write-back dispatcher runs one change request's writes one at a
+  time, in dispatch order.
 
 ### The approval tables are the sync layer's (state, not status)
 
@@ -3843,9 +4553,12 @@ offered states are filtered the same way).
   Re-schedule) / `rollback` (outside the review states) / `assess` (not New) / `new` keep the
   refusal of their own -- **also when the change is already in that state** (a resent
   `{state: scheduled}` is still a 400: staff never name it; the other resends -- `new`, `assess`,
-  `implement`, `review`, `customer_review`, `closed`, `canceled` -- are accepted no-ops). The
-  requested state is **trimmed and read case-insensitively** (`" IMPLEMENT "` is `implement`);
-  a value that is not a state is a 400 `state "X" is not a change request state`.
+  `implement`, `review`, `customer_review`, `closed`, `canceled` -- are accepted no-ops). Through
+  the API the requested state must be the exact lower-case value: `changeRequestService.PatchChangeRequest`
+  refuses anything else (`" IMPLEMENT "` included) with a 400 `state contains invalid value: X`
+  before the repository runs. The repository itself trims and folds case (`" IMPLEMENT "` is
+  `implement` there, and a value that is not a state is a 400 `state "X" is not a change request
+  state`), which only a caller inside the service, such as the repository tests, reaches.
   **`legalNextStates` of Assess no longer lists `authorize`**: the PATCH always refused
   Assess -> Authorize (only the peer approval takes it), so the portal was offered an edge the
   service would not accept; `assess` offers `["canceled"]`. A NULL state is New for the PATCH
@@ -4907,6 +5620,22 @@ The rules, in the order they are applied (**the first failing one wins, every re
      as the superuser, as `csm_app` and on a copy whose approval tables have the sync's enum
      columns), `TestNobodyToAskMsg` / `TestAnyContactToAsk` / `TestBoxesTurnedOnAfterNew` (pure),
      the service row in `change_request_service_lock_test.go`.
+8. **Request Approval needs the deviation folded into the plan**. `{state: "assess"}` on a
+   change still in New (a NULL state counts) is refused while the deviation from the implementation plan in effect -- the
+   request's own `implementationDeviation` when it carries the field, else the stored one, both by `IsBlankRichText` (markup
+   with no text is none) -- is not blank ->
+   `approval cannot be requested until the deviation from the implementation plan carried over from the cloned change request
+   has been folded into the implementation plan and cleared`, errorCode `change_request_deviation_not_incorporated`. A
+   deviation in New can only have come from a create (the CSM webapp sends one only for a clone; a PATCH in New can only clear
+   it), and the change has to go for approval (Assess, then CAB, for a Normal change; CAB for an Emergency change; Scheduled
+   or Customer Approval for a Standard change) with it folded into its plan. Clearing it in the same PATCH as
+   Request Approval (with the plan edited, or not) is accepted; a resend of `{state: "assess"}` on a change that already left
+   New is not judged, as for rules 6 and 7. Every type. It runs AFTER rules 6 and 7, which keep their words and precedence,
+   and after the deviation's own edit rule (`checkDeviationEditable`, under the gate), which refuses a request that sets or
+   changes one in New with its own words, ahead of rules 6 and 7 too. Code: `checkRequestApprovalDeviationCleared`
+   (`change_request_deviation.go`); tests: `TestChangeRequestDeviationIntegration_RequestApprovalNeedsItFoldedIn` (every
+   type, NULL state, cleared in the same PATCH and before, the resend, after the project rule, a deviation set or changed
+   with it refused by the edit rule first), `TestCheckRequestApprovalDeviationCleared_RequestValue`.
 
 **The Re-schedule hole, closed (and the loop no longer reaches it).** A change that reached
 Customer Approval necessarily has `customer_approval_required = true`. Re-schedule used to
@@ -5052,10 +5781,12 @@ and Request Approval now refuses that, so a test that needs the dead end uses
 the residual edge) or `legacyInCustomerState` (a row written with SQL, as an older build left it);
 the rest moved to a project with contacts, `createAnswerable`).
 
-### An approved change request is read-only (only work notes are added)
+### An approved change request is read-only (only work notes and the deviation are added)
 
-Decision (the user's, 2026-10-21): once CAB approval has been received, every field of the change
-request is read-only, the implementation plan included; only work notes can still be added. Code:
+Once the change request has been approved (CAB approval, or Request Approval for a Standard change), every
+field of the change request is read-only, the implementation plan included; only work notes can still be added,
+and the deviation from the implementation plan, from Implement until the change is closed, canceled or rolled back
+(see the next section). Code:
 `change_request_approved_lock.go` (`checkApprovedContentLock`, called in `patchChangeRequestTx` right
 after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`change_request_approved_read_only`).
 
@@ -5072,13 +5803,16 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
   the planned window, assignedTeamId, assignedEngineerId, requestedById, caseId, serviceId,
   serviceOfferingId, isPlanningVisibleToCustomers and the two customer boxes -- is a 400 naming every
   changed field ("description, implementationPlan can no longer be changed: the change request has been
-  approved (current state: scheduled), so its fields are read-only; only work notes can be added"), and
-  nothing is written, not even the rest of the request. The comparison is one SQL statement
+  approved (current state: implement), so its fields are read-only; only work notes and the deviation from
+  the implementation plan can be added"; that tail is said only where the deviation can be recorded, in implement, review
+  and customer_review -- in customer_approval, scheduled, closed and rollback it is "only work notes can be added"),
+  and nothing is written, not even the rest of the request. The comparison is one SQL statement
   (`approvedContentQuery`, `IS DISTINCT FROM` per field, ids and enum labels compared as text), so a
   field resent with its stored value is the accepted no-op it is everywhere in this PATCH. The project
   and the type keep their own (earlier, stricter) freezes; the deployments and deployment products are
   held by `changeRequestLinksLockedStates`, whose window now closes at the same point.
-- **Still accepted:** `workNote` and `comment`, `state` (the lifecycle), `onHold` / `onHoldReason`,
+- **Still accepted:** `workNote` and `comment`, `implementationDeviation` (not one of `approvedLockFields`;
+  recorded in implement / review / customer_review, final in closed / canceled / rollback: next section), `state` (the lifecycle), `onHold` / `onHoldReason`,
   `requestApproval`, a Re-schedule out of Customer Approval (`{state: "authorize"}` with a new window:
   the window is exempt for a staff time response, anything else it carries is judged), WSO2's answer to
   a time the customer proposed, and the customer's own answer / proposal (external callers return before
@@ -5091,12 +5825,116 @@ after `validateCreationPhaseEdits`), `CodeChangeRequestApprovedReadOnly` (`chang
   Scheduled / Implement / Review.
 - **Not enforced:** the data source that talks to the previous system directly (the PATCH goes there and
   that system decides), and csm-sync-service's own SQL writes. The CSM webapp and microapp disable their
-  Edit forms for these states (the webapp keeps a work-note field); the backend is the authority.
-- Tests: `change_request_approved_lock_test.go` (states, fields, query, message),
-  `change_request_approved_lock_integration_test.go` (every approved state read-only, resend accepted,
+  Edit forms for these states (the webapp keeps a work-note field, and the deviation from Implement on); the backend is the
+  authority.
+- Tests: `change_request_approved_lock_test.go` (states, fields, query, message and its tail per state),
+  `change_request_approved_lock_integration_test.go` (every approved state read-only with the tail of its state, resend accepted,
   work notes and on hold accepted, refused PATCH writes nothing; editable before approval, NULL and
   canceled), run as a superuser and as `csm_app`. Existing tests that edited an approved change now
   carry `onHoldReason` / a work note as "the rest of the request" (`holdReasonOf`).
+
+### The deviation from the implementation plan (recorded from Implement on, final once closed)
+
+What the implementation or the review actually did differently from the approved implementation plan is recorded
+in a field of its own, "Deviation from the implementation plan", that is not under the approved-content lock, is
+final once the change request reaches a final state (closed, canceled or rolled back), and is copied by a clone. The
+deviation is only relevant during implementation, so it is recorded from Implement on, and a clone's carried-over
+one has to be folded into the new change's plan and cleared before its Request Approval. Code:
+`change_request_deviation.go`; migration `0245_change_request_implementation_deviation.sql`
+(`change_request.implementation_deviation TEXT`, `ADD COLUMN IF NOT EXISTS`, safe to re-run). Apply it before deploying
+the build, as usual: the detail read and both create inserts name the column, so the build fails every change request
+read and create on a database without it (the older build never names it, so the migration first is safe).
+
+- **The previous system has no such field.** So it is PostgreSQL-only: the dual-write PATCH mirror and the create
+  that calls the previous system first strip it (a deviation-only PATCH mirrors nothing, so no write-back failure is
+  recorded), and the data source that talks to the previous system directly refuses it with a 400 that names the
+  field (on create only a non-blank one).
+- **API.** `implementationDeviation` on the detail (and the PATCH receipt, the same read), on create, and on
+  PATCH as a plain `*string`: nil leaves it, a blank value clears it to NULL, and an explicit `null` is read as
+  omitted (it is not one of the pointer-to-pointer fields whose null clears, see "PATCH: what a null does"). Not
+  on search rows. Create accepts it on every create path, in every case (a clone carries it),
+  from staff (below).
+- **Blank** is `IsBlankRichText` (`rich_text_blank.go`), which mirrors the CSM webapp's `isBlankHtml`: no text once the
+  markup is removed (every tag stripped, the content DOMPurify drops with its element -- script, style, svg, ... --
+  dropped, character references decoded, then JavaScript's trim, U+00A0 included). So `<p><br></p>` (an emptied editor),
+  `<p>&nbsp;</p>` and markup that is only images (isBlankHtml strips img tags too) are blank. It is applied everywhere
+  "is there a deviation" is decided -- what a create or a PATCH stores (NULL), whether a PATCH changes the stored value,
+  whether one is stored, Request Approval, and the create refusal of the data source that talks to the previous system
+  directly -- and to the stored value as well as the request's, so a blank one an earlier build stored as text counts
+  as none. The webapp's `hasImplementationDeviation` is `isBlankHtml`, so the two sides agree. The value is parsed with
+  the HTML5 parser (`golang.org/x/net/html`, scripting off as DOMParser has it) and only the body is read, so the
+  browser's own rules decide where text lands (a title or noscript before any body content goes to the head and is not
+  text, a table header's text, foreign content). On that tree it applies DOMPurify's default FORBID_CONTENTS (the
+  elements dropped with their content) and its guard against markup smuggled through a comment: an element whose
+  children are only text and comments, a comment among them, is dropped with its content when that text has a "<"
+  followed by a letter, a digit, "_", "/" or "!" (`<p><!-- c -->&lt;b&gt;</p>` is blank). `TestIsBlankRichText`'s 185
+  cases are isBlankHtml's own answers (run in jsdom with the DOMPurify the webapp pins); check a new case against
+  isBlankHtml the same way. Checked against about 107,000 more (editor-like, tag soup and sanitised), it disagrees with
+  isBlankHtml on 95, all tag soup and nearly all inside a `<select>` (where jsdom's parser and Go's follow different
+  versions of the specification), and on none that is editor-like or that DOMPurify has sanitised. A value the parser
+  refuses (elements nested more than 512 deep) is not blank: kept as written. It takes time linear in its input (it runs
+  under the change request's row locks, on up to the 1 MiB body cap): `TestIsBlankRichText_LinearTime` parses 1 MiB of
+  each of 17 adversarial shapes and fails any that takes over 2 s.
+- **When it can change** (`checkDeviationEditable`, judged on the STORED state, before the PATCH is applied). It is
+  deliberately **not** one of `approvedLockFields`, so the approved-content lock never judges it. Resending the stored
+  value is the accepted no-op in every state, and a blank value is a change only when one (not blank) is stored. A change is:
+
+  | Stored state | Set (none stored) | Change (one stored) | Clear (one stored) |
+  |---|---|---|---|
+  | New, NULL | 400 not yet | 400 carried over | ok |
+  | Assess, Authorize, Customer Approval, Scheduled | 400 not yet | 400 not yet | 400 not yet |
+  | Implement, Review, Customer Review | ok | ok | ok |
+  | Closed, Canceled, Rollback | 400 final | 400 final | 400 final |
+
+  "not yet" is `implementationDeviation cannot be changed yet: the deviation from the implementation plan can be recorded
+  once implementation has started (current state: <state>)`, "carried over" is `implementationDeviation can only be cleared
+  before implementation: fold the deviation from the implementation plan carried over from the cloned change request into
+  the implementation plan, then clear it`, both errorCode `change_request_deviation_not_yet`; "final" is `implementationDeviation
+  can no longer be changed: the change request is <closed | canceled | rolled back>, so its record is final`, errorCode
+  `change_request_deviation_final`. A refused PATCH writes nothing (not even the rest of the request). The same table is
+  `TestDeviationEditRefusal_PerState` (unit, row ids `<STATE>/<situation>`) and `TestChangeRequestDeviationIntegration_PerState`
+  (one subtest per state); the CSM webapp keeps a Vitest table with one row per state, named by the same state ids
+  (`changeRequests.test.ts`). `changeRequestPatchNeedsGate` includes
+  the field, so a deviation-only PATCH takes the row locks and reads the stored state; `checkDeviationEditable` runs right
+  after `checkApprovedContentLock` (a PATCH that also changes an approved field gets that lock's refusal first) and queries
+  nothing in Implement, Review and Customer Review. Because the stored state is judged, the PATCH that closes the change
+  (from Review) may record the deviation with it, and the one that moves it from Scheduled to Implement may not (record it
+  once the change is in Implement).
+- **Clone and Request Approval.** A clone is a create carrying the source's deviation, so a change in New can hold one.
+  Request Approval is refused while it does (Customer requirements lock, rule 8: 400
+  `change_request_deviation_not_incorporated`), unless the same PATCH clears it, so the change goes for approval with it
+  folded into its implementation plan. The CSM webapp shows a carried-over one read-only with "Clear deviation", on the create form
+  and in the Edit form in New.
+- **Internal.** A restricted caller (a customer, or staff who also hold a customer record) reads it as null,
+  on the same line as `Tags` (`crViewer`); a customer's PATCH carrying it is refused by `classifyExternalPatch`
+  (403). `POST /change-requests` is internal-only at the route (`TestChangeRequestCreateIsInternalOnly`), and behind
+  it a non-blank one from an external caller (`IsExternalCaller`) is refused with a 403 `change_request_forbidden`
+  (`RefuseExternalCreateDeviation`): by the service's create that calls the previous system first, before that system is
+  called (a refusal after it would leave a record there with no PostgreSQL row), and again by both repository create
+  paths before anything is written to PostgreSQL (the one after the previous system judges the caller's own identity,
+  before it takes the system one). The customer portal's backend-v2 drops it anyway (its typed detail has no field for it).
+- **No side effect on a customer's proposed time.** A proposal only waits in Customer Approval (see "A customer's proposed
+  time"), where the deviation cannot be recorded, and its proposer is recorded in columns of its own (migration 0249, "Who
+  proposed it") that no ordinary staff edit writes: the only staff PATCH that writes them is a plain Re-schedule, which
+  voids them, and only when no proposal waits (the 0249 trigger voids them too, on entering Customer Approval). So neither
+  recording the deviation nor any other staff save can make a recorded proposal read "nobody is recorded". A legacy one
+  (stored with no record, see "Legacy" there) is read by its last writer, and since migration 0250 a staff save records that
+  writer as its proposer first (when they have a `"user"` row) instead of un-recording it.
+- **Not built:** no activity entry (change requests have no activity feed; the outbox trigger records the
+  column change like any other), no bulk edit.
+- Tests: `rich_text_blank_test.go` (the blank rule against isBlankHtml's answers, and its linear time), `change_request_deviation_test.go`
+  (normalisation, the stored-value comparison, the messages, the rule per state, only the states in which it cannot be
+  recorded are judged, Request Approval on the request's own value, a customer's create refused before any database
+  access), `change_request_deviation_integration_test.go` (per state: set, change, clear, resend and a blank one with none
+  stored, a refused PATCH writes nothing, and in an approved state the plan stays locked with the lock's tail of that state;
+  refused in closed / canceled / rollback with the code; the closing PATCH may record it and the move to Implement may not;
+  Request Approval refused for every type while one is stored and accepted when the same PATCH clears it; both creates
+  carry it; blank markup is none on create, on PATCH, stored, and for Request Approval; a customer's create carrying one is
+  refused on both paths and writes nothing; a customer neither reads nor writes it), run as a superuser and as `csm_app`;
+  `change_request_service_deviation_test.go` (alone is a patch, never mirrored, the create that calls the previous system
+  first keeps it for PostgreSQL and refuses a customer's before that system is called); `sn_change_request_service_test.go`
+  (the data source that talks to the previous system directly refuses it);
+  `TestChangeRequestCreateIsInternalOnly` (server: the route is wrapped in `internalOnly`).
 
 ### Customer Group: approving / rejecting Customer Approval and Customer Review
 
@@ -5531,8 +6369,9 @@ the case endpoints), `TestChangeRequestVisibilityLint_*`, `TestCRVisibility*`,
 
 ### A customer's proposed time (a mechanism the previous system already had)
 
-The previous system already models the conversation and the synced schema carries it -- no column, table,
-type, state or migration is added by this feature:
+The previous system already models the conversation and the synced schema carries it; the one thing it
+cannot say, who proposed the time, is recorded in three columns of our own (migration 0249, see **Who
+proposed it** below). No table, type or state is added:
 
 * `change_request.customer_updated_on` (migration 0043) = the customer's
   proposed plan **START**;
@@ -5576,11 +6415,11 @@ an infinite date.
 
 | act | who / wire | writes |
 |---|---|---|
-| customer proposes | external `PATCH {plannedStartOn, plannedEndOn?}` | `customer_updated_on = start`, answer cleared. **Nothing else**: the change stays in Customer Approval, the planned window, the customers' request, every stage / approver row untouched. A proposal is a START: the planned LENGTH is kept; an end that rides with it must be start + length |
+| customer proposes | external `PATCH {plannedStartOn, plannedEndOn?}` | `customer_updated_on = start`, answer cleared, and in the same UPDATE the record of who proposed it (`customer_proposed_by_user_id` = the caller's user, `customer_proposed_for` = start, `customer_proposed_on` = now). **Nothing else**: the change stays in Customer Approval, the planned window, the customers' request, every stage / approver row untouched. A proposal is a START: the planned LENGTH is kept; an end that rides with it must be start + length |
 | Accept proposed time | staff `PATCH {confirmCustomerUpdatedDate: "agree", expectedCustomerUpdatedOn, expectedPlannedStartOn, expectedPlannedEndOn}` and nothing else, **only for a time a registered contact of the project is recorded as having proposed** (else 409 `change_request_proposer_not_recorded`) | ONE UPDATE: `start_on = proposal`, `end_on = proposal + planned length`, `AGREE`, state `SCHEDULED`; the customers' still-requested rows are closed by `reconcileStaleApprovers`. No CAB, no second ask. **Not written**: `is_customer_approval_required` (no staff action records the customer's approval; the proposal is the customer's own consent), `customer_approval_required`, any stage. `{state: "scheduled"}` stays refused for every staff caller: Accept is another door whose only precondition is the customer's own recorded proposal |
 | Propose a different time | staff `PATCH {state: "authorize", plannedStartOn?, plannedEndOn?, expectedCustomerUpdatedOn, expectedPlannedStartOn?, expectedPlannedEndOn?}` while a proposal waits (one a registered contact is recorded as having made) | the window as sent, `DISAGREE`; the customers' request is replaced by a fresh one (`cancelLiveCustomerStages` + `provisionCustomerStage`); the state does not move; no CAB |
 | decline | the same with no window (or the planned window restated) | `DISAGREE` only: no state, no stage, no approver row; the customers keep their live request; nobody has to be found to ask |
-| Re-schedule | the same with no proposal waiting -- **including a stored time nobody is recorded as having proposed**: it is not answered, so no `DISAGREE` is written against it | the window, the same re-ask, no CAB, no flag (above) |
+| Re-schedule | the same with no proposal waiting -- **including a stored time nobody is recorded as having proposed**: it is not answered, so no `DISAGREE` is written against it | the window, the same re-ask, no CAB, no flag (above); the record of who proposed the stored time is voided (a new round, see **Who proposed it**) |
 
 A staff `{state: "authorize"}` that finds a proposal waiting must name it (`expectedCustomerUpdatedOn`): an old or
 racing client never answers a proposal it did not see (409). One sent when none waits is a 409 too. **A stored time
@@ -5589,7 +6428,8 @@ nobody is recorded as having proposed is not a proposal waiting**: a Re-schedule
 "the time stored on this change request changed after you opened it"), writes no answer and is refused (400) when it
 carries no window ("no customer is recorded as having proposed the time stored on this change request, so there is no
 proposal to decline: send the new planned window to re-schedule it") instead of declining a date nobody proposed.
-The stored time stays as it was: the Re-schedule changes the planned window only.
+The stored time stays as it was: the Re-schedule changes the planned window, and voids the record of who proposed the
+stored time (see **Who proposed it**), so it can never count as a proposal of the new round.
 
 **The contract's refusals** (status and exact text; the first failing check wins and nothing is written):
 
@@ -5639,7 +6479,7 @@ seconds only when there are some, so it goes back as `expectedCustomerUpdatedOn`
 and, for a staff reader, `proposedByName` / `proposedByEmail` / `proposedOn` (only when `proposerRecorded`), `canAccept`
 and `acceptBlockedReason` (on hold / the proposed start has passed / no length to keep / the window would end beyond the range every window is held to, in the words of the refusal); for
 an external reader `proposedByViewer` and no names. **A stored time that nobody is recorded as having proposed** (a date a
-WSO2 user wrote in the previous system, an old one, or -- see **Who proposed it** for when -- a proposal edited over since)
+WSO2 user wrote in the previous system, an old one, one whose contact has left the project -- see **Who proposed it**)
 reads, for staff, `answer: pending` with `proposerRecorded: false`, `canAccept: false` and `acceptBlockedReason` the
 refusal's own words ("nobody is recorded as having proposed this time ..."), and the pages say the proposer is not
 recorded; **for a customer it reads `answer: "unanswered"` (history) with nothing that says a time waits** -- no customer
@@ -5649,45 +6489,152 @@ read, and what comes out is a handful of derived facts, never a row. `legalNextS
 
 **Who proposed it** (`resolveProposer` for the acts, `readProposer` for the read;
 `TestChangeRequestProposalIntegration_AcceptNeedsARecordedProposer`, `..._AStoredTimeNobodyProposedIsNoProposalToAnswer`,
-`..._AStoredTimeNobodyProposedInEveryShape`, `..._AGenuineProposalAfterAnUnrelatedStaffEditReadsNotRecorded`,
-`..._TheProposerIsTheLastWriterAndNothingElse`, `..._NoStatementReadsACommentToNameAProposer`, the predicate matrix rows
-M1a-M10d, and the database-free `change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
-cannot say who wrote it, and the previous system lets WSO2 users write the same column. A waiting time is a customer's
-**proposal** -- answerable by WSO2 -- only when **the last writer of the change** (`work_item.updated_by`, read before the
-act's own write) is a **registered PORTAL_USER contact of the change's project** (the test of the customer's own answer,
-`callerIsRegisteredPortalContact`; a contact who has since left the project is not one). **Nothing else names a proposer**
-(the user's decision, 2026-10-08): no comment, audit, outbox or other log row is read, because those rows record what the
-system did and are no reference for a business rule such as whether Accept is allowed; and nothing is added to record it (no
-column, table, migration or row of ours). The comment that trigger 0053 writes on a parent record for each proposal is still
-written (above) and is never read; `TestProposalFile_NoSQLReadsTheCommentTable` (every SQL literal of the proposal file) and the
-statement-tracing integration test fail if a query of the proposer path reads the comment table.
+`..._AStoredTimeNobodyProposedInEveryShape`, `..._AGenuineProposalStaysRecordedAfterAnyStaffWrite`,
+`..._TheProposerIsTheRecordNotTheLastWriter`, `..._TheRecordNamesTheProposerOfTheStoredTimeOnly`,
+`..._ALegacyProposalIsReadByItsLastWriter`, `..._AWriteKeepsALegacyProposer`, `..._APlainRescheduleVoidsTheRecord`,
+`..._ACustomerCannotClaimAStoredTimeByWritingItAgain`, `..._NoStatementReadsACommentToNameAProposer`,
+`..._ProposerMigrationIsSafeToRunAgain`, `..._KeepLegacyProposerMigrationIsSafeToRunAgain`,
+`..._TheRecordedUserIsAForeignKeyClearedOnDelete`, the predicate matrix rows
+M1a-M10e, and the database-free
+`change_request_proposer_test.go`). The predicate says a time is stored and unanswered; it
+cannot say who wrote it, and the previous system lets WSO2 users write the same column. **The proposal records its proposer**
+(migration `0249_change_request_customer_proposer.sql`): three columns on `change_request`, written by `proposeCustomerTime` in
+the same UPDATE that writes `customer_updated_on`:
 
-*Which writes replace `work_item.updated_by` on a change request:* `patchChangeRequestTx` stamps the caller on it
-unconditionally, so **every PATCH** does (a work note, an additional comment, the hold, an assignee, a title: any staff edit;
-and a customer's answer or proposal, through `lockWorkItemKeepingWriter`, which is also Accept's first statement), and so
-does whatever else writes the work item row directly (the sync loader, as the previous system's user; its own stamp names
-nobody, and neither does a blank value). The approval decision route does not touch it, and **neither does a comment**: `CreateComment` / `CreateCaseComment` stamp `updated_by` only on case-like work items (see "Adding a comment to a case stamps its `updated_on`/`updated_by`"), never on a change request, so a comment can neither erase a customer's proposal nor make its writer the recorded proposer (`TestCommentUpdatedOnIntegration_OnlyCaseLikeWorkItemsAreStamped`). The acts that ANSWER a waiting time
-stamp the staff member before they look, so they read the last writer **before their own write**: `lockWorkItemKeepingWriter`
-(Accept, a customer's proposal) and `lockChangeRequestForPatch` (a staff `{state: "authorize"}`,
+* `customer_proposed_by_user_id` -- the proposing contact's `"user"` id (`REFERENCES "user"(id) ON DELETE SET NULL`, pinned
+  from the catalog by `..._TheRecordedUserIsAForeignKeyClearedOnDelete`);
+* `customer_proposed_for` -- the proposed start the record is about;
+* `customer_proposed_on` -- when it was proposed (`now()` of the proposal's transaction).
+
+A waiting time is a customer's **proposal** -- answerable by WSO2 -- only when the record names a contact, is **about the stored
+time itself** (`customer_proposed_for = customer_updated_on`, the same instant) and that contact is **now a registered
+PORTAL_USER contact of the change's current project** (the test of the customer's own answer, `callerIsRegisteredPortalContact`,
+by the contact's `"user".email`; a contact who has since left the project is not one). No other staff act writes the record
+(a work note, an additional comment, the hold on and off, a whole-form resend -- in Customer Approval the approved-content
+lock refuses any field that would change, an assignee included; an Accept or a `DISAGREE` leaves it as history), except the
+two that start a new round, which **void** it: they clear who and when and set `customer_proposed_for` to the stored time, so a time left over from an
+earlier round reads "not recorded" rather than as the old proposer's, and is not read by the legacy rule either.
+
+* **Entering Customer Approval**: the 0249 trigger `change_request_void_customer_proposer` (`BEFORE UPDATE OF state`, fires when
+  `state` becomes `CUSTOMER_APPROVAL` from anything else). A change re-enters Customer Approval when an old-flow Re-schedule still
+  in flight finishes through the CAB (`TestChangeRequestFlowIntegration_StaleApprovals_OldFlowRescheduleStillFinishesThroughTheCAB`),
+  or through another writer (a manual fix, an import); the trigger covers both.
+* **A plain Re-schedule** (`{state: "authorize"}` with a new window while no proposal waits, so nothing is answered): it asks the
+  customers again without the state moving, so the trigger does not fire, and `patchChangeRequestTx` voids the record in its own
+  UPDATE of `change_request` (`..._APlainRescheduleVoidsTheRecord`). Without it a record that did not count at the Re-schedule
+  (its contact had left the project, or another approval was being asked) would count again later, and Accept would apply the
+  earlier round's time over the window the customers were asked about. A counter-proposal or a decline keeps the record.
+
+A stored time that another writer moved off its record names nobody: the 0249 trigger (`BEFORE UPDATE OF state, customer_updated_on`)
+voids the record the same way when `customer_updated_on` changes to anything but the time the same UPDATE records, so the time
+moving back later does not name the contact again (a proposal writes the record for the time it stores and is left alone; a row
+with no record keeps the legacy rule). A record whose user is gone names nobody too. **No comment, audit, outbox or other log row is read** by the acts or the read model to name a
+proposer (the notice drainer's only input is the outbox row, whose snapshot carries the 0249 record itself; see Notices below), because those rows
+record what the system did and are no reference for a business rule such as whether Accept is allowed. The comment that trigger
+0053 writes on a parent record for each proposal is still written (above) and is never read;
+`TestProposalFile_NoSQLReadsTheCommentTable` (every SQL literal of the proposal file) and the statement-tracing integration test
+fail if a query of the proposer path reads the comment table. The tracing test runs a record that counts, the same after a staff
+work note, a legacy row, and a record whose contact has left the project under a parent record whose comment names that contact
+(the record path naming nobody); the re-entry and contact-left cases are also run under such a parent record and read "not
+recorded".
+
+**Legacy: a time stored before 0249** (`customer_proposed_for` NULL -- a proposal made before the deploy and still waiting, or a
+date the previous system wrote; and also a time another writer, such as a manual fix or an import, stores later on a change that
+has had no proposal since it entered Customer Approval: entering it with no time stored leaves the column NULL, and so does a plain
+Re-schedule that voids an empty one) has no record, and for it alone the rule that held until 0249 still holds: the proposer is **the
+last writer of the change** (`work_item.updated_by`, read before the act's own write) when that writer is a registered PORTAL_USER
+contact of the project. So a migrated date reads "not recorded" exactly as before (its last writer is the sync's stamp or a WSO2
+user), and a pre-0249 proposal stays acceptable whoever writes to the change after it: **migration 0250** records it in the
+write that would have replaced its proposer (`..._ALegacyProposalIsReadByItsLastWriter`, `..._AWriteKeepsALegacyProposer`).
+Its trigger, `work_item_keep_legacy_customer_proposer` (`AFTER UPDATE OF updated_by ON work_item`, change requests only, when the
+writer changes), writes the record the proposal would have written -- the replaced writer's `"user"` (earliest by `created_on`,
+then `id`, as `readProposer` names them), the stored time, and `OLD.updated_on` (the time the read model already showed) -- when
+the change is in Customer Approval with an unanswered, finite stored time that differs from the planned start and has no record,
+and the replaced writer is a registered PORTAL_USER contact of the project with a `"user"` row (`callerIsRegisteredPortalContact`'s
+join, in SQL).
+
+It records nothing where the rule names nobody, and it freezes whatever the rule names at that moment, a wrong name included. Every
+writer in this service stamps `work_item.updated_by` before it writes the stored time, so the rule's name is the proposer's. A
+writer that changes `customer_updated_on` directly while a contact is the last writer (the sync, a manual fix, an import) can make
+the rule name that contact for a time they did not propose; the old rule showed that until the next save, and the trigger keeps it.
+Such writers must stamp `work_item.updated_by` first, and must update `work_item` before `change_request` in one transaction: a
+writer that locks `change_request` first can deadlock with a staff save that the trigger turns into a `change_request` write (one
+side is aborted, 40P01). It covers every writer from the moment it is applied (this build, GitHub, the sync, an older build still
+running), which is why it is a trigger and not a one-time update. One gap while an older build runs: once a staff save has recorded
+a waiting proposal, a later proposal the older build stores on the same change carries no record, is not about the recorded time,
+and reads "nobody is recorded" (staff can propose a different time). Its write touches only the three record columns: the outbox
+row it leaves is no turn for the notices (`TestPlanDate_KeepingALegacyProposerSendsNothing`) and the GitHub queue ignores it. It
+runs as the writer, so a role that writes `work_item` rows of change requests needs SELECT on `"user"`, `project_contact`,
+`project_contact_group`, `project_group_role` and `project_role`, and UPDATE on `change_request`: without them that role's writes
+of a change request fail. Still lost: a legacy proposal whose writer was replaced before 0250 was applied, and one whose contact
+has no `"user"` row (nothing to record them by). Deduplicating users can clear a record: deleting the earliest copy of a `"user"`
+row sets the record's user to NULL (`ON DELETE SET NULL`), and the proposal then reads "nobody is recorded". The next proposal on
+that change records itself. Apply migrations 0249 and 0250 before deploying the build that records proposers, and deploy it
+straight after (the gap above): its detail read and the proposal name 0249's columns (the older build never does), and 0250 needs
+0249 and refuses to run without it. Both set `lock_timeout` (5s, as 0207 does), so their waits for the locks on `change_request`
+and `work_item` are bounded, and both are safe to run again (`CREATE OR REPLACE TRIGGER`, which takes no ACCESS EXCLUSIVE lock).
+Migration 0263 builds the index on `customer_proposed_by_user_id` concurrently, in a file of its own.
+
+**The trigger is temporary**: once the build that records proposers is deployed and nothing writes `customer_updated_on` directly
+(the sync can, while it runs), nothing stores a time without a record, so the set it protects only shrinks. Drop it in a new
+migration (`DROP TRIGGER IF EXISTS work_item_keep_legacy_customer_proposer ON work_item; DROP FUNCTION IF EXISTS
+trg_work_item_keep_legacy_customer_proposer();`) once this reads 0 on every environment. Run it as a superuser, or after
+`SELECT set_config('app.is_internal', 'true', false)`: `change_request` is FORCE ROW LEVEL SECURITY and otherwise reads 0. It
+counts the rows the trigger would act on:
+
+```sql
+SELECT count(*)
+  FROM change_request cr
+  JOIN work_item wi ON wi.id = cr.id
+ WHERE cr.state::text = 'CUSTOMER_APPROVAL'
+   AND cr.customer_proposed_for IS NULL
+   AND cr.customer_updated_on IS NOT NULL
+   AND isfinite(cr.customer_updated_on)
+   AND cr.customer_updated_date_confirmation IS NULL
+   AND cr.customer_updated_on IS DISTINCT FROM cr.start_on
+   AND EXISTS (SELECT 1 FROM "user" u
+                WHERE LOWER(u.email) = LOWER(btrim(wi.updated_by, E' \t\n\r\f' || chr(11))))
+   AND EXISTS (SELECT 1
+                 FROM project_contact pc
+                 JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
+                 JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
+                 JOIN project_role pr ON pr.id = pgr.project_role_id
+                WHERE pc.project_id = wi.project_id
+                  AND LOWER(pc.email) = LOWER(btrim(wi.updated_by, E' \t\n\r\f' || chr(11)))
+                  AND pc.state = 'REGISTERED'::project_contact_state_enum
+                  AND pr.role = 'PORTAL_USER'::project_role_enum);
+```
+
+Until then it holds a second copy, in SQL, of the registered-contact test (`callerIsRegisteredPortalContact`): change the two
+together. Its cost is a filter on the work item row for every other type, one primary-key lookup per change request whose last
+writer changes and, when its time waits, a `"user"` lookup by email and the contact check.
+*Which writes replace `work_item.updated_by`:*
+`patchChangeRequestTx` stamps the caller on it unconditionally, so **every PATCH** does (a work note, an additional comment, the
+hold, an assignee, a title; and a customer's answer or proposal, through `lockWorkItemKeepingWriter`, which is also Accept's first
+statement), and so does whatever else writes the work item row directly (the sync loader, whose own stamp names nobody, as a blank
+value does not). The approval decision route does not touch it, and **neither does a comment**: `CreateComment` / `CreateCaseComment` stamp `updated_by` only on case-like work items (see "Adding a comment to a case stamps its `updated_on`/`updated_by`"), never on a change request (`TestCommentUpdatedOnIntegration_OnlyCaseLikeWorkItemsAreStamped`). The acts that ANSWER a waiting time
+stamp the staff member before they look, so for a legacy row they read the last writer **before their own write**:
+`lockWorkItemKeepingWriter` (Accept, a customer's proposal) and `lockChangeRequestForPatch` (a staff `{state: "authorize"}`,
 `changeRequestGateSnapshot.priorWriter`) hand it back as a `lastWriter` (whose `read` flag tells "the column held nobody" from
-"it was never looked at": the latter is a refusal of the caller's bug, never a quiet "nobody"), and the proposer is resolved
-from that, never from the column afterwards (reading it afterwards would make every proposal "not recorded" the moment WSO2
-answers it). The answer's own stamp is harmless to the next reader: after an Accept or a `DISAGREE` nothing waits any more, and
-the next proposal is a new write by a customer.
+"it was never looked at": the latter is a refusal of the caller's bug, never a quiet "nobody", and `resolveProposer` refuses it
+before any statement whatever the row turns out to be). That stamp is itself a write that replaces the last writer, so migration
+0250's trigger records them first when the rule names them, and the act then reads the record; the kept writer decides only when
+nothing was recorded (the stamp did not change the writer, the rule names nobody, or the contact has no `"user"` row). That
+plumbing exists for the legacy rule only.
 
-**The cost, stated plainly.** Any other write to the change after a customer's proposal (a staff work note, putting the change
-on hold and taking it off, assigning an engineer: whatever replaces `work_item.updated_by`) makes that genuine proposal read
-**"not recorded"**, with or without a parent record. Accept is then unavailable (409 `change_request_proposer_not_recorded`,
-`canAccept: false`), the customer who proposed it is told nothing waits on their account (`answer: unanswered`), and WSO2 can
-still **Propose a different time**, which is then a plain Re-schedule (no answer is written against a time nobody is recorded
-as having proposed; the customers are asked again) -- and the customer then **approves that time: one extra customer approval,
-by design.** The customer can also propose a different start, which records them afresh (the stored time itself is refused to them: "that time is already stored ... although nobody is recorded as having proposed it"). The same holds for a time that someone at WSO2
-wrote in the previous system, one left over from an earlier cycle, and the sync's own writes: Accept is refused (no staff action
-stands in for the customer's consent), a Re-schedule over it is a plain Re-schedule that never writes `DISAGREE` against it, a
-request with no window is a 400 ("there is no proposal to decline"), and a customer is never told it waits for WSO2. Why this is
-accepted: the rule has to hold on data the synced schema already carries, with no column or row of ours, and the previous system is not
-used in parallel after the cutover (the dual-write is a fallback), so a time a WSO2 user wrote there is migrated history, not a
-daily event.
+**What "not recorded" costs now.** A customer's own proposal is no longer lost to a staff save: after a work note, the hold on
+and off, a whole-form resend, or a write to the work item by another writer (an assignee set by an integration, say) it
+still reads `proposerRecorded: true` and `canAccept: true`, the read model names the contact and when, and Accept applies it (`..._AGenuineProposalStaysRecordedAfterAnyStaffWrite`). "Not
+recorded" is left for a time that no current contact of the project is recorded as having proposed in this round: one someone at
+WSO2 wrote in the previous system, one left over
+from an earlier cycle (voided on re-entry or by a plain Re-schedule), one whose contact has left the project, one another writer moved off its record, the
+sync's own writes, and a legacy proposal whose proposer a later write replaced before migration 0250 was applied (or whose
+contact has no user record). For those, Accept is refused (409
+`change_request_proposer_not_recorded`, `canAccept: false`: no staff action stands in for the customer's consent), a customer is
+never told it waits for WSO2 (`answer: unanswered`), a Re-schedule over it is a plain Re-schedule that never writes `DISAGREE`
+against it, a request with no window is a 400 ("there is no proposal to decline"), and **Propose a different time** asks the
+customers again, who then approve that time. The customer can also propose a different start, which records them afresh (the
+stored time itself is refused to them: "that time is already stored ... although nobody is recorded as having proposed it").
 
 **What is mirrored / what is not** (`DATA_SOURCE=postgres-servicenow-dual-write`): the previous system's PATCH API has no field for
 the two columns, so **proposals and WSO2's answers are PostgreSQL-only until the sync stops, and while the sync runs it can
@@ -5710,7 +6657,18 @@ the previous system directly refuses `confirmCustomerUpdatedDate` / `expectedCus
 proposed date is answered in that system) and forwards proposals and Re-schedules as ever. Notices (`CR_NOTICES_ENABLED`, off by
 default): the existing `planDateNotice` turns apply unchanged and no notice kind or table was added -- a proposal tells
 the "Devops Approval" team (a team nobody belongs to in this database has no recipient: the banner and the Awaiting chip are
-the signal), Accept tells the designated customers "accepted the plan start date"; **a different time and a Decline are the
+the signal). That notice's actor -- the name it carries, and the test that suppresses it for a wso2.com address -- is
+**the contact the proposal recorded**, read from the proposal's own outbox row:
+when its snapshot carries a non-empty `customer_proposed_by_user_id` whose `customer_proposed_for` is `customer_updated_on`
+itself (compared as instants), `crPlanDateActor` names that user with `CRNoticeRepository.UserActor`, by the rule `Details` names
+a last writer by (last name first; WSO2 when their email, else user name, is a wso2.com address). What it reads there is the
+0249 record itself, as the proposal's UPDATE wrote it: the outbox is the drainer's only input, and the acts and the read model
+still never read the outbox (**Who proposed it**). So a staff save between a
+proposal and the drain neither suppresses the notice nor names the staff member (`TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast`,
+`TestChangeRequestProposalIntegration_TheProposalNoticeNamesTheRecordedProposer`). Only a row with no such record -- a date
+written before 0249, a date another writer moved off its record, a record the 0249 trigger voided -- still takes its actor from
+`work_item.updated_by` read when the outbox is drained, the KNOWN GAP `crPlanDateActor` keeps for those
+(`TestPlanDate_AStaleRecordFallsBackToTheLastWriter`, `TestPlanDate_NoRecordFallsBackToTheLastWriter`). Accept tells the designated customers "accepted the plan start date"; **a different time and a Decline are the
 same turn**: both write `customer_updated_date_confirmation = DISAGREE`, which is the previous system's own Disagree, so both send the
 designated customers the one Disagree notice ("Reject the proposed plan start date" / "WSO2 Team request to change the plan
 start date"). That mail carries no time of the conversation at all: the new window of a different time is NOT in it (the
@@ -5725,6 +6683,8 @@ send byte-identical notices, none carrying a date) and, on real outbox rows, by
 counts EVERY table around each act -- a proposal adds the `event_outbox` row of any change_request update, the 0053 comment under
 a parent (and its GitHub queue row when linked); Accept the outbox row (+ the queue row when linked); a different time / a
 Re-schedule the outbox row and the one customer stage with one row per contact; a decline the outbox row; a refused act nothing.
+On a legacy row (no record, the proposing contact as the last writer) the first write by anybody else also leaves the
+`event_outbox` row of migration 0250's record (the three record columns only, no notice; `..._AWriteKeepsALegacyProposer`).
 On a migrated change in Customer Approval whose customer stage the previous system wrote (unlabeled, the customer group), the customer's
 first act still gives it the one labelled stage plus one `REQUESTED` row per registered contact (the existing behaviour of
 every customer act on such a row, `change_request_synced_stages_integration_test.go`); Accept then leaves the previous system's
@@ -5912,8 +6872,10 @@ decision route on their own `REQUESTED` row, like anyone.
   `plannedStartOn is the planned start already: propose a different start`), nor the standing
   proposal (400 `that time is already proposed and is waiting for WSO2's response`) nor one WSO2
   already declined (400 `WSO2 asked for a different time than that one: propose another start`).
-  Then ONE write: `customer_updated_on = start`, the answer cleared. The change stays in
-  Customer Approval; the planned window, every stage and approver row and the state are untouched.
+  Then ONE write: `customer_updated_on = start`, the answer cleared, and the record of who
+  proposed it (`customer_proposed_by_user_id` / `_for` / `_on`, see **Who proposed it** above).
+  The change stays in Customer Approval; the planned window, every stage and approver row and
+  the state are untouched.
 * **The planned window is parsed here, not by Postgres** (`change_request_window.go`,
   applied at the top of `patchChangeRequestTx` for every caller, and on create). It used
   to be bound as `$n::text::timestamptz`, which accepts `infinity`, `-infinity`, `now`,
@@ -7435,8 +8397,8 @@ same "platform-owned config, not synced vocabulary" posture as `team.key`/
 platform operators. The endpoint returns `{teams: [{name, chatWebhookUrl}]}` for
 every team that has one set — a team with none is left out, same as today's
 "not in `GOOGLE_CHAT_SPACES`" case. **Internal-caller-only**
-(`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the identical gate
-`GET /sla-duration-policy` uses) — a webhook URL lets anyone holding it post
+(`TeamService.ListChatWebhooks` → `RequireInternalCaller`, the same gate
+`GET /sla-status` uses) — a webhook URL lets anyone holding it post
 into that team's Chat space, so this is reference data for a backend service
 (fetched periodically, not once at startup, since operators can add a team's
 webhook while this service keeps running — see that repo's own `CLAUDE.md`),
@@ -8186,8 +9148,23 @@ previous one) and the **latest report by `counted_on`** for anything else (users
 organisations, cores, MAU). It used to store the reported count as the day's value, so a
 counter published every hour showed only its last hour. A `FILE_UPLOAD` row (an offline
 report) for the same node, day and type is a separate row and is never touched. A report the
-product re-sends after a timeout is counted twice -- the endpoint has no request id to
-deduplicate on.
+product re-sends after a timeout is stored once: the hourly insert skips a row that already
+exists for the same node, count type and `counted_on` (the endpoint has no request id, so the
+report's own timestamp is the key; `RetriedReportsAreCountedOnce`).
+
+**Reading the daily table: one row per node, type and day.** Nothing stops a connected
+customer from also uploading a report that covers days the product already published, so a
+node-day can hold both an `API_CALL` and a `FILE_UPLOAD` row. The daily reads behind the
+portals' usage views (`SearchDeployedProductMetrics`' CORES rows,
+`SearchDeployedProductUsageCounts`, `SearchInstanceUsageStats`) used to `SUM` every row of a
+node, type and day, which added the two: 8 cores showed as 16, 1,000 transactions as 2,000.
+They now keep one row per node, type and day (`dailyUsageSourcePreference`: a row with a
+value, then the live row, then the latest updated) -- the same choice `rollup_monthly_usage`
+makes, so the daily views and the monthly table agree. An explicit `dataSource` filter still
+returns that source's rows alone. `data_source` is nullable (0054), and under `DESC` a NULL
+comparison sorts ahead of `TRUE`, so both test the live row with `IS TRUE`: a row with no
+source ranks with the uploaded ones. Migration 0250 redefines `rollup_monthly_usage` for that
+one change, since 0245 had already run on servers.
 
 **Project/Deployment/DeployedProduct references, verified against staging.**
 `deployment_node.product_version_id` is a real foreign key, so `Product` is
@@ -9699,7 +10676,9 @@ requester's email and recorded nothing.
   through `PATCH /deployments/{id}`, whose detail-vs-deactivate rules and ServiceNow write-back do not
   apply to it. `updated_by` is the x-user-id-token's email when present, else `internal-client`.
 - Entity-service only knows internal vs customer callers; restricting it to a staff group is the
-  portal backend's job.
+  portal backend's job. The CSM portal does this: its backend exposes the same
+  `PUT /deployments/{id}/air-gapped` behind `PermWrite` (cs_engineer, admin), and the project's
+  Deployments tab sets or clears it from a deployment's action menu.
 - Read back as `airGapped` on `POST /deployments/search` results (`DeploymentView.AirGapped`, null
   under `DATA_SOURCE=servicenow`), which is where PCS reads it from.
 
@@ -10052,6 +11031,34 @@ new repository method this needed — a single-row lookup
 lower-cased before returning), deliberately not reusing
 `SearchDeployedProducts`' list/filter machinery for a one-row check.
 
+## Skills (`/skills`, Postgres only)
+
+`SkillService` (`internal/service/skill_service.go`) serves the skill catalogue, each internal user's own
+skills profile, the manager's view of everybody's, and the admin's catalogue edits, over the tables of
+migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only with a database pool.
+
+- **Who.** Catalogue reads: any internal caller. `/skills/me*`: the token's own user, found by the token's
+  email among active internal users; no route takes a person's id, and the identity provider's id is never
+  compared with a platform id. `POST /skills/users/search`: a CSM admin (a token role in `AUTH_ADMIN_ROLES`, as
+  for rota access) or a lead (`lead`, `americas_team_lead`) of a CRE or SRE team. `POST /skills` and
+  `PATCH /skills/{id}`: CSM admin only.
+- **No unique key on `user_skill(user_id, skill_id)`**, and migrated rows are not known to be free of repeats.
+  Every profile write holds `pg_advisory_xact_lock` for the pair and reads the pair's rows `FOR UPDATE`; every
+  read takes one canonical row per pair (`userSkillCanonical`: active, own before inherited, newest). An add
+  over an inactive own row revives it. Adding a held skill is a 409. A unique index needs the production data
+  checked for repeats first, so it is not added here. `skill.name` has no unique key either: create and rename
+  hold a per-name advisory lock and compare ignoring case.
+- **Levels.** A level must belong to the skill's `level_type_id` scale (checked in the service; no FK does it). The profile
+  write re-checks it inside its transaction under `FOR SHARE` on the skill row, which an admin's scale change
+  (`FOR UPDATE`) queues behind; a scale swapped in between is a 409. Ids are lower-cased once validated.
+  Inactive skills cannot be newly added (an add re-reads `active` in that same locked query, so a deactivation
+  racing the add is a 409 too; changing the level of an already-held skill is unaffected). Every set, change and removal writes a `user_skill_history` row
+  (`level_from_id` null on first set, `level_to_id` null on removal; `created_by` is the actor's email); setting
+  the level already held writes nothing. A removal deletes the `user_skill` row. Inherited rows are never
+  changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
+- **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
+  (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+
 ## Adding a new entity
 
 Follow these steps in order:
@@ -10147,13 +11154,16 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 | A proposed time on a change request that is not in Customer Approval, or that nobody has been asked to approve | `change_request_not_proposable` | 409 |
 | A proposed time while an approval that is not the customer's is also being asked (the customer's own answer is still possible; only the proposal is refused) | `change_request_proposal_not_now` | 409 |
 | A proposed time on a change request with no planned window to move (a proposal is a new start, the planned length is kept; the customer's answer is still possible) | `change_request_no_planned_window` | 409 |
-| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, or a genuine proposal that a later write to the change replaced as its last writer): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
+| WSO2's acceptance of a stored time that no registered contact of the project is recorded as having proposed (written by someone at WSO2, left over from an earlier cycle, proposed by a contact who has since left the project, or -- a time stored before migration 0249 only -- a proposal whose proposer a later write replaced as last writer before migration 0250 was applied, or whose contact has no user record): no staff action stands in for the customer's consent; proposing a different time still works | `change_request_proposer_not_recorded` | 409 |
 | A registered contact holding no `REQUESTED` row on the customer stage that is LIVE (registered after the request went out, or a row of theirs cancelled directly): proposing, or answering on it. A request that was withdrawn (a sibling's answer settled the stage) leaves no live stage and is a 409 instead: `change_request_approval_not_pending` for an answer, `change_request_not_proposable` for a proposal | `change_request_not_asked` | 403 |
 | Not a registered PORTAL_USER contact of the change request's project, the change request's own creator, a user who may not decide an internal stage, a field a customer may not set, a caller with no user record | `change_request_forbidden` | 403 |
 | `POST /incidents` with an `assignmentGroupId` that is not an active support group of any service (a non-UUID value is a plain 400 with no code); nothing created | `incident_assignment_group_not_allowed` | 400 |
 | `POST /incidents/{id}/specialist-handoffs` on an incident nobody is assigned to; nothing written | `incident_handoff_needs_assignee` | 409 |
+| A PATCH that changes the deviation from the implementation plan of a change request that is closed, canceled or rolled back (resending the stored value is accepted); nothing written | `change_request_deviation_final` | 400 |
+| A PATCH that changes the deviation from the implementation plan before implementation has started, judged on the stored state: in New anything but clearing one a clone carried over, in Assess, Authorize, Customer Approval and Scheduled any change (resending the stored value is accepted); nothing written | `change_request_deviation_not_yet` | 400 |
+| Request Approval (`{state: "assess"}` on a change request in New) while a deviation from the implementation plan is in effect (the request's own value, else the stored one): a clone carried it over, and it has to be folded into the implementation plan and cleared first (the same PATCH may clear it); nothing written | `change_request_deviation_not_incorporated` | 400 |
 
-`TestWriteServiceError_CarriesTheMachineReadableCode` (handler) and `TestChangeRequestErrorCodesIntegration_*` (repository, against a real database) pin each code to its refusal. customer-portal `backend-v2` and the CSM portal BFF pass the code through with the status they give it; the customer webapp classifies a refusal by it (`describeChangeRequestActionError`), and a 409 with a code it does not know, or none (an older entity-service), is "something went wrong, refresh", never "already answered".
+`TestWriteServiceError_CarriesTheMachineReadableCode` (handler) and `TestChangeRequestErrorCodesIntegration_*` (repository, against a real database) pin each code to its refusal (the three deviation codes: `TestChangeRequestDeviationIntegration_*`). customer-portal `backend-v2` and the CSM portal BFF pass the code through with the status they give it; the customer webapp classifies a refusal by it (`describeChangeRequestActionError`), and a 409 with a code it does not know, or none (an older entity-service), is "something went wrong, refresh", never "already answered".
 
 **Never put `pgErr.Detail` verbatim in a `ValidationError.Msg`.** `writeServiceError`'s own comment states a `ValidationError`'s message is always safe to return to the caller as-is, but a Postgres foreign-key violation's `Detail` field quotes the real table and column name (e.g. `` Key (assigned_to_id)=(...) is not present in table "user". ``) — handing an API caller schema internals. When a `23503` can be attributed to a specific request field (e.g. via `pgErr.ConstraintName`, since none of this schema's inline `REFERENCES` get an explicit `CONSTRAINT` name, so Postgres's default `<table>_<column>_fkey` naming applies), name that field instead. See `change_request_repo.go`'s `changeRequestPatchFKField` map for the pattern. Several older `23503` handlers elsewhere in `internal/repository/` (`case_repo.go`, `time_card_repo.go`) still return `pgErr.Detail` this way — a known pre-existing gap, not newly introduced, and not yet fixed.
 
@@ -10168,10 +11178,12 @@ Migrations live in `migrations/` as plain SQL files, numbered `NNNN_<description
   2. Every 6-digit `1NNNNN_*.sql` file numbered `100000` or above — the dedicated RLS migration track, see below.
   3. The legacy 6-digit `0NNNNN_*.up.sql` stragglers numbered below `100000` (`000020`–`000105`: old-style KB tables, `cloud_status_events`, `outage_communications` — predate the `NNNN_*.sql` convention and were never renumbered into it). `*.down.sql` files are rollbacks and are never applied by anything in this repo.
 
-  A plain `migrations/*.sql` glob sorts every 6-digit file in the `000020`–`000105` range *before* `0001` (leading zeros: `"000020..."` < `"0001..."` as strings) — this is what `make migrate` and `scripts/generate_schema_bootstrap.sh` both actually did for a long time, and it is a real, not theoretical, failure mode: on a from-scratch database the dependencies these files need don't exist yet (e.g. `000087` triggers on `outage`, created by `0083`), and on a database that already has them applied by hand with no tracking row, the whole run stops dead on the first one with no way to reach anything after it — which is exactly how `000085_announcement_visibility_rls.up.sql` (now `100001_announcement_visibility_rls.sql`) was discovered blocking a real deploy. Both tools now build their file list as three separate sorted globs concatenated in the order above, and must stay in agreement with each other — `scripts/csm-compose/migrate-and-seed.sh`'s own `apply_pending_migrations` independently arrived at the identical phase-1-then-phase-3 shape (it has no RLS track of its own) for the same reason; read its comment for the historical reasoning this repo's own tools now also follow.
-- **The RLS migration track (`migrations/1NNNNN_*.sql`, starting at `100001`)** is every migration that defines or supports an RLS policy: `CREATE POLICY` / `ALTER POLICY` / `ENABLE|FORCE ROW LEVEL SECURITY`, plus the `is_project_member()`-family helper functions that exist only to serve those policies. It is a **deliberately separate number space from the 4-digit schema sequence**, not a continuation of it — picking the next free 4-digit number for a new RLS migration is wrong; the next RLS migration is `100024` (increment from the current highest `1NNNNN` file), regardless of what the 4-digit sequence is up to. This exists because an RLS migration almost always needs its protected table to already exist, which the three-phase order above guarantees (phase 2 always runs after every phase-1 file) with no interleaving — but it is still the author's job to confirm a NEW RLS migration's own dependencies (the table it protects, any function it calls) are satisfied by "every current 4-digit file has already run," same as any migration depends on what came before it.
+  **Nothing in phases 1 or 2 may depend on something only a phase-3 straggler creates**: phase 3 runs last, so on a fresh database the dependency does not exist yet. `0184_outage_communication_channel` (alters `outage_communication`, from `000105`) and `0213_cloud_status_event_delivery_lease` (alters `cloud_status_events`, from `000086`) did: `0184` stopped every fresh `make migrate` and compose stack, and `0213` would have stopped them next. `0183_outage_communication_table` and `0212_cloud_status_events_table` now create both tables ahead of them (the stragglers' own definitions, every `CREATE` guarded, so a no-op where the table exists and `000086`/`000105` a no-op after them), numbered one below the file that needs them so the order holds under any collation. Phase 2 likewise runs against what phase 1 leaves, drops included: `100024` enables RLS on `change_request_environment` only where the table still exists, because `0192` drops it first. Still open: `000020`–`000027` cannot run on a database built from these migrations (see "Still left out" below), and `knowledge_base_manager_user` / `knowledge_base_manager_group`, which `kb_manager_repo.go` uses, are created only by `000027`.
 
-  Moved into this track, in one pass (`scripts/renumber_rls_migrations.sh`, a one-shot script, not meant to run again): `100001`–`100023` — everything that used to be `000085`/`0141`–`0154`/`0175`–`0178`/`0190` (both of them)/`0191_comment_work_notes_internal_only.sql`/`0205`. Every cross-reference comment between these files (`"migration 0147"`, `"0141's own"`, `"see 0175"`, ...) was updated to the new number at the same time — grepped and rewritten by hand, not a blind find-and-replace, since a bare 4-digit number can coincidentally appear in unrelated prose. `100024_change_request_project_links_rls.sql` was added in a second, follow-up pass (by hand, not the script): `0191_change_request_project_links.sql` originally created `change_request_deployment`/`change_request_environment`/`change_request_deployed_product` *and* enabled/policed them in the same file — the one genuinely mixed schema+RLS migration in this codebase, and the one file the renumbering script's own comment explicitly left alone. Once it was clear every other RLS statement lived in this track, the RLS half (the three `ENABLE`/`FORCE ROW LEVEL SECURITY` pairs and their nine policies) was cut from `0191` and moved to `100024`, leaving `0191` schema-only. This is safe precisely because `CREATE POLICY` has no dependency on another policy on the same table, or on `ENABLE`/`FORCE ROW LEVEL SECURITY` having already run against it — `100024` runs after `100023` (`change_request_deployment`'s own extra `UPDATE` policy, added separately), and that ordering has no effect on the end state. **Still left out, for a different reason:** the `000020`–`000105` legacy cluster above, which is not RLS at all and — for the `000020`–`000027` KB sub-range specifically — references tables (`products`, `users`, `cases`, plural) that have never existed in this schema, so renumbering it needs its own dependency audit against real database state, not a rename.
+  A plain `migrations/*.sql` glob sorts every 6-digit file in the `000020`–`000105` range *before* `0001` (leading zeros: `"000020..."` < `"0001..."` as strings) — this is what `make migrate` and `scripts/generate_schema_bootstrap.sh` both actually did for a long time, and it is a real, not theoretical, failure mode: on a from-scratch database the dependencies these files need don't exist yet (e.g. `000087` triggers on `outage`, created by `0083`), and on a database that already has them applied by hand with no tracking row, the whole run stops dead on the first one with no way to reach anything after it — which is exactly how `000085_announcement_visibility_rls.up.sql` (now `100001_announcement_visibility_rls.sql`) was discovered blocking a real deploy. Both tools now build their file list as three separate sorted globs concatenated in the order above, and must stay in agreement with each other — `scripts/csm-compose/migrate-and-seed.sh`'s own `apply_pending_migrations` independently arrived at the identical phase-1-then-phase-3 shape (it has no RLS track of its own) for the same reason; read its comment for the historical reasoning this repo's own tools now also follow.
+- **The RLS migration track (`migrations/1NNNNN_*.sql`, starting at `100001`)** is every migration that defines or supports an RLS policy: `CREATE POLICY` / `ALTER POLICY` / `ENABLE|FORCE ROW LEVEL SECURITY`, plus the `is_project_member()`-family helper functions that exist only to serve those policies. It is a **deliberately separate number space from the 4-digit schema sequence**, not a continuation of it — picking the next free 4-digit number for a new RLS migration is wrong; the next RLS migration takes the number after the highest `1NNNNN` file on the target branch, regardless of what the 4-digit sequence is up to. This exists because an RLS migration almost always needs its protected table to already exist, which the three-phase order above guarantees (phase 2 always runs after every phase-1 file) with no interleaving — but it is still the author's job to confirm a NEW RLS migration's own dependencies (the table it protects, any function it calls) are satisfied by "every current 4-digit file has already run," same as any migration depends on what came before it.
+
+  Moved into this track, in one pass (`scripts/renumber_rls_migrations.sh`, a one-shot script, not meant to run again): `100001`–`100023` — everything that used to be `000085`/`0141`–`0154`/`0175`–`0178`/`0190` (both of them)/`0191_comment_work_notes_internal_only.sql`/`0205`. Every cross-reference comment between these files (`"migration 0147"`, `"0141's own"`, `"see 0175"`, ...) was updated to the new number at the same time — grepped and rewritten by hand, not a blind find-and-replace, since a bare 4-digit number can coincidentally appear in unrelated prose. `100024_change_request_project_links_rls.sql` was added in a second, follow-up pass (by hand, not the script): `0191_change_request_project_links.sql` originally created `change_request_deployment`/`change_request_environment`/`change_request_deployed_product` *and* enabled/policed them in the same file — the one genuinely mixed schema+RLS migration in this codebase, and the one file the renumbering script's own comment explicitly left alone. Once it was clear every other RLS statement lived in this track, the RLS half (an `ENABLE`/`FORCE ROW LEVEL SECURITY` pair and three policies for each of the three tables) was cut from `0191` and moved to `100024`, leaving `0191` schema-only. This is safe precisely because `CREATE POLICY` has no dependency on another policy on the same table, or on `ENABLE`/`FORCE ROW LEVEL SECURITY` having already run against it — `100024` runs after `100023` (`change_request_deployment`'s own extra `UPDATE` policy, added separately), and that ordering has no effect on the end state. `100024` skips the `change_request_environment` part wherever `0192_change_request_drop_environments` has already dropped that table, and `make migrate` applies `0192` in phase 1, before this track. A database `make migrate` builds therefore has RLS enabled and forced on two tables, `change_request_deployment` and `change_request_deployed_product`, with six policies from `100024`, three on each; with `100023`'s `UPDATE` policy, `change_request_deployment` has four, seven in all. A database that still has `change_request_environment` (`0191` applied, `0192` not) ends the same way: `make migrate` applies `0192` first in the same run. That part acts only where `100024` runs while the table still exists (applied by hand ahead of `0192`), and `0192`'s `DROP TABLE` then removes the table together with its three policies. **Still left out, for a different reason:** the `000020`–`000105` legacy cluster above, which is not RLS at all and — for the `000020`–`000027` KB sub-range specifically — references tables (`products`, `users`, `cases`, plural) that have never existed in this schema, so renumbering it needs its own dependency audit against real database state, not a rename.
 
   Every migration in this track is idempotent by construction: `DROP POLICY IF EXISTS` immediately before each `CREATE POLICY` (Postgres has no `CREATE POLICY IF NOT EXISTS` — this is the only way), `ALTER POLICY` (idempotent on its own, replaces the expression in place), or an introspection-driven `DO` block that only acts on whatever is actually still unfixed. This is what makes the rename itself safe: whether or not a given policy's effect was already live in production under the old filename (most were, applied by hand historically — see `scripts/record_manually_applied_rls_migrations.sql`'s own doc comment), re-applying it once more under the new, previously-untracked name is a harmless no-op, never a hard failure.
 
@@ -10189,7 +11201,7 @@ Key conventions enforced at the DB level:
 - Human-readable IDs (e.g. `CASE-001`, `WSO2-001`) are generated from dedicated sequences via column defaults
 - Enum types (e.g. `case_state_enum`, `case_priority_enum`) enforce valid values at the DB level; Go enum validation in the service layer is an additional guard
 - Triggers enforce relational constraints that foreign keys alone cannot express (e.g. deployment must belong to the same project as the case)
-- **Table names are always singular** (`case`, `user`, `comment`, `product_vulnerability`, `case_attachment`, ...), never plural (`cases`, `users`, `case_attachments`). A plural name (`case_attachments`) has been introduced by mistake before and had to be renamed later — check this before adding a new `CREATE TABLE`.
+- **Table names are always singular** (`case`, `user`, `comment`, `product_vulnerability`, `case_attachment`, ...), never plural (`cases`, `users`, `case_attachments`). A plural name (`case_attachments`) has been introduced by mistake before and had to be renamed later — check this before adding a new `CREATE TABLE`. **Existing plural tables keep their names** (`announcement_requests`, `announcement_request_deliveries`, `announcement_request_updates`, `cloud_status_events`, `event_publish_failures`, `outage_notifications`, `sn_writeback_failures`): the rule is for new tables. Migrations and Go code address these by their names, so a rename is a migration of its own, never a side effect, and a migration that declares one again must use the existing name. `0212_cloud_status_events_table.sql` therefore creates `cloud_status_events` under the plural name 000086 gave it, which 0213 and `cloud_status_repo.go` use.
 - **Timestamp columns always use the `_on` suffix** (`created_on`, `updated_on`, `resolved_on`, `started_on`, `due_on`, ...), never `_at` (`created_at`, `updated_at`). This mirrors the JSON `On`-suffix convention under "Domain types" below — the DB column and the wire field should read the same way. Several migrations (`alert_incident_mapping`, `event_publish_failures`, the now-removed `sla_clocks`, `case_attachment`, `scheduled_task_run`, `sn_writeback_failures`, `announcement_requests`) used `_at` before being fixed — check this before adding a new `TIMESTAMPTZ` column.
 
 ## OpenAPI spec

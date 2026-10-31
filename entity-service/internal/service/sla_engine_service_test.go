@@ -21,41 +21,71 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// recordingSLAEngineRepo is an in-memory repository.SLAEngineRepository
-// fake that records every call, backed by the same fixed policy set
-// fakePolicyLookupRepo uses (sla_policy_resolver_test.go), so
-// SLAEngineService tests exercise the real resolver, not a stub.
-type recordingSLAEngineRepo struct {
-	fakePolicyLookupRepo
-	registered []string // "workItemID|policyID"
-	completed  []string // "workItemID|target"
-	paused     []string // "workItemID|target|true" or "...|false"
-	cancelled  []string // "workItemID"
+// fakeFullSLAEngineRepo is an in-memory repository.SLAEngineRepository fake
+// exercising the real, condition-driven resolver (slaPolicyResolver) rather
+// than a stub keyed by a deterministic name -- candidatesByTarget holds the
+// real policy shapes (condition text and all) a test wants resolved,
+// factsByCase the case's current CaseFacts, and activeByCaseTarget which
+// policy a given (caseID, target) clock is currently bound to (for
+// ApplyCaseStateEffects, which never re-resolves, only evaluates the
+// already-bound policy's own conditions).
+type fakeFullSLAEngineRepo struct {
+	candidatesByTarget map[string][]repository.SLAPolicyRef
+	factsByCase        map[string]repository.CaseFacts
+	activeByCaseTarget map[string]repository.SLAPolicyRef
 
-	registerErr error
-	registerOK  bool // if false, RegisterClock reports "already registered"
-	cancelErr   error
-	cancelCount int
-	// failReviseClocksTimes controls how ReviseClocks fails, if at all:
-	// 0 means never fail (ignores cancelErr); -1 means always fail with
-	// cancelErr; a positive N means fail with cancelErr for the next N
-	// calls (decrementing each time) then succeed -- used to test
-	// ReviseCaseClocks' bounded retry actually recovers from a transient
-	// failure, as opposed to the -1 "fails forever" case.
+	registered     []string // "caseID|policyID"
+	completed      []string // "caseID|target"
+	paused         []string // "caseID|target|true" or "...|false"
+	clockCancelled []string // "caseID|target" (CancelClock)
+	cancelled      []string // "caseID" (ReviseClocks' bulk cancel)
+
+	listErrOnTarget string
+	getCaseFactsErr error
+	registerErr     error
+	registerOK      bool // if false, RegisterClock reports "already registered"
+	cancelErr       error
+	cancelCount     int
+	// failReviseClocksTimes: 0 never fails; -1 always fails; N>0 fails the
+	// next N calls then succeeds -- same semantics the old fixture used.
 	failReviseClocksTimes int
 	reviseClocksCalls     int
 }
 
-func newRecordingSLAEngineRepo() *recordingSLAEngineRepo {
-	return &recordingSLAEngineRepo{fakePolicyLookupRepo: *newFakePolicyLookupRepo(), registerOK: true}
+func newFakeFullSLAEngineRepo() *fakeFullSLAEngineRepo {
+	return &fakeFullSLAEngineRepo{
+		candidatesByTarget: map[string][]repository.SLAPolicyRef{},
+		factsByCase:        map[string]repository.CaseFacts{},
+		activeByCaseTarget: map[string]repository.SLAPolicyRef{},
+		registerOK:         true,
+	}
 }
 
-func (r *recordingSLAEngineRepo) RegisterClock(_ context.Context, workItemID string, policy repository.SLAPolicyRef) (bool, error) {
+func (r *fakeFullSLAEngineRepo) FindPolicyByName(context.Context, string, string) (repository.SLAPolicyRef, error) {
+	panic("not implemented")
+}
+
+func (r *fakeFullSLAEngineRepo) ListCandidatePolicies(_ context.Context, target string) ([]repository.SLAPolicyRef, error) {
+	if r.listErrOnTarget != "" && target == r.listErrOnTarget {
+		return nil, errors.New("db unavailable")
+	}
+	return r.candidatesByTarget[target], nil
+}
+
+func (r *fakeFullSLAEngineRepo) GetCaseFacts(_ context.Context, workItemID string) (repository.CaseFacts, error) {
+	if r.getCaseFactsErr != nil {
+		return repository.CaseFacts{}, r.getCaseFactsErr
+	}
+	return r.factsByCase[workItemID], nil
+}
+
+func (r *fakeFullSLAEngineRepo) RegisterClock(_ context.Context, workItemID string, policy repository.SLAPolicyRef, _ time.Time) (bool, error) {
 	if r.registerErr != nil {
 		return false, r.registerErr
 	}
@@ -63,11 +93,7 @@ func (r *recordingSLAEngineRepo) RegisterClock(_ context.Context, workItemID str
 	return r.registerOK, nil
 }
 
-// ReviseClocks fakes the real repository's atomic cancel-then-register-many:
-// on cancelErr, nothing is recorded at all (mirroring a rolled-back
-// transaction -- neither the cancel nor any registration "took"), same as
-// the real ReviseClocks' all-or-nothing guarantee.
-func (r *recordingSLAEngineRepo) ReviseClocks(_ context.Context, workItemID string, policies []repository.SLAPolicyRef) (int, error) {
+func (r *fakeFullSLAEngineRepo) ReviseClocks(_ context.Context, workItemID string, policies []repository.SLAPolicyRef) (int, error) {
 	r.reviseClocksCalls++
 	if r.failReviseClocksTimes != 0 {
 		if r.failReviseClocksTimes > 0 {
@@ -82,24 +108,74 @@ func (r *recordingSLAEngineRepo) ReviseClocks(_ context.Context, workItemID stri
 	return r.cancelCount, nil
 }
 
-func (r *recordingSLAEngineRepo) CompleteClock(_ context.Context, workItemID, target string) (bool, error) {
+func (r *fakeFullSLAEngineRepo) CompleteClock(_ context.Context, workItemID, target string) (bool, error) {
 	r.completed = append(r.completed, workItemID+"|"+target)
 	return true, nil
 }
 
-func (r *recordingSLAEngineRepo) SetPaused(_ context.Context, workItemID, target string, paused bool) (bool, error) {
+func (r *fakeFullSLAEngineRepo) SetPaused(_ context.Context, workItemID, target string, paused bool) (bool, error) {
 	r.paused = append(r.paused, fmt.Sprintf("%s|%s|%v", workItemID, target, paused))
 	return true, nil
 }
 
-func TestSLAEngineService_RegisterCaseClocks_CatastrophicRegistersAllThree(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+func (r *fakeFullSLAEngineRepo) CancelClock(_ context.Context, workItemID, target string) (bool, error) {
+	r.clockCancelled = append(r.clockCancelled, workItemID+"|"+target)
+	return true, nil
+}
+
+func (r *fakeFullSLAEngineRepo) ActiveClockPolicies(_ context.Context, workItemID, target string) ([]repository.SLAPolicyRef, error) {
+	policy, ok := r.activeByCaseTarget[workItemID+"|"+target]
+	if !ok {
+		return nil, nil
+	}
+	return []repository.SLAPolicyRef{policy}, nil
+}
+
+func (r *fakeFullSLAEngineRepo) CompleteClockByPolicy(_ context.Context, workItemID, target, _ string) (bool, error) {
+	r.completed = append(r.completed, workItemID+"|"+target)
+	return true, nil
+}
+
+func (r *fakeFullSLAEngineRepo) CancelClockByPolicy(_ context.Context, workItemID, target, _ string) (bool, error) {
+	r.clockCancelled = append(r.clockCancelled, workItemID+"|"+target)
+	return true, nil
+}
+
+func (r *fakeFullSLAEngineRepo) SetPausedByPolicy(_ context.Context, workItemID, target, _ string, paused bool) (bool, error) {
+	r.paused = append(r.paused, fmt.Sprintf("%s|%s|%v", workItemID, target, paused))
+	return true, nil
+}
+
+// severityLadderCandidates seeds a clean, three-target severity ladder for
+// case_type=case (S0 response/workaround/resolution, S4 response only) --
+// enough to exercise RegisterCaseClocks/ReviseCaseClocks' own orchestration
+// without re-testing the resolver's own ambiguity/classification logic
+// (covered in sla_policy_resolver_test.go).
+func severityLadderCandidates() map[string][]repository.SLAPolicyRef {
+	return map[string][]repository.SLAPolicyRef{
+		"RESPONSE": {
+			{ID: "resp-s0", Name: "S0 Response", Target: "RESPONSE", StartCondition: "state=OPEN^case_type=case^priority=S0^cs_engineer_response_comment=false"},
+			{ID: "resp-s4", Name: "S4 Response", Target: "RESPONSE", StartCondition: "state=OPEN^case_type=case^priority=S4^cs_engineer_response_comment=false"},
+		},
+		"WORKAROUND": {
+			{ID: "work-s0", Name: "S0 Workaround", Target: "WORKAROUND", StartCondition: "case_type=case^priority=S0"},
+		},
+		"RESOLUTION": {
+			{ID: "res-s0", Name: "S0 Resolution", Target: "RESOLUTION", StartCondition: "priority=S0^case_type=case"},
+		},
+	}
+}
+
+func TestSLAEngineService_RegisterCaseClocks_MatchesAllThreeTargets(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-1"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
 	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.RegisterCaseClocks(context.Background(), "case-1", &sev, "")
 
-	want := []string{"case-1|s0-r", "case-1|s0-w", "case-1|s0-res"}
+	want := []string{"case-1|resp-s0", "case-1|work-s0", "case-1|res-s0"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
@@ -111,46 +187,118 @@ func TestSLAEngineService_RegisterCaseClocks_CatastrophicRegistersAllThree(t *te
 }
 
 func TestSLAEngineService_RegisterCaseClocks_LowSeverityRegistersResponseOnly(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-2"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
 	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityLow
 	svc.RegisterCaseClocks(context.Background(), "case-2", &sev, "")
 
-	if len(repo.registered) != 1 || repo.registered[0] != "case-2|s4-r" {
-		t.Errorf("registered = %v, want exactly [case-2|s4-r] (Query/LOW: response only, matching the old sla_clocks design's LOW-severity behavior)", repo.registered)
+	if len(repo.registered) != 1 || repo.registered[0] != "case-2|resp-s4" {
+		t.Errorf("registered = %v, want exactly [case-2|resp-s4]: no WORKAROUND/RESOLUTION policy matches S4 in this fixture", repo.registered)
 	}
 }
 
-func TestSLAEngineService_RegisterCaseClocks_NilSeverityRegistersNothing(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+// TestSLAEngineService_RegisterCaseClocks_SeverityIndependentPolicyStillRegisters
+// is the real improvement a condition-driven resolver gives over the old
+// severity-keyed map: a policy with no priority condition at all (e.g. the
+// real "ServiceRequest SLA"/"Query - Resolution (Open Source)" rows) can
+// still match and register even when the case has no severity at all.
+func TestSLAEngineService_RegisterCaseClocks_SeverityIndependentPolicyStillRegisters(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = map[string][]repository.SLAPolicyRef{
+		"RESPONSE": {
+			{ID: "sr", Name: "ServiceRequest SLA", Target: "RESPONSE", StartCondition: "case_type=service_request^state=OPEN^case_typeISNOTEMPTY"},
+		},
+	}
+	repo.factsByCase["case-sr"] = repository.CaseFacts{State: "OPEN", CaseType: "service_request"}
+	svc := NewSLAEngineService(repo)
+
+	svc.RegisterCaseClocks(context.Background(), "case-sr", nil, "")
+
+	if len(repo.registered) != 1 || repo.registered[0] != "case-sr|sr" {
+		t.Errorf("registered = %v, want [case-sr|sr] even with a nil severity", repo.registered)
+	}
+}
+
+func TestSLAEngineService_RegisterCaseClocks_NoMatchRegistersNothing(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-3"] = repository.CaseFacts{State: "CLOSED", CaseType: "announcement"}
 	svc := NewSLAEngineService(repo)
 
 	svc.RegisterCaseClocks(context.Background(), "case-3", nil, "")
 
 	if len(repo.registered) != 0 {
-		t.Errorf("registered = %v, want none for a case with no severity", repo.registered)
+		t.Errorf("registered = %v, want none for a case matching no policy at all", repo.registered)
 	}
 }
 
-func TestSLAEngineService_RegisterCaseClocks_MissingPolicySkipsThatClockTypeOnly(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
-	// Remove the workaround policy so CATASTROPHIC's middle clock type has
-	// nothing to resolve -- response and resolution must still register.
-	delete(repo.policies, "S0 - WORKAROUND (CSM)|WORKAROUND")
+func TestSLAEngineService_RegisterCaseClocks_MissingPolicySkipsThatTargetOnly(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	candidates := severityLadderCandidates()
+	delete(candidates, "WORKAROUND") // S0's middle target has nothing to resolve
+	repo.candidatesByTarget = candidates
+	repo.factsByCase["case-4"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
 	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
 	svc.RegisterCaseClocks(context.Background(), "case-4", &sev, "")
 
-	want := []string{"case-4|s0-r", "case-4|s0-res"}
+	want := []string{"case-4|resp-s0", "case-4|res-s0"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
 }
 
+// TestSLAEngineService_RegisterCaseClocks_StopConditionAlreadyTrueSkipsRegistration
+// is the regression test for a PR review finding: resolve() only ever
+// evaluates start_condition, so a policy whose stop_condition ALSO already
+// holds (upstream only ever attaches a definition when start holds AND stop
+// doesn't) used to get registered anyway, immediately completed at ~0%
+// elapsed by the very next state-effects pass -- a junk ACHIEVED row with
+// no real tracking value. resolveApplicablePolicies must skip it before it
+// is ever registered at all.
+func TestSLAEngineService_RegisterCaseClocks_StopConditionAlreadyTrueSkipsRegistration(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = map[string][]repository.SLAPolicyRef{
+		"RESOLUTION": {
+			{
+				ID:             "res-already-done",
+				Name:           "Resolution (fix ETA already shared)",
+				Target:         "RESOLUTION",
+				StartCondition: "case_type=case^priority=S0",
+				StopCondition:  "fix_eta_sharedISNOTEMPTY",
+			},
+		},
+	}
+	repo.factsByCase["case-fix-eta"] = repository.CaseFacts{State: "OPEN", CaseType: "case", FixEtaShared: true}
+	svc := NewSLAEngineService(repo)
+
+	sev := domain.CaseSeverityCatastrophic
+	svc.RegisterCaseClocks(context.Background(), "case-fix-eta", &sev, "")
+
+	if len(repo.registered) != 0 {
+		t.Errorf("registered = %v, want none -- the policy's own stop_condition already holds, so it must never be registered", repo.registered)
+	}
+}
+
+func TestSLAEngineService_RegisterCaseClocks_FactsLookupFailureRegistersNothing(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.getCaseFactsErr = errors.New("db unavailable")
+	svc := NewSLAEngineService(repo)
+
+	sev := domain.CaseSeverityCatastrophic
+	svc.RegisterCaseClocks(context.Background(), "case-x", &sev, "")
+
+	if len(repo.registered) != 0 {
+		t.Errorf("registered = %v, want none when the case's own facts can't be read", repo.registered)
+	}
+}
+
 func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
 	svc := NewSLAEngineService(repo)
 
 	svc.CompleteResponseClock(context.Background(), "case-5")
@@ -161,7 +309,7 @@ func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
 }
 
 func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
 	svc := NewSLAEngineService(repo)
 
 	svc.CompleteWorkaroundClock(context.Background(), "case-5")
@@ -172,11 +320,9 @@ func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
 }
 
 // TestSLAEngineService_CompleteFixEtaSharedClocks verifies sharing a fix ETA
-// with the customer completes BOTH the workaround and resolution clocks --
-// unlike CompleteWorkaroundClock/CompleteResponseClock, which each complete
-// exactly one target.
+// with the customer completes BOTH the workaround and resolution clocks.
 func TestSLAEngineService_CompleteFixEtaSharedClocks(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
 	svc := NewSLAEngineService(repo)
 
 	svc.CompleteFixEtaSharedClocks(context.Background(), "case-5")
@@ -192,6 +338,34 @@ func TestSLAEngineService_CompleteFixEtaSharedClocks(t *testing.T) {
 	}
 }
 
+// caseStateEffectsPolicies seeds the three targets' ACTIVE clock policies
+// for ApplyCaseStateEffects, matching the real shape of
+// "P1 - Response/Workaround/Resolution (Open Source)" closely enough to
+// exercise stop/pause/resume generically -- RESPONSE has no
+// pause_condition at all (matching every real RESPONSE policy), so it is
+// never paused, exactly like the old hardcoded switch, but now as a
+// consequence of the real data rather than special-cased Go logic.
+func caseStateEffectsPolicies(caseID string) map[string]repository.SLAPolicyRef {
+	return map[string]repository.SLAPolicyRef{
+		caseID + "|RESPONSE": {
+			ID: "resp", Target: "RESPONSE",
+			StopCondition: "cs_engineer_response_comment=true^ORstateINCLOSED",
+		},
+		caseID + "|WORKAROUND": {
+			ID: "work", Target: "WORKAROUND",
+			StopCondition:   "stateINCLOSED^ORfix_eta_sharedISNOTEMPTY",
+			PauseCondition:  "stateINAWAITING_INFO,SOLUTION_PROPOSED^ORu_workaround_providedISNOTEMPTY",
+			ResumeCondition: "stateINWORK_IN_PROGRESS,WAITING_ON_WSO2^u_workaround_providedISEMPTY",
+		},
+		caseID + "|RESOLUTION": {
+			ID: "res", Target: "RESOLUTION",
+			StopCondition:   "stateINCLOSED",
+			PauseCondition:  "stateINAWAITING_INFO,SOLUTION_PROPOSED",
+			ResumeCondition: "stateINWORK_IN_PROGRESS,WAITING_ON_WSO2,REOPENED",
+		},
+	}
+}
+
 func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -200,25 +374,25 @@ func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 		wantCompleted []string
 	}{
 		{
-			"awaiting info pauses both",
+			"awaiting info pauses workaround+resolution, leaves response alone",
 			domain.CaseStateAwaitingInfo,
 			[]string{"case-6|WORKAROUND|true", "case-6|RESOLUTION|true"},
 			nil,
 		},
 		{
-			"solution proposed pauses both",
+			"solution proposed pauses workaround+resolution",
 			domain.CaseStateSolutionProposed,
 			[]string{"case-6|WORKAROUND|true", "case-6|RESOLUTION|true"},
 			nil,
 		},
 		{
-			"closed resumes+completes all three clocks",
+			"closed completes all three clocks (via each policy's own stop_condition)",
 			domain.CaseStateClosed,
-			[]string{"case-6|RESOLUTION|false", "case-6|WORKAROUND|false"},
-			[]string{"case-6|RESOLUTION", "case-6|WORKAROUND", "case-6|RESPONSE"},
+			nil,
+			[]string{"case-6|RESPONSE", "case-6|WORKAROUND", "case-6|RESOLUTION"},
 		},
 		{
-			"work in progress resumes both",
+			"work in progress resumes workaround+resolution",
 			domain.CaseStateWorkInProgress,
 			[]string{"case-6|WORKAROUND|false", "case-6|RESOLUTION|false"},
 			nil,
@@ -226,7 +400,9 @@ func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := newRecordingSLAEngineRepo()
+			repo := newFakeFullSLAEngineRepo()
+			repo.factsByCase["case-6"] = repository.CaseFacts{CaseType: "case"}
+			repo.activeByCaseTarget = caseStateEffectsPolicies("case-6")
 			svc := NewSLAEngineService(repo)
 
 			svc.ApplyCaseStateEffects(context.Background(), "case-6", tt.state)
@@ -247,69 +423,144 @@ func TestSLAEngineService_ApplyCaseStateEffects(t *testing.T) {
 					t.Errorf("completed[%d] = %q, want %q", i, repo.completed[i], w)
 				}
 			}
+			if len(repo.clockCancelled) != 0 {
+				t.Errorf("clockCancelled = %v, want none", repo.clockCancelled)
+			}
 		})
 	}
 }
 
-// TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh confirms
-// a severity change on an existing case cancels every one of its existing
-// clocks before registering entirely new ones for the new severity, in
-// that order -- so the new registration is never blocked by RegisterClock's
-// own NOT EXISTS guard seeing a still-active old-severity row, and the new
-// clocks carry no relation to the old ones (fresh start_on, zero elapsed).
-func TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+// TestSLAEngineService_ApplyCaseStateEffects_CancelCondition confirms a
+// clock whose bound policy's cancel_condition now matches (e.g. the case's
+// type changed away from what the policy required) is cancelled rather
+// than paused/resumed/completed.
+func TestSLAEngineService_ApplyCaseStateEffects_CancelCondition(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-14"] = repository.CaseFacts{CaseType: "hosting"}
+	repo.activeByCaseTarget = map[string]repository.SLAPolicyRef{
+		"case-14|RESOLUTION": {
+			ID: "res", Target: "RESOLUTION",
+			StopCondition:   "stateINCLOSED",
+			CancelCondition: "case_type!=case",
+		},
+	}
 	svc := NewSLAEngineService(repo)
 
-	sev := domain.CaseSeverityCatastrophic // P0
+	svc.ApplyCaseStateEffects(context.Background(), "case-14", domain.CaseStateWorkInProgress)
+
+	if len(repo.clockCancelled) != 1 || repo.clockCancelled[0] != "case-14|RESOLUTION" {
+		t.Fatalf("clockCancelled = %v, want [case-14|RESOLUTION]", repo.clockCancelled)
+	}
+	if len(repo.completed) != 0 || len(repo.paused) != 0 {
+		t.Errorf("completed=%v paused=%v, want neither when cancel_condition matches", repo.completed, repo.paused)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_CompletesAClockWhoseOwnStopConditionNeverReachesClosed
+// is the regression test for the code-review-found gap: the condition-driven
+// engine only completes a clock when its own bound policy's stop_condition
+// evaluates true -- so a policy whose stop_condition text simply never
+// mentions CLOSED (a gap in the real data, or a future sync mistake) used to
+// leave its clock running forever once the case actually closed, with
+// nothing left to notice. The safety net force-completes it anyway.
+func TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_CompletesAClockWhoseOwnStopConditionNeverReachesClosed(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-16"] = repository.CaseFacts{CaseType: "case", State: "CLOSED"}
+	repo.activeByCaseTarget = map[string]repository.SLAPolicyRef{
+		// Deliberately never matches CLOSED, or anything else, for this
+		// case's facts -- simulating a policy whose stop_condition has a gap.
+		"case-16|RESOLUTION": {ID: "res", Target: "RESOLUTION", StopCondition: "priority=S4"},
+	}
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseStateEffects(context.Background(), "case-16", domain.CaseStateClosed)
+
+	if len(repo.completed) != 1 || repo.completed[0] != "case-16|RESOLUTION" {
+		t.Fatalf("completed = %v, want [case-16|RESOLUTION] via the CLOSED safety net", repo.completed)
+	}
+	if len(repo.paused) != 0 || len(repo.clockCancelled) != 0 {
+		t.Errorf("paused=%v clockCancelled=%v, want neither", repo.paused, repo.clockCancelled)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_DoesNotDoubleCompleteWhenStopConditionAlreadyMatched
+// confirms the safety net doesn't fire a second, redundant CompleteClock
+// when the policy's own stop_condition already completed the clock.
+func TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_DoesNotDoubleCompleteWhenStopConditionAlreadyMatched(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-17"] = repository.CaseFacts{CaseType: "case", State: "CLOSED"}
+	repo.activeByCaseTarget = map[string]repository.SLAPolicyRef{
+		"case-17|RESOLUTION": {ID: "res", Target: "RESOLUTION", StopCondition: "stateINCLOSED"},
+	}
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseStateEffects(context.Background(), "case-17", domain.CaseStateClosed)
+
+	if len(repo.completed) != 1 || repo.completed[0] != "case-17|RESOLUTION" {
+		t.Fatalf("completed = %v, want exactly one CompleteClock call, not a duplicate safety-net call", repo.completed)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_DoesNotFireWhenCancelConditionMatched
+// confirms a clock that CLOSED legitimately cancels (rather than completes)
+// is left cancelled, not also force-completed by the safety net.
+func TestSLAEngineService_ApplyCaseStateEffects_ClosedSafetyNet_DoesNotFireWhenCancelConditionMatched(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-18"] = repository.CaseFacts{CaseType: "hosting", State: "CLOSED"}
+	repo.activeByCaseTarget = map[string]repository.SLAPolicyRef{
+		"case-18|RESOLUTION": {ID: "res", Target: "RESOLUTION", StopCondition: "priority=S4", CancelCondition: "case_type!=case"},
+	}
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseStateEffects(context.Background(), "case-18", domain.CaseStateClosed)
+
+	if len(repo.clockCancelled) != 1 || repo.clockCancelled[0] != "case-18|RESOLUTION" {
+		t.Fatalf("clockCancelled = %v, want [case-18|RESOLUTION]", repo.clockCancelled)
+	}
+	if len(repo.completed) != 0 {
+		t.Errorf("completed = %v, want none -- the clock was already settled by cancel_condition", repo.completed)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseStateEffects_NoActiveClockIsANoOp confirms a
+// target with no currently open clock is simply skipped -- no panics, no
+// spurious repo calls.
+func TestSLAEngineService_ApplyCaseStateEffects_NoActiveClockIsANoOp(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-15"] = repository.CaseFacts{CaseType: "case"}
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseStateEffects(context.Background(), "case-15", domain.CaseStateClosed)
+
+	if len(repo.completed) != 0 || len(repo.paused) != 0 || len(repo.clockCancelled) != 0 {
+		t.Errorf("expected no repo calls at all, got completed=%v paused=%v cancelled=%v", repo.completed, repo.paused, repo.clockCancelled)
+	}
+}
+
+func TestSLAEngineService_ReviseCaseClocks_CancelsThenRegistersFresh(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-8"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
+	svc := NewSLAEngineService(repo)
+
+	sev := domain.CaseSeverityCatastrophic
 	svc.ReviseCaseClocks(context.Background(), "case-8", &sev, "")
 
 	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-8" {
 		t.Fatalf("cancelled = %v, want [case-8]", repo.cancelled)
 	}
-	want := []string{"case-8|s0-r", "case-8|s0-w", "case-8|s0-res"}
+	want := []string{"case-8|resp-s0", "case-8|work-s0", "case-8|res-s0"}
 	if len(repo.registered) != len(want) {
 		t.Fatalf("registered = %v, want %v", repo.registered, want)
 	}
-	for i, w := range want {
-		if repo.registered[i] != w {
-			t.Errorf("registered[%d] = %q, want %q", i, repo.registered[i], w)
-		}
-	}
 }
 
-// TestSLAEngineService_ReviseCaseClocks_DowngradeStillCancelsEveryClockType
-// covers a severity DOWNGRADE: ReviseClocks cancels every active clock type
-// on the case regardless of what the new severity resolves to, so a clock
-// type no longer applicable after the downgrade (e.g. LOW dropping
-// "workaround"/"resolution") is cancelled too, not left running. This is
-// the one already-cancelled call recorded per case, independent of how
-// many (fewer, for a downgrade) clock types get freshly registered.
-func TestSLAEngineService_ReviseCaseClocks_DowngradeStillCancelsEveryClockType(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo)
-
-	sev := domain.CaseSeverityLow // Query -- response only
-	svc.ReviseCaseClocks(context.Background(), "case-9", &sev, "")
-
-	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-9" {
-		t.Fatalf("cancelled = %v, want [case-9]", repo.cancelled)
-	}
-	if len(repo.registered) != 1 || repo.registered[0] != "case-9|s4-r" {
-		t.Errorf("registered = %v, want [case-9|s4-r]", repo.registered)
-	}
-}
-
-// TestSLAEngineService_ReviseCaseClocks_NothingHappensIfRepoFails confirms
-// ReviseClocks' atomicity guarantee at the service layer: when the
-// repository call errors (simulating any failure inside its transaction --
-// the cancel, a registration, or the commit itself), NEITHER the cancel NOR
-// any registration is recorded, so the case's prior clocks are left exactly
-// as they were rather than cancelled with no replacement.
 func TestSLAEngineService_ReviseCaseClocks_NothingHappensIfRepoFails(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-11"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
 	repo.cancelErr = errors.New("db unavailable")
-	repo.failReviseClocksTimes = -1 // fail every call, including both retry attempts
+	repo.failReviseClocksTimes = -1
 	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
@@ -326,15 +577,12 @@ func TestSLAEngineService_ReviseCaseClocks_NothingHappensIfRepoFails(t *testing.
 	}
 }
 
-// TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers confirms the
-// bounded retry actually recovers from a transient failure: ReviseClocks
-// fails on its first call and succeeds on the second, and the case ends up
-// with its clocks cancelled and re-registered exactly as if the first call
-// had never failed.
 func TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-13"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
 	repo.cancelErr = errors.New("db unavailable")
-	repo.failReviseClocksTimes = 1 // fail once, then succeed
+	repo.failReviseClocksTimes = 1
 	svc := NewSLAEngineService(repo)
 
 	sev := domain.CaseSeverityCatastrophic
@@ -346,18 +594,11 @@ func TestSLAEngineService_ReviseCaseClocks_RetriesOnceAndRecovers(t *testing.T) 
 	if len(repo.cancelled) != 1 || repo.cancelled[0] != "case-13" {
 		t.Errorf("cancelled = %v, want [case-13] -- the retry should have succeeded", repo.cancelled)
 	}
-	want := []string{"case-13|s0-r", "case-13|s0-w", "case-13|s0-res"}
-	if len(repo.registered) != len(want) {
-		t.Errorf("registered = %v, want %v -- the retry should have succeeded", repo.registered, want)
-	}
 }
 
-// TestSLAEngineService_ReviseCaseClocks_NilSeverityStillCancels confirms a
-// nil newSeverity (RegisterCaseClocks' own no-op case) still runs the
-// cancel step -- a case moving to an unrecognised/nil severity must not
-// keep its old clocks running just because the new one can't be resolved.
-func TestSLAEngineService_ReviseCaseClocks_NilSeverityStillCancels(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
+func TestSLAEngineService_ReviseCaseClocks_NoMatchStillCancels(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-10"] = repository.CaseFacts{}
 	svc := NewSLAEngineService(repo)
 
 	svc.ReviseCaseClocks(context.Background(), "case-10", nil, "")
@@ -366,22 +607,21 @@ func TestSLAEngineService_ReviseCaseClocks_NilSeverityStillCancels(t *testing.T)
 		t.Fatalf("cancelled = %v, want [case-10]", repo.cancelled)
 	}
 	if len(repo.registered) != 0 {
-		t.Errorf("registered = %v, want none (nil severity)", repo.registered)
+		t.Errorf("registered = %v, want none (no policy matches empty facts)", repo.registered)
 	}
 }
 
 // TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure is the
-// regression test for a real CodeRabbit finding: resolve() drops a clock
-// type from the resolved list both when its policy is genuinely absent AND
-// when the lookup itself fails (e.g. a database blip) -- resolveApplicablePolicies
-// surfaces the latter case as lookupFailed. ReviseCaseClocks must NOT call
-// ReviseClocks with an incomplete list in that case: doing so would cancel
-// the case's existing clocks and commit no replacement for the clock type
-// whose policy lookup failed. Confirms repo.ReviseClocks (and therefore
-// CancelActiveClocks) is never even called.
+// regression test for a real CodeRabbit finding on the old design: resolve()
+// drops a target from the resolved list both when its policy is genuinely
+// unmatched AND when the lookup itself fails -- resolveApplicablePolicies
+// surfaces the latter as lookupFailed. ReviseCaseClocks must NOT call
+// ReviseClocks with an incomplete list in that case.
 func TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
-	repo.errOnName = "S0 - WORKAROUND (CSM)" // one of S0's three clock types
+	repo := newFakeFullSLAEngineRepo()
+	repo.candidatesByTarget = severityLadderCandidates()
+	repo.factsByCase["case-12"] = repository.CaseFacts{State: "OPEN", CaseType: "case"}
+	repo.listErrOnTarget = "WORKAROUND"
 
 	svc := NewSLAEngineService(repo)
 	sev := domain.CaseSeverityCatastrophic
@@ -392,23 +632,5 @@ func TestSLAEngineService_ReviseCaseClocks_AbortsOnPolicyLookupFailure(t *testin
 	}
 	if len(repo.registered) != 0 {
 		t.Errorf("registered = %v, want none -- a policy lookup failure must abort before ReviseClocks is ever called", repo.registered)
-	}
-}
-
-// TestSLAEngineService_RegisterCaseClocks_MediumSeverityUsesOnlyFakedClockType
-// confirms registration depends on severity alone now (no project/plan
-// lookup involved at all): only S3 - Resolution is faked, so a Medium-
-// severity case registers only that one clock type, with response/
-// workaround for S3 simply missing from the fake set (same "no fallback
-// duration" behavior as a genuinely unconfigured policy).
-func TestSLAEngineService_RegisterCaseClocks_MediumSeverityUsesOnlyFakedClockType(t *testing.T) {
-	repo := newRecordingSLAEngineRepo()
-	svc := NewSLAEngineService(repo)
-
-	sev := domain.CaseSeverityMedium // S3
-	svc.RegisterCaseClocks(context.Background(), "case-7", &sev, "")
-
-	if len(repo.registered) != 1 || repo.registered[0] != "case-7|s3-res" {
-		t.Errorf("registered = %v, want [case-7|s3-res]", repo.registered)
 	}
 }

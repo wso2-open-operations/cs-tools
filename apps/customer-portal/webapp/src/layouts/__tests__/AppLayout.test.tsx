@@ -128,6 +128,10 @@ vi.mock("@components/header/Header", async () => ({
   ),
 }));
 
+vi.mock("@components/portal-banners/PortalBanners", () => ({
+  default: () => null,
+}));
+
 vi.mock(
   "@components/notification-banner/GlobalNotificationBanner",
   async () => ({

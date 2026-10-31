@@ -32,18 +32,13 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// validChangeRequestState/validChangeRequestImpact (shared with
-// sn_change_request_service.go) restrict to change_request_state_enum/
-// change_request_impact_enum's real labels (migration 0043) -- both
-// domain enums happen to match their real column 1:1 (case-folded), so
-// there's nothing Postgres-specific to add for either. change_request also
-// has a risk column (change_request_risk_enum) and a narrower category
-// column (change_request_category_enum has only 9 labels, not
-// domain.ChangeRequestCategory's full 13 -- "regular_release_cloud",
-// "hotfix_release_cloud", "devops", and "cloud_computing" have no real
-// column value), neither validated here since CreateChangeRequest (the only
-// method that would accept either) has no Postgres implementation yet -- see
-// its own doc comment below.
+// validChangeRequestState/validChangeRequestImpact/validChangeRequestPriority
+// (shared with sn_change_request_service.go) and validChangeRequestRisk (below)
+// restrict to the labels of change_request_state_enum/_impact_enum/
+// _priority_enum/_risk_enum (migration 0043) -- each domain enum matches its
+// column 1:1 (case-folded), except that the priority column also holds
+// PLANNING (migration 0100), which is read back but never set. The category
+// column is checked by the repository (changeRequestCategoryPGLabels).
 
 type changeRequestService struct {
 	repo repository.ChangeRequestRepository
@@ -327,8 +322,14 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	if req.State != nil && !validChangeRequestState[*req.State] {
 		return domain.PatchChangeRequestResponse{}, &apierror.ValidationError{Msg: "state contains invalid value: " + string(*req.State)}
 	}
+	if req.Priority != nil && *req.Priority != nil {
+		if err := validateChangeRequestPriority(**req.Priority); err != nil {
+			return domain.PatchChangeRequestResponse{}, err
+		}
+	}
 	if req.Title == nil && req.Description == nil && req.ProjectID == nil && req.CaseID == nil &&
-		req.DeploymentID == nil && req.DeployedProductID == nil && req.AssignedEngineerID == nil &&
+		req.DeploymentID == nil && req.DeployedProductID == nil && req.ServiceID == nil &&
+		req.ServiceOfferingID == nil && req.AssignedEngineerID == nil &&
 		req.AssignedTeamID == nil && req.PlannedStartOn == nil && req.PlannedEndOn == nil &&
 		req.Impact == nil && req.State == nil && req.Type == nil && req.Justification == nil &&
 		req.ImpactDescription == nil && req.ServiceOutage == nil && req.CommunicationPlan == nil &&
@@ -337,7 +338,7 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 		req.IsPlanningVisibleToCustomers == nil &&
 		req.ImplementationPlan == nil && req.Priority == nil && req.Category == nil &&
 		req.RequestedByID == nil && req.AffectedServicesText == nil && req.AffectedComponentsText == nil &&
-		req.RollbackDurationText == nil &&
+		req.RollbackDurationText == nil && req.ImplementationDeviation == nil &&
 		req.OnHold == nil && req.OnHoldReason == nil &&
 		req.CustomerApprovalRequired == nil && req.CustomerReviewRequired == nil &&
 		req.ConfirmCustomerUpdatedDate == nil &&
@@ -395,6 +396,16 @@ func (s *changeRequestService) PatchChangeRequest(ctx context.Context, id string
 	mirrorReq := req
 	mirrorReq.CustomerApprovalRequired, mirrorReq.CustomerReviewRequired = nil, nil
 	mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil
+	// The deviation from the implementation plan: the previous system's change
+	// request API has no field for it, so it stays PostgreSQL-only.
+	mirrorReq.ImplementationDeviation = nil
+	// The hold and the service have no field in the previous system's PATCH
+	// either (snPatchChangeRequestPayload carries neither, and the adapter
+	// refuses a request that names them): they stay PostgreSQL-only too.
+	// Stripped here, so the rest of the PATCH is mirrored and a PATCH that
+	// carries nothing else is not dispatched at all.
+	mirrorReq.OnHold, mirrorReq.OnHoldReason = nil, nil
+	mirrorReq.ServiceID, mirrorReq.ServiceOfferingID = nil, nil
 	// The conversation about a time the customer proposed (confirmCustomerUpdatedDate,
 	// expectedCustomerUpdatedOn) has no field in the previous system's change request API: it stays
 	// PostgreSQL-only. What of it changes the change request itself is mirrored from what
@@ -503,10 +514,52 @@ func (s *changeRequestService) CreateChangeRequest(ctx context.Context, req doma
 	if err := repository.RejectRemovedCreateFields(req); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
+	if err := validateCreateChangeRequestLevels(req); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	if s.snMirror != nil {
 		return s.createChangeRequestSNFirst(ctx, req)
 	}
 	return s.createChangeRequestPortal(ctx, req)
+}
+
+// validChangeRequestRisk is change_request_risk_enum's label set (migration
+// 0043), as the domain spells it.
+var validChangeRequestRisk = map[domain.ChangeRequestRisk]bool{
+	domain.ChangeRequestRiskHigh:     true,
+	domain.ChangeRequestRiskModerate: true,
+	domain.ChangeRequestRiskLow:      true,
+}
+
+// validateChangeRequestPriority refuses a priority this API does not set, on
+// create and on PATCH alike: anything but critical, high, moderate or low,
+// spelled exactly so. planning is refused too. change_request_priority_enum
+// holds PLANNING (migration 0100) for rows migrated from the previous system,
+// which read back "planning", but no write of this API sets it.
+func validateChangeRequestPriority(p domain.ChangeRequestPriority) error {
+	if !validChangeRequestPriority[p] {
+		return &apierror.ValidationError{Msg: "priority must be one of critical, high, moderate or low"}
+	}
+	return nil
+}
+
+// validateCreateChangeRequestLevels checks a create's priority, impact and risk
+// against the values this API sets, on both create paths: before anything is
+// written to PostgreSQL and, on the create that writes the previous system
+// first, before that system is called.
+func validateCreateChangeRequestLevels(req domain.CreateChangeRequestRequest) error {
+	if req.Priority != nil {
+		if err := validateChangeRequestPriority(*req.Priority); err != nil {
+			return err
+		}
+	}
+	if req.Impact != nil && !validChangeRequestImpact[*req.Impact] {
+		return &apierror.ValidationError{Msg: "impact must be one of high, medium or low"}
+	}
+	if req.Risk != nil && !validChangeRequestRisk[*req.Risk] {
+		return &apierror.ValidationError{Msg: "risk must be one of high, moderate or low"}
+	}
+	return nil
 }
 
 // createChangeRequestPortal implements CreateChangeRequest's plain-Postgres
@@ -573,6 +626,13 @@ func (s *changeRequestService) createChangeRequestPortal(ctx context.Context, re
 // generated -- see that method's own doc comment for why there is no wso2ID
 // parameter here, unlike case's equivalent.
 func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, req domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+	// A customer may not carry a deviation from the implementation plan into a
+	// create (403). Judged here, before the previous system is called, for the
+	// same reason as the checks below; CreateChangeRequestFromServiceNow judges it
+	// again.
+	if err := repository.RefuseExternalCreateDeviation(ctx, req.ImplementationDeviation); err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
 	// Reject an unsupported type before ServiceNow ever sees the request --
 	// this check is deterministic and needs no I/O, so there's no reason to
 	// defer it to CreateChangeRequestFromServiceNow's own check (which runs
@@ -630,6 +690,10 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	// the project's registered contacts).
 	mirrorReq := req
 	mirrorReq.ProjectID, mirrorReq.DeploymentIDs, mirrorReq.DeploymentProductIDs = nil, nil, nil
+	// A clone's deviation from the implementation plan is PostgreSQL-only, as on
+	// PATCH: the previous system's change request API has no field for it.
+	// PostgreSQL still gets it (req).
+	mirrorReq.ImplementationDeviation = nil
 	if mirrorReq.PlannedStartDate != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartDate)
 		mirrorReq.PlannedStartDate = &v

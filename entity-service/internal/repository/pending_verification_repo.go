@@ -95,7 +95,7 @@ func NewPendingVerificationRepository(db *Scoped) PendingVerificationRepository 
 // LEFT-joined from "case" — the only extension table with a severity column
 // — and is NULL for every non-Case record type, matching
 // domain.PendingVerification.Severity being optional.
-const pendingVerificationColumns = `pv.id, pv.work_item_id, wi.number, wi.subject, c.severity::TEXT, wi.type::TEXT,
+const pendingVerificationColumns = `pv.id, pv.work_item_id, wi.number, wi.wso2_id, wi.subject, c.severity::TEXT, wi.type::TEXT,
 	pv.added_reason::TEXT, pv.previous_status::TEXT, pv.added_on, pv.added_by,
 	pv.verified_on, pv.verified_by, pv.note`
 
@@ -137,15 +137,17 @@ func pendingVerificationSeverityFromEnum(raw *string) *string {
 
 func scanPendingVerification(row pgx.Row) (domain.PendingVerification, error) {
 	var pv domain.PendingVerification
+	var internalID *string
 	var severity *string
 	var previousStatus *string
 	if err := row.Scan(
-		&pv.ID, &pv.WorkItemID, &pv.RecordNumber, &pv.RecordTitle, &severity, &pv.RecordType,
+		&pv.ID, &pv.WorkItemID, &pv.RecordNumber, &internalID, &pv.RecordTitle, &severity, &pv.RecordType,
 		&pv.AddedReason, &previousStatus, &pv.AddedOn, &pv.AddedBy,
 		&pv.VerifiedOn, &pv.VerifiedBy, &pv.Note,
 	); err != nil {
 		return domain.PendingVerification{}, err
 	}
+	pv.InternalID = internalID
 	pv.Severity = pendingVerificationSeverityFromEnum(severity)
 	if previousStatus != nil {
 		s := domain.PendingVerificationPreviousStatus(*previousStatus)

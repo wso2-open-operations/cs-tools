@@ -131,6 +131,23 @@ func scanKBArticle(row interface {
 	return nil
 }
 
+// mapKBLookupError turns the two driver errors a by-id statement raises for a
+// caller-supplied id into the API errors the handler already maps: no row
+// becomes a NotFoundError (404) with notFoundMsg, and Postgres 22P02
+// (invalid_text_representation -- the id is not a UUID) becomes a
+// ValidationError (400). Anything else is wrapped with op and returned.
+// scanKBArticle itself still returns driver errors unwrapped, so this is
+// applied by the caller after the scan.
+func mapKBLookupError(op string, err error, notFoundMsg string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &apierror.NotFoundError{Msg: notFoundMsg}
+	}
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return &apierror.ValidationError{Msg: "id is not a valid UUID"}
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 // CreateKBArticle implements KBArticleRepository.
 func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKBArticleRequest) (domain.KBArticle, error) {
 	query := fmt.Sprintf(`
@@ -145,6 +162,8 @@ func (r *kbArticleRepo) CreateKBArticle(ctx context.Context, req domain.CreateKB
 			switch pgErr.Code {
 			case "23503":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist: " + pgErr.Detail}
+			case "22P02": // invalid_text_representation -- knowledgeBaseId or authorId is not a UUID
+				return domain.KBArticle{}, &apierror.ValidationError{Msg: "knowledgeBaseId and authorId must be valid UUIDs"}
 			case "P0001":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: pgErr.Message}
 			}
@@ -160,7 +179,7 @@ func (r *kbArticleRepo) GetKBArticleByID(ctx context.Context, id string) (domain
 
 	var a domain.KBArticle
 	if err := scanKBArticle(r.db.QueryRow(ctx, query, id), &a); err != nil {
-		return domain.KBArticle{}, fmt.Errorf("get kb article: %w", err)
+		return domain.KBArticle{}, mapKBLookupError("get kb article", err, "article not found")
 	}
 	return a, nil
 }
@@ -277,6 +296,8 @@ func (r *kbArticleRepo) UpdateKBArticleState(ctx context.Context, id string, req
 			switch pgErr.Code {
 			case "P0001", "23514":
 				return domain.KBArticle{}, &apierror.ValidationError{Msg: pgErr.Message}
+			case "22P02":
+				return domain.KBArticle{}, &apierror.ValidationError{Msg: "id is not a valid UUID"}
 			}
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -309,7 +330,7 @@ func (r *kbArticleRepo) UpdateKBArticleContent(ctx context.Context, id string, r
 
 	var a domain.KBArticle
 	if err := scanKBArticle(r.db.QueryRow(ctx, query, id, req.Title, req.Body, req.UpdatedBy), &a); err != nil {
-		return domain.KBArticle{}, fmt.Errorf("update kb article content: %w", err)
+		return domain.KBArticle{}, mapKBLookupError("update kb article content", err, "article not found, or not in draft state")
 	}
 	return a, nil
 }
@@ -321,6 +342,9 @@ func (r *kbArticleRepo) DeleteKBArticle(ctx context.Context, id string) error {
 		id,
 	)
 	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return &apierror.ValidationError{Msg: "id is not a valid UUID"}
+		}
 		return fmt.Errorf("delete kb article: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -339,6 +363,9 @@ func (r *kbArticleRepo) ListKBArticleHistory(ctx context.Context, kbArticleID st
 
 	rows, err := r.db.Query(ctx, query, kbArticleID)
 	if err != nil {
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return nil, &apierror.ValidationError{Msg: "id is not a valid UUID"}
+		}
 		return nil, fmt.Errorf("list kb article history: %w", err)
 	}
 	defer rows.Close()

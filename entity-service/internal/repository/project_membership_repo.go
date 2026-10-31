@@ -352,10 +352,34 @@ func upsertWithinTx(ctx context.Context, tx pgx.Tx, projectID, email string, pla
 	if err != nil {
 		return domain.SalesforceMembershipUpsertResult{}, err
 	}
-	step.ProjectID = &res.ProjectID
-	step.ProjectContactID = &res.ProjectContactID
-	if _, err := upsertOnboardingStep(ctx, tx, step); err != nil {
-		return domain.SalesforceMembershipUpsertResult{}, err
+	// The onboarding ledger is keyed by the Salesforce membership id
+	// (UNIQUE (membership_sf_id, step)); a deferred write has none yet, so
+	// its DATABASE step is recorded by the consumer that stamps the id, not
+	// here -- recording it under "" would make every deferred invitation
+	// share one ledger row.
+	if strings.TrimSpace(step.MembershipSfID) != "" {
+		step.ProjectID = &res.ProjectID
+		step.ProjectContactID = &res.ProjectContactID
+		if _, err := upsertOnboardingStep(ctx, tx, step); err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
+	}
+	if in.DeferredSalesforceWrite != nil {
+		id, err := insertSalesforceWriteRequestTx(ctx, tx, *in.DeferredSalesforceWrite, res.ProjectID, res.ProjectContactID, in.Email)
+		if err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
+		res.SalesforceWriteRequestID = id
+	}
+	if in.CompletesSalesforceWriteRequestID != "" {
+		if err := completeSalesforceWriteRequestTx(ctx, tx, in.CompletesSalesforceWriteRequestID); err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
+	}
+	if in.CancelsSalesforceWriteRequestID != "" {
+		if err := cancelSalesforceWriteRequestTx(ctx, tx, in.CancelsSalesforceWriteRequestID); err != nil {
+			return domain.SalesforceMembershipUpsertResult{}, err
+		}
 	}
 	return res, nil
 }
@@ -589,12 +613,30 @@ func upsertMembershipTx(ctx context.Context, tx pgx.Tx, in domain.SalesforceMemb
 	}
 
 	// 5. account_contact — by sf_id, then (account, user_name), else insert.
-	res.AccountContactID, res.CreatedAccountContact, err = upsertAccountContact(ctx, tx, in.ContactSfID, res.AccountID, userName, in.IsPrimaryContact, actor)
+	// A deferred row being completed (AdoptProjectContactID) binds to the
+	// account_contact that row already has, moving it to the resolved
+	// account when Salesforce placed the contact elsewhere.
+	res.AccountContactID, res.CreatedAccountContact, err = upsertAccountContact(ctx, tx, in.ContactSfID, res.AccountID, userName, in.IsPrimaryContact, actor, in.AdoptProjectContactID)
 	if err != nil {
 		return res, err
 	}
+	// The deferred row's own account_contact, when the user already had one
+	// on the resolved account (so the lookup above found that instead of
+	// adopting): it would otherwise stay behind, active, with no sf_id,
+	// as a second account_contact for the same user. Deactivate it; the
+	// project_contact is re-pointed at the resolved one below.
+	if adopt := strings.TrimSpace(in.AdoptProjectContactID); adopt != "" {
+		if _, err := tx.Exec(ctx, `
+			UPDATE account_contact ac SET is_active = FALSE, updated_on = NOW(), updated_by = $3
+			FROM project_contact pc
+			WHERE pc.id = $1 AND ac.id = pc.account_contact_id AND ac.id <> $2 AND ac.sf_id IS NULL`,
+			adopt, res.AccountContactID, actor); err != nil {
+			return res, fmt.Errorf("upsert membership: retire deferred account_contact: %w", err)
+		}
+	}
 
-	// 6. project_contact — by sf_id, then (project, account_contact), else insert.
+	// 6. project_contact — by sf_id, then (project, account_contact), else
+	// insert; a deferred row being completed is updated in place.
 	res.ProjectContactID, res.CreatedProjectContact, res.PreviousState, err = upsertProjectContact(ctx, tx, in, res.ProjectID, res.AccountContactID, actor)
 	if err != nil {
 		return res, err
@@ -621,15 +663,20 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 	}
 
 	// One copy per sf_id: active first, then oldest (an account_contact EXISTS has no index here).
+	// A blank id (a deferred write that has no Salesforce record yet) is not
+	// a key: matching on it would hand every such write the same row.
 	var copies int64
 	var replacedContact bool
-	err = tx.QueryRow(ctx, `
+	contactSfID := strings.TrimSpace(in.ContactSfID)
+	if contactSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT id, user_name, count(*) OVER () FROM "user" WHERE sf_id = $1
-		ORDER BY is_active IS TRUE DESC, created_on, id LIMIT 1`, in.ContactSfID).Scan(&id, &userName, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", "", false, fmt.Errorf("upsert membership: resolve user by sf_id: %w", err)
+		ORDER BY is_active IS TRUE DESC, created_on, id LIMIT 1`, contactSfID).Scan(&id, &userName, &copies)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", "", false, fmt.Errorf("upsert membership: resolve user by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "user", contactSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "user", in.ContactSfID, id, copies)
 	if id == "" {
 		rows, qerr := tx.Query(ctx, `SELECT id, user_name, COALESCE(sf_id, '') FROM "user" WHERE LOWER(email) = $1 LIMIT 2`, email)
 		if qerr != nil {
@@ -653,7 +700,7 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 		case 1:
 			id, userName = matches[0][0], matches[0][1]
 			// The person's earlier Salesforce contact was replaced by a new one.
-			replacedContact = matches[0][2] != "" && matches[0][2] != in.ContactSfID
+			replacedContact = contactSfID != "" && matches[0][2] != "" && matches[0][2] != contactSfID
 		default:
 			return "", "", false, &apierror.ConflictError{Msg: "more than one user matches the contact email; cannot resolve the membership"}
 		}
@@ -666,7 +713,7 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, $3, $4, $5, $2, TRUE, $6, $7)
 			RETURNING id, user_name`,
 			actor, email, nullIfBlank(in.ContactName), nullIfBlank(in.ContactFirstName), nullIfBlank(in.ContactLastName),
-			in.IsCsIntegrationUser, in.ContactSfID).Scan(&id, &userName)
+			in.IsCsIntegrationUser, nullIfBlank(contactSfID)).Scan(&id, &userName)
 		if err != nil {
 			return "", "", false, fmt.Errorf("upsert membership: insert user: %w", err)
 		}
@@ -674,15 +721,16 @@ func upsertMembershipUser(ctx context.Context, tx querier, in domain.SalesforceM
 	}
 
 	// Existing row: refresh profile fields and stamp the Salesforce id, but
-	// never touch user_name — it is the join key to account_contact.
+	// never touch user_name — it is the join key to account_contact. A blank
+	// id (deferred write) keeps whatever id the row already has.
 	if _, err = tx.Exec(ctx, `
 		UPDATE "user"
 		SET name = COALESCE($2, name), first_name = COALESCE($3, first_name), last_name = COALESCE($4, last_name),
-		    email = $5, is_system_user = $6, sf_id = $7, updated_on = NOW(), updated_by = $8,
+		    email = $5, is_system_user = $6, sf_id = COALESCE($7, sf_id), updated_on = NOW(), updated_by = $8,
 		    is_active = CASE WHEN $9 THEN TRUE ELSE is_active END
 		WHERE id = $1`,
 		id, nullIfBlank(in.ContactName), nullIfBlank(in.ContactFirstName), nullIfBlank(in.ContactLastName),
-		email, in.IsCsIntegrationUser, in.ContactSfID, actor,
+		email, in.IsCsIntegrationUser, nullIfBlank(contactSfID), actor,
 		// Only a replacement contact reactivates (either writer); the same contact never does.
 		replacedContact && in.State != domain.MembershipStateDeactivated); err != nil {
 		return "", "", false, fmt.Errorf("upsert membership: update user: %w", err)
@@ -799,31 +847,29 @@ func syncGlobalRoles(ctx context.Context, tx querier, userID string, wanted, man
 // accounts for the change being made and for every project not involved in
 // it. Do not narrow it to the membership in hand.
 //
-// adminRole empty (an integration user) means the whole admin question does
-// not apply: nothing is granted and nothing is revoked. The bool returned is
+// adminRole empty (an integration user) means no admin role applies: nothing
+// is granted and any managed one still held is revoked. The bool returned is
 // whether the user ends up holding adminRole.
 func syncDerivedAdminRole(ctx context.Context, tx querier, userID, adminRole string, managed []string, isCsAdmin bool, actor string) (bool, error) {
-	if adminRole == "" {
-		return false, nil
-	}
-
 	var adminMembership bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM "user" u
-			JOIN account_contact ac ON LOWER(ac.user_name) = LOWER(u.user_name)
-			JOIN project_contact pc ON pc.account_contact_id = ac.id
-			JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
-			JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
-			JOIN project_role pr ON pr.id = pgr.project_role_id
-			WHERE u.id = $1
-			  AND pr.role = 'ADMIN'::project_role_enum
-			  AND (pc.state IS NULL OR pc.state <> 'DEACTIVATED'::project_contact_state_enum))`,
-		userID).Scan(&adminMembership); err != nil {
-		return false, fmt.Errorf("upsert membership: derive account admin role: %w", err)
+	if adminRole != "" {
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM "user" u
+				JOIN account_contact ac ON LOWER(ac.user_name) = LOWER(u.user_name)
+				JOIN project_contact pc ON pc.account_contact_id = ac.id
+				JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
+				JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
+				JOIN project_role pr ON pr.id = pgr.project_role_id
+				WHERE u.id = $1
+				  AND pr.role = 'ADMIN'::project_role_enum
+				  AND (pc.state IS NULL OR pc.state <> 'DEACTIVATED'::project_contact_state_enum))`,
+			userID).Scan(&adminMembership); err != nil {
+			return false, fmt.Errorf("upsert membership: derive account admin role: %w", err)
+		}
 	}
-	isAdmin := adminMembership || isCsAdmin
+	isAdmin := adminRole != "" && (adminMembership || isCsAdmin)
 
 	var revoke []string
 	for _, m := range managed {
@@ -856,16 +902,20 @@ func syncDerivedAdminRole(ctx context.Context, tx querier, userID, adminRole str
 // marks it active. isPrimary is Salesforce's primary_contact__c: written on
 // insert and on update when known, FALSE on insert and untouched on update
 // when nil.
-func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountID, userName string, isPrimary *bool, actor string) (id string, created bool, err error) {
+func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountID, userName string, isPrimary *bool, actor, adoptProjectContactID string) (id string, created bool, err error) {
 	var copies int64
-	err = tx.QueryRow(ctx, `
+	contactSfID = strings.TrimSpace(contactSfID)
+	// A blank id (deferred write) is not a key -- see upsertMembershipUser.
+	if contactSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT ac.id, count(*) OVER () FROM account_contact ac WHERE ac.sf_id = $1 AND ac.account_id = $2
 		ORDER BY EXISTS (SELECT 1 FROM project_contact pc WHERE pc.account_contact_id = ac.id) DESC, ac.created_on, ac.id
 		LIMIT 1`, contactSfID, accountID).Scan(&id, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, fmt.Errorf("upsert membership: resolve account_contact by sf_id: %w", err)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, fmt.Errorf("upsert membership: resolve account_contact by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "account_contact", contactSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "account_contact", contactSfID, id, copies)
 	if id == "" {
 		err = tx.QueryRow(ctx, `
 			SELECT id FROM account_contact WHERE account_id = $1 AND LOWER(user_name) = LOWER($2)
@@ -874,12 +924,36 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 			return "", false, fmt.Errorf("upsert membership: resolve account_contact: %w", err)
 		}
 	}
+	// A deferred row being completed: its account_contact was created under
+	// the project's account with no sf_id. If Salesforce put the contact on
+	// a different account (so the lookups above missed), adopt that row and
+	// move it to the resolved account rather than inserting a second one.
+	if id == "" && strings.TrimSpace(adoptProjectContactID) != "" {
+		err = tx.QueryRow(ctx, `
+			SELECT ac.id FROM project_contact pc
+			JOIN account_contact ac ON ac.id = pc.account_contact_id
+			WHERE pc.id = $1 AND ac.sf_id IS NULL AND LOWER(ac.user_name) = LOWER($2)`, adoptProjectContactID, userName).Scan(&id)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, fmt.Errorf("upsert membership: resolve deferred account_contact: %w", err)
+		}
+		if id != "" {
+			if _, err = tx.Exec(ctx, `
+				UPDATE account_contact
+				SET account_id = $2, is_active = TRUE, sf_id = COALESCE($3, sf_id), is_primary_contact = COALESCE($5::boolean, is_primary_contact),
+				    updated_on = NOW(), updated_by = $4
+				WHERE id = $1`,
+				id, accountID, nullIfBlank(contactSfID), actor, isPrimary); err != nil {
+				return "", false, fmt.Errorf("upsert membership: move deferred account_contact: %w", err)
+			}
+			return id, false, nil
+		}
+	}
 	if id == "" {
 		err = tx.QueryRow(ctx, `
 			INSERT INTO account_contact (id, created_on, updated_on, created_by, updated_by,
 				is_active, user_name, is_primary_contact, account_id, sf_id)
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, TRUE, $2, COALESCE($5::boolean, FALSE), $3, $4)
-			RETURNING id`, actor, userName, accountID, contactSfID, isPrimary).Scan(&id)
+			RETURNING id`, actor, userName, accountID, nullIfBlank(contactSfID), isPrimary).Scan(&id)
 		if err != nil {
 			return "", false, fmt.Errorf("upsert membership: insert account_contact: %w", err)
 		}
@@ -887,10 +961,10 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 	}
 	if _, err = tx.Exec(ctx, `
 		UPDATE account_contact
-		SET is_active = TRUE, sf_id = $2, is_primary_contact = COALESCE($4::boolean, is_primary_contact),
+		SET is_active = TRUE, sf_id = COALESCE($2, sf_id), is_primary_contact = COALESCE($4::boolean, is_primary_contact),
 		    updated_on = NOW(), updated_by = $3
 		WHERE id = $1`,
-		id, contactSfID, actor, isPrimary); err != nil {
+		id, nullIfBlank(contactSfID), actor, isPrimary); err != nil {
 		return "", false, fmt.Errorf("upsert membership: update account_contact: %w", err)
 	}
 	return id, false, nil
@@ -903,20 +977,34 @@ func upsertAccountContact(ctx context.Context, tx querier, contactSfID, accountI
 func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMembershipUpsert, projectID, accountContactID, actor string) (id string, created bool, previousState string, err error) {
 	var prior *string
 	var copies int64
-	err = tx.QueryRow(ctx, `
+	membershipSfID := strings.TrimSpace(in.MembershipSfID)
+	// A blank id (deferred write) is not a key -- see upsertMembershipUser.
+	if membershipSfID != "" {
+		err = tx.QueryRow(ctx, `
 		SELECT pc.id, pc.state::text, count(*) OVER () FROM project_contact pc WHERE pc.sf_id = $1
 		ORDER BY EXISTS (SELECT 1 FROM project_contact_group g WHERE g.project_contact_id = pc.id) DESC, pc.created_on, pc.id
-		LIMIT 1`, in.MembershipSfID).Scan(&id, &prior, &copies)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, "", fmt.Errorf("upsert membership: resolve project_contact by sf_id: %w", err)
+		LIMIT 1`, membershipSfID).Scan(&id, &prior, &copies)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, "", fmt.Errorf("upsert membership: resolve project_contact by sf_id: %w", err)
+		}
+		warnDuplicateSfID(ctx, "project_contact", membershipSfID, id, copies)
 	}
-	warnDuplicateSfID(ctx, "project_contact", in.MembershipSfID, id, copies)
 	if id == "" {
 		err = tx.QueryRow(ctx, `
 			SELECT id, state::text FROM project_contact WHERE project_id = $1 AND account_contact_id = $2
 			ORDER BY created_on LIMIT 1`, projectID, accountContactID).Scan(&id, &prior)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", false, "", fmt.Errorf("upsert membership: resolve project_contact: %w", err)
+		}
+	}
+	// A deferred row being completed is stamped in place, whatever account
+	// its account_contact ended up under (see upsertAccountContact).
+	if id == "" && strings.TrimSpace(in.AdoptProjectContactID) != "" {
+		err = tx.QueryRow(ctx, `
+			SELECT id, state::text FROM project_contact WHERE id = $1 AND project_id = $2 AND sf_id IS NULL`,
+			in.AdoptProjectContactID, projectID).Scan(&id, &prior)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", false, "", fmt.Errorf("upsert membership: resolve deferred project_contact: %w", err)
 		}
 	}
 	if prior != nil {
@@ -928,7 +1016,7 @@ func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMe
 			INSERT INTO project_contact (id, created_on, updated_on, created_by, updated_by,
 				email, state, account_contact_id, project_id, sf_id)
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, $3::project_contact_state_enum, $4, $5, $6)
-			RETURNING id`, actor, email, in.State, accountContactID, projectID, in.MembershipSfID).Scan(&id)
+			RETURNING id`, actor, email, in.State, accountContactID, projectID, nullIfBlank(membershipSfID)).Scan(&id)
 		if err != nil {
 			return "", false, "", fmt.Errorf("upsert membership: insert project_contact: %w", err)
 		}
@@ -936,10 +1024,10 @@ func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMe
 	}
 	if _, err = tx.Exec(ctx, `
 		UPDATE project_contact
-		SET email = $2, state = $3::project_contact_state_enum, account_contact_id = $4, sf_id = $5,
+		SET email = $2, state = $3::project_contact_state_enum, account_contact_id = $4, sf_id = COALESCE($5, sf_id),
 		    updated_on = NOW(), updated_by = $6
 		WHERE id = $1`,
-		id, email, in.State, accountContactID, in.MembershipSfID, actor); err != nil {
+		id, email, in.State, accountContactID, nullIfBlank(membershipSfID), actor); err != nil {
 		return "", false, "", fmt.Errorf("upsert membership: update project_contact: %w", err)
 	}
 	return id, false, previousState, nil

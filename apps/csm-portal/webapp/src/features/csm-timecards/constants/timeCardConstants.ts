@@ -94,12 +94,12 @@ export const WORK_LOG_MAX = 4000;
 export const LEAD_COMMENT_MAX = 500;
 
 /**
- * Maximum minutes an engineer may log against a single ticket in one day (the
- * old SN Portal's "no more than 8 hours per ticket per day" rule, missing
- * from this form until now). Mirrors entity-service's maxUserTicketDailyMinutes,
- * which is the authoritative server-side check across all of a user's cards.
+ * Maximum total minutes a single time card may carry (8 hours). The limit is
+ * per card, not per ticket per day: an engineer may log several cards on the
+ * same case and day. The backend enforces the same cap authoritatively; this
+ * copy only gives early feedback in the log-time dialog.
  */
-export const MAX_MINUTES_PER_TICKET_PER_DAY = 480;
+export const MAX_MINUTES_PER_TIME_CARD = 480;
 
 /**
  * Label + semantic colour for each card state (drives the status chip).

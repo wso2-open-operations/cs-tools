@@ -620,6 +620,21 @@ func TestLoad_CSMMigrationPortalWritesEnabled(t *testing.T) {
 	}
 }
 
+// TestLoad_CSMSLAEngineEnabled pins envFlagOn's own semantics for the
+// CSM-native SLA engine's toggle: default true (unset, or anything but a
+// case/whitespace-insensitive "false"), so the engine runs on every data
+// source unless a deployment explicitly opts out.
+func TestLoad_CSMSLAEngineEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "TRUE": true, "1": true, "": true, "false": false, "FALSE": false, " false ": false,
+	} {
+		t.Setenv("CSM_SLA_ENGINE_ENABLED", value)
+		if got := Load().CSMSLAEngineEnabled; got != want {
+			t.Errorf("CSM_SLA_ENGINE_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}
+
 // TestLoad_CSMMigrationMembershipRegistrationEnabled pins the same parse for
 // the registration kill switch. It gates POST /users/me/memberships/register,
 // which clears a contact's Salesforce lockout and flips the membership to

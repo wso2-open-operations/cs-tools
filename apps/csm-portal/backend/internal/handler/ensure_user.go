@@ -39,9 +39,10 @@ type entityUserProvisioningClient interface {
 // ensureUserProvisioned makes sure the caller has a "user" row in
 // entity-service before a write that needs one to attribute itself to.
 //
-// A worknote_creator- or escalator-only caller reaches POST
+// A worknote_creator- or escalator-only caller (or, for a de-escalation, a
+// case team lead with only a view-level role) reaches POST
 // /cases/{id}/comments or POST /cases/{id}/escalations purely on the
-// strength of an Asgardeo role grant (AUTH_WORKNOTE_CREATOR_ROLES /
+// strength of a role grant (AUTH_WORKNOTE_CREATOR_ROLES /
 // AUTH_ESCALATOR_ROLES) -- unlike the admin-only "Add User" flow, holding
 // one of those roles never provisions a "user" row anywhere. Without one,
 // entity-service's own identity resolution for the write (emailFromJWT ->
@@ -52,8 +53,9 @@ type entityUserProvisioningClient interface {
 // A cs_engineer or admin is assumed already provisioned -- call sites skip
 // invoking this for them entirely (see hasFullWrite in CreateCaseComment) to
 // avoid an extra round trip on the overwhelmingly common path. CreateCaseEscalation
-// has no equivalent skip: cs_engineer never holds PermEscalate at all, so every
-// caller who reaches it is, by construction, exactly the audience this exists for.
+// has no equivalent skip: its route only requires view, so the caller may be an
+// escalator-only user or a team lead holding no other role, exactly the
+// audience this exists for.
 //
 // FirstName/LastName/Email come straight off the caller's own validated token
 // (middleware.UserInfo) -- never client-supplied. The created user is always

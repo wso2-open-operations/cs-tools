@@ -2974,6 +2974,7 @@ type PendingVerification struct {
 	ID             string     `json:"id"`
 	WorkItemID     string     `json:"workItemId"`
 	RecordNumber   string     `json:"recordNumber"`
+	InternalID     *string    `json:"internalId,omitempty"`
 	RecordTitle    string     `json:"recordTitle"`
 	Severity       *string    `json:"severity"`
 	RecordType     string     `json:"recordType"`

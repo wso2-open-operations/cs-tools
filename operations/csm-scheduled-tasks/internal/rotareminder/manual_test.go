@@ -148,7 +148,7 @@ func TestManual_ATestGoesOnlyToWhoAsked(t *testing.T) {
 		t.Fatalf("sent %d, reports %v, recorded %d", len(mail.sent), queue.reports, len(store.recorded))
 	}
 	for _, m := range mail.sent {
-		if strings.Join(m.to, ",") != "zoe@example.com" || len(m.cc) != 0 || !strings.HasPrefix(m.subject, "[Test] [CRE Rota]") ||
+		if strings.Join(m.to, ",") != "zoe@example.com" || len(m.cc) != 0 || !strings.HasPrefix(m.subject, "[Test] [CRE Operations]") ||
 			!strings.Contains(m.body, "[Test copy] Not sent to the rota.") {
 			t.Errorf("%q to %v cc %v", m.subject, m.to, m.cc)
 		}

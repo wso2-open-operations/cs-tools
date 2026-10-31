@@ -1,0 +1,18 @@
+// Runtime configuration for the Knowledge Portal webapp.
+//
+// Copy this file to public/config.js (git-ignored, never commit it) and edit
+// the copy. In a deployment, serve a config.js with the right values next to
+// the built app; the same build works in every environment.
+//
+// The app refuses to start, with a visible message naming the key, when
+// KNOWLEDGE_PORTAL_BACKEND_BASE_URL is missing or not an http(s) URL.
+window.config = {
+  // Base URL of the knowledge portal backend (no trailing path segments).
+  // CORS is set by the API gateway, not by the backend.
+  // Local development default: http://localhost:8085
+  KNOWLEDGE_PORTAL_BACKEND_BASE_URL: "http://localhost:8085",
+
+  // Optional. Where "Contact support" links send a visitor who did not find
+  // an answer. Leave it out to hide those callouts entirely.
+  // KNOWLEDGE_PORTAL_SUPPORT_URL: "https://example.com/support",
+};

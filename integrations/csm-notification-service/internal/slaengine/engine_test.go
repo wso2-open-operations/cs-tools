@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/businessdays"
 )
 
 // fakeStore is an in-memory implementation of the store interface —
@@ -110,6 +112,20 @@ func (s *fakeStore) ShiftWake(_ context.Context, caseID, clockType string, delta
 			if at, ok := s.wake[member]; ok {
 				s.wake[member] = at.Add(time.Duration(deltaSeconds) * time.Second)
 			}
+		}
+	}
+	key := caseID + "|" + clockType
+	meta := s.clocks[key]
+	meta.ShiftedPauseSeconds = newBaselineSeconds
+	s.clocks[key] = meta
+	return nil
+}
+
+func (s *fakeStore) SetWakeAbsolute(_ context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error {
+	for tier, at := range wakes {
+		member := wakeMember(caseID, clockType, tier)
+		if _, ok := s.wake[member]; ok {
+			s.wake[member] = at
 		}
 	}
 	key := caseID + "|" + clockType
@@ -210,22 +226,30 @@ type fakeLinks struct{}
 
 func (fakeLinks) CSMLink(caseID string) string { return "https://csm.example.com/cases/" + caseID }
 
-func testDurations() map[string]map[string]time.Duration {
-	return map[string]map[string]time.Duration{
-		"CATASTROPHIC": {ClockResponse: 15 * time.Minute, ClockWorkaround: 4 * time.Hour, ClockResolution: 48 * time.Hour},
-		"LOW":          {ClockResponse: 24 * time.Hour},
-		"MEDIUM":       {ClockResponse: 6 * time.Hour, ClockWorkaround: 72 * time.Hour, ClockResolution: 7 * 24 * time.Hour},
-	}
-}
-
 // weekdayDaytime is a Wednesday at 11:00 IST, outside both the Americas
 // (21:00-06:00 IST) and weekend coverage windows, so chataudience.Resolve
 // adds no audience that depends on when the test happens to run.
 var weekdayDaytime = time.Date(2026, time.October, 14, 5, 30, 0, 0, time.UTC)
 
-func newTestEngine(st *fakeStore, chat *fakeChat, pub *fakePublisher) *Engine {
-	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, durations: testDurations(), slaEmailSendingEnabled: true,
+func newTestEngine(st store, chat *fakeChat, pub *fakePublisher) *Engine {
+	return &Engine{store: st, pub: pub, chat: chat, links: fakeLinks{}, slaEmailSendingEnabled: true,
 		now: func() time.Time { return weekdayDaytime }}
+}
+
+// entityWithCatastrophicDurations returns a fakeEntityClockStatus answering
+// every clock type for caseID as Found, with CATASTROPHIC's own
+// response/workaround/resolution durations (15m/4h/48h) — the shared
+// default most RegisterClocks-driven tests in this file use as scaffolding
+// (RegisterClocks now fetches each clock's real duration live from
+// entity-service, per clock type, rather than a static severity-keyed table
+// — see that function's own doc comment), so each test only needs to say
+// what's different from it.
+func entityWithCatastrophicDurations(caseID string) *fakeEntityClockStatus {
+	return &fakeEntityClockStatus{states: map[string]clockState{
+		caseID + "|" + ClockResponse:   {Found: true, DurationSeconds: int64((15 * time.Minute).Seconds())},
+		caseID + "|" + ClockWorkaround: {Found: true, DurationSeconds: int64((4 * time.Hour).Seconds())},
+		caseID + "|" + ClockResolution: {Found: true, DurationSeconds: int64((48 * time.Hour).Seconds())},
+	}}
 }
 
 // --- RegisterClocks ---
@@ -235,6 +259,7 @@ func TestRegisterClocks_RegistersEveryClockThePolicyHasForThisSeverity(t *testin
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	createdAt := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC) // a Monday
 
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "WSO2-1", "Title", "CASE", "API Manager", "Team Nova")
 
 	for _, ct := range []string{ClockResponse, ClockWorkaround, ClockResolution} {
@@ -253,12 +278,19 @@ func TestRegisterClocks_RegistersEveryClockThePolicyHasForThisSeverity(t *testin
 	}
 }
 
-// TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor verifies LOW's
-// policy (response only — see migration 0192's own seed data) registers
-// exactly one clock, not all three.
+// TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor verifies a case
+// whose entity-service record has a duration for RESPONSE only (the real
+// shape a LOW/S4 case takes against the live table today) registers exactly
+// one clock, not all three — RegisterClocks fetches each clock type's
+// duration independently, so a Found=false answer for workaround/resolution
+// simply skips those, the same "no fallback duration" posture the old
+// static table's absent entry had.
 func TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockResponse: {Found: true, DurationSeconds: int64((24 * time.Hour).Seconds())},
+	}}
 	e.RegisterClocks(context.Background(), "case-1", "LOW", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	if _, found, _ := st.GetClock(context.Background(), "case-1", ClockResponse); !found {
@@ -272,13 +304,33 @@ func TestRegisterClocks_SkipsClockTypesThePolicyHasNoEntryFor(t *testing.T) {
 	}
 }
 
-func TestRegisterClocks_UnknownSeverity_RegistersNothing(t *testing.T) {
+// TestRegisterClocks_NoEntityClient_RegistersNothing covers what "unknown
+// severity" used to mean under the old static table: with no entity-service
+// client configured at all (or, equivalently, one that reports Found=false
+// for every clock type), there is nothing to compute a due date from, so
+// nothing registers.
+func TestRegisterClocks_NoEntityClient_RegistersNothing(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.RegisterClocks(context.Background(), "case-1", "UNKNOWN", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	if len(st.clocks) != 0 {
-		t.Errorf("clocks registered for an unknown severity: %+v", st.clocks)
+		t.Errorf("clocks registered with no entity-service client configured: %+v", st.clocks)
+	}
+}
+
+// TestRegisterClocks_EntityReportsNoPolicy_RegistersNothing is the same
+// outcome via the other route: an entity-service client IS configured, but
+// it reports Found=false for every clock type (no sla_policy currently
+// resolves for this case) — same "no fallback duration" result.
+func TestRegisterClocks_EntityReportsNoPolicy_RegistersNothing(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = &fakeEntityClockStatus{} // no states configured -- every lookup reports Found: false
+	e.RegisterClocks(context.Background(), "case-1", "ANNOUNCEMENT", time.Now(), "CS0001", "", "", "ANNOUNCEMENT", "", "")
+
+	if len(st.clocks) != 0 {
+		t.Errorf("clocks registered when entity-service has no applicable policy: %+v", st.clocks)
 	}
 }
 
@@ -295,16 +347,25 @@ func TestRegisterClocks_Replay_DoesNotResetPausedOrAlertedTier(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	createdAt := time.Now()
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
 
 	// A later event completes the response clock and pauses workaround --
 	// simulating CompleteResponseClock/ApplyStateEffects having already run
-	// before the replay below.
+	// before the replay below. entity-service's own record is configured to
+	// report workaround/resolution as paused, same as the real sequencing
+	// (its own pause_condition evaluation lands before this Kafka consumer
+	// sees the event).
 	e.CompleteResponseClock(context.Background(), "case-1")
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: true},
+	}}
 	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
 
 	// case.created is redelivered (retry or DLQ replay) with the identical
 	// payload.
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
 
 	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockResponse); meta.AlertedTier != 100 {
@@ -328,6 +389,11 @@ func TestRegisterClocks_MediumResolution_AvoidsWeekendDueDate(t *testing.T) {
 	// (+7d) is also Thursday -- use a start where +7d lands on Saturday by
 	// picking a Saturday start.
 	createdAt := time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC) // a Saturday
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockResponse:   {Found: true, DurationSeconds: int64((6 * time.Hour).Seconds())},
+		"case-1|" + ClockWorkaround: {Found: true, DurationSeconds: int64((72 * time.Hour).Seconds())},
+		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64((7 * 24 * time.Hour).Seconds())},
+	}}
 	e.RegisterClocks(context.Background(), "case-1", "MEDIUM", createdAt, "CS0001", "", "", "CASE", "", "")
 
 	due100 := st.wake[wakeMember("case-1", ClockResolution, 100)]
@@ -341,13 +407,107 @@ func TestRegisterClocks_MediumResolution_AvoidsWeekendDueDate(t *testing.T) {
 	}
 }
 
+// TestRegisterClocks_BusinessDaySchedule_WakesAtTheBusinessDayAdjustedInstant
+// is the regression test for the code-review-found bug: a 'WSO2 Business
+// days' RESOLUTION clock must be woken at the real business-day-adjusted
+// instant (skipping weekends), not at flat calendar time -- a 240h
+// (10-business-day) clock starting on a Friday was previously woken at
+// Friday+240h calendar time (ten calendar days later, landing on the
+// following Monday) instead of the correct instant two business weeks
+// later, which skips two weekends and therefore lands twelve calendar days
+// out.
+func TestRegisterClocks_BusinessDaySchedule_WakesAtTheBusinessDayAdjustedInstant(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+
+	createdAt := time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC) // a Friday
+	duration := 240 * time.Hour                              // 10 business days
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64(duration.Seconds()), Schedule: "WSO2 Business days"},
+	}}
+	e.RegisterClocks(context.Background(), "case-1", "LOW", createdAt, "CS0001", "", "", "CASE", "", "")
+
+	due100, ok := st.wake[wakeMember("case-1", ClockResolution, 100)]
+	if !ok {
+		t.Fatal("no wake entry for the resolution 100% tier")
+	}
+	wrongFlatDue := createdAt.Add(duration)
+	if due100.Equal(wrongFlatDue) {
+		t.Errorf("due100 = %v, equals the WRONG flat-wall-clock due date %v -- business-day math was not applied", due100, wrongFlatDue)
+	}
+	// The correct, business-day-adjusted due date: from Jan 2 09:00 UTC
+	// (04:00 America/New_York, a Friday), the remaining 20h of that Friday
+	// plus Jan 5-9 (120h) plus Jan 12-15 (96h) totals 236h, leaving 4h into
+	// Jan 16 (a Friday) -- 04:00 NY = 09:00 UTC.
+	wantDue := time.Date(2026, 1, 16, 9, 0, 0, 0, time.UTC)
+	if !due100.Equal(wantDue) {
+		t.Errorf("due100 = %v, want %v", due100, wantDue)
+	}
+	// The 50% tier (120h of business time) must also be business-day-aware,
+	// not simply half of the flat wall-clock span.
+	due50, ok := st.wake[wakeMember("case-1", ClockResolution, 50)]
+	if !ok {
+		t.Fatal("no wake entry for the resolution 50% tier")
+	}
+	wrongFlatHalf := createdAt.Add(duration / 2)
+	if due50.Equal(wrongFlatHalf) {
+		t.Errorf("due50 = %v, equals the WRONG flat-wall-clock half-point %v", due50, wrongFlatHalf)
+	}
+}
+
+// TestReconcileClock_BusinessDaySchedule_WakesAtTheBusinessDayAdjustedInstant
+// is reconcileClock's own counterpart to the RegisterClocks regression test
+// above -- the Redis-rebuild path must apply the identical business-day math.
+func TestReconcileClock_BusinessDaySchedule_WakesAtTheBusinessDayAdjustedInstant(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+
+	startedAt := time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC) // a Friday
+	duration := 240 * time.Hour
+	now := startedAt // reconcile immediately, before anything is due
+
+	e.reconcileClock(context.Background(), activeSLAClock{
+		CaseID: "case-1", ClockType: ClockResolution, Priority: "LOW",
+		StartedOn: timePtr(startedAt), DurationSeconds: int64(duration.Seconds()),
+		Schedule: "WSO2 Business days",
+	}, now)
+
+	due100, ok := st.wake[wakeMember("case-1", ClockResolution, 100)]
+	if !ok {
+		t.Fatal("no wake entry for the resolution 100% tier")
+	}
+	wrongFlatDue := startedAt.Add(duration)
+	if due100.Equal(wrongFlatDue) {
+		t.Errorf("due100 = %v, equals the WRONG flat-wall-clock due date %v", due100, wrongFlatDue)
+	}
+	wantDue := time.Date(2026, 1, 16, 9, 0, 0, 0, time.UTC)
+	if !due100.Equal(wantDue) {
+		t.Errorf("due100 = %v, want %v", due100, wantDue)
+	}
+}
+
 // --- ApplyStateEffects ---
 
+// TestApplyStateEffects_AwaitingInfo_PausesWorkaroundAndResolution confirms
+// ApplyStateEffects applies whatever pause status entity-service's own
+// record reports for each clock — it is entity-service's answer, not the
+// literal status string "Awaiting Info", that decides pause/resume now (see
+// ApplyStateEffects' own doc comment for why the old hardcoded status-string
+// list was removed).
 func TestApplyStateEffects_AwaitingInfo_PausesWorkaroundAndResolution(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
+	// entity-service's own pause_condition already evaluated this case's new
+	// status to "paused" for both clocks by the time this event is
+	// processed (its own pause/resume effects apply synchronously, in the
+	// same request that published case.status_changed).
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: true},
+	}}
 	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
 
 	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround); !meta.Paused {
@@ -364,6 +524,7 @@ func TestApplyStateEffects_AwaitingInfo_PausesWorkaroundAndResolution(t *testing
 func TestApplyStateEffects_Closed_CompletesResolutionAndResponseAndPausesWorkaround(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	e.ApplyStateEffects(context.Background(), "case-1", "Closed")
@@ -398,6 +559,7 @@ func TestApplyStateEffects_Closed_WithoutAQualifyingReply_NeverAlertsOnResponse(
 	chat := &fakeChat{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	start := time.Now().Add(-2 * time.Hour)
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "")
 
 	// The case closes with no qualifying support-engineer reply ever having
@@ -432,6 +594,7 @@ func TestApplyStateEffects_Closed_NoClockTypeAlertsAfterClose(t *testing.T) {
 	chat := &fakeChat{}
 	e := newTestEngine(st, chat, &fakePublisher{})
 	start := time.Now().Add(-2 * time.Hour)
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", start, "CS0001", "", "", "CASE", "", "")
 
 	e.ApplyStateEffects(context.Background(), "case-1", "Closed")
@@ -448,9 +611,19 @@ func TestApplyStateEffects_Closed_NoClockTypeAlertsAfterClose(t *testing.T) {
 func TestApplyStateEffects_ResumesOnAnyOtherStatus(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: true},
+	}}
 	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
 
+	// entity-service now reports both clocks resumed.
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: false},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: false},
+	}}
 	e.ApplyStateEffects(context.Background(), "case-1", "Work In Progress")
 
 	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround); meta.Paused {
@@ -473,6 +646,7 @@ func TestApplyStateEffects_Resume_ShiftsWakeEntriesByTheNewPauseSegment(t *testi
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	createdAt := time.Now()
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", createdAt, "CS0001", "", "", "CASE", "", "")
 
 	before := map[string]time.Time{
@@ -511,16 +685,84 @@ func TestApplyStateEffects_Resume_ShiftsWakeEntriesByTheNewPauseSegment(t *testi
 	}
 }
 
+// TestApplyStateEffects_Resume_BusinessDayClock_RecomputesWakeTimesRatherThanShiftingFlat
+// is the regression test for a real, PR-review-found bug: a business-day
+// clock's wake entries used to be shifted by a FLAT wall-clock pause delta
+// (ShiftWake's own ZINCRBY), while entity-service computes a business-day
+// clock's real due instant as AddBusinessDuration(start, duration +
+// businessPause) -- a flat increment and a business-day-aware recomputation
+// disagree by however much of the pause segment actually fell on a weekend.
+// This clock is registered with a 116-hour ('WSO2 Business days') resolution
+// duration, started Monday 2024-01-08 00:00 America/New_York, and paused
+// across a weekend-spanning segment; the 100% tier's wake time after resume
+// must equal AddBusinessDuration(start, duration+businessPause), not
+// start+duration shifted by the pause's flat wall-clock length.
+func TestApplyStateEffects_Resume_BusinessDayClock_RecomputesWakeTimesRatherThanShiftingFlat(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	startedAt := time.Date(2024, 1, 8, 0, 0, 0, 0, mustLoadLocation(t, "America/New_York")) // a Monday
+	duration := 116 * time.Hour
+
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockResolution: {Found: true, DurationSeconds: int64(duration.Seconds()), Schedule: slaScheduleWSO2BusinessDays},
+	}}
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", startedAt, "CS0001", "", "", "CASE", "", "")
+
+	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
+	// entity-service's own CSM-native engine has, by the time this Kafka
+	// event is processed, already accumulated a business-hours-aware pause
+	// total for this clock -- spanning a weekend, so it differs from the
+	// flat wall-clock pause length.
+	businessPause := 8 * time.Hour
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockResolution: {
+			Found: true, DurationSeconds: int64(duration.Seconds()), Schedule: slaScheduleWSO2BusinessDays,
+			BusinessPauseDurationSeconds: int64(businessPause.Seconds()),
+		},
+	}}
+
+	e.ApplyStateEffects(context.Background(), "case-1", "Work In Progress")
+
+	got := st.wake[wakeMember("case-1", ClockResolution, 100)]
+	want := businessdays.AddBusinessDuration(startedAt, duration+businessPause)
+	if !got.Equal(want) {
+		t.Errorf("resolution 100%% tier due at %v after resume, want %v (business-day-recomputed, not flat-shifted)", got, want)
+	}
+
+	meta, _, _ := st.GetClock(context.Background(), "case-1", ClockResolution)
+	if meta.ShiftedPauseSeconds != int64(businessPause.Seconds()) {
+		t.Errorf("ShiftedPauseSeconds = %d, want %d (the business pause total, not a flat delta)", meta.ShiftedPauseSeconds, int64(businessPause.Seconds()))
+	}
+}
+
+func mustLoadLocation(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("time.LoadLocation(%q): %v", name, err)
+	}
+	return loc
+}
+
 // TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking
-// confirms the fail-safe posture documented on resumeShift: with no entity
-// client wired up (every pre-existing test's own Engine literal), a resume
-// just clears the paused flag, exactly as it always has.
+// confirms the fail-safe posture documented on resumeShift/entityPauseStatus:
+// with no entity client wired up, a status change that would otherwise
+// resume a currently-paused clock still clears the paused flag (fail-open
+// default) and resumeShift's own pause-duration lookup is skipped without
+// panicking.
 func TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
-	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
+	// Pause the clock directly (bypassing ApplyStateEffects' own
+	// entity-based pause detection, which is not what this test is about)
+	// to set up the "currently paused" precondition a resume needs.
+	if err := st.SetPaused(context.Background(), "case-1", ClockWorkaround, true); err != nil {
+		t.Fatalf("seed pause: %v", err)
+	}
 
+	e.entity = nil
 	e.ApplyStateEffects(context.Background(), "case-1", "Work In Progress")
 
 	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround); meta.Paused {
@@ -533,6 +775,7 @@ func TestApplyStateEffects_Resume_NoEntityClient_SkipsShiftWithoutPanicking(t *t
 func TestCompleteResponseClock_AdvancesToTier100(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	e.CompleteResponseClock(context.Background(), "case-1")
@@ -553,6 +796,7 @@ func TestCompleteResponseClock_AdvancesToTier100(t *testing.T) {
 func TestCompleteWorkaroundClock_AdvancesToTier100(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	if err := e.CompleteWorkaroundClock(context.Background(), "case-1"); err != nil {
@@ -577,6 +821,7 @@ func TestCompleteWorkaroundClock_StoreFailure_ReturnsError(t *testing.T) {
 	st := newFakeStore()
 	st.failAdvance = true
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
 	if err := e.CompleteWorkaroundClock(context.Background(), "case-1"); err == nil {
@@ -670,6 +915,108 @@ func (f *fakeEntityClockStatus) GetClockState(_ context.Context, caseID, clockTy
 		return clockState{}, f.err
 	}
 	return f.states[caseID+"|"+clockType], nil
+}
+
+// flakyThenFoundEntityClockStatus answers "not found" for the first
+// notFoundCalls lookups of a given (caseID, clockType), then found -- a
+// fixture for the entity-service-hasn't-registered-the-clock-yet race
+// getClockStateWithRetry exists to close.
+type flakyThenFoundEntityClockStatus struct {
+	notFoundCalls int
+	calls         int
+	found         clockState
+}
+
+func (f *flakyThenFoundEntityClockStatus) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
+	f.calls++
+	if f.calls <= f.notFoundCalls {
+		return clockState{Found: false}, nil
+	}
+	return f.found, nil
+}
+
+func TestGetClockStateWithRetry(t *testing.T) {
+	t.Run("found on the first attempt makes no extra calls", func(t *testing.T) {
+		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 0, found: clockState{Found: true, DurationSeconds: 900}}
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !state.Found || entity.calls != 1 {
+			t.Errorf("state.Found=%v calls=%d, want Found=true calls=1", state.Found, entity.calls)
+		}
+	})
+
+	t.Run("not found once then found succeeds within the retry budget", func(t *testing.T) {
+		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1, found: clockState{Found: true, DurationSeconds: 900}}
+		start := time.Now()
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !state.Found {
+			t.Error("state.Found = false, want true after the retry catches up")
+		}
+		if entity.calls != entityClockStateRetryAttempts {
+			t.Errorf("calls = %d, want exactly %d (found on the last allowed attempt)", entity.calls, entityClockStateRetryAttempts)
+		}
+		if elapsed := time.Since(start); elapsed < entityClockStateRetryDelay {
+			t.Errorf("elapsed = %v, want at least one retry delay (%v)", elapsed, entityClockStateRetryDelay)
+		}
+	})
+
+	t.Run("never found returns the last not-found answer after exhausting retries", func(t *testing.T) {
+		entity := &flakyThenFoundEntityClockStatus{notFoundCalls: 1000}
+		state, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if state.Found {
+			t.Error("state.Found = true, want false -- this clock genuinely never registers")
+		}
+		if entity.calls != entityClockStateRetryAttempts {
+			t.Errorf("calls = %d, want exactly %d (the full retry budget, then give up)", entity.calls, entityClockStateRetryAttempts)
+		}
+	})
+
+	t.Run("a lookup error is returned immediately, never retried", func(t *testing.T) {
+		entity := &fakeEntityClockStatus{err: errors.New("entity-service unreachable")}
+		_, err := getClockStateWithRetry(context.Background(), entity, "case-1", "response")
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if len(entity.calls) != 1 {
+			t.Errorf("calls = %d, want exactly 1 (an error is not retried by this helper)", len(entity.calls))
+		}
+	})
+}
+
+// TestRegisterClocks_ClockNotYetRegistered_RetriesAndThenRegistersIt is the
+// regression test for the publish-before-register race: entity-service
+// publishes case.created before its own SLA engine has registered the
+// case's clocks (see sn_case_service.go's own CreateCase), so this Kafka
+// consumer's very first GetClockState read can land before that write has
+// happened. RegisterClocks must not give up on the first "not found".
+func TestRegisterClocks_ClockNotYetRegistered_RetriesAndThenRegistersIt(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, nil, nil)
+	e.entity = &flakyThenFoundEntityClockStatus{
+		notFoundCalls: 1,
+		found:         clockState{Found: true, DurationSeconds: int64((15 * time.Minute).Seconds())},
+	}
+
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS001", "WSO2-1", "Title", "case", "API Manager", "Team Nova")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected the response clock to be registered once the retry sees it as found")
+	}
+	if meta.CaseNumber != "CS001" {
+		t.Errorf("CaseNumber = %q, want CS001", meta.CaseNumber)
+	}
 }
 
 // TestTick_EntityServiceReportsClockAlreadyResolved_SuppressesTheAlert is the
@@ -1059,6 +1406,7 @@ func TestReconcileClock_PastTiersAreClaimedNotAlerted(t *testing.T) {
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC",
 		StartedOn: timePtr(startedAt), CaseNumber: "CS0001", Team: "Team Nova",
+		DurationSeconds: int64((15 * time.Minute).Seconds()),
 	}, now)
 
 	meta, found, _ := st.GetClock(context.Background(), "case-1", ClockResponse)
@@ -1090,7 +1438,7 @@ func TestReconcileClock_FutureTiersGetRealWakeEntries(t *testing.T) {
 
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC",
-		StartedOn: timePtr(startedAt),
+		StartedOn: timePtr(startedAt), DurationSeconds: int64((15 * time.Minute).Seconds()),
 	}, now)
 
 	meta, found, _ := st.GetClock(context.Background(), "case-1", ClockResponse)
@@ -1123,7 +1471,7 @@ func TestReconcileClock_MixOfPastAndFutureTiers(t *testing.T) {
 
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC",
-		StartedOn: timePtr(startedAt),
+		StartedOn: timePtr(startedAt), DurationSeconds: int64((15 * time.Minute).Seconds()),
 	}, now)
 
 	meta, _, _ := st.GetClock(context.Background(), "case-1", ClockResponse)
@@ -1150,7 +1498,7 @@ func TestReconcileClock_PausedSetsPausedFlag(t *testing.T) {
 
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockWorkaround, Priority: "CATASTROPHIC",
-		StartedOn: timePtr(time.Now()), IsPaused: true,
+		StartedOn: timePtr(time.Now()), IsPaused: true, DurationSeconds: int64((4 * time.Hour).Seconds()),
 	}, time.Now())
 
 	meta, found, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround)
@@ -1179,6 +1527,7 @@ func TestReconcileClock_PauseDurationShiftsDueTimes(t *testing.T) {
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC",
 		StartedOn: timePtr(startedAt), PauseDurationSeconds: pausedFor,
+		DurationSeconds: int64((15 * time.Minute).Seconds()),
 	}, now)
 
 	wantAt := startedAt.Add(7*time.Minute + 30*time.Second).Add(time.Hour)
@@ -1222,7 +1571,7 @@ func TestReconcileClock_OpenPauseIsFoldedIntoDueTimesAndTheBaseline(t *testing.T
 	e.reconcileClock(context.Background(), activeSLAClock{
 		CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC",
 		StartedOn: timePtr(startedAt), IsPaused: true, PausedOn: timePtr(pausedOn),
-		PauseDurationSeconds: completedPause,
+		PauseDurationSeconds: completedPause, DurationSeconds: int64((15 * time.Minute).Seconds()),
 	}, now)
 
 	wantAt := startedAt.Add(7*time.Minute + 30*time.Second).Add(time.Hour).Add(30 * time.Minute)
@@ -1272,8 +1621,8 @@ func TestEngine_Reconcile_ProcessesEveryClockFromTheClient(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
-		{CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now())},
-		{CaseID: "case-2", ClockType: ClockWorkaround, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), IsPaused: true},
+		{CaseID: "case-1", ClockType: ClockResponse, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), DurationSeconds: int64((15 * time.Minute).Seconds())},
+		{CaseID: "case-2", ClockType: ClockWorkaround, Priority: "CATASTROPHIC", StartedOn: timePtr(time.Now()), IsPaused: true, DurationSeconds: int64((4 * time.Hour).Seconds())},
 	}}
 
 	if err := e.Reconcile(context.Background(), client); err != nil {
@@ -1348,7 +1697,7 @@ func TestEngine_ProcessDueMember_IncarnationChangedMidFlight_DoesNotClobberNewCl
 		replacement:       ClockMeta{StartedAt: newStartedAt, Priority: "HIGH"},
 		replacementWakeAt: newWakeAt,
 	}
-	e := &Engine{store: raceStore, pub: &fakePublisher{}, chat: &fakeChat{}, links: fakeLinks{}, durations: testDurations(), slaEmailSendingEnabled: true}
+	e := &Engine{store: raceStore, pub: &fakePublisher{}, chat: &fakeChat{}, links: fakeLinks{}, slaEmailSendingEnabled: true}
 
 	if err := e.Tick(context.Background(), time.Now()); err != nil {
 		t.Fatalf("Tick() error = %v", err)
@@ -1416,5 +1765,151 @@ func TestIsTerminalSLAStage(t *testing.T) {
 		if got := isTerminalSLAStage(stage); got != want {
 			t.Errorf("isTerminalSLAStage(%q) = %v, want %v", stage, got, want)
 		}
+	}
+}
+
+// --- Redis retry + degraded-fallback deferral (processDueMemberFallback) ---
+
+// alwaysFailingGetClockStore wraps fakeStore and fails every GetClock call,
+// simulating Redis being unreachable for that one operation (e.g. a
+// partial/transient outage) while DueMembers itself still worked (the wake
+// member was found, which is how processDueMember ever gets this far).
+type alwaysFailingGetClockStore struct {
+	*fakeStore
+	getClockCalls int
+}
+
+func (s *alwaysFailingGetClockStore) GetClock(ctx context.Context, caseID, clockType string) (ClockMeta, bool, error) {
+	s.getClockCalls++
+	return ClockMeta{}, false, errors.New("redis unavailable")
+}
+
+// TestTick_RedisUnavailable_DefersRatherThanSendingADegradedAlert is the
+// end-to-end regression for the simplified fallback: when Redis's GetClock
+// fails even after withRedisRetry's bounded retries, Tick no longer sends a
+// degraded alert from entity-service's own live state -- it logs and leaves
+// the wake entry exactly where it was, so the next tick (once Redis
+// recovers) handles it through the normal, idempotent processDueMember
+// path. Tick itself reports no error (a Redis-unreachable GetClock is a
+// handled, not a failed, outcome) and the wake entry survives untouched.
+func TestTick_RedisUnavailable_DefersRatherThanSendingADegradedAlert(t *testing.T) {
+	base := newFakeStore()
+	wakeAt := time.Now().Add(-time.Minute)
+	base.wake[wakeMember("case-1", ClockResponse, 50)] = wakeAt
+	st := &alwaysFailingGetClockStore{fakeStore: base}
+
+	chat := &fakeChat{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {Found: true, BusinessElapsedPercent: 62, Stage: "IN_PROGRESS"},
+	}}
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil (a Redis-unreachable member is deferred, not failed)", err)
+	}
+	if st.getClockCalls != redisRetryAttempts {
+		t.Errorf("GetClock calls = %d, want %d (every retry attempt)", st.getClockCalls, redisRetryAttempts)
+	}
+	if len(chat.calls) != 0 {
+		t.Fatalf("chat calls = %+v, want none -- no alert should be sent while Redis is unreachable", chat.calls)
+	}
+	gotWakeAt, stillPresent := base.wake[wakeMember("case-1", ClockResponse, 50)]
+	if !stillPresent {
+		t.Fatal("wake entry was removed, want it left in place for the next tick to re-examine once Redis recovers")
+	}
+	if !gotWakeAt.Equal(wakeAt) {
+		t.Errorf("wake entry due time = %v, want unchanged %v", gotWakeAt, wakeAt)
+	}
+}
+
+// TestTick_RedisUnavailable_MultipleDueMembers_NoneAlertAndAllSurvive covers
+// the shape that used to risk a duplicate send under the old fallback design
+// (both the 50% and 75% wake members due in the same tick, e.g. after a
+// prolonged outage): with no degraded send at all, both are simply left for
+// the next successful tick, which is what actually claims and sends each
+// tier exactly once via the normal path.
+func TestTick_RedisUnavailable_MultipleDueMembers_NoneAlertAndAllSurvive(t *testing.T) {
+	base := newFakeStore()
+	base.wake[wakeMember("case-1", ClockResponse, 50)] = time.Now().Add(-time.Minute)
+	base.wake[wakeMember("case-1", ClockResponse, 75)] = time.Now().Add(-30 * time.Second)
+	st := &alwaysFailingGetClockStore{fakeStore: base}
+
+	chat := &fakeChat{}
+	e := newTestEngine(st, chat, &fakePublisher{})
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Fatalf("chat calls = %+v, want none", chat.calls)
+	}
+	for _, tier := range []int{50, 75} {
+		if _, ok := base.wake[wakeMember("case-1", ClockResponse, tier)]; !ok {
+			t.Errorf("wake entry for tier %d was removed, want it left for the next tick", tier)
+		}
+	}
+}
+
+// --- ApplyStateEffects pause status is wired from entity-service, not a
+// --- hardcoded state list ---
+
+// TestApplyStateEffects_PauseStatus_DrivenByEntityService_NotByStatusString
+// is the direct regression for the removed hardcoded pause-state list: a
+// status string that was NEVER in that old list ("Pending Customer Update")
+// still pauses the clock, as long as entity-service's own record says so --
+// proving pause/resume is no longer decided by matching the status string
+// at all.
+func TestApplyStateEffects_PauseStatus_DrivenByEntityService_NotByStatusString(t *testing.T) {
+	st := newFakeStore()
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = entityWithCatastrophicDurations("case-1")
+	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
+
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: true},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: true},
+	}}
+	e.ApplyStateEffects(context.Background(), "case-1", "Pending Customer Update")
+
+	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround); !meta.Paused {
+		t.Error("workaround clock not paused for a status entity-service reports as paused, even though that status string was never in the old hardcoded list")
+	}
+	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockResolution); !meta.Paused {
+		t.Error("resolution clock not paused for a status entity-service reports as paused")
+	}
+
+	// The converse: "Awaiting Info" -- the status that USED to always mean
+	// pause under the old hardcoded list -- does NOT pause when
+	// entity-service's own record says this clock is not paused (e.g. a
+	// policy whose pause_condition doesn't include this state at all).
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|" + ClockWorkaround: {Found: true, IsPaused: false},
+		"case-1|" + ClockResolution: {Found: true, IsPaused: false},
+	}}
+	e.ApplyStateEffects(context.Background(), "case-1", "Awaiting Info")
+
+	if meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround); meta.Paused {
+		t.Error("workaround clock paused on \"Awaiting Info\" even though entity-service's own record says it is not paused -- the old hardcoded list must no longer decide this")
+	}
+}
+
+func TestEntityPauseStatus_NoEntityClient_DefaultsToNotPaused(t *testing.T) {
+	e := &Engine{}
+	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+		t.Error("entityPauseStatus() = true with no entity client, want false (fail open toward sending, not suppressing)")
+	}
+}
+
+func TestEntityPauseStatus_LookupFailure_DefaultsToNotPaused(t *testing.T) {
+	e := &Engine{entity: &fakeEntityClockStatus{err: errors.New("unreachable")}}
+	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+		t.Error("entityPauseStatus() = true on a lookup failure, want false (fail open)")
+	}
+}
+
+func TestEntityPauseStatus_NotFound_DefaultsToNotPaused(t *testing.T) {
+	e := &Engine{entity: &fakeEntityClockStatus{}} // no states -- Found: false
+	if got := e.entityPauseStatus(context.Background(), "case-1", ClockWorkaround); got {
+		t.Error("entityPauseStatus() = true when entity-service has no record, want false")
 	}
 }

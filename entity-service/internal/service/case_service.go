@@ -194,6 +194,28 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 	return svc
 }
 
+// WithSLAEngine attaches the CSM-native SLA clock engine to an
+// already-constructed CaseService built via the plain NewCaseService (which
+// has no slaEngine parameter at all -- unlike NewCaseServiceWithSNWriteback,
+// which already takes one). Without this, s.slaEngine is always nil on this
+// path, so CreateCase never registers a case's SLA clocks and UpdateCase
+// never revises them on a severity change -- a real, reported gap: a case
+// created under plain DATA_SOURCE=postgres (no ServiceNow mirror at all) got
+// no SLA tracking whatsoever, from creation onward, regardless of its
+// severity. Same post-construction wiring shape as WithCSEngineerRole, for
+// the same reason -- optional, nil-safe to omit (every slaEngine call site in
+// this file already tolerates s.slaEngine == nil), and every existing
+// NewCaseService call site (60+, every test, every other DataSource branch
+// in routes.go) keeps working completely unchanged. slaEngine may itself be
+// nil (config.CSMSLAEngineEnabled == false, or no database configured at
+// all) -- that's the normal "engine turned off" case, not an error.
+func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.slaEngine = slaEngine
+	}
+	return svc
+}
+
 // WithCaseVolumeTrendCache attaches the optional Redis-backed per-day cache
 // CaseVolumeTrend reads through to an already-constructed CaseService. Same
 // post-construction wiring shape as WithProductCategoryEnforcement/
@@ -738,6 +760,27 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	// SLA-clock registration is scoped to req.Type == "case" only -- the
+	// same restriction snCaseService.CreateCase applies (see its own
+	// comment): service_request/engagement/security_report_analysis/
+	// announcement have no sla_policy naming convention this engine's
+	// resolver understands. Best-effort and nil-safe: s.slaEngine is nil
+	// when WithSLAEngine was never wired in (e.g. CSM_SLA_ENGINE_ENABLED=
+	// false, or no database configured at all), and a missing/failed clock
+	// registration must never fail case creation, which has already
+	// succeeded by this point. req.Severity/req.ProjectID are used directly
+	// rather than a GetCaseByID re-fetch (unlike snCaseService's own
+	// registerCaseSLAClocksEvent, which needs one because ServiceNow's
+	// create response doesn't echo these back) -- this is a native Postgres
+	// insert, so the request just written already carries both. A real,
+	// reported gap this closes: a case created under plain
+	// DATA_SOURCE=postgres (no ServiceNow mirror at all) got no SLA
+	// tracking whatsoever from creation onward, regardless of severity,
+	// until/unless its severity happened to change later (which calls
+	// ReviseCaseClocks, registering clocks as a side effect).
+	if s.slaEngine != nil && req.Type == "case" {
+		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
+	}
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
 		// the token validateCreateWatchList already accepted.
@@ -905,29 +948,37 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// staying stuck on whoever held the role at creation time.
 	s.addRequestedWatchers(ctx, c.ID, c.CreatedBy, watcherIDs)
 
-	// Only now — Postgres has confirmed the row this mode's reads actually
-	// depend on — is it safe to publish. See publishCaseCreatedEvent's doc
-	// comment for why this can't just be snCaseService's own automatic
-	// publish (that fires right after the ServiceNow POST, before this
-	// Postgres insert was even attempted) — same reasoning
-	// incidentService.createIncidentSNFirst already established.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
-
-	// Same reasoning as the publish call above, for the exact same "not
-	// safe before this Postgres insert" reason: registerCaseSLAClocksEvent
-	// inserts into "sla", whose work_item_id has a hard foreign key against
-	// work_item(id) (migration 0048) — calling it any earlier (e.g. via
-	// snCaseMirrorSvc's own automatic registration right after the
-	// ServiceNow POST, which routes.go now disables by passing it a nil
-	// slaEngine) fails with a foreign-key violation every time, since this
-	// mode's own Postgres work_item row doesn't exist until the insert
-	// above succeeds. A real, live-observed bug this fixed: every dual-write
-	// case creation failed clock registration with SQLSTATE 23503, silently
-	// (best-effort, logged only) — see registerCaseSLAClocksEvent's own doc
-	// comment.
+	// SLA-clock registration runs BEFORE the publish below, not after --
+	// this order is load-bearing (see CreateCase's own doc comment on the
+	// snCaseService.CreateCase equivalent for the full race this avoids:
+	// csm-notification-service reacts to case.created by reading this
+	// clock straight back from entity-service, with only a short, bounded
+	// retry for "not found yet"). It still can't run any earlier than this
+	// point in THIS function, though: registerCaseSLAClocksEvent inserts
+	// into "sla", whose work_item_id has a hard foreign key against
+	// work_item(id) (migration 0048) -- calling it before the Postgres
+	// insert above succeeds (e.g. via snCaseMirrorSvc's own automatic
+	// registration right after the ServiceNow POST, which routes.go now
+	// disables by passing it a nil slaEngine) fails with a foreign-key
+	// violation every time, since this mode's own Postgres work_item row
+	// doesn't exist until that insert succeeds. A real, live-observed bug
+	// this fixed: every dual-write case creation failed clock registration
+	// with SQLSTATE 23503, silently (best-effort, logged only). Postgres
+	// has already committed by the time this runs, so the only remaining
+	// ordering constraint is "before the publish," which this now also
+	// satisfies -- see registerCaseSLAClocksEvent's own doc comment.
 	if req.Type == "case" {
 		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
 	}
+
+	// Only now — Postgres has confirmed the row this mode's reads actually
+	// depend on, and the clocks above are already registered — is it safe
+	// to publish. See publishCaseCreatedEvent's doc comment for why this
+	// can't just be snCaseService's own automatic publish (that fires right
+	// after the ServiceNow POST, before this Postgres insert was even
+	// attempted) — same reasoning incidentService.createIncidentSNFirst
+	// already established.
+	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
 
 	responseState := ""
 	if c.State != nil {
@@ -1598,13 +1649,40 @@ func (s *caseService) applyCustomerReplyStateTransition(ctx context.Context, req
 	if req.Type != domain.CommentTypeComment {
 		return
 	}
+	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, req.CaseID, "customer reply")
+}
+
+// applyCustomerAttachmentStateTransition is the attachment counterpart of
+// applyCustomerReplyStateTransition: a customer who uploads a file to a case
+// that is Awaiting Info or Solution Proposed has answered WSO2's request as
+// surely as one who comments, so the same rule applies (the shared
+// moveToWaitingOnWSO2OnCustomerActivity). Called only once an attachment is
+// truly stored and complete (CreateCaseAttachment with status complete,
+// ConfirmCaseAttachment for the two-step upload, and the dual-write create),
+// never for a pending placeholder. Only an attachment on the case itself
+// counts. The uploader is the calling identity in every one of those flows,
+// so the same scope-based customer check as for comments applies.
+// Best-effort: the attachment is already committed, so a failure here is
+// logged and never fails the upload.
+func (s *caseService) applyCustomerAttachmentStateTransition(ctx context.Context, referenceType domain.ReferenceType, caseID string) {
+	if referenceType != domain.ReferenceTypeCase {
+		return
+	}
+	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, caseID, "customer attachment")
+}
+
+// moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
+// comment and a customer's attachment: when the caller is a customer and the
+// record is Awaiting Info or Solution Proposed, move it to Waiting on WSO2
+// through this service's own UpdateCase. activity ("customer reply" or "customer attachment") labels log lines only.
+func (s *caseService) moveToWaitingOnWSO2OnCustomerActivity(ctx context.Context, caseID, activity string) {
 	if !s.isCustomerCommentAuthor(ctx) {
 		return
 	}
 
-	cv, err := s.GetCaseByID(ctx, req.CaseID)
+	cv, err := s.GetCaseByID(ctx, caseID)
 	if err != nil {
-		slog.ErrorContext(ctx, "create comment: customer reply state transition not evaluated, get case failed", "caseId", req.CaseID)
+		slog.ErrorContext(ctx, activity+" state transition not evaluated, get case failed", "caseId", caseID)
 		return
 	}
 	if derefState(cv.State) != domain.CaseStateAwaitingInfo && derefState(cv.State) != domain.CaseStateSolutionProposed {
@@ -1612,8 +1690,8 @@ func (s *caseService) applyCustomerReplyStateTransition(ctx context.Context, req
 	}
 
 	waitingOnWSO2 := domain.CaseStateWaitingOnWSO2
-	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: req.CaseID, State: &waitingOnWSO2}); err != nil {
-		slog.ErrorContext(ctx, "create comment: move case to waiting on wso2 after customer reply failed", "caseId", req.CaseID)
+	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, State: &waitingOnWSO2}); err != nil {
+		slog.ErrorContext(ctx, "move case to waiting on wso2 after "+activity+" failed", "caseId", caseID)
 	}
 }
 
@@ -1803,6 +1881,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "resolutionCode, cause, and closeNotes are only allowed when state is closed or solution_proposed"}
 		}
 	}
+	// ActorEmail is only meaningful on the MarkFixIssued branch today -- the
+	// only UpdateCase field an M2M-only caller (no forwarded end-user
+	// identity) can reach on the Postgres data source. Reject it combined
+	// with anything else rather than silently ignoring it.
+	if req.ActorEmail != nil && req.MarkFixIssued == nil {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "actorEmail is only allowed when markFixIssued is also provided"}
+	}
 	if req.WatchList != nil {
 		return s.updateCaseWatchList(ctx, req)
 	}
@@ -1925,7 +2010,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		if before.State == nil {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "unable to verify the case's current state; try again"}
 		}
-		if *before.State != *req.State && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
+		// The auto-closure workflow (see withAutoclosureActor) closes a ticket
+		// that has sat in Awaiting Info after its reminders; no staff table
+		// lists that move, so it is the one transition allowed past the table.
+		_, byAutoclosure := autoclosureActorFromContext(ctx)
+		autoclosureClose := byAutoclosure && *req.State == domain.CaseStateClosed &&
+			(*before.State == domain.CaseStateAwaitingInfo || *before.State == domain.CaseStateSolutionProposed)
+		if *before.State != *req.State && !autoclosureClose && !isValidCaseStateTransition(isInternalCaller, *before.State, *req.State) {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{
 				Msg:  fmt.Sprintf("state cannot move from %q to %q", string(*before.State), string(*req.State)),
 				Code: "case_invalid_state_transition",
@@ -2085,6 +2176,12 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		if actor.ID != "" {
 			actorID = &actor.ID
 		}
+	} else if systemEmail, ok := autoclosureActorFromContext(ctx); ok {
+		// The auto-closure workflow has no user token; it acts as the system user.
+		actorEmail = systemEmail
+		if u, uErr := s.userRepo.GetUserByEmail(ctx, systemEmail); uErr == nil && u.ID != "" {
+			actorID = &u.ID
+		}
 	}
 
 	// oldSeverity is the case's severity immediately before this update —
@@ -2149,9 +2246,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		if cv, err := s.GetCaseByID(ctx, req.ID); err != nil {
 			slog.ErrorContext(ctx, "update case: enrich case for case.severity_changed publish failed", "caseId", req.ID)
 		} else {
-			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
-			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
-			// Deliberately independent of s.publisher -- see
+			// Clocks are revised BEFORE the publish below, not after -- same
+			// race this package's own createCasePostgres/createCaseSNFirst
+			// ordering avoids for case.created: csm-notification-service
+			// reacts to case.severity_changed by re-registering its own
+			// clocks from entity-service's current state, and a publish that
+			// goes out before ReviseCaseClocks commits can read the OLD
+			// clocks back. Deliberately independent of s.publisher -- see
 			// reviseCaseSLAClocks' own doc comment (sn_case_service.go) for
 			// why revising SLA clocks must not depend on Event Hub being
 			// configured. A real, live-observed gap this fixes: the
@@ -2181,6 +2282,8 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 					s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *cv.State)
 				}
 			}
+			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
+			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
 		}
 	}
 
@@ -2719,13 +2822,21 @@ func (s *caseService) updateCaseMarkFixIssued(ctx context.Context, req domain.Up
 		return domain.UpdateCaseResponse{}, err
 	}
 
-	// resolveActorOrM2M so the integration that marks a fix released (an M2M
-	// caller with no end-user token) is still attributed, to its client id.
-	// Best-effort: an unresolvable caller just skips the entry.
+	// req.ActorEmail, once the handler has verified it against the trusted
+	// M2M client set, takes priority over resolveActorOrM2M's own fallback:
+	// it names the real third-party integration that triggered this call
+	// (e.g. one of several consumers behind csm-integration-service, each
+	// mapped to its own email there), rather than csm-integration-service's
+	// single shared service-to-service client id. Best-effort either way --
+	// an unresolvable caller just skips the entry.
 	if !alreadySet {
-		if actor, err := s.resolveActorOrM2M(ctx); err == nil {
-			s.recordFieldChangeActivity(ctx, req.ID, "fix_issued_on", "", fixIssued.UTC().Format(time.RFC3339), actor.Email)
+		actorEmail := ""
+		if req.ActorEmail != nil {
+			actorEmail = *req.ActorEmail
+		} else if actor, err := s.resolveActorOrM2M(ctx); err == nil {
+			actorEmail = actor.Email
 		}
+		s.recordFieldChangeActivity(ctx, req.ID, "fix_issued_on", "", fixIssued.UTC().Format(time.RFC3339), actorEmail)
 	}
 
 	if !alreadySet && s.snWriteback != nil {
@@ -3757,6 +3868,13 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 		return domain.CreateAttachmentResponse{}, err
 	}
 
+	// A pending row is a placeholder for an upload that may never finish; the
+	// customer's file only truly exists once ConfirmCaseAttachment runs, which
+	// is where the state transition fires for that flow.
+	if a.Status == domain.AttachmentStatusComplete {
+		s.applyCustomerAttachmentStateTransition(ctx, req.ReferenceType, req.ReferenceID)
+	}
+
 	return domain.CreateAttachmentResponse{
 		Message: "Attachment created successfully",
 		Attachment: domain.AttachmentDetail{
@@ -3812,6 +3930,8 @@ func (s *caseService) ConfirmCaseAttachment(ctx context.Context, id string) (dom
 	if err != nil {
 		return domain.ConfirmAttachmentResponse{}, err
 	}
+
+	s.applyCustomerAttachmentStateTransition(ctx, existing.ReferenceType, existing.ReferenceID)
 
 	return domain.ConfirmAttachmentResponse{
 		Message: "Attachment confirmed successfully",

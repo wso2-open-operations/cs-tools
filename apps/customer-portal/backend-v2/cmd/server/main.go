@@ -223,7 +223,10 @@ func main() {
 	userHandler := handler.NewUserHandler(entityClient, scimClient, csmMigrationFirstAccess, internalWriteGroups)
 	projectHandler := handler.NewProjectHandler(entityClient)
 	projectStatsHandler := handler.NewProjectStatsHandler(entityClient)
-	caseHandler := handler.NewCaseHandler(entityClient)
+	// With the agent attached: a case raised from a Novera chat is reported
+	// back to it, so its effectiveness reporting can see escalations it did
+	// not drive itself.
+	caseHandler := handler.NewCaseHandlerWithAgent(entityClient, aiChatAgentWsClient)
 	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 	deployedProductHandler := handler.NewDeployedProductHandler(entityClient)
 	attachmentHandler := handler.NewAttachmentHandler(entityClient)
@@ -248,6 +251,7 @@ func main() {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.HandleFunc("GET /banners", handler.NewBannerHandler(entityClient).ListBanners)
 
 	mux.HandleFunc("GET /users/me", userHandler.GetMe)
 	mux.HandleFunc("PATCH /users/me", userHandler.PatchMe)
@@ -273,12 +277,7 @@ func main() {
 	mux.Handle("POST /projects/{id}/registry-tokens", middleware.RequirePermission(roleResolver, middleware.ModuleDeploymentResources, middleware.ActionCreate)(http.HandlerFunc(registryHandler.CreateRegistryToken)))
 	mux.Handle("POST /projects/{id}/registry-tokens/search", middleware.RequirePermission(roleResolver, middleware.ModuleDeploymentResources, middleware.ActionRead)(http.HandlerFunc(registryHandler.SearchRegistryTokens)))
 	mux.Handle("GET /projects/{id}/integration-users", middleware.RequirePermission(roleResolver, middleware.ModuleDeploymentResources, middleware.ActionRead)(http.HandlerFunc(registryHandler.GetProjectIntegrationUsers)))
-	mux.HandleFunc("GET /projects/{id}/contacts", contactHandler.GetProjectContacts)
-	mux.Handle("POST /projects/{id}/contacts", middleware.RequireRoles(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(http.HandlerFunc(contactHandler.CreateProjectContact)))
-	mux.Handle("DELETE /projects/{id}/contacts/{email}", middleware.RequireRoles(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(http.HandlerFunc(contactHandler.RemoveProjectContact)))
-	mux.Handle("PATCH /projects/{id}/contacts/{email}", middleware.RequireRoles(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(http.HandlerFunc(contactHandler.UpdateProjectContactRole)))
-	mux.Handle("POST /projects/{id}/contacts/{email}/resend-invitation", middleware.RequireRoles(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(http.HandlerFunc(contactHandler.ResendProjectContactInvitation)))
-	mux.Handle("POST /projects/{id}/contacts/validate", middleware.RequireRoles(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(http.HandlerFunc(contactHandler.ValidateProjectContact)))
+	registerContactRoutes(mux, roleResolver, contactHandler)
 	mux.Handle("DELETE /registry-tokens/{id}", middleware.RequirePermission(roleResolver, middleware.ModuleDeploymentResources, middleware.ActionDelete)(http.HandlerFunc(registryHandler.DeleteRegistryToken)))
 	// Regeneration is an update, not a delete: the token resource survives and
 	// only its secret changes (RegenerateToken returns a TokenCreationResponse).
@@ -768,4 +767,30 @@ func splitComma(s string) []string {
 		}
 	}
 	return result
+}
+
+// registerContactRoutes registers the project-contact routes. A function of its
+// own (rather than inline in main) so the route-to-middleware wiring is
+// exercised by tests -- see TestContactRouteGating in main_rbac_test.go.
+//
+// When the database-backed contacts path is on, every write handler runs
+// requireProjectAdmin (account admin role or the caller's own project ADMIN
+// membership, plus an active membership) before it reads or writes anything,
+// so the route gate defers to it rather than turn away a project-only admin.
+// On the legacy path the handlers make no such check, so the route gate stays
+// the only portal-side one and still requires the account-level role.
+func registerContactRoutes(mux *http.ServeMux, roleResolver middleware.RoleResolver, h *handler.ContactHandler) {
+	guard := middleware.RequireRoles
+	if h.PortalContactsEnabled() {
+		guard = middleware.RequireRolesOrDefer
+	}
+	write := func(next http.HandlerFunc) http.Handler {
+		return guard(roleResolver, middleware.RoleAdmin, middleware.RoleCustomerAdmin, middleware.RolePartnerAdmin)(next)
+	}
+	mux.HandleFunc("GET /projects/{id}/contacts", h.GetProjectContacts)
+	mux.Handle("POST /projects/{id}/contacts", write(h.CreateProjectContact))
+	mux.Handle("DELETE /projects/{id}/contacts/{email}", write(h.RemoveProjectContact))
+	mux.Handle("PATCH /projects/{id}/contacts/{email}", write(h.UpdateProjectContactRole))
+	mux.Handle("POST /projects/{id}/contacts/{email}/resend-invitation", write(h.ResendProjectContactInvitation))
+	mux.Handle("POST /projects/{id}/contacts/validate", write(h.ValidateProjectContact))
 }

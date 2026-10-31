@@ -49,6 +49,27 @@ describe("settings utils", () => {
     expect(badges[0]?.label).toBe("Portal User");
   });
 
+  describe("Admin badge", () => {
+    const base = { isCsIntegrationUser: false, isPortalUser: true, isSecurityContact: false };
+    const labels = (c: object) => getRoleBadges({ ...base, ...c } as never).map((b) => b.label);
+
+    it("shows Admin for isAccountAdmin only", () => {
+      expect(labels({ isCsAdmin: false, isAccountAdmin: true })).toEqual(["Admin", "Portal User"]);
+    });
+    it("shows Admin for isCsAdmin only", () => {
+      expect(labels({ isCsAdmin: true })).toEqual(["Admin", "Portal User"]);
+    });
+    it("shows a single Admin badge when both are set", () => {
+      expect(labels({ isCsAdmin: true, isAccountAdmin: true }).filter((l) => l === "Admin")).toHaveLength(1);
+    });
+    it("shows no Admin badge when neither is set", () => {
+      expect(labels({ isCsAdmin: false })).not.toContain("Admin");
+    });
+    it("keeps Admin first", () => {
+      expect(labels({ isAccountAdmin: true, isLead: true, isSecurityContact: true })[0]).toBe("Admin");
+    });
+  });
+
   it("resolves initials from names and email fallback", () => {
     expect(getInitials("Jane", "Doe")).toBe("JD");
     expect(getInitials(undefined, undefined, "ab@example.com")).toBe("AB");

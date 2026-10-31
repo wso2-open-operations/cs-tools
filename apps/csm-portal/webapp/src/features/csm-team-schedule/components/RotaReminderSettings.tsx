@@ -43,10 +43,14 @@ const TIME_ZONES = [
 
 const DEFAULT_WINDOW: ReminderWindow = { start: "08:00", end: "18:00", timeZone: "America/Los_Angeles" };
 
-/** What the reminders use until something is saved: the built-in settings. */
+/**
+ * What the card shows until something is saved. The automatic reminders are
+ * off until somebody turns them on here: nothing in the deployment's
+ * configuration switches them on.
+ */
 const DEFAULTS: SaveRotaReminderSettings = {
-  weekdayEnabled: true,
-  weekendEnabled: true,
+  weekdayEnabled: false,
+  weekendEnabled: false,
   invitesEnabled: true,
   weekendRequired: { [LK_WEEKEND]: 3, [AMERICAS_WEEKEND]: 1 },
   windows: { [WINDOW_CODES[0]]: DEFAULT_WINDOW, [WINDOW_CODES[1]]: DEFAULT_WINDOW },
@@ -271,7 +275,7 @@ export default function RotaReminderSettings(): JSX.Element {
         </span>
       </div>
       {loaded === null ? (
-        <p className="cp-help rrs-meta">Not saved yet: the reminders use the deployment&apos;s settings, and the values below are the defaults. Only what you change here is saved.</p>
+        <p className="cp-help rrs-meta">Not saved yet: no automatic reminder is sent until one is turned on here and saved. The other values below are the deployment&apos;s defaults; only what you change here is saved.</p>
       ) : (
         <p className="cp-help rrs-meta">
           Last changed by {loaded.updatedBy}
@@ -285,6 +289,9 @@ export default function RotaReminderSettings(): JSX.Element {
           <form className="rrs" noValidate onSubmit={submit}>
             <fieldset className="rrs-group">
               <legend>Automatic reminders</legend>
+              <p className="cp-help" id={id("automatic-help")}>
+                The only on/off for the automatic reminders in this environment. A change applies from the next run.
+              </p>
               <div className="rrs-checks">
                 <div>
                   <label className="cas-check" htmlFor={id("weekday")}>

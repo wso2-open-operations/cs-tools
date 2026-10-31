@@ -38,7 +38,6 @@ const (
 	ErrMsgWorkStateNotAllowed     = "Work state can only be updated when the case is in progress."
 	ErrMsgCommentNotAllowed       = "Comments can only be added when the case is in progress and the work state is ongoing."
 	ErrMsgCommentNotOwnCase       = "Only the assigned engineer can add a public comment on this case."
-	ErrMsgCaseCloseNotOwnCase     = "Only the assigned engineer (or an admin) can close this case."
 	ErrMsgIncidentCloseNotOwnCase = "Only the assigned engineer (or an admin) can close this incident."
 	ErrMsgWorkNoteOnClosedCase    = "Work notes cannot be added to a closed case."
 	ErrMsgCommentOnClosedCase     = "Comments cannot be added to a closed case."

@@ -271,8 +271,9 @@ func (s *userService) GetUser(ctx context.Context, id string) (domain.UserDetail
 	if u.Groups, err = s.repo.GetUserGroups(ctx, id); err != nil {
 		return domain.UserDetail{}, err
 	}
-	// Project access is a customer concept: staff have no project-contact rows.
-	if u.UserType == domain.UserTypeCustomer && u.Email != "" {
+	// Project access applies to every non-staff user: customers and the
+	// customer-side system accounts both hold project-contact rows.
+	if u.UserType != domain.UserTypeInternal && u.Email != "" {
 		if u.ProjectAccess, err = s.repo.GetUserProjectAccess(ctx, u.Email); err != nil {
 			return domain.UserDetail{}, err
 		}

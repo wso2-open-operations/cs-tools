@@ -30,7 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, type JSX, type ReactNode } from "react";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import QueryErrorState from "@components/QueryErrorState";
 import { useNavTransition } from "@hooks/useNavTransition";
@@ -43,6 +43,7 @@ import {
   projectContactRoleChipSx,
 } from "@features/csm-projects/utils/projectContactRoles";
 import { grantableRoleLabel } from "@features/csm-users/utils/grantableRoleLabels";
+import GrantUserRoleDialog from "@features/csm-users/components/GrantUserRoleDialog";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import {
   INTERNAL_USER_ROLES,
@@ -336,6 +337,7 @@ function PlainChipCluster({
  * `GetUser`'s `csmPlatformRoles` field.
  */
 function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element {
+  const [grantDialogOpen, setGrantDialogOpen] = useState(false);
   const { data: rolesData } = useSearchRoles({ pagination: { limit: BE_MAX_PAGE_LIMIT } });
   const roleNameById = useMemo(
     () => new Map((rolesData?.roles ?? []).map((r) => [r.id, r.name])),
@@ -379,12 +381,23 @@ function PermissionsCard({ user }: { user: NormalizedUserDetail }): JSX.Element 
         </Box>
         {showCsmPlatformRoles && (
           <Box sx={{ flex: "1 1 260px", minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              CSM Platform roles{csmPlatformRolesAvailable ? ` (${csmPlatformRoleLabels.length})` : ""}
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                CSM Platform roles{csmPlatformRolesAvailable ? ` (${csmPlatformRoleLabels.length})` : ""}
+              </Typography>
+              <Button size="small" onClick={() => setGrantDialogOpen(true)}>
+                Grant role
+              </Button>
+            </Box>
             <PlainChipCluster
               labels={csmPlatformRoleLabels}
               emptyMessage={csmPlatformRolesAvailable ? "No CSM Platform roles assigned." : "Unavailable"}
+            />
+            <GrantUserRoleDialog
+              open={grantDialogOpen}
+              onClose={() => setGrantDialogOpen(false)}
+              userId={user.id}
+              currentRoles={user.csmPlatformRoles ?? []}
             />
           </Box>
         )}

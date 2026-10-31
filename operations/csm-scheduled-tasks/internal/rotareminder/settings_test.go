@@ -102,8 +102,9 @@ func TestSettings_ReplaceTheConfiguration(t *testing.T) {
 	}
 }
 
-// A failed read fails the run before anything is sent; nothing saved keeps
-// the configuration.
+// A failed read fails the run before anything is sent. With nothing saved
+// for the family the automatic reminders stay off: only the switches on the
+// Rota Access tab turn them on.
 func TestSettings_ReadFailureAndNothingSaved(t *testing.T) {
 	mail := &fakeEmail{}
 	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
@@ -112,8 +113,35 @@ func TestSettings_ReadFailureAndNothingSaved(t *testing.T) {
 		t.Errorf("err %v, sent %d", err, len(mail.sent))
 	}
 	cfg.Settings = fakeSettings{}
-	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil || len(mail.sent) != 5 {
-		t.Errorf("nothing saved: err %v, sent %d, want the summary and four invitations", err, len(mail.sent))
+	store := &fakeStore{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil || len(mail.sent) != 0 || len(store.recorded) != 0 {
+		t.Errorf("nothing saved: err %v, sent %d, recorded %d; want nothing", err, len(mail.sent), len(store.recorded))
+	}
+	weekday := config("2026-10-19 10:00", weekdayRotations)
+	weekday.EmailsEnabled, weekday.Settings = true, fakeSettings{}
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-20", "2026-10-20 06:00", "2026-10-20 09:00"),
+	}}
+	if err := WeekdayReminder(rota, mail, weekday)(context.Background()); err != nil || len(mail.sent) != 0 {
+		t.Errorf("weekday, nothing saved: err %v, sent %d; want nothing", err, len(mail.sent))
+	}
+}
+
+// Send now is asked for by hand, so it goes out although nothing is saved for
+// the family, with the configured values.
+func TestSettings_SendNowWorksWithNothingSaved(t *testing.T) {
+	weekday, weekend := manualConfigs("2026-10-19 10:00")
+	weekday.Settings, weekend.Settings = fakeSettings{}, fakeSettings{}
+	queue := &fakeQueue{waiting: []teamschedule.ReminderRequest{
+		{ID: "r1", Kind: "weekend"},
+		{ID: "t1", Kind: "weekend", Test: true, RequestedBy: "zoe@example.com"},
+	}}
+	mail := &fakeEmail{}
+	if err := ManualReminder(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, queue, mail, weekday, weekend)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.reports) != 2 || queue.reports[0] != "r1 SENT Sent 5 emails." || queue.reports[1] != "t1 SENT Sent 5 emails to zoe@example.com (test)." {
+		t.Fatalf("reports %v", queue.reports)
 	}
 }
 

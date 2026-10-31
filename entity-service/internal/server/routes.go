@@ -334,6 +334,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// only in Postgres, so its routes are registered only when a pool is
 	// configured.
 	var scheduleHandler *handler.ScheduleHandler
+	// Customer engagement allocations for the CSM Allocations page: Postgres-only,
+	// internal staff only.
+	var engagementAllocationViewHandler *handler.EngagementAllocationViewHandler
 	// The SaaS SRE rota's "Generate month" action. Postgres-only, like the
 	// rest of the Team Schedule.
 	var rotaGenerateHandler *handler.RotaGenerateHandler
@@ -342,10 +345,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var rotaReminderSettingsHandler *handler.RotaReminderSettingsHandler
 	var rotaReminderRequestHandler *handler.RotaReminderRequestHandler
 	var teamMemberHandler *handler.TeamMemberHandler
+	// Skills: the catalogue and each engineer's profile. Postgres-only.
+	var skillHandler *handler.SkillHandler
 	var pagingChainHandler *handler.PagingChainHandler
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var runbookHandler *handler.RunbookHandler
+	var portalBannerHandler *handler.PortalBannerHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
 	var runbookRepo repository.RunbookRepository
@@ -637,8 +643,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// never registered, so a portal built against them fails loudly with a
 	// 404 rather than writing one system and not the other.
 	var projectMembershipHandler *handler.ProjectMembershipHandler
+	// The deferred Salesforce write ledger (migration 0249). Written by the
+	// membership writes below, read by the contact lists further down for
+	// the "syncing to Salesforce" status; nil without a database.
+	var salesforceWriteRequestRepo repository.SalesforceWriteRequestRepository
+	if db != nil {
+		salesforceWriteRequestRepo = repository.NewSalesforceWriteRequestRepository(db)
+	}
+	// salesforceWritePublisher and stopSalesforceWriteConsumers belong to the
+	// deferred Salesforce write (service.DeferredSalesforceWriteCompleter):
+	// the command publisher towards sales-entity-service and the consumers
+	// of its results. Both nil unless cfg.HasSalesforceDeferredWrites().
+	// Released by closePublishers.
+	var salesforceWritePublisher service.EventPublisherService
+	var stopSalesforceWriteConsumers func()
 	if db != nil && cfg.HasPortalMembershipWrites() && salesEntityClient != nil {
-		projectMembershipHandler = handler.NewProjectMembershipHandler(service.NewProjectMembershipWriteService(service.MembershipWriteDeps{
+		writeDeps := service.MembershipWriteDeps{
 			Memberships: repository.NewProjectMembershipRepository(repository.NewScoped(db)),
 			Steps:       repository.NewOnboardingStepRepository(db),
 			SalesEntity: salesEntityClient,
@@ -648,7 +668,35 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			Invitations: service.NewInvitationValidator(salesEntityClient, repository.NewAccountPartnerRepository(db)),
 			Admins:      repository.NewAccountAdminRepository(db),
 			UserCache:   userCacheInvalidator,
-		}))
+			Partners:    repository.NewAccountPartnerRepository(db),
+		}
+		switch {
+		case cfg.HasSalesforceDeferredWrites():
+			// Its own producer on its own topic: the command is consumed by
+			// sales-entity-service and must not share a stream with the
+			// notifications (see Config.SalesforceWriteEventHubTopic).
+			salesforceWritePublisher = service.NewEventPublisherService(
+				eventbus.NewProducer(eventbus.Config{
+					Broker:           cfg.EventHubBroker,
+					ConnectionString: cfg.EventHubConnectionString,
+					Topic:            cfg.SalesforceWriteEventHubTopic,
+				}),
+				eventPublishFailureSvc,
+			)
+			writeDeps.WriteRequests = salesforceWriteRequestRepo
+			writeDeps.SalesforceWritePublisher = salesforceWritePublisher
+		case cfg.SalesforceDeferredWritesEnabled:
+			log.Printf("SALESFORCE_DEFERRED_WRITES_ENABLED is set but Event Hub publishing is not configured and enabled; deferred Salesforce writes stay off")
+		}
+		membershipWriteSvc := service.NewProjectMembershipWriteService(writeDeps)
+		projectMembershipHandler = handler.NewProjectMembershipHandler(membershipWriteSvc)
+		if salesforceWritePublisher != nil {
+			completer, ok := membershipWriteSvc.(service.DeferredSalesforceWriteCompleter)
+			if !ok {
+				panic("salesforce: membership write service does not implement DeferredSalesforceWriteCompleter")
+			}
+			stopSalesforceWriteConsumers = startSalesforceWriteResultConsumers(cfg, completer)
+		}
 	}
 
 	// Allocation-app events into customer engagements; off by default (route not registered).
@@ -732,7 +780,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if cfg.DataSource == config.DataSourceServiceNow {
 		activeProjectContactSvc = service.NewServiceNowProjectContactService(serviceNowIntegrationServiceClient)
 	} else {
-		activeProjectContactSvc = service.NewProjectContactService(projectContactRepo, accessSvc)
+		activeProjectContactSvc = service.WithProjectContactSalesforceSync(
+			service.NewProjectContactService(projectContactRepo, accessSvc), salesforceWriteRequestRepo)
 	}
 	projectContactHandler := handler.NewProjectContactHandler(activeProjectContactSvc)
 
@@ -765,15 +814,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// ReferenceDataRepository's own doc comment.
 	referenceDataRepo := repository.NewReferenceDataRepository(db)
 
-	// sla-duration-policy reads the small, static sla_duration_policy
-	// reference table (migration 0192) -- gated on db != nil like
-	// slaStatusHandler above, since there's nothing to read on a deployment
-	// with no Postgres pool at all. integrations/csm-notification-service
-	// fetches this once at startup to compute its own SLA due dates.
+	// sla-duration-policy computes its response live from the real
+	// sla_policy table (see SLADurationPolicyService's own doc comment) --
+	// gated on db != nil like slaStatusHandler above, since there's nothing
+	// to read on a deployment with no Postgres pool at all. A fresh
+	// SLAEngineRepository is constructed here rather than reusing
+	// slaEngineSvc's own below: that one is nil whenever
+	// cfg.CSMSLAEngineEnabled is off, but this endpoint's own read has
+	// nothing to do with that toggle (a stateless wrapper over the pool
+	// costs nothing extra to construct again).
 	var slaDurationPolicyHandler *handler.SLADurationPolicyHandler
 	if db != nil {
 		slaDurationPolicyHandler = handler.NewSLADurationPolicyHandler(
-			service.NewSLADurationPolicyService(referenceDataRepo, accessSvc))
+			service.NewSLADurationPolicyService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole), accessSvc))
 	}
 
 	// Every project-stats route is available on both data sources. In
@@ -951,14 +1004,24 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		snAttachmentDelegate = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 	}
 
-	// The CSM-native SLA engine (internal/service/sla_engine_service.go)
-	// writes its own source='CSM' rows into the "sla" table (migration 0134),
-	// resolving durations from the deterministic, severity-keyed sla_policy
-	// rows migration 0203 seeds -- gated on db the same way slaStatusHandler
-	// above is: nowhere to store a clock at all with no database configured.
+	// This service's own in-process SLA engine (internal/service/sla_engine_service.go)
+	// writes source='CSM' rows into the "sla" table (migration 0134's own
+	// original enum intent -- see repository.SLAEngineRepository's own doc
+	// comment for why this engine's clocks must never carry the
+	// 'SERVICENOW' tag, which belongs to a real, independent external sync
+	// job), resolving durations AND applicability from the real, decoded
+	// sla_policy conditions (migrations 0250-0258). Gated on db (same reason slaStatusHandler
+	// above is -- nowhere to store a clock at all with no database
+	// configured) AND on cfg.CSMSLAEngineEnabled -- an explicit, named
+	// toggle (default true) replacing what used to be an implicit "runs
+	// wherever a database happens to be configured" posture. Every caller of
+	// slaEngineSvc below (NewServiceNowCaseService, NewCaseServiceWithSNWriteback,
+	// and the plain NewCaseService via WithSLAEngine) already tolerates a nil
+	// SLAEngineService, so turning this off is as simple as never
+	// constructing one -- no other code path needs to know why.
 	var slaEngineSvc service.SLAEngineService
-	if db != nil {
-		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db)))
+	if db != nil && cfg.CSMSLAEngineEnabled {
+		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
 	}
 
 	caseRepo := repository.NewCaseRepository(repository.NewScoped(db), crVisibility)
@@ -1103,6 +1166,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// (above) already takes csEngineerRole as a constructor parameter;
 		// NewCaseService has no such parameter, hence this separate step.
 		activeCaseSvc = service.WithCSEngineerRole(activeCaseSvc, cfg.CSEngineerRole)
+		// Without this, s.slaEngine is always nil on this path, so CreateCase
+		// never registers SLA clocks and UpdateCase never revises them on a
+		// severity change -- a plain DATA_SOURCE=postgres deployment got no
+		// SLA tracking at all before this. NewCaseServiceWithSNWriteback
+		// (above) already takes slaEngine as a constructor parameter;
+		// NewCaseService has no such parameter, hence this separate step --
+		// same shape as WithCSEngineerRole just above. slaEngineSvc is nil
+		// when CSM_SLA_ENGINE_ENABLED=false or no database is configured,
+		// which WithSLAEngine (and every slaEngine call site) tolerates.
+		activeCaseSvc = service.WithSLAEngine(activeCaseSvc, slaEngineSvc)
 	}
 	// Service requests: ServiceNow's "SR New Request - Acknowledge & Chat
 	// Alert" flow and the sr.* events, on the operations topic (sre-events)
@@ -1147,7 +1220,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			service.NewAnnouncementRequestService(repository.NewAnnouncementRequestRepository(db), activeCaseSvc, accessSvc),
 		)
 		scheduleHandler = handler.NewScheduleHandler(
-			service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc),
+			service.WithScheduleAdminRoles(service.NewScheduleService(repository.NewScheduleRepository(db), accessSvc), cfg.AuthAdminRoles),
+		)
+		engagementAllocationViewHandler = handler.NewEngagementAllocationViewHandler(
+			service.NewEngagementAllocationViewService(repository.NewEngagementAllocationViewRepository(db), accessSvc),
 		)
 		rotaGenerateHandler = handler.NewRotaGenerateHandler(
 			service.NewRotaGenerateService(repository.NewScheduleRepository(db), repository.NewRotaGenerateRepository(db), accessSvc),
@@ -1178,6 +1254,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// module: it returns staff names, addresses and rank.
 		teamMemberHandler = handler.NewTeamMemberHandler(
 			service.NewTeamMemberService(repository.NewTeamMemberRepository(db), accessSvc),
+		)
+		// Skills exist only in Postgres. Reads are internal-staff-only; a CSM
+		// admin is a token role from AUTH_ADMIN_ROLES, as for rota access.
+		skillHandler = handler.NewSkillHandler(
+			service.NewSkillService(repository.NewSkillRepository(db), accessSvc, cfg.AuthAdminRoles),
 		)
 	}
 	// activeAttachmentSvc backs the case-attachment write/non-content-read
@@ -1379,6 +1460,38 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// same *caseService the case handler already holds, so this reaches it.
 	activeCaseSvc = service.WithServiceRequestCatalog(activeCaseSvc, activeCatalogSvc)
 
+	// Case auto-closure (reminders and automatic closure of Awaiting Info /
+	// Solution Proposed tickets). Needs the Postgres case tables. It acts as the
+	// system user named by AUTOCLOSURE_SYSTEM_USER_EMAIL when that is set, and as
+	// the system itself ("System user", no user row) when it is not. Driven by
+	// operations/csm-scheduled-tasks, which is what switches it on.
+	//
+	// It acts through activeCaseSvc, so its comments, state changes and the close
+	// follow the deployment's data source like every other case write: Postgres
+	// only on DATA_SOURCE=postgres, and Postgres first with an asynchronous,
+	// best-effort ServiceNow mirror on postgres-servicenow-dual-write (a failed
+	// mirror is recorded in sn_writeback_failures and never fails or repeats a
+	// stage). The workflow's own position (step, clock) and audit rows are
+	// Postgres-only: ServiceNow has no field that API accepts for them.
+	//
+	// The routes are always registered. Where the feature cannot run
+	// (DATA_SOURCE=servicenow, which has no Postgres case tables to work from) they answer an explicit 503 naming the reason, so an enabled scheduler
+	// fails with that sentence in its alert instead of a bare 404.
+	var autoclosureSvc service.AutoclosureService
+	switch {
+	case db == nil || cfg.DataSource == config.DataSourceServiceNow:
+		autoclosureSvc = service.NewUnavailableAutoclosureService("case auto-closure needs the Postgres case tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
+	default:
+		autoclosureSvc = service.NewAutoclosureService(
+			repository.NewAutoclosureRepository(repository.NewScoped(db)),
+			activeCaseSvc, accessSvc, cfg.AutoclosureSystemUserEmail)
+		// A case closed for inactivity is queued for the customer's own
+		// verification (the Pending Verification feature) where the project
+		// has that turned on.
+		service.WithPendingVerificationQueue(autoclosureSvc, repository.NewPendingVerificationRepository(repository.NewScoped(db)))
+	}
+	autoclosureHandler := handler.NewAutoclosureHandler(autoclosureSvc)
+
 	// Case feedback (CSAT submissions): the ServiceNow data source reads it
 	// from the backing system; both Postgres data sources read
 	// work_item_feedback (migration 0102). Dual write deliberately does NOT
@@ -1516,6 +1629,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
+		portalBannerHandler = handler.NewPortalBannerHandler(
+			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
+		)
 		// Monthly product regression reports: one business unit's regression
 		// cases whose fix ETA was shared last month, for the scheduled task
 		// that mails one report per unit.
@@ -1873,6 +1989,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
+	if engagementAllocationViewHandler != nil {
+		mux.HandleFunc("POST /customer-engagements/allocations/search", engagementAllocationViewHandler.SearchAllocations)
+		mux.HandleFunc("GET /customer-engagements/allocations/{id}", engagementAllocationViewHandler.GetAllocation)
+		mux.HandleFunc("GET /customer-engagements/allocations/{id}/updates", engagementAllocationViewHandler.ListAllocationUpdates)
+		mux.HandleFunc("POST /customer-engagements/allocations/{id}/updates", engagementAllocationViewHandler.CreateAllocationUpdate)
+	}
 	if onboardingStepHandler != nil {
 		mux.HandleFunc("PUT /onboarding-steps/{membershipSfId}/{step}", onboardingStepHandler.UpsertOnboardingStep)
 		mux.HandleFunc("GET /onboarding-steps/{membershipSfId}", onboardingStepHandler.GetOnboardingSteps)
@@ -1894,13 +2016,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
 	}
+	if slaDurationPolicyHandler != nil {
+		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
+	}
 	if pendingVerificationHandler != nil {
 		mux.HandleFunc("POST /pending-verifications", pendingVerificationHandler.CreatePendingVerification)
 		mux.HandleFunc("POST /pending-verifications/search", pendingVerificationHandler.SearchPendingVerifications)
 		mux.HandleFunc("PATCH /pending-verifications/{id}", pendingVerificationHandler.VerifyPendingVerification)
-	}
-	if slaDurationPolicyHandler != nil {
-		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
 	}
 	if githubDeliveryHandler != nil {
 		mux.HandleFunc("POST /github/deliveries", githubDeliveryHandler.Handle)
@@ -1918,6 +2040,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// what each has spent. A customer token must never reach it.
 		mux.HandleFunc("GET /reports/query-hours", internalOnly(accessSvc, queryHourHandler.GetWeeklyReport))
 		mux.HandleFunc("POST /query-hours/recompute", internalOnly(accessSvc, queryHourHandler.RecomputeQueryHours))
+	}
+	{
+		mux.HandleFunc("POST /autoclosure/candidates", internalOnly(accessSvc, autoclosureHandler.FindCandidates))
+		mux.HandleFunc("POST /autoclosure/cases/{id}/advance", internalOnly(accessSvc, autoclosureHandler.Advance))
 	}
 	if scheduledTaskRunHandler != nil {
 		mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
@@ -1941,6 +2067,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// five rungs from this, and the fifth by intersecting it with on-duty
 		// above.
 		mux.HandleFunc("GET /team-schedule/members", teamMemberHandler.GetTeamMembers)
+	}
+	if skillHandler != nil {
+		// The catalogue: any internal caller reads it, a CSM admin edits it.
+		mux.HandleFunc("GET /skills/levels", skillHandler.GetSkillLevels)
+		mux.HandleFunc("GET /skills/categories", skillHandler.GetSkillCategories)
+		mux.HandleFunc("POST /skills/search", skillHandler.SearchSkills)
+		mux.HandleFunc("GET /skills/{id}", skillHandler.GetSkill)
+		mux.HandleFunc("POST /skills", skillHandler.CreateSkill)
+		mux.HandleFunc("PATCH /skills/{id}", skillHandler.UpdateSkill)
+		// The caller's own profile. No person's id anywhere: it is the token's user.
+		mux.HandleFunc("GET /skills/me", skillHandler.GetMySkills)
+		mux.HandleFunc("POST /skills/me", skillHandler.AddMySkill)
+		mux.HandleFunc("GET /skills/me/history", skillHandler.GetMySkillHistory)
+		mux.HandleFunc("PUT /skills/me/{skillId}", skillHandler.SetMySkillLevel)
+		mux.HandleFunc("DELETE /skills/me/{skillId}", skillHandler.RemoveMySkill)
+		// Everybody's skills: a CSM admin or a CRE or SRE team lead.
+		mux.HandleFunc("POST /skills/users/search", skillHandler.SearchUserSkills)
 	}
 	if pagingChainHandler != nil {
 		// Who is on each tier of the CRE and SRE paging chains, what the caller
@@ -1974,6 +2117,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /runbooks/import", internalOnly(accessSvc, runbookHandler.ImportRunbooks))
 		mux.HandleFunc("PUT /runbooks/{id}", internalOnly(accessSvc, runbookHandler.UpdateRunbook))
 		mux.HandleFunc("DELETE /runbooks/{id}", internalOnly(accessSvc, runbookHandler.DeleteRunbook))
+	}
+	if portalBannerHandler != nil {
+		// Banners. GET /banners is the customer portal and always returns that
+		// audience. The CSM read is internal. Manage and writes check the admin role.
+		mux.HandleFunc("GET /banners", portalBannerHandler.ListCustomerBanners)
+		mux.HandleFunc("GET /portal-banners", portalBannerHandler.ListCSMBanners)
+		mux.HandleFunc("GET /portal-banners/manage", portalBannerHandler.ListAdminBanners)
+		mux.HandleFunc("POST /portal-banners", portalBannerHandler.CreateBanner)
+		mux.HandleFunc("PUT /portal-banners/{id}", portalBannerHandler.UpdateBanner)
 	}
 	if caseAlertSettingsHandler != nil {
 		// Case Alerts settings: chat rooms, group routes and the other ladder
@@ -2023,6 +2175,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// teams of their own family.
 		mux.HandleFunc("PUT /team-schedule/teams/{teamKey}/members/{userId}", rotaAccessHandler.AddTeamMember)
 		mux.HandleFunc("DELETE /team-schedule/teams/{teamKey}/members/{userId}", rotaAccessHandler.RemoveTeamMember)
+		// A member's role and alert tier, and moving them to another team:
+		// CSM admin only (a rota admin is not enough).
+		mux.HandleFunc("PATCH /team-schedule/teams/{teamKey}/members/{userId}", rotaAccessHandler.UpdateTeamMember)
+		mux.HandleFunc("POST /team-schedule/teams/{teamKey}/members/{userId}/move", rotaAccessHandler.MoveTeamMember)
 	}
 	if scheduleReminderHandler != nil {
 		mux.HandleFunc("GET /team-schedule/reminders/{family}/{kind}/{periodStart}", scheduleReminderHandler.GetReminder)
@@ -2537,6 +2693,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	closePublishers := func() {
 		stopIngestRetry()
 		ingestRetryWG.Wait()
+		// The deferred-write consumers first: a write in flight finishes
+		// (or is left uncommitted for redelivery) before its publishers go.
+		if stopSalesforceWriteConsumers != nil {
+			stopSalesforceWriteConsumers()
+		}
+		if salesforceWritePublisher != nil {
+			salesforceWritePublisher.Close()
+		}
 		if eventPublisher != nil {
 			eventPublisher.Close()
 		}

@@ -57,6 +57,8 @@ export type ProjectContact = {
   firstName?: string | null;
   lastName: string;
   isCsAdmin: boolean;
+  /** Read-only: contact holds an account-level admin role. Never send in request payloads. */
+  isAccountAdmin?: boolean;
   isLead?: boolean;
   isCsIntegrationUser: boolean;
   isPortalUser?: boolean;

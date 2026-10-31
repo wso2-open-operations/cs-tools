@@ -86,16 +86,18 @@ beforeEach(() => {
 });
 
 describe("RotaReminderSettings", () => {
-  it("shows the built-in settings, and says nothing is saved yet, when nothing was saved", () => {
+  it("shows the built-in settings with the automatic reminders off, and says nothing is saved yet, when nothing was saved", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("heading", { name: "CRE rota reminders" })).toBeInTheDocument();
     expect(screen.getByText("Built-in settings")).toBeInTheDocument();
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
-    expect(screen.getByText(/^Not saved yet: the reminders use the deployment.s settings/)).toBeInTheDocument();
+    expect(screen.getByText(/^Not saved yet: no automatic reminder is sent until one is turned on here and saved/)).toBeInTheDocument();
+    expect(screen.getByText(/^The only on\/off for the automatic reminders in this environment/)).toBeInTheDocument();
     expect(screen.queryByText(/^Last changed by/)).not.toBeInTheDocument();
 
-    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).toBeChecked();
+    // Nothing saved means nothing scheduled: the card must not show them as on.
+    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Attach calendar invitations" })).toBeChecked();
     expect(lkField()).toHaveValue(3);
     expect(americasField()).toHaveValue(1);
@@ -187,13 +189,20 @@ describe("RotaReminderSettings", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Attach calendar invitations" }));
     fireEvent.click(saveButton());
     expect(lastBody()).toEqual({
-      weekdayEnabled: true,
-      weekendEnabled: true,
+      weekdayEnabled: false,
+      weekendEnabled: false,
       invitesEnabled: false,
       weekendRequired: {},
       windows: {},
       copyTo: [],
     });
+  });
+
+  it("turning the weekday reminders on is a first save that sends weekday on and weekend off", () => {
+    render(<RotaReminderSettings />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send weekday reminders" }));
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ weekdayEnabled: true, weekendEnabled: false });
   });
 
   it("a first save sends only the minimum that was changed", () => {

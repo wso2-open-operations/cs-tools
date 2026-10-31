@@ -341,6 +341,78 @@ describe("LogTimeCardDialog — create mode", () => {
   });
 });
 
+describe("LogTimeCardDialog — per-card 8 hour cap", () => {
+  const CAP_MESSAGE = "Total logged time cannot exceed 8 hours (480 minutes) per time card.";
+
+  function renderCreate(onSubmit = vi.fn()): ReturnType<typeof vi.fn> {
+    render(
+      <LogTimeCardDialog
+        caseId="case-1"
+        caseNumber="CS0000001"
+        caseSeverity="S3"
+        projectId="proj-1"
+        projectName="Acme"
+        isSubmitting={false}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    return onSubmit;
+  }
+
+  it("shows the cap message on blur and blocks submit when one card totals over 480 minutes", () => {
+    const onSubmit = renderCreate();
+    const input = screen.getByLabelText("Analysis and debugging");
+    fireEvent.change(input, { target: { value: "481" } });
+    // Not shown until the field is touched (blurred) or submit is attempted.
+    expect(screen.queryByText(CAP_MESSAGE)).not.toBeInTheDocument();
+    fireEvent.blur(input);
+    expect(screen.getByText(CAP_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit for review" })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("shows the cap message when submit is clicked without blurring first, and does not submit", () => {
+    const onSubmit = renderCreate();
+    fireEvent.change(screen.getByLabelText("Analysis and debugging"), {
+      target: { value: "481" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit for review" }));
+    expect(screen.getByText(CAP_MESSAGE)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not show the cap message at exactly 480 minutes", () => {
+    renderCreate();
+    const input = screen.getByLabelText("Analysis and debugging");
+    fireEvent.change(input, { target: { value: "480" } });
+    fireEvent.blur(input);
+    expect(screen.queryByText(CAP_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("applies the same cap in edit mode", () => {
+    const onSubmit = vi.fn();
+    render(
+      <LogTimeCardDialog
+        caseId={EDITING_CARD.caseId}
+        caseNumber={EDITING_CARD.caseNumber}
+        projectId={EDITING_CARD.projectId}
+        projectName={EDITING_CARD.projectName}
+        editingCard={EDITING_CARD}
+        isSubmitting={false}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    const input = screen.getByLabelText("Analysis and debugging");
+    fireEvent.change(input, { target: { value: "481" } });
+    fireEvent.blur(input);
+    expect(screen.getByText(CAP_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe("LogTimeCardDialog — edit mode", () => {
   it("shows the edit title and Save changes label instead of the create ones", () => {
     render(

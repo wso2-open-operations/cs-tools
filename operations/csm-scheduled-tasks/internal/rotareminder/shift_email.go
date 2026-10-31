@@ -102,7 +102,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 	for _, a := range w.people {
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
-	return finish(cfg, to, fmt.Sprintf("[%s Rota] %s – %s (%s)", cfg.Family, title, date, when), data), true
+	return finish(cfg, to, fmt.Sprintf("[%s Operations] %s – %s (%s)", cfg.Family, title, date, when), data), true
 }
 
 // buildWeekendEmail writes the weekend's summary: to everybody on the windows
@@ -210,7 +210,7 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 		data.AfterTable = append(data.AfterTable, "A calendar invitation for your team's rotation follows in a separate email, "+
 			"with everybody on that rotation as a guest.")
 	}
-	email := shiftEmail{to: to, cc: without(cfg.Copy, to), subject: fmt.Sprintf("[%s Rota] Weekend Rotation – %s", cfg.Family, dayList(days))}
+	email := shiftEmail{to: to, cc: without(cfg.Copy, to), subject: fmt.Sprintf("[%s Operations] Weekend Rotation – %s", cfg.Family, dayList(days))}
 	if len(cfg.RedirectTo) > 0 {
 		data.IntendedFor = append(append([]string{}, email.to...), email.cc...)
 	}
@@ -306,7 +306,7 @@ func buildInviteEmail(cfg Config, w *window, stamp time.Time) (shiftEmail, Invit
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
 	inv := windowInvite(cfg, w, stamp)
-	email := finish(cfg, to, fmt.Sprintf("[%s Rota] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
+	email := finish(cfg, to, fmt.Sprintf("[%s Operations] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
 	email.attachments = []notify.Attachment{inviteAttachment(inv)}
 	return email, inv, true
 }
@@ -329,7 +329,7 @@ func buildCancelEmail(cfg Config, inv Invite, emails []string, stamp time.Time) 
 		ScheduleURL: cfg.ScheduleURL,
 		Closing:     "If you believe this is a mistake, please contact your team lead.",
 	}
-	email := finish(cfg, emails, fmt.Sprintf("[%s Rota] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
+	email := finish(cfg, emails, fmt.Sprintf("[%s Operations] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
 	email.attachments = []notify.Attachment{inviteAttachment(cancel)}
 	return email
 }
@@ -372,7 +372,7 @@ func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Ti
 	for _, g := range gaps {
 		data.Rows = append(data.Rows, []string{g.day.Format("Monday, 2 January"), windowTitle(cfg, g.base), fmt.Sprint(g.have), fmt.Sprint(g.need)})
 	}
-	subject := fmt.Sprintf("[%s Rota] Action needed: the weekend rota for %s is not complete", cfg.Family, when)
+	subject := fmt.Sprintf("[%s Operations] Action needed: the weekend rota for %s is not complete", cfg.Family, when)
 	return finish(cfg, to, subject, data), true
 }
 
