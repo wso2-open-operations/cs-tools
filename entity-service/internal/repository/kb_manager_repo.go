@@ -43,7 +43,7 @@ type KBManagerUserRepository interface {
 	SearchKBManagerUsers(ctx context.Context, req domain.SearchKBManagerUsersRequest) ([]domain.KBManagerUser, error)
 	// CreateKBManagerUser grants a user manager access to a knowledge base.
 	// A ValidationError is returned if this pair already exists (UNIQUE
-	// constraint) or references a knowledge base that does not exist.
+	// constraint) or references a knowledge base or user that does not exist.
 	CreateKBManagerUser(ctx context.Context, req domain.CreateKBManagerUserRequest, createdBy string) (domain.KBManagerUser, error)
 	// DeleteKBManagerUser revokes a user's manager access to a knowledge base.
 	DeleteKBManagerUser(ctx context.Context, knowledgeBaseID, userID string) error
@@ -100,6 +100,25 @@ func (r *kbManagerUserRepo) SearchKBManagerUsers(ctx context.Context, req domain
 	return managers, nil
 }
 
+// kbManagerUserFKField names the request field behind a foreign key
+// violation on knowledge_base_manager_user, by the default constraint names
+// migration 0251 gives them. pgErr.Detail quotes the table and column, so it
+// is never returned to the caller.
+var kbManagerUserFKField = map[string]string{
+	"knowledge_base_manager_user_knowledge_base_id_fkey": "knowledgeBaseId does not refer to an existing knowledge base",
+	"knowledge_base_manager_user_user_id_fkey":           "userId does not refer to an existing user",
+}
+
+// kbManagerUserFKMessage is the ValidationError message for a 23503 on
+// knowledge_base_manager_user. A constraint under another name (one a
+// database was given by hand) names both fields rather than guess.
+func kbManagerUserFKMessage(constraint string) string {
+	if msg, ok := kbManagerUserFKField[constraint]; ok {
+		return msg
+	}
+	return "knowledgeBaseId or userId does not refer to an existing record"
+}
+
 // CreateKBManagerUser implements KBManagerUserRepository.
 func (r *kbManagerUserRepo) CreateKBManagerUser(ctx context.Context, req domain.CreateKBManagerUserRequest, createdBy string) (domain.KBManagerUser, error) {
 	const query = `
@@ -115,7 +134,7 @@ func (r *kbManagerUserRepo) CreateKBManagerUser(ctx context.Context, req domain.
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
 			case "23503":
-				return domain.KBManagerUser{}, &apierror.ValidationError{Msg: "knowledge base does not exist: " + pgErr.Detail}
+				return domain.KBManagerUser{}, &apierror.ValidationError{Msg: kbManagerUserFKMessage(pgErr.ConstraintName)}
 			case "23505":
 				return domain.KBManagerUser{}, &apierror.ValidationError{Msg: "this user is already a manager for this knowledge base"}
 			}
@@ -222,7 +241,7 @@ func (r *kbManagerGroupRepo) CreateKBManagerGroup(ctx context.Context, req domai
 		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) {
 			switch pgErr.Code {
 			case "23503":
-				return domain.KBManagerGroup{}, &apierror.ValidationError{Msg: "knowledge base does not exist: " + pgErr.Detail}
+				return domain.KBManagerGroup{}, &apierror.ValidationError{Msg: "knowledgeBaseId does not refer to an existing knowledge base"}
 			case "23505":
 				return domain.KBManagerGroup{}, &apierror.ValidationError{Msg: "this group is already a manager for this knowledge base"}
 			}

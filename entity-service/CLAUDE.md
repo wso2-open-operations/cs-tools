@@ -10790,9 +10790,123 @@ folder"), and here it would have silently emptied the history.
 `kb_article_repo_integration_test.go` runs 0203 repeatedly over a table that holds
 rows and asserts they survive.
 
-The other old-style KB pairs (`000020`–`000027`) are the same trap and are **not**
-touched here; `000027_replace_kb_tables_with_real_schema.down.sql` drops
-`knowledge_article` and `knowledge_base`. They need their own change.
+### The knowledge base manager tables have their own migration (0251); the 000020–000027 chain is gone
+
+The other old-style KB pairs, `000020`–`000027`, were removed later, the same way
+as `000030`. `000020` referenced `products`, `users` and `cases`, which this schema
+has never had, so every fresh `make migrate` and compose stack stopped on it once
+the earlier blockers were fixed (`relation "products" does not exist`, and on a
+rerun `type "kb_article_state_enum" already exists`, because `make migrate` had
+already committed 000020's first statement). Existing databases only passed
+because they had the files recorded.
+
+What the chain left behind:
+- `000020`–`000026` built an older design (`knowledge_bases`, `kb_articles`,
+  `kb_managers`, `kb_article_history`, their triggers and enum). `000027` dropped
+  all of it, but `000020`'s `pg_trgm` extension stays installed; nothing uses it.
+- `000027`'s `knowledge_base` is `0044_kb_tables.sql`'s (the shared table;
+  csm-sync-service has the identical file). Its `knowledge_article` is 0044's
+  **without the foreign keys** on `author_id` and `revised_by_id` (to `"user"`) and
+  `source_case_id` (to `work_item`). 0044 is `CREATE TABLE IF NOT EXISTS`, so a
+  database where 000027 ran before 0044 (the old plain glob ran the 6-digit files
+  first; only possible where the plural `products`/`users`/`cases` existed, i.e.
+  old local databases) lacked those three until
+  `0262_knowledge_article_user_and_case_fks.sql` (numbered after csm-sync-service's
+  own 0261, since the table is the sync's). For each column it adds 0044's
+  constraint (`knowledge_article_<column>_fkey`, `ON DELETE SET NULL`) unless a
+  foreign key from the column to the right table is already there, under any name;
+  "Adding a missing foreign key" below says how, and when a key is not added or
+  not validated. Where 0044 made the table all three keys are there, and 0262
+  changes nothing. `knowledge_article_fk_migration_test.go` checks the column list
+  against 0044's own `REFERENCES` lines and, with `CASE_STATS_TEST_DSN`, that a
+  table made by 000027 ends up identical to 0044's, the WARNINGs, the lock_timeout
+  (with `work_item` held by another transaction) and, only with a superuser
+  `CASE_STATS_TEST_DSN`, the orphan count under `work_item`'s row-level policies:
+  under any other role that test skips, and plain `go test` still prints `ok`.
+- `knowledge_base_manager_user` / `knowledge_base_manager_group` and their three
+  indexes existed only in `000027`. `kb_manager_repo.go` reads them, and
+  csm-sync-service does not map knowledge base managers, so they are
+  entity-service's alone.
+
+`0251_knowledge_base_manager_tables.sql` creates those two tables and indexes,
+every statement `IF NOT EXISTS`, and gives `knowledge_base_manager_user.user_id`
+the foreign key `000027` left out: `REFERENCES "user"(id) ON DELETE CASCADE`
+(constraint `knowledge_base_manager_user_user_id_fkey`). `group_id` has none, as in
+000027 (groups are not rows here; `group_name` is kept beside the id).
+
+- **Why the foreign key.** 000027's header said the real shared-database tables
+  carry FKs on `author_id`/`revised_by_id`/`user_id` to `"user"`, left out only
+  because the local database then had a plural `users` table (`git show
+  67f35215a:entity-service/migrations/000027_replace_kb_tables_with_real_schema.up.sql`).
+  The `knowledge_article` half of that matches csm-sync-service's 0044. 000020
+  cannot run on a database the sync built, so a deployed database cannot have the
+  manager tables from 000027 through `make migrate`. The delete action of the real
+  constraint is not recorded; CASCADE matches `knowledge_base_id` (`user_id` is NOT
+  NULL, so SET NULL is impossible).
+- **Where the tables already exist** nothing is dropped, rewritten or deleted;
+  where 000027 made them, every `CREATE` changes nothing, though each `CREATE
+  INDEX IF NOT EXISTS` still takes SHARE on its table first. Unless a foreign key
+  from `user_id` to `"user"` is already there, under any name, 0251 adds
+  `knowledge_base_manager_user_user_id_fkey` as described below.
+- **Errors.** A 23503 on `POST /kb-manager-users` names the field
+  (`userId does not refer to an existing user`, `knowledgeBaseId does not refer to
+  an existing knowledge base`) by constraint name, and never returns `pgErr.Detail`.
+  It used to say "knowledge base does not exist" plus the Detail for both.
+
+**Adding a missing foreign key (0251, 0262).** Both add a key to a table that may
+already hold rows, so neither may hold a strong lock for long, nor leave anything
+undone without saying so:
+- **Two statements.** A first DO block adds the constraint `NOT VALID`: no row is
+  read, and every inserted row, and every row whose key column is changed, is
+  checked from then on. The ADD takes SHARE ROW EXCLUSIVE on the table and on the
+  one it references (`"user"` or `work_item`), which waits for every open
+  transaction that has written to either and holds every later writer behind it,
+  so the block commits straight after the add. A second DO block, a transaction
+  of its own under `make migrate` (`psql -f`, autocommit), counts the rows that
+  point nowhere and validates the constraint under SHARE UPDATE EXCLUSIVE and ROW
+  SHARE, which block no reads or writes; it also validates a constraint an earlier
+  run added but did not get to validate.
+  The compose runner applies a file with `psql -1`, as one transaction, so there
+  the first block's locks last to the end of the file (local stacks only).
+- **`lock_timeout` is 5s**, `SET` at the top of the file and `RESET` at the end, as
+  0207 and 0210 do. A lock not granted in time fails that statement with 55P03
+  (`lock_not_available`) and keeps nothing it did; `make migrate` stops without
+  recording the file. Run it again once the tables are quiet.
+- **Two outcomes are left for an operator**, each a `RAISE WARNING` naming the
+  table, column and constraint. Rows that point at a user or work item that does
+  not exist are counted and kept as they are, and the constraint stays NOT VALID
+  (still enforced for new rows). A constraint that already holds the name the file
+  would give the key, and is not that key, means no key is added for that column.
+  The file is recorded either way and never runs again, so these WARNINGs are the
+  only signal it gives. `SELECT conrelid::regclass, conname FROM pg_constraint
+  WHERE contype = 'f' AND NOT convalidated;` lists every foreign key left NOT
+  VALID; `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE
+  conrelid = 'knowledge_article'::regclass AND contype = 'f';` (likewise
+  `knowledge_base_manager_user`) lists the keys a table has. Each file's header
+  gives the cleanup: delete (0251) or clear (0262) the rows, then `VALIDATE
+  CONSTRAINT`; for a taken name, rename the other constraint and add the key by
+  hand. Run 0262's `UPDATE` as a superuser or after `SELECT
+  set_config('app.is_internal', 'true', false)`: `work_item`'s row-level policies
+  otherwise hide every work item from it, and it clears every `source_case_id`.
+  0262 counts its orphans as an internal session for the same reason.
+- **What dev, staging and production have was not checked against their
+  catalogs.** That `knowledge_article` there carries 0044's three keys, and that
+  the real `knowledge_base_manager_user.user_id` references `"user"`, rest on
+  000027's header and csm-sync-service's 0044. The second query above, or `\d
+  knowledge_article` and `\d knowledge_base_manager_user`, run read-only on each
+  settles it.
+
+A database where a fresh `make migrate` already died inside `000020` keeps an
+unused `kb_article_state_enum` type; it is harmless and can be dropped by hand.
+`kb_manager_migration_test.go` pins the shape (including the lock_timeout and the
+two DO blocks, with a checker that is itself tested both ways) and checks that the
+legacy files stay gone and that no other migration creates the manager tables
+(another migration may alter them, index them or put policies on them). With
+`CASE_STATS_TEST_DSN` it checks that a fresh database and a 000027 one end with the
+same catalog, that rows are kept (with and without a user), that an existing user
+foreign key is left alone, the WARNINGs, a taken name, a constraint an earlier run
+left NOT VALID, the lock_timeout (with `"user"` held by another transaction), and
+the repository's 23503 messages.
 
 ## Case feedback silently 404'd on the Postgres data source instead of a documented 503
 
@@ -11169,21 +11283,21 @@ All shared types live in `internal/domain/entity.go`. Conventions:
 
 ## Database migrations
 
-Migrations live in `migrations/` as plain SQL files, numbered `NNNN_<description>.sql` (4-digit, single file, no separate `.up`/`.down`) — matching `operations/csm-sync-service`'s own convention exactly, since that service and this one migrate against the same shared Postgres database. This replaces the older `000NNN_<description>.up.sql`/`.down.sql` convention (6-digit, up/down pairs) this file used to document; every migration under the old convention was renumbered/consolidated into the new one, not left running side by side with it.
+Migrations live in `migrations/` as plain SQL files, numbered `NNNN_<description>.sql` (4-digit, single file, no separate `.up`/`.down`) — matching `operations/csm-sync-service`'s own convention exactly, since that service and this one migrate against the same shared Postgres database. This replaces the older `000NNN_<description>.up.sql`/`.down.sql` convention (6-digit, up/down pairs) this file used to document. Every old-convention migration was renumbered or consolidated into the new one, or removed (`000030`, replaced by `0203_knowledge_article_history`; `000020`–`000027`, replaced by `0251_knowledge_base_manager_tables`), except `000086`, `000087` and `000105`: those three `.up.sql` files still run, after everything else (phase 3 of the file order below).
 
 - **Each file is a complete, forward-only migration** — there is no scripted rollback. A change that needs undoing is a new forward migration, not a `.down.sql`. `IF NOT EXISTS`/`IF EXISTS` guards (already this repo's convention) make every file safe to re-run.
 - **A migration file itself carries no tracking statement.** `make migrate` (Makefile) creates `csm_migration_applied_migration` (`filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()`) if absent, then for each `migrations/*.sql` file, in the three-phase order below: skips it if its name is already in that table, otherwise applies it (`psql -f`) and only then records it with a separate `INSERT INTO csm_migration_applied_migration (filename) VALUES (...)` — this exactly mirrors `operations/csm-sync-service`'s own `make migrate` loop, since both services must track migrations against the same shared database the same way. `scripts/generate_schema_bootstrap.sh` (a combined-file generator for a from-scratch DB, also ported from that service, supporting `--since`/`--from`/`--to` for a delta) is the one thing that *does* append the tracking insert per migration — necessary there because a single concatenated file has no per-statement loop to do it externally. It writes **two** files, not one — see "The RLS migration track" below — a schema file and an RLS file, with the schema file's own header saying to run it first.
 - **File order is NOT a plain alphabetical glob — three phases, always in this order:**
   1. Every 4-digit `NNNN_*.sql` file (the convention above), ascending.
   2. Every 6-digit `1NNNNN_*.sql` file numbered `100000` or above — the dedicated RLS migration track, see below.
-  3. The legacy 6-digit `0NNNNN_*.up.sql` stragglers numbered below `100000` (`000020`–`000105`: old-style KB tables, `cloud_status_events`, `outage_communications` — predate the `NNNN_*.sql` convention and were never renumbered into it). `*.down.sql` files are rollbacks and are never applied by anything in this repo.
+  3. The legacy 6-digit `0NNNNN_*.up.sql` stragglers numbered below `100000` (`000086`–`000105`: `cloud_status_events`, `outage_communications` — predate the `NNNN_*.sql` convention and were never renumbered into it; the old-style KB chain `000020`–`000027` was removed, see `0251` below). `*.down.sql` files are rollbacks and are never applied by anything in this repo.
 
-  **Nothing in phases 1 or 2 may depend on something only a phase-3 straggler creates**: phase 3 runs last, so on a fresh database the dependency does not exist yet. `0184_outage_communication_channel` (alters `outage_communication`, from `000105`) and `0213_cloud_status_event_delivery_lease` (alters `cloud_status_events`, from `000086`) did: `0184` stopped every fresh `make migrate` and compose stack, and `0213` would have stopped them next. `0183_outage_communication_table` and `0212_cloud_status_events_table` now create both tables ahead of them (the stragglers' own definitions, every `CREATE` guarded, so a no-op where the table exists and `000086`/`000105` a no-op after them), numbered one below the file that needs them so the order holds under any collation. Phase 2 likewise runs against what phase 1 leaves, drops included: `100024` enables RLS on `change_request_environment` only where the table still exists, because `0192` drops it first. Still open: `000020`–`000027` cannot run on a database built from these migrations (see "Still left out" below), and `knowledge_base_manager_user` / `knowledge_base_manager_group`, which `kb_manager_repo.go` uses, are created only by `000027`.
+  **Nothing in phases 1 or 2 may depend on something only a phase-3 straggler creates**: phase 3 runs last, so on a fresh database the dependency does not exist yet. `0184_outage_communication_channel` (alters `outage_communication`, from `000105`) and `0213_cloud_status_event_delivery_lease` (alters `cloud_status_events`, from `000086`) did: `0184` stopped every fresh `make migrate` and compose stack, and `0213` would have stopped them next. `0183_outage_communication_table` and `0212_cloud_status_events_table` now create both tables ahead of them (the stragglers' own definitions, every `CREATE` guarded, so a no-op where the table exists and `000086`/`000105` a no-op after them), numbered one below the file that needs them so the order holds under any collation. Phase 2 likewise runs against what phase 1 leaves, drops included: `100024` enables RLS on `change_request_environment` only where the table still exists, because `0192` drops it first. The old-style KB chain `000020`–`000027` could not run on a database built from these migrations at all (it referenced `products`, `users` and `cases`); it is removed, and `0251_knowledge_base_manager_tables` creates the only things it left that the code still uses and nothing else creates, `knowledge_base_manager_user` / `knowledge_base_manager_group` (see "The knowledge base manager tables have their own migration (0251)").
 
-  A plain `migrations/*.sql` glob sorts every 6-digit file in the `000020`–`000105` range *before* `0001` (leading zeros: `"000020..."` < `"0001..."` as strings) — this is what `make migrate` and `scripts/generate_schema_bootstrap.sh` both actually did for a long time, and it is a real, not theoretical, failure mode: on a from-scratch database the dependencies these files need don't exist yet (e.g. `000087` triggers on `outage`, created by `0083`), and on a database that already has them applied by hand with no tracking row, the whole run stops dead on the first one with no way to reach anything after it — which is exactly how `000085_announcement_visibility_rls.up.sql` (now `100001_announcement_visibility_rls.sql`) was discovered blocking a real deploy. Both tools now build their file list as three separate sorted globs concatenated in the order above, and must stay in agreement with each other — `scripts/csm-compose/migrate-and-seed.sh`'s own `apply_pending_migrations` independently arrived at the identical phase-1-then-phase-3 shape (it has no RLS track of its own) for the same reason; read its comment for the historical reasoning this repo's own tools now also follow.
+  A plain `migrations/*.sql` glob sorts every 6-digit file in the `000086`–`000105` range *before* `0001` (leading zeros: `"000086..."` < `"0001..."` as strings) — this is what `make migrate` and `scripts/generate_schema_bootstrap.sh` both actually did for a long time, and it is a real, not theoretical, failure mode: on a from-scratch database the dependencies these files need don't exist yet (e.g. `000087` triggers on `outage`, created by `0083`), and on a database that already has them applied by hand with no tracking row, the whole run stops dead on the first one with no way to reach anything after it — which is exactly how `000085_announcement_visibility_rls.up.sql` (now `100001_announcement_visibility_rls.sql`) was discovered blocking a real deploy. Both tools now build their file list as three separate sorted globs concatenated in the order above, and must stay in agreement with each other — `scripts/csm-compose/migrate-and-seed.sh`'s own `apply_pending_migrations` independently arrived at the identical phase-1-then-phase-3 shape (it has no RLS track of its own) for the same reason; read its comment for the historical reasoning this repo's own tools now also follow.
 - **The RLS migration track (`migrations/1NNNNN_*.sql`, starting at `100001`)** is every migration that defines or supports an RLS policy: `CREATE POLICY` / `ALTER POLICY` / `ENABLE|FORCE ROW LEVEL SECURITY`, plus the `is_project_member()`-family helper functions that exist only to serve those policies. It is a **deliberately separate number space from the 4-digit schema sequence**, not a continuation of it — picking the next free 4-digit number for a new RLS migration is wrong; the next RLS migration takes the number after the highest `1NNNNN` file on the target branch, regardless of what the 4-digit sequence is up to. This exists because an RLS migration almost always needs its protected table to already exist, which the three-phase order above guarantees (phase 2 always runs after every phase-1 file) with no interleaving — but it is still the author's job to confirm a NEW RLS migration's own dependencies (the table it protects, any function it calls) are satisfied by "every current 4-digit file has already run," same as any migration depends on what came before it.
 
-  Moved into this track, in one pass (`scripts/renumber_rls_migrations.sh`, a one-shot script, not meant to run again): `100001`–`100023` — everything that used to be `000085`/`0141`–`0154`/`0175`–`0178`/`0190` (both of them)/`0191_comment_work_notes_internal_only.sql`/`0205`. Every cross-reference comment between these files (`"migration 0147"`, `"0141's own"`, `"see 0175"`, ...) was updated to the new number at the same time — grepped and rewritten by hand, not a blind find-and-replace, since a bare 4-digit number can coincidentally appear in unrelated prose. `100024_change_request_project_links_rls.sql` was added in a second, follow-up pass (by hand, not the script): `0191_change_request_project_links.sql` originally created `change_request_deployment`/`change_request_environment`/`change_request_deployed_product` *and* enabled/policed them in the same file — the one genuinely mixed schema+RLS migration in this codebase, and the one file the renumbering script's own comment explicitly left alone. Once it was clear every other RLS statement lived in this track, the RLS half (an `ENABLE`/`FORCE ROW LEVEL SECURITY` pair and three policies for each of the three tables) was cut from `0191` and moved to `100024`, leaving `0191` schema-only. This is safe precisely because `CREATE POLICY` has no dependency on another policy on the same table, or on `ENABLE`/`FORCE ROW LEVEL SECURITY` having already run against it — `100024` runs after `100023` (`change_request_deployment`'s own extra `UPDATE` policy, added separately), and that ordering has no effect on the end state. `100024` skips the `change_request_environment` part wherever `0192_change_request_drop_environments` has already dropped that table, and `make migrate` applies `0192` in phase 1, before this track. A database `make migrate` builds therefore has RLS enabled and forced on two tables, `change_request_deployment` and `change_request_deployed_product`, with six policies from `100024`, three on each; with `100023`'s `UPDATE` policy, `change_request_deployment` has four, seven in all. A database that still has `change_request_environment` (`0191` applied, `0192` not) ends the same way: `make migrate` applies `0192` first in the same run. That part acts only where `100024` runs while the table still exists (applied by hand ahead of `0192`), and `0192`'s `DROP TABLE` then removes the table together with its three policies. **Still left out, for a different reason:** the `000020`–`000105` legacy cluster above, which is not RLS at all and — for the `000020`–`000027` KB sub-range specifically — references tables (`products`, `users`, `cases`, plural) that have never existed in this schema, so renumbering it needs its own dependency audit against real database state, not a rename.
+  Moved into this track, in one pass (`scripts/renumber_rls_migrations.sh`, a one-shot script, not meant to run again): `100001`–`100023` — everything that used to be `000085`/`0141`–`0154`/`0175`–`0178`/`0190` (both of them)/`0191_comment_work_notes_internal_only.sql`/`0205`. Every cross-reference comment between these files (`"migration 0147"`, `"0141's own"`, `"see 0175"`, ...) was updated to the new number at the same time — grepped and rewritten by hand, not a blind find-and-replace, since a bare 4-digit number can coincidentally appear in unrelated prose. `100024_change_request_project_links_rls.sql` was added in a second, follow-up pass (by hand, not the script): `0191_change_request_project_links.sql` originally created `change_request_deployment`/`change_request_environment`/`change_request_deployed_product` *and* enabled/policed them in the same file — the one genuinely mixed schema+RLS migration in this codebase, and the one file the renumbering script's own comment explicitly left alone. Once it was clear every other RLS statement lived in this track, the RLS half (an `ENABLE`/`FORCE ROW LEVEL SECURITY` pair and three policies for each of the three tables) was cut from `0191` and moved to `100024`, leaving `0191` schema-only. This is safe precisely because `CREATE POLICY` has no dependency on another policy on the same table, or on `ENABLE`/`FORCE ROW LEVEL SECURITY` having already run against it — `100024` runs after `100023` (`change_request_deployment`'s own extra `UPDATE` policy, added separately), and that ordering has no effect on the end state. `100024` skips the `change_request_environment` part wherever `0192_change_request_drop_environments` has already dropped that table, and `make migrate` applies `0192` in phase 1, before this track. A database `make migrate` builds therefore has RLS enabled and forced on two tables, `change_request_deployment` and `change_request_deployed_product`, with six policies from `100024`, three on each; with `100023`'s `UPDATE` policy, `change_request_deployment` has four, seven in all. A database that still has `change_request_environment` (`0191` applied, `0192` not) ends the same way: `make migrate` applies `0192` first in the same run. That part acts only where `100024` runs while the table still exists (applied by hand ahead of `0192`), and `0192`'s `DROP TABLE` then removes the table together with its three policies. **Still left out, for a different reason:** the `000086`–`000105` legacy cluster above, which is not RLS at all. (The old-style KB chain `000020`–`000027` referenced tables that never existed in this schema; it was removed rather than renumbered, with `0251` keeping the two tables it created that the code still uses and nothing else creates.)
 
   Every migration in this track is idempotent by construction: `DROP POLICY IF EXISTS` immediately before each `CREATE POLICY` (Postgres has no `CREATE POLICY IF NOT EXISTS` — this is the only way), `ALTER POLICY` (idempotent on its own, replaces the expression in place), or an introspection-driven `DO` block that only acts on whatever is actually still unfixed. This is what makes the rename itself safe: whether or not a given policy's effect was already live in production under the old filename (most were, applied by hand historically — see `scripts/record_manually_applied_rls_migrations.sql`'s own doc comment), re-applying it once more under the new, previously-untracked name is a harmless no-op, never a hard failure.
 
