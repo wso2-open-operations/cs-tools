@@ -35,7 +35,7 @@ import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageSizeExceededMessage,
   EMPTY_DROPDOWN_PLACEHOLDER,
 } from "@constants/common";
 
@@ -264,7 +264,7 @@ export function CaseDetailsSection({
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : imageSizeExceededMessage(),
               )
             }
           />

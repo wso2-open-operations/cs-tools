@@ -167,12 +167,28 @@ describe("Editor", () => {
       expect(onPasteError).toHaveBeenCalledWith("type");
     });
 
-    it("does not upload an image over 10 MB and reports it", () => {
+    it("uses the configured image limit", () => {
+      (window as unknown as { config?: unknown }).config = { CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 2 };
+      try {
+        const onImageUpload = vi.fn();
+        const onPasteError = vi.fn();
+        renderEditor({ onImageUpload, onPasteError });
+        const big = new File(["x"], "big.png", { type: "image/png" });
+        Object.defineProperty(big, "size", { value: 3 * 1024 * 1024 });
+        paste(screen.getByTestId("case-description-editor"), big);
+        expect(onImageUpload).not.toHaveBeenCalled();
+        expect(onPasteError).toHaveBeenCalledWith("size");
+      } finally {
+        (window as unknown as { config?: unknown }).config = undefined;
+      }
+    });
+
+    it("does not upload an image over the 1 MB default and reports it", () => {
       const onImageUpload = vi.fn();
       const onPasteError = vi.fn();
       renderEditor({ onImageUpload, onPasteError });
       const big = new File(["x"], "big.png", { type: "image/png" });
-      Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
+      Object.defineProperty(big, "size", { value: 1024 * 1024 + 1 });
       paste(screen.getByTestId("case-description-editor"), big);
       expect(onImageUpload).not.toHaveBeenCalled();
       expect(onPasteError).toHaveBeenCalledWith("size");

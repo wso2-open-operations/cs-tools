@@ -80,9 +80,12 @@ import { mergeRegister, $getNearestNodeOfType } from "@lexical/utils";
 import {
   ALLOWED_INLINE_IMAGE_EXTENSIONS,
   ALLOWED_INLINE_IMAGE_TYPES,
-  MAX_IMAGE_SIZE_BYTES,
   RICH_TEXT_BLOCK_TAGS,
 } from "@features/support/constants/supportConstants";
+import {
+  formatLimitMb,
+  inlineImageMaxBytes,
+} from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
@@ -276,9 +279,10 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      const maxImageBytes = inlineImageMaxBytes();
+      if (file.size > maxImageBytes) {
         showError(
-          `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
+          `Image "${file.name}" exceeds the maximum allowed size of ${formatLimitMb(maxImageBytes)}MB. Please choose a smaller file.`,
         );
         resetInput();
         return;

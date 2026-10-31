@@ -44,7 +44,7 @@ import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageSizeExceededMessage,
 } from "@constants/common";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetCaseCommentsInfinite from "@features/support/api/useGetCaseCommentsInfinite";
@@ -676,7 +676,7 @@ export default function ServiceRequestDetailContent({
                   showError(
                     reason === "type"
                       ? ERROR_UNSUPPORTED_TYPE
-                      : ERROR_SIZE_EXCEEDED,
+                      : imageSizeExceededMessage(),
                   )
                 }
               />

@@ -67,6 +67,7 @@ import {
 } from "lexical";
 import { $isListItemNode } from "@lexical/list";
 import { $findMatchingParent } from "@lexical/utils";
+import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 
 /**
  * Internal component to handle editable state changes.
@@ -236,7 +237,7 @@ const ClipboardImagePlugin = ({
       if (!items) return;
 
       const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-      const MAX_PASTE_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+      const maxPasteImageSize = inlineImageMaxBytes();
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           event.preventDefault();
@@ -249,7 +250,7 @@ const ClipboardImagePlugin = ({
 
           event.preventDefault();
 
-          if (file.size > MAX_PASTE_IMAGE_SIZE) {
+          if (file.size > maxPasteImageSize) {
             handlers.onPasteError?.("size");
             break;
           }
