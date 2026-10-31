@@ -381,6 +381,56 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
     });
   });
 
+  // The backend refuses Request Approval (400 change_request_deviation_not_incorporated) while a
+  // deviation from the implementation plan is stored: one a clone carried over, which has to be
+  // folded into the plan and cleared first (the Edit form's "Clear deviation").
+  describe("Request Approval needs the deviation a clone carried over cleared", () => {
+    const REASON = "Fold the carried-over deviation into the implementation plan and clear it before requesting approval";
+    const CARRIED = "<p>Rolled out to one region first.</p>";
+
+    it.each(["new", undefined])("is disabled, with a focusable labelled reason, in %s while one is stored", (state) => {
+      const { onAction } = renderBar({ state, legalNextStates: ["assess"], implementationDeviation: CARRIED });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeDisabled();
+      expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${REASON}`);
+      fireEvent.click(button);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it.each(["normal", "standard", "emergency"])("blocks every type (%s)", (type) => {
+      renderBar({ state: "new", type, legalNextStates: ["assess"], implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+    });
+
+    it("is enabled once it is cleared", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess"], implementationDeviation: null });
+      fireEvent.click(screen.getByRole("button", { name: /request approval/i }));
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it("names the missing team and the missing project first", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], assignedTeam: null, implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Set an assigned team before requesting approval",
+      );
+      cleanup();
+      renderBar({ state: "new", legalNextStates: ["assess"], customerApprovalRequired: true, implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Select a Customer Project before requesting approval",
+      );
+    });
+
+    it("leaves Cancel change usable behind the menu", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess", "canceled"], implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+      expect(onAction).toHaveBeenCalledWith("canceled");
+    });
+  });
+
   describe("Request Approval needs somebody to ask when a customer box is ticked (a project with at least one registered contact)", () => {
     const REASON = "Register a contact for the Customer Project before requesting approval";
     const PROJECT = { id: "proj-a", name: "Example Corp Platform" };

@@ -470,8 +470,8 @@ func TestChangeRequestLockIntegration_RescheduleCannotReopenTheCustomersApproval
 }
 
 // A customer's own proposal of a new time waits for WSO2: they cannot take their own
-// approval away by it either (it writes one column, customer_updated_on, and nothing
-// else), and neither can WSO2 afterwards, whether it accepts the proposal or not.
+// approval away by it either (it writes customer_updated_on and the record of who proposed
+// it, nothing else), and neither can WSO2 afterwards, whether it accepts the proposal or not.
 func TestChangeRequestLockIntegration_CustomerProposalCannotReopenTheApproval(t *testing.T) {
 	f := newCustomerGroupFlow(t)
 	id := f.reachCustomerApproval(domain.ChangeRequestTypeNormal)
