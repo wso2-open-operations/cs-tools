@@ -137,6 +137,7 @@ func TestStoredAttachments_MapEntityErrors(t *testing.T) {
 		"rate limit":   {429, `{"message":"too many attachment links requested; try again in a minute"}`, 429, "too many attachment links"},
 		"bad input":    {400, `{"message":"the file is larger than the 100 MiB limit"}`, 400, "larger than"},
 		"not found":    {404, `{"message":"attachment not found"}`, 404, ErrMsgNotFound},
+		"removed":      {410, `{"message":"secret upstream wording","errorCode":"attachment_removed"}`, 410, ErrMsgAttachmentRemoved},
 		"storage down": {503, `{"message":"file storage is unavailable"}`, 503, "Failed to delete"},
 		"internal":     {500, `{"message":"boom: secret detail"}`, 500, "Failed to delete"},
 		"raw body":     {409, `not json secret`, 409, "Failed to delete"},
@@ -206,11 +207,25 @@ func TestStoredAttachments_InlineImageNeutralisesAnUnknownType(t *testing.T) {
 }
 
 func TestStoredAttachments_InlineImageErrorsAreMapped(t *testing.T) {
-	for status, want := range map[int]int{404: 404, 403: 403, 503: 503, 500: 500} {
+	for status, want := range map[int]int{404: 404, 410: 410, 403: 403, 503: 503, 500: 500} {
 		f := &fakeStoredEntity{err: &apierror.Error{StatusCode: status, Body: `{"message":"x"}`}}
 		rec := serveStoredAtt(NewStoredAttachmentHandler(f).InlineImageContent, "GET", "/attachments/inline/"+storedAttID+"/content", "", true)
 		if rec.Code != want {
 			t.Errorf("entity %d -> %d, want %d", status, rec.Code, want)
 		}
+	}
+}
+
+func TestStoredAttachments_InlineImageGoneCarriesTheCode(t *testing.T) {
+	f := &fakeStoredEntity{err: &apierror.Error{StatusCode: 410, Body: `{"message":"this image was removed","errorCode":"attachment_removed"}`}}
+	rec := serveStoredAtt(NewStoredAttachmentHandler(f).InlineImageContent, "GET", "/attachments/inline/"+storedAttID+"/content", "", true)
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"errorCode":"attachment_removed"`) {
+		t.Errorf("status = %d body = %s, want 410 with errorCode attachment_removed", rec.Code, rec.Body.String())
+	}
+	// A plain 404 carries no such code.
+	f = &fakeStoredEntity{err: &apierror.Error{StatusCode: 404, Body: `{"message":"attachment not found"}`}}
+	rec = serveStoredAtt(NewStoredAttachmentHandler(f).InlineImageContent, "GET", "/attachments/inline/"+storedAttID+"/content", "", true)
+	if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "attachment_removed") {
+		t.Errorf("status = %d body = %s, want a plain 404", rec.Code, rec.Body.String())
 	}
 }
