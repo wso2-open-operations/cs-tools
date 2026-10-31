@@ -220,6 +220,15 @@ window.config = {
   // uses the older ServiceNow flow.
   CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
 
+  // Early size checks for entity-service attachments, in megabytes. Optional:
+  // leave unset for the defaults below, which match the entity-service's own
+  // defaults. Set them to the same values as the entity-service's
+  // ATTACHMENT_MAX_BYTES and INLINE_IMAGE_MAX_BYTES; the server stays the
+  // authority, these only refuse an oversized file before the upload starts.
+  // The inline image limit also applies to images embedded in other editors.
+  // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10,
+  // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 1,
+
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when

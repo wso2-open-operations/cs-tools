@@ -17,8 +17,8 @@
 // Constants for the shared rich text editor. Relocated here from the support
 // feature so the shared editor no longer imports from `@features/support`.
 
-// Maximum allowed embedded image size in bytes (10MB for base64 images).
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+// The largest image that can be pasted or inserted is a runtime setting, not a
+// constant: see `inlineImageMaxBytes` in `@config/attachmentLimitsConfig`.
 
 // MIME types accepted for inline images (paste or toolbar upload), mirroring
 // the backend's entity-service allow-list ("Unsupported inline image type"

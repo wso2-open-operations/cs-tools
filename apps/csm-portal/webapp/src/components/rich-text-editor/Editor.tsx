@@ -62,6 +62,7 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
+import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -250,7 +251,6 @@ const ClipboardImagePlugin = ({
       const items = event.clipboardData?.items;
       if (!items) return;
 
-      const MAX_PASTE_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
@@ -267,7 +267,7 @@ const ClipboardImagePlugin = ({
             break;
           }
 
-          if (file.size > MAX_PASTE_IMAGE_SIZE) {
+          if (file.size > inlineImageMaxBytes()) {
             onPasteErrorRef.current?.("size");
             break;
           }

@@ -47,6 +47,7 @@ import {
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
 import { BackendApiError } from "@api/backend/client";
+import { LEGACY_ATTACHMENT_MAX_BYTES } from "@config/attachmentLimitsConfig";
 import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
@@ -70,8 +71,7 @@ const MAX_ATTACHMENT_PAGES = 200;
  * request body itself is capped higher to allow base64 inflation). Validate
  * here so the user gets a clear message instead of a 413.
  */
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
+export const MAX_ATTACHMENT_SIZE_BYTES = LEGACY_ATTACHMENT_MAX_BYTES;
 /** Read a File as a base64 data URI (`data:<mime>;base64,...`). */
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
