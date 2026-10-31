@@ -28,6 +28,17 @@ import { usePostComment } from "@features/support/api/usePostComment";
 import { usePostAttachments } from "@features/support/api/usePostAttachments";
 import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import {
+  confirmStoredUpload,
+  uploadStoredAttachment,
+  UploadConfirmPendingError,
+} from "@api/storedAttachments";
+import {
+  hasBlobImageSource,
+  rewriteBlobImageSources,
+} from "@features/support/utils/inlineCommentImages";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { hasSubmittableEditorContent } from "@features/support/utils/support";
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
@@ -85,6 +96,32 @@ export default function ActivityCommentInput({
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
+  // Images pasted or inserted into the comment are uploaded as soon as they are
+  // added (when entity attachments are on) and shown from a local blob: URL. Each
+  // finished upload's id is kept against that URL; on send the URLs are replaced
+  // by `/<id>` references, so no image bytes travel with the comment.
+  const authFetch = useAuthApiClient();
+  const imageIdsRef = useRef<Map<string, string>>(new Map());
+  const previewUrlsRef = useRef<Set<string>>(new Set());
+  const pendingImagesRef = useRef(0);
+  const [pendingImages, setPendingImages] = useState(0);
+  const uploadImagesInline = isEntityAttachmentsEnabled();
+
+  const releasePreviews = () => {
+    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current.clear();
+    imageIdsRef.current.clear();
+  };
+  useEffect(() => {
+    const previewUrls = previewUrlsRef.current;
+    const imageIds = imageIdsRef.current;
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+      previewUrls.clear();
+      imageIds.clear();
+    };
+  }, []);
+
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
 
   // UTF-8 byte size of the comment body. The BE caps the whole request body, so
@@ -113,6 +150,46 @@ export default function ActivityCommentInput({
     isUploadingAttachments;
 
   const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
+
+  // Stores one image through entity-service's upload flow. Rejects after showing
+  // the error, so the editor takes the image out again.
+  const uploadInlineImage = async (file: File, previewUrl: string) => {
+    previewUrlsRef.current.add(previewUrl);
+    pendingImagesRef.current += 1;
+    setPendingImages((n) => n + 1);
+    try {
+      const input = {
+        type: "comment" as const,
+        parentId: caseId,
+        file,
+        name: file.name || "image",
+      };
+      let id: string;
+      try {
+        id = (await uploadStoredAttachment(authFetch, input)).id;
+      } catch (error) {
+        // The file is already in place: finish the upload instead of repeating it.
+        if (!(error instanceof UploadConfirmPendingError)) throw error;
+        id = (
+          await confirmStoredUpload(authFetch, {
+            type: "comment",
+            attachmentId: error.attachmentId,
+          })
+        ).id;
+      }
+      imageIdsRef.current.set(previewUrl, id);
+    } catch (error) {
+      showError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Failed to upload the image. Please try again.",
+      );
+      throw error;
+    } finally {
+      pendingImagesRef.current -= 1;
+      setPendingImages((n) => n - 1);
+    }
+  };
 
   const handleAttachmentClick = () => {
     setIsAttachmentModalOpen(true);
@@ -206,6 +283,23 @@ export default function ActivityCommentInput({
       return;
     }
 
+    if (pendingImagesRef.current > 0) {
+      showError("Please wait for the image upload to finish.");
+      return;
+    }
+    // Uploaded images are sent as `/<id>` references; a preview URL that is left
+    // is an image that never finished uploading and must not be sent.
+    const finalValue = rewriteBlobImageSources(
+      currentValue,
+      imageIdsRef.current,
+    );
+    if (hasBlobImageSource(finalValue)) {
+      showError(
+        "An image in the comment could not be uploaded. Remove it and try again.",
+      );
+      return;
+    }
+
     // Snapshot attachments before posting
     const attachmentsSnapshot = [...currentAttachments];
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
@@ -215,6 +309,7 @@ export default function ActivityCommentInput({
       setResetTrigger((prev) => prev + 1);
       setAttachments([]);
       attachmentNamesRef.current.clear();
+      releasePreviews();
     };
 
     const performSend = async () => {
@@ -235,7 +330,7 @@ export default function ActivityCommentInput({
       postComment.mutate(
         {
           caseId,
-          body: { content: currentValue.trim(), type: CommentType.COMMENT },
+          body: { content: finalValue.trim(), type: CommentType.COMMENT },
         },
         {
           onSuccess: async () => {
@@ -264,7 +359,7 @@ export default function ActivityCommentInput({
     // Warn about PII in the comment text before posting. Attachment-only
     // sends have no text to scan, so they proceed directly.
     if (hasText) {
-      piiGuard.checkBeforeSubmit(currentValue, performSend);
+      piiGuard.checkBeforeSubmit(finalValue, performSend);
     } else {
       performSend();
     }
@@ -286,6 +381,7 @@ export default function ActivityCommentInput({
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
+            onImageUpload={uploadImagesInline ? uploadInlineImage : undefined}
             showKeyboardHint={true}
             maxHeight="310px"
             onPasteError={(reason) =>
@@ -300,7 +396,9 @@ export default function ActivityCommentInput({
                 title={
                   overSizeLimit && hasSubmittableEditorContent(value)
                     ? sizeError
-                    : "Send comment"
+                    : pendingImages > 0
+                      ? "Uploading image..."
+                      : "Send comment"
                 }
               >
                 <span>
@@ -309,6 +407,7 @@ export default function ActivityCommentInput({
                       (!hasSubmittableEditorContent(value) &&
                         attachments.length === 0) ||
                       (overSizeLimit && hasSubmittableEditorContent(value)) ||
+                      pendingImages > 0 ||
                       isDisabled
                     }
                     onClick={handleSend}
@@ -326,7 +425,9 @@ export default function ActivityCommentInput({
                       borderColor: "backgroundPaper",
                     }}
                   >
-                    {postComment.isPending || isUploadingAttachments ? (
+                    {postComment.isPending ||
+                    isUploadingAttachments ||
+                    pendingImages > 0 ? (
                       <CircularProgress color="inherit" size={18} />
                     ) : (
                       <ArrowUp size={18} />

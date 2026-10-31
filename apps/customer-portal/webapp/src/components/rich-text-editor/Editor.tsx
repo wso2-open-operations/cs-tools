@@ -45,6 +45,10 @@ import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
+import {
+  insertImageWithUpload,
+  type ImageUploadHandler,
+} from "@components/rich-text-editor/localImageUpload";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
 import { LinkNode } from "@lexical/link";
@@ -206,13 +210,28 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
 
 /**
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
- * Reads the image as a data URL and inserts it via INSERT_IMAGE_COMMAND.
+ * With `onImageUpload` the image is shown from a local blob: URL while that
+ * handler stores it; without one it is read as a data URL and inserted via
+ * INSERT_IMAGE_COMMAND.
  */
-const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: (reason: "size" | "type") => void }): null => {
+const ClipboardImagePlugin = ({
+  onPasteError,
+  onImageUpload,
+}: {
+  onPasteError?: (reason: "size" | "type") => void;
+  onImageUpload?: ImageUploadHandler;
+}): null => {
   const [editor] = useLexicalComposerContext();
+  // Callers pass fresh closures on every render; read them through a ref so the
+  // paste listener is registered once.
+  const handlersRef = useRef({ onPasteError, onImageUpload });
+  useEffect(() => {
+    handlersRef.current = { onPasteError, onImageUpload };
+  }, [onPasteError, onImageUpload]);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
+      const handlers = handlersRef.current;
       const items = event.clipboardData?.items;
       if (!items) return;
 
@@ -221,7 +240,7 @@ const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: (reason: "size"
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           event.preventDefault();
-          onPasteError?.("type");
+          handlers.onPasteError?.("type");
           break;
         }
         if (ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
@@ -231,7 +250,12 @@ const ClipboardImagePlugin = ({ onPasteError }: { onPasteError?: (reason: "size"
           event.preventDefault();
 
           if (file.size > MAX_PASTE_IMAGE_SIZE) {
-            onPasteError?.("size");
+            handlers.onPasteError?.("size");
+            break;
+          }
+
+          if (handlers.onImageUpload) {
+            insertImageWithUpload(editor, file, "Pasted Image", handlers.onImageUpload);
             break;
           }
 
@@ -315,6 +339,7 @@ const Editor = ({
   onBlur,
   overlayElement,
   onPasteError,
+  onImageUpload,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -337,6 +362,12 @@ const Editor = ({
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
   onPasteError?: (reason: "size" | "type") => void;
+  /**
+   * When set, pasted and toolbar-inserted images are not read as base64: each is
+   * shown from a local blob: URL while this handler stores it (see
+   * ImageUploadHandler). Leave unset to embed images as data URLs.
+   */
+  onImageUpload?: ImageUploadHandler;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -422,6 +453,7 @@ const Editor = ({
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
               enterToSubmit={enterToSubmit}
+              onImageUpload={onImageUpload}
             />
             <Divider sx={{ my: 1 }} />
           </>
@@ -522,7 +554,7 @@ const Editor = ({
           <HistoryPlugin />
           <ListPlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin onPasteError={onPasteError} />
+          <ClipboardImagePlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
           <LinkPlugin />
           <ClickableLinkPlugin />
           <InitialValuePlugin initialHtml={value} />

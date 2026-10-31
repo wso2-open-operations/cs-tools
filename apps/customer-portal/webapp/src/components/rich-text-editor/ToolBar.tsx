@@ -100,6 +100,11 @@ import {
 } from "@lexical/rich-text";
 import { $createParagraphNode } from "lexical";
 
+import {
+  insertImageWithUpload,
+  type ImageUploadHandler,
+} from "@components/rich-text-editor/localImageUpload";
+
 export type ToolbarVariant = "full" | "describeIssue";
 
 const Toolbar = ({
@@ -108,12 +113,15 @@ const Toolbar = ({
   variant = "full",
   showKeyboardHint = false,
   enterToSubmit = false,
+  onImageUpload,
 }: {
   onAttachmentClick?: () => void;
   disabled?: boolean;
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
   enterToSubmit?: boolean;
+  /** See Editor's `onImageUpload`: images are uploaded instead of read as base64. */
+  onImageUpload?: ImageUploadHandler;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
   const [editor] = useLexicalComposerContext();
@@ -248,7 +256,7 @@ const Toolbar = ({
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
-  const onImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onImageFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     focusEditor();
     const file = e.target.files?.[0];
     if (file) {
@@ -272,6 +280,13 @@ const Toolbar = ({
         showError(
           `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
         );
+        resetInput();
+        return;
+      }
+      if (onImageUpload) {
+        editor.focus(() => {
+          insertImageWithUpload(editor, file, file.name, onImageUpload);
+        });
         resetInput();
         return;
       }
@@ -830,7 +845,7 @@ const Toolbar = ({
                     type="file"
                     hidden
                     accept={ALLOWED_INLINE_IMAGE_TYPES.join(",")}
-                    onChange={onImageUpload}
+                    onChange={onImageFileSelected}
                   />
                 </ToggleButton>
               </Tooltip>
