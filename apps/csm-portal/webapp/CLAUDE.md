@@ -142,20 +142,20 @@ existing `canWrite`-gated controls — no parallel read-only clone was needed.
 A handful of features from that old app have no equivalent on the shared side and were relocated
 (not rewritten) into their own properly-named `csm-*` feature folders, restyled to this app's table/
 page conventions, but still calling the exact same backend routes they always did (`/customer-health/*`,
-`/usage-metrics/*`, `/user-scan`, the Time-log report endpoint — all still gated backend-side by
+`/usage-metrics/*`, the Time-log report endpoint — all still gated backend-side by
 `PermViewCustomerHealth`/`PermViewerAccess`/`PermUsageMetricsViewer`, see `apps/csm-portal/backend`'s
-own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-user-scan`, `csm-reports`. Four gating flags on
+own `CLAUDE.md`): `csm-customer-health`, `csm-usage-metrics`, `csm-reports`. Four gating flags on
 `usePortalAccess()` (`portalAccess.ts`) control who sees what in this merged app, and are NOT
 interchangeable:
 
 - **`isSplAudience`** — true for anyone holding the `viewer` role, regardless of what else they hold.
-  Gates User Scan, the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx`
+  Gates the Escalations and Artifacts-Repository sections added to `CsmAccountDetailPage.tsx`
   and the Time report button added to `CsmProjectDetailPage.tsx` — all of it invisible to a caller
   who has never held `viewer`.
 - **`canViewCustomerHealth`** — the Customer Health dashboard: `viewer` as well as `cs_engineer`/`admin`
   (mirrors the backend's `PermViewCustomerHealth`). Wider than `isSplAudience` on purpose, so a
   `cs_engineer` or `admin` who does not also hold `viewer` still sees it. Customer Health and Usage Metrics
-  sit together at the end of the sidebar, just above User Scan and Help — except for a `viewer` who is not
+  sit together at the end of the sidebar, just above Settings and Help — except for a `viewer` who is not
   also a `cs_engineer`/`admin` (`showCustomerHealthUnderCustomers`): for them Customers opens as a dropdown
   (Accounts, Projects, Customer Health) and the top-level Customer Health entry is dropped. That dropdown entry
   is a nav *shortcut* (`CsmNavNode.shortcutTo`): it owns no routes and is never a Customers page tab, so the

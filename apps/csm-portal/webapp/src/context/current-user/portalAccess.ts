@@ -198,7 +198,7 @@ export interface PortalAccess {
   canUpdateDeleteAnyComment: boolean;
   /**
    * The small set of sections that used to live in the separate, now-removed
-   * "Support Portal Lite" app (User scan, the Time project report, and the
+   * "Support Portal Lite" app (the Time project report and the
    * extra Account detail tabs they added): `viewer` only, regardless of what
    * other roles the caller also holds — mirrors the backend's
    * `PermViewerAccess` (`access.go`), which is built only from the viewer
@@ -235,7 +235,7 @@ export interface PortalAccess {
    * dedicated `usage_metrics_viewer` role. Unlike {@link isSplAudience},
    * holding plain `viewer` does NOT grant this on its own — reported live:
    * a viewer-only account must not see this section at all, even though it
-   * (like User Scan) is an ex-Support-Portal-Lite feature.
+   * is an ex-Support-Portal-Lite feature.
    */
   canViewUsageMetrics: boolean;
   /**

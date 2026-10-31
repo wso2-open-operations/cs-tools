@@ -88,7 +88,6 @@ describe("top-level nav order", () => {
       "skills",
       "customer-health",
       "usage-metrics",
-      "user-scan",
       "admin",
       "help",
     ]);

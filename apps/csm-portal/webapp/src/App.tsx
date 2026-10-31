@@ -121,7 +121,7 @@ import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticle
 import CsmKBArticleHistoryDetailPage from "@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage";
 import CsmKBReviewQueuePage from "@features/csm-kb-articles/pages/CsmKBReviewQueuePage";
 import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
-// The four pages below (Time project report, User Scan, Usage Metrics,
+// The three pages below (Time project report, Usage Metrics,
 // Customer Health) have no modern/entity-service-backed equivalent.
 // Relocated out of the former "sales-sa"/"Support Portal Lite" tree (now
 // deleted); routing/audience-gating for each is isSplAudience, except Usage
@@ -129,7 +129,6 @@ import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 // see each flag's own doc comment.
 import SlaReportUpcomingPage from "@features/csm-reports/pages/SlaReportUpcomingPage";
 import TimelogsReportPage from "@features/csm-reports/pages/TimelogsReportPage";
-import UserScanPage from "@features/csm-user-scan/pages/UserScanPage";
 import UsageMetricsPage from "@features/csm-usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/csm-customer-health/pages/CustomerHealthDashboardPage";
 import CustomerHealthDetailPage from "@features/csm-customer-health/pages/CustomerHealthDetailPage";
@@ -664,21 +663,8 @@ export default function App(): JSX.Element {
                     <Route path="admin" element={<CsmKBAdminPage />} />
                   </Route>
 
-                  {/* The following sections have no modern/entity-service-backed
-                      equivalent and so stay limited to their original
-                      audience (a caller holding the viewer role) via
-                      isSplAudience — see that flag's own doc comment. They
-                      used to live under the separate "/spl" prefix/app
-                      (former standalone apps/support-portal-lite/webapp);
-                      that split is gone, so these mount as normal routes
-                      like everything else, enforced the normal way: a hidden
-                      nav entry (csmNavItems.ts's `requires`) plus the page
-                      itself failing closed should it ever be reached
-                      directly. */}
-                  <Route path="user-scan" element={<UserScanPage />} />
-
-                  {/* Usage Metrics and Customer Health are the exceptions: NOT
-                      limited to isSplAudience. Usage Metrics also goes to
+                  {/* Usage Metrics and Customer Health are gated by their own
+                      flags, not isSplAudience. Usage Metrics also goes to
                       cs_engineer/admin and the dedicated usage_metrics_viewer
                       role (canViewUsageMetrics); Customer Health to
                       cs_engineer/admin as well as viewer

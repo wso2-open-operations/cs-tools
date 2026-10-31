@@ -234,17 +234,10 @@ func main() {
 	// Viewer-audience endpoints (ported from SupportPortalLite's Ballerina
 	// backend) are always registered. Every one of them reads entity-service
 	// through the shared customerEntityClient; only Google Drive (the /files
-	// routes) and the Scan User entity service (Scan User's
-	// lookups) are separate upstreams, and each is independently optional:
-	// unset leaves just its own endpoints failing at call time with a mapped
-	// upstream error -- see loadViewerConfig.
+	// routes) is a separate upstream, independently optional: unset leaves
+	// just its own endpoints failing at call time with a mapped upstream
+	// error -- see loadViewerConfig.
 	viewerCfg := loadViewerConfig()
-	salesEntityClient := entity.NewSalesEntityClient(entity.SalesEntityConfig{
-		BaseURL:      viewerCfg.salesEntityBaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-	})
 	driveClient := googledrive.NewClient(googledrive.Config{
 		ClientID:     viewerCfg.driveClientID,
 		ClientSecret: viewerCfg.driveClientSecret,
@@ -275,12 +268,10 @@ func main() {
 		files:          handler.NewFilesHandler(driveClient, accessGuard),
 		customerHealth: handler.NewCustomerHealthHandler(riskClient, handler.NewPostgresCustomerHealthClient(customerEntityClient), customerEntityClient, accessGuard),
 		userInfo:       handler.NewUserInfoHandler(customerEntityClient, accessGuard),
-		userScan:       handler.NewSplUserScanHandler(salesEntityClient, customerEntityClient, accessGuard),
 		accountEsc:     handler.NewViewerAccountHandler(handler.NewPostgresViewerAccountClient(customerEntityClient), accessGuard),
 	}
 	slog.Info("viewer-access endpoints registered",
-		"googleDriveConfigured", viewerCfg.driveClientID != "",
-		"salesEntityConfigured", viewerCfg.salesEntityBaseURL != "")
+		"googleDriveConfigured", viewerCfg.driveClientID != "")
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -802,10 +793,8 @@ func main() {
 
 	// Viewer-audience routes -- see viewerHandlers above. Always registered,
 	// and every one of them is entity-service-backed, except that GET /files
-	// and GET /files/search read Google Drive and POST /scan-user's
-	// Scan User lookups read the Scan User entity service; those two
-	// upstreams are independently optional and fail at call time when
-	// unconfigured. None of the routes below carry a /spl/ prefix: the viewer
+	// and GET /files/search read Google Drive, an upstream that is
+	// independently optional and fails at call time when unconfigured. None of the routes below carry a /spl/ prefix: the viewer
 	// audience and csm-portal share one backend, so the prefix only ever
 	// existed to avoid colliding with csm-portal's own, differently-shaped
 	// case-management domain, and none of these routes do. Accounts,
@@ -834,7 +823,6 @@ func main() {
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
-	route("POST /scan-user", handler.PermViewerAccess, viewerHandlers.userScan.ScanUser)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)
 	route("GET /usage-metrics/projects", handler.PermUsageMetricsViewer, viewerHandlers.usageMetrics.GetProjects)
@@ -1517,10 +1505,10 @@ func splitComma(s string) []string {
 
 // viewerHandlerSet holds every viewer-audience handler -- always constructed
 // and always registered. All of them read entity-service through the shared
-// customerEntityClient; files (Google Drive) and userScan's Scan User
-// lookups are the only ones with an upstream of their own, and an
-// unconfigured one fails its own calls at request time instead of the route
-// not existing at all (see loadViewerConfig).
+// customerEntityClient; files (Google Drive) is the only one with an
+// upstream of its own, and when that is unconfigured it fails its own calls
+// at request time instead of the route not existing at all (see
+// loadViewerConfig).
 type viewerHandlerSet struct {
 	reports        *handler.ReportsHandler
 	lookups        *handler.LookupsHandler
@@ -1528,55 +1516,36 @@ type viewerHandlerSet struct {
 	files          *handler.FilesHandler
 	customerHealth *handler.CustomerHealthHandler
 	userInfo       *handler.UserInfoHandler
-	userScan       *handler.SplUserScanHandler
 	accountEsc     *handler.ViewerAccountHandler
 }
 
 // viewerConfig holds the environment values behind the viewer-audience
-// endpoints' two optional upstreams (Google Drive and the Scan User entity
-// service), resolved by loadViewerConfig. Everything else those endpoints
-// read comes from entity-service via the shared customerEntityClient.
+// endpoints' one optional upstream (Google Drive), resolved by
+// loadViewerConfig. Everything else those endpoints read comes from
+// entity-service via the shared customerEntityClient.
 type viewerConfig struct {
-	driveClientID      string
-	driveClientSecret  string
-	driveRefreshToken  string
-	salesEntityBaseURL string
+	driveClientID     string
+	driveClientSecret string
+	driveRefreshToken string
 }
 
 // loadViewerConfig resolves the viewer-audience endpoints' optional
 // upstream configuration. Every value is independently optional (os.Getenv,
 // not mustEnv): unset Google Drive credentials leave only GET /files and
-// GET /files/search failing at call time, and an unset Scan User entity
-// service URL only Scan User's lookups, each with a normal mapped upstream
+// GET /files/search failing at call time, with a normal mapped upstream
 // error (mapUpstreamErrorGeneric) rather than the route being a 404 or the
-// process refusing to start. An explicitly-set value is still validated
-// (optionalHTTPSBaseURL exits on a malformed URL -- that's a real
-// misconfiguration, not "feature absent").
+// process refusing to start.
 //
-// GOOGLE_DRIVE_* and the Scan User entity service URL carry no SPL_ prefix: Google
-// Drive and the Scan User entity service are just this feature's own
-// upstreams, so they follow this file's convention of naming a service's
-// credentials after the service, not the caller. See .env.example for what
-// each variable configures.
+// GOOGLE_DRIVE_* carries no SPL_ prefix: Google Drive is just this
+// feature's own upstream, so it follows this file's convention of naming a
+// service's credentials after the service, not the caller. See .env.example
+// for what each variable configures.
 func loadViewerConfig() viewerConfig {
 	return viewerConfig{
-		driveClientID:      os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
-		driveClientSecret:  os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
-		driveRefreshToken:  os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
-		salesEntityBaseURL: optionalHTTPSBaseURL("SALES_ENTITY_BASE_URL"),
+		driveClientID:     os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
+		driveClientSecret: os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
+		driveRefreshToken: os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
 	}
-}
-
-// optionalHTTPSBaseURL reads key and, if set, validates it exactly like
-// mustHTTPSBaseURL (a configured-but-malformed URL is still a real
-// misconfiguration worth failing startup over). An unset key returns "",
-// leaving the dependent upstream unconfigured rather than failing startup.
-func optionalHTTPSBaseURL(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return ""
-	}
-	return mustHTTPSBaseURL(key, v)
 }
 
 func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {

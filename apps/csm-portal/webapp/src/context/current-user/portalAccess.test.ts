@@ -552,7 +552,7 @@ describe("getPortalAccess", () => {
 
   // Requires full access or the dedicated usage_metrics_viewer role.
   // Reported live: a plain viewer-only account must NOT see this section,
-  // unlike User Scan (isSplAudience-gated) -- holding viewer grants nothing
+  // unlike the isSplAudience-gated sections -- holding viewer grants nothing
   // here on its own.
   describe("canViewUsageMetrics", () => {
     it("usage_metrics_viewer, cs_engineer and admin all hold it", () => {

@@ -43,7 +43,6 @@ import {
   Shield,
   UserCheck,
   UserCog,
-  UserSearch,
   Users,
   UsersRound,
 } from "@wso2/oxygen-ui-icons-react";
@@ -353,7 +352,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     // Ex-Support Portal Lite section with no modern/entity-service-backed
     // equivalent. Its audience is the viewer role plus cs_engineer and admin
     // (PermViewCustomerHealth server-side) -- see canViewCustomerHealth's own
-    // doc comment. Like Usage Metrics below, it sits just above User Scan and
+    // doc comment. Like Usage Metrics below, it sits just above Settings and
     // Help at the end of the sidebar -- except for a viewer, who gets it under
     // Customers instead (the "customers.customer-health" shortcut). This node
     // still owns the page and its routes for every role.
@@ -370,13 +369,6 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     // doc comment.
     requires: "canViewUsageMetrics",
     icon: BarChart3,
-  },
-  {
-    id: "user-scan",
-    label: "User Scan",
-    href: "/user-scan",
-    requires: "isSplAudience",
-    icon: UserSearch,
   },
   {
     id: "admin",

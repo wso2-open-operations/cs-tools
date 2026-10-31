@@ -10465,9 +10465,9 @@ paths:
   # /spl/accounts, /spl/projects, /spl/cases) are gone entirely --
   # consolidated onto the shared /accounts, /projects, and /cases
   # search/detail routes above. Always registered, and every route is served
-  # from entity-service; only Google Drive (/files) and the Scan User entity
-  # service (/scan-user) are separate, independently optional upstreams -- an
-  # endpoint needing one that isn't configured in a given deployment fails at
+  # from entity-service; only Google Drive (/files) is a separate,
+  # independently optional upstream -- an endpoint needing one that isn't
+  # configured in a given deployment fails at
   # call time instead of the route not existing (see cmd/server/main.go's
   # loadViewerConfig). Identifiers here are the ones the ported viewer
   # frontend already sends: entity-service ids, or a project key for the
@@ -12208,69 +12208,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /scan-user:
-    post:
-      summary: >-
-        Diagnostic tool cross-referencing the sales-side (Salesforce) and
-        CS-side (ServiceNow) entity services for a given email/subscription
-        key, surfacing why a user might not have portal access.
-      operationId: scanUser
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UserScanRequest'
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ScanResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: >-
-            InternalServerError — also returned (with a lookup-specific
-            message in the same {"message": "..."} shape as ErrorPayload)
-            when the sales-side or CS-side entity service lookup itself
-            fails, distinct from an ordinary internal error.
           content:
             application/json:
               schema:
@@ -28294,39 +28231,6 @@ components:
         lastName:
           type: string
 
-    UserScanRequest:
-      type: object
-      required: [email, subscriptionKey, isPartner]
-      properties:
-        email:
-          type: string
-        subscriptionKey:
-          type: string
-        isPartner:
-          type: boolean
-
-    SplScanInformation:
-      type: object
-      properties:
-        issue:
-          type: string
-        solution:
-          type: string
-        documentation:
-          type: string
-
-    ScanResult:
-      type: object
-      properties:
-        order:
-          type: integer
-        label:
-          type: string
-        state:
-          type: boolean
-        information:
-          $ref: '#/components/schemas/SplScanInformation'
-
     PortalBanner:
       type: object
       required: [id, status, sortOrder, visibleInCustomerPortal, visibleInCsmPortal, html, startsAt, expiresAt, createdOn, createdBy, updatedOn, updatedBy]
@@ -28425,17 +28329,6 @@ components:
           type: string
           format: date-time
           nullable: true
-
-    ScanResponse:
-      type: object
-      properties:
-        system:
-          type: string
-          enum: [Salesforce, Servicenow]
-        systemResult:
-          type: array
-          items:
-            $ref: '#/components/schemas/ScanResult'
 
     SkillLevel:
       type: object
