@@ -67,7 +67,7 @@ func (s *salesforceResyncService) Apply(ctx context.Context, req domain.Salesfor
 	}
 	defer release()
 
-	applyCtx := withResyncApply(ctx)
+	applyCtx, stale := withResyncApply(ctx)
 	out := domain.SalesforceResyncApplyResponse{Components: []domain.SalesforceResyncApplyComponent{}}
 	for _, def := range defs {
 		if !selected[def.key] {
@@ -77,7 +77,7 @@ func (s *salesforceResyncService) Apply(ctx context.Context, req domain.Salesfor
 			out.Components = append(out.Components, skippedApplyComponent(def.key, reason))
 			continue
 		}
-		res, err := run.apply(applyCtx, def)
+		res, err := run.apply(applyCtx, stale, def)
 		if err != nil {
 			out.Components = append(out.Components, skippedApplyComponent(def.key, run.skipReason(ctx, err)))
 			continue
@@ -90,22 +90,39 @@ func (s *salesforceResyncService) Apply(ctx context.Context, req domain.Salesfor
 func skippedApplyComponent(key, reason string) domain.SalesforceResyncApplyComponent {
 	return domain.SalesforceResyncApplyComponent{
 		Key: key, Status: domain.SalesforceResyncApplySkipped, SkippedReason: &reason,
-		Errors: []domain.SalesforceResyncApplyError{},
+		Errors: []domain.SalesforceResyncApplyError{}, SkippedStaleSfIDs: []string{},
 	}
 }
 
 // applyTally accumulates one component's outcome.
 type applyTally struct {
-	comp domain.SalesforceResyncApplyComponent
+	comp  domain.SalesforceResyncApplyComponent
+	stale *resyncStale
+	// seen is how many stale ids were already folded into comp.
+	seen int
 }
 
-func newApplyTally(key string) *applyTally {
-	return &applyTally{comp: domain.SalesforceResyncApplyComponent{Key: key, Errors: []domain.SalesforceResyncApplyError{}}}
+func newApplyTally(key string, stale *resyncStale) *applyTally {
+	return &applyTally{stale: stale, comp: domain.SalesforceResyncApplyComponent{
+		Key: key, Errors: []domain.SalesforceResyncApplyError{}, SkippedStaleSfIDs: []string{},
+	}}
 }
 
 // record counts one record's write; a failure keeps its (safe) message.
 func (t *applyTally) record(ctx context.Context, sfID string, err error) {
 	if err == nil {
+		// A record the guard left alone (it changed in Salesforce since the
+		// snapshot was read) is reported as such, not as written.
+		if t.stale != nil && len(t.stale.ids) > t.seen {
+			for _, id := range t.stale.ids[t.seen:] {
+				t.comp.SkippedStale++
+				if len(t.comp.SkippedStaleSfIDs) < resyncMaxApplyErrors {
+					t.comp.SkippedStaleSfIDs = append(t.comp.SkippedStaleSfIDs, id)
+				}
+			}
+			t.seen = len(t.stale.ids)
+			return
+		}
 		t.comp.Succeeded++
 		return
 	}
@@ -138,16 +155,16 @@ func (t *applyTally) finish() domain.SalesforceResyncApplyComponent {
 	return t.comp
 }
 
-func (r *resyncRun) apply(ctx context.Context, def resyncComponentDef) (domain.SalesforceResyncApplyComponent, error) {
+func (r *resyncRun) apply(ctx context.Context, stale *resyncStale, def resyncComponentDef) (domain.SalesforceResyncApplyComponent, error) {
 	ev := r.s.ev
-	t := newApplyTally(def.key)
+	t := newApplyTally(def.key, stale)
 	switch def.key {
 	case domain.SalesforceResyncComponentAccount:
 		cust, err := r.sfAccount(ctx)
 		if err != nil {
 			return domain.SalesforceResyncApplyComponent{}, err
 		}
-		t.record(ctx, r.target.SfID, ev.upsertAccountRecord(ctx, cust, r.target.SfID, domain.SalesforceEventUpdated, false))
+		t.record(ctx, r.target.SfID, ev.upsertAccountRecord(ctx, cust, r.target.SfID, domain.SalesforceEventUpdated, true))
 
 	case domain.SalesforceResyncComponentPartners:
 		if err := r.budget.spend(ctx); err != nil {
@@ -165,7 +182,7 @@ func (r *resyncRun) apply(ctx context.Context, def resyncComponentDef) (domain.S
 			return domain.SalesforceResyncApplyComponent{}, err
 		}
 		applyEach(ctx, t, ps, func(p salesentity.Project) string { return strings.TrimSpace(p.ID) }, func(p salesentity.Project) error {
-			return ev.upsertProjectRecord(ctx, p, strings.TrimSpace(p.ID), domain.SalesforceEventUpdated, false)
+			return ev.upsertProjectRecord(ctx, p, strings.TrimSpace(p.ID), domain.SalesforceEventUpdated, true)
 		})
 
 	case domain.SalesforceResyncComponentOpportunities:
@@ -174,7 +191,7 @@ func (r *resyncRun) apply(ctx context.Context, def resyncComponentDef) (domain.S
 			return domain.SalesforceResyncApplyComponent{}, err
 		}
 		applyEach(ctx, t, opps, func(o salesentity.Opportunity) string { return strings.TrimSpace(o.ID) }, func(o salesentity.Opportunity) error {
-			return ev.ingestOpportunityRecord(ctx, o, strings.TrimSpace(o.ID), domain.SalesforceEventUpdated, false)
+			return ev.ingestOpportunityRecord(ctx, o, strings.TrimSpace(o.ID), domain.SalesforceEventUpdated, true)
 		})
 
 	case domain.SalesforceResyncComponentLinkedOpportunities:

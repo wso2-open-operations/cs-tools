@@ -30650,7 +30650,7 @@ components:
           type: array
           items:
             type: object
-            required: [key, status, succeeded, failed, skippedReason, errors]
+            required: [key, status, succeeded, failed, skippedReason, skippedStale, skippedStaleSfIds, errors]
             properties:
               key:
                 $ref: '#/components/schemas/SalesforceResyncComponentKey'
@@ -30664,6 +30664,14 @@ components:
               skippedReason:
                 type: string
                 nullable: true
+              skippedStale:
+                type: integer
+                description: "Records left alone because they changed in Salesforce after the apply read them (a newer version is already recorded, a deletion included). They are neither succeeded nor failed; the status stays applied when the rest succeeded."
+              skippedStaleSfIds:
+                type: array
+                description: "The first of those records (at most 50)."
+                items:
+                  type: string
               errors:
                 type: array
                 description: "The first records that could not be written (at most 50)."

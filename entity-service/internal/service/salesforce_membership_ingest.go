@@ -166,12 +166,35 @@ func (s *salesforceEventService) ingestMembershipRecord(ctx context.Context, mem
 	if contactOn, ok := parseSalesforceLastModified(contactModified); ok && (!hasModified || contactOn.After(eventModifiedOn)) {
 		eventModifiedOn, hasModified = contactOn, true
 	}
-	if !hasModified || isResyncApply(ctx) {
-		if !hasModified {
-			slog.WarnContext(ctx, "salesforce: project contact has no parseable lastModifiedDate, skipping duplicate guard",
-				"membershipSfId", membershipSfID, "lastModifiedDate", derefString(pc.LastModifiedDate))
+	if isResyncApply(ctx) {
+		// Equal version: overwrite. Strictly newer than the snapshot (a
+		// DELETED or DEACTIVATED step included): the membership changed since
+		// it was read, so it is left alone. No parseable version: keep the
+		// stored one.
+		steps, err := s.membership.Steps.GetByMembership(ctx, membershipSfID)
+		if err != nil {
+			return err
+		}
+		for _, st := range steps {
+			if st.Step != domain.OnboardingStepDatabase || st.Status != domain.OnboardingStepSucceeded {
+				continue
+			}
+			if !hasModified {
+				eventModifiedOn = st.EventModifiedOn
+			} else if st.EventModifiedOn.After(eventModifiedOn) {
+				slog.InfoContext(ctx, "salesforce resync: membership changed since it was read, leaving it alone",
+					"membershipSfId", membershipSfID, "snapshotModifiedOn", eventModifiedOn, "recordedOn", st.EventModifiedOn, "recordedEventType", st.EventType)
+				noteResyncStale(ctx, membershipSfID)
+				return nil
+			}
+		}
+		if !hasModified && eventModifiedOn.IsZero() {
 			eventModifiedOn = time.Now().UTC()
 		}
+	} else if !hasModified {
+		slog.WarnContext(ctx, "salesforce: project contact has no parseable lastModifiedDate, skipping duplicate guard",
+			"membershipSfId", membershipSfID, "lastModifiedDate", derefString(pc.LastModifiedDate))
+		eventModifiedOn = time.Now().UTC()
 	} else {
 		steps, err := s.membership.Steps.GetByMembership(ctx, membershipSfID)
 		if err != nil {

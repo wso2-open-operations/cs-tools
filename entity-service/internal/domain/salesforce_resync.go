@@ -132,12 +132,17 @@ type SalesforceResyncApplyError struct {
 
 // SalesforceResyncApplyComponent is the outcome of one applied component.
 type SalesforceResyncApplyComponent struct {
-	Key           string                       `json:"key"`
-	Status        string                       `json:"status"`
-	Succeeded     int                          `json:"succeeded"`
-	Failed        int                          `json:"failed"`
-	SkippedReason *string                      `json:"skippedReason"`
-	Errors        []SalesforceResyncApplyError `json:"errors"`
+	Key           string  `json:"key"`
+	Status        string  `json:"status"`
+	Succeeded     int     `json:"succeeded"`
+	Failed        int     `json:"failed"`
+	SkippedReason *string `json:"skippedReason"`
+	// SkippedStale counts the records left alone because they changed in
+	// Salesforce after the apply read them; SkippedStaleSfIDs lists the first
+	// of them. They are neither succeeded nor failed.
+	SkippedStale      int                          `json:"skippedStale"`
+	SkippedStaleSfIDs []string                     `json:"skippedStaleSfIds"`
+	Errors            []SalesforceResyncApplyError `json:"errors"`
 }
 
 // SalesforceResyncApplyResponse is the response of POST /salesforce/resync/apply.
