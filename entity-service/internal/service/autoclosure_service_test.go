@@ -207,6 +207,45 @@ func TestAutoclosureAdvance_AwaitingInfoCloseSetsTheNonResponsivenessCode(t *tes
 	}
 }
 
+func TestAutoclosureAdvance_CloseNotes(t *testing.T) {
+	existing := "  Engineer's own note.\nSecond line <b>kept</b>  "
+	for _, state := range []domain.CaseState{domain.CaseStateAwaitingInfo, domain.CaseStateSolutionProposed} {
+		for _, tc := range []struct {
+			name     string
+			existing *string
+			want     string // empty means the existing note, unchanged
+		}{
+			{"existing note is kept verbatim", &existing, existing},
+			{"empty note falls back", strp(""), ""},
+			{"whitespace-only note falls back", strp(" \n\t "), ""},
+			{"nil note falls back", nil, ""},
+		} {
+			t.Run(string(state)+"/"+tc.name, func(t *testing.T) {
+				code := domain.CaseResolutionCodeSolvedWorkaroundProvided
+				repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(state, strp("SECOND_COMMENT"))}}
+				cases := &fakeAutoclosureCases{view: domain.CaseView{ResolutionCode: &code, CloseNotes: tc.existing}}
+				if _, err := newACService(repo, cases).Advance(context.Background(), acTestCaseID, domain.AutoclosureAdvanceRequest{Stage: domain.AutoclosureStageClose}); err != nil {
+					t.Fatalf("Advance: %v", err)
+				}
+				if len(cases.updates) != 1 || cases.updates[0].CloseNotes == nil {
+					t.Fatalf("updates = %+v, want one with close notes", cases.updates)
+				}
+				got := *cases.updates[0].CloseNotes
+				if tc.want != "" {
+					if got != tc.want {
+						t.Errorf("closeNotes = %q, want the existing note %q", got, tc.want)
+					}
+				} else if got != autoclosurePlainText(autoclosureDefaultTemplates[string(state)+".closure"]) || strings.Contains(got, "<") {
+					t.Errorf("closeNotes = %q, want the plain-text closure wording", got)
+				}
+				if len(cases.comments) != 1 || !strings.HasPrefix(cases.comments[0].Content, "<p>") {
+					t.Errorf("closure comment must still be the HTML text: %+v", cases.comments)
+				}
+			})
+		}
+	}
+}
+
 func TestAutoclosureAdvance_SolutionProposedCloseKeepsItsOwnResolution(t *testing.T) {
 	code := domain.CaseResolutionCodeSolvedWorkaroundProvided
 	cause := domain.CaseCauseUnknown

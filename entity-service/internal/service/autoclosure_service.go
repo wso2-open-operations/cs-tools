@@ -444,6 +444,13 @@ func dryRunDetail(stage domain.AutoclosureStage, c repository.AutoclosureCandida
 // first and a refused close (an open child appeared, a concurrent edit) would
 // leave a "this case is closed" comment on a case that is not.
 //
+// The case's existing close notes are kept as they are (the process this
+// replaces never wrote its message there). Only when there are none does the
+// close set the plain-text form of the closure wording, because closing an
+// internal-caller case in dual-write requires non-empty close notes. The
+// closure message itself is the customer-visible HTML comment posted after
+// the close.
+//
 // Awaiting Info tickets get the non-responsiveness resolution code (which
 // keeps them out of the KB process); Solution Proposed tickets keep whatever
 // resolution they were proposed with.
@@ -453,9 +460,14 @@ func (s *autoclosureService) closeCase(ctx context.Context, c repository.Autoclo
 		return "", fmt.Errorf("read ticket before closing: %w", err)
 	}
 	closed := domain.CaseStateClosed
-	// The comment is HTML; the close notes are free text, so they get the
-	// plain-text form of the same wording.
+	// An existing close note is passed back exactly as it is, so closing never
+	// overwrites an engineer's own note. Only a case with none gets the
+	// plain-text form of the closure wording: the comment is HTML, the close
+	// notes are free text.
 	notes := autoclosurePlainText(comment)
+	if view.CloseNotes != nil && strings.TrimSpace(*view.CloseNotes) != "" {
+		notes = *view.CloseNotes
+	}
 	update := domain.UpdateCaseRequest{ID: c.ID, State: &closed, CloseNotes: &notes}
 	if view.Cause != nil {
 		update.Cause = view.Cause

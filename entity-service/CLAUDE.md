@@ -4555,9 +4555,12 @@ The defaults and any override are **HTML**: comments are rendered as HTML where 
 line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
 sign-off, signed `Thanks,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
 for contacting the Customer Success Team." No default may say "Support Team". An override is posted verbatim, never
-transformed, so it must carry its own tags. The close path writes the same text as the comment, but the
-`closeNotes` it sets are the plain-text form (`autoclosurePlainText`: `</p><p>` to a blank line, `<br/>` to a
-newline, other tags dropped), because close notes are free text in the portals.
+transformed, so it must carry its own tags.
+Closing keeps the case's existing close notes when it has any (as the legacy process did, which never wrote its
+message there), and only when there are none does it set the plain-text form of the closure wording
+(`autoclosurePlainText`: `</p><p>` to a blank line, `<br/>` to a newline, other tags dropped), because closing an
+internal-caller case in dual-write requires non-empty close notes. The closure message itself is the
+customer-visible HTML comment posted after the close.
 
 **Decisions worth knowing.**
 - A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
