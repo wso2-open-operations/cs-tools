@@ -410,6 +410,7 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 | Env var | Default | Meaning |
 |---|---|---|
 | `AUTOCLOSURE_ENABLED` | `false` | Register the task |
+| `AUTOCLOSURE_SCHEDULED` | `true` | `false` keeps the task configured but off the schedule: the normal tick never fires it, and it runs only on demand with `--run-now=case_autoclosure`. Needs `AUTOCLOSURE_ENABLED=true` to matter; anything but a boolean refuses to start |
 | `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
 | `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
 | `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
@@ -418,6 +419,42 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
+
+### Running it now
+
+`--run-now=case_autoclosure` runs the handler once, right now, then exits (0 on success, 1 on failure), so an
+operator does not have to edit an env var and remember to revert it. It is **real** (not forced to a dry run,
+unlike `TRYOUT_TASK`), uses the same entity-service calls and daily-limit accounting as the scheduled run, and
+refuses unless `AUTOCLOSURE_ENABLED=true`. It cannot be combined with `TRYOUT_TASK`. An unknown task name, an
+unknown flag, a stray positional argument or a malformed value exits non-zero with a message; it never falls
+through to the schedule. One WARN line at the start logs the effective dry run, daily limit and states.
+
+| Argument | Meaning |
+|---|---|
+| `--run-now=case_autoclosure` | Run that task once now. The only task supported |
+| `--dry-run` | Force a dry run for this invocation |
+| `--limit=N` | Daily limit for this invocation. `N` > 0; at most `AUTOCLOSURE_DAILY_LIMIT` when that is non-zero (any `N` when it is `0`) |
+| `--states=a,b` | Work only these states; each must be in `AUTOCLOSURE_STATES` (both when that is unset) |
+
+`--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and can only tighten the env
+values, never loosen them.
+
+**It does not touch the ledger.** A ledger row for the day's period would either mark the scheduled period done
+(suppressing the real scheduled run) or compete with it for the claim. Idempotence is entity-service's, as for
+every run: each ticket's advance is a compare-and-set claim and the daily limit is read from its audit table,
+so a run-now next to the scheduled run cannot send anything twice or exceed the day's budget. The price: a
+run-now is not recorded in the ledger, so look for it in the logs (`run-now: ...`), not in the run history.
+
+**Staged rollout.** Set `AUTOCLOSURE_ENABLED=true` and `AUTOCLOSURE_SCHEDULED=false`, then, from a Choreo Manual
+Task component (or the scheduled task, if it accepts per-run arguments), run in order, reading the logs between
+steps:
+
+1. `--run-now=case_autoclosure --dry-run` : see what is due, change nothing.
+2. `--run-now=case_autoclosure --states=solution_proposed --limit=20` : a small real batch of one state.
+3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTOCLOSURE_DAILY_LIMIT` and
+   `AUTOCLOSURE_STATES` allow.
+
+When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 08:00 run takes over.
 
 ## Usage rollups
 
