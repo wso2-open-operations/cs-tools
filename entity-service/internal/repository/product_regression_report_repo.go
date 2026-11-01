@@ -57,8 +57,12 @@ func NewProductRegressionReportRepository(db *Scoped) ProductRegressionReportRep
 //     so a product that exists twice under one name (it does) is matched
 //     by both rows, and the name is trimmed on the way out so they group
 //     together.
-//   - The deployed product is the customer's install the case concerns,
-//     the "Product" column the report has always shown beside the case.
+//   - The product column is the case's product name and version, built
+//     the way the case detail page shows it: the name of the product
+//     behind the case's deployed product, a space, then its version (the
+//     version is left off when there is none). The deployed product's own
+//     name column is not used: it is blank on almost every row. A case
+//     with no deployed product yields an empty string.
 //   - The month is taken on eta_shared_on, the instant the fix ETA was
 //     shared with the customer: the report lists the regressions a fix
 //     was promised for that month, not the ones opened or closed then.
@@ -69,12 +73,14 @@ SELECT wi.id::text,
        COALESCE(wi.wso2_id, ''),
        COALESCE(wi.subject, ''),
        TRIM(p.name),
-       COALESCE(dp.name, ''),
+       COALESCE(TRIM(dprod.name || COALESCE(' ' || dpv.version, '')), ''),
        wi.eta_shared_on
   FROM work_item wi
   JOIN "case" c ON c.id = wi.id
   JOIN product p ON p.id = wi.product_id
   LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
+  LEFT JOIN product dprod ON dprod.id = dp.product_id
+  LEFT JOIN product_version dpv ON dpv.id = dp.version_id
  WHERE wi.type = 'CASE'
    AND LOWER(TRIM(p.name)) = ANY($1::text[])
    AND wi.eta_shared_on >= $2

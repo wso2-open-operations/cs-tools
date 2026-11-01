@@ -30324,7 +30324,7 @@ components:
           description: The WSO2 product the case is filed against.
         deployedProduct:
           type: string
-          description: The customer's deployment the case concerns; blank when none is named.
+          description: The case's product name and version, as the case detail page shows it (for example "Acme Gateway 1.2.0"); the version is left off when there is none, and the value is blank when the case has no product instance.
         etaSharedOn:
           type: string
           format: date-time

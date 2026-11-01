@@ -72,8 +72,10 @@ type ProductRegressionReportRow struct {
 	// Product is the WSO2 product the case is filed against; the group it
 	// lands in.
 	Product string `json:"product"`
-	// DeployedProduct is the customer's deployment of that product the
-	// case concerns (name and version), blank when the case names none.
+	// DeployedProduct is the case's product name and version, as the case
+	// detail page shows it (for example "Acme Gateway 1.2.0"; the version is
+	// left off when there is none), blank when the case has no product
+	// instance.
 	DeployedProduct string `json:"deployedProduct"`
 	// EtaSharedOn is when the fix ETA was shared with the customer; the
 	// instant that placed the case in this month's report.
