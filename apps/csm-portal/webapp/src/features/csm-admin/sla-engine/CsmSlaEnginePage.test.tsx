@@ -16,15 +16,36 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import CsmSlaEnginePage from "@features/csm-admin/sla-engine/CsmSlaEnginePage";
 
 const api = vi.hoisted(() => ({
   statuses: [] as Array<Record<string, unknown>>,
-  get: vi.fn(async () => ({ statuses: api.statuses, total: api.statuses.length })),
+  // Mirrors entity-service's real limit/offset paging against `statuses`, so
+  // a test can simulate more than one page by seeding more rows than one
+  // page holds, instead of every test implicitly only ever seeing page 0.
+  get: vi.fn(async (url: string) => {
+    const params = new URL(url, "http://example.test").searchParams;
+    const limit = Number(params.get("limit") ?? api.statuses.length);
+    const offset = Number(params.get("offset") ?? 0);
+    return { statuses: api.statuses.slice(offset, offset + limit), total: api.statuses.length };
+  }),
   post: vi.fn(async () => null),
 }));
+
+function makeStatus(caseId: string): Record<string, unknown> {
+  return {
+    caseId,
+    clockType: "RESOLUTION",
+    businessElapsedPercent: 10,
+    hasBreached: false,
+    isPaused: false,
+    startedOn: null,
+    pausedOn: null,
+  };
+}
 
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({
@@ -37,7 +58,9 @@ function renderPage(): ReturnType<typeof render> {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <CsmSlaEnginePage />
+      <MemoryRouter>
+        <CsmSlaEnginePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -103,5 +126,23 @@ describe("CsmSlaEnginePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Recalculate" }));
 
     await waitFor(() => expect(screen.getByText("Failed to start SLA recalculation.")).toBeInTheDocument());
+  });
+
+  it("resets to the last valid page when the total shrinks between fetches", async () => {
+    api.statuses = Array.from({ length: 60 }, (_, i) => makeStatus(`case-${i}`));
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/currently active clocks \(60\)/i)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(screen.getByText("case-25")).toBeInTheDocument());
+
+    // The set shrinks to 10 rows (a recalculation, clocks completing) --
+    // page 1 (offset 25) is now past the last page.
+    api.statuses = Array.from({ length: 10 }, (_, i) => makeStatus(`case-${i}`));
+    fireEvent.click(screen.getByRole("button", { name: "Recalculate SLA" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recalculate" }));
+
+    await waitFor(() => expect(screen.getByText("case-0")).toBeInTheDocument());
+    expect(screen.queryByText(/no active sla clocks right now/i)).not.toBeInTheDocument();
   });
 });

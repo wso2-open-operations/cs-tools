@@ -32,17 +32,42 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
 import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useMemo, useState, type ChangeEvent, type JSX } from "react";
+import { Link as RouterLink } from "react-router";
+import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
+import { CASE_TYPE_LABEL, caseTypeDetailBasePath } from "@features/csm-cases/utils/caseType";
+import type { BeCaseType } from "@api/backend/types";
 import { useActiveSlaStatuses, useRequestSlaRecalculation } from "@features/csm-admin/sla-engine/useSlaEngine";
+
+const DEFAULT_ROWS_PER_PAGE = 25;
+const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
+const TABLE_COLUMN_COUNT = 7;
+const SLA_ENGINE_PAGE_PATH = "/admin/sla-engine";
 
 function formatTimestamp(value: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
+}
+
+/** entity-service sends SLAStatus.CaseType uppercase (e.g. "SERVICE_REQUEST"); CASE_TYPE_LABEL/caseTypeDetailBasePath are keyed lowercase. */
+function lowerCaseType(caseType: string | undefined): BeCaseType | undefined {
+  return caseType ? (caseType.toLowerCase() as BeCaseType) : undefined;
+}
+
+function caseTypeLabel(caseType: string | undefined): string {
+  if (!caseType) return "—";
+  return CASE_TYPE_LABEL[lowerCaseType(caseType) as BeCaseType] ?? caseType;
+}
+
+/** Where this row's case/SR/SRA/etc. detail page lives -- each type has its own route, not just `/cases`. */
+function caseDetailPath(caseId: string, caseType: string | undefined): string {
+  return `${caseTypeDetailBasePath(lowerCaseType(caseType))}/${caseId}`;
 }
 
 /**
@@ -55,12 +80,31 @@ function formatTimestamp(value: string | null): string {
  */
 export default function CsmSlaEnginePage(): JSX.Element {
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const activeStatuses = useActiveSlaStatuses();
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+  const request = useMemo(() => ({ limit: rowsPerPage, offset: page * rowsPerPage }), [page, rowsPerPage]);
+  const activeStatuses = useActiveSlaStatuses(request);
   const recalculate = useRequestSlaRecalculation();
+
+  // The total can shrink between fetches (a clock completes, a recalculation
+  // changes what's active) -- if that leaves `page` past the new last page,
+  // the table would show "No active SLA clocks right now" with rows still on
+  // an earlier page. Snap back to the last valid page -- a guarded set during
+  // render, React's documented pattern for adjusting state from changed
+  // inputs, not an effect (see CsmIssuesView.tsx's identical pattern/comment).
+  if (activeStatuses.data !== undefined) {
+    const lastPage = Math.max(0, Math.ceil(activeStatuses.data.total / rowsPerPage) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }
 
   const handleConfirm = (): void => {
     setConfirmOpen(false);
     recalculate.mutate();
+  };
+
+  const handleRowsPerPageChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setRowsPerPage(parseInt(e.target.value, 10));
+    setPage(0);
   };
 
   return (
@@ -138,7 +182,9 @@ export default function CsmSlaEnginePage(): JSX.Element {
               <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "action.hover" }}>
-                    <TableCell>Case ID</TableCell>
+                    <TableCell>Case</TableCell>
+                    <TableCell sx={{ maxWidth: 260 }}>Title</TableCell>
+                    <TableCell>Type</TableCell>
                     <TableCell>Clock type</TableCell>
                     <TableCell>Elapsed</TableCell>
                     <TableCell>Status</TableCell>
@@ -146,9 +192,19 @@ export default function CsmSlaEnginePage(): JSX.Element {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {activeStatuses.data.statuses.length === 0 ? (
+                  {activeStatuses.isFetching ? (
+                    Array.from({ length: rowsPerPage }).map((_, i) => (
+                      <TableRow key={i}>
+                        {Array.from({ length: TABLE_COLUMN_COUNT }).map((__, j) => (
+                          <TableCell key={j}>
+                            <Skeleton variant="text" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : activeStatuses.data.statuses.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={TABLE_COLUMN_COUNT}>
                         <Typography variant="body2" color="text.secondary">
                           No active SLA clocks right now.
                         </Typography>
@@ -157,7 +213,26 @@ export default function CsmSlaEnginePage(): JSX.Element {
                   ) : (
                     activeStatuses.data.statuses.map((status) => (
                       <TableRow key={`${status.caseId}-${status.clockType}`}>
-                        <TableCell sx={{ fontFamily: "monospace" }}>{status.caseId}</TableCell>
+                        <TableCell sx={{ fontFamily: "monospace" }}>
+                          <Box
+                            component={RouterLink}
+                            to={caseDetailPath(status.caseId, status.caseType)}
+                            state={{ from: SLA_ENGINE_PAGE_PATH }}
+                            sx={{
+                              color: "inherit",
+                              textDecoration: "none",
+                              "&:hover": { textDecoration: "underline" },
+                            }}
+                          >
+                            {caseIdLabel(status) || status.caseId}
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 260 }}>
+                          <Typography variant="body2" noWrap title={status.caseTitle || undefined}>
+                            {status.caseTitle || "—"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{caseTypeLabel(status.caseType)}</TableCell>
                         <TableCell>{status.clockType}</TableCell>
                         <TableCell>{Math.round(status.businessElapsedPercent)}%</TableCell>
                         <TableCell>
@@ -171,6 +246,17 @@ export default function CsmSlaEnginePage(): JSX.Element {
                 </TableBody>
               </Table>
             </TableContainer>
+            <TablePagination
+              component="div"
+              count={activeStatuses.data.total}
+              page={page}
+              onPageChange={(_, newPage) => setPage(newPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={handleRowsPerPageChange}
+              rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+              showFirstButton
+              showLastButton
+            />
           </Box>
         )}
       </Box>

@@ -26,15 +26,15 @@ import (
 )
 
 type stubSLAEngineClient struct {
-	searchLimit, searchOffset, searchSource string
-	searchResult                            []byte
-	searchErr                               error
-	recalcCalled                            bool
-	recalcErr                               error
+	searchLimit, searchOffset string
+	searchResult              []byte
+	searchErr                 error
+	recalcCalled              bool
+	recalcErr                 error
 }
 
-func (s *stubSLAEngineClient) SearchActiveSLAStatusesManage(_ context.Context, limit, offset, source string) ([]byte, error) {
-	s.searchLimit, s.searchOffset, s.searchSource = limit, offset, source
+func (s *stubSLAEngineClient) SearchActiveSLAStatusesManage(_ context.Context, limit, offset string) ([]byte, error) {
+	s.searchLimit, s.searchOffset = limit, offset
 	return s.searchResult, s.searchErr
 }
 
@@ -59,15 +59,15 @@ func TestSLAEngineHandler_SearchActiveSLAStatusesManage_ForwardsQueryAndResult(t
 	client := &stubSLAEngineClient{searchResult: []byte(`{"statuses":[]}`)}
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
-	req := withUser(httptest.NewRequest(http.MethodGet, "/sla-status/manage?limit=10&offset=5&source=csm", nil))
+	req := withUser(httptest.NewRequest(http.MethodGet, "/sla-status/manage?limit=10&offset=5", nil))
 
 	h.SearchActiveSLAStatusesManage(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if client.searchLimit != "10" || client.searchOffset != "5" || client.searchSource != "csm" {
-		t.Errorf("query not forwarded: limit=%q offset=%q source=%q", client.searchLimit, client.searchOffset, client.searchSource)
+	if client.searchLimit != "10" || client.searchOffset != "5" {
+		t.Errorf("query not forwarded: limit=%q offset=%q", client.searchLimit, client.searchOffset)
 	}
 	if rec.Body.String() != `{"statuses":[]}` {
 		t.Errorf("body = %q, want the client's raw result passed through", rec.Body.String())
