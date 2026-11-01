@@ -28,7 +28,23 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 )
+
+// TestAutoclosureDefaultScheduleFiresDaily pins the 02:30 UTC slot, weekends
+// included (2026-11-07 is a Saturday, 2026-11-08 a Sunday).
+func TestAutoclosureDefaultScheduleFiresDaily(t *testing.T) {
+	for _, day := range []string{"2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"} {
+		now, _ := time.Parse(time.RFC3339, day+"T12:00:00Z")
+		got, err := schedule.PeriodKey(autoclosureDefaultSchedule, now)
+		if err != nil {
+			t.Fatalf("%s: %v", day, err)
+		}
+		if want := day + "T02:30:00Z"; got.Format(time.RFC3339) != want {
+			t.Errorf("%s: period %s, want %s", day, got.Format(time.RFC3339), want)
+		}
+	}
+}
 
 func TestParseRunNowArgs(t *testing.T) {
 	tests := []struct {

@@ -389,8 +389,9 @@ some subjects updated and the rest stale.
 
 ## Case auto-closure
 
-`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `0 8 * * *`, TZ=UTC
-caveat as above), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
+`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `30 2 * * *`: 02:30 UTC =
+08:00 IST, daily including weekends, the slot of the legacy job it replaces; TZ=UTC caveat as above, and the real
+firing is the first driver start after the slot), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
 **Off unless `AUTOCLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
 accident. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. entity-service's `AUTOCLOSURE_SYSTEM_USER_EMAIL` is optional: empty acts as "System user" (no user row, no `closed_by`).
 
@@ -483,7 +484,7 @@ reading the logs between steps:
 3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTOCLOSURE_DAILY_LIMIT` and
    `AUTOCLOSURE_STATES` allow.
 
-When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 08:00 run takes over. For this task
+When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 02:30 UTC run takes over. For this task
 the run-now is safe beside the scheduled run for the reason above: entity-service decides everything. Its
 `--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
 `AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
