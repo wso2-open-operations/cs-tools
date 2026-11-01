@@ -5991,7 +5991,9 @@ type SearchGroupsFilters struct {
 	// IncidentExtraGroupsOnly limits the result to the active groups the
 	// deployment has configured as extra incident assignment groups (and none
 	// when none are configured). Ids are "group" ids, as with SupportGroupsOnly.
-	// It wins over SupportGroupsOnly when both are set. Postgres data source only.
+	// The set may include a group that is also a service's support group, so it
+	// can overlap SupportGroupsOnly results. It wins over SupportGroupsOnly when
+	// both are set. Other data sources return an empty result.
 	IncidentExtraGroupsOnly bool `json:"incidentExtraGroupsOnly,omitempty"`
 }
 

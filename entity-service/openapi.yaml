@@ -27133,15 +27133,17 @@ components:
           default: false
           description: >-
             true limits the result to the active groups the deployment has
-            configured as extra assignable groups for incidents (groups that
-            are not the support group of any service, for example a security
-            operations group). searchQuery and pagination apply, and total
-            counts the matching extra groups. The ids are group ids (what
+            configured as extra assignable groups for incidents (for example a
+            security operations group). These are the active allowlisted
+            groups, which may include a group that is also a service's support
+            group, so the result can overlap supportGroupsOnly results.
+            searchQuery and pagination apply, and total counts the matching
+            extra groups. The ids are group ids (what
             assignmentGroupId takes). When no extra groups are configured the
             result is empty, never every group. If supportGroupsOnly is also
-            true this filter wins and supportGroupsOnly is ignored. Supported
-            on the PostgreSQL data source only; other data sources
-            ignore it.
+            true this filter wins and supportGroupsOnly is ignored. Other data
+            sources do not list these groups and return an empty result for
+            this filter.
 
     ScheduleZone:
       type: object
