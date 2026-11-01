@@ -26,6 +26,7 @@ import {
   initialsOf,
   partsInZone,
   placeOnDay,
+  rotationHostOf,
   timeOf,
   toIsoDate,
 } from "../utils/rota";
@@ -172,6 +173,10 @@ interface Block {
    *  zone's regular hours mix teams, and the avatar colour alone does not say
    *  where one ends and the next begins. */
   byTeam?: boolean;
+  /** A tag after a person's name, by assignment id: the short code of a
+   *  standing window folded into a rotation's card ("AEST" on the Morning
+   *  card), so the reader sees why they are listed there. */
+  rowTags?: Readonly<Record<string, string>>;
 }
 
 /** The escalation tiers, in the order the rota talks about them. */
@@ -304,9 +309,31 @@ export default function DayLadder({
      * Those, and hours that overlap without matching, are set side by side
      * by packIntoColumns below.
      */
+    /** The rotation whose hours a standing window is stored on, on this day:
+     *  AEST regular hours sit on the Morning rotation's 06:00-09:00. */
+    const weekend = day.getDay() === 0 || day.getDay() === 6;
+    const hostOf = (window: ScheduleShift | undefined): ScheduleShift | undefined =>
+      rotationHostOf(window, shifts.values(), weekend);
     const mergeSameHours = (cards: Block[]): Block[] => {
       const out: Block[] = [];
       for (const group of groupBy(cards, (c) => `${c.startMin}-${c.endMin}`).values()) {
+        // Only people on standing hours that are stored on a rotation's hours
+        // (AEST regular hours, with nobody on the Morning rotation that day):
+        // still the rotation's card, so the morning reads the same every day,
+        // each person tagged with the window they work.
+        const host = hostOf(group[0].shift);
+        if (host && group.every((c) => !c.shift?.isRotation && hostOf(c.shift)?.code === host.code)) {
+          const rowTags: Record<string, string> = {};
+          for (const c of group) for (const a of c.rows) rowTags[a.id] = c.shift?.shortCode ?? a.shiftCode;
+          out.push({
+            ...group[0],
+            key: group.map((c) => c.key).join("+"),
+            shift: host,
+            rows: group.flatMap((c) => c.rows),
+            rowTags,
+          });
+          continue;
+        }
         if (group.length < 2) {
           out.push(...group);
           continue;
@@ -340,20 +367,34 @@ export default function DayLadder({
           continue;
         }
         // The first window leads -- its colour and chip -- and an on-call
-        // variant follows the window it is on call for.
+        // variant follows the window it is on call for. A rotation leads a
+        // standing window on the same hours, so the card keeps its name and
+        // colour.
         const ordered = [...group].sort(
-          (a, b) => Number(a.shift?.isOnCall ?? false) - Number(b.shift?.isOnCall ?? false),
+          (a, b) =>
+            Number(a.shift?.isOnCall ?? false) - Number(b.shift?.isOnCall ?? false) ||
+            Number(!(a.shift?.isRotation ?? true)) - Number(!(b.shift?.isRotation ?? true)),
         );
         const lead = ordered[0];
         // A window and its own on-call are one rotation, not two: the card
         // takes the window's name ("Morning 6-9am", not "Morning 6-9am ·
         // Morning 6-9am on-call") and lists everyone together, the on-call
-        // person tagged as such on their own row.
-        if (ordered.filter((c) => !c.shift?.isOnCall).length === 1) {
+        // person tagged as such on their own row. A standing window on the
+        // same hours (AEST regular hours on the morning) folds into that one
+        // list too, each of its people tagged with the window's short code:
+        // they are working those hours, not taking the turn.
+        const turns = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation !== false);
+        const standing = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation === false);
+        if (turns.length === 1 || (turns.length === 0 && standing.length === 1)) {
+          const rowTags: Record<string, string> = {};
+          if (turns.length === 1) {
+            for (const c of standing) for (const a of c.rows) rowTags[a.id] = c.shift?.shortCode ?? a.shiftCode;
+          }
           out.push({
             ...lead,
             key: ordered.map((c) => c.key).join("+"),
             rows: ordered.flatMap((c) => c.rows),
+            ...(Object.keys(rowTags).length > 0 ? { rowTags } : {}),
           });
           continue;
         }
@@ -906,7 +947,7 @@ function LadderBlock({
                 {/* Names in columns that share the card's width, each whole on one line. */}
                 <div className="zsec zflow">
                   {shown.map((a) => (
-                    <NameRow key={a.id} assignment={a} hideTag={block.hideTags} />
+                    <NameRow key={a.id} assignment={a} hideTag={block.hideTags} extraTag={block.rowTags?.[a.id]} />
                   ))}
                 </div>
                 {hidden > 0 ? <span className="lmore">+{hidden} more</span> : null}
@@ -1016,6 +1057,7 @@ function NameRow({
   assignment,
   hideTag,
   showTeam,
+  extraTag,
 }: {
   assignment: ScheduleAssignment;
   /** Inside a team pane the team is already the heading, so repeating it on
@@ -1024,6 +1066,9 @@ function NameRow({
   /** Spell the team out after the name: on a card that mixes teams (the
    *  night cover) it is the thing the reader is looking for. */
   showTeam?: boolean;
+  /** Said when the row has no tier or on-call of its own: the window they are
+   *  on, where the card is another window's (AEST on the Morning card). */
+  extraTag?: string;
 }): JSX.Element {
   const teamColourOf = useTeamColour();
   const teamNameOf = useTeamName();
@@ -1032,7 +1077,7 @@ function NameRow({
      avatar's colour, and the row's own tooltip. Spelling it out a third time
      cost about a quarter of the width the name needed, so the name was the
      thing that got cut. */
-  const tag = assignment.tier ?? (assignment.isOnCall ? "On-call" : null);
+  const tag = assignment.tier ?? (assignment.isOnCall ? "On-call" : (extraTag ?? null));
   return (
     <span className="lnm" title={`${assignment.engineer.name} · ${teamNameOf(assignment.teamKey)}`}>
       <span className="av" style={{ background: teamColourOf(assignment.teamKey) }}>
@@ -1042,7 +1087,7 @@ function NameRow({
       {assignment.engineer.isLead ? <i className="tag lead-t">Lead</i> : null}
       {showTeam ? <i className="tag team-t">{teamNameOf(assignment.teamKey)}</i> : null}
       {hideTag || !tag ? null : (
-        <i className={`tier-t${assignment.isOnCall ? " oc-t" : ""}`}>{tag}</i>
+        <i className={`tier-t${assignment.isOnCall ? " oc-t" : ""}${tag === extraTag ? " win-t" : ""}`}>{tag}</i>
       )}
     </span>
   );
