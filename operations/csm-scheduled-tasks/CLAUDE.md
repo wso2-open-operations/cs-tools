@@ -410,6 +410,7 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 | Env var | Default | Meaning |
 |---|---|---|
 | `AUTOCLOSURE_ENABLED` | `false` | Register the task |
+| `AUTOCLOSURE_SCHEDULED` | `true` | `false` keeps the task configured but off the schedule: the normal tick never fires it, and it runs only on demand with `--run-now=case_autoclosure` (see "Running a task now"). Affects only this task. Needs `AUTOCLOSURE_ENABLED=true` to matter; anything but a boolean refuses to start |
 | `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
 | `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
 | `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
@@ -418,6 +419,73 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
+
+## Running a task now (`--run-now`)
+
+`--run-now=<task name>` runs that task's handler once, right now, then exits (0 on success, 1 on failure), so an
+operator does not have to edit an env var and remember to revert it. Any task registered in this process can be
+named (`cmd/server/runnow.go`). It is **real**: unlike `TRYOUT_TASK` it is not forced to a dry run and not forced
+to a debug audience. At start it logs one WARN with the task name and its effective settings, so it is visible
+in Choreo logs.
+
+Refusals (non-zero exit, a message, never a fall-through to the schedule): an unknown flag, a stray positional
+argument, an empty or malformed value, `--run-now` together with `TRYOUT_TASK`, and a name that is not a
+registered task. A task is registered only when its own enable flag and config allow it (for example
+`case_autoclosure` only with `AUTOCLOSURE_ENABLED=true`), so a disabled task is refused as "not a registered
+task", and the message lists the registered names.
+
+| Argument | Meaning |
+|---|---|
+| `--run-now=<task>` | Run that registered task once now |
+| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure`) |
+| `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
+| `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
+
+`--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
+implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
+supported by task <name>`. The hook can only tighten the task's configured values, never loosen them. Do not add
+per-task flags to a task that does not need them.
+
+**Email.** A run-now of a task that sends email sends to its real recipients, or to its `debug` list in
+`SUB_CRON_RECIPIENTS` if it has one, exactly as a scheduled run does. `ALERTS_ENABLED=false` still silences the
+report emails. Use `TRYOUT_TASK` to see a report land in a debug inbox without touching the real audience.
+
+**It writes no ledger row.** A row would either mark the period done (suppressing the scheduled run) or compete
+with it for the claim. The consequence is plain: the scheduled run for the same period still fires, so a task
+that is **not idempotent** sends or does its work again. Safe to run now are the idempotent tasks only. From
+reading the handlers' code and doc comments (a judgement, not a test):
+
+- **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
+  daily limit); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
+  `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
+  `rota_manual_reminder` (claims waiting requests, each reported once).
+- **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
+  `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
+  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports.
+  `unresolved_products_digest` also mails every run it finds anything.
+- **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
+  confirmed), `query_hours_usage_notifications` (mails crossings it derives in process; whether a repeat re-sends
+  depends on stored state), `rota_weekday_reminder`, `rota_weekend_notice`, `rota_weekend_reminder` (the weekend
+  notice records its send in entity-service, the weekday reminder was not checked for a repeat guard).
+
+When unsure, treat it as not idempotent.
+
+**Example: staged rollout of case auto-closure.** Set `AUTOCLOSURE_ENABLED=true` and `AUTOCLOSURE_SCHEDULED=false`
+(the task stays configured but the normal tick never fires it; anything but a boolean refuses to start), then,
+from a Choreo Manual Task component (or the scheduled task, if it accepts per-run arguments), run in order,
+reading the logs between steps:
+
+1. `--run-now=case_autoclosure --dry-run` : see what is due, change nothing.
+2. `--run-now=case_autoclosure --states=solution_proposed --limit=20` : a small real batch of one state.
+3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTOCLOSURE_DAILY_LIMIT` and
+   `AUTOCLOSURE_STATES` allow.
+
+When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 08:00 run takes over. For this task
+the run-now is safe beside the scheduled run for the reason above: entity-service decides everything. Its
+`--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
+`AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
+the logs (`run-now: ...`).
 
 ## Usage rollups
 

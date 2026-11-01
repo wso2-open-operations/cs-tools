@@ -71,6 +71,22 @@ func main() {
 	loadDotEnv(".env")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
+	// An on-demand run (--run-now=<task>, see runnow.go) is parsed first, before
+	// anything is built: a bad argument must stop here, never fall through to the
+	// schedule. Whether the named task is registered is checked once the tasks are
+	// built, and also refuses to start.
+	runNow, err := parseRunNowArgs(os.Args[1:])
+	if err != nil {
+		slog.Error("invalid command line; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	if runNow != nil {
+		if err := checkRunNow(runNow, os.Getenv("TRYOUT_TASK")); err != nil {
+			slog.Error("run-now refused", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	driverInterval := envDuration("DRIVER_INTERVAL", time.Hour)
 
 	// Shared OAuth2 client credentials — used by the entity-service client
@@ -365,6 +381,9 @@ func main() {
 	// is optional: empty acts as "System user".
 	autoclosureEnabled := envBool("AUTOCLOSURE_ENABLED", false)
 	var autoclosureClient *autoclosure.Client
+	// AUTOCLOSURE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK find
+	// it) but never fired by the engine's tick.
+	autoclosureUnscheduled := false
 	if autoclosureEnabled {
 		autoclosureClient, err = autoclosure.NewClient(autoclosure.ClientConfig{
 			BaseURL:      entityServiceBaseURL,
@@ -1014,12 +1033,45 @@ func main() {
 			slog.Warn("TRYOUT_TASK is case_autoclosure: running as a dry run, nothing will be changed; set AUTOCLOSURE_DRY_RUN=true explicitly to silence this")
 			autoclosureCfg.DryRun = true
 		}
+		// AUTOCLOSURE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=case_autoclosure).
+		// Anything but a boolean refuses to start, like the other AUTOCLOSURE_*
+		// settings: a typo must not silently leave the schedule on or off.
+		autoclosureScheduled, err := parseStrictBool("AUTOCLOSURE_SCHEDULED", os.Getenv("AUTOCLOSURE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !autoclosureScheduled {
+			autoclosureUnscheduled = true
+			slog.Info("case_autoclosure is not scheduled (AUTOCLOSURE_SCHEDULED=false): it runs only with --run-now=case_autoclosure")
+		}
+		// An on-demand run (--run-now=case_autoclosure) uses the configured settings
+		// narrowed by its arguments, and the same handler and entity-service calls
+		// as the scheduled run. Like every run-now it does not touch the ledger: a
+		// ledger row would either mark the day's period done (suppressing the
+		// scheduled run) or be claimed alongside it. Idempotence is entity-service's:
+		// each ticket's advance is a compare-and-set claim, and the daily limit comes
+		// from its audit table, so a run-now beside a scheduled run cannot send
+		// anything twice or exceed the day's budget.
+		runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowAutoclosure(autoclosureCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := runCfg.Validate(); err != nil {
+				return nil, nil, err
+			}
+			return autoclosure.Run(autoclosureClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit, "states", describeStates(runCfg.States)}, nil
+		}
 		tasks = append(tasks, registry.Task{
-			Name:     autoclosureTaskName,
-			Schedule: scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
-			Handler:  autoclosure.Run(autoclosureClient, autoclosureCfg),
-			To:       autoclosureTo,
-			Cc:       autoclosureCc,
+			Name:         autoclosureTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
+			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
+			RunNowNarrow: runNowNarrow,
+			To:           autoclosureTo,
+			Cc:           autoclosureCc,
 		})
 	}
 
@@ -1060,12 +1112,25 @@ func main() {
 	// the engine never ticks. In Choreo: add the task's "debug" list to
 	// SUB_CRON_RECIPIENTS, set TRYOUT_TASK, run the task once by hand, read
 	// the log and the debug inbox, then remove both.
+	if runNow != nil {
+		handler, settings, err := resolveRunNow(tasks, *runNow)
+		if err != nil {
+			slog.Error("run-now refused", "err", err)
+			os.Exit(1)
+		}
+		runOnDemand(runNow.Task, handler, settings)
+		return
+	}
 	if tryout := strings.TrimSpace(os.Getenv("TRYOUT_TASK")); tryout != "" {
 		runTryout(tasks, tryout, debugFor(recipientOverrides, tryout), alertsEnabled)
 		return
 	}
 
-	eng := engine.New(tasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
+	engineTasks := tasks
+	if autoclosureUnscheduled {
+		engineTasks = withoutTask(tasks, autoclosureTaskName)
+	}
+	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 
 	// No app-level execution timeout here — Choreo's own Scheduled Task
 	// execution-time limit already bounds how long one invocation can run.
@@ -1268,6 +1333,25 @@ func runTryout(tasks []registry.Task, name string, debugRecipients []string, ema
 		os.Exit(1)
 	}
 	slog.Info("tryout complete", "task", name, "elapsed", time.Since(start).String())
+}
+
+// runOnDemand runs a --run-now task's handler once, outside the schedule and
+// the ledger, and exits the process: 0 on success, 1 on failure. Unlike
+// runTryout it is real: it reaches the task's real recipients (or its debug list
+// if it has one, as a scheduled run does), and the settings it logs are the ones
+// it acts with.
+func runOnDemand(name string, handler func(ctx context.Context) error, settings []any) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	slog.Warn("run-now: running the task once for real, outside its schedule and the ledger",
+		append([]any{"task", name}, settings...)...)
+	start := time.Now()
+	if err := handler(ctx); err != nil {
+		slog.Error("run-now failed", "task", name, "elapsed", time.Since(start).String(), "err", err)
+		os.Exit(1)
+	}
+	slog.Info("run-now complete", "task", name, "elapsed", time.Since(start).String())
 }
 
 // periodStart returns the scheduled firing time a run of expr made now belongs
