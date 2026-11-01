@@ -19,25 +19,26 @@ import "@config/portalConfig";
 export interface AuthConfig {
   baseUrl: string;
   clientId: string;
-  signInRedirectURL: string;
-  signOutRedirectURL: string;
+  /** Undefined lets AsgardeoProvider default to `window.location.origin`. */
+  signInRedirectURL?: string;
+  signOutRedirectURL?: string;
 }
 
 const getAuthConfig = (): AuthConfig => {
   const config = window.config;
   const baseUrl = config?.CUSTOMER_PORTAL_AUTH_BASE_URL;
   const clientId = config?.CUSTOMER_PORTAL_AUTH_CLIENT_ID;
-  const signInRedirectURL = config?.CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL;
-  const signOutRedirectURL = config?.CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL;
+  // Blank counts as unset, so a placeholder empty string in config.js does not
+  // reach the SDK as an (invalid) redirect URL.
+  const signInRedirectURL =
+    config?.CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL?.trim() || undefined;
+  const signOutRedirectURL =
+    config?.CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?.trim() || undefined;
 
   const missingVars: string[] = [];
 
   if (!baseUrl) missingVars.push("CUSTOMER_PORTAL_AUTH_BASE_URL");
   if (!clientId) missingVars.push("CUSTOMER_PORTAL_AUTH_CLIENT_ID");
-  if (!signInRedirectURL)
-    missingVars.push("CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL");
-  if (!signOutRedirectURL)
-    missingVars.push("CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL");
 
   if (missingVars.length > 0) {
     throw new Error(
