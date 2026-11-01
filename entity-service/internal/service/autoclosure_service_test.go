@@ -196,8 +196,8 @@ func TestAutoclosureAdvance_AwaitingInfoCloseSetsTheNonResponsivenessCode(t *tes
 	if u.ResolutionCode == nil || *u.ResolutionCode != domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness {
 		t.Errorf("an Awaiting Info close must carry the auto-closure resolution code, got %v", u.ResolutionCode)
 	}
-	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") {
-		t.Errorf("closeNotes = %v, want the closure text", u.CloseNotes)
+	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") || strings.Contains(*u.CloseNotes, "<") {
+		t.Errorf("closeNotes = %v, want the closure text as plain text", u.CloseNotes)
 	}
 	if email, ok := autoclosureActorFromContext(cases.updateCtx[0]); !ok || email != "system@example.com" {
 		t.Errorf("the close must be made as the system user, ctx actor = %q (%v)", email, ok)
@@ -316,6 +316,42 @@ func TestAutoclosureDefaultTemplatesCoverEveryStateAndKind(t *testing.T) {
 				t.Errorf("no default template for %s.%s", state, kind)
 			}
 		}
+	}
+}
+
+func TestAutoclosureDefaultTemplatesAreHTMLSignedByCustomerSuccess(t *testing.T) {
+	for key, text := range autoclosureDefaultTemplates {
+		if strings.TrimSpace(text) == "" {
+			t.Errorf("%s: empty", key)
+			continue
+		}
+		if strings.Contains(text, "\n") {
+			t.Errorf("%s: contains a raw newline: %q", key, text)
+		}
+		if !strings.HasPrefix(text, "<p>") || !strings.HasSuffix(text, "</p>") {
+			t.Errorf("%s: not wrapped in <p>...</p>: %q", key, text)
+		}
+		if !strings.Contains(text, "Thanks,<br/>Customer Success Team") {
+			t.Errorf("%s: missing the Customer Success Team sign-off: %q", key, text)
+		}
+		if strings.Contains(strings.ToLower(text), "support team") {
+			t.Errorf("%s: mentions the support team: %q", key, text)
+		}
+	}
+}
+
+func TestAutoclosurePlainText(t *testing.T) {
+	got := autoclosurePlainText(autoclosureDefaultTemplates["awaiting_info.closure"])
+	want := "Hello,\n\nPlease note that this case is closed as we did not receive an update. " +
+		"Thank you for contacting the Customer Success Team.\n\nThanks,\nCustomer Success Team"
+	if got != want {
+		t.Errorf("plain text = %q, want %q", got, want)
+	}
+	if got := autoclosurePlainText("<P class=\"x\">a</P> <p>b<BR>c<b>d</b></p>"); got != "a\n\nb\ncd" {
+		t.Errorf("mixed case/attributes = %q", got)
+	}
+	if got := autoclosurePlainText("custom wording"); got != "custom wording" {
+		t.Errorf("plain override = %q, want unchanged", got)
 	}
 }
 

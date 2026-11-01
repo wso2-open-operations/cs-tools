@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -452,7 +453,10 @@ func (s *autoclosureService) closeCase(ctx context.Context, c repository.Autoclo
 		return "", fmt.Errorf("read ticket before closing: %w", err)
 	}
 	closed := domain.CaseStateClosed
-	update := domain.UpdateCaseRequest{ID: c.ID, State: &closed, CloseNotes: &comment}
+	// The comment is HTML; the close notes are free text, so they get the
+	// plain-text form of the same wording.
+	notes := autoclosurePlainText(comment)
+	update := domain.UpdateCaseRequest{ID: c.ID, State: &closed, CloseNotes: &notes}
 	if view.Cause != nil {
 		update.Cause = view.Cause
 	} else {
@@ -577,32 +581,52 @@ func (s *autoclosureService) commentText(state domain.CaseState, kind string, ov
 }
 
 // autoclosureDefaultTemplates holds the comments sent to the customer, keyed
-// "<state>.<kind>". They are defaults: a caller may send its own for any key
-// (the scheduled task reads them from its configuration), so wording can
-// change without a deploy of this service.
+// "<state>.<kind>". They are HTML (a <p> per paragraph, <br/> for a line break
+// inside one), because comments are rendered as HTML wherever customers read
+// them and plain line breaks would collapse into one run-on paragraph. They
+// are defaults: a caller may send its own for any key (the scheduled task
+// reads them from its configuration), so wording can change without a deploy
+// of this service. Overrides are used verbatim, so they must be HTML too.
 var autoclosureDefaultTemplates = map[string]string{
-	"solution_proposed.first_reminder": "Hello,\n\n" +
-		"This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
-		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.\n\n" +
-		"Thanks,\nSupport Team",
-	"solution_proposed.second_reminder": "Hello,\n\n" +
-		"Please let us know whether you need further support for this case. " +
-		"Please note that if you are unable to respond, the case will be closed off after one week.\n\n" +
-		"Thanks,\nSupport Team",
-	"solution_proposed.closure": "Hello,\n\n" +
-		"Please note that this case has been closed due to inactivity after the solution was suggested. " +
-		"Thank you for contacting the Support Team.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.first_reminder": "Hello,\n\n" +
-		"This case will be automatically closed as no further updates have been received. " +
-		"Please share the requested details to continue the investigation of the issue.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.second_reminder": "Hello,\n\n" +
-		"Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.\n\n" +
-		"Please note that if you are unable to respond, the case will be closed off after one week.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.closure": "Hello,\n\n" +
-		"Please note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Support Team.\n\n" +
-		"Thanks,\nSupport Team",
+	"solution_proposed.first_reminder": "<p>Hello,</p>" +
+		"<p>This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
+		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"solution_proposed.second_reminder": "<p>Hello,</p>" +
+		"<p>Please let us know whether you need further support for this case. " +
+		"Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"solution_proposed.closure": "<p>Hello,</p>" +
+		"<p>Please note that this case has been closed due to inactivity after the solution was suggested. " +
+		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.first_reminder": "<p>Hello,</p>" +
+		"<p>This case will be automatically closed as no further updates have been received. " +
+		"Please share the requested details to continue the investigation of the issue.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.second_reminder": "<p>Hello,</p>" +
+		"<p>Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.</p>" +
+		"<p>Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.closure": "<p>Hello,</p>" +
+		"<p>Please note that this case is closed as we did not receive an update. " +
+		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+}
+
+var (
+	autoclosureParagraphBreak = regexp.MustCompile(`(?i)</p>\s*<p[^>]*>`)
+	autoclosureLineBreak      = regexp.MustCompile(`(?i)<br\s*/?>`)
+	autoclosureAnyTag         = regexp.MustCompile(`<[^>]*>`)
+)
+
+// autoclosurePlainText turns a comment's HTML into plain text for the close
+// notes, which the portals treat as free text: "</p><p>" becomes a blank line,
+// "<br/>" a newline, and any other tag is dropped. HTML entities are left as
+// they are (the defaults use none).
+func autoclosurePlainText(html string) string {
+	t := autoclosureParagraphBreak.ReplaceAllString(html, "\n\n")
+	t = autoclosureLineBreak.ReplaceAllString(t, "\n")
+	t = autoclosureAnyTag.ReplaceAllString(t, "")
+	return strings.TrimSpace(t)
 }

@@ -4551,6 +4551,13 @@ Needs a decision from the team before enabling under dual-write (not verifiable 
 **Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
 `first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
 scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+The defaults and any override are **HTML**: comments are rendered as HTML where customers read them, so plain
+line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
+sign-off, signed `Thanks,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
+for contacting the Customer Success Team." No default may say "Support Team". An override is posted verbatim, never
+transformed, so it must carry its own tags. The close path writes the same text as the comment, but the
+`closeNotes` it sets are the plain-text form (`autoclosurePlainText`: `</p><p>` to a blank line, `<br/>` to a
+newline, other tags dropped), because close notes are free text in the portals.
 
 **Decisions worth knowing.**
 - A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
