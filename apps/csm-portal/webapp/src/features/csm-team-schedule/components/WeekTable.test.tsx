@@ -61,14 +61,14 @@ describe("WeekTable", () => {
     const { container } = renderWeek({
       shifts: shiftMap(REGULAR, EVENING, morning, aest),
       assignments: [
-        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: morning.code }),
+        assignment({ name: "Ben", rotaDate: "2026-09-21", shiftCode: morning.code }),
         assignment({ name: "Ava", rotaDate: "2026-09-21", shiftCode: aest.code, teamKey: "australia" }),
         assignment({ name: "Ava", rotaDate: "2026-09-22", shiftCode: aest.code, teamKey: "australia" }),
       ],
     });
     expect(screen.queryByText("AEST regular hours")).not.toBeInTheDocument();
     const row = [...container.querySelectorAll("tbody tr")].find((r) => r.textContent?.includes("Morning 6-9am"))!;
-    expect(row).toHaveTextContent("Asela");
+    expect(row).toHaveTextContent("Ben");
     const ava = [...row.querySelectorAll(".nm")].filter((n) => n.textContent?.includes("Ava"));
     expect(ava).toHaveLength(2);
     expect(ava[0].querySelector(".tier-t")).toHaveTextContent("AEST");

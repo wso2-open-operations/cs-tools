@@ -1177,8 +1177,8 @@ describe("MonthRoster: reading the codes", () => {
     const { container } = renderRoster({
       shifts: shiftMap(REGULAR, REGULAR_IND, EVENING, aest),
       assignments: [
-        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: REGULAR.code }),
-        assignment({ name: "Akhil", rotaDate: "2026-09-21", shiftCode: REGULAR_IND.code }),
+        assignment({ name: "Ben", rotaDate: "2026-09-21", shiftCode: REGULAR.code }),
+        assignment({ name: "Dev", rotaDate: "2026-09-21", shiftCode: REGULAR_IND.code }),
         assignment({ name: "Ava", rotaDate: "2026-09-21", shiftCode: aest.code }),
       ],
     });

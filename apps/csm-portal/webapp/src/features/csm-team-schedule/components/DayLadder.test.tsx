@@ -210,8 +210,8 @@ describe("DayLadder: cards that share their hours", () => {
         lanes={[
           lane([
             assignment({ ...at, name: "Ava", shiftCode: aest.code }),
-            assignment({ ...at, name: "Asela", shiftCode: MORNING.code }),
-            assignment({ ...at, name: "Nuwan", shiftCode: MORNING_OC.code, isOnCall: true }),
+            assignment({ ...at, name: "Ben", shiftCode: MORNING.code }),
+            assignment({ ...at, name: "Cal", shiftCode: MORNING_OC.code, isOnCall: true }),
           ]),
         ]}
         shifts={shiftMap(REGULAR, EVENING, MORNING, MORNING_OC, aest)}
@@ -226,10 +226,10 @@ describe("DayLadder: cards that share their hours", () => {
     expect(card.querySelectorAll(".zsl")).toHaveLength(0);
     expect(card).not.toHaveTextContent(/AEST regular hours/i);
     const rows = [...card.querySelectorAll(".zflow .lnm")];
-    expect(rows.map((r) => r.querySelector(".who")?.textContent)).toEqual(["Asela", "Ava"]);
+    expect(rows.map((r) => r.querySelector(".who")?.textContent)).toEqual(["Ben", "Ava"]);
     expect(rows[1].querySelector(".tier-t")).toHaveTextContent("AEST");
     expect(rows[0].querySelector(".tier-t")).toBeNull();
-    expect(card.querySelector(".zoc")).toHaveTextContent("Nuwan");
+    expect(card.querySelector(".zoc")).toHaveTextContent("Cal");
   });
 
   it("keeps the Morning card on a day nobody is on the Morning rotation, listing the AEST person tagged", () => {
