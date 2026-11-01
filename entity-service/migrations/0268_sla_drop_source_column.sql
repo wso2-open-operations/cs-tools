@@ -64,9 +64,14 @@ DO $$
 DECLARE
     overlap_count integer;
 BEGIN
+    -- to_regclass/pg_attribute, not information_schema.columns -- resolves
+    -- "sla" the same way any ordinary query would (via the session's own
+    -- search_path), so this check works regardless of which schema a given
+    -- client session happens to default to, unlike matching against a
+    -- literal current_schema() value.
     IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = 'sla' AND column_name = 'source'
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('sla') AND attname = 'source' AND NOT attisdropped
     ) THEN
         SELECT COUNT(*) INTO overlap_count FROM (
             SELECT s.work_item_id, sp.target
@@ -75,7 +80,7 @@ BEGIN
             WHERE s.is_active AND sp.target IS NOT NULL
             GROUP BY s.work_item_id, sp.target
             HAVING COUNT(DISTINCT s.source) > 1
-        ) overlaps;
+        ) dup_pairs;
 
         IF overlap_count > 0 THEN
             RAISE EXCEPTION 'migration 0268: % work_item/target pair(s) have an active sla row from both source values -- resolve which row to keep (cancel the other) before dropping sla.source; see this migration''s own doc comment', overlap_count;
