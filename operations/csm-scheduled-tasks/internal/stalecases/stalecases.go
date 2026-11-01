@@ -35,7 +35,7 @@ import (
 
 // CaseSearcher is the subset of *entitycases.Client this package depends on.
 type CaseSearcher interface {
-	SearchOpenCasesOlderThan(ctx context.Context, olderThan time.Duration) ([]entitycases.Case, error)
+	SearchOpenCasesOlderThan(ctx context.Context, olderThan time.Duration) (cases []entitycases.Case, total int, err error)
 }
 
 // EmailSender is the subset of *notify.Client this package depends on.
@@ -70,7 +70,7 @@ func SendReport(cases CaseSearcher, email EmailSender, olderThan time.Duration, 
 			return nil
 		}
 
-		found, err := cases.SearchOpenCasesOlderThan(ctx, olderThan)
+		found, total, err := cases.SearchOpenCasesOlderThan(ctx, olderThan)
 		if err != nil {
 			return fmt.Errorf("stalecases: search open cases: %w", err)
 		}
@@ -80,6 +80,7 @@ func SendReport(cases CaseSearcher, email EmailSender, olderThan time.Duration, 
 		body := notify.RenderStaleCasesReport(notify.StaleCasesReportData{
 			ThresholdDays: thresholdDays,
 			Cases:         found,
+			TotalCases:    total,
 		})
 		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
 			return fmt.Errorf("stalecases: send report email: %w", err)

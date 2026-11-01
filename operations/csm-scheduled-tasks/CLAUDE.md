@@ -124,6 +124,8 @@ below for why that's not a generic engine feature. Queries entity-service's `POS
 there's no operational need to tune it per deployment today (unlike
 `HOUSEKEEPING_RETENTION_DAYS` — see `cmd/server/main.go`'s `staleCaseThreshold` constant if that
 changes) — then emails a report table of them (oldest first) via `notify.RenderStaleCasesReport`.
+If more than 1,000 match (entity-service's page cap x `maxSearchPages`), the report lists the oldest 1,000 and
+states "showing only the oldest N of TOTAL" rather than failing; `open_cases_report` still errors in that case.
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
 
