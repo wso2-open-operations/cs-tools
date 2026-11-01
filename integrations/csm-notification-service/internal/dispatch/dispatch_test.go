@@ -974,18 +974,18 @@ func TestDispatcher_Handle_CommentAdded_TruncatedComment_FetchFailureFallsBackTo
 
 // mockSLAEngine is a hand-written fake for slaEngineService.
 type mockSLAEngine struct {
-	mu                      sync.Mutex
-	registerCalls           []struct{ caseID, priority, caseNumber string }
-	applyStateCalls         []struct{ caseID, newStatus string }
-	completeResponseCalls   []string
-	completeWorkaroundCalls []string
-	// completeWorkaroundErr, when set, is returned by CompleteWorkaroundClock
+	mu                    sync.Mutex
+	registerCalls         []struct{ caseID, priority, caseNumber string }
+	applyStateCalls       []struct{ caseID, newStatus string }
+	completeResponseCalls []string
+	pauseWorkaroundCalls  []string
+	// pauseWorkaroundErr, when set, is returned by PauseWorkaroundClock
 	// after still recording the call — simulates a Redis outage so a test
 	// can confirm the error actually propagates out of Handle.
-	completeWorkaroundErr error
-	recalculateCalls      int
-	recalculateErr        error
-	reviseCalls           []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }
+	pauseWorkaroundErr error
+	recalculateCalls   int
+	recalculateErr     error
+	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
@@ -1006,11 +1006,11 @@ func (m *mockSLAEngine) CompleteResponseClock(_ context.Context, caseID string) 
 	m.completeResponseCalls = append(m.completeResponseCalls, caseID)
 }
 
-func (m *mockSLAEngine) CompleteWorkaroundClock(_ context.Context, caseID string) error {
+func (m *mockSLAEngine) PauseWorkaroundClock(_ context.Context, caseID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.completeWorkaroundCalls = append(m.completeWorkaroundCalls, caseID)
-	return m.completeWorkaroundErr
+	m.pauseWorkaroundCalls = append(m.pauseWorkaroundCalls, caseID)
+	return m.pauseWorkaroundErr
 }
 
 func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
@@ -1117,7 +1117,7 @@ func TestDispatcher_Handle_CommentAdded_NotSupportEngineer_DoesNotCompleteRespon
 }
 
 // TestDispatcher_Handle_WorkaroundProvided_CompletesWorkaroundClock verifies
-// handleWorkaroundProvided calls slaEngine.CompleteWorkaroundClock with the
+// handleWorkaroundProvided calls slaEngine.PauseWorkaroundClock with the
 // payload's own caseId — the fix for the case PATCH workaroundProvided:true
 // gap (entity-service's own Postgres-side SLA engine completed its clock,
 // but this engine's own Redis-based one never heard about it at all before
@@ -1131,8 +1131,8 @@ func TestDispatcher_Handle_WorkaroundProvided_CompletesWorkaroundClock(t *testin
 	if err := d.Handle(context.Background(), record); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(sla.completeWorkaroundCalls) != 1 || sla.completeWorkaroundCalls[0] != "CASE-1" {
-		t.Errorf("unexpected CompleteWorkaroundClock calls: %v", sla.completeWorkaroundCalls)
+	if len(sla.pauseWorkaroundCalls) != 1 || sla.pauseWorkaroundCalls[0] != "CASE-1" {
+		t.Errorf("unexpected PauseWorkaroundClock calls: %v", sla.pauseWorkaroundCalls)
 	}
 }
 
@@ -1158,7 +1158,7 @@ func TestDispatcher_Handle_WorkaroundProvided_NoEngineConfigured_NoError(t *test
 // eventbus.Consumer retries the record instead of silently acknowledging a
 // clock that was never actually completed.
 func TestDispatcher_Handle_WorkaroundProvided_StoreFailure_ReturnsErrorForRetry(t *testing.T) {
-	sla := &mockSLAEngine{completeWorkaroundErr: errors.New("redis: connection refused")}
+	sla := &mockSLAEngine{pauseWorkaroundErr: errors.New("redis: connection refused")}
 	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.workaround_provided","entityId":"CASE-1","payload":{"caseId":"CASE-1"}}`)}
@@ -1166,8 +1166,8 @@ func TestDispatcher_Handle_WorkaroundProvided_StoreFailure_ReturnsErrorForRetry(
 	if err := d.Handle(context.Background(), record); err == nil {
 		t.Fatal("expected Handle() to return an error so the record is retried, got nil")
 	}
-	if len(sla.completeWorkaroundCalls) != 1 || sla.completeWorkaroundCalls[0] != "CASE-1" {
-		t.Errorf("unexpected CompleteWorkaroundClock calls: %v", sla.completeWorkaroundCalls)
+	if len(sla.pauseWorkaroundCalls) != 1 || sla.pauseWorkaroundCalls[0] != "CASE-1" {
+		t.Errorf("unexpected PauseWorkaroundClock calls: %v", sla.pauseWorkaroundCalls)
 	}
 }
 

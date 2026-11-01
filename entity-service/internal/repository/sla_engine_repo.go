@@ -317,8 +317,18 @@ type CaseFacts struct {
 	// WorkaroundProvided answers "u_workaround_providedISNOTEMPTY" --
 	// backed by the existing work_item.workaround_provided_on column.
 	WorkaroundProvided bool
-	// FixEtaShared answers "fix_eta_sharedISNOTEMPTY" -- backed by the
-	// existing work_item.eta_shared_on column.
+	// FixEtaShared answers "fix_eta_sharedISNOTEMPTY" -- true when ANY of
+	// work_item.best_case_eta/most_likely_eta/worst_case_eta is set.
+	// Deliberately NOT work_item.eta_shared_on: that column records a
+	// separate, explicit "Share fix ETA with customer" action (see
+	// domain.CaseView.EtaSharedOn's own doc comment) with no reliable
+	// connection to when the ETA values themselves were set -- a case can
+	// sit for a long time with an ETA set but not yet shared, during which
+	// this engine's real sla_policy rows (whose own stop_condition reads
+	// "...ORu_fix_eta_sharedISNOTEMPTY") already expect the clock to stop.
+	// Confirmed against a real case where setting an ETA value left the
+	// Workaround clock running under the eta_shared_on-based reading, which
+	// was a genuine bug, not expected behavior.
 	FixEtaShared bool
 	// HasAccount answers "accountISNOTEMPTY".
 	HasAccount bool
@@ -372,36 +382,31 @@ type IncidentFacts struct {
 
 // SLAEngineRepository defines the read/write operations backing this
 // service's own in-process SLA engine (internal/service/sla_policy_resolver.go,
-// sla_engine_service.go). Every clock it writes is tagged source='CSM'
-// (migration 0134's enum) -- this is migration 0134's own original intent,
-// unchanged: 'SERVICENOW' means a row the external sync job that populates
-// sla_policy/sla wrote, 'CSM' means a row this in-process engine wrote, and
-// the two are NEVER supposed to share ownership of the same (work_item,
-// target) pair -- that sync job runs continuously and real-time, tagging
-// every row it writes 'SERVICENOW', so tagging this engine's own clocks the
-// same way would let the two collide on the same case (a dual-write-mode
-// case has rows from both), each silently overwriting state the other owns.
-// `'SERVICENOW'` must never be used for an engine-managed clock.
-//
-// This repository still only ever writes/mutates rows it itself registered
-// via RegisterClock (every method here scopes its WHERE clause to a
-// specific work_item_id/target pair it just resolved a policy for, AND to
-// source='CSM'), so it can never touch a row the external sync job owns.
-// Read-side consumers of "sla" (GET /sla-status, POST /task-slas/search)
-// need no changes at all -- every row already looks the same to them
-// regardless of who wrote it, and both GetClockState (single-clock) and
-// SearchActiveSLAStatuses (bulk) already accept the identical source query
-// parameter, so a caller that wants only this engine's own clocks (e.g.
-// csm-notification-service's pre-alert check, see that repo's own
-// CLAUDE.md) scopes to source=csm on either call, not just the bulk one.
+// sla_engine_service.go). Every clock it writes goes into the "sla" table,
+// which this repository is now the ONLY writer of under every DATA_SOURCE
+// mode. That wasn't always true: until migration 0268, every clock this
+// engine wrote was tagged source='CSM' (migration 0134's enum) specifically
+// to keep it apart from source='SERVICENOW' rows a separate, continuously-
+// running external sync job also wrote into the same table -- the two were
+// never supposed to share ownership of the same (work_item, target) pair,
+// since tagging this engine's own clocks the sync job's way would have let
+// the two collide on the same case, each silently overwriting state the
+// other owned. At the cutover migration 0268 ships with, that sync job
+// stops writing SLA rows into this table at all, so the column -- and the
+// collision it existed to prevent -- is gone; every pre-existing row
+// (regardless of what it was previously tagged) is simply adopted in place
+// and managed by this repository from then on. Read-side consumers of "sla"
+// (GET /sla-status, POST /task-slas/search) no longer take a source
+// parameter either -- there is nothing left to filter by.
 //
 // The `sla_policy` table's own `source` column is a SEPARATE, unrelated
-// concept -- it distinguishes a real previous-system-synced POLICY definition
-// from the 16 `source='CSM'` policy rows this engine used to seed itself
-// (migration 0203, deleted by migration 0259 once this engine started
-// evaluating the real synced policies directly). That policy-table cleanup
-// was correct and stays; only the `sla` (clock) table's own tagging was
-// ever wrongly touched.
+// concept, NOT touched by migration 0268 -- it distinguishes a real
+// previous-system-synced POLICY definition from the 16 `source='CSM'`
+// policy rows this engine used to seed itself (migration 0203, deleted by
+// migration 0259 once this engine started evaluating the real synced
+// policies directly). That remains a meaningful distinction regardless of
+// who writes clock rows, and FindPolicyByName/ListCandidatePolicies below
+// still reference it correctly.
 type SLAEngineRepository interface {
 	// FindPolicyByName resolves the single active sla_policy row matching
 	// name/target, preferring a source='SERVICENOW' row over a source='CSM'
@@ -444,7 +449,7 @@ type SLAEngineRepository interface {
 	// Returns apierror.NotFoundError if no such work item exists.
 	GetIncidentFacts(ctx context.Context, workItemID string) (IncidentFacts, error)
 
-	// CancelClock marks every open (slaEngineOpenStageFilter) source='CSM'
+	// CancelClock marks every open (slaEngineOpenStageFilter)
 	// clock for (workItemID, target) CANCELLED, regardless of which policy
 	// backs it -- used by a caller that knows "every clock of this target
 	// should stop" with no per-policy distinction to make. Returns whether
@@ -474,9 +479,9 @@ type SLAEngineRepository interface {
 	// has no open clock for target at all.
 	ActiveClockPolicies(ctx context.Context, workItemID, target string) ([]SLAPolicyRef, error)
 
-	// RegisterClock inserts a new source='CSM' "sla" row for
+	// RegisterClock inserts a new "sla" row for
 	// (workItemID, policy.Target, policy.ID) and starts it running now,
-	// UNLESS an active (see slaEngineActiveStageFilter) source='CSM' row
+	// UNLESS an active (see slaEngineActiveStageFilter) row
 	// already exists for that exact (work_item, target, policy) triple --
 	// idempotent, so a retried case-create hook never double-registers --
 	// OR a row for that triple already exists in a stage
@@ -501,7 +506,7 @@ type SLAEngineRepository interface {
 	// how that instant is chosen.
 	RegisterClock(ctx context.Context, workItemID string, policy SLAPolicyRef, startOn time.Time) (bool, error)
 
-	// CompleteClock marks EVERY open (slaEngineOpenStageFilter) source='CSM'
+	// CompleteClock marks EVERY open (slaEngineOpenStageFilter)
 	// clock for (workItemID, target) ACHIEVED, regardless of which policy
 	// backs it -- used by a caller that has no notion of "which policy" at
 	// all (a qualifying comment, a workaround being provided, a fix ETA
@@ -534,8 +539,8 @@ type SLAEngineRepository interface {
 	CompleteClockByPolicy(ctx context.Context, workItemID, target, policyID string) (bool, error)
 
 	// SetPaused pauses (true) or resumes (false) EVERY open (not-yet-final,
-	// including BREACHED -- see slaEngineOpenStageFilter) source='CSM'
-	// clock for (workItemID, target), regardless of which policy backs it.
+	// including BREACHED -- see slaEngineOpenStageFilter) clock for
+	// (workItemID, target), regardless of which policy backs it.
 	// Idempotent and a no-op (not an error) when no such clock exists.
 	SetPaused(ctx context.Context, workItemID, target string, paused bool) (bool, error)
 
@@ -547,7 +552,7 @@ type SLAEngineRepository interface {
 	// target.
 	SetPausedByPolicy(ctx context.Context, workItemID, target, policyID string, paused bool) (bool, error)
 
-	// ReviseClocks marks every source='CSM' clock for workItemID CANCELLED,
+	// ReviseClocks marks every clock for workItemID CANCELLED,
 	// per-target (RESPONSE excludes BREACHED from cancellation; WORKAROUND/
 	// RESOLUTION include it -- see the implementation's own doc comment),
 	// then registers a fresh row for each given policy (same insert shape
@@ -718,7 +723,7 @@ func (r *slaEngineRepo) GetCaseFacts(ctx context.Context, workItemID string) (Ca
 		       wi.created_on, COALESCE(pt.name, ''), COALESCE(prod.name, ''),
 		       (wi.account_id IS NOT NULL),
 		       (wi.workaround_provided_on IS NOT NULL),
-		       (wi.eta_shared_on IS NOT NULL),
+		       (wi.best_case_eta IS NOT NULL OR wi.most_likely_eta IS NOT NULL OR wi.worst_case_eta IS NOT NULL),
 		       COALESCE(wi.description, ''),
 		       (SELECT array_agg(cm.content) FROM comment cm
 		           JOIN "user" u ON LOWER(u.email) = LOWER(cm.created_by)
@@ -895,7 +900,6 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -939,7 +943,6 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1038,7 +1041,6 @@ func (r *slaEngineRepo) ActiveClockPolicies(ctx context.Context, workItemID, tar
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + `
 		ORDER BY s.created_on`
@@ -1094,7 +1096,7 @@ func slaPolicyRefColumnsPrefixed(alias string) string {
 	return strings.Join(cols, ", ")
 }
 
-// slaEngineRegisterClockQuery inserts a new source='CSM' "sla" row for
+// slaEngineRegisterClockQuery inserts a new "sla" row for
 // ($1=workItemID, $2=policy.ID) unless an existing row for that exact
 // (work_item, policy) pair is either still active (slaEngineActiveStageFilter)
 // or already reached a stage $5 names as blocking
@@ -1146,23 +1148,21 @@ const slaEngineRegisterClockQuery = `
 		id, created_on, updated_on, created_by, updated_by,
 		work_item_id, sla_policy_id, schedule, is_active, stage, start_on,
 		duration, business_elapsed_percentage, business_duration,
-		remaining_business_duration, has_breached, source
+		remaining_business_duration, has_breached
 	)
 	SELECT gen_random_uuid(), NOW(), NOW(), $3, $3,
 	       $1::uuid, $2::uuid, $6, TRUE, 'IN_PROGRESS'::sla_stage_enum, $7::timestamptz,
-	       $4::interval, 0, INTERVAL '0', $4::interval, FALSE, 'CSM'::sla_source_enum
+	       $4::interval, 0, INTERVAL '0', $4::interval, FALSE
 	FROM registration_lock
 	WHERE NOT EXISTS (
 		SELECT 1 FROM sla s
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND s.sla_policy_id = $2::uuid
 		  AND s.stage::TEXT ` + slaEngineActiveStageFilter + `
 	)
 	AND NOT EXISTS (
 		SELECT 1 FROM sla s
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND s.sla_policy_id = $2::uuid
 		  AND s.stage::TEXT = ANY($5::text[])
 	)`
@@ -1324,7 +1324,6 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -1365,7 +1364,6 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1579,7 +1577,6 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -1618,7 +1615,6 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1779,7 +1775,6 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))
@@ -1847,7 +1842,6 @@ func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID s
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))

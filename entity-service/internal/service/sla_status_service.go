@@ -66,10 +66,10 @@ func normalizeSLAStatusPagination(p *domain.Pagination) error {
 }
 
 type slaStatusService struct {
-	repo       repository.SLAStatusRepository
-	access     AccessService
-	adminRoles []string
-	publisher  EventPublisherService
+	repo                     repository.SLAStatusRepository
+	access                   AccessService
+	csmPortalBackendClientID string
+	publisher                EventPublisherService
 }
 
 // NewSLAStatusService constructs an SLAStatusService backed by the given
@@ -79,13 +79,21 @@ type slaStatusService struct {
 // per-case filtering of its own to scope by (it returns every currently-
 // active clock across every case in one bulk list), so there is no scope
 // short of "internal service" that would be safe to hand this out under.
-// adminRoles is AUTH_ADMIN_ROLES, additionally gating SearchActiveSLAStatuses'
-// own admin=true request and RequestRecalculation -- the CSM portal's
-// "Recalculate SLA" admin action. publisher may be nil (Event Hub not
+// csmPortalBackendClientID is CSM_PORTAL_BACKEND_CLIENT_ID, gating
+// SearchActiveSLAStatuses' own admin=true request and RequestRecalculation
+// -- the CSM portal's "Recalculate SLA" admin action -- the same way
+// portalBannerService.requireCSMPortalBackendCaller gates banner mutations:
+// trusting the caller's client id instead of re-checking AUTH_ADMIN_ROLES
+// here. This used to check AUTH_ADMIN_ROLES directly (requireAdminRole), which
+// requires that list to be configured identically in both csm-portal-backend
+// (which already gates this route on its own PermAdmin check) and here --
+// nothing enforces the two copies agree, and a real admin whose role name
+// only matched one of the two copies got a 403 from entity-service despite
+// passing csm-portal-backend's own gate. publisher may be nil (Event Hub not
 // configured for this deployment); RequestRecalculation reports that as a
 // ServiceUnavailableError rather than silently doing nothing.
-func NewSLAStatusService(repo repository.SLAStatusRepository, access AccessService, adminRoles []string, publisher EventPublisherService) SLAStatusService {
-	return &slaStatusService{repo: repo, access: access, adminRoles: adminRoles, publisher: publisher}
+func NewSLAStatusService(repo repository.SLAStatusRepository, access AccessService, csmPortalBackendClientID string, publisher EventPublisherService) SLAStatusService {
+	return &slaStatusService{repo: repo, access: access, csmPortalBackendClientID: csmPortalBackendClientID, publisher: publisher}
 }
 
 // requireInternalCaller rejects anyone whose AccessScope is not Unrestricted
@@ -94,43 +102,25 @@ func (s *slaStatusService) requireInternalCaller(ctx context.Context) error {
 	return RequireInternalCaller(ctx, s.access, "sla status is only available to internal services")
 }
 
-// requireAdminRole rejects anyone who isn't a holder of one of adminRoles --
-// the role-only half of the admin gate. Callers that also need the internal-
-// caller check (every one of them, today) call requireInternalCaller first;
-// kept separate rather than folded into one function so
-// SearchActiveSLAStatuses can skip a redundant second requireInternalCaller
-// call when admin=true is also requested on an already-internal-caller request.
-func (s *slaStatusService) requireAdminRole(ctx context.Context) error {
-	id := auth.IdentityFromContext(ctx)
-	if id.UserEmail == "" || !holdsAnyRole(id.Roles, s.adminRoles) {
-		return &apierror.ForbiddenError{Msg: "only a CSM admin can manage the SLA engine"}
-	}
-	return nil
-}
-
-// requireAdmin rejects anyone who isn't both an internal caller (reached
-// through the portal BFF, not a bare end-user token) and a holder of one of
-// adminRoles -- same two-part shape skillService.requireAdmin and
-// rotaAccessService's own admin gate use. portalBannerService is the one
-// exception: it trusts csm-portal-backend's own PermAdmin gate via the
-// caller's client id instead of re-checking AUTH_ADMIN_ROLES here -- see that
-// service's requireCSMPortalBackendCaller for why.
-func (s *slaStatusService) requireAdmin(ctx context.Context) error {
+// requireCSMPortalBackendCaller gates the SLA engine's admin actions
+// (SearchActiveSLAStatuses' own admin=true request, RequestRecalculation) on
+// the caller being apps/csm-portal/backend itself -- mirrors
+// portalBannerService.requireCSMPortalBackendCaller exactly; see that
+// method's own doc comment for the full reasoning (one admin check, in
+// csm-portal-backend's own PermAdmin gate, not two independently-configured
+// AUTH_ADMIN_ROLES lists that can silently drift apart).
+func (s *slaStatusService) requireCSMPortalBackendCaller(ctx context.Context) error {
 	if err := RequireInternalCaller(ctx, s.access, "the SLA engine admin actions are only available through the CSM portal"); err != nil {
 		return err
 	}
-	return s.requireAdminRole(ctx)
-}
-
-// slaStatusSourceFilters maps the lowercase, caller-facing sourceFilter
-// values this endpoint accepts to sla_source_enum's real labels -- kept as
-// an explicit allow-list (rather than just upper-casing whatever the caller
-// sends) so an unrecognized value is a 400 naming the problem, not a query
-// bound to a string that can never match any row.
-var slaStatusSourceFilters = map[string]string{
-	"":           "",
-	"csm":        "CSM",
-	"servicenow": "SERVICENOW",
+	id := auth.IdentityFromContext(ctx)
+	if id.UserEmail == "" {
+		return &apierror.ForbiddenError{Msg: "the SLA engine admin actions can only be used by a signed-in person"}
+	}
+	if s.csmPortalBackendClientID == "" || id.ClientID != s.csmPortalBackendClientID {
+		return &apierror.ForbiddenError{Msg: "the SLA engine admin actions can only be used through the CSM Portal"}
+	}
+	return nil
 }
 
 // slaClockTargetFilters maps the lowercase, caller-facing target values
@@ -146,36 +136,34 @@ var slaClockTargetFilters = map[string]string{
 	"resolution": "RESOLUTION",
 }
 
-// SearchActiveSLAStatuses implements SLAStatusService. admin=true adds the
-// CSM-admin role check on top of the ordinary internal-caller check -- it
+// SearchActiveSLAStatuses implements SLAStatusService. admin=true swaps the
+// ordinary internal-caller check for requireCSMPortalBackendCaller -- it
 // only ever narrows who may call this with admin=true, never widens the
 // plain (admin=false) call every existing internal caller already makes
 // (csm-notification-service's own startup reconciliation included), so this
 // is purely additive: nothing about the non-admin path's behavior changes
 // for a caller that never sends it.
-func (s *slaStatusService) SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string, admin bool) (domain.SearchSLAStatusResponse, error) {
-	if err := s.requireInternalCaller(ctx); err != nil {
-		return domain.SearchSLAStatusResponse{}, err
-	}
+func (s *slaStatusService) SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, admin bool) (domain.SearchSLAStatusResponse, error) {
 	if admin {
-		if err := s.requireAdminRole(ctx); err != nil {
+		// requireCSMPortalBackendCaller already includes the internal-caller
+		// check, so this is the admin=true request's only gate -- no
+		// redundant second call.
+		if err := s.requireCSMPortalBackendCaller(ctx); err != nil {
 			return domain.SearchSLAStatusResponse{}, err
 		}
+	} else if err := s.requireInternalCaller(ctx); err != nil {
+		return domain.SearchSLAStatusResponse{}, err
 	}
-	return s.searchActiveSLAStatuses(ctx, req, sourceFilter)
+	return s.searchActiveSLAStatuses(ctx, req)
 }
 
 // searchActiveSLAStatuses is SearchActiveSLAStatuses' shared body, once the
 // caller's own access check (above) has passed.
-func (s *slaStatusService) searchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string) (domain.SearchSLAStatusResponse, error) {
+func (s *slaStatusService) searchActiveSLAStatuses(ctx context.Context, req domain.Pagination) (domain.SearchSLAStatusResponse, error) {
 	if err := normalizeSLAStatusPagination(&req); err != nil {
 		return domain.SearchSLAStatusResponse{}, err
 	}
-	source, ok := slaStatusSourceFilters[strings.ToLower(sourceFilter)]
-	if !ok {
-		return domain.SearchSLAStatusResponse{}, &apierror.ValidationError{Msg: "source must be one of: csm, servicenow"}
-	}
-	statuses, total, err := s.repo.SearchActiveSLAStatuses(ctx, req, source)
+	statuses, total, err := s.repo.SearchActiveSLAStatuses(ctx, req)
 	if err != nil {
 		return domain.SearchSLAStatusResponse{}, err
 	}
@@ -195,7 +183,7 @@ const slaRecalculationEntityID = "sla-engine"
 
 // RequestRecalculation implements SLAStatusService.
 func (s *slaStatusService) RequestRecalculation(ctx context.Context) error {
-	if err := s.requireAdmin(ctx); err != nil {
+	if err := s.requireCSMPortalBackendCaller(ctx); err != nil {
 		return err
 	}
 	if s.publisher == nil {
@@ -221,7 +209,7 @@ func (s *slaStatusService) RequestRecalculation(ctx context.Context) error {
 }
 
 // GetClockState implements SLAStatusService.
-func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error) {
+func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
 	if err := s.requireInternalCaller(ctx); err != nil {
 		return domain.SLAClockState{}, err
 	}
@@ -232,9 +220,5 @@ func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target
 	if !ok {
 		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "target must be one of: response, workaround, resolution"}
 	}
-	source, ok := slaStatusSourceFilters[strings.ToLower(sourceFilter)]
-	if !ok {
-		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "source must be one of: csm, servicenow"}
-	}
-	return s.repo.GetClockState(ctx, workItemID, targetEnum, source)
+	return s.repo.GetClockState(ctx, workItemID, targetEnum)
 }

@@ -1718,13 +1718,15 @@ func TestCaseService_UpdateCase_M2MCallerCannotProvideWorkaround(t *testing.T) {
 	}
 }
 
-// TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided is the
-// regression guard for a real, previously-accepted gap: no code path
-// anywhere ever completed the workaround SLA clock -- ApplyCaseStateEffects
-// only ever paused it, even on close. WorkaroundProvided:true (the
-// "Provide Workaround" webapp action) is the one genuine "workaround was
-// provided" signal that exists in the domain model, and now completes it.
-func TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided(t *testing.T) {
+// TestCaseService_UpdateCase_WorkaroundProvidedTriggersFieldEffects is the
+// regression guard for a real, previously-accepted bug: WorkaroundProvided:
+// true used to hard-complete the workaround SLA clock directly
+// (CompleteWorkaroundClock), but the real WORKAROUND-target policies' own
+// pause_condition reads "...ORu_workaround_providedISNOTEMPTY" -- providing
+// a workaround should PAUSE that clock, not complete it outright. Fixed by
+// routing through the generic condition re-evaluation (ApplyCaseFieldEffects)
+// instead, which lets each policy's own condition text decide.
+func TestCaseService_UpdateCase_WorkaroundProvidedTriggersFieldEffects(t *testing.T) {
 	workaroundProvided := true
 	repo := &stubCaseRepo{
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
@@ -1742,15 +1744,18 @@ func TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.completeWorkaroundCalls) != 1 || slaEngine.completeWorkaroundCalls[0] != testDeploymentUUID {
-		t.Fatalf("expected CompleteWorkaroundClock(%q), got %v", testDeploymentUUID, slaEngine.completeWorkaroundCalls)
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
+		t.Fatalf("expected ApplyCaseFieldEffects(%q), got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }
 
-// TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall proves the
-// hook above only fires on true (provided), not false (a recall) -- there's
-// no "reopen a completed clock" operation, so a recall must not trigger it.
-func TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall(t *testing.T) {
+// TestCaseService_UpdateCase_WorkaroundRecallAlsoTriggersFieldEffects proves
+// a recall (false) now triggers the same re-evaluation as providing one --
+// unlike the old hardcoded-completion hook, which had no "reopen a completed
+// clock" counterpart and so deliberately never fired on a recall, the
+// generic re-evaluation lets a policy's own resume_condition
+// ("u_workaround_providedISEMPTY^...") pick a recall back up for free.
+func TestCaseService_UpdateCase_WorkaroundRecallAlsoTriggersFieldEffects(t *testing.T) {
 	workaroundProvided := false
 	repo := &stubCaseRepo{
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
@@ -1768,8 +1773,8 @@ func TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.completeWorkaroundCalls) != 0 {
-		t.Errorf("expected no CompleteWorkaroundClock call for a recall, got %v", slaEngine.completeWorkaroundCalls)
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
+		t.Errorf("expected ApplyCaseFieldEffects(%q) on a recall too, got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }
 

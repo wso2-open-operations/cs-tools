@@ -432,10 +432,10 @@ func (h *holdingSLA) RegisterClocks(context.Context, string, string, time.Time, 
 		<-h.release
 	}
 }
-func (h *holdingSLA) ApplyStateEffects(context.Context, string, string)     {}
-func (h *holdingSLA) CompleteResponseClock(context.Context, string)         {}
-func (h *holdingSLA) CompleteWorkaroundClock(context.Context, string) error { return nil }
-func (h *holdingSLA) RecalculateFromEntity(context.Context) error           { return nil }
+func (h *holdingSLA) ApplyStateEffects(context.Context, string, string)  {}
+func (h *holdingSLA) CompleteResponseClock(context.Context, string)      {}
+func (h *holdingSLA) PauseWorkaroundClock(context.Context, string) error { return nil }
+func (h *holdingSLA) RecalculateFromEntity(context.Context) error        { return nil }
 func (h *holdingSLA) ReviseClocks(context.Context, string, string, string, string, string, string, string) {
 }
 

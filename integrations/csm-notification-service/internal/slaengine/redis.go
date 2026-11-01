@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -523,10 +524,12 @@ func (s *Store) ReleaseTier(ctx context.Context, caseID, clockType string, tier 
 const wipeScanCount = 500
 
 // WipeAll deletes every key this engine owns in Redis: the whole wake
-// index, every clock hash, and every tier claim. Used only by
-// Engine.RecalculateFromEntity to force a clean rebuild from entity-service
-// — see that method's own doc comment for why a full wipe, not just a
-// repeat Reconcile, is what it needs.
+// index, every clock hash, and every tier claim. No longer called by
+// Engine.RecalculateFromEntity (which used to use this for a clean,
+// from-scratch rebuild -- see that method's own doc comment for the real
+// gap a blanket wipe-then-rebuild had, and ListClockKeys/DeleteClock for
+// what replaced it: writing in place, then removing only the genuinely
+// stale leftovers). Kept as a standalone utility for a genuine full reset.
 //
 // Walks clockKeyPrefix/tierClaimKeyPrefix with SCAN, never KEYS: KEYS
 // blocks this Redis instance for the whole scan, and this same instance
@@ -565,6 +568,56 @@ func (s *Store) deleteByScan(ctx context.Context, pattern string) error {
 			return nil
 		}
 	}
+}
+
+// ListClockKeys returns every (caseID, clockType) pair this engine currently
+// holds a clock hash for, as "<caseID>|<clockType>" identifiers (clockKey's
+// own suffix, with the prefix stripped) -- used by
+// Engine.RecalculateFromEntity's own stale-clock cleanup, which replaced an
+// up-front WipeAll with "write every currently-active clock in place, then
+// remove whatever's left over that entity-service no longer reports active"
+// (see that method's own doc comment for why). Walks the keyspace with SCAN,
+// never KEYS -- same "don't block this Redis instance for other concurrent
+// callers" reasoning deleteByScan already gives.
+func (s *Store) ListClockKeys(ctx context.Context) ([]string, error) {
+	var ids []string
+	var cursor uint64
+	for {
+		keys, next, err := s.rdb.Scan(ctx, cursor, clockKeyPrefix+"*", wipeScanCount).Result()
+		if err != nil {
+			return nil, fmt.Errorf("slaengine: list clock keys: scan: %w", err)
+		}
+		for _, k := range keys {
+			ids = append(ids, strings.TrimPrefix(k, clockKeyPrefix))
+		}
+		cursor = next
+		if cursor == 0 {
+			return ids, nil
+		}
+	}
+}
+
+// DeleteClock removes one (caseID, clockType) clock entirely: its hash,
+// every tier's wake entry (RemoveWake on an absent member is a harmless
+// no-op, so this doesn't need to know which tiers, if any, are still
+// pending), and every tier-claim key under it (walked with SCAN, since a
+// claim key's own suffix embeds the clock's startedAt, which isn't known
+// here -- see tierClaimKey's own doc comment). Used by
+// Engine.RecalculateFromEntity's own cleanup pass, once a fresh rebuild has
+// confirmed entity-service no longer reports this clock active at all.
+func (s *Store) DeleteClock(ctx context.Context, caseID, clockType string) error {
+	if err := s.rdb.Del(ctx, clockKey(caseID, clockType)).Err(); err != nil {
+		return fmt.Errorf("slaengine: delete clock %s|%s: delete hash: %w", caseID, clockType, err)
+	}
+	for _, tier := range tierSequence {
+		if err := s.RemoveWake(ctx, wakeMember(caseID, clockType, tier)); err != nil {
+			return fmt.Errorf("slaengine: delete clock %s|%s: remove wake tier %d: %w", caseID, clockType, tier, err)
+		}
+	}
+	if err := s.deleteByScan(ctx, tierClaimKeyPrefix+caseID+"|"+clockType+"|*"); err != nil {
+		return fmt.Errorf("slaengine: delete clock %s|%s: %w", caseID, clockType, err)
+	}
+	return nil
 }
 
 func boolString(b bool) string {
