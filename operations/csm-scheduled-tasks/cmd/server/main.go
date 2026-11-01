@@ -1002,8 +1002,9 @@ func main() {
 		)
 	}
 
-	// Daily at 08:00 (TZ=UTC-dependent, like every schedule here), the time the
-	// ServiceNow flow this replaces ran. The limit is per UTC day and enforced by
+	// Daily at 02:30 UTC (08:00 IST), every day including weekends, the slot the
+	// legacy job this replaces ran in (TZ=UTC-dependent, like every schedule
+	// here; the real firing is the first driver start after the slot). The limit is per UTC day and enforced by
 	// entity-service from its audit table, so the engine retrying a failed run
 	// the same day cannot exceed it. A partial failure is retried the next tick:
 	// tickets already advanced are no longer due, so only what is left is done.
@@ -1067,7 +1068,7 @@ func main() {
 		}
 		tasks = append(tasks, registry.Task{
 			Name:         autoclosureTaskName,
-			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
+			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, autoclosureDefaultSchedule),
 			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
 			RunNowNarrow: runNowNarrow,
 			To:           autoclosureTo,

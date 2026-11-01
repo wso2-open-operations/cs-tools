@@ -30,6 +30,10 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 )
 
+// autoclosureDefaultSchedule is case_autoclosure's default cron: 02:30 UTC, which
+// is 08:00 IST, every day including weekends (no day-of-week field).
+const autoclosureDefaultSchedule = "30 2 * * *"
+
 // allAutoclosureStates is what an empty AUTOCLOSURE_STATES means.
 var allAutoclosureStates = []string{"awaiting_info", "solution_proposed"}
 

@@ -4551,6 +4551,16 @@ Needs a decision from the team before enabling under dual-write (not verifiable 
 **Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
 `first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
 scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+The defaults and any override are **HTML**: comments are rendered as HTML where customers read them, so plain
+line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
+sign-off, signed `Thanks,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
+for contacting the Customer Success Team." No default may say "Support Team". An override is posted verbatim, never
+transformed, so it must carry its own tags.
+Closing keeps the case's existing close notes when it has any (as the legacy process did, which never wrote its
+message there), and only when there are none does it set the plain-text form of the closure wording
+(`autoclosurePlainText`: any `<br>` to a newline, the end of a list item to a newline, the end of any other block element such as `p`/`div`/`ul` to a blank line, other tags dropped, entities left as they are), because closing an
+internal-caller case in dual-write requires non-empty close notes. The closure message itself is the
+customer-visible HTML comment posted after the close.
 
 **Decisions worth knowing.**
 - A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
