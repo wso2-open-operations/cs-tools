@@ -16,7 +16,7 @@
 
 import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { Card, Chip, Skeleton, Stack, Typography, pxToRem, useTheme } from "@wso2/oxygen-ui";
-import { ChevronRight, Clock4 } from "@wso2/oxygen-ui-icons-react";
+import { ChevronRight, Clock4, Users } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "react-router-dom";
 import type { IncidentSummary } from "@src/types";
 import { fromNow } from "@utils/dateTime";
@@ -48,18 +48,29 @@ export function IncidentCard({ item }: { item: IncidentSummary }) {
         </Typography>
       )}
 
-      <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
-        {item.state && (
-          <Chip size="small" label={incidentStateLabel(item.state)} color={incidentStateColor(item.state)} />
-        )}
-        {item.priority && (
-          <Chip
-            size="small"
-            variant="outlined"
-            label={incidentPriorityLabel(item.priority)}
-            color={incidentPriorityColor(item.priority)}
-          />
-        )}
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+        <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" sx={{ flexShrink: 0 }}>
+          {item.state && (
+            <Chip size="small" label={incidentStateLabel(item.state)} color={incidentStateColor(item.state)} />
+          )}
+          {item.priority && (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={incidentPriorityLabel(item.priority)}
+              color={incidentPriorityColor(item.priority)}
+            />
+          )}
+        </Stack>
+
+        {/* Assignment group (ServiceNow team), right-aligned beside the chips — always shown,
+            "Unassigned" when no team has it yet; long names truncate rather than wrap. */}
+        <Stack direction="row" alignItems="center" gap={0.5} sx={{ minWidth: 0 }}>
+          <Users size={pxToRem(13)} color={theme.vars.palette.text.secondary} style={{ flexShrink: 0 }} />
+          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ fontSize: pxToRem(12) }}>
+            {item.assignmentGroup?.name || "Unassigned"}
+          </Typography>
+        </Stack>
       </Stack>
 
       <Stack direction="row" alignItems="center" gap={0.5}>
@@ -96,9 +107,12 @@ export function IncidentCardSkeleton() {
         </Stack>
         <Skeleton variant="text" width="80%" height={26} />
         <Skeleton variant="text" width="40%" height={18} />
-        <Stack direction="row" gap={1}>
-          <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: 1 }} />
-          <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: 1 }} />
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" gap={1}>
+            <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: 1 }} />
+            <Skeleton variant="rounded" width={70} height={24} sx={{ borderRadius: 1 }} />
+          </Stack>
+          <Skeleton variant="text" width={90} height={18} />
         </Stack>
       </Stack>
     </Card>
