@@ -211,14 +211,14 @@ Edit your copy with values for your environment. The template (`public/config.js
 |---|---|---|
 | `CSM_PORTAL_AUTH_BASE_URL` | Base URL of the OIDC identity provider | `https://idp.example.com` |
 | `CSM_PORTAL_AUTH_CLIENT_ID` | OAuth2 client id of the identity provider SPA application registered for this portal (use a separate application from any other portal) | `your-client-id` |
-| `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | URL the IdP redirects to after sign-in; must match the application's registered redirect URIs | `http://localhost:3001` |
-| `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | URL the IdP redirects to after sign-out; must be registered too | `http://localhost:3001` |
 | `CSM_PORTAL_BACKEND_BASE_URL` | Base URL of the CSM portal backend (BFF). Bearer tokens are only ever sent to this origin | `https://api.example.com/csm-portal/v1.0` |
 
 ### Optional keys
 
 | Key | Type / default | Description | Example |
 |---|---|---|---|
+| `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | string, page origin | URL the IdP redirects to after sign-in. Unset means the page's own origin (`window.location.origin`), so the app works on any host and port; that origin must be a registered redirect URI on the IdP application. Set it only to override, e.g. behind a proxy whose public origin differs from the browser's | `http://localhost:3001` |
+| `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | string, page origin | URL the IdP redirects to after sign-out. Same default and override rules as the sign-in URL; must also be registered | `http://localhost:3001` |
 | `CSM_PORTAL_THEME` | string, `acrylicOrange` | Default theme key. The valid set is derived from the installed Oxygen UI version (for example `acrylicOrange`, `acrylicPurple`); users can override it from the header and the choice persists per browser | `acrylicOrange` |
 | `CSM_PORTAL_LOG_LEVEL` | string, `ERROR` | Logger level: `DEBUG`, `INFO`, `WARN`, `ERROR` | `INFO` |
 | `CSM_PORTAL_FEATURE_OVERRIDES` | object or JSON string, `{}` | Per-page visibility keyed by navigation-node id (a section such as `operations`, or a tab such as `operations.incidents`). Values: `enabled`, `wip`, `hidden`. Unlisted pages are enabled; a section's value cascades to its tabs unless the tab overrides it; a `hidden` section hides all its tabs. Unknown ids are ignored with a console warning. The available ids are the `id` fields in `src/config/csmNavItems.ts` | `{ "operations": "wip", "operations.incidents": "enabled" }` |
