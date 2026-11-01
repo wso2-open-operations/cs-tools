@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,24 +30,19 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 )
 
-// runNowTasks are the tasks --run-now accepts. Only case auto-closure: it is the
-// one task an operator needs to start by hand with narrower settings than its
-// schedule runs with. The report tasks have TRYOUT_TASK.
-var runNowTasks = []string{"case_autoclosure"}
-
 // allAutoclosureStates is what an empty AUTOCLOSURE_STATES means.
 var allAutoclosureStates = []string{"awaiting_info", "solution_proposed"}
 
 // runNowArgs is the parsed command line of an on-demand run.
 type runNowArgs struct {
+	// Task is the registered task to run; whether it is registered is checked
+	// by resolveRunNow once the tasks are built.
 	Task string
-	// DryRun forces a dry run; false leaves the configured value alone.
-	DryRun bool
-	// Limit is this invocation's daily limit; 0 means "not given" (a given
-	// limit must be positive).
-	Limit int
-	// States is the subset of AUTOCLOSURE_STATES to work; nil means "not given".
-	States []string
+	// Options are the narrowing arguments, zero when not given.
+	Options registry.RunNowOptions
+	// Given names the narrowing flags that were on the command line, in the
+	// order they are reported ("--dry-run", "--limit", "--states").
+	Given []string
 }
 
 // parseRunNowArgs parses the process arguments (without the program name). It
@@ -59,10 +55,10 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	}
 	fs := flag.NewFlagSet("csm-scheduled-tasks", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	task := fs.String("run-now", "", "run this task once now, then exit")
-	dryRun := fs.Bool("dry-run", false, "force a dry run (only with --run-now)")
-	limit := fs.Int("limit", 0, "daily limit for this run (only with --run-now)")
-	states := fs.String("states", "", "comma list of states to work (only with --run-now)")
+	task := fs.String("run-now", "", "run this registered task once now, then exit")
+	dryRun := fs.Bool("dry-run", false, "force a dry run (only with --run-now, only some tasks)")
+	limit := fs.Int("limit", 0, "daily limit for this run (only with --run-now, only some tasks)")
+	states := fs.String("states", "", "comma list of states to work (only with --run-now, only some tasks)")
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
 	}
@@ -76,41 +72,76 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 		return nil, errors.New("--dry-run, --limit and --states are only valid together with --run-now")
 	}
 	name := strings.TrimSpace(*task)
-	if !slices.Contains(runNowTasks, name) {
-		return nil, fmt.Errorf("--run-now=%q is not a task that can be run on demand; supported: %s", name, strings.Join(runNowTasks, ", "))
+	if name == "" {
+		return nil, errors.New("--run-now needs a task name, for example --run-now=case_autoclosure")
 	}
-	out := &runNowArgs{Task: name, DryRun: *dryRun}
+	out := &runNowArgs{Task: name}
+	if seen["dry-run"] {
+		out.Options.DryRun = *dryRun
+		out.Given = append(out.Given, "--dry-run")
+	}
 	if seen["limit"] {
 		if *limit <= 0 {
 			return nil, fmt.Errorf("--limit=%d must be a positive number", *limit)
 		}
-		out.Limit = *limit
+		out.Options.Limit = *limit
+		out.Given = append(out.Given, "--limit")
 	}
 	if seen["states"] {
-		out.States = splitComma(*states)
-		if len(out.States) == 0 {
+		out.Options.States = splitComma(*states)
+		if len(out.Options.States) == 0 {
 			return nil, errors.New("--states is empty; give a comma list such as solution_proposed")
 		}
+		out.Given = append(out.Given, "--states")
 	}
 	return out, nil
 }
 
-// checkRunNow refuses an on-demand run that cannot go ahead: the task is off,
-// or TRYOUT_TASK is also set (two different "run once" modes at once).
-func checkRunNow(a *runNowArgs, autoclosureEnabled bool, tryoutTask string) error {
-	if !autoclosureEnabled {
-		return fmt.Errorf("--run-now=%s requires AUTOCLOSURE_ENABLED=true; refusing", a.Task)
-	}
+// checkRunNow refuses an on-demand run combined with TRYOUT_TASK (two different
+// "run once" modes at once).
+func checkRunNow(a *runNowArgs, tryoutTask string) error {
 	if strings.TrimSpace(tryoutTask) != "" {
-		return errors.New("--run-now cannot be combined with TRYOUT_TASK; refusing")
+		return fmt.Errorf("--run-now=%s cannot be combined with TRYOUT_TASK; refusing", a.Task)
 	}
 	return nil
+}
+
+// resolveRunNow finds the task an on-demand run names among the registered ones
+// and returns the handler to run and the settings to log. A name that is not
+// registered is refused, listing the registered names; usually the task's own
+// enable flag is off. The narrowing flags need the task's RunNowNarrow hook; a
+// task without one refuses them rather than ignoring them.
+func resolveRunNow(tasks []registry.Task, a runNowArgs) (func(ctx context.Context) error, []any, error) {
+	var names []string
+	var task *registry.Task
+	for i := range tasks {
+		names = append(names, tasks[i].Name)
+		if tasks[i].Name == a.Task {
+			task = &tasks[i]
+		}
+	}
+	if task == nil {
+		slices.Sort(names)
+		return nil, nil, fmt.Errorf("--run-now=%q is not a registered task: either the name is wrong or the task is not registered because its enable flag is off; registered: %s",
+			a.Task, strings.Join(names, ", "))
+	}
+	if task.RunNowNarrow == nil {
+		if len(a.Given) > 0 {
+			return nil, nil, fmt.Errorf("%s is not supported by task %s", a.Given[0], task.Name)
+		}
+		return task.Handler, nil, nil
+	}
+	handler, settings, err := task.RunNowNarrow(a.Options)
+	if err != nil {
+		return nil, nil, err
+	}
+	return handler, settings, nil
 }
 
 // narrowAutoclosure applies an on-demand run's arguments to the configured
 // settings. They can only tighten: a dry run stays a dry run, the limit may not
 // exceed a configured cap, and the states must be among the configured ones.
-func narrowAutoclosure(cfg autoclosure.RunConfig, a runNowArgs) (autoclosure.RunConfig, error) {
+func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (autoclosure.RunConfig, error) {
 	if a.DryRun {
 		cfg.DryRun = true
 	}
@@ -147,16 +178,12 @@ func describeStates(states []string) string {
 	return strings.Join(states, ",")
 }
 
-// withoutUnscheduled returns the tasks the engine's tick may fire: every task
-// except those named in unscheduled. An unscheduled task stays registered (so
-// TRYOUT_TASK and --run-now still find it) but is never started by the schedule.
-func withoutUnscheduled(tasks []registry.Task, unscheduled map[string]bool) []registry.Task {
-	if len(unscheduled) == 0 {
-		return tasks
-	}
+// withoutTask returns tasks without the one named name: the engine's list when
+// AUTOCLOSURE_SCHEDULED=false keeps case_autoclosure off the schedule.
+func withoutTask(tasks []registry.Task, name string) []registry.Task {
 	out := make([]registry.Task, 0, len(tasks))
 	for _, t := range tasks {
-		if !unscheduled[t.Name] {
+		if t.Name != name {
 			out = append(out, t)
 		}
 	}

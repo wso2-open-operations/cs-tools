@@ -71,16 +71,17 @@ func main() {
 	loadDotEnv(".env")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	// An on-demand run (--run-now=<task>, see runnow.go) is checked first, before
-	// anything is built: a bad argument or a disabled task must stop here, never
-	// fall through to the schedule.
+	// An on-demand run (--run-now=<task>, see runnow.go) is parsed first, before
+	// anything is built: a bad argument must stop here, never fall through to the
+	// schedule. Whether the named task is registered is checked once the tasks are
+	// built, and also refuses to start.
 	runNow, err := parseRunNowArgs(os.Args[1:])
 	if err != nil {
 		slog.Error("invalid command line; refusing to start", "err", err)
 		os.Exit(1)
 	}
 	if runNow != nil {
-		if err := checkRunNow(runNow, envBool("AUTOCLOSURE_ENABLED", false), os.Getenv("TRYOUT_TASK")); err != nil {
+		if err := checkRunNow(runNow, os.Getenv("TRYOUT_TASK")); err != nil {
 			slog.Error("run-now refused", "err", err)
 			os.Exit(1)
 		}
@@ -380,11 +381,9 @@ func main() {
 	// is optional: empty acts as "System user".
 	autoclosureEnabled := envBool("AUTOCLOSURE_ENABLED", false)
 	var autoclosureClient *autoclosure.Client
-	// Tasks the engine's tick must not fire; they stay registered for TRYOUT_TASK
-	// and --run-now.
-	unscheduled := map[string]bool{}
-	var runNowHandler func(ctx context.Context) error
-	var runNowSettings []any
+	// AUTOCLOSURE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK find
+	// it) but never fired by the engine's tick.
+	autoclosureUnscheduled := false
 	if autoclosureEnabled {
 		autoclosureClient, err = autoclosure.NewClient(autoclosure.ClientConfig{
 			BaseURL:      entityServiceBaseURL,
@@ -1044,37 +1043,35 @@ func main() {
 			os.Exit(1)
 		}
 		if !autoclosureScheduled {
-			unscheduled[autoclosureTaskName] = true
+			autoclosureUnscheduled = true
 			slog.Info("case_autoclosure is not scheduled (AUTOCLOSURE_SCHEDULED=false): it runs only with --run-now=case_autoclosure")
 		}
-		// An on-demand run uses the configured settings narrowed by its
-		// arguments, and the same handler and entity-service calls as the
-		// scheduled run. It deliberately does not touch the ledger: a ledger row
-		// would either mark the day's period done (suppressing the scheduled run)
-		// or be claimed alongside it. Idempotence is entity-service's: each
-		// ticket's advance is a compare-and-set claim, and the daily limit comes
+		// An on-demand run (--run-now=case_autoclosure) uses the configured settings
+		// narrowed by its arguments, and the same handler and entity-service calls
+		// as the scheduled run. Like every run-now it does not touch the ledger: a
+		// ledger row would either mark the day's period done (suppressing the
+		// scheduled run) or be claimed alongside it. Idempotence is entity-service's:
+		// each ticket's advance is a compare-and-set claim, and the daily limit comes
 		// from its audit table, so a run-now beside a scheduled run cannot send
 		// anything twice or exceed the day's budget.
-		if runNow != nil {
-			runCfg, err := narrowAutoclosure(autoclosureCfg, *runNow)
+		runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowAutoclosure(autoclosureCfg, o)
 			if err != nil {
-				slog.Error("invalid run-now arguments; refusing", "err", err)
-				os.Exit(1)
+				return nil, nil, err
 			}
 			if err := runCfg.Validate(); err != nil {
-				slog.Error("invalid run-now configuration; refusing", "err", err)
-				os.Exit(1)
+				return nil, nil, err
 			}
-			runNowHandler = autoclosure.Run(autoclosureClient, runCfg)
-			runNowSettings = []any{"task", runNow.Task, "dryRun", runCfg.DryRun,
-				"dailyLimit", runCfg.DailyLimit, "states", describeStates(runCfg.States)}
+			return autoclosure.Run(autoclosureClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit, "states", describeStates(runCfg.States)}, nil
 		}
 		tasks = append(tasks, registry.Task{
-			Name:     autoclosureTaskName,
-			Schedule: scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
-			Handler:  autoclosure.Run(autoclosureClient, autoclosureCfg),
-			To:       autoclosureTo,
-			Cc:       autoclosureCc,
+			Name:         autoclosureTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
+			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
+			RunNowNarrow: runNowNarrow,
+			To:           autoclosureTo,
+			Cc:           autoclosureCc,
 		})
 	}
 
@@ -1116,7 +1113,12 @@ func main() {
 	// SUB_CRON_RECIPIENTS, set TRYOUT_TASK, run the task once by hand, read
 	// the log and the debug inbox, then remove both.
 	if runNow != nil {
-		runOnDemand(runNow.Task, runNowHandler, runNowSettings)
+		handler, settings, err := resolveRunNow(tasks, *runNow)
+		if err != nil {
+			slog.Error("run-now refused", "err", err)
+			os.Exit(1)
+		}
+		runOnDemand(runNow.Task, handler, settings)
 		return
 	}
 	if tryout := strings.TrimSpace(os.Getenv("TRYOUT_TASK")); tryout != "" {
@@ -1124,7 +1126,11 @@ func main() {
 		return
 	}
 
-	eng := engine.New(withoutUnscheduled(tasks, unscheduled), ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
+	engineTasks := tasks
+	if autoclosureUnscheduled {
+		engineTasks = withoutTask(tasks, autoclosureTaskName)
+	}
+	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 
 	// No app-level execution timeout here — Choreo's own Scheduled Task
 	// execution-time limit already bounds how long one invocation can run.
@@ -1331,12 +1337,15 @@ func runTryout(tasks []registry.Task, name string, debugRecipients []string, ema
 
 // runOnDemand runs a --run-now task's handler once, outside the schedule and
 // the ledger, and exits the process: 0 on success, 1 on failure. Unlike
-// runTryout it is real: the settings it logs are the ones it acts with.
+// runTryout it is real: it reaches the task's real recipients (or its debug list
+// if it has one, as a scheduled run does), and the settings it logs are the ones
+// it acts with.
 func runOnDemand(name string, handler func(ctx context.Context) error, settings []any) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	slog.Warn("run-now: running the task once, outside its schedule and the ledger", settings...)
+	slog.Warn("run-now: running the task once for real, outside its schedule and the ledger",
+		append([]any{"task", name}, settings...)...)
 	start := time.Now()
 	if err := handler(ctx); err != nil {
 		slog.Error("run-now failed", "task", name, "elapsed", time.Since(start).String(), "err", err)
