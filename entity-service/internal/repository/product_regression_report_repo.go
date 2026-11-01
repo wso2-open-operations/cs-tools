@@ -51,14 +51,21 @@ func NewProductRegressionReportRepository(db *Scoped) ProductRegressionReportRep
 // listRegressionCasesSQL is the report. Notes on the joins:
 //
 //   - A case is a work item of type CASE with a case row. The product it
-//     is filed against is work_item.product_id; a case with no product
-//     cannot belong to any product's report and is left out by the inner
-//     join. Names are matched after lower-casing and trimming both sides,
+//     is filed against is the product behind its deployed product, the
+//     same source case search and the case detail page use; older rows
+//     that have no deployed product fall back to work_item.product_id. A
+//     case with neither cannot belong to any product's report and is left
+//     out by the inner join. Names are matched after lower-casing and
+//     trimming both sides,
 //     so a product that exists twice under one name (it does) is matched
 //     by both rows, and the name is trimmed on the way out so they group
 //     together.
-//   - The deployed product is the customer's install the case concerns,
-//     the "Product" column the report has always shown beside the case.
+//   - The product column is the case's product name and version, built
+//     the way the case detail page shows it: the name of the product
+//     behind the case's deployed product, a space, then its version (the
+//     version is left off when there is none). The deployed product's own
+//     name column is not used: it is blank on almost every row. A case
+//     with no deployed product yields an empty string.
 //   - The month is taken on eta_shared_on, the instant the fix ETA was
 //     shared with the customer: the report lists the regressions a fix
 //     was promised for that month, not the ones opened or closed then.
@@ -69,12 +76,14 @@ SELECT wi.id::text,
        COALESCE(wi.wso2_id, ''),
        COALESCE(wi.subject, ''),
        TRIM(p.name),
-       COALESCE(dp.name, ''),
+       COALESCE(TRIM(dprod.name || COALESCE(' ' || dpv.version, '')), ''),
        wi.eta_shared_on
   FROM work_item wi
   JOIN "case" c ON c.id = wi.id
-  JOIN product p ON p.id = wi.product_id
   LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
+  JOIN product p ON p.id = COALESCE(dp.product_id, wi.product_id)
+  LEFT JOIN product dprod ON dprod.id = dp.product_id
+  LEFT JOIN product_version dpv ON dpv.id = dp.version_id
  WHERE wi.type = 'CASE'
    AND LOWER(TRIM(p.name)) = ANY($1::text[])
    AND wi.eta_shared_on >= $2

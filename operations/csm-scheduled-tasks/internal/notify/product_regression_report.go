@@ -27,7 +27,7 @@ const productRegressionReportTimezone = "Asia/Colombo"
 // product with a count per product and in total -- the layout of the
 // report it replaces. unitLabel names the business unit ("APIM").
 // caseLinkBase is a case page prefix; when set, each row's case id links
-// to <caseLinkBase>/<case number>, else it is plain text. [YEAR] is
+// to <caseLinkBase>/<case id>, else it is plain text. [YEAR] is
 // today's year, the footer-only detail every template here has.
 func RenderProductRegressionReport(r regressionreport.Report, unitLabel, caseLinkBase string) string {
 	loc, err := time.LoadLocation(productRegressionReportTimezone)
@@ -82,17 +82,18 @@ func renderRegressionRows(groups []regressionreport.Group, caseLinkBase string) 
 }
 
 // regressionCaseLink is the row's case id, linked to the case page
-// (<caseLinkBase>/<number>) when a base URL is configured. The key falls
-// back to the number so the cell is never blank; the number is
-// path-escaped because it is data.
+// (<caseLinkBase>/<case id>) when a base URL is configured. The CSM portal
+// addresses a case by its id, not its number, so the link uses the id; a
+// row without one stays plain text. The key falls back to the number so
+// the cell is never blank; the id is path-escaped because it is data.
 func regressionCaseLink(caseLinkBase string, row regressionreport.Row) string {
 	text := row.IssueKey
 	if text == "" {
 		text = row.Number
 	}
-	if caseLinkBase == "" || row.Number == "" {
+	if caseLinkBase == "" || row.ID == "" {
 		return escapeHTML(text)
 	}
-	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.Number)
+	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.ID)
 	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }
