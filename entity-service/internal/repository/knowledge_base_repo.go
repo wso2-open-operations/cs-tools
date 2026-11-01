@@ -27,7 +27,7 @@ import (
 // knowledgeBaseColumns matches the real "knowledge_base" table -- title/
 // active (not name/is_active), no product_id column at all (a knowledge
 // base is no longer tied to a specific product in the real schema).
-const knowledgeBaseColumns = "id, title, active, created_on, updated_on"
+const knowledgeBaseColumns = "id, title, active, is_public, created_on, updated_on"
 
 // KnowledgeBaseRepository defines the persistence operations for the real
 // knowledge_base table. NOTE: the request structs below (Create/Update...)
@@ -81,7 +81,7 @@ func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context, publicOnly b
 	kbs := make([]domain.KnowledgeBase, 0)
 	for rows.Next() {
 		var kb domain.KnowledgeBase
-		if err := rows.Scan(&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
+		if err := rows.Scan(&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan knowledge base: %w", err)
 		}
 		kbs = append(kbs, kb)
@@ -106,7 +106,7 @@ func (r *knowledgeBaseRepo) CreateKnowledgeBase(ctx context.Context, req domain.
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, req.Name).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("create knowledge base: %w", err)
@@ -123,7 +123,7 @@ func (r *knowledgeBaseRepo) UpdateKnowledgeBaseName(ctx context.Context, id stri
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.Name).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("update knowledge base name: %w", err)
@@ -140,7 +140,7 @@ func (r *knowledgeBaseRepo) SetKnowledgeBaseActive(ctx context.Context, id strin
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.IsActive).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("set knowledge base active: %w", err)

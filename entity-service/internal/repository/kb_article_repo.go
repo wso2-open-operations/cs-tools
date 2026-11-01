@@ -204,6 +204,9 @@ func (r *kbArticleRepo) SearchKBArticles(ctx context.Context, req domain.SearchK
 
 	if req.PublicOnly {
 		where += " AND knowledge_base_id IN (SELECT id FROM knowledge_base WHERE active = true AND is_public = true)"
+		// When filtering for public content, also enforce published state
+		// regardless of what the caller sent in req.States.
+		where += " AND state = 'published'"
 	}
 
 	countQuery := "SELECT COUNT(*) FROM knowledge_article " + where

@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -37,7 +38,17 @@ func NewKnowledgeBaseHandler(svc service.KnowledgeBaseService) *KnowledgeBaseHan
 
 // ListKnowledgeBases handles GET /knowledge-bases.
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
-	publicOnly := r.URL.Query().Get("publicOnly") == "true"
+	publicOnlyParam := r.URL.Query().Get("publicOnly")
+	var publicOnly bool
+	switch publicOnlyParam {
+	case "", "false":
+		publicOnly = false
+	case "true":
+		publicOnly = true
+	default:
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "publicOnly must be 'true' or 'false'"})
+		return
+	}
 	resp, err := h.svc.ListKnowledgeBases(r.Context(), publicOnly)
 	if err != nil {
 		writeServiceError(w, r, err)
