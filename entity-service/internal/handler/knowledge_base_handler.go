@@ -38,6 +38,10 @@ func NewKnowledgeBaseHandler(svc service.KnowledgeBaseService) *KnowledgeBaseHan
 
 // ListKnowledgeBases handles GET /knowledge-bases.
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()["publicOnly"]) > 1 {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "publicOnly must appear at most once"})
+		return
+	}
 	publicOnlyParam := r.URL.Query().Get("publicOnly")
 	var publicOnly bool
 	switch publicOnlyParam {

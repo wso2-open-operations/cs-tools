@@ -27,7 +27,7 @@ import (
 // knowledgeBaseColumns matches the real "knowledge_base" table -- title/
 // active (not name/is_active), no product_id column at all (a knowledge
 // base is no longer tied to a specific product in the real schema).
-const knowledgeBaseColumns = "id, title, active, is_public, created_on, updated_on"
+const knowledgeBaseColumns = "id, title, COALESCE(active, false) AS active, is_public, created_on, updated_on"
 
 // KnowledgeBaseRepository defines the persistence operations for the real
 // knowledge_base table. NOTE: the request structs below (Create/Update...)
