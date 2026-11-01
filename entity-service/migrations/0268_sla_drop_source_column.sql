@@ -38,14 +38,56 @@
 -- REPLACE cannot change a view's underlying input columns. idx_sla_source
 -- (migration 0134) is dropped automatically by DROP COLUMN; no explicit
 -- DROP INDEX is needed.
+--
+-- IF EXISTS on both the view drop and the column drop, so a direct
+-- reapplication of this file succeeds as a no-op on those two statements
+-- instead of failing outright once they've already run once -- the same
+-- "safe to re-run" convention this repo's migrations already follow.
+--
+-- Pre-flight safety check: this migration adopts every existing "sla" row
+-- in place regardless of its old source tag (see above), which is only
+-- correct if no (work_item, target) pair has an ACTIVE row from BOTH
+-- sources at once -- migration 0134 never added a uniqueness constraint
+-- that would have prevented that. The application code picks one row per
+-- (work_item, target) by most-recently-started/updated once this column is
+-- gone (sla_status_repo.go's own DISTINCT ON), with no way left to tell the
+-- two apart, so an undetected overlap would silently adopt whichever one
+-- happens to look newer and abandon the other. The DO block below checks
+-- for this (only while the column still exists, so a re-run after a
+-- successful first pass is a no-op here too) and refuses to proceed if any
+-- overlap is found -- resolve which row to keep and which to cancel by hand
+-- before retrying.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
-DROP VIEW sla_live;
+DO $$
+DECLARE
+    overlap_count integer;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'sla' AND column_name = 'source'
+    ) THEN
+        SELECT COUNT(*) INTO overlap_count FROM (
+            SELECT s.work_item_id, sp.target
+            FROM sla s
+            JOIN sla_policy sp ON sp.id = s.sla_policy_id
+            WHERE s.is_active AND sp.target IS NOT NULL
+            GROUP BY s.work_item_id, sp.target
+            HAVING COUNT(DISTINCT s.source) > 1
+        ) overlaps;
 
-ALTER TABLE sla DROP COLUMN source;
+        IF overlap_count > 0 THEN
+            RAISE EXCEPTION 'migration 0268: % work_item/target pair(s) have an active sla row from both source values -- resolve which row to keep (cancel the other) before dropping sla.source; see this migration''s own doc comment', overlap_count;
+        END IF;
+    END IF;
+END $$;
 
-CREATE VIEW sla_live AS
+DROP VIEW IF EXISTS sla_live;
+
+ALTER TABLE sla DROP COLUMN IF EXISTS source;
+
+CREATE OR REPLACE VIEW sla_live AS
 SELECT s.*,
     CASE
         WHEN s.stage IN ('IN_PROGRESS', 'BREACHED') AND s.start_on IS NOT NULL AND s.duration IS NOT NULL

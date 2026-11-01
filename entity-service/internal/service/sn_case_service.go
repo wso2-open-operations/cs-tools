@@ -3773,8 +3773,28 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// for why this replaced two hardcoded CompleteClock hooks (one of them
 	// keyed on GetCaseEtaSharedOn/eta_shared_on, which is the wrong signal
 	// for this -- see repository.CaseFacts.FixEtaShared's own doc comment).
+	//
+	// Both overrides are REQUIRED on this data source, unlike caseService's
+	// own identical call site -- a CodeRabbit-caught gap: this PATCH just
+	// wrote to the previous system, not to this service's own Postgres
+	// mirror, which a separate, continuously-running sync job catches up on
+	// its own schedule rather than synchronously within this request. A
+	// fresh repository.CaseFacts read right here can still see the OLD
+	// value, which would silently decide the wrong effect (a newly-provided
+	// workaround not pausing its clock, a newly-shared fix ETA not stopping
+	// it, a recall leaving a clock paused). fixEtaSharedOverride is TRUE
+	// whenever any of the three fields is set in this very request -- that
+	// alone makes FixEtaShared true regardless of the mirror's current
+	// value or either of the other two fields' own state -- and left nil
+	// (fall back to the fresh read, already correct for a field this PATCH
+	// didn't touch) otherwise.
 	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
-		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID)
+		var fixEtaSharedOverride *bool
+		if req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
+			fixEtaShared := true
+			fixEtaSharedOverride = &fixEtaShared
+		}
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, req.WorkaroundProvided, fixEtaSharedOverride)
 	}
 	// Deliberately independent of s.slaEngine above and of s.publisher's
 	// usual EVENT_PUBLISHING_ENABLED gate (publishWorkaroundProvidedEvent

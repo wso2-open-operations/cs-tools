@@ -35,7 +35,7 @@ type fakeSLAEngineService struct {
 	registerCalls     []fakeSLARegisterCall
 	reviseCalls       []fakeSLARegisterCall
 	completeCalls     []string // caseID (response clock)
-	fieldEffectsCalls []string // caseID (workaround/fix-ETA field re-evaluation)
+	fieldEffectsCalls []fakeSLAFieldEffectsCall
 	stateCalls        []fakeSLAStateCall
 
 	registerIncidentCalls []fakeSLAIncidentRegisterCall
@@ -52,6 +52,12 @@ type fakeSLARegisterCall struct {
 type fakeSLAStateCall struct {
 	caseID string
 	state  domain.CaseState
+}
+
+type fakeSLAFieldEffectsCall struct {
+	caseID                     string
+	workaroundProvidedOverride *bool
+	fixEtaSharedOverride       *bool
 }
 
 type fakeSLAIncidentRegisterCall struct {
@@ -76,8 +82,8 @@ func (f *fakeSLAEngineService) CompleteResponseClock(_ context.Context, caseID s
 	f.completeCalls = append(f.completeCalls, caseID)
 }
 
-func (f *fakeSLAEngineService) ApplyCaseFieldEffects(_ context.Context, caseID string) {
-	f.fieldEffectsCalls = append(f.fieldEffectsCalls, caseID)
+func (f *fakeSLAEngineService) ApplyCaseFieldEffects(_ context.Context, caseID string, workaroundProvidedOverride, fixEtaSharedOverride *bool) {
+	f.fieldEffectsCalls = append(f.fieldEffectsCalls, fakeSLAFieldEffectsCall{caseID, workaroundProvidedOverride, fixEtaSharedOverride})
 }
 
 func (f *fakeSLAEngineService) ApplyCaseStateEffects(_ context.Context, caseID string, state domain.CaseState) {
@@ -344,7 +350,12 @@ func TestSNCaseService_UpdateCase_AppliesSLAStateEffects(t *testing.T) {
 // "...ORfix_eta_sharedISNOTEMPTY", resolved from the fix-ETA values
 // themselves -- see repository.CaseFacts.FixEtaShared's own doc comment) --
 // not a hardcoded completion keyed on work_item.eta_shared_on, which this
-// replaced.
+// replaced. Also the regression guard for a CodeRabbit-caught gap: this
+// PATCH just wrote to ServiceNow, not to entity-service's own Postgres
+// mirror (kept current by a separate sync job on its own schedule, not
+// synchronously within this request) -- without a fixEtaSharedOverride, a
+// fresh repository.CaseFacts read right here could still see the OLD
+// (not-yet-mirrored) value and decide the wrong effect.
 func TestSNCaseService_UpdateCase_FixEtaFieldTriggersFieldEffects(t *testing.T) {
 	caseSysid := sysid32('a')
 	projectSysid := sysid32('b')
@@ -384,8 +395,53 @@ func TestSNCaseService_UpdateCase_FixEtaFieldTriggersFieldEffects(t *testing.T) 
 		t.Fatalf("UpdateCase() error = %v", err)
 	}
 
-	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0] != caseID {
-		t.Errorf("fieldEffectsCalls = %v, want [%q]", slaEngine.fieldEffectsCalls, caseID)
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != caseID {
+		t.Fatalf("fieldEffectsCalls = %v, want one call for %q", slaEngine.fieldEffectsCalls, caseID)
+	}
+	call := slaEngine.fieldEffectsCalls[0]
+	if call.workaroundProvidedOverride != nil {
+		t.Errorf("workaroundProvidedOverride = %v, want nil (this request never touched WorkaroundProvided)", *call.workaroundProvidedOverride)
+	}
+	if call.fixEtaSharedOverride == nil || !*call.fixEtaSharedOverride {
+		t.Errorf("fixEtaSharedOverride = %v, want true -- a fresh Postgres read here can still see the pre-PATCH value, since entity-service's own mirror is only caught up by a separate sync job, not synchronously within this request", call.fixEtaSharedOverride)
+	}
+}
+
+// TestSNCaseService_UpdateCase_WorkaroundProvidedPassesOverride is the
+// WorkaroundProvided-field counterpart of the fix-ETA override test above:
+// confirms req.WorkaroundProvided itself (not a fresh, possibly
+// not-yet-mirrored Postgres read) is what reaches ApplyCaseFieldEffects as
+// workaroundProvidedOverride, for both true (provided) and false (a recall).
+func TestSNCaseService_UpdateCase_WorkaroundProvidedPassesOverride(t *testing.T) {
+	caseSysid := sysid32('a')
+	caseID := sysidToUUID(caseSysid)
+
+	getCaseBody := `{"id": "` + caseSysid + `", "state": {"id": 1, "label": "Open"}}`
+	updateCaseBody := `{
+		"message": "Case updated successfully",
+		"case": {"id": "` + caseSysid + `", "updatedOn": "2026-01-02 12:00:00", "updatedBy": "jane.doe"}
+	}`
+
+	for _, provided := range []bool{true, false} {
+		client := newTestUpdateCaseClient(t, getCaseBody, updateCaseBody)
+		slaEngine := &fakeSLAEngineService{}
+		svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", slaEngine)
+
+		req := domain.UpdateCaseRequest{ID: caseID, WorkaroundProvided: &provided}
+		if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err != nil {
+			t.Fatalf("UpdateCase() error = %v", err)
+		}
+
+		if len(slaEngine.fieldEffectsCalls) != 1 {
+			t.Fatalf("fieldEffectsCalls = %v, want one call", slaEngine.fieldEffectsCalls)
+		}
+		call := slaEngine.fieldEffectsCalls[0]
+		if call.workaroundProvidedOverride == nil || *call.workaroundProvidedOverride != provided {
+			t.Errorf("workaroundProvidedOverride = %v, want %v", call.workaroundProvidedOverride, provided)
+		}
+		if call.fixEtaSharedOverride != nil {
+			t.Errorf("fixEtaSharedOverride = %v, want nil (this request never touched a fix-ETA field)", *call.fixEtaSharedOverride)
+		}
 	}
 }
 

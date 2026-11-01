@@ -153,7 +153,28 @@ type SLAEngineService interface {
 	// ApplyCaseStateEffects): this is not a state-change call, so the
 	// safety net would misfire using whatever state a fresh fact read
 	// happens to find rather than one this call actually changed.
-	ApplyCaseFieldEffects(ctx context.Context, caseID string)
+	//
+	// workaroundProvidedOverride/fixEtaSharedOverride exist for the exact
+	// same reason RegisterCaseClocks' severity/ApplyCaseStateEffects' state
+	// parameters do (see loadCaseFacts' own doc comment): on
+	// snCaseService's dual-write path, the field this call is reacting to
+	// was just written to the previous system, not to this service's own
+	// Postgres mirror -- that mirror is kept current by a separate,
+	// continuously-running sync job on its own schedule, not synchronously
+	// within this request, so a fresh repository.CaseFacts read immediately
+	// after the PATCH can still show the OLD value (a CodeRabbit-caught
+	// gap: this call originally took no override at all, so a case whose
+	// workaround/fix-ETA PATCH landed on ServiceNow could be reevaluated
+	// against stale facts -- a newly-provided workaround not pausing its
+	// clock, a newly-shared fix ETA not stopping it, or a recall leaving a
+	// clock paused). Both are nil on caseService's own plain-Postgres call
+	// site, where the write that just happened IS this service's own
+	// Postgres row, already committed by the time this runs -- a fresh read
+	// is already correct there, no override needed. Only the field this
+	// specific PATCH actually touched is overridden; whichever one didn't
+	// change still gets its value from the fresh read, which is already
+	// correct for it.
+	ApplyCaseFieldEffects(ctx context.Context, caseID string, workaroundProvidedOverride, fixEtaSharedOverride *bool)
 	// ApplyCaseStateEffects evaluates the case's CURRENTLY ACTIVE clocks
 	// (RESPONSE/WORKAROUND/RESOLUTION) against their OWN bound sla_policy's
 	// stop_condition/cancel_condition/pause_condition/resume_condition --
@@ -229,16 +250,18 @@ func NewSLAEngineService(repo repository.SLAEngineRepository) SLAEngineService {
 }
 
 // loadCaseFacts reads caseID's current CaseFacts fresh from Postgres and
-// applies the two optional overrides callers may already know more
+// applies the optional overrides callers may already know more
 // authoritatively than a fresh read would: severityOverride (an in-flight
 // severity a dual-write case's own Postgres mirror may not have
-// caught up to yet) and stateOverride (ApplyCaseStateEffects is always
+// caught up to yet), stateOverride (ApplyCaseStateEffects is always
 // handed the case's brand new state directly from the PATCH that triggered
-// it, for the exact same reason). Every other fact -- case type, project
-// type, product, workaround/fix-ETA/account presence, creation date, and
-// whether a CS engineer has already replied -- comes from the fresh read:
-// none of those are ever passed in by a caller today.
-func (s *slaEngineService) loadCaseFacts(ctx context.Context, caseID string, severityOverride *domain.CaseSeverity, stateOverride *domain.CaseState) (repository.CaseFacts, error) {
+// it, for the exact same reason), and workaroundProvidedOverride/
+// fixEtaSharedOverride (ApplyCaseFieldEffects' own two overrides -- see
+// that method's own doc comment). Every other fact -- case type, project
+// type, product, account presence, creation date, and whether a CS
+// engineer has already replied -- comes from the fresh read: none of those
+// are ever passed in by a caller today.
+func (s *slaEngineService) loadCaseFacts(ctx context.Context, caseID string, severityOverride *domain.CaseSeverity, stateOverride *domain.CaseState, workaroundProvidedOverride, fixEtaSharedOverride *bool) (repository.CaseFacts, error) {
 	facts, err := s.repo.GetCaseFacts(ctx, caseID)
 	if err != nil {
 		return repository.CaseFacts{}, err
@@ -252,6 +275,12 @@ func (s *slaEngineService) loadCaseFacts(ctx context.Context, caseID string, sev
 		if label, ok := slaStateLabel[*stateOverride]; ok {
 			facts.State = label
 		}
+	}
+	if workaroundProvidedOverride != nil {
+		facts.WorkaroundProvided = *workaroundProvidedOverride
+	}
+	if fixEtaSharedOverride != nil {
+		facts.FixEtaShared = *fixEtaSharedOverride
 	}
 	return facts, nil
 }
@@ -344,7 +373,7 @@ func registerCaseSLAClockStartOn(policy repository.SLAPolicyRef, caseCreatedOn t
 
 // RegisterCaseClocks implements SLAEngineService.
 func (s *slaEngineService) RegisterCaseClocks(ctx context.Context, caseID string, severity *domain.CaseSeverity, _ string) {
-	facts, err := s.loadCaseFacts(ctx, caseID, severity, nil)
+	facts, err := s.loadCaseFacts(ctx, caseID, severity, nil, nil, nil)
 	if err != nil {
 		slog.ErrorContext(ctx, "sla engine: register clocks: load case facts failed", "caseId", caseID, "err", err)
 		return
@@ -373,7 +402,7 @@ func (s *slaEngineService) RegisterCaseClocks(ctx context.Context, caseID string
 
 // ReviseCaseClocks implements SLAEngineService.
 func (s *slaEngineService) ReviseCaseClocks(ctx context.Context, caseID string, severity *domain.CaseSeverity, _ string) {
-	facts, err := s.loadCaseFacts(ctx, caseID, severity, nil)
+	facts, err := s.loadCaseFacts(ctx, caseID, severity, nil, nil, nil)
 	if err != nil {
 		slog.ErrorContext(ctx, "sla engine: revise clocks: load case facts failed", "caseId", caseID, "err", err)
 		return
@@ -484,15 +513,15 @@ func (s *slaEngineService) CompleteResponseClock(ctx context.Context, caseID str
 // registered or cancelled-and-superseded, so this adds no duplicate
 // registrations -- only genuinely new ones.
 func (s *slaEngineService) ApplyCaseStateEffects(ctx context.Context, caseID string, state domain.CaseState) {
-	s.reevaluateCaseClocks(ctx, caseID, &state)
+	s.reevaluateCaseClocks(ctx, caseID, &state, nil, nil)
 }
 
 // ApplyCaseFieldEffects implements SLAEngineService. See that method's own
 // doc comment: the same reevaluateCaseClocks core as ApplyCaseStateEffects,
 // just with no state override and no CLOSED safety net, since this is never
 // called for a state-changing PATCH.
-func (s *slaEngineService) ApplyCaseFieldEffects(ctx context.Context, caseID string) {
-	s.reevaluateCaseClocks(ctx, caseID, nil)
+func (s *slaEngineService) ApplyCaseFieldEffects(ctx context.Context, caseID string, workaroundProvidedOverride, fixEtaSharedOverride *bool) {
+	s.reevaluateCaseClocks(ctx, caseID, nil, workaroundProvidedOverride, fixEtaSharedOverride)
 }
 
 // reevaluateCaseClocks is the shared core of ApplyCaseStateEffects and
@@ -502,11 +531,13 @@ func (s *slaEngineService) ApplyCaseFieldEffects(ctx context.Context, caseID str
 // non-nil only for a genuine state-changing PATCH (ApplyCaseStateEffects):
 // it both overrides loadCaseFacts' own fresh read (see that method's own
 // doc comment on why) and arms applyCaseStateEffectsForPolicy's CLOSED
-// safety net; nil for a field-driven re-evaluation (ApplyCaseFieldEffects),
-// which relies entirely on condition text and the facts a fresh read already
-// reflects, with no safety net of its own.
-func (s *slaEngineService) reevaluateCaseClocks(ctx context.Context, caseID string, stateOverride *domain.CaseState) {
-	facts, err := s.loadCaseFacts(ctx, caseID, nil, stateOverride)
+// safety net; nil for a field-driven re-evaluation (ApplyCaseFieldEffects).
+// workaroundProvidedOverride/fixEtaSharedOverride are ApplyCaseFieldEffects'
+// own two overrides, always nil from ApplyCaseStateEffects (a state-changing
+// PATCH never also touches these fields -- see UpdateCaseRequest's mutually
+// exclusive field groups).
+func (s *slaEngineService) reevaluateCaseClocks(ctx context.Context, caseID string, stateOverride *domain.CaseState, workaroundProvidedOverride, fixEtaSharedOverride *bool) {
+	facts, err := s.loadCaseFacts(ctx, caseID, nil, stateOverride, workaroundProvidedOverride, fixEtaSharedOverride)
 	if err != nil {
 		slog.ErrorContext(ctx, "sla engine: reevaluate case clocks: load case facts failed", "caseId", caseID, "err", err)
 		return

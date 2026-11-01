@@ -332,13 +332,39 @@ func TestSLAEngineService_ApplyCaseFieldEffects_WorkaroundProvidedPauses(t *test
 	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
 	svc := NewSLAEngineService(repo)
 
-	svc.ApplyCaseFieldEffects(context.Background(), "case-5")
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", nil, nil)
 
 	if len(repo.completed) != 0 {
 		t.Errorf("completed = %v, want none -- providing a workaround pauses, it does not complete", repo.completed)
 	}
 	if len(repo.paused) != 1 || repo.paused[0] != "case-5|WORKAROUND|true" {
 		t.Errorf("paused = %v, want [case-5|WORKAROUND|true]", repo.paused)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseFieldEffects_OverridesWinOverAStaleFreshRead
+// is the regression guard for a CodeRabbit-caught gap: snCaseService's own
+// dual-write PATCH lands on the previous system first, and entity-service's
+// own Postgres mirror of that case is only caught up by a separate,
+// continuously-running sync job on its own schedule -- a fresh
+// repository.CaseFacts read taken immediately afterward can still show the
+// OLD value. workaroundProvidedOverride/fixEtaSharedOverride exist so a
+// caller that already knows the authoritative, just-applied value can
+// supply it directly rather than trust a fresh read that may not have
+// caught up yet.
+func TestSLAEngineService_ApplyCaseFieldEffects_OverridesWinOverAStaleFreshRead(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	// The fresh read still says "not provided, not shared" -- simulating a
+	// Postgres mirror that hasn't caught up to the PATCH yet.
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", WorkaroundProvided: false, FixEtaShared: false}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
+	svc := NewSLAEngineService(repo)
+
+	workaroundProvided := true
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", &workaroundProvided, nil)
+
+	if len(repo.paused) != 1 || repo.paused[0] != "case-5|WORKAROUND|true" {
+		t.Errorf("paused = %v, want [case-5|WORKAROUND|true] -- the override should have won over the stale fresh read", repo.paused)
 	}
 }
 
@@ -357,7 +383,7 @@ func TestSLAEngineService_ApplyCaseFieldEffects_FixEtaSharedCompletesWorkaround(
 	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
 	svc := NewSLAEngineService(repo)
 
-	svc.ApplyCaseFieldEffects(context.Background(), "case-5")
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", nil, nil)
 
 	if len(repo.completed) != 1 || repo.completed[0] != "case-5|WORKAROUND" {
 		t.Errorf("completed = %v, want [case-5|WORKAROUND]", repo.completed)

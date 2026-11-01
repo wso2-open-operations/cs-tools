@@ -2446,8 +2446,10 @@ backend's own OAuth2 client id unlocks `Unrestricted` scope for any
 `@wso2.com` caller — see `AccessService.ResolveScope`'s own
 `CSMPortalBackendClientID` branch) — a second route gated identically
 would not have actually restricted anything a query param on the
-original couldn't. `admin=true` additionally requires `holdsAnyRole`
-against `AUTH_ADMIN_ROLES`; omitting it (every pre-existing caller,
+original couldn't. `admin=true` additionally requires
+`requireCSMPortalBackendCaller` (the caller's client id, not
+`AUTH_ADMIN_ROLES` — see "The CSM portal's 'Recalculate SLA' admin action"
+above for why); omitting it (every pre-existing caller,
 `csm-notification-service`'s own startup reconciliation included) is
 byte-identical to before this parameter existed — it only ever narrows
 who may ask for the admin view, never widens the plain one. The portal's
@@ -3241,6 +3243,24 @@ regardless of severity.
   three fix-ETA fields is set. `eta_shared_on` itself is untouched and still
   read back into `CaseView.EtaSharedOn` for display — only the SLA
   condition fact changed what it's derived from.
+- **`ApplyCaseFieldEffects` takes two overrides, `workaroundProvidedOverride`/
+  `fixEtaSharedOverride` — a CodeRabbit-caught gap on `snCaseService`'s own
+  call site specifically.** `snCaseService.UpdateCase` PATCHes the previous
+  system first; entity-service's own Postgres mirror of that same case is
+  only caught up by a separate, continuously-running sync job on its own
+  schedule, not synchronously within this request. A fresh
+  `repository.CaseFacts` read taken immediately after that PATCH can
+  therefore still see the OLD workaround/fix-ETA value — the same mirror-lag
+  reason `RegisterCaseClocks`'/`ApplyCaseStateEffects`' own severity/state
+  parameters already exist for, which this call had no equivalent of at
+  first. `snCaseService.UpdateCase` now passes `req.WorkaroundProvided`
+  straight through as its own override, and `true` for `fixEtaSharedOverride`
+  whenever any of the three fix-ETA fields is set in that same request (the
+  one it didn't touch keeps the fresh read's value, already correct). Both
+  are always `nil` on `caseService`'s own identical call site: the write
+  that just happened there IS this service's own Postgres row, already
+  committed by the time `ApplyCaseFieldEffects` runs, so a fresh read is
+  already correct and needs no override.
 - **Incidents are now wired into this same condition-driven engine too —
   previously case-only.** `repository.IncidentFacts`/`GetIncidentFacts`
   (small, no project/product/account-presence/response-comment concepts at

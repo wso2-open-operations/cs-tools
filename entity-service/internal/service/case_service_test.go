@@ -1729,7 +1729,7 @@ func TestCaseService_UpdateCase_WorkaroundProvidedTriggersFieldEffects(t *testin
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0] != testDeploymentUUID {
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
 		t.Fatalf("expected ApplyCaseFieldEffects(%q), got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }
@@ -1758,7 +1758,7 @@ func TestCaseService_UpdateCase_WorkaroundRecallAlsoTriggersFieldEffects(t *test
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0] != testDeploymentUUID {
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
 		t.Errorf("expected ApplyCaseFieldEffects(%q) on a recall too, got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }

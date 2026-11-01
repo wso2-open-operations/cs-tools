@@ -3155,9 +3155,13 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	// directly -- see that field's own doc comment for why eta_shared_on,
 	// a separate explicit "share with customer" action, is the wrong
 	// signal here). See SLAEngineService.ApplyCaseFieldEffects' own doc
-	// comment for the two hardcoded CompleteClock hooks this replaced.
+	// comment for the two hardcoded CompleteClock hooks this replaced. No
+	// override needed on this data source -- s.repo.UpdateCaseFields just
+	// above already committed to this service's own Postgres row, so the
+	// fresh read ApplyCaseFieldEffects makes is already correct (contrast
+	// snCaseService.UpdateCase's own call site, which does need one).
 	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
-		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID)
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, nil, nil)
 	}
 	// Deliberately independent of s.slaEngine above -- this is the signal
 	// csm-notification-service's own Redis-based SLA engine needs to
