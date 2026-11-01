@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package autoclosure
+package autocaseclosure
 
 import (
 	"context"
@@ -185,14 +185,14 @@ func Run(client workClient, cfg RunConfig) func(ctx context.Context) error {
 					switch {
 					case err != nil:
 						failed++
-						slog.WarnContext(ctx, "autoclosure: stage failed for a ticket", "stage", stage, "ticket", c.Number, "id", c.ID, "err", err)
+						slog.WarnContext(ctx, "autocaseclosure: stage failed for a ticket", "stage", stage, "ticket", c.Number, "id", c.ID, "err", err)
 						errs = append(errs, fmt.Errorf("%s %s: %w", stage, c.Number, err))
 					case outcome == OutcomeDryRun:
 						wouldAct++
 						if stage != StageReleaseHold {
 							spent++
 						}
-						slog.InfoContext(ctx, "autoclosure: dry run, would advance", "stage", stage, "ticket", c.Number, "id", c.ID)
+						slog.InfoContext(ctx, "autocaseclosure: dry run, would advance", "stage", stage, "ticket", c.Number, "id", c.ID)
 					case outcome != OutcomeAdvanced:
 						skipped++
 					case stage == StageClose:
@@ -210,12 +210,12 @@ func Run(client workClient, cfg RunConfig) func(ctx context.Context) error {
 			quarantined += stageHeld
 		}
 
-		slog.InfoContext(ctx, "autoclosure: run complete", "dryRun", cfg.DryRun,
+		slog.InfoContext(ctx, "autocaseclosure: run complete", "dryRun", cfg.DryRun,
 			"evaluated", evaluated, "reminded", reminded, "closed", closed,
 			"holdsReleased", released, "wouldAdvance", wouldAct, "skipped", skipped, "failed", failed,
 			"quarantined", quarantined)
 		if quarantined > 0 {
-			slog.WarnContext(ctx, "autoclosure: tickets are being left out after failing repeatedly and will not be reminded or closed until someone looks at them",
+			slog.WarnContext(ctx, "autocaseclosure: tickets are being left out after failing repeatedly and will not be reminded or closed until someone looks at them",
 				"tickets", quarantined, "see", "case_autoclosure_event, outcome FAILED")
 		}
 

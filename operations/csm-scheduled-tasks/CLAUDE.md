@@ -385,12 +385,14 @@ Timeout is five minutes, not the sixty seconds the neighbouring sweeps use.
 Volume is the normal case here, and cutting a healthy run off partway leaves
 some subjects updated and the rest stale.
 
-## Case auto-closure
+## Auto case closure
 
-`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `0 8 * * *`, TZ=UTC
+`internal/autocaseclosure.Run`, registered as **`auto_case_closure`** (default schedule `0 8 * * *`, TZ=UTC
 caveat as above), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
-**Off unless `AUTOCLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
+**Off unless `AUTO_CASE_CLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
 accident. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. entity-service's `AUTOCLOSURE_SYSTEM_USER_EMAIL` is optional: empty acts as "System user" (no user row, no `closed_by`).
+
+**Renamed** from `case_autoclosure` / `AUTOCLOSURE_*` (task name, environment variables and package). An environment that still sets the old variables has the task off, because only `AUTO_CASE_CLOSURE_ENABLED=true` registers it. Open ledger rows under the old task name are not superseded by the new name; resolve them by hand as described in the "removed from the registry" paragraph above.
 
 This task is a **trigger only**. Everything that decides anything (eligibility, whether a ticket is still due,
 the comment text, how it is closed, the daily limit) is in entity-service; see its CLAUDE.md, "Case
@@ -403,19 +405,19 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
   safe: tickets already advanced are no longer due, and entity-service takes what today has already done off the
   daily limit, so the limit holds across retries.
 - The alert lists at most 10 failures and counts the rest.
-- **Paging.** A listing returns at most one page, so each stage asks again until nothing new comes back (at most 20 passes of 500 new tickets, but entity-service never returns more than 5,000 in one listing, so at most 5,000 tickets are attempted per stage per run; the request limit grows with the tickets already attempted so ones that stay due -- skipped or failed -- do not hide those behind them). One known edge: entity-service also clamps a listing to the day's remaining budget, so when the budget is almost spent and the tickets at the front of the list are skipped or failed, the loop can stop early with later due tickets left; harmless because the budget is nearly gone. A ticket is attempted once per run. With a non-zero daily limit that limit bounds a day's work; with `AUTOCLOSURE_DAILY_LIMIT=0` (no cap) only the 20-pass page cap per stage and the schedule do, so a large backlog is then worked through at that pace.
+- **Paging.** A listing returns at most one page, so each stage asks again until nothing new comes back (at most 20 passes of 500 new tickets, but entity-service never returns more than 5,000 in one listing, so at most 5,000 tickets are attempted per stage per run; the request limit grows with the tickets already attempted so ones that stay due -- skipped or failed -- do not hide those behind them). One known edge: entity-service also clamps a listing to the day's remaining budget, so when the budget is almost spent and the tickets at the front of the list are skipped or failed, the loop can stop early with later due tickets left; harmless because the budget is nearly gone. A ticket is attempted once per run. With a non-zero daily limit that limit bounds a day's work; with `AUTO_CASE_CLOSURE_DAILY_LIMIT=0` (no cap) only the 20-pass page cap per stage and the schedule do, so a large backlog is then worked through at that pace.
 - The summary log line carries evaluated / reminded / closed / holdsReleased / wouldAdvance / skipped / failed / **quarantined**. Quarantined is how many due tickets entity-service left out because they failed the stage 3 times in 7 days; when it is above zero the run also logs a WARN saying nobody will be reminded or closed for them until someone looks (`case_autoclosure_event`, outcome `FAILED`). It deliberately does **not** fail the run: a failed run alerts, and is retried and alerted again every tick, so a permanent quarantine would become the permanent alert noise the cap exists to remove. Getting this in front of a person by email needs the per-task report email that does not exist yet (see "Future: per-task report emails"); until then watch the log or alert on the WARN.
-- **A dry run is not sign-off on closures.** It claims nothing, so it can only preview what is due *now*: first reminders for tickets still at `DEFAULT`, plus whatever second reminders and closes already-advanced tickets (for example from the old flow's steps) are due for. Tickets reach the second reminder and the close only after a real first reminder has moved them, so a clean dry run on a fresh backlog says nothing about the close stage. Validate the close rules on a small real batch first (`AUTOCLOSURE_STATES=solution_proposed`, a low `AUTOCLOSURE_DAILY_LIMIT`).
+- **A dry run is not sign-off on closures.** It claims nothing, so it can only preview what is due *now*: first reminders for tickets still at `DEFAULT`, plus whatever second reminders and closes already-advanced tickets (for example from the old flow's steps) are due for. Tickets reach the second reminder and the close only after a real first reminder has moved them, so a clean dry run on a fresh backlog says nothing about the close stage. Validate the close rules on a small real batch first (`AUTO_CASE_CLOSURE_STATES=solution_proposed`, a low `AUTO_CASE_CLOSURE_DAILY_LIMIT`).
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `AUTOCLOSURE_ENABLED` | `false` | Register the task |
-| `AUTOCLOSURE_SCHEDULED` | `true` | `false` keeps the task configured but off the schedule: the normal tick never fires it, and it runs only on demand with `--run-now=case_autoclosure` (see "Running a task now"). Affects only this task. Needs `AUTOCLOSURE_ENABLED=true` to matter; anything but a boolean refuses to start |
-| `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
-| `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
-| `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
-| `AUTOCLOSURE_STATES` | both | Comma list of `awaiting_info`, `solution_proposed`. Run `solution_proposed` alone first, add `awaiting_info` after watching it; an unknown value refuses to start |
-| `AUTOCLOSURE_TEMPLATES` | built-in | JSON `{"<state>.<kind>": "text"}` overriding comment wording; kinds `first_reminder`, `second_reminder`, `closure`; a malformed value refuses to start (it would otherwise silently post the built-in wording) |
+| `AUTO_CASE_CLOSURE_ENABLED` | `false` | Register the task |
+| `AUTO_CASE_CLOSURE_SCHEDULED` | `true` | `false` keeps the task configured but off the schedule: the normal tick never fires it, and it runs only on demand with `--run-now=auto_case_closure` (see "Running a task now"). Affects only this task. Needs `AUTO_CASE_CLOSURE_ENABLED=true` to matter; anything but a boolean refuses to start |
+| `AUTO_CASE_CLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
+| `AUTO_CASE_CLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
+| `AUTO_CASE_CLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=auto_case_closure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
+| `AUTO_CASE_CLOSURE_STATES` | both | Comma list of `awaiting_info`, `solution_proposed`. Run `solution_proposed` alone first, add `awaiting_info` after watching it; an unknown value refuses to start |
+| `AUTO_CASE_CLOSURE_TEMPLATES` | built-in | JSON `{"<state>.<kind>": "text"}` overriding comment wording; kinds `first_reminder`, `second_reminder`, `closure`; a malformed value refuses to start (it would otherwise silently post the built-in wording) |
 
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
@@ -431,13 +433,13 @@ in Choreo logs.
 Refusals (non-zero exit, a message, never a fall-through to the schedule): an unknown flag, a stray positional
 argument, an empty or malformed value, `--run-now` together with `TRYOUT_TASK`, and a name that is not a
 registered task. A task is registered only when its own enable flag and config allow it (for example
-`case_autoclosure` only with `AUTOCLOSURE_ENABLED=true`), so a disabled task is refused as "not a registered
+`auto_case_closure` only with `AUTO_CASE_CLOSURE_ENABLED=true`), so a disabled task is refused as "not a registered
 task", and the message lists the registered names.
 
 | Argument | Meaning |
 |---|---|
 | `--run-now=<task>` | Run that registered task once now |
-| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure`) |
+| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `auto_case_closure`) |
 | `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
 | `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
 
@@ -455,7 +457,7 @@ with it for the claim. The consequence is plain: the scheduled run for the same 
 that is **not idempotent** sends or does its work again. Safe to run now are the idempotent tasks only. From
 reading the handlers' code and doc comments (a judgement, not a test):
 
-- **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
+- **Idempotent (safe):** `auto_case_closure` (entity-service's per-ticket compare-and-set claim and its audit-table
   daily limit); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
   `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
@@ -471,20 +473,20 @@ reading the handlers' code and doc comments (a judgement, not a test):
 
 When unsure, treat it as not idempotent.
 
-**Example: staged rollout of case auto-closure.** Set `AUTOCLOSURE_ENABLED=true` and `AUTOCLOSURE_SCHEDULED=false`
+**Example: staged rollout of auto case closure.** Set `AUTO_CASE_CLOSURE_ENABLED=true` and `AUTO_CASE_CLOSURE_SCHEDULED=false`
 (the task stays configured but the normal tick never fires it; anything but a boolean refuses to start), then,
 from a Choreo Manual Task component (or the scheduled task, if it accepts per-run arguments), run in order,
 reading the logs between steps:
 
-1. `--run-now=case_autoclosure --dry-run` : see what is due, change nothing.
-2. `--run-now=case_autoclosure --states=solution_proposed --limit=20` : a small real batch of one state.
-3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTOCLOSURE_DAILY_LIMIT` and
-   `AUTOCLOSURE_STATES` allow.
+1. `--run-now=auto_case_closure --dry-run` : see what is due, change nothing.
+2. `--run-now=auto_case_closure --states=solution_proposed --limit=20` : a small real batch of one state.
+3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTO_CASE_CLOSURE_DAILY_LIMIT` and
+   `AUTO_CASE_CLOSURE_STATES` allow.
 
-When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 08:00 run takes over. For this task
+When satisfied, set `AUTO_CASE_CLOSURE_SCHEDULED=true` (or remove it) so the daily 08:00 run takes over. For this task
 the run-now is safe beside the scheduled run for the reason above: entity-service decides everything. Its
-`--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
-`AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
+`--limit` may not exceed `AUTO_CASE_CLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
+`AUTO_CASE_CLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
 the logs (`run-now: ...`).
 
 ## Usage rollups

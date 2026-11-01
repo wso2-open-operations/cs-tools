@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autocaseclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
@@ -38,29 +38,29 @@ func TestParseRunNowArgs(t *testing.T) {
 		wantErr string
 	}{
 		{name: "no args runs the schedule", args: nil, want: nil},
-		{name: "plain run-now", args: []string{"--run-now=case_autoclosure"},
-			want: &runNowArgs{Task: "case_autoclosure"}},
+		{name: "plain run-now", args: []string{"--run-now=auto_case_closure"},
+			want: &runNowArgs{Task: "auto_case_closure"}},
 		{name: "any task name parses", args: []string{"--run-now=stale_cases_report"},
 			want: &runNowArgs{Task: "stale_cases_report"}},
 		{name: "space separated value", args: []string{"--run-now", "usage_rollup_daily"},
 			want: &runNowArgs{Task: "usage_rollup_daily"}},
 		{name: "all narrowing flags",
-			args: []string{"--run-now=case_autoclosure", "--dry-run", "--limit=20", "--states=solution_proposed, awaiting_info"},
-			want: &runNowArgs{Task: "case_autoclosure",
+			args: []string{"--run-now=auto_case_closure", "--dry-run", "--limit=20", "--states=solution_proposed, awaiting_info"},
+			want: &runNowArgs{Task: "auto_case_closure",
 				Options: registry.RunNowOptions{DryRun: true, Limit: 20, States: []string{"solution_proposed", "awaiting_info"}},
 				Given:   []string{"--dry-run", "--limit", "--states"}}},
 		{name: "empty task", args: []string{"--run-now="}, wantErr: "needs a task name"},
-		{name: "unknown flag", args: []string{"--run-now=case_autoclosure", "--force"}, wantErr: "bad arguments"},
+		{name: "unknown flag", args: []string{"--run-now=auto_case_closure", "--force"}, wantErr: "bad arguments"},
 		{name: "unknown flag alone", args: []string{"--bogus"}, wantErr: "bad arguments"},
-		{name: "stray positional", args: []string{"--run-now=case_autoclosure", "extra"}, wantErr: "unexpected argument"},
-		{name: "positional alone", args: []string{"case_autoclosure"}, wantErr: "unexpected argument"},
+		{name: "stray positional", args: []string{"--run-now=auto_case_closure", "extra"}, wantErr: "unexpected argument"},
+		{name: "positional alone", args: []string{"auto_case_closure"}, wantErr: "unexpected argument"},
 		{name: "dry-run without run-now", args: []string{"--dry-run"}, wantErr: "only valid together with --run-now"},
 		{name: "limit without run-now", args: []string{"--limit=5"}, wantErr: "only valid together with --run-now"},
 		{name: "states without run-now", args: []string{"--states=solution_proposed"}, wantErr: "only valid together with --run-now"},
-		{name: "zero limit", args: []string{"--run-now=case_autoclosure", "--limit=0"}, wantErr: "must be a positive number"},
-		{name: "negative limit", args: []string{"--run-now=case_autoclosure", "--limit=-3"}, wantErr: "must be a positive number"},
-		{name: "non-numeric limit", args: []string{"--run-now=case_autoclosure", "--limit=abc"}, wantErr: "bad arguments"},
-		{name: "empty states", args: []string{"--run-now=case_autoclosure", "--states="}, wantErr: "--states is empty"},
+		{name: "zero limit", args: []string{"--run-now=auto_case_closure", "--limit=0"}, wantErr: "must be a positive number"},
+		{name: "negative limit", args: []string{"--run-now=auto_case_closure", "--limit=-3"}, wantErr: "must be a positive number"},
+		{name: "non-numeric limit", args: []string{"--run-now=auto_case_closure", "--limit=abc"}, wantErr: "bad arguments"},
+		{name: "empty states", args: []string{"--run-now=auto_case_closure", "--states="}, wantErr: "--states is empty"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,8 +82,8 @@ func TestParseRunNowArgs(t *testing.T) {
 }
 
 func TestCheckRunNow(t *testing.T) {
-	a := &runNowArgs{Task: "case_autoclosure"}
-	if err := checkRunNow(a, "case_autoclosure"); err == nil || !strings.Contains(err.Error(), "TRYOUT_TASK") {
+	a := &runNowArgs{Task: "auto_case_closure"}
+	if err := checkRunNow(a, "auto_case_closure"); err == nil || !strings.Contains(err.Error(), "TRYOUT_TASK") {
 		t.Fatalf("TRYOUT_TASK combination must be refused, got %v", err)
 	}
 	if err := checkRunNow(a, "  "); err != nil {
@@ -92,7 +92,7 @@ func TestCheckRunNow(t *testing.T) {
 }
 
 // resolveFixture is a registered simple task (no narrowing hook) and one with a
-// hook that records what it was given, like case_autoclosure's.
+// hook that records what it was given, like auto_case_closure's.
 func resolveFixture(simpleRan, hookedRan *int, gotOpts *registry.RunNowOptions) []registry.Task {
 	return []registry.Task{
 		{Name: "simple_task", Handler: func(context.Context) error { *simpleRan++; return nil }},
@@ -143,7 +143,7 @@ func TestResolveRunNowUnregisteredListsRegistered(t *testing.T) {
 	var a, b int
 	var o registry.RunNowOptions
 	tasks := resolveFixture(&a, &b, &o)
-	_, _, err := resolveRunNow(tasks, runNowArgs{Task: "case_autoclosure"})
+	_, _, err := resolveRunNow(tasks, runNowArgs{Task: "auto_case_closure"})
 	if err == nil {
 		t.Fatal("an unregistered task must be refused")
 	}
@@ -170,23 +170,23 @@ func TestResolveRunNowNarrowingNeedsHook(t *testing.T) {
 	}
 }
 
-// TestAutoclosureHookNarrows wires narrowAutoclosure the way main does and
+// TestAutoCaseClosureHookNarrows wires narrowAutoCaseClosure the way main does and
 // checks the flags reach it through a task's hook.
-func TestAutoclosureHookNarrows(t *testing.T) {
-	cfg := autoclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
-	var got autoclosure.RunConfig
-	task := registry.Task{Name: "case_autoclosure",
+func TestAutoCaseClosureHookNarrows(t *testing.T) {
+	cfg := autocaseclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
+	var got autocaseclosure.RunConfig
+	task := registry.Task{Name: "auto_case_closure",
 		Handler: func(context.Context) error { return nil },
 		RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
-			c, err := narrowAutoclosure(cfg, o)
+			c, err := narrowAutoCaseClosure(cfg, o)
 			got = c
 			return func(context.Context) error { return nil }, []any{"dryRun", c.DryRun}, err
 		}}
-	args := runNowArgs{Task: "case_autoclosure",
+	args := runNowArgs{Task: "auto_case_closure",
 		Options: registry.RunNowOptions{DryRun: true, Limit: 20, States: []string{"solution_proposed"}},
 		Given:   []string{"--dry-run", "--limit", "--states"}}
 	if _, _, err := resolveRunNow([]registry.Task{task}, args); err != nil {
-		t.Fatalf("flags must be accepted for case_autoclosure: %v", err)
+		t.Fatalf("flags must be accepted for auto_case_closure: %v", err)
 	}
 	if !got.DryRun || got.DailyLimit != 20 || !reflect.DeepEqual(got.States, []string{"solution_proposed"}) {
 		t.Fatalf("narrowed config = %+v", got)
@@ -197,40 +197,40 @@ func TestAutoclosureHookNarrows(t *testing.T) {
 	}
 }
 
-func TestNarrowAutoclosure(t *testing.T) {
-	base := autoclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
+func TestNarrowAutoCaseClosure(t *testing.T) {
+	base := autocaseclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
 	tests := []struct {
 		name    string
-		cfg     autoclosure.RunConfig
+		cfg     autocaseclosure.RunConfig
 		args    registry.RunNowOptions
-		want    autoclosure.RunConfig
+		want    autocaseclosure.RunConfig
 		wantErr string
 	}{
 		{name: "no narrowing keeps env", cfg: base, args: registry.RunNowOptions{}, want: base},
 		{name: "dry run forced", cfg: base, args: registry.RunNowOptions{DryRun: true},
-			want: autoclosure.RunConfig{DailyLimit: 500, States: base.States, DryRun: true}},
-		{name: "env dry run is never loosened", cfg: autoclosure.RunConfig{DailyLimit: 5, DryRun: true}, args: registry.RunNowOptions{},
-			want: autoclosure.RunConfig{DailyLimit: 5, DryRun: true}},
+			want: autocaseclosure.RunConfig{DailyLimit: 500, States: base.States, DryRun: true}},
+		{name: "env dry run is never loosened", cfg: autocaseclosure.RunConfig{DailyLimit: 5, DryRun: true}, args: registry.RunNowOptions{},
+			want: autocaseclosure.RunConfig{DailyLimit: 5, DryRun: true}},
 		{name: "limit tightens", cfg: base, args: registry.RunNowOptions{Limit: 20},
-			want: autoclosure.RunConfig{DailyLimit: 20, States: base.States}},
+			want: autocaseclosure.RunConfig{DailyLimit: 20, States: base.States}},
 		{name: "limit equal to env", cfg: base, args: registry.RunNowOptions{Limit: 500},
 			want: base},
-		{name: "limit above env", cfg: base, args: registry.RunNowOptions{Limit: 501}, wantErr: "exceeds AUTOCLOSURE_DAILY_LIMIT"},
-		{name: "env no cap allows any limit", cfg: autoclosure.RunConfig{}, args: registry.RunNowOptions{Limit: 100000},
-			want: autoclosure.RunConfig{DailyLimit: 100000}},
+		{name: "limit above env", cfg: base, args: registry.RunNowOptions{Limit: 501}, wantErr: "exceeds AUTO_CASE_CLOSURE_DAILY_LIMIT"},
+		{name: "env no cap allows any limit", cfg: autocaseclosure.RunConfig{}, args: registry.RunNowOptions{Limit: 100000},
+			want: autocaseclosure.RunConfig{DailyLimit: 100000}},
 		{name: "states subset", cfg: base, args: registry.RunNowOptions{States: []string{"solution_proposed"}},
-			want: autoclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed"}}},
+			want: autocaseclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed"}}},
 		{name: "states duplicates collapse", cfg: base, args: registry.RunNowOptions{States: []string{"awaiting_info", "awaiting_info"}},
-			want: autoclosure.RunConfig{DailyLimit: 500, States: []string{"awaiting_info"}}},
-		{name: "state outside env set", cfg: autoclosure.RunConfig{States: []string{"solution_proposed"}},
-			args: registry.RunNowOptions{States: []string{"awaiting_info"}}, wantErr: "not in AUTOCLOSURE_STATES"},
-		{name: "empty env states means both", cfg: autoclosure.RunConfig{}, args: registry.RunNowOptions{States: []string{"awaiting_info"}},
-			want: autoclosure.RunConfig{States: []string{"awaiting_info"}}},
-		{name: "unknown state", cfg: base, args: registry.RunNowOptions{States: []string{"open"}}, wantErr: "not in AUTOCLOSURE_STATES"},
+			want: autocaseclosure.RunConfig{DailyLimit: 500, States: []string{"awaiting_info"}}},
+		{name: "state outside env set", cfg: autocaseclosure.RunConfig{States: []string{"solution_proposed"}},
+			args: registry.RunNowOptions{States: []string{"awaiting_info"}}, wantErr: "not in AUTO_CASE_CLOSURE_STATES"},
+		{name: "empty env states means both", cfg: autocaseclosure.RunConfig{}, args: registry.RunNowOptions{States: []string{"awaiting_info"}},
+			want: autocaseclosure.RunConfig{States: []string{"awaiting_info"}}},
+		{name: "unknown state", cfg: base, args: registry.RunNowOptions{States: []string{"open"}}, wantErr: "not in AUTO_CASE_CLOSURE_STATES"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := narrowAutoclosure(tc.cfg, tc.args)
+			got, err := narrowAutoCaseClosure(tc.cfg, tc.args)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
@@ -255,7 +255,7 @@ func TestParseStrictBool(t *testing.T) {
 		}
 	}
 	for _, raw := range []string{"yes", "off", "nope", "2"} {
-		if _, err := parseStrictBool("AUTOCLOSURE_SCHEDULED", raw, true); err == nil {
+		if _, err := parseStrictBool("AUTO_CASE_CLOSURE_SCHEDULED", raw, true); err == nil {
 			t.Errorf("parseStrictBool(%q) must fail", raw)
 		}
 	}
@@ -273,11 +273,11 @@ func (f *fakeLedger) Fail(context.Context, string, int, string, time.Time) error
 func TestUnscheduledTaskIsNotFiredByTick(t *testing.T) {
 	var closureRuns, otherRuns int
 	tasks := []registry.Task{
-		{Name: "case_autoclosure", Schedule: "* * * * *", Handler: func(context.Context) error { closureRuns++; return nil }},
+		{Name: "auto_case_closure", Schedule: "* * * * *", Handler: func(context.Context) error { closureRuns++; return nil }},
 		{Name: "other", Schedule: "* * * * *", Handler: func(context.Context) error { otherRuns++; return nil }},
 	}
 	led := &fakeLedger{}
-	eng := engine.New(withoutTask(tasks, "case_autoclosure"), led, nil, time.Hour, nil, false)
+	eng := engine.New(withoutTask(tasks, "auto_case_closure"), led, nil, time.Hour, nil, false)
 	eng.Tick(context.Background(), time.Now())
 	if closureRuns != 0 || otherRuns != 1 {
 		t.Fatalf("closure ran %d times, other %d; want 0 and 1", closureRuns, otherRuns)

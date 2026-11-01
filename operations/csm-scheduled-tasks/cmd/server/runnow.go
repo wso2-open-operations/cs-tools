@@ -26,12 +26,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autocaseclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 )
 
-// allAutoclosureStates is what an empty AUTOCLOSURE_STATES means.
-var allAutoclosureStates = []string{"awaiting_info", "solution_proposed"}
+// allAutoCaseClosureStates is what an empty AUTO_CASE_CLOSURE_STATES means.
+var allAutoCaseClosureStates = []string{"awaiting_info", "solution_proposed"}
 
 // runNowArgs is the parsed command line of an on-demand run.
 type runNowArgs struct {
@@ -73,7 +73,7 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	}
 	name := strings.TrimSpace(*task)
 	if name == "" {
-		return nil, errors.New("--run-now needs a task name, for example --run-now=case_autoclosure")
+		return nil, errors.New("--run-now needs a task name, for example --run-now=auto_case_closure")
 	}
 	out := &runNowArgs{Task: name}
 	if seen["dry-run"] {
@@ -138,28 +138,28 @@ func resolveRunNow(tasks []registry.Task, a runNowArgs) (func(ctx context.Contex
 	return handler, settings, nil
 }
 
-// narrowAutoclosure applies an on-demand run's arguments to the configured
+// narrowAutoCaseClosure applies an on-demand run's arguments to the configured
 // settings. They can only tighten: a dry run stays a dry run, the limit may not
 // exceed a configured cap, and the states must be among the configured ones.
-func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (autoclosure.RunConfig, error) {
+func narrowAutoCaseClosure(cfg autocaseclosure.RunConfig, a registry.RunNowOptions) (autocaseclosure.RunConfig, error) {
 	if a.DryRun {
 		cfg.DryRun = true
 	}
 	if a.Limit > 0 {
 		if cfg.DailyLimit != 0 && a.Limit > cfg.DailyLimit {
-			return cfg, fmt.Errorf("--limit=%d exceeds AUTOCLOSURE_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
+			return cfg, fmt.Errorf("--limit=%d exceeds AUTO_CASE_CLOSURE_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
 		}
 		cfg.DailyLimit = a.Limit
 	}
 	if a.States != nil {
 		allowed := cfg.States
 		if len(allowed) == 0 {
-			allowed = allAutoclosureStates
+			allowed = allAutoCaseClosureStates
 		}
 		var chosen []string
 		for _, s := range a.States {
 			if !slices.Contains(allowed, s) {
-				return cfg, fmt.Errorf("--states value %q is not in AUTOCLOSURE_STATES (%s); a run-now can only narrow the configured states", s, strings.Join(allowed, ","))
+				return cfg, fmt.Errorf("--states value %q is not in AUTO_CASE_CLOSURE_STATES (%s); a run-now can only narrow the configured states", s, strings.Join(allowed, ","))
 			}
 			if !slices.Contains(chosen, s) {
 				chosen = append(chosen, s)
@@ -173,13 +173,13 @@ func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (aut
 // describeStates is the states as logged: empty means both.
 func describeStates(states []string) string {
 	if len(states) == 0 {
-		return strings.Join(allAutoclosureStates, ",")
+		return strings.Join(allAutoCaseClosureStates, ",")
 	}
 	return strings.Join(states, ",")
 }
 
 // withoutTask returns tasks without the one named name: the engine's list when
-// AUTOCLOSURE_SCHEDULED=false keeps case_autoclosure off the schedule.
+// AUTO_CASE_CLOSURE_SCHEDULED=false keeps auto_case_closure off the schedule.
 func withoutTask(tasks []registry.Task, name string) []registry.Task {
 	out := make([]registry.Task, 0, len(tasks))
 	for _, t := range tasks {

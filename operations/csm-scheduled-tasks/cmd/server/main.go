@@ -40,7 +40,7 @@ import (
 
 	"github.com/adhocore/gronx"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autocaseclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
@@ -372,20 +372,20 @@ func main() {
 		slog.Info("rota reminders are not registered: EMAIL_BASE_URL is not set, so no reminder could be sent")
 	}
 
-	// Case auto-closure: reminders and automatic closure of tickets that sit in
+	// Auto case closure: reminders and automatic closure of tickets that sit in
 	// Awaiting Info or Solution Proposed with no activity -- see
-	// internal/autoclosure's package doc and entity-service's CLAUDE.md, "Case
-	// auto-closure". OFF unless AUTOCLOSURE_ENABLED=true: it comments on and
+	// internal/autocaseclosure's package doc and entity-service's CLAUDE.md, "Case
+	// auto-closure". OFF unless AUTO_CASE_CLOSURE_ENABLED=true: it comments on and
 	// closes customers' tickets, so it is never on by accident. this component's client id must be in
 	// entity-service's M2M_CLIENT_IDS. entity-service's AUTOCLOSURE_SYSTEM_USER_EMAIL
 	// is optional: empty acts as "System user".
-	autoclosureEnabled := envBool("AUTOCLOSURE_ENABLED", false)
-	var autoclosureClient *autoclosure.Client
-	// AUTOCLOSURE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK find
+	autoCaseClosureEnabled := envBool("AUTO_CASE_CLOSURE_ENABLED", false)
+	var autoCaseClosureClient *autocaseclosure.Client
+	// AUTO_CASE_CLOSURE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK find
 	// it) but never fired by the engine's tick.
-	autoclosureUnscheduled := false
-	if autoclosureEnabled {
-		autoclosureClient, err = autoclosure.NewClient(autoclosure.ClientConfig{
+	autoCaseClosureUnscheduled := false
+	if autoCaseClosureEnabled {
+		autoCaseClosureClient, err = autocaseclosure.NewClient(autocaseclosure.ClientConfig{
 			BaseURL:      entityServiceBaseURL,
 			TokenURL:     oauthTokenURL,
 			ClientID:     oauthClientID,
@@ -393,7 +393,7 @@ func main() {
 			Scopes:       entityServiceScopes,
 		})
 		if err != nil {
-			slog.Error("failed to construct entity-service auto-closure client", "err", err)
+			slog.Error("failed to construct entity-service auto case closure client", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -616,8 +616,8 @@ func main() {
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
-	const autoclosureTaskName = "case_autoclosure"
-	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
+	const autoCaseClosureTaskName = "auto_case_closure"
+	autoCaseClosureTo, autoCaseClosureCc := recipientsFor(recipientOverrides, autoCaseClosureTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -1007,46 +1007,46 @@ func main() {
 	// entity-service from its audit table, so the engine retrying a failed run
 	// the same day cannot exceed it. A partial failure is retried the next tick:
 	// tickets already advanced are no longer due, so only what is left is done.
-	if autoclosureEnabled {
-		autoclosureCfg := autoclosure.RunConfig{
-			IntervalDays: envInt("AUTOCLOSURE_INTERVAL_DAYS", 7),
-			DailyLimit:   envInt("AUTOCLOSURE_DAILY_LIMIT", 500),
+	if autoCaseClosureEnabled {
+		autoCaseClosureCfg := autocaseclosure.RunConfig{
+			IntervalDays: envInt("AUTO_CASE_CLOSURE_INTERVAL_DAYS", 7),
+			DailyLimit:   envInt("AUTO_CASE_CLOSURE_DAILY_LIMIT", 500),
 			// Solution Proposed on its own first, then Awaiting Info: set
-			// AUTOCLOSURE_STATES=solution_proposed until the first has been watched.
-			States:    splitComma(os.Getenv("AUTOCLOSURE_STATES")),
-			Templates: autoclosureTemplates(),
-			// AUTOCLOSURE_DRY_RUN=true: decide and log, change nothing. Use it to see
+			// AUTO_CASE_CLOSURE_STATES=solution_proposed until the first has been watched.
+			States:    splitComma(os.Getenv("AUTO_CASE_CLOSURE_STATES")),
+			Templates: autoCaseClosureTemplates(),
+			// AUTO_CASE_CLOSURE_DRY_RUN=true: decide and log, change nothing. Use it to see
 			// what the first real run would do to a large backlog.
-			DryRun: envBool("AUTOCLOSURE_DRY_RUN", false),
+			DryRun: envBool("AUTO_CASE_CLOSURE_DRY_RUN", false),
 		}
 		// A value entity-service would reject on every call must stop startup, not
 		// fail and alert every day while no ticket is processed.
-		if err := autoclosureCfg.Validate(); err != nil {
-			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+		if err := autoCaseClosureCfg.Validate(); err != nil {
+			slog.Error("invalid AUTO_CASE_CLOSURE_* configuration; refusing to start", "err", err)
 			os.Exit(1)
 		}
 		// A tryout runs the handler once, outside the ledger, against the real
 		// entity-service: here that would comment on and close real tickets. Only the
 		// debug recipients are protected from the alert email, not the tickets, so a
 		// tryout of this task is always a dry run.
-		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == autoclosureTaskName && !autoclosureCfg.DryRun {
-			slog.Warn("TRYOUT_TASK is case_autoclosure: running as a dry run, nothing will be changed; set AUTOCLOSURE_DRY_RUN=true explicitly to silence this")
-			autoclosureCfg.DryRun = true
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == autoCaseClosureTaskName && !autoCaseClosureCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is auto_case_closure: running as a dry run, nothing will be changed; set AUTO_CASE_CLOSURE_DRY_RUN=true explicitly to silence this")
+			autoCaseClosureCfg.DryRun = true
 		}
-		// AUTOCLOSURE_SCHEDULED=false keeps the task configured but off the
-		// schedule: it then runs only on demand (--run-now=case_autoclosure).
-		// Anything but a boolean refuses to start, like the other AUTOCLOSURE_*
+		// AUTO_CASE_CLOSURE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=auto_case_closure).
+		// Anything but a boolean refuses to start, like the other AUTO_CASE_CLOSURE_*
 		// settings: a typo must not silently leave the schedule on or off.
-		autoclosureScheduled, err := parseStrictBool("AUTOCLOSURE_SCHEDULED", os.Getenv("AUTOCLOSURE_SCHEDULED"), true)
+		autoCaseClosureScheduled, err := parseStrictBool("AUTO_CASE_CLOSURE_SCHEDULED", os.Getenv("AUTO_CASE_CLOSURE_SCHEDULED"), true)
 		if err != nil {
-			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+			slog.Error("invalid AUTO_CASE_CLOSURE_* configuration; refusing to start", "err", err)
 			os.Exit(1)
 		}
-		if !autoclosureScheduled {
-			autoclosureUnscheduled = true
-			slog.Info("case_autoclosure is not scheduled (AUTOCLOSURE_SCHEDULED=false): it runs only with --run-now=case_autoclosure")
+		if !autoCaseClosureScheduled {
+			autoCaseClosureUnscheduled = true
+			slog.Info("auto_case_closure is not scheduled (AUTO_CASE_CLOSURE_SCHEDULED=false): it runs only with --run-now=auto_case_closure")
 		}
-		// An on-demand run (--run-now=case_autoclosure) uses the configured settings
+		// An on-demand run (--run-now=auto_case_closure) uses the configured settings
 		// narrowed by its arguments, and the same handler and entity-service calls
 		// as the scheduled run. Like every run-now it does not touch the ledger: a
 		// ledger row would either mark the day's period done (suppressing the
@@ -1055,23 +1055,23 @@ func main() {
 		// from its audit table, so a run-now beside a scheduled run cannot send
 		// anything twice or exceed the day's budget.
 		runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
-			runCfg, err := narrowAutoclosure(autoclosureCfg, o)
+			runCfg, err := narrowAutoCaseClosure(autoCaseClosureCfg, o)
 			if err != nil {
 				return nil, nil, err
 			}
 			if err := runCfg.Validate(); err != nil {
 				return nil, nil, err
 			}
-			return autoclosure.Run(autoclosureClient, runCfg),
+			return autocaseclosure.Run(autoCaseClosureClient, runCfg),
 				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit, "states", describeStates(runCfg.States)}, nil
 		}
 		tasks = append(tasks, registry.Task{
-			Name:         autoclosureTaskName,
-			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
-			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
+			Name:         autoCaseClosureTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, autoCaseClosureTaskName, "0 8 * * *"),
+			Handler:      autocaseclosure.Run(autoCaseClosureClient, autoCaseClosureCfg),
 			RunNowNarrow: runNowNarrow,
-			To:           autoclosureTo,
-			Cc:           autoclosureCc,
+			To:           autoCaseClosureTo,
+			Cc:           autoCaseClosureCc,
 		})
 	}
 
@@ -1127,8 +1127,8 @@ func main() {
 	}
 
 	engineTasks := tasks
-	if autoclosureUnscheduled {
-		engineTasks = withoutTask(tasks, autoclosureTaskName)
+	if autoCaseClosureUnscheduled {
+		engineTasks = withoutTask(tasks, autoCaseClosureTaskName)
 	}
 	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 
@@ -1168,17 +1168,17 @@ func parseStringMap(name, raw string) map[string]string {
 	return out
 }
 
-// autoclosureTemplates reads AUTOCLOSURE_TEMPLATES. Unlike the other maps here,
+// autoCaseClosureTemplates reads AUTO_CASE_CLOSURE_TEMPLATES. Unlike the other maps here,
 // a malformed value stops startup: treating it as unset would silently post the
 // built-in wording to customers instead of the wording the operator meant.
-func autoclosureTemplates() map[string]string {
-	raw := os.Getenv("AUTOCLOSURE_TEMPLATES")
+func autoCaseClosureTemplates() map[string]string {
+	raw := os.Getenv("AUTO_CASE_CLOSURE_TEMPLATES")
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var out map[string]string
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		slog.Error("AUTOCLOSURE_TEMPLATES is not a JSON object of strings; refusing to start", "err", err)
+		slog.Error("AUTO_CASE_CLOSURE_TEMPLATES is not a JSON object of strings; refusing to start", "err", err)
 		os.Exit(1)
 	}
 	return out

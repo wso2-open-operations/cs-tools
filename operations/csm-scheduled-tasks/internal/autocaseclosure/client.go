@@ -14,14 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package autoclosure drives entity-service's case auto-closure workflow:
+// Package autocaseclosure drives entity-service's case auto-closure workflow:
 // reminders and automatic closure for tickets that sit in Awaiting Info or
 // Solution Proposed with no activity. Everything that decides anything -- which
 // tickets are eligible, whether one is still due, what the comment says, how a
 // ticket is closed -- lives in entity-service (see its CLAUDE.md, "Case
 // auto-closure"); this package only asks for what is due, stage by stage, and
 // advances each ticket, so that logic has one home and one set of tests.
-package autoclosure
+package autocaseclosure
 
 import (
 	"bytes"
@@ -71,10 +71,10 @@ type Client struct {
 // allowed for local development -- see httpsec.RequireSecureURL).
 func NewClient(cfg ClientConfig) (*Client, error) {
 	if err := httpsec.RequireSecureURL(cfg.TokenURL); err != nil {
-		return nil, fmt.Errorf("autoclosure: token URL: %w", err)
+		return nil, fmt.Errorf("autocaseclosure: token URL: %w", err)
 	}
 	if err := httpsec.RequireSecureURL(cfg.BaseURL); err != nil {
-		return nil, fmt.Errorf("autoclosure: base URL: %w", err)
+		return nil, fmt.Errorf("autocaseclosure: base URL: %w", err)
 	}
 	cc := clientcredentials.Config{
 		ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, TokenURL: cfg.TokenURL, Scopes: cfg.Scopes,
@@ -129,29 +129,29 @@ const (
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	body, err := json.Marshal(in)
 	if err != nil {
-		return fmt.Errorf("autoclosure: encode request: %w", err)
+		return fmt.Errorf("autocaseclosure: encode request: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("autoclosure: build request POST %s: %w", path, err)
+		return fmt.Errorf("autocaseclosure: build request POST %s: %w", path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("autoclosure: POST %s: %w", path, err)
+		return fmt.Errorf("autocaseclosure: POST %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("autoclosure: read response: %w", err)
+		return fmt.Errorf("autocaseclosure: read response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return &apierror.Error{StatusCode: resp.StatusCode, Body: string(raw)}
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("autoclosure: decode response: %w", err)
+		return fmt.Errorf("autocaseclosure: decode response: %w", err)
 	}
 	return nil
 }
