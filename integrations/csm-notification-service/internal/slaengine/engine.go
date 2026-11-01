@@ -1285,12 +1285,32 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 // full active-clock set.
 const slaRecalculationRepairTimeout = 2 * time.Minute
 
-// slaRecalculationProgressLogInterval is how often RecalculateFromEntity's
-// main pass logs its own progress -- every Nth clock, so a large recalculation
-// (run synchronously in a detached goroutine, with nothing else reporting on
-// it while in flight) is visible as "X of Y done" rather than only ever
-// logging once, at the very end.
-const slaRecalculationProgressLogInterval = 50
+// slaRecalculationProgressLogTargetLines/slaRecalculationProgressLogMinInterval
+// decide how often RecalculateFromEntity's main pass logs its own progress --
+// scaled to the total clock count rather than a flat interval, so a small
+// staging set (a few hundred clocks) and a large production one (checked
+// live at over 100,000) both get a reasonable number of log lines: a flat
+// "every 50" would be one line per clock for the former and tens of
+// thousands of lines for the latter. recalculationProgressLogInterval
+// targets roughly slaRecalculationProgressLogTargetLines lines for the
+// whole pass, never closer together than slaRecalculationProgressLogMinInterval
+// (so a tiny active-clock set doesn't log on every single clock).
+const (
+	slaRecalculationProgressLogTargetLines = 20
+	slaRecalculationProgressLogMinInterval = 50
+)
+
+// recalculationProgressLogInterval returns how many clocks apart
+// recalculateFromEntityPass's own progress log lines should be, for a pass
+// over total clocks total. See slaRecalculationProgressLogTargetLines' own
+// doc comment for the reasoning.
+func recalculationProgressLogInterval(total int) int {
+	interval := total / slaRecalculationProgressLogTargetLines
+	if interval < slaRecalculationProgressLogMinInterval {
+		return slaRecalculationProgressLogMinInterval
+	}
+	return interval
+}
 
 // RecalculateFromEntity is the CSM portal's "Recalculate SLA" admin action
 // (TypeSLARecalculationRequested) -- called from
@@ -1313,7 +1333,7 @@ const slaRecalculationProgressLogInterval = 50
 // Runs recalculateFromEntityPass TWICE:
 //  1. The main pass, against entity-service's active-clock list as it is
 //     right now -- the bulk of the work, and visible via its own progress
-//     log (slaRecalculationProgressLogInterval).
+//     log (recalculationProgressLogInterval).
 //  2. A settle pass, immediately after -- re-fetches the SAME list, now
 //     possibly changed by real, concurrent case activity that happened
 //     anywhere during the (possibly long) main pass, and reconciles every
@@ -1388,21 +1408,25 @@ func (e *Engine) recalculateFromEntityPass(ctx context.Context, client entityAct
 	}
 
 	now := time.Now()
+	progressInterval := recalculationProgressLogInterval(len(clocks))
 	var failed []activeSLAClock
 	for i, c := range clocks {
 		if !e.reconcileClock(ctx, c, now) {
 			failed = append(failed, c)
 		}
-		// Progress log every slaRecalculationProgressLogInterval clocks (and
-		// on the very last one) -- this runs synchronously in a detached
-		// goroutine with nothing else reporting on it while in flight, and a
-		// large active-clock set can take a while; a log line only at the
-		// very end gives no visibility into whether a long-running
-		// recalculation is progressing or stuck. Only the main pass logs
-		// this -- the settle pass re-touches the same clocks and would
-		// otherwise double the noise for no new information.
+		// Progress log every progressInterval clocks (and on the very last
+		// one) -- this runs synchronously in a detached goroutine with
+		// nothing else reporting on it while in flight, and a large
+		// active-clock set can take a while; a log line only at the very end
+		// gives no visibility into whether a long-running recalculation is
+		// progressing or stuck. progressInterval scales with the total
+		// count (see its own doc comment) so this stays a reasonable number
+		// of lines whether there are a few hundred clocks or over 100,000.
+		// Only the main pass logs this -- the settle pass re-touches the
+		// same clocks and would otherwise double the noise for no new
+		// information.
 		if logProgress {
-			if done := i + 1; done%slaRecalculationProgressLogInterval == 0 || done == len(clocks) {
+			if done := i + 1; done%progressInterval == 0 || done == len(clocks) {
 				slog.InfoContext(ctx, "slaengine: recalculate: progress", "recalculated", done, "total", len(clocks))
 			}
 		}

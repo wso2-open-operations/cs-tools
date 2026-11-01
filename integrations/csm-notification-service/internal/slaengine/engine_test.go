@@ -2019,6 +2019,29 @@ func TestEngine_Reconcile_ClientErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestRecalculationProgressLogInterval confirms the interval scales with
+// the total clock count instead of staying flat -- a flat "every 50" would
+// be one log line per clock for a small staging set and tens of thousands
+// of lines for a large production one (checked live at over 100,000
+// clocks).
+func TestRecalculationProgressLogInterval(t *testing.T) {
+	tests := []struct {
+		total int
+		want  int
+	}{
+		{0, slaRecalculationProgressLogMinInterval},
+		{1, slaRecalculationProgressLogMinInterval},
+		{500, slaRecalculationProgressLogMinInterval}, // 500/20 = 25, below the floor
+		{1000, 50},                                    // 1000/20 = 50, right at the floor
+		{128409, 6420},                                // 128409/20 = 6420 (integer division)
+	}
+	for _, tt := range tests {
+		if got := recalculationProgressLogInterval(tt.total); got != tt.want {
+			t.Errorf("recalculationProgressLogInterval(%d) = %d, want %d", tt.total, got, tt.want)
+		}
+	}
+}
+
 // TestEngine_RecalculateFromEntity_CleanupRemovesStaleClocksNoLongerActive
 // confirms the admin recalculation action both rebuilds every clock the
 // client's current list reports AND removes, via its own cleanup diff (not
