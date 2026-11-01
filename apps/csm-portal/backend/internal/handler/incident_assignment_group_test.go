@@ -82,6 +82,25 @@ func TestSearchGroups_ForwardsSupportGroupsOnly(t *testing.T) {
 	}
 }
 
+// filters.incidentExtraGroupsOnly reaches the entity service the same way: the
+// body is forwarded byte for byte.
+func TestSearchGroups_ForwardsIncidentExtraGroupsOnly(t *testing.T) {
+	const body = `{"filters":{"searchQuery":"sec","incidentExtraGroupsOnly":true},"pagination":{"limit":20,"offset":0}}`
+	var forwarded []byte
+	h := NewGroupHandler(&mockEntityGroupClient{
+		searchGroupsFn: func(_ context.Context, b []byte) ([]byte, error) {
+			forwarded = b
+			return []byte(`{"groups":[],"total":0,"limit":20,"offset":0}`), nil
+		},
+	})
+	w := httptest.NewRecorder()
+	h.SearchGroups(w, withUser(httptest.NewRequest(http.MethodPost, "/groups/search", strings.NewReader(body))))
+	assertStatus(t, w, http.StatusOK)
+	if string(forwarded) != body {
+		t.Errorf("forwarded %s, want %s", forwarded, body)
+	}
+}
+
 func TestGetIncidentCreateDefaults(t *testing.T) {
 	t.Run("requires authenticated user", func(t *testing.T) {
 		h := NewIncidentHandler(&mockEntityIncidentClient{})

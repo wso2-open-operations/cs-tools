@@ -73,6 +73,14 @@ func (s *snGroupService) SearchGroups(ctx context.Context, req domain.SearchGrou
 		return domain.SearchGroupsResponse{}, err
 	}
 
+	// The allowlist of extra incident groups is not resolvable through this
+	// data source's group search, and returning every group would be wrong, so
+	// the filter yields none (as an empty allowlist does). It wins over
+	// SupportGroupsOnly, as on Postgres.
+	if req.Filters != nil && req.Filters.IncidentExtraGroupsOnly {
+		return domain.SearchGroupsResponse{Groups: []domain.Group{}, Total: 0, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 	if req.Filters != nil && req.Filters.SupportGroupsOnly {
 		return s.searchSupportGroups(ctx, token, req.Filters.SearchQuery, req.Pagination)

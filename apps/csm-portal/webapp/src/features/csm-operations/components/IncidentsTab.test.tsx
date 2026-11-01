@@ -61,6 +61,7 @@ vi.mock("@features/csm-operations/api/useSearchChangeRequestsForSelect", () => (
 vi.mock("@features/csm-operations/api/useSearchProblemsForSelect", () => ({ useSearchProblemsForSelect: noResults }));
 vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: () => ({ data: [], isFetching: false, isError: false }),
+  useSearchIncidentExtraGroups: () => ({ data: [], isFetching: false, isError: false }),
 }));
 vi.mock("@api/useSearchItServices", () => ({
   useSearchItServices: () => ({ data: [], isFetching: false, isError: false }),

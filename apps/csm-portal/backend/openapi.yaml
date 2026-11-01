@@ -7587,7 +7587,13 @@ paths:
         filters.supportGroupsOnly true the result is limited to the groups an
         incident can be created in with an explicit assignmentGroupId: active
         groups that are the support group of at least one service (their ids
-        are what assignmentGroupId takes).
+        are what assignmentGroupId takes). With filters.incidentExtraGroupsOnly
+        true the result is limited to the active groups on the incident extra
+        assignment group allowlist (for example the security operations
+        group), which an incident can also be created in; when the allowlist
+        is empty the result is empty. If both filters are sent,
+        incidentExtraGroupsOnly takes precedence and supportGroupsOnly is
+        ignored.
       operationId: searchGroups
       security:
         - bearerAuth: []
@@ -7606,6 +7612,14 @@ paths:
                     supportGroupsOnly:
                       type: boolean
                       default: false
+                    incidentExtraGroupsOnly:
+                      type: boolean
+                      default: false
+                      description: >-
+                        Optional. When true, only active groups on the
+                        incident extra assignment group allowlist are
+                        returned; an empty allowlist returns no groups. Wins
+                        over supportGroupsOnly when both are sent.
                 pagination:
                   type: object
                   properties:
@@ -26390,7 +26404,9 @@ components:
             otherwise) and forwards the body unchanged; the entity service
             decides the group. Sent: used when it is an active group that is
             the support group of at least one service (POST /groups/search
-            with filters.supportGroupsOnly lists them), otherwise 400. Not
+            with filters.supportGroupsOnly lists them), or when it is an
+            active group on the incident extra assignment group allowlist
+            (filters.incidentExtraGroupsOnly lists them), otherwise 400. Not
             sent: the service's support group; when the service has none, the
             default team (GET /incidents/create-defaults); with neither, the
             incident is created unassigned. A work note records the choice.

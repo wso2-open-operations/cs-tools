@@ -8505,7 +8505,10 @@ The **support-group set** is `supportGroupSetSQL` (`support_group_repo.go`): act
 service, matched by id never by name). The create check (`IncidentRepository.IsSupportGroup`) and
 `POST /groups/search` with `filters.supportGroupsOnly` (`GroupRepository.SearchSupportGroups`, which
 reads `"group"`, not the `team` registry) share the incident-assignable set, so the picker never
-offers a group the create refuses. The case-alert route options (`case_alert_settings_repo.go`) keep
+offers a group the create refuses. `filters.incidentExtraGroupsOnly` (`SearchIncidentExtraGroups`,
+`incidentExtraGroupSQL`) narrows the search to the active allowlisted groups alone (empty allowlist:
+empty result; wins over `supportGroupsOnly`; the set may include a group that is also a service's
+support group, so it can overlap `supportGroupsOnly`; the ServiceNow service returns an empty result). The case-alert route options (`case_alert_settings_repo.go`) keep
 reading plain `supportGroupSetSQL` and never gain the extra groups. The allowlist reaches the
 repositories through `NewIncidentRepository` / `NewGroupRepository` (variadic ids). A work note records the choice ("Assignment group set from service X's
 support group" / "Assignment group chosen by <actor>" / "Service X has no support group; assigned

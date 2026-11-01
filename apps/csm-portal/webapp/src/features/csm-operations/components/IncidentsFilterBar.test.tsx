@@ -56,7 +56,16 @@ vi.mock("@features/csm-cases/api/useUserSearch", () => ({
     isFetchingNextPage: false,
   }),
 }));
+// The extra incident assignment groups (security operations) come from their
+// own narrowed group search; tests steer its result per case.
+const useSearchIncidentExtraGroupsMock = vi.fn(
+  (): { data: Array<{ id: string; name: string; active: boolean }> | undefined; isError: boolean } => ({
+    data: [{ id: "group-soc", name: "Security Operations", active: true }],
+    isError: false,
+  }),
+);
 vi.mock("@api/useSearchGroups", () => ({
+  useSearchIncidentExtraGroups: () => useSearchIncidentExtraGroupsMock(),
   useSearchGroups: () => ({
     data: [{ id: "group-cab", name: "CAB Approval", active: true }],
     isFetching: false,
@@ -180,6 +189,55 @@ describe("IncidentsFilterBar", () => {
       ...DEFAULT_INCIDENT_FILTERS,
       sreTeamIds: ["team-apollo"],
     });
+  });
+
+  it("appends the extra incident group after the teams as an SRE Team option", () => {
+    const { onChange } = renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    const names = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(names.indexOf("Security Operations")).toBe(names.indexOf("Apollo SRE Team") + 1);
+
+    fireEvent.click(screen.getByRole("option", { name: "Security Operations" }));
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_INCIDENT_FILTERS,
+      sreTeamIds: ["group-soc"],
+    });
+  });
+
+  it("does not list an extra group twice when a team already carries its id", () => {
+    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({
+      data: [{ id: "team-apollo", name: "Apollo Group", active: true }],
+      isError: false,
+    });
+    renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    expect(screen.getAllByRole("option", { name: /apollo/i })).toHaveLength(1);
+    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+  });
+
+  it("shows only the teams when the extra-group request returns nothing", () => {
+    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({ data: [], isError: false });
+    renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Security Operations" })).not.toBeInTheDocument();
+  });
+
+  it("still shows the teams when the extra-group request fails", () => {
+    useSearchIncidentExtraGroupsMock.mockReturnValueOnce({ data: undefined, isError: true });
+    renderFilterBar();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "SRE Team" }));
+    expect(screen.getByRole("option", { name: "Apollo SRE Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Security Operations" })).not.toBeInTheDocument();
+  });
+
+  it("renders the label of a selected extra group while the picker is closed", () => {
+    renderFilterBar({ filters: { ...DEFAULT_INCIDENT_FILTERS, sreTeamIds: ["group-soc"] } });
+    expect(screen.getAllByText("Security Operations").length).toBeGreaterThan(0);
   });
 
   it("calls onReset when Clear filters is clicked", () => {
