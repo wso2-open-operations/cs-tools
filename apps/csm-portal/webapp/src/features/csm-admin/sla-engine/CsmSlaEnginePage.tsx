@@ -86,6 +86,17 @@ export default function CsmSlaEnginePage(): JSX.Element {
   const activeStatuses = useActiveSlaStatuses(request);
   const recalculate = useRequestSlaRecalculation();
 
+  // The total can shrink between fetches (a clock completes, a recalculation
+  // changes what's active) -- if that leaves `page` past the new last page,
+  // the table would show "No active SLA clocks right now" with rows still on
+  // an earlier page. Snap back to the last valid page -- a guarded set during
+  // render, React's documented pattern for adjusting state from changed
+  // inputs, not an effect (see CsmIssuesView.tsx's identical pattern/comment).
+  if (activeStatuses.data !== undefined) {
+    const lastPage = Math.max(0, Math.ceil(activeStatuses.data.total / rowsPerPage) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }
+
   const handleConfirm = (): void => {
     setConfirmOpen(false);
     recalculate.mutate();
