@@ -2303,14 +2303,30 @@ assignee/team-group emails sent alongside the existing Chat alert — see that
 repo's own `CLAUDE.md`, "SLA breach-alerting engine") — not used by anything
 in this service itself. `AssigneeEmail`/`AssigneeName` resolve via a
 `LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id`; `TeamEmail` is
-`"group".group_email` (the same `"group"` row `team` already joins through)
-and `TeamLeadName` resolves via a second `LEFT JOIN "user" teamlead ON
-teamlead.id = cre.manager_id` — the group's manager, not a dedicated "team
-lead" column, since none exists on this schema today. All four are
-best-effort, same posture as `ProjectOnboardingStatus`/`IsEvaluationAccount`
-above: a work item with no assignee/group simply reports empty strings. A
-dedicated team table may replace the `"group"` lookup for `TeamEmail`/
-`TeamLeadName` later — noted, not yet needed.
+`team.group_email` — **not** `"group".group_email`, a real, reported
+documentation bug: the two are different, independently-synced values for
+the same team, and `team.group_email` is the one other proven code
+(`TeamGroupEmails`, `migration_case_report_repo.go`) already relies on.
+
+**`TeamLeadName` does NOT come from `"group".manager_id` — a real, reported
+bug in an earlier version of this field, now fixed.** That earlier version
+noted (wrongly) that "no dedicated team lead column exists on this schema" —
+it does: `team_member.role = 'lead'` on the team whose id is
+`account.cre_team_id`, the identical join `EscalationRepository.CaseTeamLeads`
+already uses to notify team leads from the escalation ladder
+(`escalation_repo.go`). `"group".manager_id` is an unrelated field — for most
+teams it's simply unset (manual, staging-only edits aside), and even where
+it is set, it does not name the team's actual lead. The fix is a
+`LEFT JOIN LATERAL` picking one `team_member` row with `role = 'lead'`
+(oldest membership first, `tm.created_on`) per `account.cre_team_id`, then
+the usual `LEFT JOIN "user" teamlead` on that row's `user_id` — a team can
+genuinely have more than one lead (`team_member.role` has no per-team
+uniqueness constraint for `'lead'`, unlike the one-per-team
+`'americas_team_lead'` role — see migration `0185`'s own doc comment), so
+this field, being a single string, only ever shows one. All four fields are
+still best-effort, same posture as `ProjectOnboardingStatus`/
+`IsEvaluationAccount` above: a work item with no assignee/account/CRE
+team/lead simply reports an empty string for the ones that don't resolve.
 
 ### `GET /sla-duration-policy` — now computed from `sla_policy`, not a static table
 

@@ -139,7 +139,15 @@ const activeSLAStatusFromJoins = `
 	LEFT JOIN product_version pv ON pv.id = dp.version_id
 	LEFT JOIN account a ON a.id = wi.account_id
 	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
-	LEFT JOIN "user" teamlead ON teamlead.id = cre.manager_id
+	LEFT JOIN team cre_team ON cre_team.id = a.cre_team_id
+	LEFT JOIN LATERAL (
+		SELECT tm.user_id
+		FROM team_member tm
+		WHERE tm.team_id = a.cre_team_id AND tm.role = 'lead'
+		ORDER BY tm.created_on, tm.user_id
+		LIMIT 1
+	) lead_tm ON TRUE
+	LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 	LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 	LEFT JOIN project p ON p.id = wi.project_id
 	LEFT JOIN project_type pt ON pt.id = p.project_type_id
@@ -283,7 +291,7 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
 		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
-		       cre.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
 		` + activeSLAStatusFromJoins + `
 		ORDER BY als.work_item_id, als.target
@@ -397,14 +405,21 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		       COALESCE(EXTRACT(EPOCH FROM s.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
-		       cre.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		JOIN work_item wi ON wi.id = s.work_item_id
 		LEFT JOIN account a ON a.id = wi.account_id
-		LEFT JOIN "group" cre ON cre.id = a.cre_team_id
-		LEFT JOIN "user" teamlead ON teamlead.id = cre.manager_id
+		LEFT JOIN team cre_team ON cre_team.id = a.cre_team_id
+		LEFT JOIN LATERAL (
+			SELECT tm.user_id
+			FROM team_member tm
+			WHERE tm.team_id = a.cre_team_id AND tm.role = 'lead'
+			ORDER BY tm.created_on, tm.user_id
+			LIMIT 1
+		) lead_tm ON TRUE
+		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2` + sourceFilterSQL + `
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
