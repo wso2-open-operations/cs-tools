@@ -1350,18 +1350,25 @@ func recalculationProgressLogInterval(total int) int {
 //     settle pass's own fetch and write is still possible) -- same accepted
 //     residual as refreshAndReconcileClock's own one-round-trip window.
 //
-// After both passes succeed, any clock Redis still holds that the settle
-// pass's own list no longer reports (Store.ListClockKeys diffed against it)
-// is removed individually (Store.DeleteClock) -- this is the one thing
-// writing-in-place cannot do on its own: a clock that completed/cancelled
-// or was otherwise cleaned out of entity-service's own data (a bulk resync
-// changing which "sla" rows exist at all) has to be told apart from one
-// that's simply not in THIS page yet, which the settle pass's own full list
-// already resolves. Each delete is independent and best-effort: a single
-// failure is logged and the rest still proceed, and failing to list/delete
-// stale entries at all never fails the whole recalculation (those entries
-// are mostly harmless on their own -- processDueMember already drops a due
-// wake entry for an unregistered clock without alerting).
+// Cleanup candidates come from Store.ListClockKeys taken as a snapshot
+// BEFORE the main pass even starts, diffed (in cleanupStaleClocks) against
+// the settle pass's own fresh list, and only then deleted (Store.DeleteClock)
+// -- this is the one thing writing-in-place cannot do on its own: a clock
+// that completed/cancelled or was otherwise cleaned out of entity-service's
+// own data (a bulk resync changing which "sla" rows exist at all) has to be
+// told apart from one that's simply not in THIS page yet. Two CodeRabbit-
+// caught gaps in an earlier version of this, both covered by
+// cleanupStaleClocks' own doc comment: the snapshot has to be taken before
+// the main pass (not after the settle pass) so a clock registered live
+// anywhere during this call is never even a candidate, and every remaining
+// candidate is re-verified directly against entity-service immediately
+// before its delete, since OFFSET-based pagination can otherwise skip a
+// still-genuinely-active row. Each delete is independent and best-effort: a
+// single failure is logged and the rest still proceed, and failing to
+// list/delete stale entries at all never fails the whole recalculation
+// (those entries are mostly harmless on their own -- processDueMember
+// already drops a due wake entry for an unregistered clock without
+// alerting).
 //
 // Guarded by recalculating (atomic.Bool) so two requests in flight at once
 // -- a double click, or a redelivered Kafka record -- can't race each
@@ -1378,6 +1385,24 @@ func (e *Engine) RecalculateFromEntity(ctx context.Context) error {
 	}
 	defer e.recalculating.Store(false)
 
+	// Snapshot cleanup candidates BEFORE the main pass runs, not after the
+	// settle pass -- a CodeRabbit-caught gap: RegisterClocks runs on
+	// case.created independently of this recalculation's own guard, so a
+	// clock registered anywhere during either pass (its own case.created
+	// landing after this snapshot but before the settle pass's fetch) would
+	// otherwise be in Redis but missing from the settle list, and
+	// cleanupStaleClocks would delete a clock that was never stale at all.
+	// Restricting cleanup candidates to keys that already existed before
+	// this call started removes that case entirely: a clock that didn't
+	// exist yet when this snapshot was taken is never considered for
+	// deletion, no matter what either pass's own fetch does or doesn't see.
+	// A listing failure here is logged and skips cleanup for this run only
+	// -- the rebuild passes below still run.
+	preExisting, err := e.store.ListClockKeys(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: list existing clock keys failed, skipping cleanup for this run", "err", err)
+	}
+
 	clocks, err := e.recalculateFromEntityPass(ctx, client, true)
 	if err != nil {
 		return fmt.Errorf("slaengine: recalculate: main pass: %w", err)
@@ -1388,7 +1413,7 @@ func (e *Engine) RecalculateFromEntity(ctx context.Context) error {
 		return fmt.Errorf("slaengine: recalculate: settle pass: %w", err)
 	}
 
-	e.cleanupStaleClocks(ctx, settled)
+	e.cleanupStaleClocks(ctx, preExisting, settled)
 
 	slog.InfoContext(ctx, "slaengine: recalculation complete", "count", len(clocks))
 	return nil
@@ -1475,27 +1500,35 @@ func (e *Engine) recalculateFromEntityPass(ctx context.Context, client entityAct
 	return clocks, nil
 }
 
-// cleanupStaleClocks removes every clock Redis still holds that fresh (the
-// settle pass's own, most current list) no longer reports -- see
-// RecalculateFromEntity's own doc comment for why this, not a blanket wipe,
-// is how an orphaned entry (a bulk resync of entity-service's own data
-// changing which "sla" rows exist at all) gets cleaned up. Best-effort
-// throughout: a listing failure is logged and skips cleanup entirely for
-// this run (the next recalculation gets another chance), and one clock's
-// delete failing is logged and never stops the rest -- none of this ever
-// fails the recalculation itself, since every entry left behind here is
-// already harmless on its own (processDueMember drops a due wake entry for
-// an unregistered clock without alerting).
-func (e *Engine) cleanupStaleClocks(ctx context.Context, fresh []activeSLAClock) {
+// cleanupStaleClocks removes every clock from existing (the snapshot
+// RecalculateFromEntity took BEFORE either pass ran -- see that method's
+// own doc comment for why cleanup candidates come from a pre-recalculation
+// snapshot, not the settle pass's own list) that fresh (the settle pass's
+// own, most current list) no longer reports -- see RecalculateFromEntity's
+// own doc comment for why this, not a blanket wipe, is how an orphaned entry
+// (a bulk resync of entity-service's own data changing which "sla" rows
+// exist at all) gets cleaned up.
+//
+// A second CodeRabbit-caught gap, on top of the snapshot-timing one:
+// OFFSET-based pagination (GetActiveCSMSLAClocks) can skip a row if a clock
+// closes between two pages during either pass's own fetch, independently of
+// anything this engine does -- the skipped clock is still genuinely active,
+// but simply absent from fresh through no fault of its own. Before deleting
+// any candidate, e.entity.GetClockState double-checks it directly against
+// entity-service: only a clock confirmed absent, or found but in a terminal
+// stage, is actually deleted; a lookup error or a found-and-still-open row
+// is skipped, same fail-safe-toward-not-deleting posture
+// refreshAndReconcileClock's own terminal-stage check already uses.
+//
+// Best-effort throughout: one clock's lookup or delete failing is logged
+// and never stops the rest -- none of this ever fails the recalculation
+// itself, since every entry left behind here is already harmless on its own
+// (processDueMember drops a due wake entry for an unregistered clock
+// without alerting).
+func (e *Engine) cleanupStaleClocks(ctx context.Context, existing []string, fresh []activeSLAClock) {
 	freshIDs := make(map[string]bool, len(fresh))
 	for _, c := range fresh {
 		freshIDs[c.CaseID+"|"+c.ClockType] = true
-	}
-
-	existing, err := e.store.ListClockKeys(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: list existing clock keys failed, skipping cleanup for this run", "err", err)
-		return
 	}
 
 	removed := 0
@@ -1506,6 +1539,16 @@ func (e *Engine) cleanupStaleClocks(ctx context.Context, fresh []activeSLAClock)
 		caseID, clockType, ok := strings.Cut(id, "|")
 		if !ok {
 			continue
+		}
+		if e.entity != nil {
+			state, err := e.entity.GetClockState(ctx, caseID, clockType)
+			if err != nil {
+				slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: verify candidate before delete failed, skipping it", "caseId", caseID, "clockType", clockType, "err", err)
+				continue
+			}
+			if state.Found && !isTerminalSLAStage(state.Stage) {
+				continue
+			}
 		}
 		if err := e.store.DeleteClock(ctx, caseID, clockType); err != nil {
 			slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: delete stale clock failed", "caseId", caseID, "clockType", clockType, "err", err)

@@ -54,6 +54,12 @@ type fakeStore struct {
 	// RecalculateFromEntity's own cleanup step (cleanupStaleClocks).
 	failListClockKeys bool
 	failDeleteClock   bool
+	// afterListClockKeys, when set, runs immediately after ListClockKeys has
+	// already captured its own snapshot (but before returning it) -- lets a
+	// test simulate a clock being registered concurrently, in the narrow
+	// window between RecalculateFromEntity's own pre-recalculation snapshot
+	// and the rest of the call.
+	afterListClockKeys func()
 }
 
 func newFakeStore() *fakeStore {
@@ -225,6 +231,9 @@ func (s *fakeStore) ListClockKeys(_ context.Context) ([]string, error) {
 	ids := make([]string, 0, len(s.clocks))
 	for id := range s.clocks {
 		ids = append(ids, id)
+	}
+	if s.afterListClockKeys != nil {
+		s.afterListClockKeys()
 	}
 	return ids, nil
 }
@@ -1713,6 +1722,13 @@ type fakeActiveClocksClient struct {
 	// concurrent case update that landed too late for the main pass to see).
 	clocksOnSecondCall []activeSLAClock
 	getActiveCallCount int
+	// extraClockStates, keyed by "caseID|clockType", answers GetClockState
+	// for a clock that is NOT in f.clocks at all -- lets a test simulate
+	// entity-service's own single-clock lookup confirming a clock is still
+	// live even though OFFSET-based pagination skipped it out of the bulk
+	// GetActiveCSMSLAClocks list (checked before falling back to the
+	// f.clocks-derived behavior below).
+	extraClockStates map[string]clockState
 }
 
 func (f *fakeActiveClocksClient) GetActiveCSMSLAClocks(context.Context) ([]activeSLAClock, error) {
@@ -1736,6 +1752,11 @@ func (f *fakeActiveClocksClient) GetActiveCSMSLAClocks(context.Context) ([]activ
 func (f *fakeActiveClocksClient) GetClockState(_ context.Context, caseID, clockType string) (clockState, error) {
 	if f.clockStateErr != nil {
 		return clockState{}, f.clockStateErr
+	}
+	if f.extraClockStates != nil {
+		if state, ok := f.extraClockStates[caseID+"|"+clockType]; ok {
+			return state, nil
+		}
 	}
 	for _, c := range f.clocks {
 		if c.CaseID == caseID && c.ClockType == clockType {
@@ -2183,6 +2204,75 @@ func TestEngine_RecalculateFromEntity_CleanupDeleteFailureIsNonFatal(t *testing.
 	}
 	if _, found, _ := st.GetClock(context.Background(), "case-fresh", ClockResponse); !found {
 		t.Error("case-fresh's clock was not rebuilt despite the cleanup delete failure for an unrelated stale clock")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_CleanupNeverDeletesAClockRegisteredAfterTheSnapshot
+// is the regression test for a CodeRabbit-caught gap: an earlier version
+// took the cleanup candidate snapshot (Store.ListClockKeys) AFTER the settle
+// pass, so a clock registered live (RegisterClocks, on case.created,
+// independent of this recalculation's own guard) in the window between that
+// snapshot and the settle pass's own fetch -- not yet visible to
+// entity-service's bulk list either -- would be in Redis but missing from
+// fresh, and cleanup would delete a clock that was never stale at all. The
+// snapshot is now taken BEFORE the main pass even starts, so a clock that
+// didn't exist in Redis yet at that moment is never a cleanup candidate in
+// the first place, no matter what happens afterward.
+func TestEngine_RecalculateFromEntity_CleanupNeverDeletesAClockRegisteredAfterTheSnapshot(t *testing.T) {
+	st := newFakeStore()
+	client := &fakeActiveClocksClient{} // entity-service reports nothing active at all, either pass
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	// Simulates RegisterClocks firing from a live case.created event right
+	// after RecalculateFromEntity's own pre-pass ListClockKeys snapshot --
+	// a clock entity-service's own bulk list doesn't report either, exactly
+	// the race this fix protects against.
+	st.afterListClockKeys = func() {
+		if err := st.SetClock(context.Background(), "case-new", ClockResponse, ClockMeta{CaseNumber: "CS0099"}); err != nil {
+			t.Fatalf("SetClock() error = %v", err)
+		}
+	}
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v", err)
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-new", ClockResponse); !found {
+		t.Error("case-new's clock was deleted despite being registered after the pre-recalculation snapshot was taken")
+	}
+}
+
+// TestEngine_RecalculateFromEntity_CleanupSkipsACandidateEntityServiceStillConfirmsActive
+// is the regression test for a second CodeRabbit-caught gap in the same
+// cleanup step: OFFSET-based pagination (GetActiveCSMSLAClocks) can skip a
+// row if a clock closes between two pages, independently of anything this
+// engine does -- the skipped clock is still genuinely active, but absent
+// from both passes' own fetched lists through no fault of its own.
+// cleanupStaleClocks must double-check a candidate directly against
+// entity-service's own single-clock lookup before deleting it, and skip the
+// delete when that lookup still reports it Found and not in a terminal
+// stage.
+func TestEngine_RecalculateFromEntity_CleanupSkipsACandidateEntityServiceStillConfirmsActive(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-skipped", ClockResponse, ClockMeta{CaseNumber: "CS0001"}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{
+		// Neither pass's own bulk list reports case-skipped at all -- as if
+		// OFFSET pagination skipped it -- but entity-service's own
+		// single-clock lookup still confirms it is genuinely active.
+		extraClockStates: map[string]clockState{
+			"case-skipped|" + ClockResponse: {Found: true, Stage: "IN_PROGRESS"},
+		},
+	}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	if err := e.RecalculateFromEntity(context.Background()); err != nil {
+		t.Fatalf("RecalculateFromEntity() error = %v", err)
+	}
+	if _, found, _ := st.GetClock(context.Background(), "case-skipped", ClockResponse); !found {
+		t.Error("case-skipped's clock was deleted despite entity-service's own lookup still confirming it active")
 	}
 }
 
