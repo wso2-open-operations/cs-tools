@@ -23,6 +23,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 type fixActivityFixture struct {
@@ -58,6 +59,92 @@ func fixActivityService(repo *stubCaseRepo) CaseService {
 		return domain.User{ID: "00000000-0000-0000-0000-000000000000", Email: email}, nil
 	}}
 	return NewCaseService(repo, userRepo, nil, alwaysUnrestrictedAccess{}, nil)
+}
+
+// withBeforeCase makes the fixture answer the prior-state read the ETA
+// entries need.
+func (f *fixActivityFixture) withBeforeCase(cv domain.CaseView) {
+	f.repo.getCaseByID = func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+		return cv, nil
+	}
+}
+
+func TestCaseService_UpdateCase_FixEtaLogsOnlyChanges(t *testing.T) {
+	f := newFixActivityFixture(nil)
+	shared := time.Date(2026, 10, 10, 6, 0, 0, 0, time.UTC)
+	f.withBeforeCase(domain.CaseView{
+		ID:               testDeploymentUUID,
+		BestCaseFixEta:   strPtr("2026-10-20"),
+		MostLikelyFixEta: strPtr("2026-10-25"),
+		EtaSharedOn:      &shared,
+	})
+	req := domain.UpdateCaseRequest{
+		ID:               testDeploymentUUID,
+		BestCaseFixEta:   strPtr("2026-10-20"), // unchanged
+		MostLikelyFixEta: strPtr("2026-10-27"), // changed
+		WorstCaseFixEta:  strPtr("2026-11-01"), // previously unset
+	}
+	if _, err := fixActivityService(f.repo).UpdateCase(fixActivityUserCtx(t), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []recordedActivity{
+		{"most_likely_eta", "2026-10-25", "2026-10-27", "jane.doe@example.com"},
+		{"worst_case_eta", "", "2026-11-01", "jane.doe@example.com"},
+		{"eta_shared_on", "2026-10-10T06:00:00Z", "2026-10-19T09:30:00Z", "jane.doe@example.com"},
+	}
+	if len(f.activity) != len(want) {
+		t.Fatalf("activity = %+v, want %+v", f.activity, want)
+	}
+	for i := range want {
+		if f.activity[i] != want[i] {
+			t.Errorf("activity[%d] = %+v, want %+v", i, f.activity[i], want[i])
+		}
+	}
+}
+
+// Re-sending the stored dates changes nothing, so nothing is logged and the
+// share stamp is not re-logged.
+func TestCaseService_UpdateCase_FixEtaUnchangedLogsNothing(t *testing.T) {
+	f := newFixActivityFixture(nil)
+	f.withBeforeCase(domain.CaseView{ID: testDeploymentUUID, BestCaseFixEta: strPtr("2026-10-20")})
+	if _, err := fixActivityService(f.repo).UpdateCase(fixActivityUserCtx(t), domain.UpdateCaseRequest{ID: testDeploymentUUID, BestCaseFixEta: strPtr("2026-10-20")}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.activity) != 0 {
+		t.Errorf("activity = %+v, want none", f.activity)
+	}
+}
+
+// An M2M caller (no end-user token) is attributed to its client id rather
+// than dropped, for the date and for the share stamp.
+func TestCaseService_UpdateCase_FixEtaM2MCallerAttributedToClientID(t *testing.T) {
+	f := newFixActivityFixture(nil)
+	f.withBeforeCase(domain.CaseView{ID: testDeploymentUUID})
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{ClientID: "integration-client"})
+	svc := NewCaseService(f.repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: testDeploymentUUID, BestCaseFixEta: strPtr("2026-10-20")}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []recordedActivity{
+		{"best_case_eta", "", "2026-10-20", "integration-client"},
+		{"eta_shared_on", "", "2026-10-19T09:30:00Z", "integration-client"},
+	}
+	if len(f.activity) != len(want) || f.activity[0] != want[0] || f.activity[1] != want[1] {
+		t.Errorf("activity = %+v, want %+v", f.activity, want)
+	}
+}
+
+func TestCaseService_UpdateCase_FixEtaBeforeReadFailureStillUpdates(t *testing.T) {
+	f := newFixActivityFixture(nil)
+	f.repo.getCaseByID = func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+		return domain.CaseView{}, context.DeadlineExceeded
+	}
+	if _, err := fixActivityService(f.repo).UpdateCase(fixActivityUserCtx(t), domain.UpdateCaseRequest{ID: testDeploymentUUID, BestCaseFixEta: strPtr("2026-10-20")}); err != nil {
+		t.Fatalf("update must not fail on a before-state read error: %v", err)
+	}
+	if len(f.activity) != 0 {
+		t.Errorf("activity = %+v, want none", f.activity)
+	}
 }
 
 func TestCaseService_UpdateCase_WorkaroundSetLogsActivity(t *testing.T) {

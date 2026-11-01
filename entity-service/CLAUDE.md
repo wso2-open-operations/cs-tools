@@ -1655,7 +1655,7 @@ gap ("with servicenow data source all are shown").
   `case.status_changed`'s sake) is now unconditional whenever `req.State` or
   `req.WorkState` is set, since the activity write needs the prior value
   regardless of whether Event Hub is configured at all.
-- **Workaround and update released**: `updateCaseFields` logs
+- **Workaround, fix ETAs, update released**: `updateCaseFields` logs
   `workaround_provided_on` (set stores the new timestamp, recall stores the
   prior timestamp as old and an empty new; a recall of an unset workaround
   logs nothing). It reads the prior stamp via `GetCaseWorkaroundProvidedOn`
@@ -1663,16 +1663,22 @@ gap ("with servicenow data source all are shown").
   source) only when `WorkaroundProvided` is in the request; a failed read is
   logged and never fails the update. `updateCaseMarkFixIssued` logs `fix_issued_on` as
   "Update Released" only when `!alreadySet`. Timestamps are RFC 3339 UTC so
-  the feed renders them as date-times. Fix ETA values are deliberately not
-  logged: they are internal until shared with the customer, and the
-  customer portal can request field-change rows. Both paths resolve the
+  the feed renders them as date-times. `best_case_eta`/`most_likely_eta`/
+  `worst_case_eta` are logged only when a date actually changed (`YYYY-MM-DD`,
+  old empty when previously unset), read from a best-effort `GetCaseByID`
+  before-state taken only when an ETA date is in the request; a failed read
+  skips the ETA entries, never the update. `CaseRepository.UpdateCaseFields`
+  also stamps `work_item.eta_shared_on = NOW()` server-side in the same
+  UPDATE whenever a written date differs from the stored one (no request
+  field, so a pure M2M caller stamps it too); that stamp is logged as
+  `eta_shared_on` (RFC 3339 UTC) and makes the fix-ETA SLA clocks complete
+  via `CompleteFixEtaSharedClocks`. Both paths resolve the
   actor with `resolveActorOrM2M`, so a pure M2M caller is attributed to its
   client id (the same value already stamped on `work_item.updated_by`)
   instead of being dropped by the blank-email guard; such a row has no
   matching `"user"` record, so the feed shows the client id and no display
   name. The rest of the plain-field bundle (Subject/Description/
-  DeploymentID/DeployedProductID/fix ETAs/RelatedCaseID) writes no activity
-  entry.
+  DeploymentID/DeployedProductID/RelatedCaseID) writes no activity entry.
 
 Every helper above runs **synchronously** (not detached/async the way
 `apps/csm-portal/backend`'s own `internal/handler/cases.go` `publishAsync`

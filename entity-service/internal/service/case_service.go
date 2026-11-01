@@ -3134,12 +3134,24 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 		}
 	}
 
+	// The prior fix ETA dates and share stamp are read only when an ETA date
+	// is in the request: the ETA entries log a genuine change only. A failed
+	// read is logged and skips those entries, never the update.
+	var beforeEta *domain.CaseView
+	if req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
+		if cv, err := s.GetCaseByID(ctx, req.ID); err != nil {
+			slog.ErrorContext(ctx, "update case: read prior fix ETAs for activity entries failed", "caseId", req.ID, "error", err)
+		} else {
+			beforeEta = &cv
+		}
+	}
+
 	updatedOn, err := s.repo.UpdateCaseFields(ctx, req, actor.ID, actor.Email)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
 
-	s.recordCaseFieldsActivity(ctx, req, prevWorkaround, updatedOn, actor.Email)
+	s.recordCaseFieldsActivity(ctx, req, prevWorkaround, beforeEta, updatedOn, actor.Email)
 
 	// Deliberately independent of s.publisher (never touches Event Hub) --
 	// same reasoning every other SLAEngineService call site in this file
@@ -3235,22 +3247,49 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	return domain.UpdateCaseResponse{Message: "Case updated successfully", Case: resp}, nil
 }
 
-// recordCaseFieldsActivity logs the activity-feed entry for updateCaseFields'
-// workaround field: set stores the new timestamp, recall stores the prior one
-// as old (and nothing when it was not set), which the feed renders as a
-// date-time.
-func (s *caseService) recordCaseFieldsActivity(ctx context.Context, req domain.UpdateCaseRequest, prevOn *time.Time, updatedOn time.Time, actorEmail string) {
-	if req.WorkaroundProvided == nil {
+// recordCaseFieldsActivity logs the activity-feed entries for updateCaseFields'
+// workaround and fix-ETA fields. Workaround set stores the new timestamp,
+// recall stores the prior one as old (and nothing when it was not set); the
+// feed renders both as date-times. The three ETA dates are logged only on a
+// real change (old empty when previously unset, values "YYYY-MM-DD"), so they
+// need before. When any date changed the repository also re-stamped
+// eta_shared_on to the update time, logged here as an RFC 3339 UTC value.
+func (s *caseService) recordCaseFieldsActivity(ctx context.Context, req domain.UpdateCaseRequest, prevWorkaround *time.Time, before *domain.CaseView, updatedOn time.Time, actorEmail string) {
+	if req.WorkaroundProvided != nil {
+		var prev string
+		if prevWorkaround != nil {
+			prev = prevWorkaround.UTC().Format(time.RFC3339)
+		}
+		if *req.WorkaroundProvided {
+			s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
+		} else if prev != "" {
+			s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, "", actorEmail)
+		}
+	}
+	if before == nil {
 		return
 	}
-	var prev string
-	if prevOn != nil {
-		prev = prevOn.UTC().Format(time.RFC3339)
+	changed := false
+	for _, e := range []struct {
+		field    string
+		new, old *string
+	}{
+		{"best_case_eta", req.BestCaseFixEta, before.BestCaseFixEta},
+		{"most_likely_eta", req.MostLikelyFixEta, before.MostLikelyFixEta},
+		{"worst_case_eta", req.WorstCaseFixEta, before.WorstCaseFixEta},
+	} {
+		if e.new == nil || *e.new == derefString(e.old) {
+			continue
+		}
+		changed = true
+		s.recordFieldChangeActivity(ctx, req.ID, e.field, derefString(e.old), *e.new, actorEmail)
 	}
-	if *req.WorkaroundProvided {
-		s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
-	} else if prev != "" {
-		s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, "", actorEmail)
+	if changed {
+		var prev string
+		if before.EtaSharedOn != nil {
+			prev = before.EtaSharedOn.UTC().Format(time.RFC3339)
+		}
+		s.recordFieldChangeActivity(ctx, req.ID, "eta_shared_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
 	}
 }
 
