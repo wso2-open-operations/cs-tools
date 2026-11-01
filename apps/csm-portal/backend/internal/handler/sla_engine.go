@@ -27,7 +27,7 @@ import (
 // entitySLAEngineClient is the entity-service calls the SLA engine admin
 // action needs.
 type entitySLAEngineClient interface {
-	SearchActiveSLAStatusesManage(ctx context.Context, limit, offset, source string) ([]byte, error)
+	SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string) ([]byte, error)
 	RequestSLARecalculation(ctx context.Context) ([]byte, error)
 }
 
@@ -58,7 +58,7 @@ func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, 
 		return
 	}
 	q := r.URL.Query()
-	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"), q.Get("source"))
+	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"))
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchActiveSLAStatusesManage failed", "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to load SLA clocks.")

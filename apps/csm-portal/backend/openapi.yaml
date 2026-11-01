@@ -17574,7 +17574,7 @@ paths:
     get:
       summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
       description: >
-        A CSM admin. Same limit/offset/source query params as entity-service's own
+        A CSM admin. Same limit/offset query params as entity-service's own
         GET /sla-status; responses are Cache-Control no-store. Typically polled right
         after POST /sla-engine/recalculate to show which clocks are currently running.
       operationId: searchActiveSLAStatusesManage
@@ -17587,12 +17587,6 @@ paths:
           in: query
           schema:
             type: integer
-        - name: source
-          in: query
-          description: Optional. "csm" or "servicenow"; omitted returns both.
-          schema:
-            type: string
-            enum: [csm, servicenow]
       responses:
         "200":
           description: Every currently-active SLA clock, paginated.

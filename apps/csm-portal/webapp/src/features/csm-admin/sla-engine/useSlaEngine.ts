@@ -14,12 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
 
 /** One row of GET /sla-status/manage -- entity-service's raw SLAStatus shape, passed through unchanged. */
 export interface ActiveSlaStatus {
   caseId: string;
+  /** Omitted from the wire (no `omitempty` survivor) when the case has none. */
+  caseNumber?: string;
+  wso2CaseId?: string;
+  caseTitle?: string;
+  caseType?: string;
   clockType: string;
   businessElapsedPercent: number;
   hasBreached: boolean;
@@ -31,21 +43,34 @@ export interface ActiveSlaStatus {
 interface SearchActiveSlaStatusResponse {
   statuses: ActiveSlaStatus[];
   total: number;
+  limit: number;
+  offset: number;
+}
+
+interface ActiveSlaStatusesRequest {
+  limit: number;
+  offset: number;
 }
 
 const ACTIVE_SLA_STATUSES_KEY = ["admin", "sla-status", "manage"] as const;
 
 /**
  * Every currently-active SLA clock, for the Recalculate SLA admin page.
- * Capped at 200 rows -- this page is for a quick sanity check after a
- * recalculation, not a full operational view of every clock in the system.
+ * entity-service's GET /sla-status already supports limit+offset+total -- see
+ * that endpoint's own doc comment -- this just exercises it instead of
+ * fetching a single, uncapped first page.
  */
-export function useActiveSlaStatuses(): UseQueryResult<SearchActiveSlaStatusResponse, Error> {
+export function useActiveSlaStatuses(
+  request: ActiveSlaStatusesRequest,
+): UseQueryResult<SearchActiveSlaStatusResponse, Error> {
   const api = useBackendApi();
   return useQuery<SearchActiveSlaStatusResponse, Error>({
-    queryKey: ACTIVE_SLA_STATUSES_KEY,
+    queryKey: [...ACTIVE_SLA_STATUSES_KEY, request],
     queryFn: async () =>
-      (await api.get<SearchActiveSlaStatusResponse>("/sla-status/manage?limit=200&source=csm")) ?? { statuses: [], total: 0 },
+      (await api.get<SearchActiveSlaStatusResponse>(
+        `/sla-status/manage?limit=${request.limit}&offset=${request.offset}`,
+      )) ?? { statuses: [], total: 0, limit: request.limit, offset: request.offset },
+    placeholderData: keepPreviousData,
   });
 }
 

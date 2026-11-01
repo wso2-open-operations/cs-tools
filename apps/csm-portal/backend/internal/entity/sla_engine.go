@@ -25,18 +25,18 @@ import (
 // SearchActiveSLAStatusesManage calls GET /sla-status?admin=true on the
 // entity service -- the CSM-admin-facing request of that endpoint (the
 // plain, admin=false request is internal-callers-only and not exposed by
-// this backend). limit/offset/source are forwarded as-is; a blank value is
-// omitted so entity-service applies its own default.
-func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context, limit, offset, source string) ([]byte, error) {
+// this backend). limit/offset are forwarded as-is; a blank value is omitted
+// so entity-service applies its own default. There used to be a source
+// param forwarded here too -- dropped along with entity-service's own
+// sla.source column (migration 0268 there); entity-service already ignores
+// one if it's still sent, but there's no reason to keep sending it.
+func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string) ([]byte, error) {
 	q := url.Values{"admin": {"true"}}
 	if limit != "" {
 		q.Set("limit", limit)
 	}
 	if offset != "" {
 		q.Set("offset", offset)
-	}
-	if source != "" {
-		q.Set("source", source)
 	}
 	return c.do(ctx, http.MethodGet, "/sla-status?"+q.Encode(), nil)
 }
