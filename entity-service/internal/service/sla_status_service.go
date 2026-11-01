@@ -110,7 +110,11 @@ func (s *slaStatusService) requireAdminRole(ctx context.Context) error {
 
 // requireAdmin rejects anyone who isn't both an internal caller (reached
 // through the portal BFF, not a bare end-user token) and a holder of one of
-// adminRoles -- same two-part gate as portalBannerService.requireAdmin.
+// adminRoles -- same two-part shape skillService.requireAdmin and
+// rotaAccessService's own admin gate use. portalBannerService is the one
+// exception: it trusts csm-portal-backend's own PermAdmin gate via the
+// caller's client id instead of re-checking AUTH_ADMIN_ROLES here -- see that
+// service's requireCSMPortalBackendCaller for why.
 func (s *slaStatusService) requireAdmin(ctx context.Context) error {
 	if err := RequireInternalCaller(ctx, s.access, "the SLA engine admin actions are only available through the CSM portal"); err != nil {
 		return err

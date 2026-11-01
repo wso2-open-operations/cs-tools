@@ -2398,9 +2398,11 @@ exist). Scoped to `GET /sla-status`'s own case-like work item types —
 incidents have no breach-alerting tracking of any kind in
 `csm-notification-service` today (not a gap this action introduces; see
 that repo's own CLAUDE.md), so they're deliberately out of scope here too.
-Admin-gated the same way `portalBannerService`'s own `requireAdmin` is
-(`RequireInternalCaller` — reached through the portal BFF, not a bare
-end-user token — plus `AUTH_ADMIN_ROLES`), on the same `SLAStatusService`:
+Admin-gated the same way `skillService`/`rotaAccessService`'s own admin
+checks are (`RequireInternalCaller` — reached through the portal BFF, not a
+bare end-user token — plus `AUTH_ADMIN_ROLES`); `portalBannerService` is the
+one exception to this shape — see "Portal banners" below — on the same
+`SLAStatusService`:
 it publishes `events.TypeSLARecalculationRequested` (a fixed `"sla-engine"`
 partition key — there is no single case this request is "about") and
 returns, carrying no instruction of its own beyond "rebuild everything" —
@@ -2436,6 +2438,40 @@ adding one back just for this one admin action would mean inventing new
 inbound auth for a service that has never needed any. Publishing instead
 reuses the exact same event-bus path every other cross-service signal in
 this file already takes.
+
+## Portal banners: admin-gated on the caller's client id, not `AUTH_ADMIN_ROLES`
+
+`PortalBannerService` (`internal/service/portal_banner_service.go`) is the one
+admin-gated feature in this service that does **not** check
+`holdsAnyRole(id.Roles, cfg.AuthAdminRoles)` the way its siblings (rota
+access, SLA status's `admin=true`, skills, schedule admin) do. Its own
+`requireCSMPortalBackendCaller` instead checks `id.ClientID ==
+cfg.CSMPortalBackendClientID` directly — the same config value
+`AccessService.ResolveScope` already uses to grant `Unrestricted` scope for a
+`@<CSM_PORTAL_USER_DOMAIN>` caller, read here a second time for a narrower
+purpose. **Deliberate, reported-live decision**: `AUTH_ADMIN_ROLES` has to be
+configured identically in two separately-deployed services (csm-portal-backend
+and this one) for the two to agree on who is an admin, and nothing in code
+enforces that — a real admin was rejected here (403 "only a CSM admin can
+change banners") because this service's own copy of `AUTH_ADMIN_ROLES` was
+unset while csm-portal-backend's was correctly configured, even though
+csm-portal-backend's own `PermAdmin` gate on this exact route (and the
+webapp's identical frontend gate) had already recognized the caller as an
+admin. Since every real "is this person an admin" decision for banners
+already happens exactly once, in csm-portal-backend's `PermAdmin` check
+before it ever proxies the request here, re-deriving the same answer from a
+second, independently-configured role list added nothing but a second place
+for the two services to silently disagree. Trusting the caller's client id
+instead means there is only one admin check left for banners, and it lives
+in the one service that actually resolves it from the live, normalized
+`GET /users/me` role list the frontend also trusts — not a stale or
+differently-shaped copy. This is narrower than csm-portal-backend's own
+`AUTH_ADMIN_ROLES`-based `PermAdmin` gate being wrong in general: it only
+removes the second, redundant check here, for this one feature, by explicit
+decision — the other `AUTH_ADMIN_ROLES`-gated features above were not
+touched, since each of them is reachable by more than just csm-portal-backend
+(or is reasoned about independently) and a blanket switch away from
+`AUTH_ADMIN_ROLES` was never the ask.
 
 ## Real, condition-driven SLA clock engine
 
