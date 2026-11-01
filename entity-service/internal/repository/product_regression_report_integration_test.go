@@ -156,6 +156,10 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	// Listed only when product B is asked for.
 	listedB := caseItem(6, &b, &dpNoVer, at(time.Date(2026, 9, 5, 0, 0, 0, 0, loc)), "CASE")
 	tagged(listedB, prrRegressionTag)
+	// Listed: a new case that carries only a deployed product (no product
+	// of its own), ETA shared after case 2 so the row order is unchanged.
+	listed10 := caseItem(10, nil, &dp, at(time.Date(2026, 9, 30, 23, 45, 0, 0, loc)), "CASE")
+	tagged(listed10, prrRegressionTag)
 	// Not listed: no product at all.
 	tagged(caseItem(7, nil, nil, at(time.Date(2026, 9, 5, 0, 0, 0, 0, loc)), "CASE"), prrRegressionTag)
 	// Not listed: no ETA ever shared.
@@ -179,7 +183,7 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02"}; !equalStringSlices(got, want) {
+	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR10"}; !equalStringSlices(got, want) {
 		t.Fatalf("product A rows = %v, want %v (ETA order; boundaries, tag, product, type and NULL ETA all respected)", got, want)
 	}
 	if rows[0].Product != "PRR API Manager" || rows[1].Product != "PRR API Manager" {
@@ -187,6 +191,9 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	}
 	if rows[0].DeployedProduct != "PRR API Manager 4.2.0" || rows[1].DeployedProduct != "" {
 		t.Errorf("product column = %q / %q, want \"PRR API Manager 4.2.0\" (NULL deployed product name, product + version) and \"\" (no deployed product)", rows[0].DeployedProduct, rows[1].DeployedProduct)
+	}
+	if rows[2].Product != "PRR API Manager" || rows[2].DeployedProduct != "PRR API Manager 4.2.0" {
+		t.Errorf("deployed-product-only case = %q / %q, want it grouped under the deployed product's product with product + version", rows[2].Product, rows[2].DeployedProduct)
 	}
 	if rows[0].IssueKey != "ACME-PRR-01" || rows[0].Subject != "regression 01" || rows[0].ID != listed1 {
 		t.Errorf("row 1 = %+v", rows[0])
@@ -200,11 +207,11 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list both: %v", err)
 	}
-	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR06"}; !equalStringSlices(got, want) {
+	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR10", "CSPRR06"}; !equalStringSlices(got, want) {
 		t.Errorf("both products = %v, want %v in product name order", got, want)
 	}
-	if len(rows) == 3 && rows[2].DeployedProduct != "PRR Identity Server" {
-		t.Errorf("version-less product column = %q, want the product name only", rows[2].DeployedProduct)
+	if len(rows) == 4 && rows[3].DeployedProduct != "PRR Identity Server" {
+		t.Errorf("version-less product column = %q, want the product name only", rows[3].DeployedProduct)
 	}
 
 	// A product nobody has, or no product at all, lists nothing.

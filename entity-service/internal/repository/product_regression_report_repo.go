@@ -51,9 +51,12 @@ func NewProductRegressionReportRepository(db *Scoped) ProductRegressionReportRep
 // listRegressionCasesSQL is the report. Notes on the joins:
 //
 //   - A case is a work item of type CASE with a case row. The product it
-//     is filed against is work_item.product_id; a case with no product
-//     cannot belong to any product's report and is left out by the inner
-//     join. Names are matched after lower-casing and trimming both sides,
+//     is filed against is the product behind its deployed product, the
+//     same source case search and the case detail page use; older rows
+//     that have no deployed product fall back to work_item.product_id. A
+//     case with neither cannot belong to any product's report and is left
+//     out by the inner join. Names are matched after lower-casing and
+//     trimming both sides,
 //     so a product that exists twice under one name (it does) is matched
 //     by both rows, and the name is trimmed on the way out so they group
 //     together.
@@ -77,8 +80,8 @@ SELECT wi.id::text,
        wi.eta_shared_on
   FROM work_item wi
   JOIN "case" c ON c.id = wi.id
-  JOIN product p ON p.id = wi.product_id
   LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
+  JOIN product p ON p.id = COALESCE(dp.product_id, wi.product_id)
   LEFT JOIN product dprod ON dprod.id = dp.product_id
   LEFT JOIN product_version dpv ON dpv.id = dp.version_id
  WHERE wi.type = 'CASE'
