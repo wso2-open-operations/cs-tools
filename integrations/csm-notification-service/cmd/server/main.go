@@ -643,6 +643,14 @@ func main() {
 		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
 
+		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
+		// own doc comment: closes the restart/rebalance redelivery gap the
+		// in-memory done map alone can't. Shares this same redisClient with
+		// slaengine.NewStore above -- no second Redis connection, no new
+		// env var, same optional-per-deployment posture (nil without
+		// REDIS_ADDR/REDIS_URL, exactly as before this feature existed).
+		dispatcher = dispatcher.WithDurableDedup(redisClient)
+
 		// One-shot reconciliation: rebuilds every currently-open clock's
 		// Redis state from entity-service's own durable record (see
 		// Engine.Reconcile's own doc comment) — the recovery path Redis
