@@ -750,33 +750,43 @@ func (e *Engine) CompleteResponseClock(ctx context.Context, caseID string) {
 	}
 }
 
-// CompleteWorkaroundClock force-completes the workaround clock — called
-// from dispatch.handleWorkaroundProvided when entity-service publishes
+// PauseWorkaroundClock pauses the workaround clock — called from
+// dispatch.handleWorkaroundProvided when entity-service publishes
 // events.TypeWorkaroundProvided (a case's workaroundProvided field was set
-// to true via PATCH; entity-service has no equivalent "recall" event, so
-// there's no opposite operation here either — same accepted gap
-// CompleteWorkaroundClock's entity-service namesake documents). Before this
-// existed, ApplyStateEffects only ever paused/resumed this clock, never
-// completed it — a documented gap this closes. Idempotent, same reasoning
-// as CompleteResponseClock.
+// to true via PATCH). Renamed from CompleteWorkaroundClock and changed from
+// a force-complete (AdvanceAlertedTier to 100) to a pause (SetPaused) --
+// a real, reported bug found reviewing entity-service's own matching fix:
+// that service's real WORKAROUND-target policies pause the clock on this
+// same signal, they don't complete it (it only actually stops on the case
+// closing or a fix ETA being shared) -- entity-service's own
+// CompleteWorkaroundClock hook used to force-complete it there too, which
+// is exactly the bug that PR fixed, but this engine's own, independent copy
+// of the same mistake was never updated to match, so after that fix shipped
+// this engine would force-complete (AdvanceAlertedTier is a one-way ratchet
+// that NOTHING can undo, not even a full Recalculate) a clock
+// entity-service itself now correctly keeps running paused -- a later
+// workaround recall resuming the real clock would then alert nothing ever
+// again for it, silently.
 //
-// Unlike every other trigger in this file, this one DOES return its store
-// error rather than just logging it (a CodeRabbit-caught gap): this is a
-// one-shot signal with no later reconciliation pass to re-derive it from —
-// RegisterClocks/ApplyStateEffects/CompleteResponseClock all react to
-// events whose effect either repeats (a resent status change) or is
-// re-established by a later event in the same case's lifecycle, and
-// Reconcile's own startup sweep can rebuild a clock's state from
-// entity-service's durable row regardless. A workaround-provided signal
-// lost here (e.g. a transient Redis outage) has no such second chance:
-// nothing else ever calls this again for the same PATCH. Returning the
-// error lets dispatch.handleWorkaroundProvided fail the record, so
-// eventbus.Consumer retries it instead of silently acknowledging a clock
-// that was never actually completed.
-func (e *Engine) CompleteWorkaroundClock(ctx context.Context, caseID string) error {
-	if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockWorkaround, 100, time.Time{}); err != nil {
-		slog.ErrorContext(ctx, "slaengine: failed to complete workaround clock", "caseId", caseID, "err", err)
-		return fmt.Errorf("slaengine: complete workaround clock for %s: %w", caseID, err)
+// Unlike CompleteResponseClock, this still has no recall counterpart
+// (entity-service publishes no such event), but that no longer matters the
+// way it used to: entity-service's own row now stays ACTIVE (merely
+// paused) rather than disappearing into a completed stage, so
+// Reconcile/RecalculateFromEntity's own pause-aware rebuild
+// (activeSLAClock.IsPaused) and ApplyStateEffects' own entityPauseStatus
+// check (run on every later case.status_changed, regardless of cause) both
+// already re-derive the correct current pause state directly from
+// entity-service on their own schedule -- a workaround recall resumes for
+// real the next time either one runs, with no new event needed. Idempotent,
+// same reasoning as CompleteResponseClock, and still returns its store
+// error rather than just logging it (unchanged from before this rename):
+// a lost pause here still has to wait for one of those two to catch up
+// rather than being re-established by this same trigger firing again, so
+// retrying the record is still worth it over silently acknowledging it.
+func (e *Engine) PauseWorkaroundClock(ctx context.Context, caseID string) error {
+	if err := e.store.SetPaused(ctx, caseID, ClockWorkaround, true); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to pause workaround clock", "caseId", caseID, "err", err)
+		return fmt.Errorf("slaengine: pause workaround clock for %s: %w", caseID, err)
 	}
 	return nil
 }

@@ -109,14 +109,15 @@ type slaEngineService interface {
 	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string)
 	ApplyStateEffects(ctx context.Context, caseID, newStatus string)
 	CompleteResponseClock(ctx context.Context, caseID string)
-	// CompleteWorkaroundClock is called from handleWorkaroundProvided — the
-	// one trigger here that is NOT best-effort: unlike the three above, a
-	// lost workaround-provided signal has no later event or reconciliation
-	// pass to re-derive it from (see CompleteWorkaroundClock's own doc
-	// comment), so its error is returned and propagated, failing the
-	// record so eventbus.Consumer retries it instead of silently
-	// acknowledging a clock that was never actually completed.
-	CompleteWorkaroundClock(ctx context.Context, caseID string) error
+	// PauseWorkaroundClock is called from handleWorkaroundProvided — the one
+	// trigger here that is NOT best-effort: unlike the three above, a lost
+	// pause signal has to wait for ApplyStateEffects/RecalculateFromEntity to
+	// next re-derive it from entity-service, rather than being
+	// re-established by this same trigger firing again (see
+	// PauseWorkaroundClock's own doc comment), so its error is returned and
+	// propagated, failing the record so eventbus.Consumer retries it instead
+	// of silently acknowledging a pause that was never actually applied.
+	PauseWorkaroundClock(ctx context.Context, caseID string) error
 	// RecalculateFromEntity is called from handleSLARecalculationRequested,
 	// in its own detached goroutine — see that handler's own doc comment.
 	RecalculateFromEntity(ctx context.Context) error
@@ -1645,18 +1646,20 @@ func (d *Dispatcher) handleCaseAcknowledged(ctx context.Context, record eventbus
 
 // handleWorkaroundProvided has no email/Chat reaction at all — unlike every
 // other handler in this file, it exists purely to feed
-// internal/slaengine.Engine.CompleteWorkaroundClock, the same direct
+// internal/slaengine.Engine.PauseWorkaroundClock, the same direct
 // "call straight from this handler" wiring RegisterClocks/ApplyStateEffects/
 // CompleteResponseClock already get from
-// handleCaseCreated/handleStatusChanged/handleCommentAdded — see
-// slaEngineService's own doc comment for why this one trigger, unlike its
-// three siblings, is NOT best-effort: its error is returned (wrapped) so
-// eventbus.Consumer retries the record rather than silently acknowledging a
-// workaround-provided signal that was never actually applied (e.g. a
-// transient Redis outage) — this is a one-shot signal with no later
-// reconciliation pass to recover it otherwise. No idempotency tracking is
-// needed regardless of outcome: CompleteWorkaroundClock is itself idempotent
-// (AdvanceAlertedTier never moves the cursor backward), so a redelivered
+// handleCaseCreated/handleStatusChanged/handleCommentAdded. Was
+// CompleteWorkaroundClock (force-completed the clock) until a real,
+// reported bug: entity-service's own matching fix made its real
+// WORKAROUND-target policies pause this signal, not complete it (see that
+// repo's own CLAUDE.md), and this engine's own, independent copy of the
+// identical old mistake was never updated to match -- see
+// PauseWorkaroundClock's own doc comment for the full story, including why
+// its error is still returned (wrapped) here so eventbus.Consumer retries
+// the record rather than silently acknowledging a pause that was never
+// actually applied. No idempotency tracking is needed regardless of
+// outcome: PauseWorkaroundClock is itself idempotent, so a redelivered
 // retry is harmless. A nil slaEngine (REDIS_ADDR/REDIS_URL unset) is a
 // silent no-op, same posture as every other slaEngine call site in this
 // file.
@@ -1666,8 +1669,8 @@ func (d *Dispatcher) handleWorkaroundProvided(ctx context.Context, raw json.RawM
 		return fmt.Errorf("dispatch: decode case.workaround_provided payload: %w", err)
 	}
 	if d.slaEngine != nil {
-		if err := d.slaEngine.CompleteWorkaroundClock(ctx, p.CaseID); err != nil {
-			return fmt.Errorf("dispatch: complete workaround clock: %w", err)
+		if err := d.slaEngine.PauseWorkaroundClock(ctx, p.CaseID); err != nil {
+			return fmt.Errorf("dispatch: pause workaround clock: %w", err)
 		}
 	}
 	return nil
@@ -1684,8 +1687,8 @@ const slaRecalculationTimeout = 10 * time.Minute
 // handleSLARecalculationRequested reacts to the CSM portal's "Recalculate
 // SLA" admin action (TypeSLARecalculationRequested, published once per
 // click by entity-service). Unlike every other handler in this file, the
-// actual work (Engine.RecalculateFromEntity: wipe this engine's Redis state
-// and rebuild it from entity-service's own durable record — see that
+// actual work (Engine.RecalculateFromEntity: rebuild this engine's Redis
+// state in place from entity-service's own durable record — see that
 // method's own doc comment) is kicked off in its own detached goroutine
 // rather than awaited here: a full reconciliation pages through every
 // currently-active clock and must not hold up this consumer's own event
@@ -1698,7 +1701,7 @@ const slaRecalculationTimeout = 10 * time.Minute
 // RecalculateFromEntity is safe to call more than once in a row at all
 // (Engine.recalculating + every write Reconcile makes being idempotent) —
 // so, like CompleteResponseClock/ApplyStateEffects above and unlike
-// CompleteWorkaroundClock, this is best-effort: a nil slaEngine (no Redis
+// PauseWorkaroundClock, this is best-effort: a nil slaEngine (no Redis
 // configured) and a decode failure both log and return nil rather than
 // failing the record, since there is no reason to burn this consumer's
 // retry budget over an admin action that can simply be clicked again.

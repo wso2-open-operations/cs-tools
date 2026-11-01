@@ -30,13 +30,14 @@ import (
 // fakeStore is an in-memory implementation of the store interface —
 // everything this package's tests need, with no real Redis.
 type fakeStore struct {
-	wake        map[string]time.Time
-	clocks      map[string]ClockMeta
-	claims      map[string]bool
-	failClaim   bool
-	failAdd     bool
-	failAdvance bool
-	failWipe    bool
+	wake          map[string]time.Time
+	clocks        map[string]ClockMeta
+	claims        map[string]bool
+	failClaim     bool
+	failAdd       bool
+	failAdvance   bool
+	failSetPaused bool
+	failWipe      bool
 	// failWipeAttempts, when > 0, fails exactly that many WipeAll calls
 	// before letting one through -- simulates a transient Redis blip that
 	// withRedisRetry's own retry clears, distinct from failWipe's "always
@@ -120,6 +121,9 @@ func (s *fakeStore) GetClock(_ context.Context, caseID, clockType string) (Clock
 }
 
 func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, paused bool) error {
+	if s.failSetPaused {
+		return errors.New("set paused failed")
+	}
 	key := caseID + "|" + clockType
 	meta := s.clocks[key]
 	meta.Paused = paused
@@ -870,46 +874,48 @@ func TestCompleteResponseClock_AdvancesToTier100(t *testing.T) {
 	}
 }
 
-// --- CompleteWorkaroundClock ---
+// --- PauseWorkaroundClock ---
 
-// TestCompleteWorkaroundClock_AdvancesToTier100 is the regression test for
-// the case PATCH workaroundProvided:true gap: entity-service's own
-// Postgres-side SLA engine completed its workaround clock, but this
-// engine's own Redis-based clock had no way to hear about it at all until
-// case.workaround_provided existed.
-func TestCompleteWorkaroundClock_AdvancesToTier100(t *testing.T) {
+// TestPauseWorkaroundClock_SetsPaused is the regression test for a real,
+// reported bug found reviewing entity-service's own matching fix: this
+// engine used to force-complete (AdvanceAlertedTier to 100 -- a one-way
+// ratchet nothing can undo) the workaround clock on workaroundProvided:true,
+// matching entity-service's own now-fixed CompleteWorkaroundClock hook. The
+// real WORKAROUND-target policies pause this clock on that same signal,
+// they don't complete it, so this engine's independent copy of the same old
+// mistake had to be fixed the same way: PAUSE, not complete.
+func TestPauseWorkaroundClock_SetsPaused(t *testing.T) {
 	st := newFakeStore()
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
-	if err := e.CompleteWorkaroundClock(context.Background(), "case-1"); err != nil {
-		t.Fatalf("CompleteWorkaroundClock() error = %v", err)
+	if err := e.PauseWorkaroundClock(context.Background(), "case-1"); err != nil {
+		t.Fatalf("PauseWorkaroundClock() error = %v", err)
 	}
 
 	meta, _, _ := st.GetClock(context.Background(), "case-1", ClockWorkaround)
-	if meta.AlertedTier != 100 {
-		t.Errorf("workaround AlertedTier = %d, want 100", meta.AlertedTier)
+	if !meta.Paused {
+		t.Error("workaround clock Paused = false, want true")
+	}
+	if meta.AlertedTier != 0 {
+		t.Errorf("workaround AlertedTier = %d, want 0 -- a pause must not touch the alerted-tier cursor the way the old force-complete did", meta.AlertedTier)
 	}
 }
 
-// TestCompleteWorkaroundClock_StoreFailure_ReturnsError is the regression
-// test for a CodeRabbit-caught gap: unlike its siblings (CompleteResponseClock
-// and the other triggers, all genuinely best-effort since a later event or
-// Reconcile's own startup sweep can re-derive their effect), a lost
-// workaround-provided signal has no second chance — so a store failure here
-// must be returned, not just logged, so dispatch.handleWorkaroundProvided
-// can fail the record for a retry instead of silently acknowledging a clock
-// that was never actually completed.
-func TestCompleteWorkaroundClock_StoreFailure_ReturnsError(t *testing.T) {
+// TestPauseWorkaroundClock_StoreFailure_ReturnsError confirms a store
+// failure here is still returned, not just logged, so
+// dispatch.handleWorkaroundProvided can fail the record for a retry instead
+// of silently acknowledging a pause that was never actually applied.
+func TestPauseWorkaroundClock_StoreFailure_ReturnsError(t *testing.T) {
 	st := newFakeStore()
-	st.failAdvance = true
+	st.failSetPaused = true
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = entityWithCatastrophicDurations("case-1")
 	e.RegisterClocks(context.Background(), "case-1", "CATASTROPHIC", time.Now(), "CS0001", "", "", "CASE", "", "")
 
-	if err := e.CompleteWorkaroundClock(context.Background(), "case-1"); err == nil {
-		t.Fatal("expected CompleteWorkaroundClock() to return an error on a store failure, got nil")
+	if err := e.PauseWorkaroundClock(context.Background(), "case-1"); err == nil {
+		t.Fatal("expected PauseWorkaroundClock() to return an error on a store failure, got nil")
 	}
 }
 
@@ -2053,8 +2059,8 @@ func TestRecalculationProgressLogInterval(t *testing.T) {
 		{0, slaRecalculationProgressLogMinInterval},
 		{1, slaRecalculationProgressLogMinInterval},
 		{500, slaRecalculationProgressLogMinInterval}, // 500/20 = 25, below the floor
-		{1000, 50},                                    // 1000/20 = 50, right at the floor
-		{128409, 6420},                                // 128409/20 = 6420 (integer division)
+		{1000, 50},     // 1000/20 = 50, right at the floor
+		{128409, 6420}, // 128409/20 = 6420 (integer division)
 	}
 	for _, tt := range tests {
 		if got := recalculationProgressLogInterval(tt.total); got != tt.want {
