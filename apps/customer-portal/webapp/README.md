@@ -53,10 +53,10 @@ Register a **Single Page Application** in your identity provider and align these
 
 | IdP setting | Must match |
 |-------------|------------|
-| Allowed callback URLs | `CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` |
-| Allowed logout URLs | `CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` |
+| Allowed callback URLs | The portal's origin (or `CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL`, if you set it) |
+| Allowed logout URLs | The portal's origin (or `CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL`, if you set it) |
 
-For local development, use `http://localhost:3000` for both redirect URLs unless you change the Vite dev server port.
+The sign-in and sign-out redirect URLs are optional. When unset, both default to the page's own origin, so for local development register `http://localhost:3000` (or whichever port the Vite dev server runs on).
 
 ### 4. Start the backend (local)
 
@@ -112,8 +112,6 @@ window.config = {
   // Required — authentication
   CUSTOMER_PORTAL_AUTH_BASE_URL: "https://api.asgardeo.io/t/<your-tenant>",
   CUSTOMER_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
-  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
-  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
 
   // Required — backend Url
   CUSTOMER_PORTAL_BACKEND_BASE_URL: "http://localhost:9090",
@@ -176,14 +174,14 @@ These must be set in `public/config.js` or the app throws at startup:
 |-----|-------------|
 | `CUSTOMER_PORTAL_AUTH_BASE_URL` | Asgardeo or IS tenant base URL (e.g. `https://api.asgardeo.io/t/<org>`) |
 | `CUSTOMER_PORTAL_AUTH_CLIENT_ID` | OAuth 2.0 SPA client ID |
-| `CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | Post-login redirect URL (must match IdP callback allowlist) |
-| `CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | Post-logout redirect URL (must match IdP logout allowlist) |
 | `CUSTOMER_PORTAL_BACKEND_BASE_URL` | Customer Portal REST API base URL (no trailing slash) |
 
 ### Optional settings
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | page origin | Post-login redirect URL. Unset uses the page's own origin (`window.location.origin`); that origin must be a registered callback URL. Set only to override |
+| `CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | page origin | Post-logout redirect URL. Same default and override rules; must be a registered logout URL |
 | `CUSTOMER_PORTAL_THEME` | `acrylicOrange` | Oxygen UI theme: `acrylicOrange`, `acrylicPurple`, `highContrast`, `classic` |
 | `CUSTOMER_PORTAL_LOG_LEVEL` | `ERROR` | Console log level: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL` | — | WebSocket URL for the AI chatbot; omit to disable |
