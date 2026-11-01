@@ -3143,16 +3143,21 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 
 	// Deliberately independent of s.publisher (never touches Event Hub) --
 	// same reasoning every other SLAEngineService call site in this file
-	// gives. WorkaroundProvided is the one genuine "workaround was
-	// provided" signal anywhere in the domain model -- unlike
-	// ApplyCaseStateEffects (called from UpdateCase's own State branch),
-	// which only ever pauses/resumes this clock, never completes it.
-	// false (a recall) is deliberately not handled the opposite way here:
-	// there's no "reopen a completed clock" operation on SLAEngineRepository,
-	// and recalling a workaround is rare enough that this is a real, known
-	// gap rather than a fix worth building speculatively.
-	if s.slaEngine != nil && req.WorkaroundProvided != nil && *req.WorkaroundProvided {
-		s.slaEngine.CompleteWorkaroundClock(ctx, req.ID)
+	// gives. Re-checks every active clock's own pause/resume/stop/cancel
+	// condition text against the case's current facts whenever this bundle
+	// touches a field those conditions can reference -- WorkaroundProvided
+	// (a policy's own pause_condition reads
+	// "...ORu_workaround_providedISNOTEMPTY", so providing one PAUSES the
+	// clock rather than completing it, and a recall is picked up for free
+	// by the matching resume_condition) and the three fix-ETA values (a
+	// policy's own stop_condition reads "...ORfix_eta_sharedISNOTEMPTY",
+	// which repository.CaseFacts.FixEtaShared now answers from these values
+	// directly -- see that field's own doc comment for why eta_shared_on,
+	// a separate explicit "share with customer" action, is the wrong
+	// signal here). See SLAEngineService.ApplyCaseFieldEffects' own doc
+	// comment for the two hardcoded CompleteClock hooks this replaced.
+	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID)
 	}
 	// Deliberately independent of s.slaEngine above -- this is the signal
 	// csm-notification-service's own Redis-based SLA engine needs to
@@ -3162,19 +3167,6 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	// published this before.
 	if req.WorkaroundProvided != nil && *req.WorkaroundProvided {
 		publishWorkaroundProvidedEvent(ctx, s.publisher, req.ID)
-	}
-	// Checked via GetCaseEtaSharedOn, not a request field -- eta_shared_on
-	// has no ServiceNow equivalent and no guaranteed connection to this
-	// specific PATCH (see snCaseService.UpdateCase's own identical check
-	// for the full reasoning); this branch is where a case's fix-ETA
-	// fields themselves get edited, so it's a natural, frequent point to
-	// also pick up a fix ETA having since been shared.
-	if s.slaEngine != nil {
-		if etaSharedOn, err := s.repo.GetCaseEtaSharedOn(ctx, req.ID); err != nil {
-			slog.ErrorContext(ctx, "update case: eta shared on lookup failed", "caseId", req.ID, "error", err)
-		} else if etaSharedOn != nil {
-			s.slaEngine.CompleteFixEtaSharedClocks(ctx, req.ID)
-		}
 	}
 
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write

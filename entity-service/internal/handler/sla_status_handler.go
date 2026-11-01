@@ -39,16 +39,18 @@ func NewSLAStatusHandler(svc service.SLAStatusService) *SLAStatusHandler {
 }
 
 // SearchActiveSLAStatuses handles GET /sla-status. A plain GET with
-// limit/offset/source/admin query params, not a POST /search: filtering is a
+// limit/offset/admin query params, not a POST /search: filtering is a
 // handful of optional values, so a request body would carry nothing a query
 // string can't — same reasoning as the deprecated GET /tags form (see
 // CaseHandler.SearchTagsQuery's own doc comment) minus that one's
-// backward-compatibility concern, since this is a new endpoint. source is
-// optional; see SLAStatusService.SearchActiveSLAStatuses's own doc comment
-// for its accepted values. admin=true is the CSM portal's own "Recalculate
-// SLA" admin page requesting the CSM-admin-gated view (same query, same
-// response shape, just an extra role check) — any other value, or the
-// param's absence, is the plain internal-caller request every other caller
+// backward-compatibility concern, since this is a new endpoint. There used
+// to be a source query param here too (dropped along with sla.source
+// itself — see SLAStatusService.SearchActiveSLAStatuses's own doc comment);
+// a caller that still sends one is simply ignored, not rejected.
+// admin=true is the CSM portal's own "Recalculate SLA" admin page
+// requesting the CSM-admin-gated view (same query, same response shape,
+// just an extra role check) — any other value, or the param's absence, is
+// the plain internal-caller request every other caller
 // (csm-notification-service's own startup reconciliation included) already
 // makes, completely unaffected by this parameter's existence.
 func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +59,7 @@ func (h *SLAStatusHandler) SearchActiveSLAStatuses(w http.ResponseWriter, r *htt
 		return
 	}
 	admin := strings.EqualFold(r.URL.Query().Get("admin"), "true")
-	resp, err := h.svc.SearchActiveSLAStatuses(r.Context(), pagination, r.URL.Query().Get("source"), admin)
+	resp, err := h.svc.SearchActiveSLAStatuses(r.Context(), pagination, admin)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
@@ -104,9 +106,10 @@ func parseSLAStatusPaginationQuery(w http.ResponseWriter, r *http.Request) (doma
 }
 
 // GetClockState handles GET /sla-status/clock-state. A plain GET with
-// workItemId/target/source query params — workItemId and target are
-// required, source is optional; see SLAStatusService.GetClockState's own
-// doc comment for their accepted values.
+// workItemId/target query params, both required; see
+// SLAStatusService.GetClockState's own doc comment for target's accepted
+// values. There used to be a source query param too (dropped along with
+// sla.source itself); a caller that still sends one is simply ignored.
 func (h *SLAStatusHandler) GetClockState(w http.ResponseWriter, r *http.Request) {
 	workItemID := r.URL.Query().Get("workItemId")
 	if workItemID == "" {
@@ -119,7 +122,7 @@ func (h *SLAStatusHandler) GetClockState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	resp, err := h.svc.GetClockState(r.Context(), workItemID, target, r.URL.Query().Get("source"))
+	resp, err := h.svc.GetClockState(r.Context(), workItemID, target)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

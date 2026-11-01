@@ -317,33 +317,53 @@ func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
 	}
 }
 
-func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
+// TestSLAEngineService_ApplyCaseFieldEffects_WorkaroundProvidedPauses is the
+// regression guard for a real bug in the old design: WorkaroundProvided=true
+// used to hard-complete the workaround clock directly. The real
+// WORKAROUND-target policies' own pause_condition
+// ("...ORu_workaround_providedISNOTEMPTY") says providing a workaround
+// should PAUSE that clock, not complete it -- it only actually stops on
+// stateINCLOSED or fix_eta_sharedISNOTEMPTY (see caseStateEffectsPolicies'
+// own WORKAROUND policy). ApplyCaseFieldEffects lets that condition text
+// decide, with no state override and no CLOSED safety net.
+func TestSLAEngineService_ApplyCaseFieldEffects_WorkaroundProvidedPauses(t *testing.T) {
 	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", WorkaroundProvided: true}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
 	svc := NewSLAEngineService(repo)
 
-	svc.CompleteWorkaroundClock(context.Background(), "case-5")
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5")
+
+	if len(repo.completed) != 0 {
+		t.Errorf("completed = %v, want none -- providing a workaround pauses, it does not complete", repo.completed)
+	}
+	if len(repo.paused) != 1 || repo.paused[0] != "case-5|WORKAROUND|true" {
+		t.Errorf("paused = %v, want [case-5|WORKAROUND|true]", repo.paused)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseFieldEffects_FixEtaSharedCompletesWorkaround
+// verifies the fix-ETA fields (BestCaseFixEta/MostLikelyFixEta/
+// WorstCaseFixEta -- any one of them, via repository.CaseFacts.FixEtaShared's
+// own doc comment) complete the workaround clock through its own
+// stop_condition, replacing the old design's hardcoded
+// CompleteFixEtaSharedClocks hook (which also force-completed the resolution
+// clock regardless of that clock's own condition text -- the resolution
+// policy here has no fix_eta_shared clause at all, so it is correctly left
+// running).
+func TestSLAEngineService_ApplyCaseFieldEffects_FixEtaSharedCompletesWorkaround(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", FixEtaShared: true}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5")
 
 	if len(repo.completed) != 1 || repo.completed[0] != "case-5|WORKAROUND" {
 		t.Errorf("completed = %v, want [case-5|WORKAROUND]", repo.completed)
 	}
-}
-
-// TestSLAEngineService_CompleteFixEtaSharedClocks verifies sharing a fix ETA
-// with the customer completes BOTH the workaround and resolution clocks.
-func TestSLAEngineService_CompleteFixEtaSharedClocks(t *testing.T) {
-	repo := newFakeFullSLAEngineRepo()
-	svc := NewSLAEngineService(repo)
-
-	svc.CompleteFixEtaSharedClocks(context.Background(), "case-5")
-
-	want := []string{"case-5|WORKAROUND", "case-5|RESOLUTION"}
-	if len(repo.completed) != len(want) {
-		t.Fatalf("completed = %v, want %v", repo.completed, want)
-	}
-	for i, w := range want {
-		if repo.completed[i] != w {
-			t.Errorf("completed[%d] = %q, want %q", i, repo.completed[i], w)
-		}
+	if len(repo.paused) != 0 {
+		t.Errorf("paused = %v, want none", repo.paused)
 	}
 }
 

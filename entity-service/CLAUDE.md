@@ -2166,17 +2166,18 @@ in one bulk list with no per-project/per-case filtering, so it has its own
 pagination cap (`normalizeSLAStatusPagination` — default `500`, max `2000`)
 well above the generic `20`/`50` `normalizePagination` uses everywhere else.
 
-**`source` (query param, `csm`/`servicenow`) narrows the result to one
-`sla.source` value** — added so `csm-notification-service`'s Redis engine
-could call this endpoint again for exactly one purpose: rebuilding its own
-tracking state from Postgres if its Redis instance is ever wiped (a
-one-shot reconciliation pass at process startup, not a recurring poll — see
-that repo's own `CLAUDE.md`). `source=csm` scopes the query to just this
-engine's own, much smaller row set (`WHERE s.source = 'CSM'`, injected into
-`activeSLAStatusCTE`), so that reconciliation read never pays the cost of
-scanning the full ServiceNow-synced table the old, abandoned poll design
-choked on. Omitted (the default, and every other caller's behavior)
-means no filter, identical to this endpoint's original, unscoped shape.
+**There used to be a `source` query param (`csm`/`servicenow`) narrowing the
+result to one `sla.source` value — removed along with the column itself
+(migration `0268`).** It existed so `csm-notification-service`'s Redis
+engine could scope its own reconciliation read to just this engine's own,
+much smaller row set, separate from the previous system's own
+continuously-running sync job's rows in the same table. At cutover, that
+sync job stops writing SLA rows into this table at all, so there is only
+ever one writer left and nothing to distinguish a row by — `source=csm` and
+`source=servicenow` would always have meant the same thing. `GET
+/sla-status`/`GET /sla-status/clock-state` now simply return every active
+clock, unconditionally; a caller that still sends `source` is just ignored,
+not rejected.
 
 **`is_active` is now actually cleared when a clock finishes — a real,
 reported bug.** `SLAEngineRepository.CompleteClock`/`ReviseClocks` used to
@@ -2414,11 +2415,19 @@ exist). Scoped to `GET /sla-status`'s own case-like work item types —
 incidents have no breach-alerting tracking of any kind in
 `csm-notification-service` today (not a gap this action introduces; see
 that repo's own CLAUDE.md), so they're deliberately out of scope here too.
-Admin-gated the same way `skillService`/`rotaAccessService`'s own admin
-checks are (`RequireInternalCaller` — reached through the portal BFF, not a
-bare end-user token — plus `AUTH_ADMIN_ROLES`); `portalBannerService` is the
-one exception to this shape — see "Portal banners" below — on the same
-`SLAStatusService`:
+Admin-gated the same way `portalBannerService` is, not the way
+`skillService`/`rotaAccessService`'s own admin checks are: `RequireInternalCaller`
+(reached through the portal BFF, not a bare end-user token) plus trusting
+the caller's client id (`CSM_PORTAL_BACKEND_CLIENT_ID`), not a second,
+independently-configured `AUTH_ADMIN_ROLES` role list —
+`requireCSMPortalBackendCaller` (`sla_status_service.go`), mirroring
+`portalBannerService.requireCSMPortalBackendCaller` exactly. This replaced
+an `AUTH_ADMIN_ROLES` check that caused a real, reported bug: a genuine
+admin, already past csm-portal-backend's own PermAdmin gate on this route,
+got a 403 from entity-service whenever its own, separately-configured
+`AUTH_ADMIN_ROLES` list didn't happen to include that admin's exact role
+name. `SearchActiveSLAStatuses`'s own `admin=true` request is gated the
+same way, on the same `SLAStatusService`:
 it publishes `events.TypeSLARecalculationRequested` (a fixed `"sla-engine"`
 partition key — there is no single case this request is "about") and
 returns, carrying no instruction of its own beyond "rebuild everything" —
@@ -2691,24 +2700,27 @@ the Query/SecReport Analysis family) on no severity at all.
   (`sla_engine_repo.go`) for a live business-day row and leave every other
   row (24x7, or `PAUSED`/terminal regardless of schedule) reading
   `sla_live`'s own value unchanged, since those are already correct.
-- **This engine's own clocks are tagged `source='CSM'`** (migration `0134`'s
-  enum) — this is migration `0134`'s own original intent, unchanged:
-  `'CSM'` rows are exclusively owned by this in-process engine, `'SERVICENOW'`
-  rows are exclusively owned by the external sync job that populates
-  `sla_policy`/`sla` (a separate, continuously-running process sharing this
-  database — not this repo), and the two never share a row. `'SERVICENOW'`
-  must never be used for an engine-managed clock: doing so would let this
-  engine's writes collide with that sync job's rows for the same
-  `(work_item_id, target)` pair on a dual-write-mode case, each silently
-  overwriting state the other owns. See `repository.SLAEngineRepository`'s
-  own doc comment for the full reasoning. Every `GetClockState`/
-  `SearchActiveSLAStatuses` caller that wants only this engine's own clocks
-  (not just the bulk listing — `GetClockState`'s own single-clock lookup
-  matters just as much, since `csm-notification-service`'s pre-alert check
-  reads through it) must pass `source=csm` explicitly. `sla_engine_repo.go`
-  is the only code path in this repo that writes to the `sla` table, under
-  every `DATA_SOURCE` mode — the external sync job is the only other writer,
-  and it is outside this repo entirely.
+- **`sla.source` is gone (migration `0268`) — this engine's clocks used to be
+  tagged `source='CSM'`, kept apart from a separate, continuously-running
+  external sync job's own `'SERVICENOW'`-tagged rows in the same table.**
+  That column (migration `0134`'s enum) existed purely to stop the two from
+  colliding on the same `(work_item_id, target)` pair, each silently
+  overwriting state the other owned — see `repository.SLAEngineRepository`'s
+  own doc comment, still accurate on the mechanism even though the column
+  itself is gone. At the cutover migration `0268` ships with, that sync job
+  stops writing SLA rows into this table at all, so there is only ever one
+  writer left (`sla_engine_repo.go`, under every `DATA_SOURCE` mode) and
+  nothing left to tag a row by. Every row already in the table at cutover —
+  regardless of what it was previously tagged — is simply adopted in place:
+  its own `start_on`/`duration`/`pause_duration` already reflect genuine
+  elapsed and paused time, so this engine's stop/pause/resume/cancel
+  evaluation picks it up and continues it correctly with no separate
+  backfill step. `RegisterClock`'s own per-`(work_item, sla_policy)`
+  uniqueness guard (`NOT EXISTS` against `sla`, no source filter any more)
+  means a case that already has a row for a given policy simply keeps using
+  that same row going forward — a fresh insert for the same pair is
+  correctly refused, not duplicated. `GetClockState`/`SearchActiveSLAStatuses`
+  no longer take a `source` parameter at all (see "SLA status" above).
 - **Raw, vendor-encoded condition text is translated at evaluation time, not
   pre-decoded by a migration.** `sla_policy` is written by the external sync
   job on a recurring schedule, mapping its own `start`/`stop`/`pause`/
@@ -3148,26 +3160,36 @@ regardless of severity.
     change (unlike the state hook above), reusing the same `GetCaseByID`
     fetch the `case.severity_changed` publish already does, rather than a
     second round trip.
-- **The workaround clock could never actually complete, on either code
-  path, until now — a separate, previously-accepted gap this also
-  closes.** `ApplyCaseStateEffects` only ever pauses/resumes the workaround
-  clock (even on close, per its own doc comment — there was no "workaround
-  provided" signal wired into it). `WorkaroundProvided` (a real field on
-  `UpdateCaseRequest`/`CaseView`, the "Provide Workaround" action) is the
-  one genuine such signal that exists anywhere in the domain model, and
-  it simply wasn't connected to the SLA engine at all. `SLAEngineService`
-  now has its own `CompleteWorkaroundClock`, called from both `caseService.
-  updateCaseFields` and `snCaseService.UpdateCase` whenever
-  `WorkaroundProvided` is set to `true` — `false` (a recall) deliberately
-  does **not** reopen a completed clock; `SLAEngineRepository` has no
-  "uncomplete" operation, and a recall is rare enough that this stays a
-  known, accepted gap rather than something built speculatively.
+- **The workaround clock's own "provided" signal used to force-complete it
+  directly — a confirmed bug, now fixed.** `WorkaroundProvided` (a real
+  field on `UpdateCaseRequest`/`CaseView`, the "Provide Workaround" action)
+  is the one genuine "workaround was provided" signal anywhere in the domain
+  model, but the real WORKAROUND-target policies' own `pause_condition` text
+  already reads `"...ORu_workaround_providedISNOTEMPTY"` — providing a
+  workaround is supposed to PAUSE that clock (the engineer is now waiting on
+  the customer), not complete it outright; it only actually stops on
+  `stateINCLOSED` or `fix_eta_sharedISNOTEMPTY`. A hardcoded
+  `SLAEngineService.CompleteWorkaroundClock` hook, called whenever
+  `WorkaroundProvided` was set `true`, bypassed that condition text entirely
+  and force-completed the clock anyway. Fixed by replacing that hook (and
+  `CompleteFixEtaSharedClocks` below) with `SLAEngineService.
+  ApplyCaseFieldEffects` — the same stop/cancel/pause/resume condition
+  evaluation `ApplyCaseStateEffects` already runs on a state change, just
+  triggered by a field change instead, with no state override and no
+  CLOSED safety net (see that method's own doc comment). Called from both
+  `caseService.updateCaseFields` and `snCaseService.UpdateCase` whenever the
+  PATCH sets `WorkaroundProvided` or any of the three fix-ETA fields. One
+  side benefit: a workaround RECALL (`WorkaroundProvided` back to `false`)
+  is now picked up for free by the same policies' own `resume_condition`
+  (`"u_workaround_providedISEMPTY^..."`) — there's no separate "uncomplete a
+  clock" gap to accept any more, since nothing completes it in the first
+  place.
 - **That only fixed this engine's own Postgres-side clock — reported live as
   a separate, distinct gap: `csm-notification-service`'s own, independent
   Redis-based SLA engine had no way to hear about a workaround being
   provided at all.** Setting `workaroundProvided:true` published no event
   whatsoever — `updateCaseFields`/`snCaseService.UpdateCase`'s own
-  `CompleteWorkaroundClock` call above is deliberately independent of
+  `ApplyCaseFieldEffects` call above is deliberately independent of
   `s.publisher` (it never touches Event Hub), and no other code path
   published anything either, unlike response (a qualifying comment, already
   carried by `case.comment_added`'s own `IsSupportEngineerResponse`) or
@@ -3182,43 +3204,43 @@ regardless of severity.
   `Recipients`/email reaction and no Chat alert, a pure tracking signal),
   published by the shared `publishWorkaroundProvidedEvent` function
   (`sn_case_service.go`) from both `caseService.updateCaseFields` and
-  `snCaseService.UpdateCase`, in the identical place and under the identical
-  `WorkaroundProvided != nil && *req.WorkaroundProvided` gate as the
-  `CompleteWorkaroundClock` call above, but independent of it — `false` is
-  never published either, matching that call's own "no uncomplete
-  operation" posture. `csm-notification-service` consumes it directly via a
+  `snCaseService.UpdateCase`, gated on `WorkaroundProvided != nil &&
+  *req.WorkaroundProvided` — narrower than the `ApplyCaseFieldEffects` call
+  above, which also fires on `false` (a recall) to let the matching
+  `resume_condition` run; `false` is never published here, since
+  csm-notification-service's own Redis engine has no recall handling to
+  trigger (see that repo's own `CLAUDE.md`). `csm-notification-service`
+  consumes it directly via a
   new `dispatch.handleWorkaroundProvided` → `slaengine.Engine.
   CompleteWorkaroundClock`, the same direct-call wiring `RegisterClocks`/
   `ApplyStateEffects`/`CompleteResponseClock` already get — see that repo's
   own `CLAUDE.md` for the consuming side.
-- **Sharing a fix ETA with the customer completes BOTH the workaround and
-  resolution clocks, not just one.** The webapp's "Share fix ETA with
-  customer" action (`SetFixEtaDialog.tsx`, ServiceNow-only on the wire —
-  `req.AddPublicComment` alongside a fix-ETA date) once WSO2 has committed a
-  fix timeline to the customer, neither clock has anything further to
-  track. **The trigger is `work_item.eta_shared_on` becoming non-null, not
-  `req.AddPublicComment` itself** — that request flag has no guaranteed
-  connection to *when* the ETA-share actually lands in Postgres (whatever
-  external process populates `eta_shared_on` does so on its own schedule,
-  not synchronously with this one PATCH), so `CaseService.GetCaseEtaSharedOn`
-  (`domain.CaseView.EtaSharedOn`, sourced from Postgres on **every** data
-  source — see that field's own doc comment for why ServiceNow has no
-  equivalent column at all) is checked on every `UpdateCase` call instead,
-  on both `caseService` (Postgres) and `snCaseService` (ServiceNow, via
-  `pgFallback` when configured, else always nil/no-op). Cheap and
-  idempotent, same as every other completion check here: a case's clocks
-  get completed the next time anything about it changes, once the shared
-  fact is persisted, not strictly on the PATCH that shared it.
-  `SLAEngineService.CompleteFixEtaSharedClocks` calls `CompleteClock` for
-  both targets, same real, uncapped elapsed-time-at-this-moment semantics
-  every other completion path uses (see `SLAEngineRepository.CompleteClock`'s
-  own doc comment) — not an unconditional 100%. Independent of
-  `WorkaroundProvided`'s own hook just above: a caller can set both signals
-  at once, in which case `CompleteWorkaroundClock` simply becomes a no-op
-  for whichever of the two runs second. Postgres's own `GetCaseByID` now
-  also selects `best_case_eta`/`most_likely_eta`/`worst_case_eta`/
-  `eta_shared_on` for the first time — previously write-only columns on
-  this data source, never read back into a `CaseView` at all.
+- **`fix_eta_shared` used to be answered from `work_item.eta_shared_on` — a
+  confirmed bug, now answered from the ETA values themselves.**
+  `repository.CaseFacts.FixEtaShared` (the fact behind every policy's own
+  `"...fix_eta_sharedISNOTEMPTY"` clause) used to be
+  `wi.eta_shared_on IS NOT NULL`. `eta_shared_on` records a separate,
+  explicit "Share fix ETA with customer" action (`domain.CaseView.
+  EtaSharedOn`'s own doc comment — there is no equivalent column on
+  ServiceNow's own `GET /cases/{id}` at all, unlike `BestCaseFixEta`/
+  `MostLikelyFixEta`/`WorstCaseFixEta`, which are real ServiceNow fields),
+  with no reliable connection to when the ETA values themselves were set —
+  a case can sit for a long time with an ETA set but not yet shared, during
+  which the real policy text already expects the clock to stop. Confirmed
+  against a real case where setting an ETA value left the workaround clock
+  running under the `eta_shared_on`-based reading. Fixed:
+  `CaseFacts.FixEtaShared` is now `TRUE` when ANY of
+  `best_case_eta`/`most_likely_eta`/`worst_case_eta` is set
+  (`sla_engine_repo.go`'s `GetCaseFacts` query).
+  A second, related hardcoded hook — `SLAEngineService.
+  CompleteFixEtaSharedClocks`, which force-completed BOTH the workaround and
+  resolution clocks whenever `GetCaseEtaSharedOn` returned non-nil,
+  regardless of either clock's own condition text — was replaced at the
+  same time by the generic `ApplyCaseFieldEffects` call described in the
+  workaround bullet just above, now also triggered whenever any of the
+  three fix-ETA fields is set. `eta_shared_on` itself is untouched and still
+  read back into `CaseView.EtaSharedOn` for display — only the SLA
+  condition fact changed what it's derived from.
 - **Incidents are now wired into this same condition-driven engine too —
   previously case-only.** `repository.IncidentFacts`/`GetIncidentFacts`
   (small, no project/product/account-presence/response-comment concepts at

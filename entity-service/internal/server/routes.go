@@ -226,7 +226,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var slaStatusHandler *handler.SLAStatusHandler
 	if db != nil {
 		slaStatusRepo := repository.NewSLAStatusRepository(repository.NewScoped(db))
-		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc, cfg.AuthAdminRoles, eventPublisher))
+		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc, cfg.CSMPortalBackendClientID, eventPublisher))
 	}
 
 	// scheduled_task_run has no ServiceNow equivalent either — same

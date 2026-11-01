@@ -317,8 +317,18 @@ type CaseFacts struct {
 	// WorkaroundProvided answers "u_workaround_providedISNOTEMPTY" --
 	// backed by the existing work_item.workaround_provided_on column.
 	WorkaroundProvided bool
-	// FixEtaShared answers "fix_eta_sharedISNOTEMPTY" -- backed by the
-	// existing work_item.eta_shared_on column.
+	// FixEtaShared answers "fix_eta_sharedISNOTEMPTY" -- true when ANY of
+	// work_item.best_case_eta/most_likely_eta/worst_case_eta is set.
+	// Deliberately NOT work_item.eta_shared_on: that column records a
+	// separate, explicit "Share fix ETA with customer" action (see
+	// domain.CaseView.EtaSharedOn's own doc comment) with no reliable
+	// connection to when the ETA values themselves were set -- a case can
+	// sit for a long time with an ETA set but not yet shared, during which
+	// this engine's real sla_policy rows (whose own stop_condition reads
+	// "...ORu_fix_eta_sharedISNOTEMPTY") already expect the clock to stop.
+	// Confirmed against a real case where setting an ETA value left the
+	// Workaround clock running under the eta_shared_on-based reading, which
+	// was a genuine bug, not expected behavior.
 	FixEtaShared bool
 	// HasAccount answers "accountISNOTEMPTY".
 	HasAccount bool
@@ -718,7 +728,7 @@ func (r *slaEngineRepo) GetCaseFacts(ctx context.Context, workItemID string) (Ca
 		       wi.created_on, COALESCE(pt.name, ''), COALESCE(prod.name, ''),
 		       (wi.account_id IS NOT NULL),
 		       (wi.workaround_provided_on IS NOT NULL),
-		       (wi.eta_shared_on IS NOT NULL),
+		       (wi.best_case_eta IS NOT NULL OR wi.most_likely_eta IS NOT NULL OR wi.worst_case_eta IS NOT NULL),
 		       COALESCE(wi.description, ''),
 		       (SELECT array_agg(cm.content) FROM comment cm
 		           JOIN "user" u ON LOWER(u.email) = LOWER(cm.created_by)
@@ -895,7 +905,6 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -939,7 +948,6 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1038,7 +1046,6 @@ func (r *slaEngineRepo) ActiveClockPolicies(ctx context.Context, workItemID, tar
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + `
 		ORDER BY s.created_on`
@@ -1146,23 +1153,21 @@ const slaEngineRegisterClockQuery = `
 		id, created_on, updated_on, created_by, updated_by,
 		work_item_id, sla_policy_id, schedule, is_active, stage, start_on,
 		duration, business_elapsed_percentage, business_duration,
-		remaining_business_duration, has_breached, source
+		remaining_business_duration, has_breached
 	)
 	SELECT gen_random_uuid(), NOW(), NOW(), $3, $3,
 	       $1::uuid, $2::uuid, $6, TRUE, 'IN_PROGRESS'::sla_stage_enum, $7::timestamptz,
-	       $4::interval, 0, INTERVAL '0', $4::interval, FALSE, 'CSM'::sla_source_enum
+	       $4::interval, 0, INTERVAL '0', $4::interval, FALSE
 	FROM registration_lock
 	WHERE NOT EXISTS (
 		SELECT 1 FROM sla s
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND s.sla_policy_id = $2::uuid
 		  AND s.stage::TEXT ` + slaEngineActiveStageFilter + `
 	)
 	AND NOT EXISTS (
 		SELECT 1 FROM sla s
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND s.sla_policy_id = $2::uuid
 		  AND s.stage::TEXT = ANY($5::text[])
 	)`
@@ -1324,7 +1329,6 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -1365,7 +1369,6 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1579,7 +1582,6 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.target::TEXT = $2
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND s.stage::TEXT ` + slaEngineOpenStageFilter + policyFilter
@@ -1618,7 +1620,6 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
-			  AND s.source = 'CSM'
 			  AND sp.target::TEXT = $2
 			  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 			  AND s.stage::TEXT `+slaEngineOpenStageFilter+policyFilter+`
@@ -1779,7 +1780,6 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 		FROM sla_policy sp
 		WHERE s.sla_policy_id = sp.id
 		  AND s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND COALESCE(sp.schedule, '') != '` + slaScheduleWSO2BusinessDays + `'
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))
@@ -1847,7 +1847,6 @@ func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID s
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
-		  AND s.source = 'CSM'
 		  AND sp.schedule = '`+slaScheduleWSO2BusinessDays+`'
 		  AND (
 		    (sp.target::TEXT = 'RESPONSE' AND s.stage::TEXT IN ('IN_PROGRESS', 'PAUSED'))
