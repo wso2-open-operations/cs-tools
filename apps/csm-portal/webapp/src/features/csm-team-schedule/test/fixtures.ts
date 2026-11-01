@@ -76,14 +76,14 @@ export const MOE_NIGHT = shift({
 /** The windows these tests lean on, as the catalogue actually has them. */
 export const REGULAR = shift({
   code: "CRE_REGULAR",
-  shortCode: "LK",
+  shortCode: "IST",
   label: "Regular hours",
   isRotation: false,
   sortOrder: 90,
 });
 export const REGULAR_IND = shift({
   code: "CRE_REGULAR_IND",
-  shortCode: "IND",
+  shortCode: "IST",
   label: "India region shift",
   isRotation: false,
   sortOrder: 91,

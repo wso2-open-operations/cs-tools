@@ -187,6 +187,87 @@ describe("DayLadder: cards that share their hours", () => {
     expect(names).toEqual(["Zara", "Asela"]);
   });
 
+  it("lists people on AEST regular hours in the Morning card's one list, tagged AEST", () => {
+    // AEST regular hours are stored on the morning's hours so the team sees
+    // who on Australian time is there. They are working hours, not a turn:
+    // the card stays the Morning rotation, one list with the AEST person
+    // tagged, and the on-call person in their own column.
+    const aest = shift({
+      code: "CRE_REGULAR_AEST",
+      shortCode: "AEST",
+      label: "AEST regular hours",
+      startMinute: 360,
+      endMinute: 540,
+      isRotation: false,
+      sortOrder: 36,
+    });
+    const at = { rotaDate: ISO, startsAt: `${ISO}T00:30:00.000Z`, endsAt: `${ISO}T03:30:00.000Z` };
+    const { container } = render(
+      <DayLadder
+        day={WEDNESDAY}
+        tz={TZ}
+        zoneLabel="IST"
+        lanes={[
+          lane([
+            assignment({ ...at, name: "Ava", shiftCode: aest.code }),
+            assignment({ ...at, name: "Asela", shiftCode: MORNING.code }),
+            assignment({ ...at, name: "Nuwan", shiftCode: MORNING_OC.code, isOnCall: true }),
+          ]),
+        ]}
+        shifts={shiftMap(REGULAR, EVENING, MORNING, MORNING_OC, aest)}
+        zones={ZONES}
+        absences={[]}
+        absenceKinds={[ANNUAL_LEAVE]}
+        {...scopeControls()}
+      />,
+    );
+    const card = [...container.querySelectorAll(".zblk")].find((c) => c.textContent?.includes("Ava"))!;
+    expect(card.querySelector(".zbt")).toHaveTextContent(/^Morning 6-9am$/);
+    expect(card.querySelectorAll(".zsl")).toHaveLength(0);
+    expect(card).not.toHaveTextContent(/AEST regular hours/i);
+    const rows = [...card.querySelectorAll(".zflow .lnm")];
+    expect(rows.map((r) => r.querySelector(".who")?.textContent)).toEqual(["Asela", "Ava"]);
+    expect(rows[1].querySelector(".tier-t")).toHaveTextContent("AEST");
+    expect(rows[0].querySelector(".tier-t")).toBeNull();
+    expect(card.querySelector(".zoc")).toHaveTextContent("Nuwan");
+  });
+
+  it("keeps the Morning card on a day nobody is on the Morning rotation, listing the AEST person tagged", () => {
+    const aest = shift({
+      code: "CRE_REGULAR_AEST",
+      shortCode: "AEST",
+      label: "AEST regular hours",
+      startMinute: 360,
+      endMinute: 540,
+      isRotation: false,
+      sortOrder: 36,
+    });
+    const { container } = render(
+      <DayLadder
+        day={WEDNESDAY}
+        tz={TZ}
+        zoneLabel="IST"
+        lanes={[
+          lane([
+            assignment({
+              name: "Ava", rotaDate: ISO, shiftCode: aest.code,
+              startsAt: `${ISO}T00:30:00.000Z`, endsAt: `${ISO}T03:30:00.000Z`,
+            }),
+          ]),
+        ]}
+        shifts={shiftMap(REGULAR, EVENING, MORNING, MORNING_OC, aest)}
+        zones={ZONES}
+        absences={[]}
+        absenceKinds={[ANNUAL_LEAVE]}
+        {...scopeControls()}
+      />,
+    );
+    const card = [...container.querySelectorAll(".zblk")].find((c) => c.textContent?.includes("Ava"))!;
+    expect(card.querySelector(".zbt")).toHaveTextContent(/^Morning 6-9am$/);
+    expect(card).not.toHaveTextContent(/AEST regular hours/i);
+    expect(card.querySelector(".zflow .lnm .tier-t")).toHaveTextContent("AEST");
+  });
+
   it("folds a window that differs only by team into the crowded card", () => {
     // Regular hours and the India region shift are the same nine-to-five. A
     // card this size lists teams, which is the whole distinction, so a second
