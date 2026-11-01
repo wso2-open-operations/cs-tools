@@ -382,36 +382,31 @@ type IncidentFacts struct {
 
 // SLAEngineRepository defines the read/write operations backing this
 // service's own in-process SLA engine (internal/service/sla_policy_resolver.go,
-// sla_engine_service.go). Every clock it writes is tagged source='CSM'
-// (migration 0134's enum) -- this is migration 0134's own original intent,
-// unchanged: 'SERVICENOW' means a row the external sync job that populates
-// sla_policy/sla wrote, 'CSM' means a row this in-process engine wrote, and
-// the two are NEVER supposed to share ownership of the same (work_item,
-// target) pair -- that sync job runs continuously and real-time, tagging
-// every row it writes 'SERVICENOW', so tagging this engine's own clocks the
-// same way would let the two collide on the same case (a dual-write-mode
-// case has rows from both), each silently overwriting state the other owns.
-// `'SERVICENOW'` must never be used for an engine-managed clock.
-//
-// This repository still only ever writes/mutates rows it itself registered
-// via RegisterClock (every method here scopes its WHERE clause to a
-// specific work_item_id/target pair it just resolved a policy for, AND to
-// source='CSM'), so it can never touch a row the external sync job owns.
-// Read-side consumers of "sla" (GET /sla-status, POST /task-slas/search)
-// need no changes at all -- every row already looks the same to them
-// regardless of who wrote it, and both GetClockState (single-clock) and
-// SearchActiveSLAStatuses (bulk) already accept the identical source query
-// parameter, so a caller that wants only this engine's own clocks (e.g.
-// csm-notification-service's pre-alert check, see that repo's own
-// CLAUDE.md) scopes to source=csm on either call, not just the bulk one.
+// sla_engine_service.go). Every clock it writes goes into the "sla" table,
+// which this repository is now the ONLY writer of under every DATA_SOURCE
+// mode. That wasn't always true: until migration 0268, every clock this
+// engine wrote was tagged source='CSM' (migration 0134's enum) specifically
+// to keep it apart from source='SERVICENOW' rows a separate, continuously-
+// running external sync job also wrote into the same table -- the two were
+// never supposed to share ownership of the same (work_item, target) pair,
+// since tagging this engine's own clocks the sync job's way would have let
+// the two collide on the same case, each silently overwriting state the
+// other owned. At the cutover migration 0268 ships with, that sync job
+// stops writing SLA rows into this table at all, so the column -- and the
+// collision it existed to prevent -- is gone; every pre-existing row
+// (regardless of what it was previously tagged) is simply adopted in place
+// and managed by this repository from then on. Read-side consumers of "sla"
+// (GET /sla-status, POST /task-slas/search) no longer take a source
+// parameter either -- there is nothing left to filter by.
 //
 // The `sla_policy` table's own `source` column is a SEPARATE, unrelated
-// concept -- it distinguishes a real previous-system-synced POLICY definition
-// from the 16 `source='CSM'` policy rows this engine used to seed itself
-// (migration 0203, deleted by migration 0259 once this engine started
-// evaluating the real synced policies directly). That policy-table cleanup
-// was correct and stays; only the `sla` (clock) table's own tagging was
-// ever wrongly touched.
+// concept, NOT touched by migration 0268 -- it distinguishes a real
+// previous-system-synced POLICY definition from the 16 `source='CSM'`
+// policy rows this engine used to seed itself (migration 0203, deleted by
+// migration 0259 once this engine started evaluating the real synced
+// policies directly). That remains a meaningful distinction regardless of
+// who writes clock rows, and FindPolicyByName/ListCandidatePolicies below
+// still reference it correctly.
 type SLAEngineRepository interface {
 	// FindPolicyByName resolves the single active sla_policy row matching
 	// name/target, preferring a source='SERVICENOW' row over a source='CSM'
@@ -454,7 +449,7 @@ type SLAEngineRepository interface {
 	// Returns apierror.NotFoundError if no such work item exists.
 	GetIncidentFacts(ctx context.Context, workItemID string) (IncidentFacts, error)
 
-	// CancelClock marks every open (slaEngineOpenStageFilter) source='CSM'
+	// CancelClock marks every open (slaEngineOpenStageFilter)
 	// clock for (workItemID, target) CANCELLED, regardless of which policy
 	// backs it -- used by a caller that knows "every clock of this target
 	// should stop" with no per-policy distinction to make. Returns whether
@@ -484,9 +479,9 @@ type SLAEngineRepository interface {
 	// has no open clock for target at all.
 	ActiveClockPolicies(ctx context.Context, workItemID, target string) ([]SLAPolicyRef, error)
 
-	// RegisterClock inserts a new source='CSM' "sla" row for
+	// RegisterClock inserts a new "sla" row for
 	// (workItemID, policy.Target, policy.ID) and starts it running now,
-	// UNLESS an active (see slaEngineActiveStageFilter) source='CSM' row
+	// UNLESS an active (see slaEngineActiveStageFilter) row
 	// already exists for that exact (work_item, target, policy) triple --
 	// idempotent, so a retried case-create hook never double-registers --
 	// OR a row for that triple already exists in a stage
@@ -511,7 +506,7 @@ type SLAEngineRepository interface {
 	// how that instant is chosen.
 	RegisterClock(ctx context.Context, workItemID string, policy SLAPolicyRef, startOn time.Time) (bool, error)
 
-	// CompleteClock marks EVERY open (slaEngineOpenStageFilter) source='CSM'
+	// CompleteClock marks EVERY open (slaEngineOpenStageFilter)
 	// clock for (workItemID, target) ACHIEVED, regardless of which policy
 	// backs it -- used by a caller that has no notion of "which policy" at
 	// all (a qualifying comment, a workaround being provided, a fix ETA
@@ -544,8 +539,8 @@ type SLAEngineRepository interface {
 	CompleteClockByPolicy(ctx context.Context, workItemID, target, policyID string) (bool, error)
 
 	// SetPaused pauses (true) or resumes (false) EVERY open (not-yet-final,
-	// including BREACHED -- see slaEngineOpenStageFilter) source='CSM'
-	// clock for (workItemID, target), regardless of which policy backs it.
+	// including BREACHED -- see slaEngineOpenStageFilter) clock for
+	// (workItemID, target), regardless of which policy backs it.
 	// Idempotent and a no-op (not an error) when no such clock exists.
 	SetPaused(ctx context.Context, workItemID, target string, paused bool) (bool, error)
 
@@ -557,7 +552,7 @@ type SLAEngineRepository interface {
 	// target.
 	SetPausedByPolicy(ctx context.Context, workItemID, target, policyID string, paused bool) (bool, error)
 
-	// ReviseClocks marks every source='CSM' clock for workItemID CANCELLED,
+	// ReviseClocks marks every clock for workItemID CANCELLED,
 	// per-target (RESPONSE excludes BREACHED from cancellation; WORKAROUND/
 	// RESOLUTION include it -- see the implementation's own doc comment),
 	// then registers a fresh row for each given policy (same insert shape
@@ -1101,7 +1096,7 @@ func slaPolicyRefColumnsPrefixed(alias string) string {
 	return strings.Join(cols, ", ")
 }
 
-// slaEngineRegisterClockQuery inserts a new source='CSM' "sla" row for
+// slaEngineRegisterClockQuery inserts a new "sla" row for
 // ($1=workItemID, $2=policy.ID) unless an existing row for that exact
 // (work_item, policy) pair is either still active (slaEngineActiveStageFilter)
 // or already reached a stage $5 names as blocking
