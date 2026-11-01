@@ -146,6 +146,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	salesforceResyncHandler := handler.NewSalesforceResyncHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -509,6 +510,12 @@ func main() {
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
 	// staff role should be able to set it.
 	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
+	// Admin-only: compare one account's or project's Salesforce data with the
+	// database, then overwrite the chosen components. Synchronous and slow
+	// (up to about a minute); entity-service re-checks admin and serialises
+	// per target.
+	route("POST /salesforce/resync/preview", handler.PermAdmin, salesforceResyncHandler.Preview)
+	route("POST /salesforce/resync/apply", handler.PermAdmin, salesforceResyncHandler.Apply)
 	route("POST /accounts/search", handler.PermViewSharedEntity, accountHandler.SearchAccounts)
 	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)

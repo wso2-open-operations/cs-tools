@@ -284,6 +284,18 @@ from SCIM) while doing nothing anyone could observe. `CreateUser`'s own `grantRo
 identical guard at the same time, for the same reason — it had none before either, despite sharing
 the exact same `GrantableRole`/SCIM mechanism.
 
+## Salesforce resync (`POST /salesforce/resync/preview`, `POST /salesforce/resync/apply`)
+
+Admin-only (`PermAdmin`), thin pass-through in `internal/handler/salesforce_resync.go`: the preview compares one
+account's or project's Salesforce data with the database (writes nothing), the apply overwrites the components the
+admin chose. The entity service owns the comparison, re-checks admin and serialises resyncs per target; this layer
+validates only the obvious (scope is `account` or `project`, `id` non-empty, apply has at least one component) and
+forwards the body unchanged. It maps errors with `mapUpstreamError`, not the Generic mapper, so a 409 (a resync is
+already running for the target) and the entity service's validation 400 reach the admin with their reason; 403 and 404
+keep the fixed messages and 5xx never echoes the upstream body. The request body is never logged (it carries ids).
+A resync can take about a minute, which is the same as the default `ENTITY_SERVICE_TIMEOUT` and `REST_WRITE_TIMEOUT`
+(60s each): raise both together if resyncs start timing out.
+
 ## Provisioning a "user" row on demand (`ensureUserProvisioned`)
 
 A `worknote_creator`- or `escalator`-only caller reaches `POST /cases/{id}/comments`

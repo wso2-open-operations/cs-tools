@@ -2644,6 +2644,140 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /salesforce/resync/preview:
+    post:
+      summary: "Compare one account's or project's Salesforce data with the database."
+      description: "Admin only. Read-only: writes nothing. Returns, per component of the scope, the records that differ with a field-by-field diff. For scope account the components are account, partners, projects, opportunities, linkedOpportunities, invoices, contacts and memberships; for scope project they are project, opportunities, linkedOpportunities, invoices and memberships. When the Salesforce call cap or the request time limit stops a component, capped is true with a cappedReason and that component is reported as skipped. Synchronous and slow: it can take about a minute."
+      operationId: postSalesforceResyncPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncRequest'
+      responses:
+        "200":
+          description: "The comparison, one entry per component of the scope."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncPreview'
+        "400":
+          description: "Unknown scope, missing id, a component outside the scope, no components, or a target with no Salesforce id."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "The caller is not an internal admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "The account or project does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "A resync is already running for this account or project."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: "Request body too large."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "Salesforce or an upstream service is temporarily unavailable."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /salesforce/resync/apply:
+    post:
+      summary: "Overwrite the chosen components of one account or project from Salesforce."
+      description: "Admin only. Re-ingests only the listed components, parents before children. Never deletes a row. A component with any record that could not be written has status failed, with the counts and the first errors; records left alone because they changed in Salesforce after they were read are counted as skippedStale. One resync per target at a time (409 otherwise). Synchronous and slow: it can take about a minute."
+      operationId: postSalesforceResyncApply
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncApplyRequest'
+      responses:
+        "200":
+          description: "The outcome of each requested component."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncApplyResponse'
+        "400":
+          description: "Unknown scope, missing id, a component outside the scope, no components, or a target with no Salesforce id."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "The caller is not an internal admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "The account or project does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "A resync is already running for this account or project."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: "Request body too large."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "Salesforce or an upstream service is temporarily unavailable."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /accounts/search:
     post:
       summary: Search accounts.
@@ -18412,6 +18546,164 @@ components:
       properties:
         subject: { type: string, maxLength: 512 }
         content: { type: string, maxLength: 8000 }
+    SalesforceResyncRequest:
+      type: object
+      description: "The target of a Salesforce resync."
+      required: [scope, id]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+          description: "Whether id names an account or a project."
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+    SalesforceResyncApplyRequest:
+      type: object
+      description: "The target of a Salesforce resync apply and the components to overwrite."
+      required: [scope, id, components]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+          description: "Whether id names an account or a project."
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+        components:
+          type: array
+          minItems: 1
+          description: "Component keys to overwrite from Salesforce; each must belong to the scope."
+          items:
+            type: string
+            enum: [account, partners, projects, project, opportunities, linkedOpportunities, invoices, contacts, memberships]
+    SalesforceResyncTarget:
+      type: object
+      properties:
+        scope:
+          type: string
+        id:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+          nullable: true
+    SalesforceResyncCounts:
+      type: object
+      properties:
+        inSync:
+          type: integer
+        differs:
+          type: integer
+        missingInCsm:
+          type: integer
+        onlyInCsm:
+          type: integer
+    SalesforceResyncFieldDiff:
+      type: object
+      description: "One field that differs. When wouldTruncate is true, sfValue is the full Salesforce value, which the ingest would cut to fit its column."
+      properties:
+        field:
+          type: string
+        csmValue:
+          type: string
+          nullable: true
+        sfValue:
+          type: string
+          nullable: true
+        wouldTruncate:
+          type: boolean
+    SalesforceResyncRecord:
+      type: object
+      description: "One record that is not in sync. fields is empty for a record that exists on one side only."
+      properties:
+        sfId:
+          type: string
+        label:
+          type: string
+        state:
+          type: string
+          enum: [differs, missing_in_csm, only_in_csm]
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncFieldDiff'
+    SalesforceResyncComponent:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum: [in_sync, differs, skipped]
+        skippedReason:
+          type: string
+          nullable: true
+        counts:
+          $ref: '#/components/schemas/SalesforceResyncCounts'
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncRecord'
+    SalesforceResyncPreview:
+      type: object
+      properties:
+        target:
+          $ref: '#/components/schemas/SalesforceResyncTarget'
+        capped:
+          type: boolean
+        cappedReason:
+          type: string
+          nullable: true
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncComponent'
+    SalesforceResyncApplyError:
+      type: object
+      properties:
+        sfId:
+          type: string
+        message:
+          type: string
+    SalesforceResyncApplyComponent:
+      type: object
+      description: "The outcome of one applied component. skippedStale counts records left alone because they changed in Salesforce after the apply read them; they are neither succeeded nor failed."
+      properties:
+        key:
+          type: string
+        status:
+          type: string
+          enum: [applied, failed, skipped]
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        skippedReason:
+          type: string
+          nullable: true
+        skippedStale:
+          type: integer
+        skippedStaleSfIds:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncApplyError'
+    SalesforceResyncApplyResponse:
+      type: object
+      properties:
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncApplyComponent'
     ErrorPayload:
       type: object
       description: >-
