@@ -40,8 +40,8 @@
 --    it. It has its own colour (token AEST), apart from IST and PDT.
 --
 -- 3. The Australia team's ordinary day becomes AEST regular hours. Matched by
---    name or key, as 0203 matches the Americas team (keys differ between
---    environments). Where no such team is in the Team Schedule, nothing is
+--    name or key with the pattern 0203 uses for the Americas team, since keys
+--    differ between environments ("australia", "australia_cre_team"). Where no such team is in the Team Schedule, nothing is
 --    added. A default already set to anything but the Morning window is left
 --    as a rota admin chose it.
 --
@@ -84,7 +84,8 @@ INSERT INTO team_schedule_team_default_shift (team_key, shift_code, created_by)
 SELECT t.key, 'CRE_REGULAR_AEST', 'migration:0269_team_schedule_zone_tags'
   FROM team t
  WHERE t.key IS NOT NULL
-   AND (lower(t.key) ~ '^australia\M' OR lower(t.name) ~ '^australia\M')
+   AND (lower(t.key) ~ '^australia([ _-]+cre)?([ _-]+team)?$'
+        OR lower(t.name) ~ '^australia([ _-]+cre)?([ _-]+team)?$')
 ON CONFLICT (team_key) DO UPDATE
    SET shift_code = EXCLUDED.shift_code
  WHERE team_schedule_team_default_shift.shift_code = 'CRE_MORNING';
