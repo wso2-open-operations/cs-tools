@@ -123,6 +123,16 @@ func (s *salesforceEventService) ingestLinkedOpportunity(ctx context.Context, sf
 	if err != nil {
 		return err
 	}
+	return s.ingestLinkedOpportunityRecord(ctx, link, sfID, eventType)
+}
+
+// ingestLinkedOpportunityRecord is ingestLinkedOpportunity's body for a
+// Linked_Opportunity__c already in hand: the admin resync reads links itself
+// and writes them here.
+func (s *salesforceEventService) ingestLinkedOpportunityRecord(ctx context.Context, link salesentity.LinkedOpportunity, sfID, eventType string) error {
+	if s.support.States == nil {
+		return errors.New("salesforce: salesforce_ingest_state ledger is not configured")
+	}
 	if strings.TrimSpace(link.ID) != "" {
 		sfID = strings.TrimSpace(link.ID)
 	}
@@ -168,7 +178,7 @@ func (s *salesforceEventService) ingestLinkedOpportunity(ctx context.Context, sf
 
 	row := domain.SalesforceOpportunityLinkUpsert{
 		LinkSfID:      sfID,
-		Number:        truncateSfColumn(ctx, "sf_opportunity_link.number", sfID, optionalPtr(link.Name), maxSfOpportunityLinkNumberChars),
+		Number:        mapSalesEntityLinkNumber(ctx, sfID, link),
 		OpportunityID: oppID,
 		ProjectID:     projectID,
 	}
@@ -180,6 +190,12 @@ func (s *salesforceEventService) ingestLinkedOpportunity(ctx context.Context, sf
 	slog.InfoContext(ctx, "salesforce: linked opportunity ingested",
 		"linkSfId", sfID, "number", derefString(row.Number), "opportunityId", oppID, "projectId", projectID, "created", created)
 	return nil
+}
+
+// mapSalesEntityLinkNumber is the link's "LO-..." code as the ingest writes it
+// to sf_opportunity_link.number.
+func mapSalesEntityLinkNumber(ctx context.Context, sfID string, link salesentity.LinkedOpportunity) *string {
+	return truncateSfColumn(ctx, "sf_opportunity_link.number", sfID, optionalPtr(link.Name), maxSfOpportunityLinkNumberChars)
 }
 
 // deleteLinkedOpportunity is DELETED: a hard delete by link_sf_id, as

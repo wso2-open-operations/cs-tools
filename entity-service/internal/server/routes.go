@@ -421,10 +421,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var salesforceEventHandler *handler.SalesforceEventHandler
 	// salesforcePartnerHandler is set when the partner refresh is on.
 	var salesforcePartnerHandler *handler.SalesforcePartnerHandler
+	// salesforceResyncHandler is set when the Salesforce ingest is wired: the
+	// admin resync compares and overwrites through those same ingests, so a
+	// component whose ingest flag is off reports "skipped".
+	var salesforceResyncHandler *handler.SalesforceResyncHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
 	var membershipIngestSvc service.SalesforceEventService
+	// resyncIngestSvc is the ingest service the admin resync runs through.
+	var resyncIngestSvc service.SalesforceEventService
 	var salesEntityClient *salesentity.Client
 	// ingestRetryCtx stops the Salesforce ingest retry worker; closePublishers
 	// (returned to cmd/api/main.go) cancels it on shutdown and waits on
@@ -566,6 +572,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				})
 			membershipIngestSvc = withPartnerIngest(withOpportunityIngest(membershipIngestSvc))
 			salesforceEventHandler = handler.NewSalesforceEventHandler(membershipIngestSvc)
+			resyncIngestSvc = membershipIngestSvc
 
 			// The delayed-retry job re-runs memberships whose project or
 			// account was not in CSM when their event arrived. It lives here
@@ -610,8 +617,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				log.Printf("salesforce ingest retry worker enabled (every %s)", cfg.SalesforceIngestRetryInterval)
 			}
 		} else {
-			salesforceEventHandler = handler.NewSalesforceEventHandler(withPartnerIngest(withOpportunityIngest(service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport))))
+			resyncIngestSvc = withPartnerIngest(withOpportunityIngest(service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)))
+			salesforceEventHandler = handler.NewSalesforceEventHandler(resyncIngestSvc)
 		}
+		// The admin resync (POST /salesforce/resync/preview and /apply). It
+		// is admin-only (AUTH_ADMIN_ROLES) and adds no flag of its own: each
+		// component runs only when its ingest is on.
+		resyncSvc, err := service.NewSalesforceResyncService(resyncIngestSvc, salesEntityClient,
+			repository.NewSalesforceResyncReadRepository(repository.NewScoped(db)), accessSvc, cfg.AuthAdminRoles)
+		if err != nil {
+			panic("salesforce: " + err.Error())
+		}
+		salesforceResyncHandler = handler.NewSalesforceResyncHandler(resyncSvc)
 	}
 
 	// POST /users/me/memberships/register (H-0 of the customer onboarding flow).
@@ -1998,6 +2015,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)
+	}
+	if salesforceResyncHandler != nil {
+		mux.HandleFunc("POST /salesforce/resync/preview", salesforceResyncHandler.Preview)
+		mux.HandleFunc("POST /salesforce/resync/apply", salesforceResyncHandler.Apply)
 	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)

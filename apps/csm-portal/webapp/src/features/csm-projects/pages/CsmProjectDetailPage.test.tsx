@@ -63,6 +63,7 @@ let mockIsSplAudience = false;
 let mockCanViewWorkItemsStaffView = true;
 let mockCanUpdateProjectClosureState = false;
 let mockCanEditProjectOnboarding = false;
+let mockIsAdmin = false;
 vi.mock("@context/current-user/usePortalAccess", () => ({
   usePortalAccess: () => ({
     hasAnyRole: true,
@@ -75,7 +76,14 @@ vi.mock("@context/current-user/usePortalAccess", () => ({
     canViewWorkItemsStaffView: mockCanViewWorkItemsStaffView,
     canUpdateProjectClosureState: mockCanUpdateProjectClosureState,
     canEditProjectOnboarding: mockCanEditProjectOnboarding,
+    isAdmin: mockIsAdmin,
   }),
+}));
+
+vi.mock("@features/csm-admin/salesforce-resync/SalesforceResyncDialog", () => ({
+  default: ({ scope, id }: { scope: string; id: string }) => (
+    <div data-testid="salesforce-resync-dialog">{`${scope}:${id}`}</div>
+  ),
 }));
 
 const mockPatchClosureStateMutate = vi.fn();
@@ -188,6 +196,26 @@ function renderPage(initialEntry = "/customers/projects/proj-1") {
     </QueryClientProvider>,
   );
 }
+
+describe("CsmProjectDetailPage: Compare with Salesforce", () => {
+  beforeEach(() => {
+    mockIsAdmin = false;
+    mockUseGetProject.mockReturnValue({ data: PROJECT, isLoading: false, isError: false, error: null });
+  });
+
+  it("hides the button from a non-admin", () => {
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Compare with Salesforce" })).not.toBeInTheDocument();
+  });
+
+  it("shows the button to an admin and opens the dialog for this project", () => {
+    mockIsAdmin = true;
+    renderPage();
+    expect(screen.queryByTestId("salesforce-resync-dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare with Salesforce" }));
+    expect(screen.getByTestId("salesforce-resync-dialog")).toHaveTextContent("project:proj-1");
+  });
+});
 
 describe("CsmProjectDetailPage — tab state", () => {
   beforeEach(() => {

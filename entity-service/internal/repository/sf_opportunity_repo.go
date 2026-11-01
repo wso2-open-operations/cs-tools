@@ -210,11 +210,13 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 		keep = append(keep, li.LineItemSfID)
 		res.LineItemsWritten++
 	}
-	tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
-	if err != nil {
-		return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+	if !row.KeepStaleLineItems {
+		tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+		}
+		res.LineItemsDeleted = int(tag.RowsAffected())
 	}
-	res.LineItemsDeleted = int(tag.RowsAffected())
 
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err

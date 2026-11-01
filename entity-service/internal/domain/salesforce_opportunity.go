@@ -44,6 +44,10 @@ type SalesforceOpportunityUpsert struct {
 	// LineItems is the complete set of the opportunity's line items; the
 	// write makes sf_opportunity_product under this opportunity equal to it.
 	LineItems []SalesforceOpportunityLineItemUpsert
+	// KeepStaleLineItems skips the removal of the opportunity's line items
+	// the set above does not mention, so the write only adds and updates
+	// rows. Only the admin resync sets it (it never deletes anything).
+	KeepStaleLineItems bool
 }
 
 // SalesforceOpportunityLineItemUpsert is one Salesforce OpportunityLineItem

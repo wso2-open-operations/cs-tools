@@ -897,6 +897,11 @@ type SalesforceMembershipUpsert struct {
 	ProjectSfID string
 	ProjectKey  string
 
+	// KeepStaleProjectGroups skips the removal of the membership's project
+	// groups that ProjectGroups does not list, so the write only adds rows.
+	// Only the admin resync sets it (it never deletes anything).
+	KeepStaleProjectGroups bool
+
 	// IsPrimaryContact is the contact's Salesforce primary_contact__c,
 	// written to account_contact.is_primary_contact on insert and update.
 	// nil (the portal writes, or a Sales Entity response without the key)

@@ -113,6 +113,15 @@ func (s *salesforceEventService) ingestInvoice(ctx context.Context, sfID, eventT
 	if err != nil {
 		return err
 	}
+	return s.ingestInvoiceRecord(ctx, inv, sfID, eventType)
+}
+
+// ingestInvoiceRecord is ingestInvoice's body for an Invoice__c already in
+// hand: the admin resync reads invoices itself and writes them here.
+func (s *salesforceEventService) ingestInvoiceRecord(ctx context.Context, inv salesentity.Invoice, sfID, eventType string) error {
+	if s.support.States == nil {
+		return errors.New("salesforce: salesforce_ingest_state ledger is not configured")
+	}
 	if id := strings.TrimSpace(derefString(inv.ID)); id != "" {
 		sfID = id
 	}
